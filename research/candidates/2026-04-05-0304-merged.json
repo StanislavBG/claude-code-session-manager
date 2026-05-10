@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-04-05T03:05:00Z",
+  "pass": 4,
+  "summary": { "new": 6, "updated": 0, "kept": 0, "demoted": 0, "cumulative_new_through_pass_4": 36 },
+  "note": "Plan 2 unblocked via node:sqlite. This user's Edge profile has no Claude signal (40 urls, infra topics). Fusion still web-weighted.",
+  "add": [
+    { "id": "terraform-mcp-hashicorp", "kind": "mcp", "final_score": 0.87, "web": 0.84, "novelty": 1.0, "install": "TBD — verify github.com/hashicorp/terraform-mcp-server", "rationale": "First-party HashiCorp Terraform MCP. IaC gap in catalog." },
+    { "id": "terraform-opentofu-skill", "kind": "skill", "final_score": 0.85, "web": 0.82, "novelty": 1.0, "install": "TBD", "rationale": "Complements terraform MCP with best-practice patterns; discussed on HN." },
+    { "id": "jetbrains-go-skill", "kind": "skill", "final_score": 0.81, "web": 0.78, "novelty": 1.0, "install": "TBD — JetBrains official skills repo", "rationale": "Modern Go idioms from JetBrains — complements existing gopls-lsp plugin." },
+    { "id": "mcp-reddit-karanb192", "kind": "mcp", "final_score": 0.73, "web": 0.70, "novelty": 1.0, "install": "npx @karanb192/reddit-mcp-buddy (TBD verify)", "rationale": "Social-media research capability." },
+    { "id": "openclaw-claude-code", "kind": "plugin", "final_score": 0.75, "web": 0.72, "novelty": 1.0, "install": "git clone https://github.com/Enderfga/openclaw-claude-code", "rationale": "Headless Claude Code with multi-model proxy." },
+    { "id": "claude-flow-npm", "kind": "plugin", "final_score": 0.77, "web": 0.74, "novelty": 1.0, "install": "npx claude-flow", "rationale": "Flow/workflow orchestration on npm." }
+  ],
+  "session_manager_impact": [
+    "Settings editor should add field for 'disableSkillShellExecution' (new in claude-code v2.1.91).",
+    "MCP config editor should surface _meta['anthropic/maxResultSizeChars'] (new in v2.1.91)."
+  ],
+  "next_pass_todo": [
+    "Fetch anthropics/claude-plugins-official README for 101-plugin enumeration.",
+    "Crawl claudemarketplaces.com top-50.",
+    "Implement src/main/vector.cjs (node:sqlite proof-of-concept)."
+  ]
+}

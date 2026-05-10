@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-04-05T01:02:30Z",
+  "pass": 2,
+  "source_type": "local",
+  "status": "blocked",
+  "blocker": "better-sqlite3 still not in node_modules; not in package.json dependencies.",
+  "install_plan": {
+    "command": "npm install better-sqlite3 sqlite-vec",
+    "risk": "native rebuild required for Electron — needs @electron/rebuild (already present in project per package.json electron-builder flow).",
+    "size_estimate": "~15MB node_modules footprint",
+    "user_gate": "REQUIRES user approval — adding a native dep changes the build. Not auto-installing."
+  },
+  "alternative_considered": "sql.js (pure-JS wasm). Slower but zero native build. Could ship as fallback.",
+  "edge_history_detected": "/home/bilko/.config/microsoft-edge/Default/History (confirmed existing)",
+  "personalization_score": null,
+  "recommendation": "Defer to pass 3+ or surface as a one-line request to user for approval."
+}

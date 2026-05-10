@@ -1,0 +1,108 @@
+{
+  "timestamp": "2026-04-05T00:01:00Z",
+  "pass": 1,
+  "source_type": "web",
+  "candidates": [
+    {
+      "id": "awesome-claude-skills-travisvn",
+      "name": "Awesome Claude Skills (travisvn)",
+      "kind": "meta-list",
+      "source": "https://github.com/travisvn/awesome-claude-skills",
+      "score": 0.88,
+      "notes": "Curated index, frequently updated; use as upstream crawl target."
+    },
+    {
+      "id": "awesome-agent-skills-voltagent",
+      "name": "VoltAgent awesome-agent-skills",
+      "kind": "meta-list",
+      "source": "https://github.com/VoltAgent/awesome-agent-skills",
+      "score": 0.86,
+      "notes": "1000+ skills, cross-agent (Codex/Gemini/Cursor compat)."
+    },
+    {
+      "id": "claude-skills-alirezarezvani",
+      "name": "alirezarezvani/claude-skills",
+      "kind": "skill-bundle",
+      "source": "https://github.com/alirezarezvani/claude-skills",
+      "score": 0.80,
+      "notes": "220+ skills across engineering/marketing/product/compliance."
+    },
+    {
+      "id": "awesome-claude-code-toolkit-rohitg00",
+      "name": "Awesome Claude Code Toolkit (rohitg00)",
+      "kind": "meta-list",
+      "source": "https://github.com/rohitg00/awesome-claude-code-toolkit",
+      "score": 0.84,
+      "notes": "135 agents, 35 skills, 42 commands, 150+ plugins, 19 hooks."
+    },
+    {
+      "id": "claude-code-skills-daymade",
+      "name": "daymade/claude-code-skills",
+      "kind": "skill-bundle",
+      "source": "https://github.com/daymade/claude-code-skills",
+      "score": 0.72,
+      "notes": "Professional production-ready skills marketplace."
+    },
+    {
+      "id": "claude-code-skills-levnikolaevich",
+      "name": "levnikolaevich/claude-code-skills",
+      "kind": "plugin-suite",
+      "source": "https://github.com/levnikolaevich/claude-code-skills",
+      "score": 0.70,
+      "notes": "Plugin suite + bundled MCP (hex-line, hex-graph, hex-ssh)."
+    },
+    {
+      "id": "mcp-context7",
+      "name": "Context7",
+      "kind": "mcp-server",
+      "source": "https://mcpmarket.com/",
+      "score": 0.93,
+      "notes": "Top MCP server by usage (11k views, 690 installs) - docs sync."
+    },
+    {
+      "id": "mcp-playwright-browser",
+      "name": "Playwright Browser Automation MCP",
+      "kind": "mcp-server",
+      "source": "https://mcpmarket.com/",
+      "score": 0.86,
+      "notes": "#2 trending; browser automation dominates 2026 rankings."
+    },
+    {
+      "id": "mcp-puppeteer",
+      "name": "Puppeteer MCP",
+      "kind": "mcp-server",
+      "source": "https://mcpmarket.com/",
+      "score": 0.78,
+      "notes": "#6 trending browser automation."
+    },
+    {
+      "id": "mcp-vectara",
+      "name": "Vectara MCP",
+      "kind": "mcp-server",
+      "source": "https://mcpmarket.com/",
+      "score": 0.74,
+      "notes": "RAG/vector search; enterprise data integration."
+    },
+    {
+      "id": "claude-plugins-official",
+      "name": "Anthropic Official Plugins",
+      "kind": "plugin-registry",
+      "source": "https://github.com/anthropics/claude-plugins-official",
+      "score": 0.98,
+      "notes": "Official registry, 101 plugins as of March 2026."
+    },
+    {
+      "id": "claudemarketplaces",
+      "name": "claudemarketplaces.com",
+      "kind": "directory",
+      "source": "https://claudemarketplaces.com/",
+      "score": 0.82,
+      "notes": "2300+ skills indexed; community voting."
+    }
+  ],
+  "next_actions": [
+    "Fetch README of top 3 meta-lists and extract individual skill entries.",
+    "Diff against catalog.ts entries to produce add-set.",
+    "Verify install commands for top 5 candidates."
+  ]
+}

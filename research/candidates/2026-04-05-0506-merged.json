@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-04-05T05:07:00Z",
+  "pass": 6,
+  "summary": { "new": 8, "updated": 0, "kept": 0, "demoted": 0, "cumulative_new_through_pass_6": 54 },
+  "note": "2 upcoming official skills (/simplify, /batch) discovered via Anthropic engineer X announcement — flag as CRITICAL for roadmap.",
+  "add": [
+    { "id": "skill-simplify-official", "kind": "skill", "final_score": 0.97, "web": 0.96, "novelty": 1.0, "install": "ships with next claude-code version (TBD: 2.1.92?)", "official": true, "rationale": "Announced by Boris Cherny (Anthropic). Shepherds PRs to production." },
+    { "id": "skill-batch-official", "kind": "skill", "final_score": 0.96, "web": 0.95, "novelty": 1.0, "install": "ships with next claude-code version", "official": true, "rationale": "Announced by Boris Cherny. Parallelizable code migrations." },
+    { "id": "mcp-mindsdb", "kind": "mcp", "final_score": 0.94, "web": 0.92, "novelty": 1.0, "install": "TBD — check mindsdb/mindsdb README", "rationale": "39k stars, data unification across platforms." },
+    { "id": "mcp-metamcp", "kind": "mcp", "final_score": 0.83, "web": 0.80, "novelty": 1.0, "install": "TBD", "rationale": "Middleware MCP with GUI — meta-layer for managing MCP connections. Very relevant to session-manager itself." },
+    { "id": "mcp-jungle", "kind": "mcp", "final_score": 0.75, "web": 0.72, "novelty": 1.0, "install": "TBD", "rationale": "Self-hosted enterprise MCP registry." },
+    { "id": "mcp-github-trending", "kind": "mcp", "final_score": 0.73, "web": 0.70, "novelty": 1.0, "install": "hetaoBackend/mcp-github-trending", "rationale": "Discovery MCP — use as live data source for future passes." },
+    { "id": "skill-agentation", "kind": "skill", "final_score": 0.79, "web": 0.76, "novelty": 1.0, "install": "npx add-skill benjitaylor/agentation", "rationale": "Auto framework detect + provider scaffold." },
+    { "id": "skill-meta-learning-blader", "kind": "skill", "final_score": 0.75, "web": 0.72, "novelty": 1.0, "install": "TBD", "rationale": "Self-learning skill from Siqi Chen (notable Anthropic community)." }
+  ],
+  "session_manager_roadmap_flags": [
+    "WATCH: next claude-code release likely adds /simplify + /batch — Skills tab should recognize them as built-in.",
+    "best-of-mcp-servers (tolkonepiu) is the authoritative weekly-ranked source — use as primary crawl target from pass 7."
+  ]
+}

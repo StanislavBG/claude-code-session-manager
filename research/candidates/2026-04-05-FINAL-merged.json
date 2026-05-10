@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-04-05T06:08:00Z",
+  "label": "FINAL-consolidated-7-passes",
+  "passes_rolled_up": 7,
+  "summary": { "total_candidates_proposed": 54, "after_final_dedupe": 52, "updated": 2, "kept_existing": 11, "critical_roadmap_items": 4 },
+  "tier_1_first_party_anthropic": [
+    { "id": "skill-simplify", "final_score": 0.99, "kind": "skill", "status": "SHIPPED in claude-code v2.1.92", "action": "Surface as built-in in Skills tab" },
+    { "id": "skill-batch", "final_score": 0.98, "kind": "skill", "status": "SHIPPED in claude-code v2.1.92", "action": "Surface as built-in in Skills tab" },
+    { "id": "plugin-terraform", "final_score": 0.93, "kind": "plugin", "install": "/plugin install terraform@claude-plugins-official", "action": "Add to CATALOG_PLUGINS" },
+    { "id": "plugin-firebase", "final_score": 0.92, "kind": "plugin", "install": "/plugin install firebase@claude-plugins-official", "action": "Add to CATALOG_PLUGINS" },
+    { "id": "plugin-asana", "final_score": 0.91, "kind": "plugin", "install": "/plugin install asana@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-discord", "final_score": 0.90, "kind": "plugin", "install": "/plugin install discord@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-greptile", "final_score": 0.89, "kind": "plugin", "install": "/plugin install greptile@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-serena", "final_score": 0.85, "kind": "plugin", "install": "/plugin install serena@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-laravel-boost", "final_score": 0.81, "kind": "plugin", "install": "/plugin install laravel-boost@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-telegram", "final_score": 0.78, "kind": "plugin", "install": "/plugin install telegram@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-imessage", "final_score": 0.74, "kind": "plugin", "install": "/plugin install imessage@claude-plugins-official", "action": "Add" },
+    { "id": "plugin-fakechat", "final_score": 0.68, "kind": "plugin", "install": "/plugin install fakechat@claude-plugins-official", "action": "Add (low prio)" }
+  ],
+  "tier_2_high_trust_community": [
+    { "id": "everything-claude-code", "final_score": 0.91, "kind": "plugin", "install": "/plugin marketplace add affaan-m/everything-claude-code && /plugin install everything-claude-code@everything-claude-code", "stars": 139000 },
+    { "id": "trailofbits-skills", "final_score": 0.88, "kind": "skill", "install": "git clone https://github.com/trailofbits/skills" },
+    { "id": "composiohq-composio", "final_score": 0.88, "kind": "skill", "install": "https://officialskills.sh/composiohq/skills/composio" },
+    { "id": "cloudflare-agents-sdk", "final_score": 0.86, "kind": "skill", "install": "https://officialskills.sh/cloudflare/skills/agents-sdk" },
+    { "id": "terraform-mcp-hashicorp", "final_score": 0.87, "kind": "mcp", "install": "TBD verify" },
+    { "id": "terraform-opentofu-skill", "final_score": 0.85, "kind": "skill", "install": "TBD" },
+    { "id": "ios-simulator-skill", "final_score": 0.85, "kind": "skill", "install": "git clone https://github.com/conorluddy/ios-simulator-skill" },
+    { "id": "superclaude-framework", "final_score": 0.84, "kind": "plugin", "install": "git clone https://github.com/SuperClaude-Org/SuperClaude_Framework" },
+    { "id": "playwright-skill-lackeyjb", "final_score": 0.83, "kind": "skill", "install": "git clone https://github.com/lackeyjb/playwright-skill" },
+    { "id": "jetbrains-go-skill", "final_score": 0.81, "kind": "skill", "install": "TBD" },
+    { "id": "claude-scientific-skills", "final_score": 0.81, "kind": "skill", "install": "git clone https://github.com/K-Dense-AI/claude-scientific-skills" },
+    { "id": "fullstack-dev-skills-jeffallan", "final_score": 0.81, "kind": "skill", "install": "git clone https://github.com/jeffallan/claude-skills" }
+  ],
+  "tier_3_trending_mcps": [
+    { "id": "mcp-mindsdb", "final_score": 0.94, "stars": 39000 },
+    { "id": "mcp-datadog", "final_score": 0.85 },
+    { "id": "mcp-metamcp", "final_score": 0.83, "notes": "GUI middleware — directly relevant to session-manager itself" },
+    { "id": "mcp-vectara", "final_score": 0.85 },
+    { "id": "mcp-jungle", "final_score": 0.75 },
+    { "id": "mcp-github-trending", "final_score": 0.73 },
+    { "id": "mcp-reddit-karanb192", "final_score": 0.73 },
+    { "id": "mcp-shared-memory-multiagent", "final_score": 0.74 },
+    { "id": "mcp-pentest-200tools", "final_score": 0.72 }
+  ],
+  "tier_4_niche_specialized": [
+    "ffuf-web-fuzzing", "cc-devops-skills", "agentsys", "harness-revfactory", "web-asset-generator",
+    "claude-d3js-skill", "stripe-best-practices", "netlify-functions", "skill-agentation",
+    "skill-meta-learning-blader", "plugin-hex-line", "plugin-hex-graph", "claude-flow-npm",
+    "openclaw-claude-code", "skill-security-codeql-semgrep", "skill-clean-architecture",
+    "loki-mode", "mockhero", "skill-paid-ads-campaign", "skill-free-tool-lead-gen"
+  ],
+  "new_crawl_sources_discovered": [
+    "officialskills.sh — vendor-namespaced directory",
+    "claudemarketplaces.com — 2300+ skills / 770+ MCPs / 95+ marketplaces",
+    "tolkonepiu/best-of-mcp-servers — 450 servers, weekly-ranked (PRIMARY for future)",
+    "mcpmarket.com daily leaderboards",
+    "skillsindex.dev — 4,133 MCPs indexed (873% YoY growth)"
+  ],
+  "session_manager_code_changes_needed": {
+    "critical": [
+      "Skills tab: recognize /simplify + /batch as built-in (not filesystem-backed)",
+      "Settings editor: add boolean 'disableSkillShellExecution'",
+      "Permissions editor: migrate effort scheme to low/medium/high"
+    ],
+    "nice_to_have": [
+      "MCP editor: surface _meta['anthropic/maxResultSizeChars']",
+      "Implement src/main/vector.cjs using node:sqlite (zero deps)"
+    ]
+  }
+}

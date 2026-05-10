@@ -1,0 +1,163 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  app: {
+    version: () => ipcRenderer.invoke('app:version'),
+    homeDir: () => ipcRenderer.invoke('app:home-dir'),
+    cwd: () => ipcRenderer.invoke('app:cwd'),
+    engageRulesPath: () => ipcRenderer.invoke('app:engage-rules-path'),
+    pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
+    gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
+    rebootApp: () => ipcRenderer.send('app:reboot-app'),
+    openInEditor: (cwd, editor) => ipcRenderer.invoke('app:open-in-editor', { cwd, editor }),
+    openInFinder: (cwd) => ipcRenderer.invoke('app:open-in-finder', { cwd }),
+    openInTerminal: (cwd) => ipcRenderer.invoke('app:open-in-terminal', { cwd }),
+    archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),
+    testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
+    // F7: lets the renderer suppress the wizard auto-trigger under SM_E2E=1.
+    isE2E: () => ipcRenderer.invoke('app:is-e2e'),
+    onNewSession: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('app:new-session', listener);
+      return () => ipcRenderer.removeListener('app:new-session', listener);
+    },
+    onRebootSession: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('app:reboot-session', listener);
+      return () => ipcRenderer.removeListener('app:reboot-session', listener);
+    },
+  },
+  pty: {
+    spawn: (payload) => ipcRenderer.invoke('pty:spawn', payload),
+    write: (payload) => ipcRenderer.send('pty:write', payload),
+    resize: (payload) => ipcRenderer.send('pty:resize', payload),
+    kill: (tabId) => ipcRenderer.send('pty:kill', tabId),
+    onData: (tabId, handler) => {
+      const channel = `pty:data:${tabId}`;
+      const listener = (_e, data) => handler(data);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
+    onExit: (tabId, handler) => {
+      const channel = `pty:exit:${tabId}`;
+      const listener = (_e, info) => handler(info);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
+    onWriteError: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('pty:write-error', listener);
+      return () => ipcRenderer.removeListener('pty:write-error', listener);
+    },
+  },
+  transcripts: {
+    subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),
+    unsubscribe: (tabId) => ipcRenderer.invoke('transcript:unsubscribe', { tabId }),
+    buffer: (tabId) => ipcRenderer.invoke('transcript:buffer', { tabId }),
+    pathFor: (cwd, sessionUuid) =>
+      ipcRenderer.invoke('transcript:path', { cwd, sessionUuid }),
+    onEvent: (tabId, handler) => {
+      const channel = `transcript:event:${tabId}`;
+      const listener = (_e, ev) => handler(ev);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
+  },
+  sessions: {
+    load: () => ipcRenderer.invoke('sessions:load'),
+    save: (payload) => ipcRenderer.invoke('sessions:save', payload),
+  },
+  billing: {
+    fetch: () => ipcRenderer.invoke('billing:fetch'),
+  },
+  logs: {
+    write: (scope, level, message, meta) =>
+      ipcRenderer.send('log:write', { scope, level, message, meta }),
+    dir: () => ipcRenderer.invoke('log:dir'),
+  },
+  config: {
+    readJson: (path) => ipcRenderer.invoke('config:read-json', { path }),
+    readText: (path) => ipcRenderer.invoke('config:read-text', { path }),
+    writeJson: (path, data) => ipcRenderer.invoke('config:write-json', { path, data }),
+    writeText: (path, text) => ipcRenderer.invoke('config:write-text', { path, text }),
+    listDir: (path, opts) => ipcRenderer.invoke('config:list-dir', { path, opts }),
+    exists: (path) => ipcRenderer.invoke('config:exists', { path }),
+    watch: (paths) => ipcRenderer.send('config:watch', { paths }),
+    unwatch: (paths) => ipcRenderer.send('config:unwatch', { paths }),
+    onChanged: (handler) => {
+      const listener = (_e, info) => handler(info);
+      ipcRenderer.on('config:changed', listener);
+      return () => ipcRenderer.removeListener('config:changed', listener);
+    },
+  },
+  voice: {
+    onHotkey: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('voice:hotkey', listener);
+      return () => ipcRenderer.removeListener('voice:hotkey', listener);
+    },
+    onHotkeyConfigChanged: (handler) => {
+      const listener = (_e, cfg) => handler(cfg);
+      ipcRenderer.on('voice:hotkey-changed', listener);
+      return () => ipcRenderer.removeListener('voice:hotkey-changed', listener);
+    },
+    getHotkeyConfig: () => ipcRenderer.invoke('voice:get-hotkey-config'),
+    setHotkeyConfig: (cfg) => ipcRenderer.invoke('voice:set-hotkey', cfg),
+    getHotkeyConfigPath: () => ipcRenderer.invoke('voice:get-hotkey-config-path'),
+    setRecording: (recording) => ipcRenderer.send('voice:set-recording', !!recording),
+    // F5 device picker prefs (~/.config/session-manager/voice.json `device` key).
+    getDevicePref: () => ipcRenderer.invoke('voice:get-device-pref'),
+    setDevicePref: (pref) => ipcRenderer.invoke('voice:set-device-pref', pref),
+    // F7 first-run wizard state (~/.config/session-manager/voice.json `wizard` key).
+    getWizardState: () => ipcRenderer.invoke('voice:wizard-state'),
+    markWizardComplete: () => ipcRenderer.invoke('voice:wizard-complete'),
+    // F8 turn-detector settings (~/.config/session-manager/voice.json `turnDetector` key).
+    // MVP: settings persistence + kill switch only; no model is actually loaded in v1.
+    getTurnDetector: () => ipcRenderer.invoke('voice:get-turn-detector'),
+    setTurnDetector: (state) => ipcRenderer.invoke('voice:set-turn-detector', state),
+  },
+  watchers: {
+    add: (payload) => ipcRenderer.invoke('watchers:add', payload),
+    list: (tabId) => ipcRenderer.invoke('watchers:list', { tabId }),
+    remove: (watcherId) => ipcRenderer.invoke('watchers:remove', { watcherId }),
+    killTab: (tabId) => ipcRenderer.invoke('watchers:kill-tab', { tabId }),
+    onLine: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('watcher:line', listener);
+      return () => ipcRenderer.removeListener('watcher:line', listener);
+    },
+    onClosed: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('watcher:closed', listener);
+      return () => ipcRenderer.removeListener('watcher:closed', listener);
+    },
+  },
+  otel: {
+    getConfig: () => ipcRenderer.invoke('otel:get-config'),
+    setConfig: (cfg) => ipcRenderer.invoke('otel:set-config', cfg),
+    status: () => ipcRenderer.invoke('otel:status'),
+    configPath: () => ipcRenderer.invoke('otel:config-path'),
+  },
+  history: {
+    aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
+  },
+  schedule: {
+    state: () => ipcRenderer.invoke('schedule:state'),
+    setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),
+    resetJob: (slug) => ipcRenderer.invoke('schedule:reset-job', { slug }),
+    runNow: () => ipcRenderer.invoke('schedule:run-now'),
+    resume: () => ipcRenderer.invoke('schedule:resume'),
+    refreshReset: () => ipcRenderer.invoke('schedule:refresh-reset'),
+    openFolder: () => ipcRenderer.invoke('schedule:open-folder'),
+    readPrd: (slug) => ipcRenderer.invoke('schedule:read-prd', { slug }),
+    readLog: (runId, slug) => ipcRenderer.invoke('schedule:read-log', { runId, slug }),
+    writePrd: (slug, body) => ipcRenderer.invoke('schedule:write-prd', { slug, body }),
+    listPrds: () => ipcRenderer.invoke('schedule:list-prds'),
+    health: () => ipcRenderer.invoke('schedule:health'),
+    onState: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('schedule:state', listener);
+      return () => ipcRenderer.removeListener('schedule:state', listener);
+    },
+  },
+});

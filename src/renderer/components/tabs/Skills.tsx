@@ -1,0 +1,270 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Panel } from '../ui/Panel'
+import { ListDetail } from '../ui/ListDetail'
+import { MarkdownEditor } from '../ui/MarkdownEditor'
+import { SaveBar } from '../ui/SaveBar'
+import { EmptyState } from '../ui/EmptyState'
+import { ScopeSwitcher } from '../ui/ScopeSwitcher'
+import { useConfig } from '../../state/config'
+import { useActiveTab } from '../../lib/useActiveTab'
+import { useHomeDir } from '../../lib/useHomeDir'
+import type { Scope } from '../../lib/scopes'
+import type { DirEntry } from '../../../preload/api'
+import { SkillsLibrary, ViewSwitcher } from './Library'
+
+type Kind = 'skills' | 'commands'
+
+function roots(home: string, cwd: string | null) {
+  return {
+    user: { skills: `${home}/.claude/skills`, commands: `${home}/.claude/commands` },
+    project: cwd ? { skills: `${cwd}/.claude/skills`, commands: `${cwd}/.claude/commands` } : null,
+  }
+}
+
+interface Item {
+  kind: Kind
+  scope: Scope
+  name: string
+  /** Absolute path to the editable markdown file. */
+  path: string
+  /** Absolute path of the skill directory (if applicable). */
+  dir: string | null
+}
+
+export function Skills() {
+  const home = useHomeDir()
+  const activeTab = useActiveTab()
+  const cwd = activeTab?.cwd ?? null
+  const [scope, setScope] = useState<Scope>('user')
+  const [items, setItems] = useState<Item[]>([])
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [view, setView] = useState<'installed' | 'library'>('installed')
+  const [filter, setFilter] = useState('')
+
+  const scopeRoots = useMemo(() => {
+    if (!home) return null
+    return roots(home, cwd)
+  }, [home, cwd])
+
+  // Enumerate skills and commands for the active scope.
+  useEffect(() => {
+    if (!scopeRoots) return
+    let cancelled = false
+    const bases =
+      scope === 'user' ? scopeRoots.user : scopeRoots.project
+    if (!bases) {
+      setItems([])
+      return
+    }
+    ;(async () => {
+      const next: Item[] = []
+      // Skills: subdirs containing SKILL.md, possibly nested under a
+      // namespace dir (e.g. ~/.claude/skills/user/<name>/SKILL.md).
+      const skillsDir = await window.api.config.listDir(bases.skills, { dirsOnly: true })
+      for (const e of skillsDir.entries) {
+        // Check if this dir itself is a skill (has SKILL.md).
+        const directSkill = await window.api.config.readText(`${e.path}/SKILL.md`)
+        if (directSkill.exists) {
+          next.push({
+            kind: 'skills',
+            scope,
+            name: e.name,
+            path: `${e.path}/SKILL.md`,
+            dir: e.path,
+          })
+        } else {
+          // Namespace dir — scan one level deeper.
+          const nested = await window.api.config.listDir(e.path, { dirsOnly: true })
+          for (const ne of nested.entries) {
+            const nestedSkill = await window.api.config.readText(`${ne.path}/SKILL.md`)
+            if (nestedSkill.exists) {
+              next.push({
+                kind: 'skills',
+                scope,
+                name: ne.name,
+                path: `${ne.path}/SKILL.md`,
+                dir: ne.path,
+              })
+            }
+          }
+        }
+      }
+      // Commands: each .md file is a command.
+      const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })
+      for (const e of cmdsDir.entries as DirEntry[]) {
+        if (!e.name.endsWith('.md')) continue
+        next.push({
+          kind: 'commands',
+          scope,
+          name: e.name.replace(/\.md$/, ''),
+          path: e.path,
+          dir: null,
+        })
+      }
+      if (!cancelled) {
+        next.sort((a, b) =>
+          a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skills' ? -1 : 1
+        )
+        setItems(next)
+        if (!next.find((i) => i.path === selectedPath)) {
+          setSelectedPath(next[0]?.path ?? null)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, scopeRoots])
+
+  const files = useConfig((s) => s.files)
+  const loadText = useConfig((s) => s.loadText)
+  const setDraft = useConfig((s) => s.setDraft)
+  const saveText = useConfig((s) => s.saveText)
+  const revert = useConfig((s) => s.revert)
+  const watchFile = useConfig((s) => s.watchFile)
+  const unwatchFile = useConfig((s) => s.unwatchFile)
+
+  useEffect(() => {
+    if (!selectedPath) return
+    if (!files[selectedPath]) loadText(selectedPath)
+    watchFile(selectedPath)
+    return () => unwatchFile(selectedPath)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPath])
+
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  if (!home) return <EmptyState title="loading…" />
+  if (view === 'library') {
+    return (
+      <Panel
+        toolbar={<ViewSwitcher active={view} onChange={setView} installedLabel="Installed" libraryLabel="Library" />}
+      >
+        <SkillsLibrary />
+      </Panel>
+    )
+  }
+  if (scope === 'project' && !cwd) {
+    return (
+      <Panel
+        toolbar={
+          <>
+            <ViewSwitcher active={view} onChange={setView} />
+            <span className="mx-2 text-fg-faint">·</span>
+            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
+          </>
+        }
+      >
+        <EmptyState
+          title="no active project"
+          hint="open a tab in a project directory to view project skills & commands"
+        />
+      </Panel>
+    )
+  }
+
+  const selectedItem = items.find((i) => i.path === selectedPath) ?? null
+  const file = selectedPath ? files[selectedPath] : null
+
+  return (
+    <Panel
+      toolbar={
+        <>
+          <ViewSwitcher active={view} onChange={setView} />
+          <span className="mx-2 text-fg-faint">·</span>
+          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
+          <span className="ml-3 text-fg-faint">
+            {items.length} {items.length === 1 ? 'item' : 'items'}
+          </span>
+          <div className="flex-1" />
+          <span className="text-fg-faint truncate">{selectedItem?.path ?? ''}</span>
+        </>
+      }
+      footer={
+        selectedPath && file ? (
+          <SaveBar
+            dirty={file.dirty}
+            busy={file.busy}
+            parseError={saveError}
+            lastSavedAt={file.lastSavedAt}
+            onSave={async () => {
+              setSaveError(null)
+              const r = await saveText(selectedPath)
+              if (!r.ok) setSaveError(r.error ?? 'save failed')
+            }}
+            onRevert={() => {
+              setSaveError(null)
+              revert(selectedPath)
+            }}
+          />
+        ) : null
+      }
+    >
+      <ListDetail
+        sidebar={
+          <div className="py-1">
+            <div className="px-2 pb-1">
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="filter…"
+                className="w-full bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
+              />
+            </div>
+            {(['skills', 'commands'] as Kind[]).map((kind) => {
+              const needle = filter.toLowerCase()
+              const group = items.filter((i) => i.kind === kind && (!needle || i.name.toLowerCase().includes(needle)))
+              return (
+                <div key={kind} className="mb-3">
+                  <div className="px-3 py-1 text-xs uppercase tracking-wider text-fg-faint">
+                    {kind === 'skills' ? 'Skills' : 'Slash Commands'}
+                  </div>
+                  {group.length === 0 ? (
+                    <div className="px-3 py-1 text-xs text-fg-faint italic">none</div>
+                  ) : (
+                    group.map((i) => (
+                      <button
+                        key={i.path}
+                        onClick={() => setSelectedPath(i.path)}
+                        className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
+                          selectedPath === i.path
+                            ? 'bg-bg-hi text-fg'
+                            : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                        }`}
+                      >
+                        <span className="truncate">
+                          {i.kind === 'commands' ? '/' : ''}
+                          {i.name}
+                        </span>
+                        {files[i.path]?.dirty && (
+                          <span className="w-1 h-1 rounded-full bg-accent shrink-0 ml-2" />
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        }
+        detail={
+          selectedPath && file ? (
+            <div className="h-full">
+              <MarkdownEditor
+                path={selectedPath}
+                value={file.draftRaw}
+                onChange={(v) => {
+                  setSaveError(null)
+                  setDraft(selectedPath, v)
+                }}
+              />
+            </div>
+          ) : (
+            <EmptyState title={items.length === 0 ? 'no skills or commands' : 'select an item'} />
+          )
+        }
+      />
+    </Panel>
+  )
+}

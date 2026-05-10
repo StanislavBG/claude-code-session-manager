@@ -1,0 +1,103 @@
+{
+  "name": "claude-code-session-manager",
+  "version": "0.8.3",
+  "description": "Local cockpit for Claude Code CLI sessions — terminal + full config surface.",
+  "type": "module",
+  "main": "src/main/index.cjs",
+  "bin": {
+    "claude-code-session-manager": "bin/cli.cjs"
+  },
+  "files": [
+    "bin/",
+    "src/main/",
+    "src/preload/",
+    "dist/index.html",
+    "dist/assets/",
+    "dist/vad/",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c magenta,cyan \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && SM_DEV=1 electron .",
+    "build:renderer": "vite build",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "start": "electron .",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "prepublishOnly": "vite build",
+    "test:e2e": "xvfb-run -a playwright test",
+    "test:e2e:mic": "xvfb-run -a playwright test e2e/mic.spec.mjs",
+    "test:e2e:gen-fixture": "espeak-ng -w /tmp/sm-raw.wav -s 140 'testing one two three four five' && ffmpeg -y -i /tmp/sm-raw.wav -ar 48000 -ac 2 -sample_fmt s16 e2e/fixtures/speech.wav",
+    "refresh:vad-assets": "cp node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx node_modules/@ricky0123/vad-web/dist/vad.worklet.bundle.min.js src/renderer/public/vad/ && cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs src/renderer/public/vad/"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "terminal",
+    "electron",
+    "session-manager",
+    "cli"
+  ],
+  "author": "bilkobibitkov",
+  "license": "MIT",
+  "homepage": "https://github.com/StanislavBG/claude-code-session-manager#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/StanislavBG/claude-code-session-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/StanislavBG/claude-code-session-manager/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "dependencies": {
+    "@electron/rebuild": "^3.7.0",
+    "@huggingface/transformers": "^4.1.0",
+    "@monaco-editor/react": "^4.6.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0",
+    "@ricky0123/vad-web": "^0.0.30",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "chokidar": "^4.0.1",
+    "electron": "^33.2.0",
+    "node-pty": "^1.2.0-beta.12",
+    "onnxruntime-web": "^1.24.3",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "framer-motion": "^12.38.0",
+    "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.4",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1",
+    "wait-on": "^8.0.1"
+  }
+}

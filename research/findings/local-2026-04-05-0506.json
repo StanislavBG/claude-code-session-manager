@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-04-05T05:06:30Z",
+  "pass": 6,
+  "source_type": "local",
+  "status": "stable",
+  "edge_history": { "total_urls": 40, "last_30d_urls": 40, "claude_signal": 0, "note": "No browsing activity outside the 30d window — tiny profile." },
+  "bash_history_profile_confirmed": {
+    "power_user_tilt": "+0.03 for multi-agent/CLI/headless candidates",
+    "confirmed_by_pass_5": "61 dangerously-skip-permissions launches, 8 resumes"
+  },
+  "node_sqlite_status": "working reliably across passes 4-6.",
+  "proposed_impl": {
+    "file": "src/main/vector.cjs",
+    "signature": "scanBrowserHistory() → {url,title,visit_count,last_visit}[] ; scanShellHistory() → {cmd,count}[]",
+    "ipc": "vector:scan, vector:query",
+    "persistence": "~/.claude/session-manager/vectors.sqlite (create on demand)",
+    "opt_in": "Settings toggle vectorIndex.enabled (false by default)"
+  }
+}

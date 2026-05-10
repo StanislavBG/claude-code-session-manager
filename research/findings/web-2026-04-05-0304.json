@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-04-05T03:04:00Z",
+  "pass": 4,
+  "source_type": "web",
+  "query_buckets": ["HackerNews", "Reddit", "npm"],
+  "candidates": [
+    { "id": "claude-code-npm-2.1.91", "kind": "meta", "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code", "score": 0.95, "notes": "v2.1.91 (2026-04-02): disableSkillShellExecution setting + MCP tool result persistence override via _meta['anthropic/maxResultSizeChars'] (up to 500K). Settings tab may need new toggle." },
+    { "id": "terraform-opentofu-skill", "kind": "skill", "source": "HN item 46676801", "score": 0.82, "notes": "Terraform/OpenTofu skill — testing, modules, CI/CD, prod patterns. Paired with HashiCorp Terraform MCP." },
+    { "id": "terraform-mcp-hashicorp", "kind": "mcp", "source": "https://github.com/hashicorp/terraform-mcp-server", "score": 0.84, "notes": "HashiCorp first-party Terraform MCP — pairs with skill above." },
+    { "id": "jetbrains-go-skill", "kind": "skill", "source": "HN item 47098398", "score": 0.78, "notes": "JetBrains Go skill for modern Go idioms." },
+    { "id": "claude-flow-npm", "kind": "plugin", "source": "https://www.npmjs.com/package/claude-flow", "score": 0.74, "notes": "Workflow/flow orchestration on npm." },
+    { "id": "openclaw-claude-code", "kind": "plugin", "source": "https://github.com/Enderfga/openclaw-claude-code", "score": 0.72, "notes": "Programmable headless Claude Code with tools/agent-teams/multi-model proxy." },
+    { "id": "agent-skills-1k-curated", "kind": "directory", "source": "HN item 46693426", "score": 0.83, "notes": "Show HN: 1k curated from 60k+ GitHub skills. Good crawl target." },
+    { "id": "mcp-reddit-karanb192", "kind": "mcp", "source": "https://github.com/karanb192/reddit-mcp-buddy", "score": 0.70, "notes": "Reddit MCP — browse/search/analyze." }
+  ],
+  "anthropic_release_notes_202604": {
+    "v2.1.91": ["disableSkillShellExecution setting", "MCP tool result persistence via _meta annotation"],
+    "implications_for_session_manager": [
+      "Settings tab should expose new 'disableSkillShellExecution' toggle.",
+      "Consider surfacing the _meta['anthropic/maxResultSizeChars'] field in MCP server config editor."
+    ]
+  },
+  "leak_event": {
+    "date": "2026-03-31",
+    "summary": "Claude Code source code accidentally leaked via .map file in npm package. No credentials exposed. Packaging issue.",
+    "relevance": "Informational — not a catalog entry."
+  }
+}

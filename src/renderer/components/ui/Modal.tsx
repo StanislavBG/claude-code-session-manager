@@ -1,0 +1,139 @@
+import { useEffect, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+
+/**
+ * Generic modal primitive for F7 (and any future dialog).
+ *
+ * - Renders via React portal to document.body when available, else inline.
+ * - Click on the backdrop (not the dialog) closes.
+ * - ESC closes.
+ * - Focus trap: focuses the first focusable child on mount, restores focus
+ *   to the previously-active element on unmount, and wraps Tab/Shift-Tab
+ *   between the first and last focusable elements inside the dialog so
+ *   keyboard navigation can't escape into the inert background.
+ */
+export interface ModalProps {
+  open: boolean
+  onClose: () => void
+  children: ReactNode
+  title?: string
+}
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+export function Modal({ open, onClose, children, title }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const previouslyFocusedRef = useRef<Element | null>(null)
+  // Stable ref to the latest onClose so the keydown effect's deps stay `[open]`.
+  // Without this, parents that recreate `onClose` on every render (e.g. wrapping
+  // it in a step-dependent useCallback) cause the focus snapshot/restore cycle
+  // to thrash on every step transition, restoring focus to a stale element.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    if (!open) return
+
+    // Snapshot the active element so we can restore focus when the modal closes.
+    previouslyFocusedRef.current = typeof document !== 'undefined' ? document.activeElement : null
+
+    // Focus the first focusable child after mount. Defer one tick so portaled
+    // children are in the DOM before we query.
+    const focusFirst = () => {
+      const root = dialogRef.current
+      if (!root) return
+      const first = root.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+      if (first) {
+        first.focus()
+      } else {
+        // Fall back to focusing the dialog itself (tabindex=-1) so ESC works.
+        root.focus()
+      }
+    }
+    const t = setTimeout(focusFirst, 0)
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onCloseRef.current()
+        return
+      }
+      // Focus trap: cycle focus between the first and last focusable
+      // elements inside the dialog. Without this, Tab past the last button
+      // moves focus to the host page (LeftNav, terminal, etc.), which is
+      // confusing in a modal context. Querying live each time keeps the
+      // trap correct when buttons appear/disappear between steps.
+      if (e.key === 'Tab') {
+        const root = dialogRef.current
+        if (!root) return
+        const focusables = Array.from(
+          root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter((el) => !el.hasAttribute('disabled') && el.tabIndex !== -1)
+        if (focusables.length === 0) {
+          // Nothing focusable — pin focus to the dialog itself.
+          e.preventDefault()
+          root.focus()
+          return
+        }
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        const active = document.activeElement as HTMLElement | null
+        if (e.shiftKey) {
+          if (active === first || !root.contains(active)) {
+            e.preventDefault()
+            last.focus()
+          }
+        } else {
+          if (active === last || !root.contains(active)) {
+            e.preventDefault()
+            first.focus()
+          }
+        }
+      }
+    }
+    document.addEventListener('keydown', onKey)
+
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('keydown', onKey)
+      const prev = previouslyFocusedRef.current
+      if (prev && prev instanceof HTMLElement) {
+        try { prev.focus() } catch { /* element may have unmounted */ }
+      }
+      previouslyFocusedRef.current = null
+    }
+  }, [open])
+
+  if (!open) return null
+
+  const onBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose()
+  }
+
+  const node = (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onBackdropClick}
+      data-testid="modal-backdrop"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title ?? 'Dialog'}
+        tabIndex={-1}
+        className="bg-bg-elev border border-line rounded-lg shadow-xl max-w-md w-full mx-4 p-6 outline-none"
+        data-testid="modal-dialog"
+      >
+        {title ? <h2 className="text-base font-medium text-fg mb-3">{title}</h2> : null}
+        {children}
+      </div>
+    </div>
+  )
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(node, document.body)
+  }
+  return node
+}

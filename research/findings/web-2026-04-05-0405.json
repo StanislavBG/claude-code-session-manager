@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-04-05T04:05:00Z",
+  "pass": 5,
+  "source_type": "web",
+  "primary_sources": [
+    "https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins",
+    "https://claudemarketplaces.com/"
+  ],
+  "official_external_plugins": {
+    "total_count": 17,
+    "already_in_catalog_as_mcp": ["context7", "github", "gitlab", "linear", "slack", "supabase", "playwright"],
+    "new_to_catalog": [
+      { "id": "asana", "kind": "plugin", "source": "anthropics/claude-plugins-official/external_plugins/asana", "install": "/plugin install asana@claude-plugins-official" },
+      { "id": "discord", "kind": "plugin", "source": "external_plugins/discord", "install": "/plugin install discord@claude-plugins-official" },
+      { "id": "firebase", "kind": "plugin", "source": "external_plugins/firebase", "install": "/plugin install firebase@claude-plugins-official" },
+      { "id": "fakechat", "kind": "plugin", "source": "external_plugins/fakechat", "install": "/plugin install fakechat@claude-plugins-official" },
+      { "id": "greptile", "kind": "plugin", "source": "external_plugins/greptile", "install": "/plugin install greptile@claude-plugins-official" },
+      { "id": "imessage", "kind": "plugin", "source": "external_plugins/imessage", "install": "/plugin install imessage@claude-plugins-official" },
+      { "id": "laravel-boost", "kind": "plugin", "source": "external_plugins/laravel-boost", "install": "/plugin install laravel-boost@claude-plugins-official" },
+      { "id": "serena", "kind": "plugin", "source": "external_plugins/serena", "install": "/plugin install serena@claude-plugins-official" },
+      { "id": "telegram", "kind": "plugin", "source": "external_plugins/telegram", "install": "/plugin install telegram@claude-plugins-official" },
+      { "id": "terraform", "kind": "plugin", "source": "external_plugins/terraform", "install": "/plugin install terraform@claude-plugins-official", "notes": "Confirms HashiCorp partnership hinted in pass 4" }
+    ]
+  },
+  "claudemarketplaces_directory": {
+    "counts": { "skills": 2300, "mcp_servers": 770, "marketplaces": 95 },
+    "featured": [
+      { "id": "mockhero", "kind": "tool", "desc": "Realistic test data, 156 field types, 22 locales, JSON/CSV/SQL", "score": 0.70 }
+    ]
+  },
+  "internal_plugins_reminder": "/plugins subfolder contents not listed from the repo root webfetch; would need individual browse pass."
+}

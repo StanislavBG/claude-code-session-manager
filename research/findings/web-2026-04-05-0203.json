@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-04-05T02:03:00Z",
+  "pass": 3,
+  "source_type": "web",
+  "readmes_fetched": [
+    "https://github.com/travisvn/awesome-claude-skills",
+    "https://github.com/VoltAgent/awesome-agent-skills"
+  ],
+  "individual_skills_extracted": [
+    { "id": "ios-simulator-skill", "name": "iOS Simulator Skill", "description": "iOS app building, navigation, and testing through automation", "source": "https://github.com/conorluddy/ios-simulator-skill", "install": "git clone https://github.com/conorluddy/ios-simulator-skill ~/.claude/skills/ios-simulator", "score": 0.82, "category": "mobile" },
+    { "id": "ffuf-web-fuzzing", "name": "ffuf Web Fuzzing", "description": "Expert guidance for ffuf web fuzzing with authenticated-fuzz support", "source": "https://github.com/jthack/ffuf_claude_skill", "install": "git clone https://github.com/jthack/ffuf_claude_skill ~/.claude/skills/ffuf-web-fuzzing", "score": 0.76, "category": "security" },
+    { "id": "playwright-skill", "name": "Playwright Skill", "description": "General-purpose browser automation using Playwright", "source": "https://github.com/lackeyjb/playwright-skill", "install": "git clone https://github.com/lackeyjb/playwright-skill ~/.claude/skills/playwright-skill", "score": 0.80, "category": "browser" },
+    { "id": "claude-d3js-skill", "name": "D3.js Visualizations", "description": "Visualizations in d3.js", "source": "https://github.com/chrisvoncsefalvay/claude-d3js-skill", "install": "git clone https://github.com/chrisvoncsefalvay/claude-d3js-skill ~/.claude/skills/d3js", "score": 0.70, "category": "viz" },
+    { "id": "claude-scientific-skills", "name": "Scientific Skills", "description": "Ready-to-use scientific skills for specialized libraries and databases", "source": "https://github.com/K-Dense-AI/claude-scientific-skills", "install": "git clone https://github.com/K-Dense-AI/claude-scientific-skills ~/.claude/skills/scientific", "score": 0.78, "category": "science" },
+    { "id": "web-asset-generator", "name": "Web Asset Generator", "description": "Generate favicons, app icons, and social media images", "source": "https://github.com/alonw0/web-asset-generator", "install": "git clone https://github.com/alonw0/web-asset-generator ~/.claude/skills/web-asset-generator", "score": 0.74, "category": "design" },
+    { "id": "loki-mode", "name": "Loki Mode", "description": "Multi-agent autonomous startup system orchestrating 37 agents across 6 swarms", "source": "https://github.com/asklokesh/claudeskill-loki-mode", "install": "git clone https://github.com/asklokesh/claudeskill-loki-mode", "score": 0.65, "category": "meta-agent" },
+    { "id": "composiohq-composio", "name": "Composio", "description": "Connect AI agents to 1000+ external apps with managed auth", "source": "https://officialskills.sh/composiohq/skills/composio", "install": "via officialskills.sh", "score": 0.85, "category": "integration" },
+    { "id": "stripe-best-practices", "name": "Stripe Best Practices", "description": "Best practices for building Stripe integrations", "source": "https://officialskills.sh/stripe/skills/stripe-best-practices", "install": "via officialskills.sh", "score": 0.76, "category": "payments" },
+    { "id": "cloudflare-agents-sdk", "name": "Cloudflare Agents SDK", "description": "Build stateful AI agents with scheduling, RPC, MCP servers", "source": "https://officialskills.sh/cloudflare/skills/agents-sdk", "install": "via officialskills.sh", "score": 0.83, "category": "infra" },
+    { "id": "netlify-functions", "name": "Netlify Functions", "description": "Build serverless API endpoints and background tasks", "source": "https://officialskills.sh/netlify/skills/netlify-functions", "install": "via officialskills.sh", "score": 0.74, "category": "infra" }
+  ],
+  "new_directory_discovered": {
+    "id": "officialskills-sh",
+    "url": "https://officialskills.sh/",
+    "notes": "Vendor-published skill directory with namespace URLs (anthropics/*, stripe/*, cloudflare/*, netlify/*, composiohq/*). Add as crawl source for future passes."
+  },
+  "dedupes": {
+    "ios-simulator-skill": "matches 'mcp-ios-simulator' finding from pass 1 — same capability, different form factor",
+    "playwright-skill": "skill variant of existing CATALOG_MCP 'playwright' — worth listing both",
+    "trailofbits-skills": "confirmed (pass 2)"
+  }
+}

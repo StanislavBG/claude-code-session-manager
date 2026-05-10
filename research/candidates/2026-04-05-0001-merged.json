@@ -1,0 +1,99 @@
+{
+  "generated_at": "2026-04-05T00:03:00Z",
+  "pass": 1,
+  "summary": { "new": 9, "updated": 0, "kept": 3, "demoted": 0 },
+  "note": "personal_score unavailable (Plan 2 blocked on deps). Reweighted: web=0.85, novelty=0.15.",
+  "add": [
+    {
+      "id": "mcp-vectara",
+      "kind": "mcp",
+      "final_score": 0.85,
+      "web": 0.74,
+      "novelty": 1.0,
+      "install": "npx -y @vectara/mcp-server-vectara",
+      "rationale": "Trending RAG/vector MCP; complements our own Plan 2 (local vector) with remote enterprise RAG."
+    },
+    {
+      "id": "mcp-ios-simulator",
+      "kind": "mcp",
+      "final_score": 0.78,
+      "web": 0.68,
+      "novelty": 1.0,
+      "install": "TBD (verify repo)",
+      "rationale": "Emerging use case: AI driving iOS Simulator apps."
+    },
+    {
+      "id": "skill-security-codeql-semgrep",
+      "kind": "skill",
+      "final_score": 0.81,
+      "web": 0.72,
+      "novelty": 1.0,
+      "install": "git clone --depth 1 https://github.com/travisvn/awesome-claude-skills (extract security/)",
+      "rationale": "OWASP Top 10:2025 + ASVS 5.0 + Agentic AI security — hot category in 2026."
+    },
+    {
+      "id": "skill-clean-architecture",
+      "kind": "skill",
+      "final_score": 0.76,
+      "web": 0.66,
+      "novelty": 1.0,
+      "install": "TBD",
+      "rationale": "SOLID + Clean Architecture patterns — 65 full-stack skills collection."
+    },
+    {
+      "id": "skill-mcp-builder-community",
+      "kind": "skill",
+      "final_score": 0.73,
+      "web": 0.63,
+      "novelty": 0.3,
+      "install": "TBD",
+      "rationale": "Community variant of official mcp-builder; worth comparing."
+    },
+    {
+      "id": "plugin-hex-line",
+      "kind": "plugin",
+      "final_score": 0.70,
+      "web": 0.60,
+      "novelty": 1.0,
+      "install": "levnikolaevich/claude-code-skills bundle",
+      "rationale": "Hash-verified file editing — reduces accidental overwrites."
+    },
+    {
+      "id": "plugin-hex-graph",
+      "kind": "plugin",
+      "final_score": 0.70,
+      "web": 0.60,
+      "novelty": 1.0,
+      "install": "levnikolaevich/claude-code-skills bundle",
+      "rationale": "Code knowledge graph MCP."
+    },
+    {
+      "id": "directory-claudemarketplaces",
+      "kind": "reference",
+      "final_score": 0.82,
+      "web": 0.82,
+      "novelty": 1.0,
+      "install": "add as External source reference link in UI",
+      "rationale": "2300+ skills directory with voting — use as live crawl source in future passes."
+    },
+    {
+      "id": "directory-mcpmarket-daily",
+      "kind": "reference",
+      "final_score": 0.80,
+      "web": 0.80,
+      "novelty": 1.0,
+      "install": "add as crawl source",
+      "rationale": "Daily-updated MCP trending lists."
+    }
+  ],
+  "kept_existing": [
+    { "id": "context7", "reason": "already in CATALOG_MCP" },
+    { "id": "playwright", "reason": "already in CATALOG_MCP" },
+    { "id": "puppeteer", "reason": "already in CATALOG_MCP" }
+  ],
+  "next_pass_todo": [
+    "Unblock Plan 2 (add better-sqlite3) so personal_score becomes available.",
+    "Fetch READMEs of travisvn/awesome-claude-skills and VoltAgent/awesome-agent-skills to extract individual skill entries with verified install commands.",
+    "Query claudemarketplaces.com + mcpmarket.com daily lists for drift detection."
+  ]
+}

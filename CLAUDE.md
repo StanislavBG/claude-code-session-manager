@@ -21,6 +21,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `config.cjs` — fs layer. **All paths go through `validatePath` (allowedRoots = home dir)**. Atomic writes via tmp + rename. Chokidar watchers refcounted per absolute path.
 - `transcripts.cjs` — tails `~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl`, classifies events, ring-buffers per tab, broadcasts `transcript:event:<tabId>`.
 - `scheduler.cjs` — runs PRDs from `~/.claude/session-manager/scheduled-plans/prds/` as `claude -p` jobs. Modes: `manual` / `on-reset` / `when-available` (default; polls billing usage every 2 min). Auto-pause on rate-limit, auto-resume at next 5h reset.
+- `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by SM_SUPERVISOR_DISABLE.
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
 
@@ -40,6 +41,10 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - **Hot data contiguous**: live state per tab is a flat object, not nested per-event.
 - **No backwards-compat shims**: this is a single-author project; just rename and refactor.
 - **Privacy invariant**: `RecordingStatus` (App-level, top of window) MUST be mounted whenever `isRecording === true`.
+
+### Scheduled PRD authoring
+
+Before writing a new PRD for `~/.claude/session-manager/scheduled-plans/prds/`, read [`PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md). It codifies two real stuck-job incidents: the **fizzpop poll-hang** (106-fizzpop-publish used an `until $(curl ... | jq .uptime)` loop whose condition was unsatisfiable because Render static-content deploys don't restart the API — hung 2h47m until the watchdog SIGKILLed) and the **etch-engine post-AC overrun** (112-etch-engine declared success at 17:44 UTC then launched a `for seed in 100..50000` fixture generator not in the AC — ran 2h44m until user killed it). The guide has 9 sections of rules and a pre-queue checklist (§10).
 
 ## Distribution
 

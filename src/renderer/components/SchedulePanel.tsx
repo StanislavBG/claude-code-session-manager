@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot } from '../../preload/api.d'
+import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig } from '../../preload/api.d'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -51,6 +51,8 @@ export function SchedulePanel() {
   const [now, setNow] = useState(() => Date.now())
   const [hiddenSlugs, setHiddenSlugs] = useState<Set<string>>(() => loadHidden())
   const [showAllCompleted, setShowAllCompleted] = useState(false)
+  const [meterBannerDismissed, setMeterBannerDismissed] = useState(false)
+  const [panelView, setPanelView] = useState<'queue' | 'supervisor'>('queue')
 
   useEffect(() => {
     let off: (() => void) | null = null
@@ -85,6 +87,16 @@ export function SchedulePanel() {
 
   if (!snap) return null
 
+  if (panelView === 'supervisor') {
+    return (
+      <SupervisorPanel
+        supervisorConfig={snap.config.supervisor}
+        onSetConfig={(s) => window.api.schedule.setConfig({ supervisor: s })}
+        onBack={() => setPanelView('queue')}
+      />
+    )
+  }
+
   const { config, jobs, paused, lastRunAt, nextReset } = snap
   const counts = { pending: 0, running: 0, completed: 0, failed: 0 }
   for (const j of jobs) {
@@ -93,7 +105,8 @@ export function SchedulePanel() {
     }
   }
 
-  const status = computeStatus({ snap, now, avgDurationMs })
+  const runningJobs = jobs.filter((j) => j.status === 'running')
+  const status = computeStatus({ snap, now, avgDurationMs, runningJobs })
 
   // Pre-compute "ahead" cumulative counts per job in (group, slug) order so
   // etaForJob is O(1) instead of O(N) per call. Done once per render.
@@ -139,6 +152,21 @@ export function SchedulePanel() {
           <div className="text-[10px] text-fg-faint mt-0.5 truncate font-mono">{status.line2}</div>
         )}
       </div>
+
+      {/* Meter rate-limited banner — shown when billing API is consistently 429-ing but queue is still firing */}
+      {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
+        <div className="px-3 py-1.5 bg-amber-400/15 border-t border-amber-400/30 flex items-center justify-between gap-2">
+          <span className="text-[10px] text-amber-400 font-medium">Meter rate-limited — firing on heuristic</span>
+          <button
+            type="button"
+            onClick={() => setMeterBannerDismissed(true)}
+            className="text-[10px] text-amber-400/70 hover:text-amber-400 shrink-0"
+            title="Dismiss this banner. The scheduler continues firing normally."
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="px-3 pb-3 pt-2 space-y-2 border-t border-line">
         {/* fire policy + concurrency */}
@@ -187,12 +215,12 @@ export function SchedulePanel() {
         <div className="flex items-center gap-2 text-[10px] text-fg-faint">
           <button
             type="button"
-            onClick={() => window.api.schedule.runNow()}
+            onClick={() => window.api.schedule.forceTick()}
             disabled={counts.pending === 0 && counts.running === 0}
             className="px-2 py-0.5 text-fg-dim hover:text-fg border border-line hover:border-fg-faint rounded disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Execute all pending jobs now (clears any pause)"
+            title="Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress."
           >
-            Run now
+            Fire next batch now
           </button>
           <div className="flex-1 text-right font-mono">
             {counts.pending}p · {counts.running}r · {counts.completed}d
@@ -209,6 +237,27 @@ export function SchedulePanel() {
             </button>
           )}
         </div>
+
+        {/* concurrency badge + group-backfill hint */}
+        {runningJobs.length > 0 && (() => {
+          const cap = config.concurrencyCap ?? 4
+          const currentGroup = runningJobs[0]?.parallelGroup
+          const groupPending = jobs.filter(
+            (j) => j.status === 'pending' && j.parallelGroup === currentGroup
+          ).length
+          return (
+            <div className="flex items-center gap-2 text-[10px] font-mono">
+              <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-400 shrink-0">
+                {runningJobs.length}/{cap} running
+              </span>
+              {groupPending > 0 && (
+                <span className="text-fg-faint">
+                  +{groupPending} ready in this group
+                </span>
+              )}
+            </div>
+          )
+        })()}
 
         {/* job list — show pending first (with ETA), then running, then recent completed */}
         <div className="space-y-0.5 max-h-72 overflow-y-auto">
@@ -258,13 +307,23 @@ export function SchedulePanel() {
             {nextReset && <span title={`next 5h reset: ${nextReset}`}>reset {formatRelative(Date.parse(nextReset) - now)}</span>}
             {lastRunAt && <span className="ml-2" title={lastRunAt}>last run {formatRelative(now - Date.parse(lastRunAt))} ago</span>}
           </span>
-          <button
-            type="button"
-            onClick={() => window.api.schedule.openFolder()}
-            className="hover:text-fg-dim underline"
-          >
-            folder
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPanelView('supervisor')}
+              className="hover:text-fg-dim underline"
+              title="Open supervisor log and settings"
+            >
+              supervisor
+            </button>
+            <button
+              type="button"
+              onClick={() => window.api.schedule.openFolder()}
+              className="hover:text-fg-dim underline"
+            >
+              folder
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -282,30 +341,34 @@ interface StatusInfo {
 }
 
 function computeStatus({
-  snap, now, avgDurationMs,
-}: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number }): StatusInfo {
+  snap, now, avgDurationMs, runningJobs,
+}: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number; runningJobs: ScheduleJob[] }): StatusInfo {
   const { config, jobs, paused, nextReset, utilization } = snap
   let pendingCount = 0
   let completedCount = 0
-  let firstRunning: ScheduleJob | null = null
   for (const j of jobs) {
     if (j.status === 'pending') pendingCount++
     else if (j.status === 'completed') completedCount++
-    else if (j.status === 'running' && !firstRunning) firstRunning = j
   }
-  const runningCount = firstRunning ? 1 : 0
+  const runningCount = runningJobs.length
   const totalActive = pendingCount + runningCount
+  const cap = config.concurrencyCap ?? 4
 
-  if (firstRunning) {
-    const r = firstRunning
-    const elapsed = r.startedAt ? now - Date.parse(r.startedAt) : 0
-    const k = completedCount + 1
+  if (runningCount > 0) {
+    const oldest = runningJobs.reduce((a, b) =>
+      (a.startedAt ?? '') < (b.startedAt ?? '') ? a : b
+    )
+    const elapsed = oldest.startedAt ? now - Date.parse(oldest.startedAt) : 0
+    const k = completedCount + runningCount
     const n = completedCount + totalActive
+    const concurrencyLabel = runningCount > 1 ? ` · ${runningCount}/${cap} parallel` : ''
     return {
       kind: 'running',
-      line1: `Running ${k}/${n} · ${formatDuration(elapsed)}`,
-      line2: r.title,
-      tooltip: `${r.slug} (group ${r.parallelGroup})`,
+      line1: `Running ${k}/${n}${concurrencyLabel} · ${formatDuration(elapsed)}`,
+      line2: runningCount === 1
+        ? oldest.title
+        : runningJobs.map((j) => j.title).join(', '),
+      tooltip: runningJobs.map((j) => `${j.slug} (g${j.parallelGroup})`).join('; '),
     }
   }
 
@@ -345,11 +408,11 @@ function computeStatus({
     return {
       kind: 'manual',
       line1: `Manual · ${pendingCount} pending`,
-      line2: 'click Run now to fire',
+      line2: 'click Fire next batch now to fire',
       action: {
-        label: 'Run now',
-        onClick: () => window.api.schedule.runNow(),
-        title: 'Execute all pending jobs now',
+        label: 'Fire next batch now',
+        onClick: () => window.api.schedule.forceTick(),
+        title: 'Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress.',
       },
     }
   }
@@ -443,7 +506,7 @@ function partitionJobs(
 }
 
 function StatusIcon({ kind }: { kind: StatusKind }) {
-  if (kind === 'running') return <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />
+  if (kind === 'running') return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
   if (kind === 'paused') return <span className="text-[11px] shrink-0" title="paused">⏸</span>
   if (kind === 'manual') return <span className="text-[11px] shrink-0" title="manual">✋</span>
   if (kind === 'on-reset' || kind === 'auto-soon') return <span className="text-[11px] shrink-0" title="auto">⏰</span>
@@ -452,7 +515,7 @@ function StatusIcon({ kind }: { kind: StatusKind }) {
 }
 
 function statusBannerClass(kind: StatusKind): string {
-  if (kind === 'running') return 'bg-accent/5'
+  if (kind === 'running') return 'bg-amber-400/10'
   if (kind === 'paused') return 'bg-amber-500/10'
   if (kind === 'auto-throttled') return 'bg-amber-500/5'
   return ''
@@ -485,7 +548,7 @@ function etaForJob(
 function JobRow({ job, eta, now }: { job: ScheduleJob; eta: string | null; now: number }) {
   const [open, setOpen] = useState(false)
   const dot =
-    job.status === 'running' ? 'bg-accent animate-pulse' :
+    job.status === 'running' ? 'bg-amber-400 animate-pulse' :
     job.status === 'completed' ? 'bg-green-500' :
     job.status === 'failed' ? 'bg-red-400' :
     'bg-fg-faint/40'
@@ -564,6 +627,152 @@ function JobRow({ job, eta, now }: { job: ScheduleJob; eta: string | null; now: 
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Supervisor sub-panel ────────────────────────────────────────────────────
+
+function SupervisorPanel({
+  supervisorConfig,
+  onSetConfig,
+  onBack,
+}: {
+  supervisorConfig: SupervisorConfig | undefined
+  onSetConfig: (partial: Partial<SupervisorConfig>) => void
+  onBack: () => void
+}) {
+  const [log, setLog] = useState<SupervisorLogEntry[]>([])
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    window.api.supervisor.getLog().then(setLog).catch(() => {})
+    const id = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  const cfg: SupervisorConfig = {
+    enabled: supervisorConfig?.enabled ?? true,
+    intervalMinutes: supervisorConfig?.intervalMinutes ?? 15,
+    maxConcurrentProbes: supervisorConfig?.maxConcurrentProbes ?? 2,
+    probeStaleThresholdMinutes: supervisorConfig?.probeStaleThresholdMinutes ?? 10,
+  }
+
+  return (
+    <div className="bg-bg-elev/60">
+      {/* Header */}
+      <div className="px-3 py-2 flex items-center gap-2 border-b border-line">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-[10px] text-fg-faint hover:text-fg-dim"
+          title="Back to queue"
+        >
+          ← queue
+        </button>
+        <span className="text-[11px] font-medium text-fg-dim">Supervisor</span>
+        <button
+          type="button"
+          onClick={() => window.api.supervisor.getLog().then(setLog).catch(() => {})}
+          className="ml-auto text-[10px] text-fg-faint hover:text-fg-dim underline"
+          title="Refresh log"
+        >
+          refresh
+        </button>
+      </div>
+
+      {/* Config controls */}
+      <div className="px-3 py-2 space-y-1.5 border-b border-line">
+        <div className="text-[9px] text-fg-faint uppercase tracking-wider">Config</div>
+        <div className="flex items-center gap-3 flex-wrap text-[10px] text-fg-faint">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={cfg.enabled}
+              onChange={(e) => onSetConfig({ enabled: e.target.checked })}
+              className="cursor-pointer"
+            />
+            <span>enabled</span>
+          </label>
+          <label className="flex items-center gap-1" title="How often to check for wedged jobs (minutes)">
+            <span>interval</span>
+            <input
+              type="number"
+              min={5}
+              max={60}
+              value={cfg.intervalMinutes}
+              onChange={(e) => onSetConfig({ intervalMinutes: Number(e.target.value) })}
+              className="w-10 bg-bg border border-line rounded px-1 py-0.5 font-mono"
+            />
+            <span>min</span>
+          </label>
+          <label className="flex items-center gap-1" title="Max concurrent Opus probes per tick">
+            <span>probes</span>
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={cfg.maxConcurrentProbes}
+              onChange={(e) => onSetConfig({ maxConcurrentProbes: Number(e.target.value) })}
+              className="w-8 bg-bg border border-line rounded px-1 py-0.5 font-mono"
+            />
+          </label>
+          <label className="flex items-center gap-1" title="Probe a job only if no JSONL event in this many minutes">
+            <span>stale</span>
+            <input
+              type="number"
+              min={5}
+              max={30}
+              value={cfg.probeStaleThresholdMinutes}
+              onChange={(e) => onSetConfig({ probeStaleThresholdMinutes: Number(e.target.value) })}
+              className="w-8 bg-bg border border-line rounded px-1 py-0.5 font-mono"
+            />
+            <span>min</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Log table */}
+      <div className="px-3 py-2">
+        <div className="text-[9px] text-fg-faint uppercase tracking-wider mb-1">
+          Recent probes (last {log.length})
+        </div>
+        {log.length === 0 ? (
+          <div className="text-[10px] text-fg-faint italic">No probes yet.</div>
+        ) : (
+          <div className="space-y-0.5 max-h-64 overflow-y-auto">
+            {log.map((entry, i) => (
+              <SupervisorLogRow key={`${entry.ts}-${i}`} entry={entry} now={now} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SupervisorLogRow({ entry, now }: { entry: SupervisorLogEntry; now: number }) {
+  const isAction = entry.action !== 'none'
+  const ago = formatRelative(now - entry.ts)
+  return (
+    <div
+      className={`text-[10px] px-1.5 py-1 rounded font-mono ${isAction ? 'bg-red-500/10 border border-red-500/20' : 'bg-bg/40'}`}
+      title={entry.reason}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-fg-faint shrink-0">{ago} ago</span>
+        <span className={`shrink-0 px-1 rounded ${entry.verdict === 'stuck' ? 'text-red-400 bg-red-500/10' : 'text-green-500/70'}`}>
+          {entry.verdict}
+        </span>
+        <span className="truncate text-fg-dim">{entry.jobSlug}</span>
+        {isAction && (
+          <span className="shrink-0 text-red-400">{entry.action}{entry.targetPid ? ` pid=${entry.targetPid}` : ''}</span>
+        )}
+        {entry.costUsd !== null && (
+          <span className="shrink-0 text-fg-faint">${entry.costUsd.toFixed(3)}</span>
+        )}
+      </div>
+      <div className="text-fg-faint truncate mt-0.5">{entry.reason}</div>
     </div>
   )
 }

@@ -25,6 +25,27 @@ const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'billing-cache.json');
 
+/**
+ * Pure: classify a raw HTTP response status + body from the usage endpoint into a
+ * result kind. Exported for unit testing without needing to mock fetch or electron.
+ *
+ * Returns one of: 'ok' | 'auth' | 'transient' | 'meter_rate_limited'
+ */
+function classifyUsageResponse(status, bodyText) {
+  if (status === 401 || status === 403) return { kind: 'auth', httpStatus: status };
+  if (status === 429) {
+    let parsed = null;
+    try { parsed = JSON.parse(bodyText); } catch { /* */ }
+    if (parsed?.error?.type === 'rate_limit_error') {
+      return { kind: 'meter_rate_limited', message: bodyText.slice(0, 200), httpStatus: 429 };
+    }
+    return { kind: 'transient', message: bodyText.slice(0, 200) || 'HTTP 429', httpStatus: 429 };
+  }
+  if (status === 408 || status >= 500) return { kind: 'transient', httpStatus: status };
+  if (!status || status >= 400) return { kind: 'transient', httpStatus: status };
+  return { kind: 'ok' };
+}
+
 let cache = null;
 let hydrationPromise = null;
 
@@ -44,6 +65,18 @@ async function persistCache(c) {
 }
 
 async function fetchUsage() {
+  // Test stub: SM_MOCK_BILLING_KIND lets e2e tests simulate billing API responses
+  // without hitting the real endpoint. Only active when SM_E2E=1 to prevent
+  // accidental use in production.
+  if (process.env.SM_E2E === '1' && process.env.SM_MOCK_BILLING_KIND) {
+    const kind = process.env.SM_MOCK_BILLING_KIND;
+    if (kind === 'meter_rate_limited') return { kind: 'meter_rate_limited', message: 'e2e stub', httpStatus: 429 };
+    if (kind === 'transient') return { kind: 'transient', message: 'e2e stub', httpStatus: 503 };
+    if (kind === 'auth') return { kind: 'auth', message: 'e2e stub', httpStatus: 401 };
+    // 'ok' stub returns a minimal valid payload.
+    return { kind: 'ok', data: { usage: { five_hour: { utilization: 10, resets_at: null }, seven_day: { utilization: 10, resets_at: null }, seven_day_sonnet: null, seven_day_opus: null, extra_usage: null }, subscriptionType: null, rateLimitTier: null, credentialsExpiresAt: null, fetchedAt: Date.now() } };
+  }
+
   // Check expiry and attempt proactive refresh before touching the network.
   const refresh = await refreshIfNeeded();
   if (refresh.kind === 'auth') {
@@ -71,9 +104,18 @@ async function fetchUsage() {
     const ms = expiresAtMs(creds);
     return { kind: 'auth', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status, expiredAt: ms };
   }
-  if (r.status === 408 || r.status === 429 || r.status >= 500) {
+  if (r.status === 408 || r.status >= 500) {
     const body = await r.text().catch(() => '');
     return { kind: 'transient', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status };
+  }
+  if (r.status === 429) {
+    const body = await r.text().catch(() => '');
+    let parsed = null;
+    try { parsed = JSON.parse(body); } catch { /* */ }
+    if (parsed?.error?.type === 'rate_limit_error') {
+      return { kind: 'meter_rate_limited', message: body.slice(0, 200), httpStatus: 429 };
+    }
+    return { kind: 'transient', message: body.slice(0, 200) || 'HTTP 429', httpStatus: 429 };
   }
   if (!r.ok) {
     const body = await r.text().catch(() => '');
@@ -116,4 +158,4 @@ function registerBillingHandlers() {
   });
 }
 
-module.exports = { registerBillingHandlers, fetchUsage };
+module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse };

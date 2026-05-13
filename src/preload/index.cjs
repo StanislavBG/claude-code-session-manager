@@ -146,6 +146,7 @@ contextBridge.exposeInMainWorld('api', {
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),
     resetJob: (slug) => ipcRenderer.invoke('schedule:reset-job', { slug }),
     runNow: () => ipcRenderer.invoke('schedule:run-now'),
+    forceTick: () => ipcRenderer.invoke('schedule:force-tick'),
     resume: () => ipcRenderer.invoke('schedule:resume'),
     refreshReset: () => ipcRenderer.invoke('schedule:refresh-reset'),
     openFolder: () => ipcRenderer.invoke('schedule:open-folder'),
@@ -159,5 +160,9 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('schedule:state', listener);
       return () => ipcRenderer.removeListener('schedule:state', listener);
     },
+  },
+  supervisor: {
+    tickNow: () => ipcRenderer.invoke('supervisor:tick-now'),
+    getLog: () => ipcRenderer.invoke('supervisor:get-log'),
   },
 });

@@ -15,6 +15,7 @@ const logs = require('./logs.cjs');
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
+const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
@@ -632,6 +633,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  supervisor.stopSupervisor();
   ptyManager.killAll();
   configMgr.closeAllWatchers();
   transcripts.closeAll();

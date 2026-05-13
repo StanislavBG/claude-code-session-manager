@@ -48,11 +48,37 @@ const { spawn } = require('node:child_process');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const supervisor = require('./supervisor.cjs');
 const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
   MAX_JOB_DURATION_MS,
 } = require('./lib/schedulerConfig.cjs');
+
+const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
+
+// After the agent emits a `result` event in its JSONL stream, the parent
+// `claude -p` process should exit promptly. Real-world failure (2026-05-10
+// cellar-publish): an agent emitted result=success, then spawned unbounded
+// `until $(curl ...)` background bashes that kept the parent alive for 22
+// minutes until manual intervention. The post-result watchdog catches this:
+// if the process is still alive POST_RESULT_GRACE_MS after result, SIGTERM
+// the whole process group; if still alive POST_RESULT_KILL_MS after SIGTERM,
+// SIGKILL. The original `result.subtype` is preserved and used to map the
+// kill exit code back to 0 so legit work isn't mismarked as failed.
+const POST_RESULT_GRACE_MS = 90_000;
+const POST_RESULT_KILL_MS = 30_000;
+const RESULT_TAIL_POLL_MS = 5_000;
+const RESULT_TAIL_BYTES = 8 * 1024;
+
+// Idle-output watchdog: if the log file mtime stops advancing for this long
+// while the process is still alive, the agent is hung mid-work (network
+// stall, infinite tool loop, compaction wedge). User rule: anything not
+// making progress for 20 minutes is presumed stuck. SIGTERM the process
+// group, then SIGKILL after POST_RESULT_KILL_MS. The scheduler logs this
+// distinctly from MAX_JOB_DURATION_MS so post-mortems can tell them apart.
+const IDLE_OUTPUT_KILL_MS = 20 * 60_000;
+const IDLE_CHECK_INTERVAL_MS = 60_000;
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
@@ -63,11 +89,15 @@ const HEARTBEAT_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'sc
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
+const ENV_CAP = process.env.SM_SCHEDULER_MAX_CONCURRENCY
+  ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 4))
+  : null;
+
 const DEFAULT_CONFIG = {
   // Legacy on/off retained for backwards compat; v0.5+ uses firePolicy.
   enabled: false,
   offsetMinutes: 15,
-  concurrencyCap: 5,
+  concurrencyCap: ENV_CAP ?? 4,
   defaultCwd: DEFAULT_PROJECT_CWD,
   // 'when-available' = poll usage and fire whenever utilization < threshold.
   // 'on-reset'        = fire offsetMinutes after the next 5h reset (legacy).
@@ -76,6 +106,12 @@ const DEFAULT_CONFIG = {
   // For 'when-available'. Fire only when five_hour utilization < this percent.
   utilizationThreshold: 90,
   schemaVersion: 1,
+  supervisor: {
+    enabled: true,
+    intervalMinutes: 15,
+    maxConcurrentProbes: 2,
+    probeStaleThresholdMinutes: 10,
+  },
 };
 
 // ---------- fs helpers ----------
@@ -324,6 +360,8 @@ let consecutiveFailures = 0;
 let backoffMs = 0;
 let backoffNextAt = null;
 let firstFailureAt = null;
+let firstNon429FailureAt = null; // tracks only transient/config failures; 429s don't count toward network-pause threshold
+let lastFailureKind = null; // 'transient' | 'meter_rate_limited' | 'auth' | null
 let pauseClearedManuallyAt = null;
 
 // ---------- timer ----------
@@ -334,7 +372,9 @@ let resumeTimer = null;
 let pollLoopTimer = null;
 let rescheduleInterval = null;
 let heartbeatInterval = null;
-let isExecuting = false;
+// In-memory set of slugs currently spawned in this process. Prevents
+// double-spawn when runDueJobs() is called while jobs are in flight.
+const runningSet = new Set();
 let cancelToken = { cancelled: false };
 let claudeBinPathCached = null;
 
@@ -569,22 +609,112 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
       cwd,
       env: childEnv,
       stdio: ['ignore', fd, fd],
+      // detached:true puts the child in its own process group so we can kill
+      // the entire descendant tree (including any stray background bashes the
+      // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
+      // only kills the immediate `claude` process, leaving orphaned subprocs
+      // that keep the parent alive (the 2026-05-10 cellar-publish hang).
+      detached: true,
     });
 
-    fs.writeSync(fd, `[scheduler] spawned pid=${child.pid}\n\n`);
+    fs.writeSync(fd, `[scheduler] spawned pid=${child.pid} (process group)\n\n`);
 
     // Fire-and-forget pid persistence — best effort.
     if (onPid) onPid(child.pid).catch(() => {});
 
+    // Track whether the agent has emitted a `result` event in its JSONL stream.
+    // null until seen; then one of "success" | "error_max_turns" | ... per the
+    // claude harness's result subtype taxonomy.
+    let agentResultSubtype = null;
+    let postResultTimer = null;
+    let postResultKillTimer = null;
+
+    const killTree = (signal) => {
+      // Kill the whole process group. Negative pid targets the group leader's
+      // group (only works because we spawned with detached:true).
+      try { process.kill(-child.pid, signal); return true; }
+      catch {
+        try { process.kill(child.pid, signal); return true; }
+        catch { return false; /* already dead */ }
+      }
+    };
+
+    // Tail the log for {"type":"result","subtype":"..."} events. When we see
+    // one, start the post-result grace timer — the agent has declared done,
+    // so the process should exit promptly. If not, something is hanging
+    // (the cellar-publish failure mode).
+    const resultTailer = setInterval(() => {
+      if (agentResultSubtype) return; // already seen; tailer will be cleared below
+      try {
+        const stat = fs.statSync(logPath);
+        if (stat.size === 0) return;
+        const n = Math.min(stat.size, RESULT_TAIL_BYTES);
+        const buf = Buffer.alloc(n);
+        const fdR = fs.openSync(logPath, 'r');
+        fs.readSync(fdR, buf, 0, n, stat.size - n);
+        fs.closeSync(fdR);
+        const m = buf.toString('utf8').match(/\{"type":"result","subtype":"([a-z_]+)"/);
+        if (!m) return;
+        agentResultSubtype = m[1];
+        fs.writeSync(fd, `\n[scheduler] result event detected (subtype=${agentResultSubtype}); ` +
+          `starting ${Math.round(POST_RESULT_GRACE_MS/1000)}s exit-grace timer\n`);
+        clearInterval(resultTailer);
+        postResultTimer = setTimeout(() => {
+          fs.writeSync(fd, `\n[scheduler] post-result grace expired (${Math.round(POST_RESULT_GRACE_MS/1000)}s); ` +
+            `child still alive — SIGTERM process group\n`);
+          killTree('SIGTERM');
+          postResultKillTimer = setTimeout(() => {
+            fs.writeSync(fd, `\n[scheduler] still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+            killTree('SIGKILL');
+          }, POST_RESULT_KILL_MS);
+          if (postResultKillTimer.unref) postResultKillTimer.unref();
+        }, POST_RESULT_GRACE_MS);
+        if (postResultTimer.unref) postResultTimer.unref();
+      } catch { /* log not readable yet; try again */ }
+    }, RESULT_TAIL_POLL_MS);
+    if (resultTailer.unref) resultTailer.unref();
+
     // Kill the child if it runs past the maximum allowed duration.
     const watchdog = setTimeout(() => {
       fs.writeSync(fd, `\n[scheduler] watchdog SIGKILL after ${MAX_JOB_DURATION_MS}ms\n`);
-      try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      killTree('SIGKILL');
     }, MAX_JOB_DURATION_MS);
     if (watchdog.unref) watchdog.unref();
 
-    child.on('error', (err) => {
+    // Idle-output watchdog: poll log mtime every IDLE_CHECK_INTERVAL_MS; if
+    // it hasn't advanced in IDLE_OUTPUT_KILL_MS, presume the agent is stuck
+    // and SIGTERM the process group.
+    let idleKillTimer = null;
+    const idleChecker = setInterval(() => {
+      try {
+        const stat = fs.statSync(logPath);
+        const idleMs = Date.now() - stat.mtimeMs;
+        if (idleMs > IDLE_OUTPUT_KILL_MS) {
+          fs.writeSync(fd, `\n[scheduler] idle-output watchdog: log mtime stalled ` +
+            `${Math.round(idleMs/1000)}s (> ${Math.round(IDLE_OUTPUT_KILL_MS/1000)}s threshold) — SIGTERM process group\n`);
+          clearInterval(idleChecker);
+          killTree('SIGTERM');
+          idleKillTimer = setTimeout(() => {
+            fs.writeSync(fd, `\n[scheduler] idle watchdog: still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+            killTree('SIGKILL');
+          }, POST_RESULT_KILL_MS);
+          if (idleKillTimer.unref) idleKillTimer.unref();
+        }
+      } catch { /* log not statable; skip */ }
+    }, IDLE_CHECK_INTERVAL_MS);
+    if (idleChecker.unref) idleChecker.unref();
+
+    const clearAllTimers = () => {
       clearTimeout(watchdog);
+      clearInterval(resultTailer);
+      clearInterval(idleChecker);
+      if (postResultTimer) clearTimeout(postResultTimer);
+      if (postResultKillTimer) clearTimeout(postResultKillTimer);
+      if (idleKillTimer) clearTimeout(idleKillTimer);
+    };
+
+    child.on('error', (err) => {
+      clearAllTimers();
       const durationMs = Date.now() - startedAt;
       fs.writeSync(fd, `\n[scheduler] error: ${err.message}\n`);
       closeFd();
@@ -592,132 +722,395 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
       resolve({ exitCode: -1, durationMs, error: err.message });
     });
 
-    child.on('exit', (code) => {
-      clearTimeout(watchdog);
+    child.on('exit', (code, signal) => {
+      clearAllTimers();
       const durationMs = Date.now() - startedAt;
-      fs.writeSync(fd, `\n[scheduler] exit code=${code} duration=${Math.round(durationMs / 1000)}s\n`);
+      // If we SIGTERM'd because of the post-result watchdog AND the agent had
+      // emitted result=success, the work succeeded; only the cleanup hung.
+      // Map the kill exit code to 0 so the job is marked completed, not failed.
+      // Node's child.on('exit') reports either code (normal) or signal (killed);
+      // when killed by signal, code is null. We also check 143 (128+SIGTERM)
+      // and 137 (128+SIGKILL) in case the process exited via signal-as-code.
+      let effectiveCode = code;
+      const killedBySignal = signal === 'SIGTERM' || signal === 'SIGKILL' || code === 143 || code === 137 || code === null;
+      const mappedToSuccess = agentResultSubtype === 'success' && killedBySignal;
+      if (mappedToSuccess) {
+        effectiveCode = 0;
+        fs.writeSync(fd, `\n[scheduler] mapping exit code=${code} signal=${signal} → 0 ` +
+          `(result=success was emitted before kill)\n`);
+      }
+      fs.writeSync(fd, `\n[scheduler] exit code=${effectiveCode} (raw code=${code} signal=${signal}) ` +
+        `duration=${Math.round(durationMs / 1000)}s\n`);
       closeFd();
-      const rateLimited = code !== 0 && detectRateLimitInLog(logPath);
-      atomicWriteJson(metaPath, { slug: job.slug, cwd, exitCode: code, rateLimited, startedAt, finishedAt: Date.now(), durationMs });
-      resolve({ exitCode: code, durationMs, rateLimited });
+      const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
+      atomicWriteJson(metaPath, {
+        slug: job.slug, cwd, exitCode: effectiveCode, rateLimited,
+        startedAt, finishedAt: Date.now(), durationMs,
+        agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${code}` : null,
+      });
+      resolve({ exitCode: effectiveCode, durationMs, rateLimited });
     });
   });
 }
 
-async function runDueJobs() {
-  if (isExecuting) return;
-  isExecuting = true;
-  cancelToken = { cancelled: false };
+/**
+ * Pick the next batch of jobs to spawn this tick.
+ *
+ * Rules:
+ *   1. Find the lowest parallelGroup that has pending jobs not already in
+ *      runningSet.
+ *   2. If that group has jobs in runningSet (i.e., we're mid-group), backfill
+ *      up to (cap - runningSet.size) more from the SAME group.
+ *   3. If the current group has NO jobs in runningSet (new group), and there
+ *      are still jobs from an earlier group in runningSet, do nothing — wait
+ *      for the earlier group to drain before advancing.
+ *   4. **Late-arrival**: if a lower-numbered (higher-priority) PRD reconciles
+ *      AFTER a higher-numbered group was already picked, fire the late-arrival
+ *      immediately in parallel with the active group rather than starving it
+ *      until the active group drains. This handles the reconcile-race where
+ *      a PRD file lands on disk between two pickNextBatch invocations.
+ *   5. A singleton group (unique NN, no other jobs share it) runs alone;
+ *      no bleed into adjacent groups.
+ *
+ * Returns array of job objects to spawn. O(N) where N = pending.length.
+ */
+function pickNextBatch(allJobs, running, cap) {
+  const pending = allJobs.filter((j) => j.status === 'pending' && !running.has(j.slug));
+  if (pending.length === 0) return [];
+
+  // Groups with at least one job in flight: either tracked in runningSet
+  // (this process spawned it) or still marked 'running' in queue.json
+  // (persisted from a previous session that hasn't been orphan-reset yet).
+  const activeGroups = new Set();
+  for (const slug of running) {
+    const job = allJobs.find((j) => j.slug === slug);
+    if (job) activeGroups.add(job.parallelGroup ?? 99);
+  }
+  for (const j of allJobs) {
+    if (j.status === 'running' && !running.has(j.slug)) {
+      activeGroups.add(j.parallelGroup ?? 99);
+    }
+  }
+  // Total slots consumed: in-process spawns + queue.json running count.
+  const queueRunningCount = allJobs.filter((j) => j.status === 'running').length;
+  const effectiveRunning = Math.max(running.size, queueRunningCount);
+
+  // Lowest pending group.
+  const lowestPendingGroup = pending.reduce(
+    (min, j) => Math.min(min, j.parallelGroup ?? 99),
+    Infinity,
+  );
+
+  if (activeGroups.size > 0) {
+    const lowestActive = Math.min(...activeGroups);
+    if (lowestPendingGroup > lowestActive) {
+      // Earlier group still running — wait for it to drain before advancing.
+      console.log(`[scheduler] concurrency: g${lowestActive} in flight, holding g${lowestPendingGroup}`);
+      return [];
+    }
+    if (lowestPendingGroup < lowestActive) {
+      // Late-arrival: a lower-numbered (higher-priority) PRD reconciled AFTER
+      // a higher-numbered group was already picked. Without this branch the
+      // pending PRD starves until the active group drains — the bug observed
+      // on 2026-05-10 where 118-studio-add-wave2-games (g118) was held while
+      // the g130 hardening trio ran. Honor priority: fire the late-arrival
+      // now, in parallel with the active group. (Strict serial group
+      // ordering still applies between groups that were both present at the
+      // time of picking; this only handles the reconcile-race edge case.)
+      const slots = cap - effectiveRunning;
+      if (slots <= 0) {
+        console.log(`[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots for late-arrival g${lowestPendingGroup}`);
+        return [];
+      }
+      const batch = pending.filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup).slice(0, slots);
+      console.log(`[scheduler] concurrency: firing late-arrival g${lowestPendingGroup} (${batch.length} job(s)) alongside active g${lowestActive}`);
+      return batch;
+    }
+    // Backfill slots remaining in the current group.
+    const slots = cap - effectiveRunning;
+    if (slots <= 0) {
+      console.log(`[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`);
+      return [];
+    }
+    const batch = pending.filter((j) => (j.parallelGroup ?? 99) === lowestActive).slice(0, slots);
+    if (batch.length > 0) {
+      console.log(`[scheduler] concurrency: backfilling ${batch.length} into g${lowestActive} (${effectiveRunning}/${cap} running)`);
+    }
+    return batch;
+  }
+
+  // No active group — start the next group fresh.
+  const slots = cap - effectiveRunning;
+  if (slots <= 0) {
+    console.log(`[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`);
+    return [];
+  }
+  const batch = pending.filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup).slice(0, slots);
+  console.log(`[scheduler] concurrency: starting g${lowestPendingGroup} with ${batch.length} job(s) (cap ${cap})`);
+  return batch;
+}
+
+/**
+ * Recognize fix-plan slugs (NN-fix-...) so we don't recurse on a fix-plan that
+ * itself failed. The pattern matches the slug we generate in spawnInvestigation.
+ */
+function isFixPlanSlug(slug) {
+  return /^\d+-fix-/.test(slug);
+}
+
+/**
+ * Read the last `bytes` of a file as utf8. Returns '' on error.
+ */
+function readTail(filePath, bytes) {
   try {
+    const stat = fs.statSync(filePath);
+    const n = Math.min(stat.size, bytes);
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(n);
+    fs.readSync(fd, buf, 0, n, stat.size - n);
+    fs.closeSync(fd);
+    return buf.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Spawn an Opus investigation session for a failed job. The investigator's job
+ * is to read the failure log + original PRD, identify the root cause, and write
+ * a fix-plan PRD into prds/<NN>-fix-<base>.md. Reconcile picks it up; the next
+ * Sonnet slot fires it. Investigations themselves are NOT queue entries — they
+ * run out-of-band, so they don't consume the concurrency cap. They DO consume
+ * tokens, which the when-available throttle will reflect on the next poll.
+ *
+ * Skipped if the failed job is itself a fix-plan (avoids infinite recursion).
+ */
+async function spawnInvestigation(failedJob, runDir) {
+  if (isFixPlanSlug(failedJob.slug)) {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} is itself a fix plan`);
+    return;
+  }
+
+  const failedLogPath = path.join(runDir, `${failedJob.slug}.log`);
+  const investigationLogPath = path.join(runDir, `${failedJob.slug}.investigation.log`);
+
+  let originalBody = '';
+  try {
+    originalBody = parsePrd(path.join(PRDS_DIR, `${failedJob.slug}.md`)).body;
+  } catch {
+    originalBody = failedJob.bodyPreview || '(original PRD missing from disk)';
+  }
+
+  const logTail = readTail(failedLogPath, 16 * 1024) || '(failed to read log)';
+
+  const baseSlug = failedJob.slug.replace(/^\d+-/, '');
+  const group = failedJob.parallelGroup ?? 99;
+  const fixSlug = `${String(group).padStart(2, '0')}-fix-${baseSlug}`;
+  const fixPath = path.join(PRDS_DIR, `${fixSlug}.md`);
+
+  if (fs.existsSync(fixPath)) {
+    console.log(`[scheduler] skip investigation: fix plan already exists at ${fixPath}`);
+    return;
+  }
+
+  const cwd = failedJob.cwd || DEFAULT_PROJECT_CWD;
+  const prompt = `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.
+
+# Failed job
+- Slug: ${failedJob.slug}
+- Title: ${failedJob.title}
+- cwd: ${cwd}
+- Exit code: ${failedJob.exitCode}
+- Full failure log: ${failedLogPath}
+
+# Original PRD body (this is what the job was trying to do)
+\`\`\`
+${originalBody}
+\`\`\`
+
+# Last ~16KB of the failure log (stream-json format from \`claude -p\`)
+\`\`\`
+${logTail}
+\`\`\`
+
+# Your task
+1. Read the full failure log at ${failedLogPath} if the tail above isn't sufficient.
+2. Read source files in ${cwd} as needed to understand the context.
+3. Identify the root cause of the failure.
+4. Write a NEW fix-plan PRD file at exactly this path:
+
+   ${fixPath}
+
+5. The frontmatter MUST be exactly this format (no extra keys):
+   \`\`\`
+   ---
+   title: Fix: <short summary of the fix>
+   cwd: ${cwd}
+   parallelGroup: ${group}
+   estimateMinutes: <your time estimate>
+   ---
+   \`\`\`
+6. The PRD body MUST be self-contained — \`claude -p\` runs it on a fresh Sonnet session with NO conversation context. Include:
+   - Root-cause analysis (what went wrong and why)
+   - Concrete fix steps (specific files / commands / edits)
+   - Verification command(s) the next agent should run to confirm the fix
+   - Acceptance criteria
+
+DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
+
+  const fd = fs.openSync(investigationLogPath, 'a');
+  fs.writeSync(fd, `[scheduler] investigation starting for ${failedJob.slug} at ${new Date().toISOString()}\n[scheduler] target fix PRD: ${fixPath}\n\n`);
+
+  const claudeBin = resolveClaudeBin();
+  const childEnv = cleanChildEnv();
+  const child = spawn(claudeBin, [
+    '-p', prompt,
+    '--model', 'opus',
+    '--dangerously-skip-permissions',
+    '--output-format', 'stream-json',
+    '--verbose',
+  ], {
+    cwd,
+    env: childEnv,
+    stdio: ['ignore', fd, fd],
+  });
+
+  fs.writeSync(fd, `[scheduler] investigation pid=${child.pid}\n\n`);
+
+  const watchdog = setTimeout(() => {
+    fs.writeSync(fd, `\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`);
+    try { child.kill('SIGKILL'); } catch { /* already dead */ }
+  }, MAX_INVESTIGATION_DURATION_MS);
+  if (watchdog.unref) watchdog.unref();
+
+  child.on('error', (err) => {
+    clearTimeout(watchdog);
+    try { fs.writeSync(fd, `\n[scheduler] investigation error: ${err.message}\n`); } catch { /* */ }
+    try { fs.closeSync(fd); } catch { /* */ }
+  });
+
+  child.on('exit', (code) => {
+    clearTimeout(watchdog);
+    try { fs.writeSync(fd, `\n[scheduler] investigation exit code=${code}\n`); } catch { /* */ }
+    try { fs.closeSync(fd); } catch { /* */ }
+    if (fs.existsSync(fixPath)) {
+      console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
+    } else {
+      console.log(`[scheduler] investigation finished WITHOUT producing fix plan (slug=${failedJob.slug}, code=${code})`);
+    }
+    // Trigger a tick so the new fix plan is reconciled into the queue and fired.
+    tickQueue().catch(() => {});
+  });
+}
+
+async function spawnJob(job, runId, runDir, defaultCwd) {
+  runningSet.add(job.slug);
+  try {
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (idx >= 0) {
+        s.jobs[idx].status = 'running';
+        s.jobs[idx].runId = runId;
+        s.jobs[idx].startedAt = new Date().toISOString();
+      }
+    });
+    broadcast();
+
+    const res = await executeJob(job, runDir, defaultCwd, async (pid) => {
+      await mutate((s) => {
+        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+        if (idx >= 0) {
+          s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt };
+        }
+      });
+    });
+
+    if (res.rateLimited) {
+      const resetIso = await refreshNextReset().catch(() => cachedNextReset);
+      await setPaused('rate_limit', resetIso);
+    }
+
+    let actuallyFailed = false;
+    let failedJobSnapshot = null;
+    await mutate((s) => {
+      const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (i2 >= 0) {
+        const treatAsPending = res.rateLimited || (s.paused && s.paused.reason === 'rate_limit');
+        if (treatAsPending) {
+          resetJobFields(s.jobs[i2], res.rateLimited ? 'paused: rate limit' : 'paused: queue halted');
+        } else {
+          s.jobs[i2].status = res.exitCode === 0 ? 'completed' : 'failed';
+          s.jobs[i2].finishedAt = new Date().toISOString();
+          s.jobs[i2].exitCode = res.exitCode;
+          s.jobs[i2].error = res.error || null;
+          delete s.jobs[i2].runtime;
+          if (s.jobs[i2].status === 'failed') {
+            actuallyFailed = true;
+            failedJobSnapshot = { ...s.jobs[i2] };
+          }
+        }
+      }
+    });
+    broadcast();
+
+    if (actuallyFailed && failedJobSnapshot) {
+      spawnInvestigation(failedJobSnapshot, runDir).catch((e) => {
+        console.error('[scheduler] spawnInvestigation error', job.slug, e);
+      });
+    }
+  } catch (e) {
+    console.error('[scheduler] spawnJob error', job.slug, e);
+  } finally {
+    runningSet.delete(job.slug);
+    // Each job completion is a signal to advance the queue.
+    tickQueue().catch(() => {});
+  }
+}
+
+// Serialized ticker: prevents two concurrent tickQueue() calls from racing
+// on the same pending jobs. A simple promise tail suffices since pickNextBatch
+// is synchronous and spawnJob is fire-and-forget.
+let tickTail = Promise.resolve();
+
+function tickQueue() {
+  const next = tickTail.then(async () => {
     const state = readQueue();
     if (state.paused) {
-      console.log('[scheduler] runDueJobs skipped: paused');
+      console.log('[scheduler] tickQueue skipped: paused');
       return;
     }
-    reconcile(state);
-    const pending = state.jobs.filter((j) => j.status === 'pending');
-    if (pending.length === 0) {
-      return;
-    }
-    const { runId, dir: runDir } = pickRunDir();
+    if (cancelToken.cancelled) return;
 
-    // Group by parallelGroup, ascending. Each group runs serially after the
-    // previous group completes.
-    const groups = new Map();
-    for (const j of pending) {
-      const g = j.parallelGroup ?? 99;
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(j);
-    }
-    const groupKeys = Array.from(groups.keys()).sort((a, b) => a - b);
+    reconcile(state);
+    const cap = ENV_CAP ?? state.config.concurrencyCap;
+    const batch = pickNextBatch(state.jobs, runningSet, cap);
+    if (batch.length === 0) return;
 
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
     broadcast();
 
-    for (const gk of groupKeys) {
+    const { runId, dir: runDir } = pickRunDir();
+    for (const job of batch) {
       if (cancelToken.cancelled) break;
-      const groupJobs = groups.get(gk);
-      // Within a group: cap concurrency and run waves until all done.
-      const cap = Math.max(1, Math.min(state.config.concurrencyCap, groupJobs.length));
-      const queue = [...groupJobs];
-      const inFlight = new Set();
-
-      const launch = (job) => {
-        const promise = (async () => {
-          try {
-            // Mark job running.
-            await mutate((s) => {
-              const idx = s.jobs.findIndex((x) => x.slug === job.slug);
-              if (idx >= 0) {
-                s.jobs[idx].status = 'running';
-                s.jobs[idx].runId = runId;
-                s.jobs[idx].startedAt = new Date().toISOString();
-              }
-            });
-            broadcast();
-
-            // Execute — onPid persists the child PID into the running state.
-            const res = await executeJob(job, runDir, state.config.defaultCwd, async (pid) => {
-              await mutate((s) => {
-                const idx = s.jobs.findIndex((x) => x.slug === job.slug);
-                if (idx >= 0) {
-                  s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt };
-                }
-              });
-            });
-
-            // Rate-limit: pause before writing terminal status so the status
-            // mutate below can read the pause state.
-            if (res.rateLimited) {
-              const resetIso = await refreshNextReset().catch(() => cachedNextReset);
-              await setPaused('rate_limit', resetIso);
-            }
-
-            // Write terminal status; strip runtime regardless of outcome.
-            await mutate((s) => {
-              const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
-              if (i2 >= 0) {
-                const treatAsPending = res.rateLimited || (s.paused && s.paused.reason === 'rate_limit');
-                if (treatAsPending) {
-                  resetJobFields(s.jobs[i2], res.rateLimited ? 'paused: rate limit' : 'paused: queue halted');
-                } else {
-                  s.jobs[i2].status = res.exitCode === 0 ? 'completed' : 'failed';
-                  s.jobs[i2].finishedAt = new Date().toISOString();
-                  s.jobs[i2].exitCode = res.exitCode;
-                  s.jobs[i2].error = res.error || null;
-                  delete s.jobs[i2].runtime;
-                }
-              }
-            });
-            broadcast();
-          } catch (e) {
-            console.error('[scheduler] launch error', job.slug, e);
-          }
-        })();
-        inFlight.add(promise);
-        promise.then(() => inFlight.delete(promise), () => inFlight.delete(promise));
-      };
-
-      // Prime up to cap
-      while (queue.length && inFlight.size < cap && !cancelToken.cancelled) launch(queue.shift());
-      // Drain. If cancelled mid-group, stop launching new jobs but let
-      // already-launched ones settle (they're rate-limited too — short).
-      while (inFlight.size > 0) {
-        await Promise.race(inFlight);
-        if (cancelToken.cancelled) {
-          await Promise.allSettled([...inFlight]);
-          break;
-        }
-        while (queue.length && inFlight.size < cap) launch(queue.shift());
-      }
+      // spawnJob is fire-and-forget; it calls tickQueue() on completion.
+      spawnJob(job, runId, runDir, state.config.defaultCwd).catch(() => {});
     }
-  } finally {
-    isExecuting = false;
-    // No longer auto-disable after a run. The firePolicy now governs whether
-    // the next batch fires automatically. Just clear the one-shot scheduledFor.
-    await mutate((s) => { s.scheduledFor = null; });
-    broadcast();
+  });
+  tickTail = next.catch(() => {});
+  return next;
+}
+
+async function runDueJobs() {
+  const state = readQueue();
+  if (state.paused) {
+    console.log('[scheduler] runDueJobs skipped: paused');
+    return;
   }
+  cancelToken = { cancelled: false };
+  await tickQueue();
+  // Clear the one-shot scheduledFor without waiting for jobs to settle.
+  await mutate((s) => { s.scheduledFor = null; });
+  broadcast();
 }
 
 // ---------- when-available launch logic ----------
@@ -725,16 +1118,15 @@ async function runDueJobs() {
 async function maybeLaunchWhenAvailable(state) {
   if (state.config.firePolicy !== 'when-available') return;
   if (state.paused) return;
-  if (isExecuting) return;
-  const pending = state.jobs.filter((j) => j.status === 'pending');
+  const pending = state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug));
   if (pending.length === 0) return;
   if (cachedUtilization === null || cachedUtilization === undefined) return;
   if (cachedUtilization >= state.config.utilizationThreshold) {
     broadcast();
     return;
   }
-  console.log(`[scheduler] when-available: util=${cachedUtilization}%, ${pending.length} pending — firing`);
-  runDueJobs().catch((e) => console.error('[scheduler] runDueJobs error', e));
+  console.log(`[scheduler] when-available: util=${cachedUtilization}%, ${pending.length} pending, ${runningSet.size} running — ticking`);
+  tickQueue().catch((e) => console.error('[scheduler] tickQueue error', e));
 }
 
 // ---------- poll loop with exponential backoff ----------
@@ -750,6 +1142,8 @@ async function pollLoop() {
       backoffMs = 0;
       backoffNextAt = null;
       firstFailureAt = null;
+      firstNon429FailureAt = null;
+      lastFailureKind = null;
       lastPollAt = Date.now();
       lastPollOk = true;
       persistSchedulerState();
@@ -766,6 +1160,19 @@ async function pollLoop() {
 
       await maybeLaunchWhenAvailable(cur);
       broadcast();
+    } else if (r.kind === 'meter_rate_limited') {
+      // Billing meter is itself being rate-limited. Treat as "utilization unknown but safe":
+      // fire available jobs anyway at utilization=0 rather than pausing the queue.
+      lastPollAt = Date.now();
+      lastPollOk = false;
+      consecutiveFailures++;
+      lastFailureKind = 'meter_rate_limited';
+      // Don't update firstNon429FailureAt — 429s don't count toward the 30-min network-pause threshold.
+      cachedUtilization = 0; // assume safe; fire any pending work
+      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on heuristic (failure #${consecutiveFailures})`);
+      const cur = readQueue();
+      await maybeLaunchWhenAvailable(cur);
+      broadcast();
     } else {
       lastPollAt = Date.now();
       lastPollOk = false;
@@ -773,16 +1180,19 @@ async function pollLoop() {
       if (!firstFailureAt) firstFailureAt = Date.now();
 
       if (r.kind === 'auth') {
+        lastFailureKind = 'auth';
         console.error(`[scheduler] auth failure (HTTP ${r.httpStatus}): ${r.message}`);
         await setPaused('auth', null);
       } else {
-        // transient or config — apply exponential backoff.
+        // transient or config — apply exponential backoff and count toward 30-min threshold.
+        lastFailureKind = 'transient';
+        if (!firstNon429FailureAt) firstNon429FailureAt = Date.now();
         backoffMs = backoffMs ? Math.min(backoffMs * 2, 480_000) : 30_000;
-        const totalFailureMs = Date.now() - firstFailureAt;
+        const totalNon429FailureMs = Date.now() - firstNon429FailureAt;
         console.log(`[scheduler] transient failure #${consecutiveFailures}: ${r.kind} ${r.message ?? ''}; retry in ${backoffMs / 1000}s`);
 
-        // After 30 minutes of consecutive failures, set 'network' pause.
-        if (totalFailureMs > 30 * 60_000) {
+        // After 30 minutes of consecutive non-429 failures, set 'network' pause.
+        if (totalNon429FailureMs > 30 * 60_000) {
           const cur2 = readQueue();
           if (!cur2.paused || cur2.paused.reason === 'network') {
             await setPaused('network', null);
@@ -798,7 +1208,9 @@ async function pollLoop() {
     lastPollAt = Date.now();
     lastPollOk = false;
     consecutiveFailures++;
+    lastFailureKind = 'transient';
     if (!firstFailureAt) firstFailureAt = Date.now();
+    if (!firstNon429FailureAt) firstNon429FailureAt = Date.now();
     backoffMs = backoffMs ? Math.min(backoffMs * 2, 480_000) : 30_000;
     backoffNextAt = Date.now() + backoffMs;
     persistSchedulerState();
@@ -813,6 +1225,7 @@ async function pollLoop() {
 
 function registerScheduleHandlers() {
   ensureDirs();
+  supervisor.registerHandlers();
 
   ipcMain.handle('schedule:state', async () => {
     const state = readQueue();
@@ -847,12 +1260,21 @@ function registerScheduleHandlers() {
       lastPollAt,
       lastPollOk,
       consecutiveFailures,
+      lastFailureKind,
       backoffNextAt,
       nextResetCached: cachedNextReset,
       pausedSince: state.paused ? Date.parse(state.paused.since) : null,
       pauseReason: state.paused?.reason ?? null,
       runningJobs,
     };
+  });
+
+  ipcMain.handle('schedule:force-tick', async () => {
+    // Bypass the billing-poll gate entirely — fire pending jobs immediately regardless of meter state.
+    // Clears any existing pause first (same semantics as run-now).
+    await clearPause('run-now');
+    runDueJobs().catch((e) => console.error('[scheduler] runDueJobs error (force-tick)', e));
+    return { ok: true };
   });
 
   ipcMain.handle('schedule:set-config', async (_e, partial) => {
@@ -864,7 +1286,11 @@ function registerScheduleHandlers() {
       return { ok: false, error: e?.message ?? 'invalid config' };
     }
     const config = await mutate((state) => {
-      state.config = { ...state.config, ...validated };
+      const { supervisor: supPartial, ...rest } = validated;
+      state.config = { ...state.config, ...rest };
+      if (supPartial !== undefined) {
+        state.config.supervisor = { ...(state.config.supervisor ?? {}), ...supPartial };
+      }
       return state.config;
     });
     await rescheduleTimer();
@@ -1050,6 +1476,11 @@ async function init() {
   // First tick fires after the standard warmup delay so billing is ready.
   pollLoopTimer = setTimeout(() => { pollLoop().catch(() => {}); }, USAGE_REFRESH_INTERVAL_MS);
   if (pollLoopTimer.unref) pollLoopTimer.unref();
+
+  // Supervisor: probe running jobs for wedged poll-loops.
+  if (process.env.SM_SUPERVISOR_DISABLE !== '1') {
+    supervisor.startSupervisor({ readQueue, mutate });
+  }
 
   // Heartbeat: once per minute, log queue state for 24h visibility.
   if (heartbeatInterval) clearInterval(heartbeatInterval);

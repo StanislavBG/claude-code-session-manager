@@ -285,6 +285,8 @@ export interface ScheduleHealthSnapshot {
   lastPollAt: number | null;
   lastPollOk: boolean;
   consecutiveFailures: number;
+  /** Kind of the most recent poll failure: 'transient' | 'meter_rate_limited' | 'auth' | null */
+  lastFailureKind: string | null;
   backoffNextAt: number | null;
   nextResetCached: string | null;
   pausedSince: number | null;
@@ -301,8 +303,26 @@ export interface PrdListItem {
   mtimeMs: number;
 }
 
+export interface SupervisorConfig {
+  enabled: boolean;
+  intervalMinutes: number;
+  maxConcurrentProbes: number;
+  probeStaleThresholdMinutes: number;
+}
+
+export interface SupervisorLogEntry {
+  ts: number;
+  jobSlug: string;
+  lastActivityAgeMin: number;
+  verdict: 'ok' | 'stuck';
+  action: 'none' | 'kill-bash' | 'kill-agent';
+  targetPid: number | null;
+  reason: string;
+  costUsd: number | null;
+}
+
 export interface ScheduleStateSnapshot {
-  config: ScheduleConfig;
+  config: ScheduleConfig & { supervisor?: SupervisorConfig };
   jobs: ScheduleJob[];
   scheduledFor: string | null;
   lastRunAt: string | null;
@@ -471,9 +491,10 @@ export interface SessionManagerAPI {
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;
-    setConfig: (partial: Partial<ScheduleConfig>) => Promise<{ ok: boolean; config: ScheduleConfig }>;
+    setConfig: (partial: Partial<ScheduleConfig & { supervisor?: Partial<SupervisorConfig> }>) => Promise<{ ok: boolean; config: ScheduleConfig }>;
     resetJob: (slug: string) => Promise<{ ok: boolean; error?: string }>;
     runNow: () => Promise<{ ok: boolean }>;
+    forceTick: () => Promise<{ ok: boolean }>;
     resume: () => Promise<{ ok: boolean }>;
     refreshReset: () => Promise<{ ok: boolean; nextReset: string | null }>;
     openFolder: () => Promise<{ ok: boolean }>;
@@ -483,6 +504,12 @@ export interface SessionManagerAPI {
     listPrds: () => Promise<PrdListItem[]>;
     health: () => Promise<ScheduleHealthSnapshot>;
     onState: (handler: (snapshot: ScheduleStateSnapshot) => void) => () => void;
+  };
+  supervisor: {
+    /** Debug-only: run a supervisor tick immediately. Used by e2e tests. */
+    tickNow: () => Promise<{ ok: boolean }>;
+    /** Return last 50 supervisor log entries, descending by ts. */
+    getLog: () => Promise<SupervisorLogEntry[]>;
   };
 }
 

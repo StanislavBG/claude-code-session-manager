@@ -10,6 +10,7 @@
  */
 
 import { MicVAD } from '@ricky0123/vad-web'
+import type { SpeechProbabilities } from '@ricky0123/vad-web/dist/models/common'
 import { log } from './logger'
 
 /**
@@ -45,6 +46,14 @@ interface RecognitionCallbacks {
    * because the store value can change while a segment is in flight.
    */
   partialsEnabled?: () => boolean
+  /**
+   * Fires on every processed VAD frame (~32ms cadence) regardless of segment
+   * state. The host uses `isSpeech` for sub-segment decisions — primarily to
+   * preempt the auto-submit countdown before VAD's `onSpeechStart` fires
+   * (which requires 300ms of confirmed speech). Display-only / decision-only;
+   * the recognition layer makes no use of this internally.
+   */
+  onFrame?: (probabilities: SpeechProbabilities) => void
   /**
    * F5: pin the input device. `undefined`/`null` ⇒ OS default (no `deviceId`
    * constraint). When set, the constructed getUserMedia uses
@@ -779,12 +788,11 @@ export function createRecognition(opts: RecognitionCallbacks): RecognitionHandle
           // utterance via submitUserSpeechOnPause.
           positiveSpeechThreshold: VAD_DEFAULT_POSITIVE,
           negativeSpeechThreshold: VAD_DEFAULT_NEGATIVE,
-          minSpeechMs: 250,
-          // 1200 ms (was 600) — VAD waits this long after the last in-speech
-          // frame before committing a turn. 600 ms cut users off mid-sentence
-          // when pausing to think; 1200 ms covers a normal "uh, …" hesitation
-          // without a perceptible latency hit on the final commit.
-          redemptionMs: 1200,
+          minSpeechMs: 300,
+          // 1500 ms (was 1200) — VAD waits this long after the last in-speech
+          // frame before committing a turn. Extended so "uh, …" hesitations
+          // and mid-thought pauses don't prematurely end the segment.
+          redemptionMs: 1500,
           preSpeechPadMs: 300,
           submitUserSpeechOnPause: true,
           // F6: capture every post-resample 512-sample frame from MicVAD into
@@ -792,8 +800,11 @@ export function createRecognition(opts: RecognitionCallbacks): RecognitionHandle
           // the partial scheduler only fires while `segmentActive`. Per the
           // F6 PRD, `frame` is the post-resample 16 kHz Float32 — the same
           // domain the final encoder sees.
-          onFrameProcessed: (_probabilities: unknown, frame: Float32Array) => {
+          onFrameProcessed: (probabilities: SpeechProbabilities, frame: Float32Array) => {
             if (destroyed) return
+            // Always forward the per-frame probability — the host uses it to
+            // preempt the auto-submit countdown even when no segment is active.
+            opts.onFrame?.(probabilities)
             if (!segmentActive) return
             appendFrame(frame)
             schedulePartialMaybe()

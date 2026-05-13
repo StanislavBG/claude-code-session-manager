@@ -200,11 +200,11 @@ interface VoiceState {
  * `onSpeechStart`; armed on segment end (`onFinal` / `onMisfire`) and on
  * `startRecording` so a totally-silent user still auto-closes.
  *
- * 30 s (was 5 s) so a long thinking pause between dictated turns doesn't
+ * 40 s (was 30 s) so a long thinking pause between dictated turns doesn't
  * close the mic — user keeps a continuous-listening session and only loses
  * the mic if they truly walk away.
  */
-const IDLE_AUTO_STOP_MS = 30_000
+const IDLE_AUTO_STOP_MS = 40_000
 let idleAutoStopTimer: ReturnType<typeof setTimeout> | null = null
 
 function armIdleAutoStop() {
@@ -233,11 +233,87 @@ function cancelIdleAutoStop() {
  * this one only arms after a transcript has been typed.
  */
 let submitTimer: ReturnType<typeof setTimeout> | null = null
+let submitGuardRaf: number | null = null
+
+/**
+ * Typical mic noise floor with EC/AGC (existing constraint chain): RMS 0.005-0.015.
+ * Speech onset: RMS 0.05-0.20. 0.04 is conservative — false positives only on loud
+ * transients (keyboard, chair) that VAD would confirm within ~200 ms anyway.
+ *
+ * NOTE: this RMS guard is the fallback. The primary signal is the VAD frame
+ * probability (lastVoiceProb below), which is far more reliable on quiet mics
+ * and AGC-flattened streams where speech can sit below 0.04 RMS.
+ */
+const SUBMIT_PRECEDENCE_RMS = 0.04
+
+/**
+ * Per-frame VAD probability threshold for preempting the auto-submit
+ * countdown. Set well below VAD's segment-commit threshold (positiveSpeechThreshold=0.5)
+ * so even soft "wait" / "hold on" cancels the cooldown before VAD's 300ms
+ * minSpeechMs gate would let `onSpeechStart` fire. Silero typically reports
+ * 0.05-0.15 for background and 0.5+ for clear speech; 0.3 covers voiced
+ * onsets without false-tripping on typing/breath.
+ */
+const SUBMIT_PRECEDENCE_PROB = 0.3
+
+// Updated on every VAD frame (~32ms) via the onFrame callback below. The
+// submit guard reads it each rAF tick. Stale data is OK — frames fire faster
+// than the guard polls.
+let lastVoiceProb = 0
+let lastVoiceProbAt = 0
+
+function startSubmitGuard(countdownStartAt: number) {
+  if (submitGuardRaf !== null) cancelAnimationFrame(submitGuardRaf)
+
+  const tick = () => {
+    // Timer ended naturally or was already cancelled — stop the guard.
+    if (submitTimer === null || useVoice.getState().submitCountdownStartAt === null) {
+      submitGuardRaf = null
+      return
+    }
+    const now = performance.now()
+    // Primary signal: VAD per-frame probability. Considered fresh if the most
+    // recent frame fired within 200ms (frames are ~32ms apart; 200ms means
+    // we'd catch a stalled VAD pump and fall back to the RMS check below).
+    if (now - lastVoiceProbAt < 200 && lastVoiceProb > SUBMIT_PRECEDENCE_PROB) {
+      const msIntoCountdown = now - countdownStartAt
+      log.info('voice', 'submit.preempted_by_voice', { reason: 'vad', prob: lastVoiceProb.toFixed(2), msIntoCountdown: Math.round(msIntoCountdown) })
+      cancelSubmitInternal()
+      armIdleAutoStop()
+      return
+    }
+    // Fallback: RMS amplitude check. Catches loud transients VAD might miss
+    // and covers the case where the onFrame pump is stalled.
+    const analyser = getActiveAnalyser()
+    if (analyser) {
+      const buf = new Uint8Array(analyser.fftSize)
+      analyser.getByteTimeDomainData(buf)
+      // Mirror MicLevelMeter.tsx RMS math: samples are unsigned [0,255], center at 128.
+      let sum = 0
+      for (let i = 0; i < buf.length; i++) {
+        const s = (buf[i] - 128) / 128
+        sum += s * s
+      }
+      const rms = Math.sqrt(sum / buf.length)
+      if (rms > SUBMIT_PRECEDENCE_RMS) {
+        const msIntoCountdown = now - countdownStartAt
+        log.info('voice', 'submit.preempted_by_voice', { reason: 'rms', rms: rms.toFixed(3), msIntoCountdown: Math.round(msIntoCountdown) })
+        cancelSubmitInternal()
+        armIdleAutoStop()
+        return
+      }
+    }
+    submitGuardRaf = requestAnimationFrame(tick)
+  }
+
+  submitGuardRaf = requestAnimationFrame(tick)
+}
 
 function armSubmit(tabId: string) {
   if (submitTimer) clearTimeout(submitTimer)
   const delayMs = useVoice.getState().submitDelayMs
-  useVoice.setState({ submitCountdownStartAt: performance.now() })
+  const countdownStartAt = performance.now()
+  useVoice.setState({ submitCountdownStartAt: countdownStartAt })
   submitTimer = setTimeout(() => {
     submitTimer = null
     useVoice.setState({ submitCountdownStartAt: null })
@@ -251,9 +327,14 @@ function armSubmit(tabId: string) {
     // auto-stop (re-armed here) catches it after IDLE_AUTO_STOP_MS.
     armIdleAutoStop()
   }, delayMs)
+  startSubmitGuard(countdownStartAt)
 }
 
 function cancelSubmitInternal() {
+  if (submitGuardRaf !== null) {
+    cancelAnimationFrame(submitGuardRaf)
+    submitGuardRaf = null
+  }
   if (submitTimer) {
     clearTimeout(submitTimer)
     submitTimer = null
@@ -350,7 +431,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
   isRecording: false,
   ttsEnabled: false,
   autoSubmit: true,
-  submitDelayMs: 6000,
+  submitDelayMs: 8000,
   submitCountdownStartAt: null,
   lastTranscript: '',
   lastPartial: '',
@@ -406,6 +487,11 @@ export const useVoice = create<VoiceState>((set, get) => ({
           log.error('voice', 'modelStatus -> error', { msg })
           set({ modelStatus: 'error', error: msg, errorKind: 'load' })
         } else {
+          // Cached pipeline init fires no progress events for 30-90s on slow
+          // machines. The worker emits a `status: 'loading'` heartbeat every
+          // 10s to compensate — treat it as a watchdog re-arm signal so the
+          // 90s no-progress timer doesn't false-trip during cache loads.
+          armWatchdog()
           set({ modelStatus: 'loading' })
         }
       },
@@ -475,6 +561,13 @@ export const useVoice = create<VoiceState>((set, get) => ({
         // stops running when the user disables partials. Returns the
         // current value via getState so the host re-checks each tick.
         partialsEnabled: () => get().partialsEnabled,
+        // Per-frame VAD probability. Cached for the submit-guard rAF tick so
+        // the cooldown cancels on the first voiced frame instead of waiting
+        // for VAD's 300ms minSpeechMs gate to fire onSpeechStart.
+        onFrame: (probs) => {
+          lastVoiceProb = probs.isSpeech
+          lastVoiceProbAt = performance.now()
+        },
         // F4 barge-in: VAD-confirmed speech start cancels any in-progress TTS.
         // tabId is captured here in the closure so multi-tab telemetry is correct.
         onSpeechStart: () => {
@@ -605,6 +698,8 @@ export const useVoice = create<VoiceState>((set, get) => ({
     if (!handle) return
     cancelIdleAutoStop()
     cancelSubmitInternal()
+    lastVoiceProb = 0
+    lastVoiceProbAt = 0
     detachVadDucking?.()
     detachVadDucking = null
     set({ isRecording: false, lastTranscript: '', lastPartial: '', statusPill: 'idle' })
@@ -650,7 +745,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
 
   toggleTTS: () => set((s) => ({ ttsEnabled: !s.ttsEnabled })),
   setAutoSubmit: (v) => set({ autoSubmit: v }),
-  setSubmitDelayMs: (ms) => set({ submitDelayMs: Math.max(500, Math.min(10_000, Math.floor(ms))) }),
+  setSubmitDelayMs: (ms) => set({ submitDelayMs: Math.max(500, Math.min(13_000, Math.floor(ms))) }),
   cancelSubmit: () => cancelSubmitInternal(),
   setPartialsEnabled: (v) => {
     if (get().partialsEnabled === v) return

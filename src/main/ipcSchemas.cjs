@@ -127,6 +127,12 @@ const setConfigSchema = z.object({
   ).optional(),
   firePolicy: z.enum(['when-available', 'on-reset', 'manual']).optional(),
   utilizationThreshold: z.number().min(0).max(200).optional(),
+  supervisor: z.object({
+    enabled: z.boolean().optional(),
+    intervalMinutes: z.number().int().min(5).max(60).optional(),
+    maxConcurrentProbes: z.number().int().min(1).max(5).optional(),
+    probeStaleThresholdMinutes: z.number().int().min(5).max(30).optional(),
+  }).optional(),
 }).strict();
 
 // ──────────────────────────────────────────── History

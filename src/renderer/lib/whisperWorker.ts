@@ -37,15 +37,28 @@ async function loadModel() {
   // sit at 0% the whole time and look stuck. If pipeline() doesn't report
   // any download progress within 1.5s, switch the status text.
   let progressSeen = false
+  let phase: 'downloading' | 'cache-loading' = 'downloading'
   const cacheHintTimer = setTimeout(() => {
     if (!progressSeen && !transcriber) {
+      phase = 'cache-loading'
       self.postMessage({ type: 'status', status: 'loading', message: 'Loading speech model from cache…' })
       workerLog('info', 'load: no download progress within 1.5s, assuming cache hit')
     }
   }, 1500)
 
-  const pipelineStart = Date.now()
+  // Heartbeat: cache-loaded pipeline() init is silent (no progress events).
+  // On slow machines pipeline + warmup can run 30-90s with no messages, which
+  // trips the host's 90s no-progress watchdog and surfaces "Model load timed
+  // out" even though loading is fine. Emit a status ping every 10s so the
+  // host re-arms its watchdog. Cleared in the finally below.
+  const heartbeatTimer = setInterval(() => {
+    if (transcriber) return
+    const message = phase === 'downloading' ? 'Downloading speech model…' : 'Loading speech model from cache…'
+    self.postMessage({ type: 'status', status: 'loading', message })
+  }, 10000)
+
   try {
+    const pipelineStart = Date.now()
     transcriber = await pipeline('automatic-speech-recognition', MODEL_ID, {
       dtype: 'fp32',
       device: 'wasm',
@@ -61,27 +74,28 @@ async function loadModel() {
         }
       },
     })
+    workerLog('info', 'load: pipeline ready', { ms: Date.now() - pipelineStart })
+
+    // Warmup: force encoder/decoder JIT before the first real utterance so the
+    // user doesn't pay an extra ~500ms on their first command. Race against a
+    // 10s timeout so a hung warmup can't deadlock the entire load.
+    const warmupStart = Date.now()
+    try {
+      await Promise.race([
+        transcriber(new Float32Array(16000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('warmup timeout')), 10000)),
+      ])
+      workerLog('info', 'load: warmup done', { ms: Date.now() - warmupStart })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      workerLog('warn', 'load: warmup failed (best-effort, ignored)', { error: msg, ms: Date.now() - warmupStart })
+    }
+
+    self.postMessage({ type: 'status', status: 'ready', message: 'Speech model ready' })
   } finally {
     clearTimeout(cacheHintTimer)
+    clearInterval(heartbeatTimer)
   }
-  workerLog('info', 'load: pipeline ready', { ms: Date.now() - pipelineStart })
-
-  // Warmup: force encoder/decoder JIT before the first real utterance so the
-  // user doesn't pay an extra ~500ms on their first command. Race against a
-  // 10s timeout so a hung warmup can't deadlock the entire load.
-  const warmupStart = Date.now()
-  try {
-    await Promise.race([
-      transcriber(new Float32Array(16000)),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('warmup timeout')), 10000)),
-    ])
-    workerLog('info', 'load: warmup done', { ms: Date.now() - warmupStart })
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    workerLog('warn', 'load: warmup failed (best-effort, ignored)', { error: msg, ms: Date.now() - warmupStart })
-  }
-
-  self.postMessage({ type: 'status', status: 'ready', message: 'Speech model ready' })
 }
 
 self.onmessage = async (e: MessageEvent) => {

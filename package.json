@@ -1,6 +1,6 @@
 {
   "name": "claude-code-session-manager",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "description": "Local cockpit for Claude Code CLI sessions — terminal + full config surface.",
   "type": "module",
   "main": "src/main/index.cjs",

@@ -83,6 +83,7 @@ const IDLE_CHECK_INTERVAL_MS = 60_000;
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
 const RUNS_DIR = path.join(ROOT, 'runs');
+const PRDS_ARCHIVE_DIR = path.join(ROOT, 'prds-archived');
 const QUEUE_PATH = path.join(ROOT, 'queue.json');
 const SCHEDULER_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-state.json');
 const HEARTBEAT_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-heartbeat.log');
@@ -1337,6 +1338,58 @@ function registerScheduleHandlers() {
     const at = await refreshNextReset().catch(() => cachedNextReset);
     await rescheduleTimer();
     return { ok: true, nextReset: at };
+  });
+
+  // Re-scan prds/ folder and merge into queue.json. The `schedule:state`
+  // handler already reconciles on read, but this gives the renderer an
+  // explicit refresh path that also broadcasts so all views update.
+  ipcMain.handle('schedule:rescan', async () => {
+    await mutate((state) => {
+      reconcile(state);
+      return null;
+    });
+    broadcast();
+    return { ok: true };
+  });
+
+  // Archive all pending+failed PRDs and drop their entries from queue.json.
+  // Completed/running entries are kept. PRD files are moved (not deleted) to
+  // prds-archived/<ISO>/ so the user can recover them. Path containment is
+  // enforced — only files inside PRDS_DIR are moved.
+  ipcMain.handle('schedule:clear-queue', async () => {
+    ensureDirs();
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
+    const state = readQueue();
+    const victims = state.jobs.filter((j) => j.status === 'pending' || j.status === 'failed');
+    if (victims.length === 0) {
+      return { ok: true, archived: 0, archivedTo: null };
+    }
+    fs.mkdirSync(archiveDir, { recursive: true });
+    let archived = 0;
+    for (const job of victims) {
+      const src = path.resolve(path.join(PRDS_DIR, `${job.slug}.md`));
+      if (!src.startsWith(PRDS_DIR + path.sep)) continue;
+      const dst = path.join(archiveDir, `${job.slug}.md`);
+      try {
+        await fsp.rename(src, dst);
+        archived++;
+      } catch (e) {
+        // ENOENT: the .md is already gone (reconcile would drop it on next
+        // read anyway). Either way, fall through and remove from queue.
+        if (e?.code !== 'ENOENT') {
+          console.warn('[scheduler] clear-queue: rename failed', job.slug, e?.message);
+        }
+      }
+    }
+    await mutate((s) => {
+      const victimSlugs = new Set(victims.map((j) => j.slug));
+      s.jobs = s.jobs.filter((j) => !victimSlugs.has(j.slug));
+      reconcile(s);
+      return null;
+    });
+    broadcast();
+    return { ok: true, archived, archivedTo: archiveDir };
   });
 
   ipcMain.handle('schedule:open-folder', async () => {

@@ -497,6 +497,11 @@ export interface SessionManagerAPI {
     forceTick: () => Promise<{ ok: boolean }>;
     resume: () => Promise<{ ok: boolean }>;
     refreshReset: () => Promise<{ ok: boolean; nextReset: string | null }>;
+    /** Re-scan prds/ and merge into queue.json; broadcasts updated state. */
+    rescan: () => Promise<{ ok: boolean }>;
+    /** Move all pending+failed PRDs to prds-archived/<ISO>/ and drop their
+     *  queue entries. Completed/running entries are preserved. */
+    clearQueue: () => Promise<{ ok: boolean; archived: number; archivedTo: string | null }>;
     openFolder: () => Promise<{ ok: boolean }>;
     readPrd: (slug: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
     readLog: (runId: string, slug: string) => Promise<{ ok: boolean; text?: string; error?: string }>;

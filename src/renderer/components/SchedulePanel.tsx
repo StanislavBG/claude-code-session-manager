@@ -121,6 +121,18 @@ export function SchedulePanel() {
     setHiddenSlugs(next)
     saveHidden(next)
   }
+  const onClearQueue = async () => {
+    const victims = counts.pending + counts.failed
+    if (victims === 0) return
+    const msg = `Archive ${victims} pending/failed PRD${victims === 1 ? '' : 's'} and remove from the queue?\n\nFiles are moved to prds-archived/<timestamp>/ and can be restored from disk.`
+    if (!window.confirm(msg)) return
+    const r = await window.api.schedule.clearQueue()
+    if (r.ok && r.archived > 0 && r.archivedTo) {
+      // Silent success — the state broadcast will refresh the panel. Surface
+      // the archive path in the console so the user can find it if needed.
+      console.info('[scheduler] clear-queue: archived', r.archived, '→', r.archivedTo)
+    }
+  }
   const onUnhideAll = () => {
     setHiddenSlugs(new Set())
     saveHidden(new Set())
@@ -221,6 +233,23 @@ export function SchedulePanel() {
             title="Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress."
           >
             Fire next batch now
+          </button>
+          <button
+            type="button"
+            onClick={() => window.api.schedule.rescan()}
+            className="px-1.5 py-0.5 text-fg-dim hover:text-fg border border-line hover:border-fg-faint rounded"
+            title="Re-scan the prds/ folder. Use when you've added or edited PRDs on disk and want the queue to reflect them immediately."
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={onClearQueue}
+            disabled={counts.pending === 0 && counts.failed === 0}
+            className="px-1.5 py-0.5 text-fg-dim hover:text-red-400 border border-line hover:border-red-400/60 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Archive all pending and failed PRDs (moved to prds-archived/<timestamp>/) and remove them from the queue. Completed entries are kept."
+          >
+            Clear
           </button>
           <div className="flex-1 text-right font-mono">
             {counts.pending}p · {counts.running}r · {counts.completed}d

@@ -149,6 +149,8 @@ contextBridge.exposeInMainWorld('api', {
     forceTick: () => ipcRenderer.invoke('schedule:force-tick'),
     resume: () => ipcRenderer.invoke('schedule:resume'),
     refreshReset: () => ipcRenderer.invoke('schedule:refresh-reset'),
+    rescan: () => ipcRenderer.invoke('schedule:rescan'),
+    clearQueue: () => ipcRenderer.invoke('schedule:clear-queue'),
     openFolder: () => ipcRenderer.invoke('schedule:open-folder'),
     readPrd: (slug) => ipcRenderer.invoke('schedule:read-prd', { slug }),
     readLog: (runId, slug) => ipcRenderer.invoke('schedule:read-log', { runId, slug }),

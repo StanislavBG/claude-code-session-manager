@@ -24,6 +24,10 @@ const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'billing-cache.json');
+// Coalesce the 4 renderer pollers (Overview/AppStatusBar/StatusBar/Usage). A
+// fresh ok-cache is served directly without touching the network. Auth/
+// transient/config skip this TTL so they retry promptly on next poll.
+const OK_CACHE_TTL_MS = 30_000;
 
 /**
  * Pure: classify a raw HTTP response status + body from the usage endpoint into a
@@ -139,6 +143,10 @@ function registerBillingHandlers() {
 
   ipcMain.handle('billing:fetch', async () => {
     if (hydrationPromise) { await hydrationPromise; hydrationPromise = null; }
+
+    if (cache && cache.fetchedAt && Date.now() - cache.fetchedAt < OK_CACHE_TTL_MS) {
+      return { kind: 'ok', data: cache.data };
+    }
 
     const r = await fetchUsage();
     if (r.kind === 'ok') {

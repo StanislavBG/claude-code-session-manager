@@ -66,8 +66,13 @@ export function Settings() {
     [files, scopePaths]
   )
 
-  const overrideInto = (path: string[], value: unknown) => {
-    const target = scopePaths[scope]
+  const overrideInto = (path: string[], value: unknown, intoScope?: Scope) => {
+    // intoScope (optional) lets callers write a delete/reset into a specific
+    // scope (e.g. the winner) rather than the user-active editing scope. Used
+    // by EffectiveCards' reset-to-default button which targets the
+    // most-specific scope that currently holds the key.
+    const targetScope = intoScope ?? scope
+    const target = scopePaths[targetScope]
     if (!target) return
     setSaveError(null)
     const draft = files[target]?.draftRaw ?? ''

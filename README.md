@@ -1,99 +1,129 @@
 # claude-code-session-manager
 
-Local cockpit for Claude Code CLI — multi-tab terminal plus a full configuration and observability surface, running as an Electron desktop app.
+Local cockpit for the Claude Code CLI — multi-tab terminal, configuration surface, scheduler, voice dictation, and live observability, all in one Electron desktop app.
 
-## Usage
+## The 30-second pitch
+
+You already use the `claude` CLI. This wraps it in a cockpit so you can run multiple sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, talk to it with your microphone, and watch transcripts in real time — without ever leaving the window.
+
+Single-author hobby project. Linux and macOS only. Free, MIT, zero telemetry.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Overview cockpit](screenshots/overview-cockpit.png) | ![Agent view](screenshots/agent-view.png) |
+| Overview tab — AppStatusBar + cockpit strip + instrument grid | Agent-View — animated workshop with subagents and todo board |
+| ![Command palette](screenshots/command-palette.png) | ![Scheduler](screenshots/scheduler.png) |
+| Cmd-K command palette (41+ commands) | Scheduler panel with PRD queue + health linter |
+| ![Voice](screenshots/voice.png) | ![Hooks events](screenshots/hooks-events.png) |
+| Voice subsystem — local Whisper + Silero VAD | Hooks tab — 29 documented events with inline docs |
+
+Screenshots are placeholders right now; see `screenshots/README-screenshots.md` if you want to help capture them.
+
+## Features tour
+
+- **AppStatusBar** — five always-visible pills at the very top of the window: active model, thinking effort, team, voice state, and the current 5-hour usage percentage. Each pill is a shortcut into the relevant settings panel.
+- **Overview cockpit** — the home tab is a real instrument cluster:
+  - CockpitStrip at the top with critical session info.
+  - Two-by-five instrument grid (one tile per live signal).
+  - Teams card when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is on.
+  - System row with cwd, model, branch, and git status.
+  - Quick-actions footer for the things you do every day.
+- **Cmd-K command palette** — 41+ commands organised into bands (session, voice, scheduler, config, nav). Fuzzy filter, emit-only dispatch so commands stay decoupled from views.
+- **17 tabs** — every Claude Code surface, broken into three groups:
+  - Workspace: Overview · Terminal · System Prompt · Agent-View · Memory.
+  - Config: Settings · Permissions · Skills · Plugins · MCP Servers · Hooks · Subagents · Keybindings.
+  - Activity: Plans · Tasks · Projects · History · Usage.
+  - Footer dock: Scheduler panel and microphone status, both pinned above the active tab.
+- **Scheduler / PRD queue** — drop a markdown file into `~/.claude/session-manager/scheduled-plans/prds/` and the scheduler will pick it up as a headless `claude -p` job. Multi-select bulk archive and reset. Queue-health linter catches unbounded poll loops and post-AC overrun patterns before they burn tokens. Structured frontmatter editor with a raw-yaml escape hatch for power users.
+- **Agent-View** — animated workshop scene rendered as a friendly cartoon: subagent dock, plan whiteboard, todo board, and a SchedulerDock with mini-bots that mirror each running scheduler job. Watching a job is more legible than tailing its log.
+- **Memory tab** — new this cycle. Workspace-scoped memory entries that the `memory_20250818` tool can read and write, surfaced as a real UI rather than a JSON blob.
+- **Hooks** — all 29 documented events with inline tooltips explaining what each event fires on. Definitions editor plus a test-fire runner so you can verify a hook without rebuilding state.
+- **Subagents** — full frontmatter editor with tool and skill pickers. Live invocation status while you watch agents spawn off the active session.
+- **Plugins** — manifest inspector for installed plugins plus a Discover panel that lists the 23 first-party plugins with one-click install (pty-wrapped `claude plugin install`).
+- **MCP servers** — five transports (stdio, http, streamable-http, ws, sse) with a reserved-name linter so you don't waste a launch on a server Claude refuses to load.
+- **Voice** — local Whisper ASR plus Silero VAD running in a Web Worker. Push-to-talk hotkey, continuous listening, auto-submit, and barge-in that ducks TTS playback. Nothing leaves the machine.
+- **Toast notifications + 4-scope drift surfacing** — non-fatal errors land in a corner toast instead of being swallowed. Settings show drift across the default / user / project / local scopes so you always know which value actually wins.
+- **npm update checker** — new this cycle. Quietly polls `registry.npmjs.org` and surfaces a toast when a newer version is published. Update on your schedule, not theirs.
+
+## Install
 
 ```bash
 npx claude-code-session-manager@latest
 ```
 
-First run installs Electron (~200 MB) and rebuilds `node-pty` against the bundled Electron runtime. Subsequent launches are instant from the npx cache.
+Linux and macOS only. The first launch downloads Electron (~200 MB) and runs `electron-rebuild` on `node-pty` so it links against the bundled Electron ABI. Subsequent launches are instant from the npx cache.
 
-## Supported platforms
+macOS needs Xcode Command Line Tools: `xcode-select --install`.
+Linux needs `build-essential` and `python3` for the rebuild.
 
-- Linux
-- macOS (requires Xcode Command Line Tools: `xcode-select --install`)
+## Quick start
 
-Windows is not supported (different node-pty backend).
+1. Run the install command above.
+2. The app opens on the Overview tab — you should see your AppStatusBar pills populate and a fresh Terminal tab ready to go.
+3. Hit Cmd-K (Ctrl-K on Linux) and try `terminal new`, `voice start`, or `scheduler open`.
+4. Drop a markdown file into `~/.claude/session-manager/scheduled-plans/prds/01-my-first-prd.md` and watch the Scheduler dock pick it up.
+5. Press F7 to open the microphone setup wizard, then F1 to start dictating.
 
-## Main features
+## Privacy
 
-- **Multi-tab terminals.** Each tab owns its own PTY and Claude Code session. Tab id = `claudeSessionId`, so `--session-id` pass-through and JSONL transcript lookup line up automatically. Tabs persist across restarts.
-- **Live transcript inspector.** Tails `~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl` per tab and broadcasts events to the renderer in a ring buffer — no file reload, no polling.
-- **Voice dictation.** Local-only Whisper + Silero VAD running in a Web Worker. No audio leaves the machine. Push-to-talk hotkey (window or global), continuous listening across turns, auto-submit with a configurable countdown, and barge-in that ducks TTS.
-- **Scheduler / PRD queue.** Drop a PRD into `~/.claude/session-manager/scheduled-plans/prds/` and the scheduler runs it as a `claude -p` job. Modes: `manual`, `on-reset`, or `when-available` (the default — polls billing usage every 2 min, auto-pauses on rate-limit, auto-resumes at the next 5 h reset).
-- **Engage presets.** Per-tab build/engage presets stored in `session-rules.json`, with a one-shot "reboot sessions" action that respects the active preset.
-- **17 configuration and observability tabs:** Overview · Terminal · System Prompt · Agent-View · Settings · Permissions · Skills · Plugins · MCP Servers · Hooks · Subagents · Keybindings · Plans · Tasks · Projects · History · Usage.
+**Zero telemetry by default.**
 
-## Configuration surface
+- No analytics, no error reporting, no crash uploads.
+- The Content-Security-Policy restricts `connect-src` to two hosts: `api.anthropic.com` (so the in-app `/usage` panel can read the billing endpoint) and `registry.npmjs.org` (for the version-check toast).
+- All settings, skills, hooks, scheduler PRDs, transcripts, and voice configuration stay on disk under `~/.claude/`. The `claude` CLI itself is the only network egress for AI work — the cockpit never proxies your prompts.
+- An opt-in OpenTelemetry exporter lives under Settings → Telemetry. It is off until you turn it on.
+- The recording-status pill is always mounted at the top of the window whenever the microphone is hot, above every other UI layer. There is no way to record without seeing the indicator.
 
-Edit-in-place for everything Claude Code reads, with atomic writes (tmp + rename) and per-path file-watcher refcounting:
+## Voice setup
 
-- `~/.claude/settings.json` — Monaco editor with the official schemastore.org schema for validation and completion.
-- `CLAUDE.md` files — project + global, with scope switcher.
-- **Skills** — list/detail editor for `~/.claude/skills/*` and project-local skills.
-- **Plugins** — installed plugin inventory and toggles.
-- **MCP Servers** — `mcp.json` editor with status and reconnect.
-- **Hooks** — definitions plus a "test fire" runner.
-- **Subagents** — agent definitions with live invocation status.
-- **Permissions** — allow/ask/deny per-tool, scoped at user / project / local.
-- **Keybindings** — the `~/.claude/keybindings.json` editor with chord support.
+- Press F7 to open the first-run wizard. It enumerates your input devices, lets you pick one, records a sample utterance, and persists the choice in `voice.json`.
+- Press F1 for push-to-talk. Hold or toggle, configurable in Keybindings.
+- Models download once on first use, then run entirely locally via onnxruntime-web.
+- Auto-submit fires Enter at a configurable countdown (default 6 s); the mic stays open across turns until silence (default 30 s) or an explicit stop.
 
-## Observability tabs
+## Scheduler / PRD workflow
 
-- **Plans** — current plan, in-flight tasks, decisions.
-- **Tasks** — TaskCreate/Get/List feed, live.
-- **Subagents** — running agents, their tools, output streams.
-- **Agent-View** — assistant turn inspector tied to the active session.
-- **History** — recent sessions, replayable transcripts.
-- **Usage** — billing/usage from the undocumented `/api/oauth/usage` endpoint, with the active 5 h window.
-- **Projects** — session inventory grouped by `cwd`.
+A PRD is a self-contained markdown file with frontmatter (`title`, absolute `cwd`, `estimateMinutes`) and a body that `claude -p` runs without conversation context. They live in `~/.claude/session-manager/scheduled-plans/prds/<NN>-<kebab-slug>.md` where the `NN` prefix groups parallel work.
 
-## Optional: engage presets
+Three run modes:
 
-If you maintain a `session-rules.json`, point to it before launch:
+- `manual` — only fires when you click Run.
+- `on-reset` — fires at the next 5-hour usage reset.
+- `when-available` — the default. Polls the billing usage endpoint every two minutes and fires when tokens fall below the configured threshold. Auto-pauses if a job hits a rate limit, auto-resumes at the next reset.
 
-```bash
-SESSION_MANAGER_ENGAGE_RULES=/path/to/session-rules.json npx claude-code-session-manager
-```
+The queue-health linter scans every queued PRD for two patterns that have caused real stuck jobs in this project: unbounded poll loops with unsatisfiable conditions, and post-AC fixture generators that overrun the acceptance criteria. Both incidents are documented in `PRD_AUTHORING.md`.
 
-Unset → no engage presets, no error.
+## Keyboard cheatsheet
 
-## Voice dictation details
+| Key | Action |
+|---|---|
+| Cmd-K / Ctrl-K | Open command palette |
+| F1 | Push-to-talk |
+| F7 | Microphone setup wizard |
+| Ctrl-N | New terminal tab |
+| Ctrl-W | Close tab |
+| Ctrl-Shift-R | Reboot active session (preset-aware) |
+| Ctrl-Shift-B | Toggle build mode for active tab |
 
-- Local Whisper-based ASR via `@huggingface/transformers` + onnxruntime-web; Silero VAD via `@ricky0123/vad-web` for endpointing. No network round-trip after the first model download.
-- **Continuous listening across turns.** Auto-submit fires Enter at the configured countdown (default 6 s) and the mic stays open — only true silence (default 30 s) or an explicit hotkey/button click closes it.
-- **Push-to-talk** with hold or toggle modes; per-OS default hotkey, customizable in Keybindings.
-- **Barge-in:** speaking while TTS plays cancels playback and raises the VAD threshold so self-talk doesn't retrigger.
-- **First-run wizard** picks a mic, verifies a sample utterance, and persists the choice in `voice.json`.
-- **Privacy invariant:** the recording-status pill is always visible at the top of the window whenever the mic is hot.
+## Architecture
 
-## Scheduler details
+Electron 33 with a CommonJS main process and a Vite-built React 18 renderer. xterm and node-pty drive the terminals. zustand owns renderer state. Whisper via `@huggingface/transformers` plus Silero VAD via `@ricky0123/vad-web` runs voice on-device through onnxruntime-web. Tailwind for styling. Single-author project, no backwards-compat shims — when something needs renaming, it gets renamed.
 
-- PRD format: `~/.claude/session-manager/scheduled-plans/prds/<NN>-<kebab-slug>.md`. Frontmatter `title`, absolute `cwd`, `estimateMinutes`. The `NN` prefix is the parallel group.
-- The `/prd` slash command in Claude Code emits the canonical structure.
-- Body is self-contained because `claude -p` runs without conversation context.
-- Rate-limit handling: scheduler reads the same `/api/oauth/usage` endpoint the in-app `/usage` panel uses, with the OAuth token from `~/.claude/.credentials.json`.
-
-## Security model
-
-- All filesystem paths in the main process go through `validatePath` against the user's home directory.
-- `setWindowOpenHandler` denies all popups; `will-navigate` only allows the dev URL.
-- IPC payloads are zod-validated at the main-process boundary (`ipcSchemas.cjs`).
-- `child_process.spawn` is argv-only except for two narrowly-scoped places (the watchers feature and `app:test-fire-hook`) where a user-supplied shell string is part of the feature.
-
-## Development
+## Contributing / development
 
 ```bash
-git clone <repo>
+git clone https://github.com/StanislavBG/claude-code-session-manager
 cd claude-code-session-manager
 npm install
 npm run dev          # Vite + Electron with HMR (SM_DEV=1)
-npm run typecheck    # tsc --noEmit
-npm run test:e2e     # Playwright Electron under xvfb-run
+npm run typecheck    # tsc --noEmit, must pass before commits
+npm run test:e2e     # Playwright Electron under xvfb-run (Linux)
 ```
+
+PRs welcome. Before authoring a scheduler PRD, read `PRD_AUTHORING.md` — the two stuck-job postmortems in there will save you tokens.
 
 ## License
 
-MIT.
+MIT. Built by one person on evenings and weekends.

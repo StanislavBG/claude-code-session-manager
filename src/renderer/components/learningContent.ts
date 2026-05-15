@@ -405,6 +405,22 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     ],
   },
 
+  'memory': {
+    headline: 'Per-workspace markdown notes Claude can read and write across sessions',
+    intro:
+      'A workspace-scoped notebook stored at ~/.claude/session-manager/memories/<workspace>/, where workspace is derived from the active tab\'s cwd (or "default" when none). Each entry is a plain markdown file with optional name/description frontmatter. You can hand-edit; Claude can write to it during sessions when you ask it to remember things across context resets.',
+    sections: [
+      {
+        title: 'How to use it',
+        items: [
+          { term: 'Slug', body: 'Lowercase letters, digits, dashes, underscores. Slugs become the filename (with .md).' },
+          { term: 'Workspace', body: 'Auto-selected from the active tab. Switching tabs (different cwd) shows a different memory set.' },
+          { term: 'Caps', body: '1 MiB per file, 1000 entries per workspace. New writes above the cap are refused.' },
+        ],
+      },
+    ],
+  },
+
   'projects': {
     headline: 'Every directory you\'ve ever run Claude Code in, with quick-resume',
     intro:

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig } from '../../preload/api.d'
+import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -326,6 +326,9 @@ export function SchedulePanel() {
             </button>
           )}
         </div>
+
+        {/* Bundle D — queue-health linter widget */}
+        <QueueHealthSection snap={snap} />
 
         {/* scheduler health disclosure */}
         <SchedulerHealthSection health={health} now={now} showHealth={showHealth} setShowHealth={setShowHealth} />
@@ -887,6 +890,119 @@ function SchedulerHealthSection({
               running: {health.runningJobs.map((j) => `${j.slug}(pid ${j.pid})`).join(', ')}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Bundle D — queue-health linter widget ──────────────────────────────────
+
+/**
+ * QueueHealthSection — scans queued PRDs for anti-patterns (unbounded loops,
+ * missing frontmatter, missing cwd, --no-verify, etc.). Auto-runs once on
+ * mount and re-runs whenever the schedule:state broadcast comes in (i.e. the
+ * scheduler has nudged the queue — PRDs may have been added/edited).
+ *
+ * Surface shape:
+ *   ▸ Queue health · all clear        (no findings)
+ *   ▾ Queue health · 3 errors, 2 warn (drill down)
+ *
+ * Findings sort: severity desc, then slug. Renders in a collapsible block to
+ * keep the dense left-nav scannable when there are no issues.
+ */
+function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
+  const [report, setReport] = useState<LintQueueResult | null>(null)
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  // Run once on mount + every time the queue state broadcast fires. The
+  // `snap` prop is updated by the parent on every onState callback so this
+  // dependency closure correctly re-runs the lint after refresh/rescan/etc.
+  // We ignore the `snap` value itself in the body — it's only here as a
+  // change signal. We use jobs.length + lastRunAt as a stable identity to
+  // avoid re-running on every minor field flip.
+  const signal = `${snap.jobs.length}:${snap.lastRunAt ?? ''}`
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    window.api.schedule
+      .lintQueue()
+      .then((r) => { if (alive) setReport(r) })
+      .catch(() => { /* */ })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [signal])
+
+  if (!report) {
+    return (
+      <div className="text-[9px] text-fg-faint border-t border-line pt-1">
+        {loading ? 'queue health · scanning…' : 'queue health · idle'}
+      </div>
+    )
+  }
+
+  // Aggregate. O(F × findings) but bounded by the queue size.
+  let errors = 0
+  let warns = 0
+  const flaggedPrds = report.reports.filter((r) => r.findings.length > 0)
+  for (const r of flaggedPrds) {
+    for (const f of r.findings) {
+      if (f.severity === 'error') errors++
+      else warns++
+    }
+  }
+
+  const clean = errors === 0 && warns === 0
+  const summaryClass = errors > 0 ? 'text-red-400' : warns > 0 ? 'text-amber-400' : ''
+
+  return (
+    <div className="text-[9px] text-fg-faint border-t border-line pt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-1 hover:text-fg-dim w-full text-left ${summaryClass}`}
+        title="Static lint of queued PRDs for unbounded loops, missing frontmatter, etc."
+      >
+        <span>{open ? '▾' : '▸'}</span>
+        <span>
+          {clean
+            ? `queue health · all clear (${report.reports.length} scanned)`
+            : `queue health · ${errors} error${errors === 1 ? '' : 's'}${warns > 0 ? `, ${warns} warn${warns === 1 ? '' : 's'}` : ''}`}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setLoading(true)
+            window.api.schedule
+              .lintQueue()
+              .then(setReport)
+              .catch(() => {})
+              .finally(() => setLoading(false))
+          }}
+          className="ml-auto text-fg-faint hover:text-fg-dim underline"
+          title="Re-run the lint now"
+        >
+          {loading ? '…' : 'rerun'}
+        </button>
+      </button>
+      {open && !clean && (
+        <div className="mt-1 space-y-1 max-h-48 overflow-y-auto pl-2">
+          {flaggedPrds.map((r) => (
+            <div key={r.slug} className="font-mono">
+              <div className="text-fg-dim truncate" title={r.slug}>{r.slug}</div>
+              {r.findings.map((f, i) => (
+                <div
+                  key={`${r.slug}-${i}`}
+                  className={`pl-3 truncate ${f.severity === 'error' ? 'text-red-400/80' : 'text-amber-400/70'}`}
+                  title={f.snippet}
+                >
+                  {f.severity === 'error' ? '✗' : '⚠'} L{f.line}: {f.snippet}
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
     </div>

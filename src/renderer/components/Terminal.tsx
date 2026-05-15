@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
+import { toast } from '../state/toast'
 
 interface Props {
   tabId: string
@@ -116,6 +117,7 @@ export function Terminal({ tabId, cwd }: Props) {
       .catch((err) => {
         console.error('[Terminal] pty.spawn rejected for tabId=', tabId, err)
         term.write(`\r\n\x1b[31mfailed to spawn: ${err.message}\x1b[0m\r\n`)
+        toast.error(`Terminal failed to start: ${err.message ?? 'spawn failed'}`)
         useSessions.getState().setTabExited(tabId, -1)
       })
 

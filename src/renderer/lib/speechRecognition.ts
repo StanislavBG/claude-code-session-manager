@@ -123,8 +123,8 @@ export interface RecognitionHandle {
   getAnalyser: () => AnalyserNode | null
 }
 
-const VAD_DEFAULT_POSITIVE = 0.5
-const VAD_DEFAULT_NEGATIVE = 0.35
+export const VAD_DEFAULT_POSITIVE = 0.5
+export const VAD_DEFAULT_NEGATIVE = 0.35
 /** Raised thresholds while TTS is speaking; F4 barge-in uses these. */
 export const VAD_DUCKED_POSITIVE = 0.85
 export const VAD_DUCKED_NEGATIVE = 0.7
@@ -820,9 +820,6 @@ export function createRecognition(opts: RecognitionCallbacks): RecognitionHandle
             resetPartialState()
             segmentActive = true
             segmentStartedAt = performance.now()
-            // Touch segmentStartedAt so the linter knows it's read; primary
-            // use is for telemetry in F6-followup.
-            void segmentStartedAt
             opts.onSpeechStart?.()
           },
           onSpeechEnd: (audio: Float32Array) => {

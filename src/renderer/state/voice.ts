@@ -10,6 +10,7 @@ import { stopSpeaking, isSpeaking, getSpeakStartedAt } from '../lib/speechSynthe
 import { attachVadDucking } from '../lib/vadDucking'
 import { log } from '../lib/logger'
 import { matchVoiceCommand } from '../lib/voiceCommands'
+import { toast } from './toast'
 
 export type GateReason =
   | 'ready'
@@ -638,6 +639,9 @@ export const useVoice = create<VoiceState>((set, get) => ({
         },
         onError: (err) => {
           log.error('voice', 'recognition error', { err })
+          // Cancel any armed submit countdown — without this, a pty.write('\r')
+          // would fire seconds after the mic errored out.
+          cancelSubmitInternal()
           set({ error: err, errorKind: 'recording', isRecording: false, lastPartial: '', statusPill: 'idle' })
           // Without this, an error mid-recording leaks a VAD-ducking
           // listener pair; the next startRecording would stack another.
@@ -646,6 +650,9 @@ export const useVoice = create<VoiceState>((set, get) => ({
           cancelIdleAutoStop()
           activeHandle?.destroy()
           activeHandle = null
+          // User-visible signal: the mic button only shows error state in its
+          // tooltip, which is easy to miss. Toast it.
+          toast.error(`Microphone error: ${err}`)
         },
         onModelStatus: (status) => {
           if (status === 'ready') set({ modelStatus: 'ready', loadingProgress: 100 })
@@ -671,7 +678,9 @@ export const useVoice = create<VoiceState>((set, get) => ({
           detachVadDucking = attachVadDucking(handle)
         })
         .catch((e: unknown) => {
-          log.error('voice', 'handle.start() failed', { error: e instanceof Error ? e.message : String(e) })
+          const msg = e instanceof Error ? e.message : String(e)
+          log.error('voice', 'handle.start() failed', { error: msg })
+          toast.error(`Could not start mic: ${msg}`)
         })
     } catch (e: unknown) {
       set({

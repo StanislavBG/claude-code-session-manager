@@ -16,6 +16,7 @@ import { Hooks } from './tabs/Hooks'
 import { Subagents } from './tabs/Subagents'
 import { Plans } from './tabs/Plans'
 import { Tasks } from './tabs/Tasks'
+import { Memory } from './tabs/Memory'
 import { Projects } from './tabs/Projects'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
@@ -39,6 +40,7 @@ const LABELS: Record<NavKey, string> = {
   'subagents': 'Subagents',
   'plans': 'Plans',
   'tasks': 'Tasks / Todos',
+  'memory': 'Memory',
   'projects': 'Projects',
   'history': 'History',
   'keybindings': 'Keybindings',
@@ -46,10 +48,10 @@ const LABELS: Record<NavKey, string> = {
   'agent-view': 'Agent-View',
 }
 
-function renderTab(active: NavKey): React.ReactNode {
+function renderTab(active: NavKey, onNavigate?: (k: NavKey) => void): React.ReactNode {
   switch (active) {
     case 'overview':
-      return <Overview />
+      return <Overview onNavigate={onNavigate} />
     case 'system-prompt':
       return <SystemPrompt />
     case 'settings':
@@ -70,6 +72,8 @@ function renderTab(active: NavKey): React.ReactNode {
       return <Plans />
     case 'tasks':
       return <Tasks />
+    case 'memory':
+      return <Memory />
     case 'projects':
       return <Projects />
     case 'history':
@@ -85,7 +89,7 @@ function renderTab(active: NavKey): React.ReactNode {
   }
 }
 
-export function MainPane({ active }: { active: NavKey }) {
+export function MainPane({ active, onNavigate }: { active: NavKey; onNavigate?: (k: NavKey) => void }) {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const restartTab = useSessions((s) => s.restartTab)
@@ -217,7 +221,7 @@ export function MainPane({ active }: { active: NavKey }) {
         </div>
         {active !== 'terminal' && (
           <div className="absolute inset-0 bg-bg overflow-auto">
-            <ErrorBoundary>{renderTab(active)}</ErrorBoundary>
+            <ErrorBoundary>{renderTab(active, onNavigate)}</ErrorBoundary>
           </div>
         )}
       </div>

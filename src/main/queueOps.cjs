@@ -1,0 +1,428 @@
+/**
+ * queueOps.cjs — bulk PRD operations + queue-health linter.
+ *
+ * This module is owned by Bundle D. It registers three IPC handlers:
+ *
+ *   schedule:lint-queue    — scan all PRDs in PRDS_DIR for anti-patterns
+ *   schedule:archive-prd   — move PRDS_DIR/<slug>.md → prds-archived/<ISO>/<slug>.md
+ *   schedule:retag-prd     — rewrite parallelGroup and/or estimateMinutes
+ *                            frontmatter; optionally rename slug to reflect
+ *                            the new NN- prefix
+ *
+ * All file mutations go through tmp + rename for atomicity. Path containment
+ * is enforced against PRDS_DIR via path.resolve() + startsWith() (mirrors
+ * scheduler.cjs's existing pattern).
+ *
+ * The linter rules come from research-04 §1 (queue-health) plus PRD 106's
+ * regex inventory. Rules:
+ *   - `^until ` at the start of a logical line  → fizzpop-style poll hang
+ *   - `^while true` (case insensitive)          → unbounded while loop
+ *   - `for .* in $(seq 1 [5-9][0-9][0-9]+)`     → unbounded large seq
+ *   - missing frontmatter title / cwd / estimateMinutes
+ *   - cwd doesn't exist on disk (fs.accessSync)
+ *   - `--no-verify` or `--no-gpg-sign`          → hook-skip flags
+ *
+ * Severity: 'error' for the loop patterns and missing required frontmatter;
+ * 'warn' for the rest.
+ *
+ * Time complexity: O(F × L) where F = number of PRD files, L = avg line count.
+ * Hot-loop-safe: regex tests are pre-compiled module-level constants.
+ */
+
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { ipcMain } = require('electron');
+const { SCHEDULE_SLUG_RE: SLUG_RE, schemas } = require('./ipcSchemas.cjs');
+
+const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
+const PRDS_DIR = path.join(ROOT, 'prds');
+const PRDS_ARCHIVE_DIR = path.join(ROOT, 'prds-archived');
+const RETAG_LOG = path.join(ROOT, 'retag-log.jsonl');
+
+// ────────────────────────────────────────────── lint rules
+
+// Each rule: { id, severity, test: (line) => boolean }
+// O(1) regex test per line. Module-level so the compiled forms don't churn.
+const LINE_RULES = [
+  {
+    id: 'unbounded-until',
+    severity: 'error',
+    re: /^\s*until\s+/,
+    label: '"until" loop — risk of unbounded poll (see PRD 106 §1)',
+  },
+  {
+    id: 'while-true',
+    severity: 'error',
+    re: /^\s*while\s+(?:true|:)/i,
+    label: '"while true" — unbounded loop',
+  },
+  {
+    id: 'unbounded-seq',
+    severity: 'error',
+    // for X in $(seq 1 NNN) where NNN ≥ 500. PRD 106 §1 cites this exact pattern.
+    re: /for\s+\S+\s+in\s+\$\(seq\s+1\s+[5-9][0-9]{2,}/,
+    label: 'unbounded seq — for-loop range ≥500',
+  },
+  {
+    id: 'no-verify',
+    severity: 'warn',
+    re: /--no-verify\b/,
+    label: '--no-verify — skips git hooks',
+  },
+  {
+    id: 'no-gpg-sign',
+    severity: 'warn',
+    re: /--no-gpg-sign\b/,
+    label: '--no-gpg-sign — bypasses signing',
+  },
+];
+
+function splitFrontmatter(raw) {
+  if (!raw.startsWith('---\n')) return { fm: {}, body: raw, fmLineCount: 0 };
+  const end = raw.indexOf('\n---', 4);
+  if (end === -1) return { fm: {}, body: raw, fmLineCount: 0 };
+  const fmRaw = raw.slice(4, end);
+  const fm = {};
+  for (const line of fmRaw.split('\n')) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)\s*$/);
+    if (!m) continue;
+    let v = m[2];
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    fm[m[1]] = v;
+  }
+  return {
+    fm,
+    body: raw.slice(end + 4).replace(/^\n/, ''),
+    // +2 for the two `---` fences themselves
+    fmLineCount: fmRaw.split('\n').length + 2,
+  };
+}
+
+/**
+ * Lint a single PRD asynchronously. Returns { slug, findings: [...] }.
+ * O(L) per PRD where L is line count of the file. Reads via fsp so kernel
+ * I/O can overlap when called via Promise.all from lintAll().
+ */
+async function lintOneAsync(filePath) {
+  const slug = path.basename(filePath, '.md');
+  let raw;
+  try {
+    raw = await fsp.readFile(filePath, 'utf8');
+  } catch (e) {
+    return {
+      slug,
+      findings: [{ rule: 'read-error', line: 0, snippet: e?.message ?? 'read failed', severity: 'error' }],
+    };
+  }
+  return lintParsed(slug, raw);
+}
+
+function lintParsed(slug, raw) {
+  const findings = [];
+  const { fm, body, fmLineCount } = splitFrontmatter(raw);
+
+  // Required frontmatter keys.
+  if (!fm.title || !fm.title.trim()) {
+    findings.push({ rule: 'missing-title', line: 1, snippet: 'frontmatter "title" is required', severity: 'error' });
+  }
+  if (!fm.cwd || !fm.cwd.trim()) {
+    findings.push({ rule: 'missing-cwd', line: 1, snippet: 'frontmatter "cwd" is required', severity: 'error' });
+  } else {
+    // cwd existence — only if it looks like an absolute path. ~ -> homedir.
+    let candidate = fm.cwd;
+    if (candidate.startsWith('~/')) candidate = path.join(os.homedir(), candidate.slice(2));
+    if (path.isAbsolute(candidate)) {
+      try {
+        fs.accessSync(candidate, fs.constants.F_OK);
+      } catch {
+        findings.push({
+          rule: 'cwd-missing',
+          line: 1,
+          snippet: `cwd does not exist on disk: ${fm.cwd}`,
+          severity: 'error',
+        });
+      }
+    }
+  }
+  if (fm.estimateMinutes === undefined || !String(fm.estimateMinutes).trim()) {
+    findings.push({
+      rule: 'missing-estimate',
+      line: 1,
+      snippet: 'frontmatter "estimateMinutes" is required',
+      severity: 'warn',
+    });
+  } else {
+    const v = Number(fm.estimateMinutes);
+    if (!Number.isInteger(v) || v <= 0) {
+      findings.push({
+        rule: 'bad-estimate',
+        line: 1,
+        snippet: `"estimateMinutes" must be a positive integer (got: ${fm.estimateMinutes})`,
+        severity: 'warn',
+      });
+    }
+  }
+
+  // Body line scan. Line numbers are 1-indexed and reflect the original file
+  // (so fm lines are skipped). O(L).
+  const bodyLines = body.split('\n');
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i];
+    if (!line) continue;
+    for (const rule of LINE_RULES) {
+      if (rule.re.test(line)) {
+        findings.push({
+          rule: rule.id,
+          line: fmLineCount + i + 1,
+          snippet: `${rule.label} — ${line.trim().slice(0, 80)}`,
+          severity: rule.severity,
+        });
+      }
+    }
+  }
+
+  return { slug, findings };
+}
+
+/**
+ * Lint all PRDs in PRDS_DIR. Returns { reports: [...], scannedAt }.
+ * O(F × L). F is bounded by the actual prds/ contents (~200 today).
+ *
+ * Reads are issued in parallel via Promise.all so kernel-side I/O can
+ * overlap. Each lintOneAsync is self-isolating (its own try/catch on read),
+ * so Promise.all never rejects under normal use.
+ */
+async function lintAll() {
+  let entries = [];
+  try {
+    entries = await fsp.readdir(PRDS_DIR);
+  } catch {
+    return { reports: [], scannedAt: Date.now() };
+  }
+  const paths = [];
+  for (const name of entries) {
+    if (!name.endsWith('.md') || name.startsWith('.')) continue;
+    paths.push(path.join(PRDS_DIR, name));
+  }
+  const reports = await Promise.all(paths.map(async (filePath) => {
+    try {
+      return await lintOneAsync(filePath);
+    } catch (e) {
+      return {
+        slug: path.basename(filePath, '.md'),
+        findings: [{ rule: 'lint-error', line: 0, snippet: e?.message ?? 'lint failed', severity: 'error' }],
+      };
+    }
+  }));
+  return { reports, scannedAt: Date.now() };
+}
+
+// ────────────────────────────────────────────── archive
+
+/**
+ * Move PRDS_DIR/<slug>.md → PRDS_ARCHIVE_DIR/<ISO>/<slug>.md.
+ * Atomic rename. Path containment checks both source and destination.
+ * Never deletes — always reversible from prds-archived/.
+ */
+async function archiveOne(slug, archiveDir) {
+  if (!SLUG_RE.test(slug)) return { ok: false, slug, error: 'invalid slug' };
+  const src = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
+  if (!src.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'path escape (src)' };
+  const dst = path.resolve(path.join(archiveDir, `${slug}.md`));
+  if (!dst.startsWith(PRDS_ARCHIVE_DIR + path.sep)) return { ok: false, slug, error: 'path escape (dst)' };
+  try {
+    await fsp.rename(src, dst);
+    return { ok: true, slug, archivedTo: dst };
+  } catch (e) {
+    return { ok: false, slug, error: e?.message ?? 'rename failed' };
+  }
+}
+
+async function archiveMany(slugs) {
+  if (!Array.isArray(slugs) || slugs.length === 0) {
+    return { ok: true, archived: 0, archivedTo: null, results: [] };
+  }
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
+  await fsp.mkdir(archiveDir, { recursive: true });
+  const results = [];
+  for (const slug of slugs) {
+    results.push(await archiveOne(slug, archiveDir));
+  }
+  const archived = results.filter((r) => r.ok).length;
+  return { ok: true, archived, archivedTo: archiveDir, results };
+}
+
+// ────────────────────────────────────────────── retag
+
+/**
+ * Re-serialize the frontmatter of one PRD, optionally rewriting parallelGroup
+ * and/or estimateMinutes. If parallelGroup changes AND the slug has an NN-
+ * prefix, the file is renamed to reflect the new prefix (the old NN is
+ * stripped and replaced; if no prefix exists, one is prepended).
+ *
+ * Returns { ok, slug, newSlug, before, after, error? }.
+ *
+ * Mutates only the keys explicitly passed — preserves all other frontmatter
+ * lines verbatim (line-level replace, not a full YAML reparse). Reversible
+ * via retag-log.jsonl.
+ */
+async function retagOne({ slug, parallelGroup, estimateMinutes }) {
+  if (!SLUG_RE.test(slug)) return { ok: false, slug, error: 'invalid slug' };
+  const src = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
+  if (!src.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'path escape' };
+
+  let raw;
+  try {
+    raw = await fsp.readFile(src, 'utf8');
+  } catch (e) {
+    return { ok: false, slug, error: `read failed: ${e?.message}` };
+  }
+  if (!raw.startsWith('---\n')) {
+    return { ok: false, slug, error: 'no frontmatter to retag' };
+  }
+  const end = raw.indexOf('\n---', 4);
+  if (end === -1) return { ok: false, slug, error: 'unterminated frontmatter' };
+
+  const fmRaw = raw.slice(4, end);
+  const bodyTail = raw.slice(end); // includes "\n---..."
+  const fmLines = fmRaw.split('\n');
+
+  // Snapshot before-values for the retag log.
+  const before = {};
+  const newFmLines = [];
+  const seen = { parallelGroup: false, estimateMinutes: false };
+  for (const line of fmLines) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$/);
+    if (!m) {
+      newFmLines.push(line);
+      continue;
+    }
+    const key = m[1];
+    if (key === 'parallelGroup' && parallelGroup !== undefined) {
+      before.parallelGroup = m[2];
+      newFmLines.push(`parallelGroup: ${parallelGroup}`);
+      seen.parallelGroup = true;
+    } else if (key === 'estimateMinutes' && estimateMinutes !== undefined) {
+      before.estimateMinutes = m[2];
+      newFmLines.push(`estimateMinutes: ${estimateMinutes}`);
+      seen.estimateMinutes = true;
+    } else {
+      newFmLines.push(line);
+    }
+  }
+  if (parallelGroup !== undefined && !seen.parallelGroup) {
+    newFmLines.push(`parallelGroup: ${parallelGroup}`);
+  }
+  if (estimateMinutes !== undefined && !seen.estimateMinutes) {
+    newFmLines.push(`estimateMinutes: ${estimateMinutes}`);
+  }
+
+  const newRaw = `---\n${newFmLines.join('\n')}${bodyTail}`;
+
+  // Decide whether to rename the file. NN-kebab pattern only.
+  let newSlug = slug;
+  if (parallelGroup !== undefined) {
+    const m = slug.match(/^(\d+)-(.+)$/);
+    if (m) {
+      newSlug = `${parallelGroup}-${m[2]}`;
+    } else {
+      // Slug doesn't have NN- prefix — prepend one.
+      newSlug = `${parallelGroup}-${slug}`;
+    }
+    if (!SLUG_RE.test(newSlug)) return { ok: false, slug, error: 'new slug would be invalid' };
+  }
+  const dst = path.resolve(path.join(PRDS_DIR, `${newSlug}.md`));
+  if (!dst.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'new path escape' };
+
+  // Atomic write: tmp + rename. If slug changed, the tmp is named off the new
+  // path (so the rename atomically materializes at the new slug).
+  const tmp = `${dst}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fsp.writeFile(tmp, newRaw, { encoding: 'utf8', mode: 0o644 });
+    if (dst !== src) {
+      // Rename: first move into place at new slug, then unlink old slug.
+      await fsp.rename(tmp, dst);
+      try {
+        await fsp.unlink(src);
+      } catch {
+        /* if src is already the same as dst (race), fine */
+      }
+    } else {
+      await fsp.rename(tmp, dst);
+    }
+  } catch (e) {
+    try { await fsp.unlink(tmp); } catch { /* */ }
+    return { ok: false, slug, error: `write failed: ${e?.message}` };
+  }
+
+  const after = {};
+  if (parallelGroup !== undefined) after.parallelGroup = String(parallelGroup);
+  if (estimateMinutes !== undefined) after.estimateMinutes = String(estimateMinutes);
+  if (newSlug !== slug) {
+    before.slug = slug;
+    after.slug = newSlug;
+  }
+  return { ok: true, slug, newSlug, before, after };
+}
+
+async function appendRetagLog(entries) {
+  if (entries.length === 0) return;
+  try {
+    await fsp.mkdir(ROOT, { recursive: true });
+    const lines = entries.map((e) => JSON.stringify({ ts: new Date().toISOString(), ...e }) + '\n').join('');
+    await fsp.appendFile(RETAG_LOG, lines);
+  } catch (e) {
+    console.warn('[queueOps] retag log append failed', e?.message);
+  }
+}
+
+async function retagMany(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return { ok: true, retagged: 0, results: [] };
+  }
+  const results = [];
+  for (const item of items) {
+    results.push(await retagOne(item));
+  }
+  await appendRetagLog(results.filter((r) => r.ok));
+  const retagged = results.filter((r) => r.ok).length;
+  return { ok: true, retagged, results };
+}
+
+// ────────────────────────────────────────────── IPC registration
+
+function registerQueueOpsHandlers() {
+  ipcMain.handle('schedule:lint-queue', async () => {
+    return lintAll();
+  });
+
+  ipcMain.handle('schedule:archive-prd', async (_e, payload) => {
+    let parsed;
+    try { parsed = schemas.scheduleArchivePrd.parse(payload); }
+    catch (e) { return { ok: false, error: e?.message ?? 'invalid payload' }; }
+    return archiveMany(parsed.slugs);
+  });
+
+  ipcMain.handle('schedule:retag-prd', async (_e, payload) => {
+    let parsed;
+    try { parsed = schemas.scheduleRetagPrd.parse(payload); }
+    catch (e) { return { ok: false, error: e?.message ?? 'invalid payload' }; }
+    return retagMany(parsed.items);
+  });
+}
+
+module.exports = {
+  registerQueueOpsHandlers,
+  // Exposed for tests / future direct calls.
+  lintAll,
+  lintOneAsync,
+  archiveMany,
+  retagMany,
+  PRDS_DIR,
+  PRDS_ARCHIVE_DIR,
+};

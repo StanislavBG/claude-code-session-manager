@@ -27,6 +27,7 @@ import { MicDevicePicker } from './MicDevicePicker'
 import { useVoice } from '../state/voice'
 import { useSessions } from '../state/sessions'
 import { transcribeOnce } from '../lib/speechRecognition'
+import { toast } from '../state/toast'
 
 type Step =
   | 'welcome'
@@ -340,6 +341,7 @@ export function MicWizard({ open, onClose }: MicWizardProps) {
         wlog('error', 'wizard.error', { step: 'record', error: msg })
         setError(msg)
         setRecording(false)
+        toast.error(`Mic wizard: ${msg}`)
       }
 
       recorder.start()
@@ -361,6 +363,7 @@ export function MicWizard({ open, onClose }: MicWizardProps) {
       setError(msg)
       setRecording(false)
       releaseMic()
+      toast.error(`Mic wizard: ${msg}`)
     }
   }, [goto, releaseMic])
 

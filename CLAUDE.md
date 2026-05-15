@@ -24,6 +24,10 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by SM_SUPERVISOR_DISABLE.
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
+- `teams.cjs` — enumerates `~/.claude/teams/<name>/config.json`; gates the AppStatusBar team pill behind `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
+- `queueOps.cjs` — scheduler PRD queue linter (unbounded-loop + post-AC overrun detection) + archive + retag.
+- `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9\-/]+$/`, 5 min kill ceiling, single in-flight per slug.
+- `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool (NEW cycle 3).
 
 **Renderer** (`src/renderer/`):
 - `state/config.ts` — per-path FileState with dirty tracking.
@@ -32,6 +36,11 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `components/tabs/Settings.tsx` — canonical "scoped editor" shape (ScopeSwitcher + SaveBar + JsonEditor). Other scoped tabs follow it.
 - `components/tabs/Skills.tsx` — canonical "list+detail" shape. Other list tabs (Subagents, Hooks, McpServers, Plugins) follow it.
 - `components/ui/` — shared primitives (Panel, ScopeSwitcher, SaveBar, JsonEditor, KVTable, ListDetail, Toggle, EmptyState).
+- `components/AppStatusBar.tsx` — global model / effort / team / voice / 5h-usage chip strip. Pills navigate to Settings / Voice / Usage on click.
+- `components/CommandPalette.tsx` — Cmd-K palette with fuzzy filter + emit-only dispatch. Suppressed inside Monaco / text inputs.
+- `components/ui/Toast.tsx` + `state/toast.ts` — non-fatal error surfacing. `info / warn / error`. Mounted above modals, below RecordingStatus.
+- `lib/agentFrontmatter.ts` + `lib/prdFrontmatter.ts` — round-trip YAML preservation for Subagents and SchedulerPrdsView.
+- `components/tabs/agent/SchedulerDock.tsx` — per-running-job mini-bot strip rendered in AgentView.
 
 ## Conventions
 
@@ -41,6 +50,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - **Hot data contiguous**: live state per tab is a flat object, not nested per-event.
 - **No backwards-compat shims**: this is a single-author project; just rename and refactor.
 - **Privacy invariant**: `RecordingStatus` (App-level, top of window) MUST be mounted whenever `isRecording === true`.
+- **Toast is the user-facing error channel** — don't swallow errors silently; surface via `useToast().show('error', msg)` (or `toast.error(msg)`) so the user sees the failure. Background hydrate paths can stay logger-only.
 
 ### Scheduled PRD authoring
 
@@ -55,3 +65,7 @@ Published as `claude-code-session-manager` on npm. Run via `npx claude-code-sess
 - Adding `shell: true` to `child_process.spawn` calls — only `watchers.cjs` and `app:test-fire-hook` legitimately need it (user-supplied shell strings are part of those features). Anywhere else, pass argv arrays.
 - Reading remote URLs in production — `createWindow` hard-fails if `dist/index.html` is missing rather than falling back to `localhost:5173`.
 - Re-implementing the tmp+rename atomic-write pattern. Use `config.cjs`'s `writeJson` / `writeTextAtomic`.
+
+## Future: Files API + Memory tool
+
+Anthropic ships two platform-API features that the renderer doesn't surface yet: the **Files API** (`anthropic-beta: files-api-2025-04-14`; upload, reference by `file_id` in `{ type: "document", source: { type: "file", file_id } }`, 500 MB/file cap, ZDR-ineligible) and the **Memory tool** (`memory_20250818`; server-decided tool with client-side `/memories` store, ZDR-eligible). Cycle 2 added a documented stub at `src/main/filesApi.cjs.todo` and `src/main/memoryTool.cjs.todo` for cycle 3 to pick up — each needs a new IPC namespace, key resolution (Files API needs an Anthropic API key separate from the OAuth credentials billing reads), and CSP changes for `api.anthropic.com` uploads. Distinct from Claude Code's `autoMemoryDirectory` (filesystem convention, already in our schema).

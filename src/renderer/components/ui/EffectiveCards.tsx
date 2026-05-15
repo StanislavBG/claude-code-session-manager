@@ -5,6 +5,19 @@ import type { EffectiveNode, LeafNode } from '../../lib/mergeScopes'
 import type { SchemaResolver, SchemaInfo } from '../../lib/schemaLookup'
 import { planGroups, humanizeKey } from '../../lib/settingsGroups'
 
+type OnOverride = (path: string[], value: unknown, intoScope?: Scope) => void
+
+/** The four columns surfaced by the drift indicator. `default` is sourced
+ *  from the JSON Schema, the other three from the merged LeafNode. */
+const DRIFT_SCOPES: ReadonlyArray<Scope | 'default'> = ['user', 'project', 'local', 'default']
+
+const SCOPE_LABELS_SHORT: Record<Scope | 'default', string> = {
+  user: 'user',
+  project: 'project',
+  local: 'local',
+  default: 'default',
+}
+
 /**
  * Grandma-friendly view of merged settings.
  *
@@ -18,7 +31,7 @@ import { planGroups, humanizeKey } from '../../lib/settingsGroups'
 interface Props {
   node: EffectiveNode
   targetScope: Scope
-  onOverride: (path: string[], value: unknown) => void
+  onOverride: OnOverride
   schema: SchemaResolver
 }
 
@@ -102,7 +115,7 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
                   node={child}
                   info={info}
                   targetScope={targetScope}
-                  onOverride={(v) => onOverride([k], v)}
+                  onOverride={(v, intoScope) => onOverride([k], v, intoScope)}
                 />
               )
             })}
@@ -163,11 +176,12 @@ interface CardProps {
   node: EffectiveNode | undefined
   info: SchemaInfo | null
   targetScope: Scope
-  onOverride: (value: unknown) => void
+  onOverride: (value: unknown, intoScope?: Scope) => void
 }
 
 function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [driftOpen, setDriftOpen] = useState(false)
   const title = humanizeKey(keyName)
   const isSet = node !== undefined
   const isLeaf = node?.kind === 'leaf'
@@ -185,6 +199,16 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
     node,
   })
 
+  // Drift across scopes is precomputed by mergeScopes — winner + shadowed[] —
+  // so we just surface what's already there rather than re-merging here.
+  const driftScopes = collectDriftScopes(leafNode, defaultVal)
+  const hasDrift = driftScopes.length >= 2
+
+  // Reset = "delete from the most-specific scope that has it". For a leaf
+  // that's the winner. Only show when effective != default (otherwise the
+  // value already matches the schema default).
+  const canReset = !!leafNode && !isDefault
+
   return (
     <div className="px-4 py-3 hover:bg-bg-elev/20">
       <div className="flex items-start gap-3">
@@ -199,6 +223,34 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
           <div className="flex items-baseline gap-2 flex-wrap">
             <h3 className="text-fg text-sm">{title}</h3>
             <StatusChip kind={status.kind} label={status.label} />
+            {hasDrift && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (!expanded) setExpanded(true)
+                  setDriftOpen((v) => !v)
+                }}
+                className="text-[9px] px-1.5 py-0 rounded border border-blue-900/40 bg-blue-950/30 text-blue-300/90 uppercase tracking-wide hover:bg-blue-900/40"
+                title="this key is defined in multiple scopes — click to expand"
+              >
+                drift · {driftScopes.map((s) => SCOPE_LABELS_SHORT[s]).join(' · ')}
+              </button>
+            )}
+            {canReset && leafNode && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  // Write undefined into the winning scope's draft. setAtPath
+                  // sets base[head] = undefined, which JSON.stringify drops,
+                  // achieving an in-scope delete on save.
+                  onOverride(undefined, leafNode.winner)
+                }}
+                className="text-[9px] px-1.5 py-0 rounded border border-line bg-bg-elev text-fg-faint uppercase tracking-wide hover:text-fg hover:bg-bg-hi"
+                title={`reset · delete from ${SCOPE_LABELS[leafNode.winner].label}`}
+              >
+                ↺ reset
+              </button>
+            )}
             {info?.deprecated && (
               <span className="text-[9px] px-1 py-0 rounded border border-yellow-900/40 bg-yellow-950/30 text-yellow-500/80 uppercase tracking-wide">
                 deprecated
@@ -215,13 +267,20 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
               {firstSentence(info.description)}
             </p>
           )}
+          {expanded && driftOpen && leafNode && (
+            <DriftTable
+              leaf={leafNode}
+              defaultVal={defaultVal}
+              onReset={(s) => onOverride(undefined, s)}
+            />
+          )}
           {expanded && (
             <CardDetails
               keyName={keyName}
               node={node}
               info={info}
               targetScope={targetScope}
-              onOverride={onOverride}
+              onOverride={(v) => onOverride(v)}
             />
           )}
         </div>
@@ -236,6 +295,79 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
               disabled={isObjectOrArray && isSet}
             />
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function collectDriftScopes(
+  leaf: LeafNode | null,
+  defaultVal: unknown,
+): Array<Scope | 'default'> {
+  if (!leaf) return []
+  const seen = new Set<Scope | 'default'>()
+  seen.add(leaf.winner)
+  for (const s of leaf.shadowed) seen.add(s.scope)
+  if (defaultVal !== undefined) seen.add('default')
+  // Preserve canonical order (user → project → local → default).
+  return DRIFT_SCOPES.filter((s) => seen.has(s))
+}
+
+/* --------------------------------------------------------- DriftTable */
+
+function DriftTable({
+  leaf,
+  defaultVal,
+  onReset,
+}: {
+  leaf: LeafNode
+  defaultVal: unknown
+  onReset: (scope: Scope) => void
+}) {
+  // Build a complete 4-row view (one per file scope + schema default). Even
+  // unset scopes are rendered with a "—" so the user can see exactly why a
+  // value drifts from each particular place.
+  const valuesByScope: Partial<Record<Scope, { value: unknown; winner: boolean }>> = {}
+  valuesByScope[leaf.winner] = { value: leaf.value, winner: true }
+  for (const s of leaf.shadowed) {
+    valuesByScope[s.scope] = { value: s.value, winner: false }
+  }
+  return (
+    <div className="mt-2 border border-line rounded bg-bg-elev/40 text-xs">
+      <div className="px-2 py-1 text-fg-faint border-b border-line/60">
+        Values across all scopes (winner highlighted · reset removes that scope's value):
+      </div>
+      <div className="divide-y divide-line/60">
+        {(['user', 'project', 'local'] as Scope[]).map((s) => {
+          const entry = valuesByScope[s]
+          const present = entry !== undefined
+          return (
+            <div key={s} className="grid grid-cols-[5rem_1fr_auto] gap-2 px-2 py-1 items-center">
+              <span className="text-fg-faint">{SCOPE_LABELS[s].label}</span>
+              <span className={`font-mono truncate ${entry?.winner ? 'text-accent' : 'text-fg-dim'}`}>
+                {present ? valueToString(entry!.value) : <span className="text-fg-faint">—</span>}
+              </span>
+              {present ? (
+                <button
+                  onClick={() => onReset(s)}
+                  className="text-[9px] px-1.5 py-0 rounded border border-line text-fg-faint uppercase tracking-wide hover:text-fg hover:bg-bg-hi"
+                  title={`delete this key from ${SCOPE_LABELS[s].label}`}
+                >
+                  ↺
+                </button>
+              ) : (
+                <span />
+              )}
+            </div>
+          )
+        })}
+        <div className="grid grid-cols-[5rem_1fr_auto] gap-2 px-2 py-1 items-center">
+          <span className="text-fg-faint">Default</span>
+          <span className="font-mono text-fg-dim truncate">
+            {defaultVal !== undefined ? valueToString(defaultVal) : <span className="text-fg-faint">—</span>}
+          </span>
+          <span />
         </div>
       </div>
     </div>

@@ -25,5 +25,11 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // `compact:` variant — applies when <body> has `density-compact`.
+    // Toggled via useDensity() in src/renderer/lib/useDensity.ts.
+    function ({ addVariant }) {
+      addVariant('compact', 'body.density-compact &')
+    },
+  ],
 }

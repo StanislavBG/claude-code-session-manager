@@ -371,7 +371,8 @@
     },
     "model": {
       "type": "string",
-      "description": "Override the default model used by Claude Code. For finer control, use environment variables: ANTHROPIC_MODEL (runtime override), ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL (per-class pinning), CLAUDE_CODE_SUBAGENT_MODEL (subagent model). See https://code.claude.com/docs/en/model-config"
+      "enum": ["opus", "sonnet", "haiku", "default"],
+      "description": "Override the default model used by Claude Code. Accepts a short alias (opus|sonnet|haiku) or a full model ID. For finer control, use environment variables: ANTHROPIC_MODEL (runtime override), ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL (per-class pinning), CLAUDE_CODE_SUBAGENT_MODEL (subagent model). See https://code.claude.com/docs/en/model-config"
     },
     "availableModels": {
       "type": "array",
@@ -414,6 +415,33 @@
       "maximum": 1,
       "description": "Probability (0–1) that the session quality survey appears when eligible. A value of 0.05 means 5% of eligible sessions. See https://code.claude.com/docs/en/settings",
       "examples": [0.05]
+    },
+    "editorMode": {
+      "type": "string",
+      "enum": ["normal", "vim"],
+      "default": "normal",
+      "description": "Editor input mode for the Claude Code terminal prompt. 'vim' enables modal editing (Esc for normal mode, i for insert). See https://code.claude.com/docs/en/settings"
+    },
+    "skillOverrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["on", "name-only", "user-invocable-only", "off"]
+      },
+      "description": "Per-skill availability override map. Keys are skill names; values are one of 'on' (default), 'name-only' (skill name listed but not auto-loaded), 'user-invocable-only' (load only when user explicitly invokes), or 'off' (hidden). Requires Claude Code v2.1.129+. See https://code.claude.com/docs/en/settings",
+      "examples": [
+        { "playwright-debug": "user-invocable-only", "init": "off" }
+      ]
+    },
+    "disableAgentView": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable the Agent View feature (read-only inspection of sub-agent activity). Useful when administering managed deployments. Requires Claude Code v2.1.139+. See https://code.claude.com/docs/en/settings"
+    },
+    "disableRemoteControl": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block the `claude remote-control` channel that allows external clients to drive this Claude Code instance. Recommended default for shared/CI environments. Requires Claude Code v2.1.128+. See https://code.claude.com/docs/en/settings"
     },
     "enableAllProjectMcpServers": {
       "type": "boolean",

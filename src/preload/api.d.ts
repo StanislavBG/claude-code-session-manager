@@ -247,6 +247,16 @@ export interface ScheduleConfig {
 
 export type ScheduleJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export interface ScheduleJobRuntime {
+  pid: number;
+  runId: string;
+  startedAt: string | null;
+  /** Claude session UUID for the `--session-id` arg — populated when the job spawns. */
+  sessionId?: string;
+  /** Resolved cwd the job was launched in (may differ from job.cwd if defaultCwd was applied). */
+  cwd?: string;
+}
+
 export interface ScheduleJob {
   slug: string;
   title: string;
@@ -260,6 +270,11 @@ export interface ScheduleJob {
   finishedAt: string | null;
   exitCode: number | null;
   error: string | null;
+  /** Claude session UUID passed via `--session-id`. Set when the job spawns
+   *  and persisted across queue reloads so the renderer can find the JSONL
+   *  transcript even after restart. */
+  sessionId?: string;
+  runtime?: ScheduleJobRuntime;
 }
 
 export interface SchedulePaths {
@@ -395,6 +410,115 @@ export interface WatcherClosedEvent {
   watcherId: string;
 }
 
+export interface TeamMember {
+  name: string;
+  agentType: string | null;
+  model: string | null;
+}
+
+export interface TeamInfo {
+  name: string;
+  configPath: string;
+  description: string | null;
+  leadAgentId: string | null;
+  members: TeamMember[];
+  memberCount: number;
+  inboxDepth: number;
+}
+
+export interface TeamsListResult {
+  teams: TeamInfo[];
+}
+
+// ────────────────────────────────────────────── Bundle D — queue ops
+
+export interface LintFinding {
+  rule: string;
+  line: number;
+  snippet: string;
+  severity: 'warn' | 'error';
+}
+
+export interface LintReport {
+  slug: string;
+  findings: LintFinding[];
+}
+
+export interface LintQueueResult {
+  reports: LintReport[];
+  scannedAt: number;
+}
+
+export interface ArchivePrdResult {
+  ok: boolean;
+  archived: number;
+  archivedTo: string | null;
+  results: Array<{ ok: boolean; slug: string; error?: string; archivedTo?: string }>;
+  error?: string;
+}
+
+export interface RetagPrdItem {
+  slug: string;
+  /** New parallel-group number; if set on an NN-kebab slug, the file is renamed. */
+  parallelGroup?: number;
+  estimateMinutes?: number;
+}
+
+export interface RetagPrdResult {
+  ok: boolean;
+  retagged: number;
+  results: Array<{
+    ok: boolean;
+    slug: string;
+    newSlug?: string;
+    before?: Record<string, string>;
+    after?: Record<string, string>;
+    error?: string;
+  }>;
+  error?: string;
+}
+
+// ────────────────────────────────────────────── Bundle C (cycle 3) — Memory tab
+
+export interface MemoryEntry {
+  name: string;
+  path: string;
+  mtimeMs: number;
+  bytes: number;
+}
+
+export interface MemoryListResult {
+  entries: MemoryEntry[];
+  workspace: string;
+  error: string | null;
+}
+
+export interface MemoryReadResult {
+  content: string;
+  exists: boolean;
+  mtimeMs: number;
+  bytes: number;
+  error: string | null;
+}
+
+export interface MemoryMutationResult {
+  ok: boolean;
+  error: string | null;
+}
+
+// ────────────────────────────────────────────── Bundle F — plugins install
+
+export interface PluginInstallResult {
+  ok: boolean;
+  exitCode: number;
+  error?: string;
+}
+
+export interface PluginInstallProgressEvent {
+  slug: string;
+  line: string;
+}
+
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
@@ -505,16 +629,44 @@ export interface SessionManagerAPI {
     openFolder: () => Promise<{ ok: boolean }>;
     readPrd: (slug: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
     readLog: (runId: string, slug: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
-    writePrd: (slug: string, body: string) => Promise<{ ok: boolean; bytesWritten: number }>;
+    writePrd: (slug: string, body: string) => Promise<{ ok: true; bytesWritten: number } | { ok: false; error: string }>;
     listPrds: () => Promise<PrdListItem[]>;
     health: () => Promise<ScheduleHealthSnapshot>;
     onState: (handler: (snapshot: ScheduleStateSnapshot) => void) => () => void;
+    /** Bundle D — scan all PRDs for unbounded loops + missing frontmatter. */
+    lintQueue: () => Promise<LintQueueResult>;
+    /** Bundle D — move PRDs to prds-archived/<ISO>/. Never deletes. */
+    archivePrds: (slugs: string[]) => Promise<ArchivePrdResult>;
+    /** Bundle D — bulk retag parallelGroup and/or estimateMinutes. */
+    retagPrds: (items: RetagPrdItem[]) => Promise<RetagPrdResult>;
   };
   supervisor: {
     /** Debug-only: run a supervisor tick immediately. Used by e2e tests. */
     tickNow: () => Promise<{ ok: boolean }>;
     /** Return last 50 supervisor log entries, descending by ts. */
     getLog: () => Promise<SupervisorLogEntry[]>;
+  };
+  teams: {
+    /** Enumerate ~/.claude/teams/<name>/config.json + inbox depths. */
+    list: () => Promise<TeamsListResult>;
+  };
+  plugins: {
+    /** Run `claude plugin install <slug>` in a hidden pty. Streams output
+     *  via `onInstallProgress`. Returns { ok, exitCode } on exit. */
+    install: (payload: { slug: string }) => Promise<PluginInstallResult>;
+    onInstallProgress: (handler: (ev: PluginInstallProgressEvent) => void) => () => void;
+  };
+  memory: {
+    /** List markdown memory entries for the given workspace (defaults to 'default'). */
+    list: (workspace?: string) => Promise<MemoryListResult>;
+    /** Read the contents of one memory entry. */
+    read: (name: string, workspace?: string) => Promise<MemoryReadResult>;
+    /** Atomic write of a memory entry (max 1 MiB). */
+    write: (name: string, content: string, workspace?: string) => Promise<MemoryMutationResult>;
+    /** Delete a memory entry. */
+    delete: (name: string, workspace?: string) => Promise<MemoryMutationResult>;
+    /** Create a new memory entry with starter frontmatter + body. */
+    create: (name: string, description?: string, workspace?: string) => Promise<MemoryMutationResult>;
   };
 }
 

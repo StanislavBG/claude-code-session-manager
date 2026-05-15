@@ -10,4 +10,5 @@ playwright-report
 .env
 .env.local
 .claude/
+.research/
 <path>

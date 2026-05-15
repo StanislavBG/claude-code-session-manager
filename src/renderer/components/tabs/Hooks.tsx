@@ -15,76 +15,96 @@ import { EffectiveTree } from '../ui/EffectiveTree'
 import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
+import { Tooltip } from '../ui/Tooltip'
+import { HOOK_EVENT_DOCS } from '../../data/hookEventDocs'
 import type { TestFireHookResult } from '../../../preload/api'
 
 /**
  * Hooks tab — scalable event-list UI over settings.json `hooks` key.
- * Claude Code supports 26 hook events (Apr 2026) and 4 hook types
- * (command, http, prompt, agent).
+ * Event list mirrors code.claude.com/docs/en/hooks (verified 2026-05). Legacy
+ * tool-specific events (PreBash, PreEdit, etc.) were removed in 2026 and are
+ * collapsed under an "unknown events" warning chip instead of cluttering the
+ * sidebar.
  */
 const HOOK_EVENTS = [
+  // Core
+  'UserPromptSubmit',
+  'UserPromptExpansion',
   'PreToolUse',
   'PostToolUse',
-  'UserPromptSubmit',
-  'Notification',
+  'PostToolUseFailure',
+  'PostToolBatch',
   'Stop',
-  'SubagentStop',
+  'StopFailure',
   'SessionStart',
   'SessionEnd',
+  'Setup',
   'PreCompact',
   'PostCompact',
-  'PreBash',
-  'PostBash',
-  'PreEdit',
-  'PostEdit',
-  'PreRead',
-  'PostRead',
-  'PreWrite',
-  'PostWrite',
-  'PreGlob',
-  'PreGrep',
-  'PreTaskCreate',
-  'PreTaskUpdate',
-  'PreWebFetch',
-  'PreWebSearch',
-  'PreMcpToolUse',
-  'PostMcpToolUse',
+  'InstructionsLoaded',
+  'Notification',
+  // Permissions
+  'PermissionRequest',
+  'PermissionDenied',
+  // Subagents/Teams
+  'SubagentStart',
+  'SubagentStop',
+  'TeammateIdle',
+  // Tasks
+  'TaskCreated',
+  'TaskCompleted',
+  // State changes
+  'ConfigChange',
+  'CwdChanged',
+  'FileChanged',
+  // Worktree
+  'WorktreeCreate',
+  'WorktreeRemove',
+  // Elicitation
+  'Elicitation',
+  'ElicitationResult',
 ] as const
 type HookEvent = (typeof HOOK_EVENTS)[number]
+const KNOWN_HOOK_EVENTS: ReadonlySet<string> = new Set(HOOK_EVENTS)
 
-const HOOK_TYPES = ['command', 'http', 'prompt', 'agent'] as const
+// Hook config shape per docs: { type, command|url|prompt|agent, args[], timeout, terminalSequence }
+// `type: "mcp_tool"` added v2.1.118; `args` v2.1.139; `terminalSequence` v2.1.141.
+const HOOK_TYPES = ['command', 'http', 'prompt', 'agent', 'mcp_tool'] as const
 type HookType = (typeof HOOK_TYPES)[number]
 
 // Minimal placeholder payloads used to seed the "Test fire" textarea per event.
-// Aim is "smallest valid-shape JSON the hook is likely to receive" so the user
-// can edit from a sensible starting point rather than typing from scratch.
+// Where the doc doesn't specify a payload shape, we leave an empty object so
+// the user starts from a documented unknown rather than a fabricated shape.
 const DEFAULT_PAYLOADS: Record<HookEvent, Record<string, unknown>> = {
+  UserPromptSubmit: { prompt: 'hello' },
+  UserPromptExpansion: { command: '/example', expanded: 'hello' },
   PreToolUse: { tool_name: 'Bash', tool_input: { command: 'ls' } },
   PostToolUse: { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_result: '' },
-  UserPromptSubmit: { prompt: 'hello' },
-  Notification: { title: 'test', message: 'test notification' },
-  Stop: { reason: 'end_turn' },
-  SubagentStop: { reason: 'end_turn' },
-  SessionStart: { source: 'startup' },
+  PostToolUseFailure: { tool_name: 'Bash', tool_input: { command: 'ls' }, error: '' },
+  PostToolBatch: { tool_uses: [] },
+  Stop: { stop_reason: 'end_turn', output_tokens: 0 },
+  StopFailure: { reason: 'rate_limit' },
+  SessionStart: { source: 'startup', model: '', agent_type: '' },
   SessionEnd: { reason: 'user_quit' },
-  PreCompact: { transcript_path: '' },
-  PostCompact: { transcript_path: '' },
-  PreBash: { tool_input: { command: 'ls' } },
-  PostBash: { tool_input: { command: 'ls' }, tool_result: '' },
-  PreEdit: { tool_input: { file_path: '/tmp/x', old_string: 'a', new_string: 'b' } },
-  PostEdit: { tool_input: { file_path: '/tmp/x' }, tool_result: '' },
-  PreRead: { tool_input: { file_path: '/tmp/x' } },
-  PostRead: { tool_input: { file_path: '/tmp/x' }, tool_result: '' },
-  PreWrite: { tool_input: { file_path: '/tmp/x', content: '' } },
-  PostWrite: { tool_input: { file_path: '/tmp/x' }, tool_result: '' },
-  PreGlob: { tool_input: { pattern: '**/*.ts' } },
-  PreGrep: { tool_input: { pattern: 'TODO' } },
-  PreTaskCreate: { tool_input: { description: 'task' } },
-  PreTaskUpdate: { tool_input: { task_id: 'id' } },
-  PreWebFetch: { tool_input: { url: 'https://example.com' } },
-  PreWebSearch: { tool_input: { query: 'test' } },
-  PreMcpToolUse: { tool_name: 'mcp__server__tool', tool_input: {} },
-  PostMcpToolUse: { tool_name: 'mcp__server__tool', tool_input: {}, tool_result: '' },
+  Setup: { mode: 'init' }, // payload: <unknown — see docs>
+  PreCompact: { transcript_path: '', trigger: 'manual' },
+  PostCompact: { transcript_path: '', trigger: 'manual' },
+  InstructionsLoaded: { source: 'session_start' }, // payload: <unknown — see docs>
+  Notification: { title: 'test', message: 'test notification' },
+  PermissionRequest: { tool_name: 'Bash' }, // payload: <unknown — see docs>
+  PermissionDenied: { tool_name: 'Bash', retry: false }, // payload: <unknown — see docs>
+  SubagentStart: { agent_type: 'general-purpose' },
+  SubagentStop: { agent_type: 'general-purpose', reason: 'end_turn' },
+  TeammateIdle: {}, // payload: <unknown — see docs>
+  TaskCreated: { task: { description: '' } },
+  TaskCompleted: { task: { description: '' } },
+  ConfigChange: { source: 'user_settings' },
+  CwdChanged: { old_cwd: '', new_cwd: '' },
+  FileChanged: { file_path: '', change_type: 'modified' },
+  WorktreeCreate: {}, // payload: <unknown — see docs>
+  WorktreeRemove: {}, // payload: <unknown — see docs>
+  Elicitation: { action: 'accept' }, // payload: <unknown — see docs>
+  ElicitationResult: {}, // payload: <unknown — see docs>
 }
 
 interface HookRule {
@@ -93,6 +113,12 @@ interface HookRule {
   url?: string
   prompt?: string
   agent?: string
+  /** mcp_tool name (e.g. `mcp__server__tool`) when `type === 'mcp_tool'`. */
+  mcpTool?: string
+  /** v2.1.139+ exec form — argv after `command` (no shell). */
+  args?: string[]
+  /** v2.1.141+ terminal escape sequence emitted with notifications (bells). */
+  terminalSequence?: string
   matcher?: string
   timeout?: number
 }
@@ -228,6 +254,15 @@ export function Hooks() {
   const file = files[path]
   const { full, hooks, err } = file ? parseFull(file.draftRaw) : { full: {}, hooks: {}, err: null }
 
+  // Old 2025-era event names (PreBash etc.) silently disappear from the
+  // documented sidebar; surface them in a single chip so users notice the
+  // drift without us re-rendering deprecated UI.
+  const unknownEvents = Object.keys(hooks).filter((k) => !KNOWN_HOOK_EVENTS.has(k))
+  const unknownCount = unknownEvents.reduce(
+    (acc, k) => acc + (hooks[k as HookEvent] ?? []).reduce((a, g) => a + (g.hooks?.length ?? 0), 0),
+    0,
+  )
+
   const updateHooks = (next: HooksConfig) => {
     setSaveError(null)
     setDraft(path, serialize(full, next))
@@ -300,25 +335,49 @@ export function Hooks() {
           rootLabel="hooks"
         />
       ) : (
+      <div className="flex flex-col h-full">
+      {unknownCount > 0 ? (
+        <div className="px-3 py-2 border-b border-line text-xs bg-bg-elev text-fg-dim">
+          <span className="text-yellow-400">⚠</span> {unknownCount} hook(s) configured under
+          unknown event names: <span className="font-mono text-fg">{unknownEvents.join(', ')}</span>
+          <span className="text-fg-faint"> · these are ignored by Claude Code 2026; edit settings.json directly to remove.</span>
+        </div>
+      ) : null}
       <ListDetail
         sidebarWidth="14rem"
         sidebar={
           <div className="py-1">
             {HOOK_EVENTS.map((ev) => {
               const count = countFor(hooks, ev)
+              const doc = HOOK_EVENT_DOCS[ev]
+              const tip = doc ? (
+                <span className="block space-y-1">
+                  <span className="block text-fg">{doc.when}</span>
+                  <span className="block text-fg-faint font-mono">payload: {doc.payload}</span>
+                  {doc.example ? (
+                    <span className="block text-fg-faint italic">e.g. {doc.example}</span>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="text-fg-faint italic">no documentation yet</span>
+              )
               return (
-                <button
-                  key={ev}
-                  onClick={() => setSelectedEvent(ev)}
-                  className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
-                    selectedEvent === ev
-                      ? 'bg-bg-hi text-fg'
-                      : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                  }`}
-                >
-                  <span className="truncate">{ev}</span>
-                  {count > 0 && <span className="text-accent shrink-0 ml-2">{count}</span>}
-                </button>
+                <div key={ev} className="[&>span]:w-full">
+                  <Tooltip content={tip} align="bottom-center">
+                    <button
+                      onClick={() => setSelectedEvent(ev)}
+                      title={doc?.when}
+                      className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
+                        selectedEvent === ev
+                          ? 'bg-bg-hi text-fg'
+                          : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                      }`}
+                    >
+                      <span className="truncate">{ev}</span>
+                      {count > 0 && <span className="text-accent shrink-0 ml-2">{count}</span>}
+                    </button>
+                  </Tooltip>
+                </div>
               )
             })}
           </div>
@@ -357,6 +416,7 @@ export function Hooks() {
           </div>
         }
       />
+      </div>
       )}
       {testFire ? (
         <TestFireModal
@@ -452,6 +512,7 @@ function HookRuleEditor({
     http: 'e.g. https://hooks.example.com/notify',
     prompt: 'e.g. Review this change for security issues',
     agent: 'e.g. security-reviewer',
+    mcp_tool: 'e.g. mcp__server__tool',
   })[t]
   const valueKey: keyof HookRule =
     rule.type === 'command'
@@ -460,59 +521,93 @@ function HookRuleEditor({
         ? 'url'
         : rule.type === 'prompt'
           ? 'prompt'
-          : 'agent'
+          : rule.type === 'mcp_tool'
+            ? 'mcpTool'
+            : 'agent'
   const value = (rule[valueKey] as string | undefined) ?? ''
+  const argsText = (rule.args ?? []).join(' ')
 
   return (
-    <div className="flex items-center gap-2">
-      <select
-        value={rule.type}
-        onChange={(e) => onChange({ type: e.target.value as HookType })}
-        className="bg-bg border border-line rounded px-1 py-0.5 text-xs text-fg"
-      >
-        {HOOK_TYPES.map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
-      <input
-        value={value}
-        onChange={(e) => onChange({ ...rule, [valueKey]: e.target.value })}
-        placeholder={placeholderFor(rule.type)}
-        className={`flex-1 bg-bg border rounded px-2 py-0.5 text-xs text-fg font-mono ${
-          jsonInvalid ? 'border-red-500/70' : !value.trim() ? 'border-yellow-600/50' : 'border-line'
-        }`}
-      />
-      {jsonInvalid ? (
-        <span
-          className="text-red-400 text-xs"
-          title="The enclosing settings.json is malformed; fix the JSON before editing."
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <select
+          value={rule.type}
+          onChange={(e) => onChange({ type: e.target.value as HookType })}
+          className="bg-bg border border-line rounded px-1 py-0.5 text-xs text-fg"
         >
-          × invalid
-        </span>
-      ) : null}
-      <input
-        value={rule.timeout ?? ''}
-        onChange={(e) =>
-          onChange({ ...rule, timeout: e.target.value ? Number(e.target.value) : undefined })
-        }
-        placeholder="timeout ms"
-        className="w-20 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
-      />
-      {rule.type === 'command' ? (
-        <button
-          onClick={onTestFire}
-          disabled={jsonInvalid || !value.trim()}
-          className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Run this command with a fake event payload"
-        >
-          test fire
+          {HOOK_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <input
+          value={value}
+          onChange={(e) => onChange({ ...rule, [valueKey]: e.target.value })}
+          placeholder={placeholderFor(rule.type)}
+          className={`flex-1 bg-bg border rounded px-2 py-0.5 text-xs text-fg font-mono ${
+            jsonInvalid ? 'border-red-500/70' : !value.trim() ? 'border-yellow-600/50' : 'border-line'
+          }`}
+        />
+        {jsonInvalid ? (
+          <span
+            className="text-red-400 text-xs"
+            title="The enclosing settings.json is malformed; fix the JSON before editing."
+          >
+            × invalid
+          </span>
+        ) : null}
+        <input
+          value={rule.timeout ?? ''}
+          onChange={(e) =>
+            onChange({ ...rule, timeout: e.target.value ? Number(e.target.value) : undefined })
+          }
+          placeholder="timeout ms"
+          className="w-20 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
+        />
+        {rule.type === 'command' ? (
+          <button
+            onClick={onTestFire}
+            disabled={jsonInvalid || !value.trim()}
+            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Run this command with a fake event payload"
+          >
+            test fire
+          </button>
+        ) : null}
+        <button onClick={onRemove} className="text-fg-faint hover:text-red-400 text-xs">
+          ×
         </button>
+      </div>
+      {rule.type === 'command' ? (
+        <div className="flex items-center gap-2 pl-[3.75rem]">
+          <span className="text-xs text-fg-faint w-12">args</span>
+          <input
+            value={argsText}
+            onChange={(e) =>
+              onChange({
+                ...rule,
+                args: e.target.value.trim()
+                  ? e.target.value.split(/\s+/).filter(Boolean)
+                  : undefined,
+              })
+            }
+            placeholder="argv array (v2.1.139+ exec form, no shell)"
+            className="flex-1 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg font-mono"
+          />
+        </div>
       ) : null}
-      <button onClick={onRemove} className="text-fg-faint hover:text-red-400 text-xs">
-        ×
-      </button>
+      <div className="flex items-center gap-2 pl-[3.75rem]">
+        <span className="text-xs text-fg-faint w-12">term</span>
+        <input
+          value={rule.terminalSequence ?? ''}
+          onChange={(e) =>
+            onChange({ ...rule, terminalSequence: e.target.value || undefined })
+          }
+          placeholder="terminalSequence — e.g. \\a (bell), v2.1.141+"
+          className="flex-1 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg font-mono"
+        />
+      </div>
     </div>
   )
 }

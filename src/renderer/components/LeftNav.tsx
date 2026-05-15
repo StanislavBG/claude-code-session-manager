@@ -7,6 +7,8 @@ import { SubmitCountdown } from './SubmitCountdown'
 import { useVoice } from '../state/voice'
 import { useLive } from '../state/live'
 import { log } from '../lib/logger'
+import { useDensity, type Density } from '../lib/useDensity'
+import { StatusDot } from './ui/StatusDot'
 import type { VoiceHotkeyConfig } from '../../preload/api'
 
 export type NavKey =
@@ -22,6 +24,7 @@ export type NavKey =
   | 'subagents'
   | 'plans'
   | 'tasks'
+  | 'memory'
   | 'projects'
   | 'history'
   | 'keybindings'
@@ -61,6 +64,7 @@ const GROUPS: { title: string; storageKey: string; items: NavItem[] }[] = [
     items: [
       { key: 'plans', label: 'Plans' },
       { key: 'tasks', label: 'Tasks', liveKind: 'tasks' },
+      { key: 'memory', label: 'Memory' },
       { key: 'projects', label: 'Projects' },
       { key: 'history', label: 'History' },
       { key: 'usage', label: 'Usage' },
@@ -227,7 +231,7 @@ export function LeftNav({
           // doesn't hide a working/active indicator.
           const groupLive = group.items.some((it) => it.liveKind && indicators[it.liveKind])
           const groupBadge = groupLive
-            ? <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="live activity in this group" />
+            ? <StatusDot state="attention" pulse title="live activity in this group" />
             : null
           return (
             <CollapsibleSection
@@ -244,14 +248,14 @@ export function LeftNav({
                     key={item.key}
                     onClick={() => onChange(item.key)}
                     title={tooltip}
-                    className={`w-full text-left px-4 py-1.5 text-xs flex items-center justify-between transition-colors ${
+                    className={`w-full text-left px-4 py-1.5 compact:py-1 text-xs flex items-center justify-between transition-colors ${
                       active === item.key
                         ? 'bg-bg-hi text-fg border-l-2 border-accent'
                         : 'text-fg-dim hover:text-fg hover:bg-bg-hi border-l-2 border-transparent'
                     }`}
                   >
                     <span>{item.label}</span>
-                    {liveActive && <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />}
+                    {liveActive && <StatusDot state="attention" pulse />}
                   </button>
                 )
               })}
@@ -265,6 +269,7 @@ export function LeftNav({
           <SchedulerSection />
           <MicrophoneSection />
           <SessionSection onNewSession={onNewSession} />
+          <DensityToggle />
         </div>
       )}
 
@@ -307,7 +312,7 @@ function SchedulerSection() {
           className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/15 text-accent normal-case tracking-normal"
           title="a scheduler job is running"
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+          <StatusDot state="attention" pulse />
           <span className="text-[9px] font-medium">working</span>
         </span>
       )}
@@ -332,7 +337,7 @@ function MicrophoneSection() {
   const error = useVoice((s) => s.error)
   const badge = (
     <span className="flex items-center gap-1">
-      {isRecording && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" title="recording" />}
+      {isRecording && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" title="recording" />}
       {error && <span className="text-red-400" title={error}>⚠</span>}
     </span>
   )
@@ -524,6 +529,37 @@ function MicActivityPanel() {
       <span className="inline-block w-2 h-2 rounded-full bg-red-400 animate-pulse shrink-0" />
       <span className="truncate" title={lastTranscript}>
         {lastTranscript || 'Listening…'}
+      </span>
+    </div>
+  )
+}
+
+/** Density toggle — compact|roomy segmented control. Persists to localStorage
+ *  via useDensity(); changing it toggles `body.density-compact` so any
+ *  `compact:` Tailwind variant applies app-wide. */
+function DensityToggle() {
+  const { density, setDensity } = useDensity()
+  const opt = (d: Density, label: string) => (
+    <button
+      key={d}
+      type="button"
+      onClick={() => setDensity(d)}
+      aria-pressed={density === d}
+      className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+        density === d
+          ? 'bg-bg text-fg border border-line'
+          : 'text-fg-faint hover:text-fg-dim border border-transparent'
+      }`}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div className="border-t border-line px-3 py-1.5 flex items-center justify-between text-[10px] text-fg-faint">
+      <span className="uppercase tracking-wider">Density</span>
+      <span className="flex items-center gap-1" role="group" aria-label="UI density">
+        {opt('compact', 'compact')}
+        {opt('roomy', 'roomy')}
       </span>
     </div>
   )

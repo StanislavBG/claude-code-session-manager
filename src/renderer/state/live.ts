@@ -218,10 +218,11 @@ export const useLive = create<LiveState>((set, get) => ({
       case 'plan': {
         const input = ev.data as { plan?: string } | string | undefined
         const text = typeof input === 'string' ? input : input?.plan ?? JSON.stringify(input)
-        // Retain full plan history per tab. The main-side ring buffer caps at
-        // 500 transcript events, which bounds growth here without an explicit
-        // slice.
-        next.plans = [{ at: now, content: text ?? '' }, ...cur.plans]
+        // Cap at 50 — the main-side ring buffer (500 events) bounds REPLAY
+        // growth but every live `plan` event still appends here, so an
+        // explicit slice is required to keep this array bounded across a
+        // long-lived session.
+        next.plans = [{ at: now, content: text ?? '' }, ...cur.plans].slice(0, 50)
         if (!opts?.replay) {
           newActivity.push({
             id: 0,

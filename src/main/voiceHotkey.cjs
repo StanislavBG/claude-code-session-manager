@@ -18,6 +18,7 @@
 const { app, globalShortcut, ipcMain } = require('electron');
 const voiceSettings = require('./voiceSettings.cjs');
 const { voiceHotkeyLog } = require('./lib/voice-hotkey-log.cjs');
+const { schemas, validated } = require('./ipcSchemas.cjs');
 
 let mainWindow = null;
 let currentConfig = null;
@@ -297,7 +298,9 @@ function registerHotkeyHandlers() {
     return currentConfig;
   });
 
-  ipcMain.handle('voice:set-hotkey', async (_e, cfg) => {
+  ipcMain.handle('voice:set-hotkey', validated(schemas.voiceSetHotkey, async (cfg) => {
+    // voiceSettings.isValidConfig adds one cross-field check zod can't express
+    // tersely (global=true + mode=hold is rejected, see PRD F1 v2). Keep it.
     if (!voiceSettings.isValidConfig(cfg)) {
       throw new Error('Invalid voice hotkey config');
     }
@@ -308,7 +311,7 @@ function registerHotkeyHandlers() {
       mainWindow.webContents.send('voice:hotkey-changed', currentConfig);
     }
     return { ok: true, config: currentConfig };
-  });
+  }));
 
   ipcMain.handle('voice:get-hotkey-config-path', () => voiceSettings.storePath());
 
@@ -317,20 +320,21 @@ function registerHotkeyHandlers() {
     return await voiceSettings.loadDevice();
   });
 
-  ipcMain.handle('voice:set-device-pref', async (_e, pref) => {
-    if (!voiceSettings.isValidDevicePref(pref)) {
-      throw new Error('Invalid device pref payload');
-    }
+  ipcMain.handle('voice:set-device-pref', validated(schemas.voiceSetDevicePref, async (pref) => {
     await voiceSettings.saveDevice(pref);
     return { ok: true };
-  });
+  }));
 
   // Renderer pings this when isRecording flips so we can prefix the window
-  // title with `● REC — ` (PRD F1 v2 §Security: privacy invariant).
+  // title with `● REC — ` (PRD F1 v2 §Security: privacy invariant). This is
+  // `ipcMain.on` (not handle), so we can't use the validated() helper —
+  // safeParse inline and silently drop malformed payloads.
   ipcMain.on('voice:set-recording', (_e, recording) => {
+    const parsed = schemas.voiceSetRecording.safeParse(recording);
+    if (!parsed.success) return;
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const baseTitle = 'Claude Session Manager';
-    const next = recording ? `● REC — ${baseTitle}` : baseTitle;
+    const next = parsed.data ? `● REC — ${baseTitle}` : baseTitle;
     try { mainWindow.setTitle(next); } catch { /* */ }
   });
 }

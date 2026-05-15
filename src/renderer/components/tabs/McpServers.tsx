@@ -14,8 +14,12 @@ import { McpLibrary, ViewSwitcher } from './Library'
  * MCP servers are stored in ~/.claude.json (user scope) under `mcpServers`,
  * or in .mcp.json at the project root (project scope). Both share the same
  * shape.
+ *
+ * Docs (code.claude.com/docs/en/mcp, 2026-05): transports stdio/http/sse/ws/
+ * streamable-http; v2.1.121 added `alwaysLoad`; reserved name `workspace`
+ * cannot be used (v2.1.128).
  */
-type ServerType = 'stdio' | 'http' | 'sse'
+type ServerType = 'stdio' | 'http' | 'sse' | 'ws' | 'streamable-http'
 interface McpServer {
   type?: ServerType
   command?: string
@@ -23,7 +27,22 @@ interface McpServer {
   url?: string
   env?: Record<string, string>
   headers?: Record<string, string>
+  /** v2.1.121: bypass tool-search deferral, always load the server. */
+  alwaysLoad?: boolean
+  /** Hide this server without removing it. */
+  enabled?: boolean
+  /** Per-server tool denylist surfaced in /mcp. */
+  disabledTools?: string[]
+  permissions?: {
+    tools?: 'allow' | 'deny' | string[]
+  }
 }
+
+const SERVER_TYPES: ServerType[] = ['stdio', 'http', 'streamable-http', 'sse', 'ws']
+// `workspace` is the only doc-reserved name as of v2.1.128; `ide`/`tasks` are
+// project-supplied conventions other tools collide with — warn but allow.
+const RESERVED_NAMES = new Set(['workspace'])
+const CAUTION_NAMES = new Set(['ide', 'tasks'])
 
 function pathFor(scope: Scope, home: string, cwd: string | null): string | null {
   if (scope === 'user') return `${home}/.claude.json`
@@ -243,6 +262,21 @@ function McpServerEditor({
   onRemove: () => void
 }) {
   const type = server.type ?? 'stdio'
+  const isReserved = RESERVED_NAMES.has(name)
+  const isCaution = CAUTION_NAMES.has(name)
+  const isHttp = type === 'http' || type === 'streamable-http' || type === 'sse' || type === 'ws'
+  const permTools = server.permissions?.tools
+  const permMode: 'inherit' | 'allow' | 'deny' | 'list' =
+    permTools === undefined
+      ? 'inherit'
+      : permTools === 'allow'
+        ? 'allow'
+        : permTools === 'deny'
+          ? 'deny'
+          : 'list'
+  const permList = Array.isArray(permTools) ? permTools : []
+  const disabledToolsText = (server.disabledTools ?? []).join(', ')
+
   return (
     <div className="p-4 space-y-4 max-w-2xl">
       <div className="flex items-center gap-2">
@@ -259,6 +293,15 @@ function McpServerEditor({
           delete
         </button>
       </div>
+      {isReserved ? (
+        <div className="text-xs px-2 py-1 border border-red-500/50 rounded text-red-300 bg-red-500/5">
+          ⚠ <span className="font-mono">{name}</span> is a reserved name — Claude Code will refuse to load this server (v2.1.128+).
+        </div>
+      ) : isCaution ? (
+        <div className="text-xs px-2 py-1 border border-yellow-600/50 rounded text-yellow-200 bg-yellow-500/5">
+          ⚠ <span className="font-mono">{name}</span> collides with a commonly-bundled MCP name; expect surprises in other tools.
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         <label className="text-xs text-fg-faint w-20">type</label>
         <select
@@ -266,10 +309,13 @@ function McpServerEditor({
           onChange={(e) => onChange({ ...server, type: e.target.value as ServerType })}
           className="bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg"
         >
-          <option value="stdio">stdio</option>
-          <option value="http">http</option>
-          <option value="sse">sse</option>
+          {SERVER_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
+        {type === 'sse' ? (
+          <span className="text-xs text-yellow-400/80">sse is deprecated — prefer streamable-http</span>
+        ) : null}
       </div>
       {type === 'stdio' ? (
         <>
@@ -308,6 +354,80 @@ function McpServerEditor({
           />
         </>
       )}
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-fg-faint w-20">alwaysLoad</label>
+        <label className="flex items-center gap-2 text-xs text-fg">
+          <input
+            type="checkbox"
+            checked={server.alwaysLoad === true}
+            onChange={(e) => onChange({ ...server, alwaysLoad: e.target.checked || undefined })}
+          />
+          <span className="text-fg-dim">bypass tool-search deferral (v2.1.121+)</span>
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-fg-faint w-20">enabled</label>
+        <label className="flex items-center gap-2 text-xs text-fg">
+          <input
+            type="checkbox"
+            checked={server.enabled !== false}
+            onChange={(e) =>
+              onChange({ ...server, enabled: e.target.checked ? undefined : false })
+            }
+          />
+          <span className="text-fg-dim">load this server in new sessions</span>
+        </label>
+      </div>
+      <Field
+        label="disabledTools"
+        value={disabledToolsText}
+        onChange={(v) => {
+          const arr = v.split(',').map((s) => s.trim()).filter(Boolean)
+          onChange({ ...server, disabledTools: arr.length ? arr : undefined })
+        }}
+        placeholder="comma-separated tool names to hide"
+      />
+      <div className="flex items-start gap-2">
+        <label className="text-xs text-fg-faint w-20 pt-1">permissions</label>
+        <div className="flex-1 space-y-1">
+          <select
+            value={permMode}
+            onChange={(e) => {
+              const m = e.target.value as typeof permMode
+              const next = { ...server }
+              if (m === 'inherit') {
+                if (next.permissions) {
+                  const { tools: _drop, ...rest } = next.permissions
+                  void _drop
+                  next.permissions = Object.keys(rest).length ? rest : undefined
+                }
+              } else if (m === 'list') {
+                next.permissions = { ...(next.permissions ?? {}), tools: [] }
+              } else {
+                next.permissions = { ...(next.permissions ?? {}), tools: m }
+              }
+              onChange(next)
+            }}
+            className="bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg"
+          >
+            <option value="inherit">inherit (default)</option>
+            <option value="allow">allow all tools</option>
+            <option value="deny">deny all tools</option>
+            <option value="list">allowlist…</option>
+          </select>
+          {permMode === 'list' ? (
+            <input
+              value={permList.join(', ')}
+              onChange={(e) => {
+                const arr = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                onChange({ ...server, permissions: { ...(server.permissions ?? {}), tools: arr } })
+              }}
+              placeholder="comma-separated tool names"
+              className="w-full bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg font-mono"
+            />
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }

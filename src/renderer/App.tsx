@@ -4,7 +4,11 @@ import { LeftNav, type NavKey } from './components/LeftNav'
 import { StatusBar } from './components/StatusBar'
 import { MainPane } from './components/MainPane'
 import { RecordingStatus } from './components/RecordingStatus'
+import { AppStatusBar } from './components/AppStatusBar'
 import { MicWizard } from './components/MicWizard'
+import { CommandPalette, type Command } from './components/CommandPalette'
+import { Toast } from './components/ui/Toast'
+import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
@@ -30,6 +34,7 @@ async function createPickedSession() {
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const activeTabId = useSessions((s) => s.activeTabId)
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
@@ -43,7 +48,10 @@ export function App() {
 
   const handleNewSession = useCallback(() => {
     setActiveNav('terminal')
-    createPickedSession().catch((e) => console.error('[App] new session failed:', e))
+    createPickedSession().catch((e) => {
+      console.error('[App] new session failed:', e)
+      toast.error('Could not start new session. Is the claude CLI on PATH?')
+    })
   }, [])
 
   // Eager preload of the speech model + permission subscription.
@@ -123,7 +131,10 @@ export function App() {
             activeTabId: id,
           }))
         })
-        .catch((e) => console.warn('[App] failed to create initial tab:', e))
+        .catch((e) => {
+          console.warn('[App] failed to create initial tab:', e)
+          toast.error('Failed to create initial tab. Is the claude CLI on PATH?')
+        })
     })
 
     // Menu → New Session (Ctrl+N): pick a directory and open claude there.
@@ -229,6 +240,32 @@ export function App() {
     try { window.api.voice.setRecording(isRecording) } catch { /* preload not ready */ }
   }, [isRecording])
 
+  // Item 13 — Cmd-K / Ctrl-K opens the global command palette. Toggle so a
+  // second press closes the palette (Escape inside the palette also closes).
+  // Listener is attached at the App level (not via Mousetrap) because Monaco
+  // editor instances install their own key handlers — we rely on bubble-phase
+  // ordering: Monaco's command palette consumes Cmd-K when an editor is
+  // focused, leaving the global one alone. Confirmed acceptable in research-04
+  // §1.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        // Don't hijack when Monaco / inputs are focused — Monaco wires its
+        // own Cmd-K and editing input feels weird if global palette steals it.
+        const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase() ?? ''
+        if (tag === 'input' || tag === 'textarea') return
+        const inMonaco = (e.target as HTMLElement | null)?.closest('.monaco-editor')
+        if (inMonaco) return
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      } else if (e.key === 'Escape' && paletteOpen) {
+        setPaletteOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [paletteOpen])
+
   // F8 — read persisted turn-detector settings on mount, seed the store, and
   // (when opted-in and not in dictation mode) spawn the turn-detector worker
   // so its status messages drive `turnDetectorState`. The worker is a stub in
@@ -328,17 +365,36 @@ export function App() {
   }, [])
 
   return (
-    <div className="h-full w-full flex flex-col bg-bg text-fg text-sm">
-      <TabBar />
+    <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>
+      {/* Privacy invariant (CLAUDE.md): RecordingStatus must remain mounted
+          whenever isRecording === true. It is fixed-positioned at z-[60] so
+          it paints over any z-50 overlay (Modal, CommandPalette). The pt-7
+          spacer on the outer container shifts the rest of the app down by
+          the banner's 28px height to keep AppStatusBar visible. */}
       <RecordingStatus />
+      <AppStatusBar onNavigate={setActiveNav} />
+      <TabBar />
       <div className="flex-1 flex min-h-0">
         <LeftNav active={activeNav} onChange={setActiveNav} onNewSession={handleNewSession} />
-        <MainPane active={activeNav} />
+        <MainPane active={activeNav} onNavigate={setActiveNav} />
       </div>
       <StatusBar />
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
       <MicWizard open={wizardOpen} onClose={closeWizard} />
+      {/* Toast host — z-[55] sits above z-50 dialogs but below z-[60]
+          RecordingStatus so the privacy banner is never obscured. */}
+      <Toast />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onCommand={(cmd: Command) => {
+          setPaletteOpen(false)
+          if (cmd.id.startsWith('nav:')) {
+            setActiveNav(cmd.id.slice(4) as NavKey)
+          }
+        }}
+      />
     </div>
   )
 }

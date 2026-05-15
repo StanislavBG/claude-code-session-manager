@@ -1,7 +1,7 @@
 {
   "name": "claude-code-session-manager",
-  "version": "0.8.6",
-  "description": "Local cockpit for Claude Code CLI sessions — terminal + full config surface.",
+  "version": "0.9.0",
+  "description": "Local cockpit for the Claude Code CLI — multi-tab terminal, full config surface, scheduler, voice dictation, and live observability.",
   "type": "module",
   "main": "src/main/index.cjs",
   "bin": {
@@ -14,6 +14,7 @@
     "dist/index.html",
     "dist/assets/",
     "dist/vad/",
+    "screenshots/",
     "README.md"
   ],
   "scripts": {
@@ -39,7 +40,15 @@
     "terminal",
     "electron",
     "session-manager",
-    "cli"
+    "cli",
+    "cockpit",
+    "mcp",
+    "agents",
+    "hooks",
+    "scheduler",
+    "voice",
+    "whisper",
+    "prd"
   ],
   "author": "bilkobibitkov",
   "license": "MIT",
@@ -79,8 +88,10 @@
     "@xterm/xterm": "^5.5.0",
     "chokidar": "^4.0.1",
     "electron": "^33.2.0",
+    "framer-motion": "^12.38.0",
     "node-pty": "^1.2.0-beta.12",
     "onnxruntime-web": "^1.24.3",
+    "recharts": "^2.15.4",
     "zod": "^3.23.8",
     "zustand": "^5.0.0"
   },
@@ -92,11 +103,9 @@
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
-    "framer-motion": "^12.38.0",
     "postcss": "^8.4.49",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "recharts": "^2.15.4",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
     "vite": "^6.0.1",

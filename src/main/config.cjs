@@ -315,4 +315,6 @@ module.exports = {
   listDir,
   exists,
   addAllowedRoot,
+  validatePath,
+  validateWrite,
 };

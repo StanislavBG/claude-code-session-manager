@@ -45,10 +45,12 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
+const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
@@ -116,6 +118,19 @@ const DEFAULT_CONFIG = {
 };
 
 // ---------- fs helpers ----------
+
+/**
+ * Resolve PRDS_DIR/<slug>.md and enforce path containment. Returns the
+ * absolute path on success, null on slug-escape attempts. The zod schema
+ * for slugs already blocks `..` because the SLUG_RE excludes `/`, but
+ * defense-in-depth: a second containment check after path.resolve costs
+ * nothing and catches future regex laxity.
+ */
+function safeSlugPath(slug) {
+  const resolved = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
+  if (!resolved.startsWith(PRDS_DIR + path.sep)) return null;
+  return resolved;
+}
 
 function ensureDirs() {
   fs.mkdirSync(PRDS_DIR, { recursive: true });
@@ -225,7 +240,7 @@ function mutate(fn) {
  * yaml dep; the schema is small (title, cwd, estimateMinutes, parallelGroup)
  * and the format is documented in the user-facing README.
  */
-function parsePrd(filePath) {
+function parsePrdRaw(filePath) {
   const text = fs.readFileSync(filePath, 'utf8');
   const meta = { title: null, cwd: null, estimateMinutes: null, parallelGroup: null };
   let body = text;
@@ -268,12 +283,69 @@ function parsePrd(filePath) {
   };
 }
 
+// Two-level cache for reconcile():
+//   - dirCache: keyed by PRDS_DIR mtimeMs — invalidated when files added/removed.
+//   - fileCache: per-PRD parse keyed by individual file mtimeMs — survives across
+//     dir-cache invalidations so adding ONE new PRD doesn't re-parse the other 197.
+// Both layers also bound by ino so a rename + re-create can't alias.
+let prdDirMtime = -1;
+let prdDirFiles = null; // sorted absolute paths
+const prdFileCache = new Map(); // path -> { mtimeMs, ino, parsed }
+
 function listPrdFiles() {
   ensureDirs();
-  return fs.readdirSync(PRDS_DIR)
+  let dirMtime;
+  try {
+    dirMtime = fs.statSync(PRDS_DIR).mtimeMs;
+  } catch {
+    dirMtime = -1;
+  }
+  if (dirMtime === prdDirMtime && prdDirFiles) return prdDirFiles;
+  const files = fs.readdirSync(PRDS_DIR)
     .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
     .map((f) => path.join(PRDS_DIR, f))
     .sort();
+  // Drop file-cache entries whose path is no longer on disk so the map
+  // doesn't accumulate ghosts after archives/deletes.
+  if (prdFileCache.size > 0) {
+    const live = new Set(files);
+    for (const k of prdFileCache.keys()) {
+      if (!live.has(k)) prdFileCache.delete(k);
+    }
+  }
+  prdDirMtime = dirMtime;
+  prdDirFiles = files;
+  return files;
+}
+
+// Hard cap to keep one malformed PRD (e.g. a binary blob accidentally renamed
+// .md) from wedging the main thread. PRDs are PRDs, not media files; 1 MB is
+// already ~25k lines and well beyond any legitimate authored doc.
+const PRD_READ_MAX_BYTES = 1024 * 1024;
+
+function parsePrd(filePath) {
+  let st;
+  try {
+    st = fs.statSync(filePath);
+  } catch {
+    // fall back to direct parse (will throw the original ENOENT to caller)
+    return parsePrdRaw(filePath);
+  }
+  if (st.size > PRD_READ_MAX_BYTES) {
+    // Evict any stale cached entry so callers see this as a parse miss.
+    prdFileCache.delete(filePath);
+    throw new Error(`PRD too large (${st.size}B > ${PRD_READ_MAX_BYTES}B): ${filePath}`);
+  }
+  const cached = prdFileCache.get(filePath);
+  if (cached && cached.mtimeMs === st.mtimeMs && cached.ino === st.ino) {
+    return cached.parsed;
+  }
+  // Evict BEFORE re-parsing so a parse exception leaves the cache empty
+  // rather than holding a stale-good entry for the new mtime.
+  prdFileCache.delete(filePath);
+  const parsed = parsePrdRaw(filePath);
+  prdFileCache.set(filePath, { mtimeMs: st.mtimeMs, ino: st.ino, parsed });
+  return parsed;
 }
 
 // ---------- queue reconciliation ----------
@@ -377,7 +449,6 @@ let heartbeatInterval = null;
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
 let cancelToken = { cancelled: false };
-let claudeBinPathCached = null;
 
 function attachWindow(w) { mainWindow = w; }
 
@@ -491,6 +562,15 @@ async function clearPause(source) {
   // Track manual clears for the auto-pause cooldown.
   if (source === 'manual' || source === 'run-now') {
     pauseClearedManuallyAt = Date.now();
+    // The user has just affirmed the queue should run — clear the failure
+    // counters so the renderer doesn't keep nagging about stale poll fails.
+    // The next poll will set them again if the condition still applies.
+    consecutiveFailures = 0;
+    backoffMs = 0;
+    backoffNextAt = null;
+    firstFailureAt = null;
+    firstNon429FailureAt = null;
+    lastFailureKind = null;
     persistSchedulerState();
   }
   if (wasPaused) broadcast();
@@ -528,24 +608,6 @@ function detectRateLimitInLog(logPath) {
   }
 }
 
-// ---------- claude binary ----------
-
-function resolveClaudeBin() {
-  if (claudeBinPathCached) return claudeBinPathCached;
-  const candidates = [
-    path.join(os.homedir(), '.claude', 'local', 'claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-    '/usr/bin/claude',
-  ];
-  for (const c of candidates) {
-    try { fs.accessSync(c, fs.constants.X_OK); claudeBinPathCached = c; return c; } catch { /* */ }
-  }
-  // Last resort: rely on PATH lookup at spawn time.
-  claudeBinPathCached = 'claude';
-  return claudeBinPathCached;
-}
-
 // ---------- execution ----------
 
 function pickRunDir() {
@@ -565,22 +627,31 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   const metaPath = path.join(runDir, `${job.slug}.meta.json`);
   const cwd = job.cwd || defaultCwd;
   const startedAt = Date.now();
+  const sessionId = randomUUID();
 
   const fd = fs.openSync(logPath, 'a');
   let fdClosed = false;
-  const closeFd = () => { if (fdClosed) return; fdClosed = true; fs.closeSync(fd); };
+  const closeFd = () => { if (fdClosed) return; fdClosed = true; try { fs.closeSync(fd); } catch { /* */ } };
+  // safeLog: no-op once the fd is closed, never throws on the watchdog timer
+  // path. Pre-fix, a post-result/idle watchdog firing AFTER closeFd would
+  // throw EBADF and crash the host. Every fs.writeSync(fd, …) below goes
+  // through this helper.
+  const safeLog = (msg) => {
+    if (fdClosed) return;
+    try { fs.writeSync(fd, msg); } catch { /* fd vanished mid-write */ }
+  };
 
-  fs.writeSync(fd, `[scheduler] starting ${job.slug} at ${new Date().toISOString()}\n[scheduler] cwd=${cwd}\n\n`);
+  safeLog(`[scheduler] starting ${job.slug} at ${new Date().toISOString()}\n[scheduler] cwd=${cwd}\n\n`);
 
   // Dead-cwd guard: verify the target directory exists and is traversable
   // before handing it to the child process.
   try { fs.accessSync(cwd, fs.constants.X_OK); }
   catch {
     const errMsg = `cwd no longer exists: ${cwd}`;
-    fs.writeSync(fd, `[scheduler] ${errMsg}\n`);
+    safeLog(`[scheduler] ${errMsg}\n`);
     closeFd();
-    atomicWriteJson(metaPath, { slug: job.slug, cwd, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
-    return { exitCode: -1, durationMs: 0, error: errMsg };
+    atomicWriteJson(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    return { exitCode: -1, durationMs: 0, error: errMsg, sessionId };
   }
 
   // Read full PRD body fresh from disk (queue stored only the preview).
@@ -589,7 +660,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     const parsed = parsePrd(path.join(PRDS_DIR, `${job.slug}.md`));
     prompt = parsed.body;
   } catch (e) {
-    fs.writeSync(fd, `[scheduler] failed to read PRD: ${e?.message}\n`);
+    safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
     closeFd();
     return { exitCode: -1, durationMs: 0, error: e?.message };
   }
@@ -600,28 +671,43 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     // launched from a `claude` shell. CLAUDE_EFFORT=xhigh forces Opus and
     // overrides `--model sonnet`, so scheduled jobs burn Opus credits silently.
     const childEnv = cleanChildEnv();
-    const child = spawn(claudeBin, [
-      '-p', prompt,
-      '--model', 'sonnet',
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
-      '--verbose',
-    ], {
-      cwd,
-      env: childEnv,
-      stdio: ['ignore', fd, fd],
-      // detached:true puts the child in its own process group so we can kill
-      // the entire descendant tree (including any stray background bashes the
-      // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
-      // only kills the immediate `claude` process, leaving orphaned subprocs
-      // that keep the parent alive (the 2026-05-10 cellar-publish hang).
-      detached: true,
-    });
+    // Guard against synchronous spawn failures (EAGAIN, ENOMEM on fork).
+    // Without this, the throw bubbles out of the Promise executor and the
+    // outer await rejects — but the open fd is leaked.
+    let child;
+    try {
+      child = spawn(claudeBin, [
+        '-p', prompt,
+        '--model', 'sonnet',
+        '--dangerously-skip-permissions',
+        '--output-format', 'stream-json',
+        '--verbose',
+        '--session-id', sessionId,
+      ], {
+        cwd,
+        env: childEnv,
+        stdio: ['ignore', fd, fd],
+        // detached:true puts the child in its own process group so we can kill
+        // the entire descendant tree (including any stray background bashes the
+        // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
+        // only kills the immediate `claude` process, leaving orphaned subprocs
+        // that keep the parent alive (the 2026-05-10 cellar-publish hang).
+        detached: true,
+      });
+    } catch (e) {
+      const errMsg = `spawn failed: ${e?.message ?? String(e)}`;
+      safeLog(`[scheduler] ${errMsg}\n`);
+      closeFd();
+      const durationMs = Date.now() - startedAt;
+      atomicWriteJson(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs });
+      resolve({ exitCode: -1, durationMs, error: errMsg, sessionId });
+      return;
+    }
 
-    fs.writeSync(fd, `[scheduler] spawned pid=${child.pid} (process group)\n\n`);
+    safeLog(`[scheduler] spawned pid=${child.pid} sessionId=${sessionId} (process group)\n\n`);
 
     // Fire-and-forget pid persistence — best effort.
-    if (onPid) onPid(child.pid).catch(() => {});
+    if (onPid) onPid(child.pid, sessionId, cwd).catch(() => {});
 
     // Track whether the agent has emitted a `result` event in its JSONL stream.
     // null until seen; then one of "success" | "error_max_turns" | ... per the
@@ -657,15 +743,15 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
         const m = buf.toString('utf8').match(/\{"type":"result","subtype":"([a-z_]+)"/);
         if (!m) return;
         agentResultSubtype = m[1];
-        fs.writeSync(fd, `\n[scheduler] result event detected (subtype=${agentResultSubtype}); ` +
+        safeLog(`\n[scheduler] result event detected (subtype=${agentResultSubtype}); ` +
           `starting ${Math.round(POST_RESULT_GRACE_MS/1000)}s exit-grace timer\n`);
         clearInterval(resultTailer);
         postResultTimer = setTimeout(() => {
-          fs.writeSync(fd, `\n[scheduler] post-result grace expired (${Math.round(POST_RESULT_GRACE_MS/1000)}s); ` +
+          safeLog(`\n[scheduler] post-result grace expired (${Math.round(POST_RESULT_GRACE_MS/1000)}s); ` +
             `child still alive — SIGTERM process group\n`);
           killTree('SIGTERM');
           postResultKillTimer = setTimeout(() => {
-            fs.writeSync(fd, `\n[scheduler] still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+            safeLog(`\n[scheduler] still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
             killTree('SIGKILL');
           }, POST_RESULT_KILL_MS);
           if (postResultKillTimer.unref) postResultKillTimer.unref();
@@ -677,7 +763,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
 
     // Kill the child if it runs past the maximum allowed duration.
     const watchdog = setTimeout(() => {
-      fs.writeSync(fd, `\n[scheduler] watchdog SIGKILL after ${MAX_JOB_DURATION_MS}ms\n`);
+      safeLog(`\n[scheduler] watchdog SIGKILL after ${MAX_JOB_DURATION_MS}ms\n`);
       killTree('SIGKILL');
     }, MAX_JOB_DURATION_MS);
     if (watchdog.unref) watchdog.unref();
@@ -691,12 +777,12 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
         const stat = fs.statSync(logPath);
         const idleMs = Date.now() - stat.mtimeMs;
         if (idleMs > IDLE_OUTPUT_KILL_MS) {
-          fs.writeSync(fd, `\n[scheduler] idle-output watchdog: log mtime stalled ` +
+          safeLog(`\n[scheduler] idle-output watchdog: log mtime stalled ` +
             `${Math.round(idleMs/1000)}s (> ${Math.round(IDLE_OUTPUT_KILL_MS/1000)}s threshold) — SIGTERM process group\n`);
           clearInterval(idleChecker);
           killTree('SIGTERM');
           idleKillTimer = setTimeout(() => {
-            fs.writeSync(fd, `\n[scheduler] idle watchdog: still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+            safeLog(`\n[scheduler] idle watchdog: still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
             killTree('SIGKILL');
           }, POST_RESULT_KILL_MS);
           if (idleKillTimer.unref) idleKillTimer.unref();
@@ -717,10 +803,10 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     child.on('error', (err) => {
       clearAllTimers();
       const durationMs = Date.now() - startedAt;
-      fs.writeSync(fd, `\n[scheduler] error: ${err.message}\n`);
+      safeLog(`\n[scheduler] error: ${err.message}\n`);
       closeFd();
-      atomicWriteJson(metaPath, { slug: job.slug, cwd, exitCode: -1, error: err.message, startedAt, finishedAt: Date.now(), durationMs });
-      resolve({ exitCode: -1, durationMs, error: err.message });
+      atomicWriteJson(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: err.message, startedAt, finishedAt: Date.now(), durationMs });
+      resolve({ exitCode: -1, durationMs, error: err.message, sessionId });
     });
 
     child.on('exit', (code, signal) => {
@@ -737,19 +823,19 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
       const mappedToSuccess = agentResultSubtype === 'success' && killedBySignal;
       if (mappedToSuccess) {
         effectiveCode = 0;
-        fs.writeSync(fd, `\n[scheduler] mapping exit code=${code} signal=${signal} → 0 ` +
+        safeLog(`\n[scheduler] mapping exit code=${code} signal=${signal} → 0 ` +
           `(result=success was emitted before kill)\n`);
       }
-      fs.writeSync(fd, `\n[scheduler] exit code=${effectiveCode} (raw code=${code} signal=${signal}) ` +
+      safeLog(`\n[scheduler] exit code=${effectiveCode} (raw code=${code} signal=${signal}) ` +
         `duration=${Math.round(durationMs / 1000)}s\n`);
       closeFd();
       const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
       atomicWriteJson(metaPath, {
-        slug: job.slug, cwd, exitCode: effectiveCode, rateLimited,
+        slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited,
         startedAt, finishedAt: Date.now(), durationMs,
         agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${code}` : null,
       });
-      resolve({ exitCode: effectiveCode, durationMs, rateLimited });
+      resolve({ exitCode: effectiveCode, durationMs, rateLimited, sessionId });
     });
   });
 }
@@ -914,7 +1000,16 @@ async function spawnInvestigation(failedJob, runDir) {
     return;
   }
 
-  const cwd = failedJob.cwd || DEFAULT_PROJECT_CWD;
+  // cwd fallback: if the failed job's cwd is missing on disk, the investigator
+  // child would itself fail to spawn (ENOENT). Fall back to DEFAULT_PROJECT_CWD
+  // so the investigation can still write a fix plan that updates the cwd or
+  // re-creates the missing project directory.
+  let cwd = failedJob.cwd || DEFAULT_PROJECT_CWD;
+  try { fs.accessSync(cwd, fs.constants.X_OK); }
+  catch {
+    console.warn(`[scheduler] investigation cwd missing (${cwd}); falling back to ${DEFAULT_PROJECT_CWD}`);
+    cwd = DEFAULT_PROJECT_CWD;
+  }
   const prompt = `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.
 
 # Failed job
@@ -960,26 +1055,37 @@ ${logTail}
 DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
 
   const fd = fs.openSync(investigationLogPath, 'a');
-  fs.writeSync(fd, `[scheduler] investigation starting for ${failedJob.slug} at ${new Date().toISOString()}\n[scheduler] target fix PRD: ${fixPath}\n\n`);
+  const sessionId = randomUUID();
+  try {
+    fs.writeSync(fd, `[scheduler] investigation starting for ${failedJob.slug} at ${new Date().toISOString()}\n[scheduler] target fix PRD: ${fixPath}\n[scheduler] sessionId=${sessionId}\n\n`);
+  } catch { /* */ }
 
   const claudeBin = resolveClaudeBin();
   const childEnv = cleanChildEnv();
-  const child = spawn(claudeBin, [
-    '-p', prompt,
-    '--model', 'opus',
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--verbose',
-  ], {
-    cwd,
-    env: childEnv,
-    stdio: ['ignore', fd, fd],
-  });
+  let child;
+  try {
+    child = spawn(claudeBin, [
+      '-p', prompt,
+      '--model', 'opus',
+      '--dangerously-skip-permissions',
+      '--output-format', 'stream-json',
+      '--verbose',
+      '--session-id', sessionId,
+    ], {
+      cwd,
+      env: childEnv,
+      stdio: ['ignore', fd, fd],
+    });
+  } catch (e) {
+    try { fs.writeSync(fd, `\n[scheduler] investigation spawn failed: ${e?.message ?? e}\n`); } catch { /* */ }
+    try { fs.closeSync(fd); } catch { /* */ }
+    return;
+  }
 
-  fs.writeSync(fd, `[scheduler] investigation pid=${child.pid}\n\n`);
+  try { fs.writeSync(fd, `[scheduler] investigation pid=${child.pid}\n\n`); } catch { /* */ }
 
   const watchdog = setTimeout(() => {
-    fs.writeSync(fd, `\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`);
+    try { fs.writeSync(fd, `\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`); } catch { /* */ }
     try { child.kill('SIGKILL'); } catch { /* already dead */ }
   }, MAX_INVESTIGATION_DURATION_MS);
   if (watchdog.unref) watchdog.unref();
@@ -1017,13 +1123,15 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     });
     broadcast();
 
-    const res = await executeJob(job, runDir, defaultCwd, async (pid) => {
+    const res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
       await mutate((s) => {
         const idx = s.jobs.findIndex((x) => x.slug === job.slug);
         if (idx >= 0) {
-          s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt };
+          s.jobs[idx].sessionId = sessionId;
+          s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
         }
       });
+      broadcast();
     });
 
     if (res.rateLimited) {
@@ -1306,11 +1414,7 @@ function registerScheduleHandlers() {
     } catch (e) {
       return { ok: false, error: 'invalid slug' };
     }
-    // Containment check after path.join.
-    const resolved = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
-    if (!resolved.startsWith(PRDS_DIR + path.sep)) {
-      return { ok: false, error: 'invalid slug' };
-    }
+    if (!safeSlugPath(slug)) return { ok: false, error: 'invalid slug' };
     const found = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return false;
@@ -1406,10 +1510,8 @@ function registerScheduleHandlers() {
     } catch {
       return { ok: false, error: 'invalid slug' };
     }
-    const filePath = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
-    if (!filePath.startsWith(PRDS_DIR + path.sep)) {
-      return { ok: false, error: 'invalid slug' };
-    }
+    const filePath = safeSlugPath(slug);
+    if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
       const text = await fsp.readFile(filePath, 'utf8');
       return { ok: true, text };
@@ -1426,6 +1528,8 @@ function registerScheduleHandlers() {
     } catch {
       return { ok: false, error: 'invalid slug or runId' };
     }
+    // Defense-in-depth: re-check containment after path.resolve even though
+    // SLUG_RE / RUN_ID_RE already forbid path separators.
     const logPath = path.resolve(path.join(RUNS_DIR, runId, `${slug}.log`));
     if (!logPath.startsWith(RUNS_DIR + path.sep)) {
       return { ok: false, error: 'invalid slug or runId' };
@@ -1438,21 +1542,29 @@ function registerScheduleHandlers() {
     }
   });
 
-  const PRD_WRITE_MAX_BYTES = 256 * 1024;
-  const SLUG_RE = /^[A-Za-z0-9._-]{1,128}$/;
-
-  ipcMain.handle('schedule:write-prd', async (_e, { slug, body }) => {
-    if (!SLUG_RE.test(slug)) throw new Error(`invalid slug: ${slug}`);
-    if (typeof body !== 'string') throw new Error('body must be string');
-    if (Buffer.byteLength(body, 'utf8') > PRD_WRITE_MAX_BYTES) throw new Error('body too large');
-    const file = path.join(PRDS_DIR, `${slug}.md`);
-    const resolved = path.resolve(file);
-    if (!resolved.startsWith(PRDS_DIR + path.sep)) throw new Error('path escape');
+  ipcMain.handle('schedule:write-prd', async (_e, payload) => {
+    const { schemas: s } = require('./ipcSchemas.cjs');
+    let parsed;
+    try { parsed = s.scheduleWritePrd.parse(payload); }
+    catch (e) { return { ok: false, error: e?.message ?? 'invalid payload' }; }
+    const resolved = safeSlugPath(parsed.slug);
+    if (!resolved) return { ok: false, error: 'invalid slug' };
     const tmp = `${resolved}.${process.pid}.${Date.now()}.tmp`;
-    await fsp.writeFile(tmp, body, { encoding: 'utf8', mode: 0o644 });
-    await fsp.rename(tmp, resolved);
-    const stat = await fsp.stat(resolved);
-    return { ok: true, bytesWritten: stat.size };
+    try {
+      await fsp.writeFile(tmp, parsed.body, { encoding: 'utf8', mode: 0o644 });
+      await fsp.rename(tmp, resolved);
+    } catch (e) {
+      // Best-effort cleanup so a botched rename doesn't litter the prds/ dir
+      // with .tmp files (matches the orphan-cleanup pattern in queueOps.retag).
+      try { await fsp.unlink(tmp); } catch { /* */ }
+      return { ok: false, error: e?.message ?? 'write failed' };
+    }
+    try {
+      const stat = await fsp.stat(resolved);
+      return { ok: true, bytesWritten: stat.size };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? 'stat failed' };
+    }
   });
 
   ipcMain.handle('schedule:list-prds', async () => {
@@ -1532,7 +1644,7 @@ async function init() {
 
   // Supervisor: probe running jobs for wedged poll-loops.
   if (process.env.SM_SUPERVISOR_DISABLE !== '1') {
-    supervisor.startSupervisor({ readQueue, mutate });
+    supervisor.startSupervisor({ readQueue });
   }
 
   // Heartbeat: once per minute, log queue state for 24h visibility.

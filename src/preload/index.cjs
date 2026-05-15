@@ -162,9 +162,38 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('schedule:state', listener);
       return () => ipcRenderer.removeListener('schedule:state', listener);
     },
+    // Bundle D — queue ops (queueOps.cjs).
+    lintQueue: () => ipcRenderer.invoke('schedule:lint-queue'),
+    archivePrds: (slugs) => ipcRenderer.invoke('schedule:archive-prd', { slugs }),
+    retagPrds: (items) => ipcRenderer.invoke('schedule:retag-prd', { items }),
   },
   supervisor: {
     tickNow: () => ipcRenderer.invoke('supervisor:tick-now'),
     getLog: () => ipcRenderer.invoke('supervisor:get-log'),
+  },
+  teams: {
+    list: () => ipcRenderer.invoke('teams:list'),
+  },
+  plugins: {
+    install: (payload) => ipcRenderer.invoke('plugins:install', payload),
+    onInstallProgress: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('plugins:install-progress', listener);
+      return () => ipcRenderer.removeListener('plugins:install-progress', listener);
+    },
+  },
+  memory: {
+    list: (workspace) => ipcRenderer.invoke('memory:list', workspace ? { workspace } : {}),
+    read: (name, workspace) => ipcRenderer.invoke('memory:read', workspace ? { name, workspace } : { name }),
+    write: (name, content, workspace) =>
+      ipcRenderer.invoke('memory:write', workspace ? { name, content, workspace } : { name, content }),
+    delete: (name, workspace) =>
+      ipcRenderer.invoke('memory:delete', workspace ? { name, workspace } : { name }),
+    create: (name, description, workspace) => {
+      const payload = { name };
+      if (description) payload.description = description;
+      if (workspace) payload.workspace = workspace;
+      return ipcRenderer.invoke('memory:create', payload);
+    },
   },
 });

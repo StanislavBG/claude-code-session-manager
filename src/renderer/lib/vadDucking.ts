@@ -13,12 +13,11 @@ import {
   type RecognitionHandle,
   VAD_DUCKED_POSITIVE,
   VAD_DUCKED_NEGATIVE,
+  VAD_DEFAULT_POSITIVE as VAD_RESTORED_POSITIVE,
+  VAD_DEFAULT_NEGATIVE as VAD_RESTORED_NEGATIVE,
 } from './speechRecognition'
 import { onSpeakStart, onSpeakEnd, isSpeaking } from './speechSynthesis'
 import { log } from './logger'
-
-const VAD_RESTORED_POSITIVE = 0.5
-const VAD_RESTORED_NEGATIVE = 0.35
 
 /**
  * Bind ducking to a live recognition handle. Call the returned function

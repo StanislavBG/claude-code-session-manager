@@ -20,9 +20,12 @@ const ptySpawn = z.object({
 
 const ptyTabId = z.object({ tabId: z.string().min(1).max(128) });
 
+// 64 KiB cap per pty:write — typewriter input is bounded; a renderer firing
+// megabytes per call is either a bug or an attack. Block it at the boundary.
+const PTY_WRITE_MAX_BYTES = 64 * 1024;
 const ptyWrite = z.object({
   tabId: z.string().min(1).max(128),
-  data: z.string(),
+  data: z.string().max(PTY_WRITE_MAX_BYTES),
 });
 
 const ptyResize = z.object({
@@ -96,6 +99,34 @@ const scheduleReadLog = z.object({
   runId: z.string().regex(SCHEDULE_RUN_ID_RE),
 });
 
+// PRD write: slug + body (≤256 KiB, matches PRD_WRITE_MAX_BYTES in scheduler.cjs).
+const PRD_WRITE_MAX_BYTES = 256 * 1024;
+const scheduleWritePrd = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  body: z.string().refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= PRD_WRITE_MAX_BYTES,
+    `body must be ≤ ${PRD_WRITE_MAX_BYTES} bytes`,
+  ),
+});
+
+// Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
+const scheduleArchivePrd = z.object({
+  slugs: z.array(z.string().regex(SCHEDULE_SLUG_RE)).min(1).max(500),
+});
+
+const scheduleRetagItem = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  parallelGroup: z.number().int().min(0).max(999).optional(),
+  estimateMinutes: z.number().int().min(1).max(100000).optional(),
+}).refine(
+  (it) => it.parallelGroup !== undefined || it.estimateMinutes !== undefined,
+  'at least one of parallelGroup or estimateMinutes is required',
+);
+
+const scheduleRetagPrd = z.object({
+  items: z.array(scheduleRetagItem).min(1).max(500),
+});
+
 // ──────────────────────────────────────────── Projects
 const ENCODED_SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -135,17 +166,109 @@ const setConfigSchema = z.object({
   }).optional(),
 }).strict();
 
+// ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
+// Workspace-scoped markdown store at ~/.claude/session-manager/memories/<ws>/.
+// Slug regex must match memoryTool.cjs SLUG_RE; workspace regex matches its
+// encodeWorkspace() output (alphanumeric + dash) plus 'default'.
+const MEMORY_WORKSPACE_RE = /^[a-zA-Z0-9-_]{1,256}$/;
+const MEMORY_SLUG_RE = /^[a-z0-9-_]+\.md$/;
+// 1 MiB hard cap — matches MAX_FILE_BYTES in memoryTool.cjs.
+const MEMORY_MAX_BYTES = 1024 * 1024;
+
+const memoryList = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+}).strict();
+
+const memoryRead = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  name: z.string().regex(MEMORY_SLUG_RE),
+}).strict();
+
+const memoryWrite = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  name: z.string().regex(MEMORY_SLUG_RE),
+  content: z.string().max(MEMORY_MAX_BYTES),
+}).strict();
+
+const memoryDelete = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  name: z.string().regex(MEMORY_SLUG_RE),
+}).strict();
+
+const memoryCreate = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  name: z.string().regex(MEMORY_SLUG_RE),
+  description: z.string().max(2048).optional(),
+}).strict();
+
 // ──────────────────────────────────────────── History
 const DATE_YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
 const historyAggregate = z.object({
   fromDate: z.string().regex(DATE_YYYY_MM_DD).optional(),
   toDate: z.string().regex(DATE_YYYY_MM_DD).optional(),
-}).optional().nullable();
+}).nullish();
+
+// ──────────────────────────────────────────── Voice (F1/F5/F7/F8)
+// Mirrors voiceSettings.cjs isValidConfig / isValidDevicePref / isValid…
+// validators (ad-hoc on disk). Schemas here gate the IPC boundary so a
+// malformed renderer payload can never reach the file writer.
+const VOICE_ACCELERATOR_RE = /^(CommandOrControl|CmdOrCtrl|Cmd|Command|Ctrl|Control|Alt|Option|Shift|Super|Meta)(\+(CommandOrControl|CmdOrCtrl|Cmd|Command|Ctrl|Control|Alt|Option|Shift|Super|Meta))*\+([A-Z]|[0-9]|F([1-9]|1[0-9]|2[0-4])|Space|Tab|Enter|Backspace|Delete|Escape|Esc)$/;
+
+const voiceSetHotkey = z.object({
+  accelerator: z.string().regex(VOICE_ACCELERATOR_RE),
+  mode: z.enum(['hold', 'toggle']),
+  global: z.boolean(),
+  schemaVersion: z.number().int().optional(),
+}).passthrough();
+
+const voiceSetDevicePref = z.object({
+  selectedDeviceId: z.string().max(256).nullable(),
+  selectedLabel: z.string().max(256).nullable(),
+  schemaVersion: z.number().int().optional(),
+}).passthrough();
+
+const voiceSetTurnDetector = z.object({
+  enabled: z.boolean(),
+  mode: z.enum(['audio', 'text', 'off']),
+  schemaVersion: z.number().int().optional(),
+}).passthrough();
+
+const voiceSetRecording = z.boolean();
+
+// ──────────────────────────────────────────── Hooks / git / plugins
+// Free-form env: keys must be safe identifier shape (no '=' / NUL / weird
+// unicode), values must be plain strings, both length-capped. We don't
+// restrict the key set — Hooks can legitimately need any env name — but we
+// do refuse anything that wouldn't survive a child_process env-block round
+// trip.
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const appTestFireHook = z.object({
+  command: z.string().min(1).max(16 * 1024),
+  env: z.record(z.string().regex(ENV_KEY_RE).max(256), z.string().max(8 * 1024))
+    .nullable()
+    .optional(),
+  payload: z.string().max(1 * 1024 * 1024).optional(),
+  timeoutMs: z.number().int().min(0).max(30_000).optional(),
+}).passthrough();
+
+const appGitBranch = z.object({
+  cwd: z.string().min(1).max(4096),
+}).passthrough();
+
+// Plugin install: mirrors pluginInstall.cjs SLUG_RE + length cap. Defense in
+// depth — install() re-checks; the schema rejects earlier.
+const PLUGIN_SLUG_RE = /^[a-z0-9\-/]+$/;
+const pluginsInstall = z.object({
+  slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
+}).passthrough();
 
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
- * parses the payload before calling the original.
+ * parses the payload before calling the original. On invalid payload throws
+ * a ZodError (caught by Electron's IPC harness → rejected promise). Existing
+ * call sites already rely on throw semantics for malformed input, so we keep
+ * that behavior for backwards compatibility.
  */
 function validated(schema, handler) {
   return (_event, payload) => {
@@ -155,6 +278,10 @@ function validated(schema, handler) {
 }
 
 module.exports = {
+  // Centralized slug regex — used by scheduler.cjs and queueOps.cjs for
+  // direct test()/match() containment checks alongside the zod parses.
+  SCHEDULE_SLUG_RE,
+  SCHEDULE_RUN_ID_RE,
   schemas: {
     ptySpawn,
     ptyTabId,
@@ -171,12 +298,27 @@ module.exports = {
     sessionsPayload,
     scheduleSlug,
     scheduleReadLog,
+    scheduleWritePrd,
+    scheduleArchivePrd,
+    scheduleRetagPrd,
     setConfigSchema,
     openInEditor,
     openInFinder,
     openInTerminal,
     archiveProject,
     historyAggregate,
+    voiceSetHotkey,
+    voiceSetDevicePref,
+    voiceSetTurnDetector,
+    voiceSetRecording,
+    appTestFireHook,
+    appGitBranch,
+    pluginsInstall,
+    memoryList,
+    memoryRead,
+    memoryWrite,
+    memoryDelete,
+    memoryCreate,
   },
   validated,
 };

@@ -4,7 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
-const { schemas } = require('./ipcSchemas.cjs');
+const { schemas, validated } = require('./ipcSchemas.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
 const configMgr = require('./config.cjs');
@@ -17,9 +17,13 @@ const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
+const teams = require('./teams.cjs');
+const queueOps = require('./queueOps.cjs');
+const pluginInstall = require('./pluginInstall.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs');
+const memoryTool = require('./memoryTool.cjs');
 
 let mainWindow = null;
 let rebooting = false;
@@ -110,6 +114,7 @@ async function rebootApp() {
     });
     scheduler.attachWindow(mainWindow);
     watchers.attachWindow(mainWindow);
+    pluginInstall.attachWindow(mainWindow);
     rebooting = false;
     return;
   }
@@ -211,10 +216,18 @@ ipcMain.on('app:reboot-app', () => rebootApp());
 // string. Timeout is enforced via SIGKILL on a timer because spawn's built-in
 // `timeout` option only sends SIGTERM, which a wedged shell may ignore.
 ipcMain.handle('app:test-fire-hook', async (_e, payload) => {
-  const command = typeof payload?.command === 'string' ? payload.command : '';
-  const env = payload && typeof payload.env === 'object' && payload.env !== null ? payload.env : null;
-  const stdin = typeof payload?.payload === 'string' ? payload.payload : '';
-  const requested = Number(payload?.timeoutMs);
+  // Zod-validate up front so a malformed renderer payload can never reach the
+  // shell. We `safeParse` (not throw) because the existing return shape is
+  // `{ exitCode, stdout, stderr, durationMs }` — callers (Hooks.tsx) don't
+  // wrap the call in try/catch.
+  const parsed = schemas.appTestFireHook.safeParse(payload);
+  if (!parsed.success) {
+    return { exitCode: -1, stdout: '', stderr: `invalid payload: ${parsed.error.message}`, durationMs: 0 };
+  }
+  const command = parsed.data.command;
+  const env = parsed.data.env ?? null;
+  const stdin = typeof parsed.data.payload === 'string' ? parsed.data.payload : '';
+  const requested = parsed.data.timeoutMs;
   const timeoutMs = Number.isFinite(requested) && requested > 0
     ? Math.min(requested, 30_000)
     : 5_000;
@@ -322,8 +335,11 @@ ipcMain.handle('app:test-fire-hook', async (_e, payload) => {
 // render `—` without branching on error shape. 1s ceiling keeps a wedged git
 // (network filesystem, hung index lock) from blocking the renderer.
 ipcMain.handle('app:git-branch', async (_e, payload) => {
-  const cwd = payload && typeof payload.cwd === 'string' ? payload.cwd : null;
-  if (!cwd) return null;
+  // safeParse (not throw) so a malformed call resolves to null — matches the
+  // existing semantics where StatusBar renders `—` on any failure.
+  const parsed = schemas.appGitBranch.safeParse(payload);
+  if (!parsed.success) return null;
+  const { cwd } = parsed.data;
   return await new Promise((resolve) => {
     execFile('git', ['branch', '--show-current'], { cwd, timeout: 1000, windowsHide: true }, (err, stdout) => {
       if (err) { resolve(null); return; }
@@ -332,6 +348,44 @@ ipcMain.handle('app:git-branch', async (_e, payload) => {
     });
   });
 });
+
+// Containment check used by the open-in-{editor,finder,terminal} handlers.
+// Bare `startsWith(home)` matches `/home/bilkoEVIL` when home=`/home/bilko` —
+// the classic prefix-trap. Resolve real paths (follow symlinks) and require
+// either exact equality or a separator boundary. Returns null on success or
+// an error string on failure. ENOENT (cwd doesn't exist) is a soft fail —
+// downstream `spawn`/`shell.openPath` will surface a more precise error.
+function checkInsideHome(cwd) {
+  if (typeof cwd !== 'string' || !cwd) return 'cwd outside home';
+  const home = os.homedir();
+  let realCwd;
+  let realHome;
+  try {
+    realHome = fs.realpathSync(home);
+  } catch {
+    return 'home directory unresolved';
+  }
+  try {
+    realCwd = fs.realpathSync(cwd);
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      // Fall through to the existing error path: the resolved-but-nonexistent
+      // path still has to be home-contained to avoid information disclosure
+      // via stat-probes (`/etc/secrets/...` → editor errors that reveal
+      // existence).
+      const resolved = path.resolve(cwd);
+      if (resolved !== realHome && !resolved.startsWith(realHome + path.sep)) {
+        return 'cwd outside home';
+      }
+      return null;
+    }
+    return 'cwd outside home';
+  }
+  if (realCwd !== realHome && !realCwd.startsWith(realHome + path.sep)) {
+    return 'cwd outside home';
+  }
+  return null;
+}
 
 // Returns the resolved path of a command, or null if not found on PATH.
 function findCommand(name) {
@@ -348,8 +402,8 @@ function findCommand(name) {
 
 ipcMain.handle('app:open-in-editor', async (_e, payload) => {
   const { cwd, editor } = schemas.openInEditor.parse(payload);
-  const home = os.homedir();
-  if (!path.resolve(cwd).startsWith(home)) throw new Error('cwd outside home');
+  const err = checkInsideHome(cwd);
+  if (err) throw new Error(err);
   const candidates = (editor && editor !== 'auto')
     ? [editor]
     : [process.env.VISUAL, process.env.EDITOR, 'code', 'cursor', 'subl', 'nano'].filter(Boolean);
@@ -364,16 +418,16 @@ ipcMain.handle('app:open-in-editor', async (_e, payload) => {
 
 ipcMain.handle('app:open-in-finder', async (_e, payload) => {
   const { cwd } = schemas.openInFinder.parse(payload);
-  const home = os.homedir();
-  if (!path.resolve(cwd).startsWith(home)) throw new Error('cwd outside home');
+  const err = checkInsideHome(cwd);
+  if (err) throw new Error(err);
   await shell.openPath(cwd);
   return { ok: true };
 });
 
 ipcMain.handle('app:open-in-terminal', async (_e, payload) => {
   const { cwd } = schemas.openInTerminal.parse(payload);
-  const home = os.homedir();
-  if (!path.resolve(cwd).startsWith(home)) throw new Error('cwd outside home');
+  const err = checkInsideHome(cwd);
+  if (err) throw new Error(err);
   if (process.platform === 'linux') {
     const terms = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
     for (const t of terms) {
@@ -412,7 +466,11 @@ voiceHotkey.registerHotkeyHandlers();
 voiceWizard.registerWizardHandlers();
 scheduler.registerScheduleHandlers();
 watchers.registerWatcherHandlers();
+teams.registerTeamsHandlers();
+queueOps.registerQueueOpsHandlers();
 registerHistoryAggregatorHandlers();
+pluginInstall.registerPluginInstallHandlers();
+memoryTool.registerMemoryHandlers();
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());
@@ -497,15 +555,19 @@ app.whenReady().then(async () => {
   });
 
   // Inject Content-Security-Policy for all renderer responses.
+  // frame-src / frame-ancestors locked to 'none' — the app is a top-level
+  // Electron BrowserWindow; iframes/embedding have no legitimate use.
   const CSP = [
     "default-src 'self'",
     "script-src 'self' 'wasm-unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' https://api.anthropic.com",
+    "connect-src 'self' https://api.anthropic.com https://registry.npmjs.org",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
   ].join('; ') + ';';
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
     cb({
@@ -595,6 +657,7 @@ app.whenReady().then(async () => {
   });
   scheduler.attachWindow(mainWindow);
   watchers.attachWindow(mainWindow);
+  pluginInstall.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });

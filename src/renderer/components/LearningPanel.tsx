@@ -4,42 +4,40 @@ import { LEARNING_CONTENT, type LearningContent } from './learningContent'
 
 const STORAGE_KEY = 'sm.learningPanel.collapsed'
 
-/** Per-tab collapse state, persisted to localStorage. New users see the panel
- *  expanded by default the first time they visit each tab; once collapsed it
- *  stays collapsed for that tab until they expand it again. */
-function loadCollapsed(): Record<string, boolean> {
+function loadCollapsed(): boolean {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    return typeof parsed === 'object' && parsed !== null ? parsed : {}
+    if (raw === null) return false
+    // Legacy: was a per-tab JSON map. Migrate "any tab collapsed" → globally collapsed.
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw)
+      return !!(parsed && typeof parsed === 'object' && Object.values(parsed).some(Boolean))
+    }
+    return raw === '1' || raw === 'true'
   } catch {
-    return {}
+    return false
   }
 }
 
-function saveCollapsed(state: Record<string, boolean>) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch { /* */ }
+function saveCollapsed(collapsed: boolean) {
+  try { localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0') } catch { /* */ }
 }
 
 export function LearningPanel({ active }: { active: NavKey }) {
-  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(() => loadCollapsed())
-
-  const collapsed = collapsedMap[active] ?? false
+  const [collapsed, setCollapsed] = useState<boolean>(() => loadCollapsed())
 
   const toggle = useCallback(() => {
-    setCollapsedMap((prev) => {
-      const next = { ...prev, [active]: !(prev[active] ?? false) }
+    setCollapsed((prev) => {
+      const next = !prev
       saveCollapsed(next)
       return next
     })
-  }, [active])
+  }, [])
 
-  // Cross-tab sync: if another window updates the same key, mirror it here.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return
-      setCollapsedMap(loadCollapsed())
+      setCollapsed(loadCollapsed())
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)

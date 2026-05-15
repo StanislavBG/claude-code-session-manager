@@ -1,6 +1,12 @@
 export const SCENE_W = 800
-export const SCENE_H = 480
+export const SCENE_H = 600
 export const FLOOR_Y = 305
+
+// Scheduler dock (lower workshop strip)
+export const SCHED_DOCK_Y = 484
+export const SCHED_DOCK_H = 116
+export const SCHED_DOCK_FLOOR_Y = 580
+export const SCHED_BOT_SCALE = 0.3
 
 // Bench
 export const BENCH_L = 185

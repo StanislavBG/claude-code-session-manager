@@ -12,6 +12,7 @@
 
 const { ipcMain } = require('electron');
 const voiceSettings = require('./voiceSettings.cjs');
+const { schemas, validated } = require('./ipcSchemas.cjs');
 
 function registerWizardHandlers() {
   ipcMain.handle('voice:wizard-state', async () => {
@@ -42,13 +43,10 @@ function registerWizardHandlers() {
     return await voiceSettings.loadTurnDetector();
   });
 
-  ipcMain.handle('voice:set-turn-detector', async (_e, state) => {
-    if (!voiceSettings.isValidTurnDetectorState(state)) {
-      throw new Error('Invalid turn-detector state payload');
-    }
+  ipcMain.handle('voice:set-turn-detector', validated(schemas.voiceSetTurnDetector, async (state) => {
     await voiceSettings.saveTurnDetector(state);
     return { ok: true, state: await voiceSettings.loadTurnDetector() };
-  });
+  }));
 }
 
 module.exports = { registerWizardHandlers };

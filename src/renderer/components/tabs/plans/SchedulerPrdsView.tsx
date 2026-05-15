@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ScheduleStateSnapshot } from '../../../../preload/api'
+import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
 import { ListDetail } from '../../ui/ListDetail'
 import { EmptyState } from '../../ui/EmptyState'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
+import { Modal } from '../../ui/Modal'
 import { Tooltip } from '../../ui/Tooltip'
+import { parsePrdFile, serializePrdFile, type PrdFrontmatter } from '../../../lib/prdFrontmatter'
 
 type PrdStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unqueued'
 
@@ -17,26 +19,14 @@ interface PrdMeta {
   mtimeMs: number
 }
 
-function splitFrontmatter(raw: string): { frontmatter: Record<string, string>; body: string } {
-  if (!raw.startsWith('---\n')) return { frontmatter: {}, body: raw }
-  const end = raw.indexOf('\n---\n', 4)
-  if (end === -1) return { frontmatter: {}, body: raw }
-  const fm: Record<string, string> = {}
-  for (const line of raw.slice(4, end).split('\n')) {
-    const colon = line.indexOf(':')
-    if (colon === -1) continue
-    fm[line.slice(0, colon).trim()] = line.slice(colon + 1).trim()
-  }
-  return { frontmatter: fm, body: raw.slice(end + 5) }
-}
-
 function validateDraft(draft: string): string | null {
-  const { frontmatter: fm } = splitFrontmatter(draft)
+  const { frontmatter: fm } = parsePrdFile(draft)
   if (!fm.title?.trim()) return 'frontmatter "title" is required'
   if (!fm.cwd?.trim()) return 'frontmatter "cwd" is required'
   if (fm.estimateMinutes !== undefined) {
-    const v = Number(fm.estimateMinutes)
-    if (!Number.isInteger(v) || v <= 0) return '"estimateMinutes" must be a positive integer'
+    if (!Number.isInteger(fm.estimateMinutes) || fm.estimateMinutes <= 0) {
+      return '"estimateMinutes" must be a positive integer'
+    }
   }
   return null
 }
@@ -107,10 +97,27 @@ export function SchedulerPrdsView() {
   const [body, setBody] = useState('')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  // Bundle E — structured editor state. `editMode` switches between the
+  // structured form (default) and the raw Monaco editor (escape hatch).
+  // `formFm` and `formBody` hold the in-flight structured form fields;
+  // `draft` holds the raw text. Switching modes round-trips through
+  // serializePrdFile / parsePrdFile so in-flight work is preserved.
+  const [editMode, setEditMode] = useState<'structured' | 'raw'>('structured')
+  const [formFm, setFormFm] = useState<PrdFrontmatter>({})
+  const [formBody, setFormBody] = useState('')
+  const [showCustomFields, setShowCustomFields] = useState(false)
+  const [lintFindings, setLintFindings] = useState<LintFinding[]>([])
   const [saveError, setSaveError] = useState<string | null>(null)
   const [logText, setLogText] = useState<string | null>(null)
   const [showLog, setShowLog] = useState(false)
   const [loading, setLoading] = useState(true)
+  // Bundle D — multi-select state. Set semantics avoid accidental O(N^2) on
+  // toggle for the ~200-PRD list seen in practice.
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [retagOpen, setRetagOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkError, setBulkError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -156,6 +163,12 @@ export function SchedulerPrdsView() {
         const text = res.ok && res.text != null ? res.text : ''
         setBody(text)
         setDraft(text)
+        const parsed = parsePrdFile(text)
+        setFormFm(parsed.frontmatter)
+        setFormBody(parsed.body)
+        setEditMode('structured')
+        setShowCustomFields(false)
+        setLintFindings([])
         setEditing(false)
         setSaveError(null)
         setLogText(null)
@@ -173,25 +186,85 @@ export function SchedulerPrdsView() {
   )
   const status: PrdStatus = job == null ? 'unqueued' : (job.status as PrdStatus)
 
-  const { frontmatter: fm, body: mdBody } = useMemo(() => splitFrontmatter(body), [body])
+  const { frontmatter: fm, body: mdBody } = useMemo(() => parsePrdFile(body), [body])
+  const customFieldKeys = useMemo(
+    () => (fm.extras ? Object.keys(fm.extras) : []),
+    [fm.extras],
+  )
+
+  // Build the text that would be written. Structured-mode work is rendered
+  // back to YAML via serializePrdFile; raw mode uses draft verbatim.
+  function buildPayload(): string {
+    if (editMode === 'raw') return draft
+    return serializePrdFile(formFm, formBody)
+  }
+
+  async function runLint(forSlug: string) {
+    try {
+      const res = await window.api.schedule.lintQueue()
+      const report = res.reports.find((r) => r.slug === forSlug)
+      setLintFindings(report?.findings ?? [])
+    } catch {
+      setLintFindings([])
+    }
+  }
 
   async function handleSave() {
     if (!selectedSlug) return
-    const err = validateDraft(draft)
+    const payload = buildPayload()
+    const err = validateDraft(payload)
     if (err) {
       setSaveError(err)
       return
     }
     setSaveError(null)
     try {
-      await window.api.schedule.writePrd(selectedSlug, draft)
-      setBody(draft)
+      const res = await window.api.schedule.writePrd(selectedSlug, payload)
+      if (!res.ok) {
+        setSaveError(res.error)
+        return
+      }
+      setBody(payload)
+      setDraft(payload)
       setEditing(false)
       const list = await window.api.schedule.listPrds()
       setPrds(list)
+      // Inline linter — surface findings for THIS slug inline. Runs after
+      // save so the on-disk text matches what we lint.
+      runLint(selectedSlug)
     } catch (e: unknown) {
       setSaveError(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  // Switching modes preserves in-flight work both directions.
+  function switchToRaw() {
+    setDraft(serializePrdFile(formFm, formBody))
+    setEditMode('raw')
+  }
+  function switchToStructured() {
+    const parsed = parsePrdFile(draft)
+    setFormFm(parsed.frontmatter)
+    setFormBody(parsed.body)
+    setEditMode('structured')
+  }
+
+  function beginEdit() {
+    // Re-seed the form from current on-disk body so cancel-then-edit is clean.
+    const parsed = parsePrdFile(body)
+    setFormFm(parsed.frontmatter)
+    setFormBody(parsed.body)
+    setDraft(body)
+    setEditMode('structured')
+    setEditing(true)
+    setSaveError(null)
+  }
+
+  async function pickCwd() {
+    try {
+      const dir = await window.api.app.pickDirectory()
+      if (dir) setFormFm((prev) => ({ ...prev, cwd: dir }))
+    } catch { /* user cancelled */ }
   }
 
   async function handleShowLog() {
@@ -214,69 +287,206 @@ export function SchedulerPrdsView() {
 
   if (loading) return <EmptyState title="loading PRDs…" />
 
+  // Bundle D — multi-select handlers.
+  const toggleChecked = (slug: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+  }
+  const allVisibleChecked = prds.length > 0 && prds.every((p) => checked.has(p.slug))
+  const someVisibleChecked = !allVisibleChecked && prds.some((p) => checked.has(p.slug))
+  const toggleAllVisible = () => {
+    setChecked((prev) => {
+      if (allVisibleChecked) {
+        const next = new Set(prev)
+        for (const p of prds) next.delete(p.slug)
+        return next
+      }
+      const next = new Set(prev)
+      for (const p of prds) next.add(p.slug)
+      return next
+    })
+  }
+  const clearChecked = () => setChecked(new Set())
+
+  async function refreshPrds() {
+    try {
+      const list = await window.api.schedule.listPrds()
+      setPrds(list)
+    } catch { /* */ }
+  }
+
+  // Reset N pending: idempotent per-slug calls. resetJob is already
+  // serialized in scheduler.cjs's mutate() so concurrency is safe.
+  async function bulkReset() {
+    setBulkBusy(true)
+    setBulkError(null)
+    try {
+      const slugs = [...checked]
+      for (const slug of slugs) {
+        await window.api.schedule.resetJob(slug)
+      }
+      clearChecked()
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   const sidebar = (
     <div className="py-2">
       {prds.length === 0 ? (
         <div className="px-3 py-2 text-xs text-fg-faint">no PRDs found</div>
       ) : (
-        prds.map((p) => {
-          const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
-          const s: PrdStatus = j == null ? 'unqueued' : (j.status as PrdStatus)
-          const sel = p.slug === selectedSlug
-          return (
-            <button
-              key={p.slug}
-              onClick={() => selectSlug(p.slug)}
-              className={`w-full text-left px-3 py-2 border-l-2 ${
-                sel ? 'bg-bg-hi border-accent' : 'border-transparent hover:bg-bg-hi'
-              }`}
-            >
-              <div className="font-mono text-[11px] text-fg truncate">{p.slug}</div>
-              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                <StatusPill status={s} />
-                {p.estimateMinutes != null && (
-                  <span className="text-[10px] text-fg-faint">{p.estimateMinutes}m</span>
-                )}
-                <span className="text-[10px] text-fg-faint">g{p.parallelGroup}</span>
+        <>
+          {/* Select-all header */}
+          <label
+            className="flex items-center gap-2 px-3 py-1 border-b border-line text-[10px] text-fg-faint"
+            title="Select all visible PRDs"
+          >
+            <input
+              type="checkbox"
+              checked={allVisibleChecked}
+              ref={(el) => { if (el) el.indeterminate = someVisibleChecked }}
+              onChange={toggleAllVisible}
+              className="cursor-pointer"
+            />
+            <span>{checked.size > 0 ? `${checked.size} selected` : `${prds.length} PRDs`}</span>
+            {checked.size > 0 && (
+              <button
+                type="button"
+                onClick={clearChecked}
+                className="ml-auto text-fg-faint hover:text-fg-dim underline"
+              >
+                clear
+              </button>
+            )}
+          </label>
+          {prds.map((p) => {
+            const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
+            const s: PrdStatus = j == null ? 'unqueued' : (j.status as PrdStatus)
+            const sel = p.slug === selectedSlug
+            const isChecked = checked.has(p.slug)
+            return (
+              <div
+                key={p.slug}
+                className={`flex items-stretch w-full border-l-2 ${
+                  sel ? 'bg-bg-hi border-accent' : 'border-transparent hover:bg-bg-hi'
+                }`}
+              >
+                <label
+                  className="flex items-center px-2 cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                  title="Select for bulk action"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleChecked(p.slug)}
+                    className="cursor-pointer"
+                  />
+                </label>
+                <button
+                  onClick={() => selectSlug(p.slug)}
+                  className="flex-1 text-left px-1 py-2 min-w-0"
+                >
+                  <div className="font-mono text-[11px] text-fg truncate">{p.slug}</div>
+                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                    <StatusPill status={s} />
+                    {p.estimateMinutes != null && (
+                      <span className="text-[10px] text-fg-faint">{p.estimateMinutes}m</span>
+                    )}
+                    <span className="text-[10px] text-fg-faint">g{p.parallelGroup}</span>
+                  </div>
+                </button>
               </div>
-            </button>
-          )
-        })
+            )
+          })}
+        </>
       )}
     </div>
   )
 
+  // Bulk action bar — rendered above the detail pane when there's a selection.
+  const bulkBar = checked.size > 0 ? (
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-bg-elev/60 flex-wrap">
+      <span className="text-[10px] text-fg-faint font-mono">{checked.size} selected</span>
+      <TBtn
+        label="Reset to pending"
+        tip="Reset each selected job to pending status (idempotent)"
+        onClick={bulkReset}
+        disabled={bulkBusy}
+      />
+      <TBtn
+        label="Archive…"
+        tip="Move selected PRD files to prds-archived/<timestamp>/ (never deletes)"
+        onClick={() => setArchiveOpen(true)}
+        disabled={bulkBusy}
+      />
+      <TBtn
+        label="Retag…"
+        tip="Rewrite parallelGroup and/or estimateMinutes frontmatter"
+        onClick={() => setRetagOpen(true)}
+        disabled={bulkBusy}
+      />
+      <button
+        type="button"
+        onClick={clearChecked}
+        className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg-dim ml-auto"
+        title="Clear selection"
+      >
+        clear
+      </button>
+      {bulkError && (
+        <div className="w-full text-[10px] text-red-300 mt-1">{bulkError}</div>
+      )}
+    </div>
+  ) : null
+
   const detail =
     selectedSlug == null ? (
-      <EmptyState title="select a PRD" />
+      <div>
+        {bulkBar}
+        <EmptyState title="select a PRD" />
+      </div>
     ) : (
       <div>
+        {bulkBar}
         {/* Toolbar */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-line flex-wrap">
           <StatusPill status={status} />
           <div className="flex-1" />
           {editing ? (
             <>
+              <TBtn
+                label={editMode === 'structured' ? 'View raw' : 'View structured'}
+                tip={
+                  editMode === 'structured'
+                    ? 'Switch to raw Monaco editor (in-flight work preserved)'
+                    : 'Switch back to structured form (in-flight work preserved)'
+                }
+                onClick={editMode === 'structured' ? switchToRaw : switchToStructured}
+              />
               <TBtn label="Save" tip="Save PRD to disk" onClick={handleSave} primary />
               <TBtn
                 label="Cancel"
                 tip="Discard edits"
                 onClick={() => {
                   setDraft(body)
+                  const parsed = parsePrdFile(body)
+                  setFormFm(parsed.frontmatter)
+                  setFormBody(parsed.body)
                   setEditing(false)
                   setSaveError(null)
                 }}
               />
             </>
           ) : (
-            <TBtn
-              label="Edit"
-              tip="Edit this PRD"
-              onClick={() => {
-                setEditing(true)
-                setSaveError(null)
-              }}
-            />
+            <TBtn label="Edit" tip="Edit this PRD" onClick={beginEdit} />
           )}
           <TBtn
             label="Reset"
@@ -316,13 +526,26 @@ export function SchedulerPrdsView() {
 
         {/* Content */}
         {editing ? (
-          <div style={{ height: '600px' }}>
-            <MarkdownEditor
-              value={draft}
-              onChange={setDraft}
-              path={`/scheduler/prds/${selectedSlug}.md`}
+          editMode === 'raw' ? (
+            <div style={{ height: '600px' }}>
+              <MarkdownEditor
+                value={draft}
+                onChange={setDraft}
+                path={`/scheduler/prds/${selectedSlug}.md`}
+              />
+            </div>
+          ) : (
+            <StructuredPrdEditor
+              fm={formFm}
+              body={formBody}
+              onFmChange={setFormFm}
+              onBodyChange={setFormBody}
+              onPickCwd={pickCwd}
+              slug={selectedSlug}
+              showCustomFields={showCustomFields}
+              onToggleCustomFields={() => setShowCustomFields((v) => !v)}
             />
-          </div>
+          )
         ) : (
           <div className="p-4 max-w-3xl space-y-4">
             {/* Frontmatter card */}
@@ -331,13 +554,33 @@ export function SchedulerPrdsView() {
               <FmRow label="cwd">
                 <span className="font-mono">{fm.cwd || '—'}</span>
               </FmRow>
-              {fm.estimateMinutes && (
+              {fm.estimateMinutes != null && (
                 <FmRow label="estimateMinutes">{fm.estimateMinutes}</FmRow>
               )}
-              {fm.parallelGroup && <FmRow label="parallelGroup">{fm.parallelGroup}</FmRow>}
+              {fm.parallelGroup != null && (
+                <FmRow label="parallelGroup">{fm.parallelGroup}</FmRow>
+              )}
               <FmRow label="queued status">{status}</FmRow>
               {job?.finishedAt && (
                 <FmRow label="last run">{new Date(job.finishedAt).toLocaleString()}</FmRow>
+              )}
+              {customFieldKeys.length > 0 && (
+                <div className="pt-1 mt-1 border-t border-line/60">
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomFields((v) => !v)}
+                    className="text-[10px] text-fg-faint hover:text-fg-dim"
+                  >
+                    {showCustomFields ? '▾' : '▸'} custom fields ({customFieldKeys.length})
+                  </button>
+                  {showCustomFields && (
+                    <pre className="mt-1 text-[11px] text-fg-dim whitespace-pre-wrap font-mono leading-5">
+                      {customFieldKeys
+                        .map((k) => (fm.extras?.[k]?.lines ?? []).join('\n'))
+                        .join('\n')}
+                    </pre>
+                  )}
+                </div>
               )}
             </div>
 
@@ -348,6 +591,29 @@ export function SchedulerPrdsView() {
                 {mdBody || <span className="italic">empty body</span>}
               </pre>
             </div>
+
+            {/* Inline lint findings for THIS slug — populated after save. */}
+            {lintFindings.length > 0 && (
+              <div className="p-3 rounded border border-amber-400/40 bg-amber-900/10 text-xs space-y-1">
+                <div className="text-[10px] uppercase tracking-wide text-amber-300">
+                  lint findings ({lintFindings.length})
+                </div>
+                {lintFindings.map((f, idx) => (
+                  <div key={idx} className="font-mono text-[11px]">
+                    <span
+                      className={
+                        f.severity === 'error' ? 'text-red-300' : 'text-amber-300'
+                      }
+                    >
+                      [{f.severity}]
+                    </span>{' '}
+                    <span className="text-fg-faint">L{f.line}</span>{' '}
+                    <span className="text-fg-dim">{f.rule}</span>
+                    <div className="ml-6 text-fg-faint truncate">{f.snippet}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -373,5 +639,351 @@ export function SchedulerPrdsView() {
       </div>
     )
 
-  return <ListDetail sidebar={sidebar} detail={detail} sidebarWidth="14rem" />
+  async function confirmArchive() {
+    setBulkBusy(true)
+    setBulkError(null)
+    try {
+      const slugs = [...checked]
+      const res = await window.api.schedule.archivePrds(slugs)
+      if (!res.ok) {
+        setBulkError(res.error ?? 'archive failed')
+      } else {
+        clearChecked()
+        setArchiveOpen(false)
+        await refreshPrds()
+      }
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function confirmRetag(parallelGroup: number | null, estimateMinutes: number | null) {
+    setBulkBusy(true)
+    setBulkError(null)
+    try {
+      const items: RetagPrdItem[] = []
+      for (const slug of checked) {
+        const item: RetagPrdItem = { slug }
+        if (parallelGroup !== null) item.parallelGroup = parallelGroup
+        if (estimateMinutes !== null) item.estimateMinutes = estimateMinutes
+        items.push(item)
+      }
+      const res = await window.api.schedule.retagPrds(items)
+      if (!res.ok) {
+        setBulkError(res.error ?? 'retag failed')
+      } else {
+        clearChecked()
+        setRetagOpen(false)
+        await refreshPrds()
+        // If the currently-selected slug was retagged with a parallelGroup
+        // change, its slug may have moved; clear selection.
+        if (selectedSlug && res.results.some((r) => r.slug === selectedSlug && r.newSlug && r.newSlug !== r.slug)) {
+          setSelectedSlug(null)
+        }
+      }
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <ListDetail sidebar={sidebar} detail={detail} sidebarWidth="16rem" />
+      <ArchiveConfirmModal
+        open={archiveOpen}
+        count={checked.size}
+        busy={bulkBusy}
+        onClose={() => setArchiveOpen(false)}
+        onConfirm={confirmArchive}
+      />
+      <RetagModal
+        open={retagOpen}
+        count={checked.size}
+        busy={bulkBusy}
+        onClose={() => setRetagOpen(false)}
+        onConfirm={confirmRetag}
+      />
+    </>
+  )
+}
+
+// ─── Bundle E — structured PRD editor ──────────────────────────────────────
+
+function StructuredPrdEditor({
+  fm,
+  body,
+  onFmChange,
+  onBodyChange,
+  onPickCwd,
+  slug,
+  showCustomFields,
+  onToggleCustomFields,
+}: {
+  fm: PrdFrontmatter
+  body: string
+  onFmChange: (next: PrdFrontmatter) => void
+  onBodyChange: (next: string) => void
+  onPickCwd: () => void
+  slug: string
+  showCustomFields: boolean
+  onToggleCustomFields: () => void
+}) {
+  const customFieldKeys = fm.extras ? Object.keys(fm.extras) : []
+
+  function patch(partial: Partial<PrdFrontmatter>) {
+    onFmChange({ ...fm, ...partial })
+  }
+
+  // Coerce a string input into number-or-undefined. Empty string = unset.
+  function num(s: string): number | undefined {
+    if (s.trim() === '') return undefined
+    const v = Number(s)
+    return Number.isFinite(v) ? v : undefined
+  }
+
+  return (
+    <div className="p-4 max-w-3xl space-y-4">
+      {/* Structured frontmatter form */}
+      <div className="p-3 rounded border border-line bg-bg-elev space-y-2">
+        <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+          frontmatter
+        </div>
+        <label className="flex items-start gap-2 text-xs">
+          <span className="w-28 shrink-0 text-fg-faint pt-1">title*</span>
+          <input
+            type="text"
+            value={fm.title ?? ''}
+            onChange={(e) => patch({ title: e.target.value })}
+            placeholder="One-line PRD title"
+            className="flex-1 bg-bg border border-line rounded px-2 py-1 text-xs"
+          />
+        </label>
+        <label className="flex items-start gap-2 text-xs">
+          <span className="w-28 shrink-0 text-fg-faint pt-1">cwd*</span>
+          <div className="flex-1 flex gap-2 min-w-0">
+            <input
+              type="text"
+              value={fm.cwd ?? ''}
+              onChange={(e) => patch({ cwd: e.target.value })}
+              placeholder="/absolute/path/to/repo"
+              className="flex-1 min-w-0 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
+            />
+            <button
+              type="button"
+              onClick={onPickCwd}
+              className="px-2 py-1 text-[11px] rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
+              title="Pick directory"
+            >
+              Browse…
+            </button>
+          </div>
+        </label>
+        <label className="flex items-start gap-2 text-xs">
+          <span className="w-28 shrink-0 text-fg-faint pt-1">estimateMinutes*</span>
+          <input
+            type="number"
+            min={1}
+            value={fm.estimateMinutes ?? ''}
+            onChange={(e) => patch({ estimateMinutes: num(e.target.value) })}
+            placeholder="e.g. 60"
+            className="flex-1 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
+          />
+        </label>
+        <label className="flex items-start gap-2 text-xs">
+          <span className="w-28 shrink-0 text-fg-faint pt-1">parallelGroup</span>
+          <input
+            type="number"
+            min={0}
+            max={99}
+            value={fm.parallelGroup ?? ''}
+            onChange={(e) => patch({ parallelGroup: num(e.target.value) })}
+            placeholder="0-99 (matches NN- slug prefix)"
+            className="flex-1 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
+          />
+        </label>
+
+        {customFieldKeys.length > 0 && (
+          <div className="pt-2 mt-1 border-t border-line/60">
+            <button
+              type="button"
+              onClick={onToggleCustomFields}
+              className="text-[10px] text-fg-faint hover:text-fg-dim"
+            >
+              {showCustomFields ? '▾' : '▸'} custom fields ({customFieldKeys.length}) - round-trip preserved
+            </button>
+            {showCustomFields && (
+              <pre className="mt-1 text-[11px] text-fg-faint whitespace-pre-wrap font-mono leading-5">
+                {customFieldKeys
+                  .map((k) => (fm.extras?.[k]?.lines ?? []).join('\n'))
+                  .join('\n')}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Body editor (Monaco markdown) */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">body</div>
+        <div style={{ height: '500px' }}>
+          <MarkdownEditor
+            value={body}
+            onChange={onBodyChange}
+            path={`/scheduler/prds/${slug}.body.md`}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Bundle D — bulk modals ────────────────────────────────────────────────
+
+function ArchiveConfirmModal({
+  open, count, busy, onClose, onConfirm,
+}: {
+  open: boolean
+  count: number
+  busy: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title="Archive PRDs">
+      <p className="text-xs text-fg-dim">
+        Move <span className="font-mono">{count}</span> PRD{count === 1 ? '' : 's'} to{' '}
+        <span className="font-mono">prds-archived/&lt;timestamp&gt;/</span>?
+      </p>
+      <p className="text-[10px] text-fg-faint mt-2">
+        Files are renamed, never deleted. Restore manually from disk if needed.
+      </p>
+      <div className="flex justify-end gap-2 mt-4">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="px-2 py-1 text-xs border border-line rounded text-fg-dim hover:text-fg disabled:opacity-40"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy || count === 0}
+          className="px-2 py-1 text-xs border border-accent/60 text-accent rounded hover:bg-bg-hi disabled:opacity-40"
+        >
+          {busy ? 'Archiving…' : `Archive ${count}`}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function RetagModal({
+  open, count, busy, onClose, onConfirm,
+}: {
+  open: boolean
+  count: number
+  busy: boolean
+  onClose: () => void
+  onConfirm: (parallelGroup: number | null, estimateMinutes: number | null) => void
+}) {
+  const [groupStr, setGroupStr] = useState('')
+  const [estimateStr, setEstimateStr] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      setGroupStr('')
+      setEstimateStr('')
+      setErr(null)
+    }
+  }, [open])
+
+  function submit() {
+    setErr(null)
+    let pg: number | null = null
+    let em: number | null = null
+    if (groupStr.trim()) {
+      const v = Number(groupStr)
+      if (!Number.isInteger(v) || v < 0 || v > 999) {
+        setErr('parallelGroup must be 0–999')
+        return
+      }
+      pg = v
+    }
+    if (estimateStr.trim()) {
+      const v = Number(estimateStr)
+      if (!Number.isInteger(v) || v <= 0) {
+        setErr('estimateMinutes must be a positive integer')
+        return
+      }
+      em = v
+    }
+    if (pg === null && em === null) {
+      setErr('set at least one field')
+      return
+    }
+    onConfirm(pg, em)
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Retag PRDs">
+      <p className="text-xs text-fg-dim">
+        Update <span className="font-mono">{count}</span> PRD{count === 1 ? '' : 's'}. Leave a field blank to keep its current value.
+      </p>
+      <p className="text-[10px] text-fg-faint mt-2">
+        Changing parallelGroup on an <span className="font-mono">NN-kebab</span> slug renames the file.
+        Every change is logged to <span className="font-mono">retag-log.jsonl</span> so it's reversible.
+      </p>
+      <div className="mt-3 space-y-2">
+        <label className="flex items-center gap-2 text-xs">
+          <span className="w-32 text-fg-faint">parallelGroup:</span>
+          <input
+            type="number"
+            min={0}
+            max={999}
+            value={groupStr}
+            onChange={(e) => setGroupStr(e.target.value)}
+            placeholder="(unchanged)"
+            className="flex-1 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="w-32 text-fg-faint">estimateMinutes:</span>
+          <input
+            type="number"
+            min={1}
+            value={estimateStr}
+            onChange={(e) => setEstimateStr(e.target.value)}
+            placeholder="(unchanged)"
+            className="flex-1 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
+          />
+        </label>
+      </div>
+      {err && <div className="mt-2 text-[10px] text-red-300">{err}</div>}
+      <div className="flex justify-end gap-2 mt-4">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="px-2 py-1 text-xs border border-line rounded text-fg-dim hover:text-fg disabled:opacity-40"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || count === 0}
+          className="px-2 py-1 text-xs border border-accent/60 text-accent rounded hover:bg-bg-hi disabled:opacity-40"
+        >
+          {busy ? 'Retagging…' : `Retag ${count}`}
+        </button>
+      </div>
+    </Modal>
+  )
 }

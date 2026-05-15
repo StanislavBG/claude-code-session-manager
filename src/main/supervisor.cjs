@@ -16,6 +16,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
+const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 
 const HOME = os.homedir();
 const SUPERVISOR_LOG_PATH = path.join(HOME, '.claude', 'session-manager', 'supervisor.log');
@@ -27,7 +28,6 @@ const inFlightProbes = new Set();
 
 let supervisorInterval = null;
 let _readQueue = null;
-let _mutate = null;
 
 // ─── /proc helpers (Linux-only) ────────────────────────────────────────────
 
@@ -176,24 +176,6 @@ function readSupervisorLog(n) {
   } catch {
     return [];
   }
-}
-
-// ─── Claude binary resolution ────────────────────────────────────────────────
-
-let claudeBinCached = null;
-function resolveClaudeBin() {
-  if (claudeBinCached) return claudeBinCached;
-  const candidates = [
-    path.join(HOME, '.claude', 'local', 'claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-    '/usr/bin/claude',
-  ];
-  for (const c of candidates) {
-    try { fs.accessSync(c, fs.constants.X_OK); claudeBinCached = c; return c; } catch { /* */ }
-  }
-  claudeBinCached = 'claude';
-  return claudeBinCached;
 }
 
 // ─── Probe ──────────────────────────────────────────────────────────────────
@@ -454,7 +436,7 @@ async function supervisorTick() {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-function startSupervisor({ readQueue, mutate }) {
+function startSupervisor({ readQueue }) {
   if (process.platform !== 'linux') {
     console.log('[supervisor] non-Linux platform detected; supervisor is a no-op for v1');
     return;
@@ -465,7 +447,6 @@ function startSupervisor({ readQueue, mutate }) {
   }
 
   _readQueue = readQueue;
-  _mutate = mutate;
 
   stopSupervisor(); // idempotent: clear any existing interval
 

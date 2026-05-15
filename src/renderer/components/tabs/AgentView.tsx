@@ -2,16 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useSessions } from '../../state/sessions'
 import { useLive, type ToolUseEntry } from '../../state/live'
+import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
 import { Robot, type IdleAction, type RobotState } from './agent/Robot'
-import { Workbench } from './agent/Workbench'
+import { Workbench, type CrateSpawn } from './agent/Workbench'
 import { TodoBoard } from './agent/TodoBoard'
 import { SubagentDock } from './agent/SubagentDock'
 import { PlanWhiteboard } from './agent/PlanWhiteboard'
 import { FlyingObjects } from './agent/FlyingObjects'
+import { SchedulerDock } from './agent/SchedulerDock'
+import { SkyWindow } from './agent/SkyWindow'
+import { PressureGauge } from './agent/PressureGauge'
 import {
   ROBOT_EMIT_X, ROBOT_EMIT_Y,
   BOARD_X, BOARD_Y, BOARD_W, BOARD_H,
-  FLOOR_Y,
+  FLOOR_Y, SCENE_H,
 } from './agent/sceneConstants'
 
 /**
@@ -39,6 +43,20 @@ const IDLE_MIN_DUR    = 6_000
 const IDLE_MAX_DUR    = 12_000
 
 const DISCO_COLORS = ['#f43f5e', '#facc15', '#22d3ee', '#a78bfa'] as const
+
+// Single mono-font letter per tool for the conveyor crate badge. Avoids emoji
+// per project rule; readability at 7px favours capital ASCII over symbols.
+const CRATE_GLYPH_FOR_TOOL: Record<string, string> = {
+  Bash: '$', BashOutput: '>', KillBash: 'X',
+  Read: 'R', Write: 'W', Edit: 'E', NotebookEdit: 'N',
+  Grep: 'G', Glob: 'L',
+  WebFetch: 'F', WebSearch: 'S',
+  Task: 'T', TodoWrite: 'O', ExitPlanMode: 'P',
+}
+function crateGlyphFor(toolName?: string): string {
+  if (!toolName) return '?'
+  return CRATE_GLYPH_FOR_TOOL[toolName] ?? toolName.charAt(0).toUpperCase()
+}
 
 const STARS = Array.from({ length: 40 }, (_, i) => ({
   x:     (i * 37 + 11) % 100,
@@ -360,11 +378,27 @@ export function AgentView() {
     return () => unsubscribe(tab.id)
   }, [tab?.id, tab?.cwd, tab?.claudeSessionId, subscribe, unsubscribe])
 
-  // 500ms clock for age calculations
+  // Age-calc clock. Gated so we don't burn frames re-rendering the 864-line
+  // scene every 500ms while the tab is offline. Tick only when:
+  //   - state === 'working' (to detect working → idle transition, drive
+  //     the speech bubble's tool-age fade, and the disco-egg recency window)
+  //   - an idle action is in flight (Robot child animations)
+  //   - an animation flag is set (easter eggs)
+  // SkyWindow and SchedulerDock self-poll their own slower intervals; nothing
+  // else reads `now` in a way that's affected when state is offline/idle-quiet.
+  // O(1) per tick.
   const [now, setNow] = useState(() => Date.now())
+  // tickActive is recomputed below once all animation flags are declared.
+
+  // Scheduler running-jobs feed: initial state() then broadcast subscription.
+  const [schedulerJobs, setSchedulerJobs] = useState<ScheduleJob[]>([])
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 500)
-    return () => window.clearInterval(id)
+    let cancelled = false
+    window.api.schedule.state().then((snap: ScheduleStateSnapshot) => {
+      if (!cancelled) setSchedulerJobs(snap.jobs)
+    }).catch(() => { /* ignore — dock just renders empty */ })
+    const off = window.api.schedule.onState((snap) => setSchedulerJobs(snap.jobs))
+    return () => { cancelled = true; off() }
   }, [])
 
   // ── Robot state ────────────────────────────────────────────────────────────
@@ -441,6 +475,21 @@ export function AgentView() {
   // ── Conveyor scroll on hit ─────────────────────────────────────────────────
   const [conveyorScrollCount, setConveyorScrollCount] = useState(0)
   const handleConveyorHit = () => setConveyorScrollCount((n) => n + 1)
+
+  // ── Labelled crates: spawn one per tool-use activity event ─────────────────
+  // We mirror activitySeq so each new event becomes a unique crate id.
+  const [crateSpawn, setCrateSpawn] = useState<CrateSpawn | null>(null)
+  const prevCrateSeqRef = useRef(0)
+  useEffect(() => {
+    const ring = live?.activityRing ?? []
+    const seq  = live?.activitySeq  ?? 0
+    if (seq <= prevCrateSeqRef.current || ring.length === 0) return
+    const newEvents = ring.filter((e) => e.id > prevCrateSeqRef.current && e.kind === 'tool-use')
+    prevCrateSeqRef.current = seq
+    if (newEvents.length === 0) return
+    const latest = newEvents[newEvents.length - 1]
+    setCrateSpawn({ id: latest.id, glyph: crateGlyphFor(latest.toolName) })
+  }, [live?.activitySeq, live?.activityRing])
 
   // ── Idle action state machine ──────────────────────────────────────────────
   const [idleAction, setIdleAction] = useState<IdleAction>('base')
@@ -522,6 +571,19 @@ export function AgentView() {
   const [firstBloodActive, setFirstBloodActive] = useState(false)
   const [towerActive,     setTowerActive]     = useState(false)
   const [wbShudder,       setWbShudder]       = useState(false)
+
+  // Gated 500ms tick — see comment near `now` declaration. Remounted on any
+  // dependency flip so an offline tab incurs zero re-renders.
+  const tickActive =
+    state === 'working' ||
+    idleAction !== 'base' ||
+    discoActive || catActive || sleepyBotActive ||
+    firstBloodActive || towerActive || wbShudder
+  useEffect(() => {
+    if (!tickActive) return
+    const id = window.setInterval(() => setNow(Date.now()), 500)
+    return () => window.clearInterval(id)
+  }, [tickActive])
 
   // first-blood + egg reset on offline→working transition
   const prevStateRef = useRef<RobotState>(state)
@@ -673,7 +735,7 @@ export function AgentView() {
       )}
 
       <svg
-        viewBox="0 0 800 480"
+        viewBox={`0 0 800 ${SCENE_H}`}
         preserveAspectRatio="xMidYMid meet"
         className="absolute inset-0 w-full h-full pointer-events-none"
       >
@@ -690,6 +752,15 @@ export function AgentView() {
         {/* Floor strip */}
         <rect x={0} y={305} width={800} height={175} fill="#1a1d23" />
         <line x1={0} y1={305} x2={800} y2={305} stroke="#2a2f3a" strokeWidth="1" />
+
+        {/* Back-wall sky window — tints by user's local hour (self-polls 60s) */}
+        <SkyWindow reducedMotion={prefersReducedMotion} />
+
+        {/* Back-wall token pressure gauge */}
+        <PressureGauge
+          tokens={(live?.usage.inputTokens ?? 0) + (live?.usage.outputTokens ?? 0)}
+          reducedMotion={prefersReducedMotion}
+        />
 
         {/* Sleepy-bot moon (behind everything) */}
         <AnimatePresence>
@@ -728,7 +799,11 @@ export function AgentView() {
         />
 
         {/* Workbench */}
-        <Workbench steamTriggered={steamTriggered} conveyorScrollCount={conveyorScrollCount} />
+        <Workbench
+          steamTriggered={steamTriggered}
+          conveyorScrollCount={conveyorScrollCount}
+          crateSpawn={crateSpawn}
+        />
 
         {/* Flying objects */}
         <FlyingObjects
@@ -781,6 +856,9 @@ export function AgentView() {
         <text x="400" y="473" textAnchor="middle" fill="#374151" fontSize="8" fontFamily="monospace">
           {diagnosticText}
         </text>
+
+        {/* Scheduler dock — lower workshop strip */}
+        <SchedulerDock jobs={schedulerJobs} />
       </svg>
 
       {/* HTML overlays */}

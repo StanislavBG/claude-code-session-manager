@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import {
   BENCH_L, BENCH_R, BENCH_FRONT_Y, BENCH_BACK_Y, BENCH_BOTTOM_Y, BENCH_LEG_Y,
@@ -8,11 +8,23 @@ import {
   PAL,
 } from './sceneConstants'
 
+export interface CrateSpawn {
+  /** Monotonic id from AgentView. */
+  id: number
+  /** Single ASCII glyph (no emoji) — see CRATE_GLYPH_FOR_TOOL in AgentView. */
+  glyph: string
+}
+
 interface WorkbenchProps {
   steamTriggered: boolean
   /** Increment to trigger one conveyor scroll tile (each unique value = one scroll) */
   conveyorScrollCount: number
+  /** Latest crate to spawn at the right roller, if any. Id must be monotonic. */
+  crateSpawn?: CrateSpawn | null
 }
+
+const MAX_CRATES = 5
+const CRATE_TRAVEL_MS = 3000
 
 const BENCH_W = BENCH_R - BENCH_L
 
@@ -130,6 +142,109 @@ function ConveyorBelt({ scrollCount }: { scrollCount: number }) {
   )
 }
 
+// ── Conveyor crates ──────────────────────────────────────────────────────────
+
+interface ActiveCrate {
+  id: number
+  glyph: string
+  bornAt: number
+}
+
+// Crate dimensions, sitting just above the belt.
+const CRATE_W = 14
+const CRATE_H = 10
+const CRATE_TOP_Y = CONV_Y - CRATE_H - 1
+const CRATE_START_X = CONV_X + CONV_W - CRATE_W / 2 - 2
+const CRATE_END_X = CONV_X - CRATE_W / 2 - 2
+
+function CrateGlyph({ crate, onDone }: {
+  crate: ActiveCrate
+  onDone: (id: number) => void
+}) {
+  return (
+    <motion.g
+      initial={{ x: CRATE_START_X, y: CRATE_TOP_Y, opacity: 0 }}
+      animate={{
+        x: [CRATE_START_X, CRATE_END_X, CRATE_END_X - 8],
+        y: [CRATE_TOP_Y, CRATE_TOP_Y, CRATE_TOP_Y + 18],
+        opacity: [0, 1, 1, 0],
+      }}
+      transition={{
+        duration: (CRATE_TRAVEL_MS + 400) / 1000,
+        ease: 'linear',
+        times: [0, 0.05, 0.92, 1],
+      }}
+      onAnimationComplete={() => onDone(crate.id)}
+    >
+      <rect x={0} y={0} width={CRATE_W} height={CRATE_H} rx={1.5}
+        fill="#7a5c1e" stroke="#3d2d0d" strokeWidth={0.8} />
+      {/* Crate plank line */}
+      <line x1={CRATE_W / 2} y1={0} x2={CRATE_W / 2} y2={CRATE_H}
+        stroke="#3d2d0d" strokeWidth={0.5} opacity={0.5} />
+      <text x={CRATE_W / 2} y={CRATE_H / 2 + 2.5}
+        textAnchor="middle" dominantBaseline="middle"
+        fontFamily="monospace" fontSize={7} fill="#fde68a">
+        {crate.glyph}
+      </text>
+    </motion.g>
+  )
+}
+
+function CrateStatic({ crate, onDone }: {
+  crate: ActiveCrate
+  onDone: (id: number) => void
+}) {
+  // Reduced-motion: pick a deterministic mid-belt slot by id, dwell for the
+  // same lifetime so the FIFO cap still rotates.
+  const slot = crate.id % 4
+  const segW = CONV_W / 5
+  const x = CONV_X + segW * (1 + slot) - CRATE_W / 2
+  useEffect(() => {
+    const t = window.setTimeout(() => onDone(crate.id), CRATE_TRAVEL_MS)
+    return () => window.clearTimeout(t)
+  }, [crate.id, onDone])
+  return (
+    <g transform={`translate(${x}, ${CRATE_TOP_Y})`}>
+      <rect x={0} y={0} width={CRATE_W} height={CRATE_H} rx={1.5}
+        fill="#7a5c1e" stroke="#3d2d0d" strokeWidth={0.8} />
+      <text x={CRATE_W / 2} y={CRATE_H / 2 + 2.5}
+        textAnchor="middle" dominantBaseline="middle"
+        fontFamily="monospace" fontSize={7} fill="#fde68a">
+        {crate.glyph}
+      </text>
+    </g>
+  )
+}
+
+function Crates({ spawn }: { spawn?: CrateSpawn | null }) {
+  const reduced = useReducedMotion() ?? false
+  const [active, setActive] = useState<ActiveCrate[]>([])
+  const lastSeenIdRef = useRef<number>(-1)
+
+  useEffect(() => {
+    if (!spawn) return
+    if (spawn.id === lastSeenIdRef.current) return
+    lastSeenIdRef.current = spawn.id
+    setActive((prev) => {
+      const next = [...prev, { id: spawn.id, glyph: spawn.glyph, bornAt: Date.now() }]
+      // FIFO drop oldest when over cap.
+      return next.length > MAX_CRATES ? next.slice(next.length - MAX_CRATES) : next
+    })
+  }, [spawn?.id, spawn?.glyph])
+
+  const handleDone = (id: number) => setActive((prev) => prev.filter((c) => c.id !== id))
+
+  return (
+    <g>
+      {active.map((c) => (
+        reduced
+          ? <CrateStatic key={c.id} crate={c} onDone={handleDone} />
+          : <CrateGlyph key={c.id} crate={c} onDone={handleDone} />
+      ))}
+    </g>
+  )
+}
+
 // ── Kettle ───────────────────────────────────────────────────────────────────
 
 function Kettle() {
@@ -154,7 +269,7 @@ function Kettle() {
 
 // ── Workbench ────────────────────────────────────────────────────────────────
 
-export function Workbench({ steamTriggered, conveyorScrollCount }: WorkbenchProps) {
+export function Workbench({ steamTriggered, conveyorScrollCount, crateSpawn }: WorkbenchProps) {
   return (
     <g>
       {/* Tool rack */}
@@ -193,6 +308,9 @@ export function Workbench({ steamTriggered, conveyorScrollCount }: WorkbenchProp
 
       {/* Conveyor belt */}
       <ConveyorBelt scrollCount={conveyorScrollCount} />
+
+      {/* Labelled crates riding the belt */}
+      <Crates spawn={crateSpawn ?? null} />
 
       {/* Kettle */}
       <Kettle />

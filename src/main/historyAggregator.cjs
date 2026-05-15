@@ -4,6 +4,7 @@ const { ipcMain } = require('electron');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { schemas } = require('./ipcSchemas.cjs');
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const SLOW_THRESHOLD_MS = 2_000;
@@ -105,14 +106,18 @@ async function parseJSONL(filePath, stat) {
 }
 
 function registerHistoryAggregatorHandlers() {
-  ipcMain.handle('history:aggregate', async (_e, req) => {
+  ipcMain.handle('history:aggregate', async (_e, rawReq) => {
+    // Wire the historyAggregate schema (previously defined but never used).
+    // safeParse so a malformed payload still falls through to defaults
+    // (today − 30d) rather than throwing — matches the current "best-effort"
+    // semantics expected by the History tab.
+    const parsed = schemas.historyAggregate.safeParse(rawReq);
+    const req = parsed.success ? (parsed.data ?? {}) : {};
     const t0 = Date.now();
     const today = new Date().toISOString().slice(0, 10);
-    let effectiveTo = (req?.toDate && /^\d{4}-\d{2}-\d{2}$/.test(req.toDate)) ? req.toDate : today;
+    let effectiveTo = req?.toDate ? req.toDate : today;
     if (effectiveTo > today) effectiveTo = today;
-    const effectiveFrom = (req?.fromDate && /^\d{4}-\d{2}-\d{2}$/.test(req.fromDate))
-      ? req.fromDate
-      : subtractDays(today, 30);
+    const effectiveFrom = req?.fromDate ? req.fromDate : subtractDays(today, 30);
 
     const buckets = new Map();
     let partial = false;

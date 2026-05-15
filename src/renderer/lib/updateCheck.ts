@@ -12,6 +12,10 @@
 const REGISTRY_URL = 'https://registry.npmjs.org/claude-code-session-manager/latest'
 const CACHE_KEY_PREFIX = 'sm.updateCheck.v1'
 
+// Defends against hostile localStorage / hostile DNS proxy injecting non-semver
+// values that would render as arbitrary text in the cockpit version chip.
+const SEMVER_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][A-Za-z0-9.\-]{1,32})?$/
+
 export interface UpdateCheckResult {
   latest: string
   isNewer: boolean
@@ -55,7 +59,11 @@ function readCache(currentVersion: string): UpdateCheckResult | null {
     const raw = localStorage.getItem(todayKey(currentVersion))
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<UpdateCheckResult>
-    if (typeof parsed.latest === 'string' && typeof parsed.isNewer === 'boolean') {
+    if (
+      typeof parsed.latest === 'string' &&
+      SEMVER_RE.test(parsed.latest) &&
+      typeof parsed.isNewer === 'boolean'
+    ) {
       return { latest: parsed.latest, isNewer: parsed.isNewer }
     }
     return null
@@ -94,8 +102,8 @@ export async function checkForUpdate(
       return null
     }
     const body = (await res.json()) as { version?: unknown }
-    if (typeof body.version !== 'string') {
-      console.warn('[updateCheck] registry payload missing version field')
+    if (typeof body.version !== 'string' || !SEMVER_RE.test(body.version)) {
+      console.warn('[updateCheck] registry payload missing or invalid version field')
       return null
     }
     const latest = body.version

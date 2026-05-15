@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { NavKey } from '../LeftNav'
 import { StatusDot } from './StatusDot'
 
@@ -10,7 +11,7 @@ interface Props {
   onNavigate?: (k: NavKey) => void
 }
 
-export function InstrumentTile({ label, value, subFact, linkTo, attention, onNavigate }: Props) {
+function InstrumentTileImpl({ label, value, subFact, linkTo, attention, onNavigate }: Props) {
   const canNavigate = !!(linkTo && onNavigate)
   const handleClick = canNavigate ? () => onNavigate!(linkTo!) : undefined
   const titleAttr = canNavigate ? `open ${label}` : 'opens in N/A — wire MainPane.tsx'
@@ -34,3 +35,5 @@ export function InstrumentTile({ label, value, subFact, linkTo, attention, onNav
     </Component>
   )
 }
+
+export const InstrumentTile = memo(InstrumentTileImpl)

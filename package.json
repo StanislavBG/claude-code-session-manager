@@ -72,10 +72,9 @@
     "linux"
   ],
   "dependencies": {
-    "@electron/rebuild": "^3.7.0",
+    "@electron/rebuild": "4.0.4",
     "@huggingface/transformers": "^4.1.0",
     "@monaco-editor/react": "^4.6.0",
-    "monaco-editor": "^0.55.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
     "@opentelemetry/resources": "^1.30.0",
@@ -89,6 +88,7 @@
     "chokidar": "^4.0.1",
     "electron": "^33.2.0",
     "framer-motion": "^12.38.0",
+    "monaco-editor": "^0.55.0",
     "node-pty": "^1.2.0-beta.12",
     "onnxruntime-web": "^1.24.3",
     "recharts": "^2.15.4",

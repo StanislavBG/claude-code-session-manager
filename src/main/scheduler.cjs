@@ -137,10 +137,26 @@ function ensureDirs() {
   fs.mkdirSync(RUNS_DIR, { recursive: true });
 }
 
-function atomicWriteJson(p, data) {
+// Sync variant — retained for the executeJob exit handler (Promise resolver
+// callback that must flush meta.json before resolving) and the heartbeat-log
+// rotation path. NOT reachable from ipcMain.handle callbacks.
+function atomicWriteJsonSync(p, data) {
   const tmp = `${p}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
   fs.renameSync(tmp, p);
+}
+
+// Async version used by mutate() and any IPC-reachable write path. Cleans up
+// the tmp file if rename fails so a botched write doesn't litter the dir.
+async function atomicWriteJson(p, data) {
+  const tmp = `${p}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
+    await fsp.rename(tmp, p);
+  } catch (e) {
+    try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
+    throw e;
+  }
 }
 
 // ---------- scheduler-state.json (sidecar) ----------
@@ -158,8 +174,12 @@ function loadSchedulerState() {
 }
 
 function persistSchedulerState() {
+  // Sync write: called from many sync hot paths (clearPause, pollLoop catch
+  // block) and the sidecar is tiny (<1 KB). Converting to async here would
+  // require threading awaits through pause/resume bookkeeping for negligible
+  // benefit — the file is well under one page.
   try {
-    atomicWriteJson(SCHEDULER_STATE_PATH, {
+    atomicWriteJsonSync(SCHEDULER_STATE_PATH, {
       version: 1,
       lastObservedReset: cachedNextReset,
       lastResetObservedAt: cachedNextReset ? Date.now() : null,
@@ -193,7 +213,10 @@ function appendHeartbeat(entry) {
   }
 }
 
-function readQueue() {
+// Sync queue read — passed to the supervisor module (which calls it from
+// supervisorTick / applyAction with no await) and the heartbeat interval.
+// IPC handlers and mutate() use readQueue (async) below.
+function readQueueSync() {
   try {
     const raw = fs.readFileSync(QUEUE_PATH, 'utf8');
     const data = JSON.parse(raw);
@@ -209,9 +232,28 @@ function readQueue() {
   }
 }
 
-function writeQueue(state) {
+// Async queue read — used on all IPC hot paths. Reading queue.json sync was
+// blocking the main thread inside ipcMain.handle callbacks; awaiting fsp.readFile
+// hands control back to the renderer while the kernel paginates the file.
+async function readQueue() {
+  try {
+    const raw = await fsp.readFile(QUEUE_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    return {
+      config: { ...DEFAULT_CONFIG, ...(data.config || {}) },
+      jobs: Array.isArray(data.jobs) ? data.jobs : [],
+      scheduledFor: data.scheduledFor ?? null,
+      lastRunAt: data.lastRunAt ?? null,
+      paused: data.paused ?? null,
+    };
+  } catch {
+    return { config: { ...DEFAULT_CONFIG }, jobs: [], scheduledFor: null, lastRunAt: null, paused: null };
+  }
+}
+
+async function writeQueue(state) {
   ensureDirs();
-  atomicWriteJson(QUEUE_PATH, state);
+  await atomicWriteJson(QUEUE_PATH, state);
 }
 
 // ---------- serialized mutation queue ----------
@@ -224,9 +266,9 @@ let mutateTail = Promise.resolve();
 
 function mutate(fn) {
   const next = mutateTail.then(async () => {
-    const state = readQueue();
+    const state = await readQueue();
     const ret = await fn(state);
-    writeQueue(state);
+    await writeQueue(state);
     return ret;
   });
   mutateTail = next.catch(() => {}); // keep chain alive on errors
@@ -240,8 +282,10 @@ function mutate(fn) {
  * yaml dep; the schema is small (title, cwd, estimateMinutes, parallelGroup)
  * and the format is documented in the user-facing README.
  */
-function parsePrdRaw(filePath) {
-  const text = fs.readFileSync(filePath, 'utf8');
+async function parsePrdRaw(filePath) {
+  // Async read: reconcile() walks all PRDs on every IPC schedule:state call,
+  // so the cumulative readFileSync cost was the main thread hog the audit flagged.
+  const text = await fsp.readFile(filePath, 'utf8');
   const meta = { title: null, cwd: null, estimateMinutes: null, parallelGroup: null };
   let body = text;
 
@@ -292,16 +336,19 @@ let prdDirMtime = -1;
 let prdDirFiles = null; // sorted absolute paths
 const prdFileCache = new Map(); // path -> { mtimeMs, ino, parsed }
 
-function listPrdFiles() {
+async function listPrdFiles() {
   ensureDirs();
   let dirMtime;
   try {
-    dirMtime = fs.statSync(PRDS_DIR).mtimeMs;
+    // Async stat: the mtime-cache short-circuit means this only hits the
+    // kernel on dir change, but the call itself was blocking IPC.
+    dirMtime = (await fsp.stat(PRDS_DIR)).mtimeMs;
   } catch {
     dirMtime = -1;
   }
   if (dirMtime === prdDirMtime && prdDirFiles) return prdDirFiles;
-  const files = fs.readdirSync(PRDS_DIR)
+  const entries = await fsp.readdir(PRDS_DIR);
+  const files = entries
     .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
     .map((f) => path.join(PRDS_DIR, f))
     .sort();
@@ -323,10 +370,12 @@ function listPrdFiles() {
 // already ~25k lines and well beyond any legitimate authored doc.
 const PRD_READ_MAX_BYTES = 1024 * 1024;
 
-function parsePrd(filePath) {
+async function parsePrd(filePath) {
   let st;
   try {
-    st = fs.statSync(filePath);
+    // Async stat: cache validation runs on every reconcile (per-PRD), which
+    // is IPC-reachable via schedule:state / schedule:rescan.
+    st = await fsp.stat(filePath);
   } catch {
     // fall back to direct parse (will throw the original ENOENT to caller)
     return parsePrdRaw(filePath);
@@ -343,7 +392,7 @@ function parsePrd(filePath) {
   // Evict BEFORE re-parsing so a parse exception leaves the cache empty
   // rather than holding a stale-good entry for the new mtime.
   prdFileCache.delete(filePath);
-  const parsed = parsePrdRaw(filePath);
+  const parsed = await parsePrdRaw(filePath);
   prdFileCache.set(filePath, { mtimeMs: st.mtimeMs, ino: st.ino, parsed });
   return parsed;
 }
@@ -358,12 +407,14 @@ function parsePrd(filePath) {
  * Status is preserved: pending stays pending, completed stays completed.
  * Newly-discovered PRDs land as `pending`.
  */
-function reconcile(state) {
-  const files = listPrdFiles();
+async function reconcile(state) {
+  const files = await listPrdFiles();
   const onDisk = new Map();
   for (const f of files) {
     try {
-      const p = parsePrd(f);
+      // Per-file await: parsing is mtime-cached so steady-state hits zero
+      // disk reads; on cold cache the awaits keep the main thread responsive.
+      const p = await parsePrd(f);
       onDisk.set(p.slug, p);
     } catch (e) {
       console.warn('[scheduler] failed to parse', f, e?.message);
@@ -452,11 +503,12 @@ let cancelToken = { cancelled: false };
 
 function attachWindow(w) { mainWindow = w; }
 
-function broadcast() {
+async function broadcast() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const state = readQueue();
-  reconcile(state);
-  writeQueue(state);
+  const state = await readQueue();
+  await reconcile(state);
+  await writeQueue(state);
+  if (!mainWindow || mainWindow.isDestroyed()) return; // window may have closed during awaits
   mainWindow.webContents.send('schedule:state', {
     config: state.config,
     jobs: state.jobs,
@@ -496,13 +548,13 @@ async function rescheduleTimer() {
   } catch {
     nextResetIso = cachedNextReset;
   }
-  const fireAt = await mutate((state) => {
-    reconcile(state);
+  const fireAt = await mutate(async (state) => {
+    await reconcile(state);
     const fa = computeFireAt(state, nextResetIso);
     state.scheduledFor = fa ? new Date(fa).toISOString() : null;
     return fa;
   });
-  broadcast();
+  await broadcast();
   if (!fireAt) return;
 
   const delay = Math.max(1000, fireAt - Date.now());
@@ -533,7 +585,7 @@ async function setPaused(reason, resumeAtIso) {
       s.paused = { reason, since: new Date().toISOString(), resumeAt: effectiveResumeAt || null };
     }
   });
-  broadcast();
+  await broadcast();
   cancelToken.cancelled = true;
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   if (!effectiveResumeAt) return;
@@ -573,7 +625,7 @@ async function clearPause(source) {
     lastFailureKind = null;
     persistSchedulerState();
   }
-  if (wasPaused) broadcast();
+  if (wasPaused) await broadcast();
 }
 
 /** Mutate a job in place to "pending" with cleared run metadata. */
@@ -650,14 +702,17 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     const errMsg = `cwd no longer exists: ${cwd}`;
     safeLog(`[scheduler] ${errMsg}\n`);
     closeFd();
-    atomicWriteJson(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    // Sync write: this is an early-exit error path inside an async function,
+    // so we could await, but using the sync variant keeps the error path
+    // ordering identical to the spawn-failed branch below (also sync).
+    atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
     return { exitCode: -1, durationMs: 0, error: errMsg, sessionId };
   }
 
   // Read full PRD body fresh from disk (queue stored only the preview).
   let prompt;
   try {
-    const parsed = parsePrd(path.join(PRDS_DIR, `${job.slug}.md`));
+    const parsed = await parsePrd(path.join(PRDS_DIR, `${job.slug}.md`));
     prompt = parsed.body;
   } catch (e) {
     safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
@@ -699,7 +754,10 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
       safeLog(`[scheduler] ${errMsg}\n`);
       closeFd();
       const durationMs = Date.now() - startedAt;
-      atomicWriteJson(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs });
+      // Sync write: inside the Promise executor, before resolve(). Awaiting
+      // here would require restructuring the executor; the meta file is tiny
+      // and this is an error path, not the IPC hot path.
+      atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs });
       resolve({ exitCode: -1, durationMs, error: errMsg, sessionId });
       return;
     }
@@ -805,7 +863,8 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
       const durationMs = Date.now() - startedAt;
       safeLog(`\n[scheduler] error: ${err.message}\n`);
       closeFd();
-      atomicWriteJson(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: err.message, startedAt, finishedAt: Date.now(), durationMs });
+      // Sync write: child event handler must flush meta before resolve().
+      atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: err.message, startedAt, finishedAt: Date.now(), durationMs });
       resolve({ exitCode: -1, durationMs, error: err.message, sessionId });
     });
 
@@ -830,7 +889,9 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
         `duration=${Math.round(durationMs / 1000)}s\n`);
       closeFd();
       const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
-      atomicWriteJson(metaPath, {
+      // Sync write: child 'exit' handler must flush meta before resolve()
+      // so the spawnJob mutate() that follows sees the persisted exit code.
+      atomicWriteJsonSync(metaPath, {
         slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited,
         startedAt, finishedAt: Date.now(), durationMs,
         agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${code}` : null,
@@ -983,7 +1044,7 @@ async function spawnInvestigation(failedJob, runDir) {
 
   let originalBody = '';
   try {
-    originalBody = parsePrd(path.join(PRDS_DIR, `${failedJob.slug}.md`)).body;
+    originalBody = (await parsePrd(path.join(PRDS_DIR, `${failedJob.slug}.md`))).body;
   } catch {
     originalBody = failedJob.bodyPreview || '(original PRD missing from disk)';
   }
@@ -1121,7 +1182,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         s.jobs[idx].startedAt = new Date().toISOString();
       }
     });
-    broadcast();
+    await broadcast();
 
     const res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
       await mutate((s) => {
@@ -1131,7 +1192,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
         }
       });
-      broadcast();
+      await broadcast();
     });
 
     if (res.rateLimited) {
@@ -1160,7 +1221,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         }
       }
     });
-    broadcast();
+    await broadcast();
 
     if (actuallyFailed && failedJobSnapshot) {
       spawnInvestigation(failedJobSnapshot, runDir).catch((e) => {
@@ -1183,20 +1244,20 @@ let tickTail = Promise.resolve();
 
 function tickQueue() {
   const next = tickTail.then(async () => {
-    const state = readQueue();
+    const state = await readQueue();
     if (state.paused) {
       console.log('[scheduler] tickQueue skipped: paused');
       return;
     }
     if (cancelToken.cancelled) return;
 
-    reconcile(state);
+    await reconcile(state);
     const cap = ENV_CAP ?? state.config.concurrencyCap;
     const batch = pickNextBatch(state.jobs, runningSet, cap);
     if (batch.length === 0) return;
 
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
-    broadcast();
+    await broadcast();
 
     const { runId, dir: runDir } = pickRunDir();
     for (const job of batch) {
@@ -1210,7 +1271,7 @@ function tickQueue() {
 }
 
 async function runDueJobs() {
-  const state = readQueue();
+  const state = await readQueue();
   if (state.paused) {
     console.log('[scheduler] runDueJobs skipped: paused');
     return;
@@ -1219,7 +1280,7 @@ async function runDueJobs() {
   await tickQueue();
   // Clear the one-shot scheduledFor without waiting for jobs to settle.
   await mutate((s) => { s.scheduledFor = null; });
-  broadcast();
+  await broadcast();
 }
 
 // ---------- when-available launch logic ----------
@@ -1231,7 +1292,7 @@ async function maybeLaunchWhenAvailable(state) {
   if (pending.length === 0) return;
   if (cachedUtilization === null || cachedUtilization === undefined) return;
   if (cachedUtilization >= state.config.utilizationThreshold) {
-    broadcast();
+    await broadcast();
     return;
   }
   console.log(`[scheduler] when-available: util=${cachedUtilization}%, ${pending.length} pending, ${runningSet.size} running — ticking`);
@@ -1258,7 +1319,7 @@ async function pollLoop() {
       persistSchedulerState();
 
       // If a 'network' pause resolved, clear it now that we have a good reading.
-      const cur = readQueue();
+      const cur = await readQueue();
       if (cur.paused?.reason === 'network') {
         await clearPause('network-recovered');
       }
@@ -1268,7 +1329,7 @@ async function pollLoop() {
       }
 
       await maybeLaunchWhenAvailable(cur);
-      broadcast();
+      await broadcast();
     } else if (r.kind === 'meter_rate_limited') {
       // Billing meter is itself being rate-limited. Treat as "utilization unknown but safe":
       // fire available jobs anyway at utilization=0 rather than pausing the queue.
@@ -1279,9 +1340,9 @@ async function pollLoop() {
       // Don't update firstNon429FailureAt — 429s don't count toward the 30-min network-pause threshold.
       cachedUtilization = 0; // assume safe; fire any pending work
       console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on heuristic (failure #${consecutiveFailures})`);
-      const cur = readQueue();
+      const cur = await readQueue();
       await maybeLaunchWhenAvailable(cur);
-      broadcast();
+      await broadcast();
     } else {
       lastPollAt = Date.now();
       lastPollOk = false;
@@ -1302,7 +1363,7 @@ async function pollLoop() {
 
         // After 30 minutes of consecutive non-429 failures, set 'network' pause.
         if (totalNon429FailureMs > 30 * 60_000) {
-          const cur2 = readQueue();
+          const cur2 = await readQueue();
           if (!cur2.paused || cur2.paused.reason === 'network') {
             await setPaused('network', null);
           }
@@ -1337,9 +1398,9 @@ function registerScheduleHandlers() {
   supervisor.registerHandlers();
 
   ipcMain.handle('schedule:state', async () => {
-    const state = readQueue();
-    reconcile(state);
-    writeQueue(state);
+    const state = await readQueue();
+    await reconcile(state);
+    await writeQueue(state);
     return {
       config: state.config,
       jobs: state.jobs,
@@ -1353,7 +1414,7 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:health', async () => {
-    const state = readQueue();
+    const state = await readQueue();
     const runningJobs = [];
     for (const j of state.jobs) {
       if (j.status === 'running' && j.runtime) {
@@ -1422,7 +1483,7 @@ function registerScheduleHandlers() {
       return true;
     });
     if (!found) return { ok: false, error: 'not found' };
-    broadcast();
+    await broadcast();
     return { ok: true };
   });
 
@@ -1448,11 +1509,11 @@ function registerScheduleHandlers() {
   // handler already reconciles on read, but this gives the renderer an
   // explicit refresh path that also broadcasts so all views update.
   ipcMain.handle('schedule:rescan', async () => {
-    await mutate((state) => {
-      reconcile(state);
+    await mutate(async (state) => {
+      await reconcile(state);
       return null;
     });
-    broadcast();
+    await broadcast();
     return { ok: true };
   });
 
@@ -1464,12 +1525,12 @@ function registerScheduleHandlers() {
     ensureDirs();
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
-    const state = readQueue();
+    const state = await readQueue();
     const victims = state.jobs.filter((j) => j.status === 'pending' || j.status === 'failed');
     if (victims.length === 0) {
       return { ok: true, archived: 0, archivedTo: null };
     }
-    fs.mkdirSync(archiveDir, { recursive: true });
+    await fsp.mkdir(archiveDir, { recursive: true });
     let archived = 0;
     for (const job of victims) {
       const src = path.resolve(path.join(PRDS_DIR, `${job.slug}.md`));
@@ -1486,13 +1547,13 @@ function registerScheduleHandlers() {
         }
       }
     }
-    await mutate((s) => {
+    await mutate(async (s) => {
       const victimSlugs = new Set(victims.map((j) => j.slug));
       s.jobs = s.jobs.filter((j) => !victimSlugs.has(j.slug));
-      reconcile(s);
+      await reconcile(s);
       return null;
     });
-    broadcast();
+    await broadcast();
     return { ok: true, archived, archivedTo: archiveDir };
   });
 
@@ -1580,7 +1641,7 @@ function registerScheduleHandlers() {
       if (!name.endsWith('.md') || name.startsWith('.')) continue;
       const filePath = path.join(PRDS_DIR, name);
       try {
-        const parsed = parsePrd(filePath);
+        const parsed = await parsePrd(filePath);
         const stat = await fsp.stat(filePath);
         out.push({
           slug: parsed.slug,
@@ -1621,7 +1682,7 @@ async function init() {
 
   // If we boot up while paused with a resumeAt in the past, clear it. This
   // happens when the app was closed across the reset window.
-  const boot = readQueue();
+  const boot = await readQueue();
   if (boot.paused && boot.paused.resumeAt && new Date(boot.paused.resumeAt).getTime() <= Date.now()) {
     await clearPause('boot-elapsed');
   } else if (boot.paused && boot.paused.resumeAt) {
@@ -1642,15 +1703,20 @@ async function init() {
   pollLoopTimer = setTimeout(() => { pollLoop().catch(() => {}); }, USAGE_REFRESH_INTERVAL_MS);
   if (pollLoopTimer.unref) pollLoopTimer.unref();
 
-  // Supervisor: probe running jobs for wedged poll-loops.
+  // Supervisor: probe running jobs for wedged poll-loops. Supervisor calls
+  // its injected readQueue() synchronously from supervisorTick and applyAction,
+  // so pass the sync variant; the 15-min probe cadence makes the blocking cost
+  // negligible vs IPC handler latency.
   if (process.env.SM_SUPERVISOR_DISABLE !== '1') {
-    supervisor.startSupervisor({ readQueue });
+    supervisor.startSupervisor({ readQueue: readQueueSync });
   }
 
   // Heartbeat: once per minute, log queue state for 24h visibility.
+  // setInterval callback is sync; readQueueSync stays sync to avoid awaiting
+  // inside the timer body (and the 60s cadence makes the cost moot).
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
-    const s = readQueue();
+    const s = readQueueSync();
     const counts = { pending: 0, running: 0, completed: 0, failed: 0 };
     for (const j of s.jobs) counts[j.status] = (counts[j.status] || 0) + 1;
     appendHeartbeat({
@@ -1672,8 +1738,10 @@ async function init() {
       if (pollLoopTimer) { clearTimeout(pollLoopTimer); pollLoopTimer = null; }
       backoffMs = 0;
       backoffNextAt = null;
-      // Clear any paused-but-resumeAt-elapsed state immediately.
-      const wakeState = readQueue();
+      // Clear any paused-but-resumeAt-elapsed state immediately. Sync read:
+      // the powerMonitor 'resume' callback fires rarely and isn't on the IPC
+      // hot path; switching to async would require an IIFE wrapper for no gain.
+      const wakeState = readQueueSync();
       if (wakeState.paused?.resumeAt && new Date(wakeState.paused.resumeAt).getTime() <= Date.now()) {
         clearPause('boot-elapsed').then(() => { runDueJobs().catch(() => {}); }).catch(() => {});
       }

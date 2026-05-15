@@ -11,6 +11,14 @@ interface Props {
   cwd: string
 }
 
+// Main-side zod cap is 64 KiB; 60 KiB leaves headroom for IPC envelope overhead.
+const PTY_WRITE_CHUNK_SIZE = 60 * 1024
+function writeInChunks(tabId: string, data: string) {
+  for (let i = 0; i < data.length; i += PTY_WRITE_CHUNK_SIZE) {
+    window.api.pty.write({ tabId, data: data.slice(i, i + PTY_WRITE_CHUNK_SIZE) })
+  }
+}
+
 export function Terminal({ tabId, cwd }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
@@ -74,7 +82,7 @@ export function Terminal({ tabId, cwd }: Props) {
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'V') {
         navigator.clipboard.readText().then((text) => {
-          if (text) window.api.pty.write({ tabId, data: text })
+          if (text) writeInChunks(tabId, text)
         }).catch(() => {})
         return false
       }
@@ -90,7 +98,7 @@ export function Terminal({ tabId, cwd }: Props) {
       useSessions.getState().setTabExited(tabId, exitCode)
     })
 
-    term.onData((data) => window.api.pty.write({ tabId, data }))
+    term.onData((data) => writeInChunks(tabId, data))
     term.onResize(({ cols, rows }) => window.api.pty.resize({ tabId, cols, rows }))
 
     console.log('[Terminal] calling pty.spawn', { tabId, cwd, cols, rows })
@@ -110,7 +118,7 @@ export function Terminal({ tabId, cwd }: Props) {
         const { startupCommand } = useSessions.getState().tabs.find((t) => t.id === tabId) ?? {}
         if (startupCommand) {
           setTimeout(() => {
-            window.api.pty.write({ tabId, data: `${startupCommand}\n` })
+            writeInChunks(tabId, `${startupCommand}\n`)
           }, 350)
         }
       })

@@ -1,6 +1,13 @@
 import ReactDOM from 'react-dom/client'
+import { loader as monacoLoader } from '@monaco-editor/react'
+import * as monaco from 'monaco-editor'
 import { App } from './App'
 import './styles.css'
+
+// @monaco-editor/react defaults to fetching Monaco from cdn.jsdelivr.net,
+// which our CSP (script-src 'self' 'wasm-unsafe-eval') blocks — the editor
+// would otherwise hang on "Loading…" forever. Pin it to the bundled package.
+monacoLoader.config({ monaco })
 
 // Surface otherwise-silent async failures as [renderer] lines instead of the
 // default "Uncaught (in promise)" dev-console spam with no file context. Both

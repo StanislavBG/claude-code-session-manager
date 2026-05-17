@@ -5,6 +5,8 @@ const os = require('node:os');
 const fs = require('node:fs');
 const { addAllowedRoot } = require('./config.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**
  * PtyManager — owns every claude PTY process, keyed by tabId (renderer-generated UUID).
@@ -26,17 +28,9 @@ class PtyManager {
 
     // Validate that cwd is inside homedir before widening the allowed-root set.
     if (cwd) {
-      const home = os.homedir();
-      let realCwd;
-      try {
-        realCwd = fs.realpathSync(cwd);
-      } catch {
-        realCwd = path.resolve(cwd);
-      }
-      if (realCwd !== home && !realCwd.startsWith(home + path.sep)) {
-        throw new Error(`pty cwd outside home directory: ${realCwd}`);
-      }
-      addAllowedRoot(realCwd);
+      const r = assertCwdInsideHome(cwd);
+      if (!r.ok) throw new Error(`pty ${r.error}`);
+      addAllowedRoot(r.realCwd);
     }
 
     // Idempotent reattach: renderer reloads (HMR/Ctrl+R) re-run App.tsx's
@@ -62,9 +56,7 @@ class PtyManager {
       if (existing.proc.exitCode != null) {
         const exitCode = existing.proc.exitCode;
         setImmediate(() => {
-          if (this.window && !this.window.isDestroyed()) {
-            this.window.webContents.send(`pty:exit:${tabId}`, { exitCode, signal: undefined });
-          }
+          sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode, signal: undefined });
         });
       }
       return { pid: existing.proc.pid, cwd: existing.cwd, reattached: true };
@@ -108,9 +100,7 @@ class PtyManager {
     console.log('[pty] spawned pid=', proc.pid, 'for tabId=', tabId);
 
     proc.onData((data) => {
-      if (this.window && !this.window.isDestroyed()) {
-        this.window.webContents.send(`pty:data:${tabId}`, data);
-      }
+      sendIfAlive(this.window, `pty:data:${tabId}`, data);
     });
 
     proc.onExit(({ exitCode, signal }) => {
@@ -122,9 +112,7 @@ class PtyManager {
         this.sessions.delete(tabId);
         return;
       }
-      if (this.window && !this.window.isDestroyed()) {
-        this.window.webContents.send(`pty:exit:${tabId}`, { exitCode, signal });
-      }
+      sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode, signal });
       this.sessions.delete(tabId);
     });
 
@@ -137,9 +125,7 @@ class PtyManager {
     if (!s) {
       // Tab was removed or never existed — tell the renderer so it can surface
       // "skipped" feedback rather than silently dropping the write.
-      if (this.window && !this.window.isDestroyed()) {
-        this.window.webContents.send('pty:write-error', { tabId, reason: 'no-pty' });
-      }
+      sendIfAlive(this.window, 'pty:write-error', { tabId, reason: 'no-pty' });
       return;
     }
     try {
@@ -149,12 +135,10 @@ class PtyManager {
       // error that node-pty re-throws) when writing to an exited process.
       // Catch here so the uncaught-exception handler never sees it, and notify
       // the renderer to surface "skipped" feedback.
-      if (this.window && !this.window.isDestroyed()) {
-        this.window.webContents.send('pty:write-error', {
-          tabId,
-          reason: String(err?.message || 'write-failed'),
-        });
-      }
+      sendIfAlive(this.window, 'pty:write-error', {
+        tabId,
+        reason: String(err?.message || 'write-failed'),
+      });
     }
   }
 

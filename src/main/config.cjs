@@ -20,6 +20,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const chokidar = require('chokidar');
+const logs = require('./logs.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
 const watchers = new Map();
@@ -157,16 +159,29 @@ async function readText(abs) {
 
 /**
  * Atomic write — write to <path>.tmp-<pid>-<ts> then rename. Creates parent
- * directories if missing.
+ * directories if missing. Cleans up the tmp file on rename failure.
+ *
+ * opts.mode: optional POSIX permission bits, applied to the tmp file before
+ * rename. Used by voiceSettings/otelSettings for 0o600 credential storage.
  */
-async function writeTextAtomic(abs, text) {
+async function writeTextAtomic(abs, text, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   const dir = path.dirname(real);
   await fsp.mkdir(dir, { recursive: true });
   const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, text, 'utf8');
-  await fsp.rename(tmp, real);
+  try {
+    await fsp.writeFile(tmp, text, opts.mode ? { encoding: 'utf8', mode: opts.mode } : 'utf8');
+    if (opts.mode) {
+      // chmod explicitly because some platforms ignore the mode arg on
+      // writeFile when the file pre-exists.
+      try { await fsp.chmod(tmp, opts.mode); } catch { /* */ }
+    }
+    await fsp.rename(tmp, real);
+  } catch (e) {
+    try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
+    throw e;
+  }
   const stat = await fsp.stat(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
 }
@@ -174,6 +189,28 @@ async function writeTextAtomic(abs, text) {
 async function writeJson(abs, data) {
   const pretty = JSON.stringify(data, null, 2) + '\n';
   return writeTextAtomic(abs, pretty);
+}
+
+/**
+ * Sync variant — only for child-exit handlers and similar callbacks where
+ * an event-loop yield would deadlock the caller. Use writeJson/writeTextAtomic
+ * for everything else.
+ */
+function writeJsonSync(abs, data) {
+  const real = validatePath(expandHome(abs));
+  validateWrite(real);
+  const dir = path.dirname(real);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, real);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* tmp never created or already gone */ }
+    throw e;
+  }
+  const stat = fs.statSync(real);
+  return { ok: true, mtimeMs: stat.mtimeMs };
 }
 
 async function listDir(abs, { filesOnly = false, dirsOnly = false, includeHidden = false } = {}) {
@@ -257,9 +294,7 @@ function watch(paths) {
       } catch {
         /* file may have been deleted */
       }
-      if (window && !window.isDestroyed()) {
-        window.webContents.send('config:changed', { path: key, mtimeMs, kind });
-      }
+      sendIfAlive(window, 'config:changed', { path: key, mtimeMs, kind });
     };
     w.on('add', emit('add'));
     w.on('change', emit('change'));
@@ -299,8 +334,8 @@ function registerConfigHandlers() {
   ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text }) => writeTextAtomic(p, text)));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
-  ipcMain.on('config:watch', (_e, { paths }) => { try { s.configWatch.parse(paths); watch(paths); } catch { /* ignore */ } });
-  ipcMain.on('config:unwatch', (_e, { paths }) => { try { s.configWatch.parse(paths); unwatch(paths); } catch { /* ignore */ } });
+  ipcMain.on('config:watch', (_e, { paths }) => { try { s.configWatch.parse(paths); watch(paths); } catch (e) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch schema reject', meta: { error: e?.message } }); } });
+  ipcMain.on('config:unwatch', (_e, { paths }) => { try { s.configWatch.parse(paths); unwatch(paths); } catch (e) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:unwatch schema reject', meta: { error: e?.message } }); } });
 }
 
 module.exports = {
@@ -311,6 +346,7 @@ module.exports = {
   readJson,
   readText,
   writeJson,
+  writeJsonSync,
   writeTextAtomic,
   listDir,
   exists,

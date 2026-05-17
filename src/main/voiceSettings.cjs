@@ -24,6 +24,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const config = require('./config.cjs');
 
 const SCHEMA_VERSION = 1;
 const DEVICE_SCHEMA_VERSION = 1;
@@ -103,17 +104,9 @@ async function readRaw() {
 let writeQueue = Promise.resolve();
 async function writeMerged(patch) {
   const run = async () => {
-    const p = storePath();
-    await fsp.mkdir(path.dirname(p), { recursive: true }).catch(() => {});
     const existing = (await readRaw()) || {};
     const next = { ...existing, ...patch };
-    const body = JSON.stringify(next, null, 2) + '\n';
-    const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
-    await fsp.writeFile(tmp, body, { encoding: 'utf8', mode: 0o600 });
-    // chmod tmp explicitly because some platforms ignore the mode arg on
-    // writeFile when the file pre-exists. Then rename for atomicity.
-    try { await fsp.chmod(tmp, 0o600); } catch { /* */ }
-    await fsp.rename(tmp, p);
+    await config.writeTextAtomic(storePath(), JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
     return { ok: true };
   };
   // Tail-promise pattern: each call awaits the previous, so writes are

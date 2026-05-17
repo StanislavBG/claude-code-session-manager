@@ -36,9 +36,6 @@ interface PluginRow {
   hasMcp: boolean
 }
 
-const COUNT_OR_DASH = (n: number) =>
-  n > 0 ? n : (null as unknown as number)
-
 /**
  * Plugins are directories under `~/.claude/plugins/<name>/` that bundle skills,
  * subagents, and hooks. We enumerate them and show their manifest + contents
@@ -116,7 +113,6 @@ export function Plugins() {
       render: (r) => <span className="font-mono text-fg-faint truncate">{r.path}</span>,
     },
   ]
-  void COUNT_OR_DASH
 
   const installedSlugs = useMemo(() => new Set(rows.map((r) => r.name)), [rows])
 

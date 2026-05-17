@@ -195,6 +195,10 @@ ipcMain.handle('app:home-dir', () => os.homedir());
 
 ipcMain.handle('app:cwd', () => process.cwd());
 
+// E2E plumbing: tests set SM_E2E=1 to suppress the voice wizard auto-trigger.
+// The renderer reads this once on mount.
+ipcMain.handle('app:is-e2e', () => process.env.SM_E2E === '1');
+
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
 
 ipcMain.handle('app:pick-directory', async () => {
@@ -563,7 +567,11 @@ app.whenReady().then(async () => {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' https://api.anthropic.com https://registry.npmjs.org",
+    // schemastore.org is used by Monaco for JSON schema validation
+    // (settings.json, keybindings.json — see App.tsx::installMonacoSchemas).
+    // The json.schemastore.org URL redirects to www.schemastore.org, so both
+    // hosts must be in the allowlist or CSP blocks the redirect.
+    "connect-src 'self' https://api.anthropic.com https://registry.npmjs.org https://json.schemastore.org https://www.schemastore.org",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
     "frame-src 'none'",

@@ -1,10 +1,9 @@
 /**
  * voiceWizard — F7 first-run mic-check wizard, main-process side.
  *
- * Owns three IPC channels:
+ * Owns:
  *   - voice:wizard-state   → returns persisted state + current schema constant
  *   - voice:wizard-complete → stamps completedAt + completedSchema to voice.json
- *   - app:is-e2e           → exposes process.env.SM_E2E === '1' to the renderer
  *
  * No window state held here; persistence is delegated to voiceSettings.cjs
  * (additive `wizard` subtree on the same file as F1/F5).
@@ -32,10 +31,6 @@ function registerWizardHandlers() {
     await voiceSettings.saveWizard(next);
     return { ok: true, ...next, currentSchema: voiceSettings.WIZARD_SCHEMA };
   });
-
-  // E2E plumbing: tests set SM_E2E=1 to suppress the wizard auto-trigger.
-  // The renderer reads this once on mount.
-  ipcMain.handle('app:is-e2e', () => process.env.SM_E2E === '1');
 
   // F8 — turn-detector settings (additive subtree on voice.json).
   // MVP: persistence only; no model loaded in v1 (see PRD §Loading & inference).

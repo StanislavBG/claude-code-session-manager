@@ -34,15 +34,7 @@ const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
 const MAX_ENTRIES = 1000;
 const SLUG_RE = /^[a-z0-9-_]+\.md$/;
 
-/**
- * Encode a workspace label from a cwd. Mirrors transcripts.cjs's encodeCwd
- * (replace any non-alphanumeric with '-'). Duplicated here to avoid coupling
- * the two modules. Falls back to 'default' when cwd is missing/blank.
- */
-function encodeWorkspace(cwd) {
-  if (!cwd || typeof cwd !== 'string' || !cwd.trim()) return 'default';
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
-}
+const { encodeCwd: encodeWorkspace } = require('./lib/encodeCwd.cjs');
 
 function memoryRoot() {
   return path.join(os.homedir(), '.claude', 'session-manager', 'memories');

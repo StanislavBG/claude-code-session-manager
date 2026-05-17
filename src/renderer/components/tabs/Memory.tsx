@@ -5,26 +5,13 @@ import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { EmptyState } from '../ui/EmptyState'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { formatBytes } from '../../lib/formatBytes'
+import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import type { MemoryEntry } from '../../../preload/api'
+import { toast } from '../../state/toast'
 
 const SLUG_RE = /^[a-z0-9-_]+$/
 
-/**
- * Mirrors transcripts.cjs encodeCwd + memoryTool.cjs encodeWorkspace: replace
- * every non-alphanumeric run with '-'. Renderer-side mirror is purely advisory
- * (the main process re-derives), used to populate the workspace label in the
- * toolbar so the user knows which folder they're editing.
- */
-function encodeWorkspace(cwd: string | null): string {
-  if (!cwd || !cwd.trim()) return 'default'
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K`
-  return `${(n / (1024 * 1024)).toFixed(2)} M`
-}
 
 function formatMtime(ms: number): string {
   if (!ms) return ''
@@ -49,14 +36,13 @@ export function Memory() {
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
   const [savedByName, setSavedByName] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [creatingOpen, setCreatingOpen] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!home) return
     const r = await window.api.memory.list(workspace)
     setEntries(r.entries)
-    setError(r.error)
+    if (r.error) toast.error(`Memory list failed: ${r.error}`)
     setSelectedName((prev) => {
       if (prev && r.entries.some((e) => e.name === prev)) return prev
       return r.entries[0]?.name ?? null
@@ -70,6 +56,26 @@ export function Memory() {
     refresh()
   }, [workspace, refresh])
 
+  // External-change subscription. Without this, an external `claude` write
+  // to the workspace dir leaves the UI showing stale state — and saving from
+  // the stale draft clobbers Claude's update (renderer #2 in the
+  // consolidation review). Watch the workspace dir; any change inside fires
+  // a re-list.
+  useEffect(() => {
+    if (!home) return
+    const workspaceDir = `${home}/.claude/session-manager/memories/${workspace}`
+    window.api.config.watch([workspaceDir])
+    const off = window.api.config.onChanged(({ path }) => {
+      if (path === workspaceDir || path.startsWith(workspaceDir + '/')) {
+        refresh()
+      }
+    })
+    return () => {
+      off()
+      window.api.config.unwatch([workspaceDir])
+    }
+  }, [home, workspace, refresh])
+
   // Load file body when the selection changes (only if not yet cached).
   useEffect(() => {
     if (!selectedName) return
@@ -78,6 +84,7 @@ export function Memory() {
     ;(async () => {
       const r = await window.api.memory.read(selectedName, workspace)
       if (cancelled) return
+      if (r.error) { toast.error(`Memory read failed: ${r.error}`); return }
       setDraftByName((m) => ({ ...m, [selectedName]: r.content }))
       setSavedByName((m) => ({ ...m, [selectedName]: r.content }))
     })()
@@ -98,11 +105,10 @@ export function Memory() {
   const onSave = async () => {
     if (!selectedName) return
     setBusy(true)
-    setError(null)
     const r = await window.api.memory.write(selectedName, draft, workspace)
     setBusy(false)
     if (!r.ok) {
-      setError(r.error ?? 'save failed')
+      toast.error(`Memory save failed: ${r.error ?? 'unknown error'}`)
       return
     }
     setSavedByName((m) => ({ ...m, [selectedName]: draft }))
@@ -113,11 +119,10 @@ export function Memory() {
     if (!selectedName) return
     if (!window.confirm(`Delete memory "${selectedName}"? This cannot be undone.`)) return
     setBusy(true)
-    setError(null)
     const r = await window.api.memory.delete(selectedName, workspace)
     setBusy(false)
     if (!r.ok) {
-      setError(r.error ?? 'delete failed')
+      toast.error(`Memory delete failed: ${r.error ?? 'unknown error'}`)
       return
     }
     setDraftByName((m) => { const n = { ...m }; delete n[selectedName]; return n })
@@ -170,7 +175,6 @@ export function Memory() {
             </button>
             <span className="text-fg-faint truncate flex-1">{selectedEntry.path}</span>
             {dirty && <span className="text-accent">unsaved</span>}
-            {error && <span className="text-red-400 truncate max-w-[20rem]" title={error}>{error}</span>}
           </div>
         ) : null
       }

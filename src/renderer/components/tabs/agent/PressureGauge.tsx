@@ -75,6 +75,10 @@ export function PressureGauge({ tokens, cap = 1_000_000, reducedMotion }: Pressu
       {/* Needle */}
       <motion.line
         x1={CX} y1={CY}
+        // `initial` is required: without it, the underlying <line> renders
+        // x2/y2 as "undefined" on the first paint before framer-motion's
+        // animator takes over. Browser logs SVG attribute errors.
+        initial={{ x2: tip.x, y2: tip.y }}
         animate={{ x2: tip.x, y2: tip.y }}
         transition={transition}
         stroke="#d97757"

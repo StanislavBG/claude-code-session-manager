@@ -8,6 +8,7 @@ import { useSessions } from '../../state/sessions'
 import { shellQuote } from '../../lib/presets'
 import { useProjectsPrefs, type SortCol } from '../../state/projectsPrefs'
 import { enrichProject, type ProjectDetails } from '../../lib/projectEnrichment'
+import { formatBytes } from '../../lib/formatBytes'
 import { ClaudeMdDrawer } from './projects/ClaudeMdDrawer'
 import type { DirEntry } from '../../../preload/api'
 
@@ -49,12 +50,6 @@ async function resolveProjectCwd(projectFolder: string): Promise<string | null> 
   return null
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 function formatRelTime(ms: number): string {
   if (!ms) return '—'

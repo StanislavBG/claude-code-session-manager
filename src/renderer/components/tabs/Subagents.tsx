@@ -17,6 +17,7 @@ import {
   type AgentFrontmatter,
 } from '../../lib/agentFrontmatter'
 import { CANONICAL_TOOLS, isCanonicalTool } from '../../data/canonicalTools'
+import { toast } from '../../state/toast'
 
 const MODEL_OPTIONS = ['inherit', 'opus', 'sonnet', 'haiku'] as const
 const EFFORT_OPTIONS = ['', 'low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -68,7 +69,11 @@ export function Subagents() {
         }
       } catch (e) {
         console.error('[Subagents] listDir failed:', dir, e)
-        if (!cancelled) setAgents([])
+        if (!cancelled) {
+          setAgents([])
+          const msg = e instanceof Error ? e.message : String(e)
+          toast.error(`Could not list subagents: ${msg}`)
+        }
       }
     })()
     return () => {

@@ -17,6 +17,7 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const config = require('./config.cjs');
 
 const SCHEMA_VERSION = 1;
 
@@ -74,13 +75,7 @@ async function save(cfg) {
   if (!isValid(cfg)) throw new Error('Invalid OTEL config');
   const next = normalize(cfg);
   const run = async () => {
-    const p = storePath();
-    await fsp.mkdir(path.dirname(p), { recursive: true }).catch(() => {});
-    const body = JSON.stringify(next, null, 2) + '\n';
-    const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
-    await fsp.writeFile(tmp, body, { encoding: 'utf8', mode: 0o600 });
-    try { await fsp.chmod(tmp, 0o600); } catch { /* */ }
-    await fsp.rename(tmp, p);
+    await config.writeTextAtomic(storePath(), JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
     return next;
   };
   const tail = writeQueue.then(run, run);

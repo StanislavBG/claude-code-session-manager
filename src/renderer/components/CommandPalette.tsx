@@ -107,29 +107,32 @@ function buildCommands(): Command[] {
     },
 
     // ── scheduler ──
+    // Errors toast through `runCommand`'s outer catch (see ~287) so the
+    // user sees feedback when Cmd-K → "Run now" fails. Bare `.catch(() => {})`
+    // here would swallow the failure silently.
     {
       id: 'scheduler-run-now',
       label: 'Scheduler — Run now',
       section: 'scheduler',
-      run: () => { window.api.schedule.runNow().catch(() => {}) },
+      run: async () => { await window.api.schedule.runNow() },
     },
     {
       id: 'scheduler-force-tick',
       label: 'Scheduler — Force tick (bypass meter)',
       section: 'scheduler',
-      run: () => { window.api.schedule.forceTick().catch(() => {}) },
+      run: async () => { await window.api.schedule.forceTick() },
     },
     {
       id: 'scheduler-resume',
       label: 'Scheduler — Resume from pause',
       section: 'scheduler',
-      run: () => { window.api.schedule.resume().catch(() => {}) },
+      run: async () => { await window.api.schedule.resume() },
     },
     {
       id: 'scheduler-rescan',
       label: 'Scheduler — Re-scan PRDs folder',
       section: 'scheduler',
-      run: () => { window.api.schedule.rescan().catch(() => {}) },
+      run: async () => { await window.api.schedule.rescan() },
     },
     {
       id: 'scheduler-lint',
@@ -141,13 +144,13 @@ function buildCommands(): Command[] {
       id: 'scheduler-open-folder',
       label: 'Scheduler — Open PRDs folder',
       section: 'scheduler',
-      run: () => { window.api.schedule.openFolder().catch(() => {}) },
+      run: async () => { await window.api.schedule.openFolder() },
     },
     {
       id: 'scheduler-supervisor-tick',
       label: 'Scheduler — Run supervisor probe now',
       section: 'scheduler',
-      run: () => { window.api.supervisor.tickNow().catch(() => {}) },
+      run: async () => { await window.api.supervisor.tickNow() },
     },
 
     // ── config ──
@@ -168,11 +171,12 @@ function buildCommands(): Command[] {
     { id: 'nav:subagents', label: 'Go to Subagents', section: 'nav', emitOnly: true },
     { id: 'nav:plans', label: 'Go to Plans', section: 'nav', emitOnly: true },
     { id: 'nav:tasks', label: 'Go to Tasks', section: 'nav', emitOnly: true },
+    { id: 'nav:memory', label: 'Go to Memory', section: 'nav', emitOnly: true },
     { id: 'nav:projects', label: 'Go to Projects', section: 'nav', emitOnly: true },
     { id: 'nav:history', label: 'Go to History', section: 'nav', emitOnly: true },
     { id: 'nav:keybindings', label: 'Go to Keybindings', section: 'nav', emitOnly: true },
     { id: 'nav:usage', label: 'Go to Usage', section: 'nav', emitOnly: true },
-    { id: 'nav:agent-view', label: 'Go to Agent-View', section: 'nav', emitOnly: true },
+    { id: 'nav:agent-view', label: 'Go to Agent View', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
   ]
   return cmds

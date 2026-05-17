@@ -10,32 +10,8 @@
  *   5. Toast appears when toast.error() fires and auto-expires after 5s.
  *   6. Density toggle persists across reload (cycle 1 smoke).
  */
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, '../..')
-
-async function launchApp(): Promise<{ app: ElectronApplication; win: Page }> {
-  const app = await electron.launch({
-    args: [path.join(ROOT, 'src', 'main', 'index.cjs')],
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      SM_E2E: '1',
-      // Avoid pegging the supervisor + billing pollers during tests.
-      SM_SUPERVISOR_DISABLE: '1',
-      SM_MOCK_BILLING_KIND: 'meter_rate_limited',
-    },
-  })
-  const win = await app.firstWindow()
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
-  // Let initial render settle (AppStatusBar mounts the settings poller).
-  await win.waitForTimeout(500)
-  return { app, win }
-}
+import { test, expect } from '@playwright/test'
+import { launchApp } from './_helpers/launchApp'
 
 test('AppStatusBar pills render with correct aria-labels', async () => {
   const { app, win } = await launchApp()
@@ -188,6 +164,8 @@ test('Toast appears on toast.error() and auto-expires after 5s', async () => {
     // Fire a toast via the global module. The toast module exports a
     // singleton; reach it through dynamic import inside the page context.
     await win.evaluate(async () => {
+      // Vite resolves this URL at runtime; the TS compiler can't follow it.
+      // @ts-expect-error dynamic-import string is resolved by Vite
       const mod = await import('/src/renderer/state/toast.ts')
       mod.toast.error('e2e test toast — expires in 5s')
     })

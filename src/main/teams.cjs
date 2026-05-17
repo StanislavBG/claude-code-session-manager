@@ -18,6 +18,7 @@ const { ipcMain } = require('electron');
 const os = require('node:os');
 const path = require('node:path');
 const configMgr = require('./config.cjs');
+const logs = require('./logs.cjs');
 
 const TEAMS_ROOT = path.join(os.homedir(), '.claude', 'teams');
 
@@ -36,7 +37,11 @@ async function listTeams() {
     // happen for ~/.claude/teams, but guard anyway.
     return { teams: [] };
   }
-  if (!dir.ok || dir.entries.length === 0) return { teams: [] };
+  if (!dir.ok) {
+    if (dir.error) logs.writeLine({ level: 'warn', scope: 'teams', message: 'listDir failed', meta: { error: dir.error } });
+    return { teams: [] };
+  }
+  if (dir.entries.length === 0) return { teams: [] };
 
   const teams = [];
   for (const entry of dir.entries) {

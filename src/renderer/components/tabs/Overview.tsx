@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { InstrumentTile } from '../ui/InstrumentTile'
@@ -10,6 +10,10 @@ import { checkForUpdate, type UpdateCheckResult } from '../../lib/updateCheck'
 import { useSessions } from '../../state/sessions'
 import { useLive } from '../../state/live'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
+import { toast } from '../../state/toast'
+import { formatAgoSec } from '../../lib/formatTime'
+import { useBilling, refreshBilling } from '../../state/billing'
+import { useScheduleState } from '../../state/scheduleState'
 import type {
   BillingFetchResult,
   ScheduleStateSnapshot,
@@ -31,12 +35,7 @@ interface Counts {
   claudeMdExists: boolean
 }
 
-const BILLING_REFRESH_MS = 60_000
 const HEARTBEAT_REFRESH_MS = 10_000
-
-// User has CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 per synthesis; Bundle B
-// replaces TeamsCard + drives this from settings.
-const teamsEnabled = true
 
 interface OverviewProps {
   onNavigate?: (k: NavKey) => void
@@ -47,61 +46,14 @@ export function Overview({ onNavigate }: OverviewProps) {
   const tabs = useSessions((s) => s.tabs)
   const liveTabs = useLive((s) => s.tabs)
   const [counts, setCounts] = useState<Counts | null>(null)
-  const [billing, setBilling] = useState<BillingFetchResult | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
-  const [schedSnap, setSchedSnap] = useState<ScheduleStateSnapshot | null>(null)
+  // Billing + schedule snapshots are owned by the singleton pollers in
+  // state/billing.ts and state/scheduleState.ts (started once in App.tsx).
+  const billing = useBilling((s) => s.data)
+  const refreshing = useBilling((s) => s.refreshing)
+  const schedSnap = useScheduleState((s) => s.snapshot)
   const [lastPollAt, setLastPollAt] = useState<number | null>(null)
   const [nowTick, setNowTick] = useState<number>(() => Date.now())
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
-  const lastKindRef = useRef<string | null>(null)
-  const tickRef = useRef<() => void>(() => {})
-
-  useEffect(() => {
-    let cancelled = false
-    let timer: number | null = null
-    const tick = async () => {
-      if (timer !== null) { clearTimeout(timer); timer = null }
-      setRefreshing(true)
-      const r = await window.api.billing.fetch()
-      if (cancelled) return
-      setBilling(r)
-      setRefreshing(false)
-      let next: number
-      if (r.kind === 'transient') {
-        next = lastKindRef.current === 'transient' ? 30_000 : 5_000
-      } else if (r.kind === 'auth') {
-        next = 30_000
-      } else {
-        next = BILLING_REFRESH_MS
-      }
-      lastKindRef.current = r.kind
-      timer = window.setTimeout(tick, next)
-    }
-    tickRef.current = tick
-    tick()
-    return () => { cancelled = true; if (timer !== null) clearTimeout(timer) }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    let offState: (() => void) | null = null
-    ;(async () => {
-      try {
-        const snap = await window.api.schedule.state()
-        if (cancelled) return
-        setSchedSnap(snap)
-      } catch (e) {
-        console.warn('[Overview] schedule.state failed:', e)
-      }
-      offState = window.api.schedule.onState((s) => {
-        if (!cancelled) setSchedSnap(s)
-      })
-    })()
-    return () => {
-      cancelled = true
-      if (offState) offState()
-    }
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -204,6 +156,10 @@ export function Overview({ onNavigate }: OverviewProps) {
         }
       } catch (e) {
         console.error('[Overview] scan failed:', e)
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e)
+          toast.error(`Overview scan failed: ${msg}`)
+        }
       }
     })()
     return () => {
@@ -251,7 +207,7 @@ export function Overview({ onNavigate }: OverviewProps) {
       <div className="p-6 max-w-5xl space-y-5">
         <CockpitStrip
           billing={billing}
-          onRetry={tickRef.current}
+          onRetry={refreshBilling}
           refreshing={refreshing}
           tabCount={tabs.length}
           updateInfo={updateInfo}
@@ -268,7 +224,7 @@ export function Overview({ onNavigate }: OverviewProps) {
               onNavigate={onNavigate}
             />
 
-            {teamsEnabled && <TeamsCard />}
+            <TeamsCard />
 
             <SystemRow
               counts={counts}
@@ -502,14 +458,6 @@ function InstrumentGrid({
 
 /* -------------------------------------------------------------- System row */
 
-function formatAgoSec(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  return `${h}h ago`
-}
 
 function SystemRow({
   counts,
@@ -564,6 +512,7 @@ function QuickActions({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
       })
     } catch (e) {
       console.error('[Overview] new session failed:', e)
+      toast.error('Could not start new session. Is the claude CLI on PATH?')
     }
   }
 

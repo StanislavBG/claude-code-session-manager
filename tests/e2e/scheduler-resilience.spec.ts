@@ -10,14 +10,12 @@
  * If claude is unavailable, jobs will fail but the queue should still not enter
  * the network-pause state (which is the primary assertion of this test).
  */
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { launchApp } from './_helpers/launchApp'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, '../..')
 const PRDS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds')
 const QUEUE_JSON = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json')
 
@@ -71,20 +69,7 @@ test.afterEach(() => {
 })
 
 test('meter_rate_limited billing responses do not pause the queue', async () => {
-  const app = await electron.launch({
-    args: [path.join(ROOT, 'src', 'main', 'index.cjs')],
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      SM_E2E: '1',
-      // Simulate sustained meter rate-limiting from the billing API.
-      SM_MOCK_BILLING_KIND: 'meter_rate_limited',
-    },
-  })
-
-  const win = await app.firstWindow()
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15000 })
+  const { app, win } = await launchApp()
   // Give the scheduler time to boot and run its first poll (which will get meter_rate_limited).
   await win.waitForTimeout(5000)
 
@@ -110,19 +95,7 @@ test('meter_rate_limited billing responses do not pause the queue', async () => 
 })
 
 test('"Fire next batch now" button is visible in SchedulePanel', async () => {
-  const app = await electron.launch({
-    args: [path.join(ROOT, 'src', 'main', 'index.cjs')],
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      SM_E2E: '1',
-      SM_MOCK_BILLING_KIND: 'meter_rate_limited',
-    },
-  })
-
-  const win = await app.firstWindow()
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15000 })
+  const { app, win } = await launchApp()
   await win.waitForTimeout(2000)
 
   // The "Fire next batch now" button should exist somewhere in the page.

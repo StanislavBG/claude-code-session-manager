@@ -15,6 +15,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { ipcMain } = require('electron');
+const config = require('./config.cjs');
 
 function storePath() {
   return path.join(os.homedir(), '.config', 'session-manager', 'tabs.json');
@@ -38,14 +39,9 @@ async function load() {
 }
 
 async function save({ tabs, activeTabId, freshStart }) {
-  const p = storePath();
-  await fsp.mkdir(path.dirname(p), { recursive: true }).catch(() => {});
   const payload = { tabs, activeTabId, savedAt: Date.now() };
   if (freshStart) payload.freshStart = true;
-  const body = JSON.stringify(payload, null, 2) + '\n';
-  const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
-  await fsp.writeFile(tmp, body, 'utf8');
-  await fsp.rename(tmp, p);
+  await config.writeJson(storePath(), payload);
   return { ok: true };
 }
 

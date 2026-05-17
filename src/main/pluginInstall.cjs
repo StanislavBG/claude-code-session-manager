@@ -20,8 +20,9 @@ const { ipcMain } = require('electron');
 const pty = require('node-pty');
 const path = require('node:path');
 const os = require('node:os');
-const fs = require('node:fs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 
 const SLUG_RE = /^[a-z0-9\-/]+$/;
@@ -36,23 +37,7 @@ function attachWindow(window) {
 }
 
 function send(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
-  }
-}
-
-function resolveClaudeBin() {
-  // Same PATH-resolution heuristic pty.cjs uses for `claude`.
-  const candidates = [
-    path.join(os.homedir(), '.local', 'bin', 'claude'),
-    path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
-    '/usr/local/bin/claude',
-    '/usr/bin/claude',
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return 'claude'; // Hope PATH has it.
+  sendIfAlive(mainWindow, channel, payload);
 }
 
 function install({ slug }) {

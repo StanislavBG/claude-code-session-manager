@@ -236,6 +236,22 @@ const voiceSetTurnDetector = z.object({
 
 const voiceSetRecording = z.boolean();
 
+// ──────────────────────────────────────────── Watchers
+// watchers:add runs `spawn(command, { shell: true })` — second-highest blast
+// radius after app:test-fire-hook. The 8 KiB cap on `command` is the same
+// cap watchers.cjs uses internally; centralizing here so the schema is the
+// injection fence rather than relying on the inline schemas in watchers.cjs.
+const watchersAdd = z.object({
+  tabId: z.string().min(1).max(128),
+  label: z.string().max(256).optional().default(''),
+  command: z.string().min(1).max(8192),
+  cwd: z.string().max(4096).optional().nullable(),
+});
+
+const watchersList = z.object({ tabId: z.string().min(1).max(128) });
+const watchersRemove = z.object({ watcherId: z.string().min(1).max(128) });
+const watchersKillTab = z.object({ tabId: z.string().min(1).max(128) });
+
 // ──────────────────────────────────────────── Hooks / git / plugins
 // Free-form env: keys must be safe identifier shape (no '=' / NUL / weird
 // unicode), values must be plain strings, both length-capped. We don't
@@ -319,6 +335,10 @@ module.exports = {
     memoryWrite,
     memoryDelete,
     memoryCreate,
+    watchersAdd,
+    watchersList,
+    watchersRemove,
+    watchersKillTab,
   },
   validated,
 };

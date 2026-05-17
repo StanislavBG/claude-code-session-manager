@@ -7,6 +7,9 @@ import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
 import { Tooltip } from '../../ui/Tooltip'
 import { parsePrdFile, serializePrdFile, type PrdFrontmatter } from '../../../lib/prdFrontmatter'
+import { toast } from '../../../state/toast'
+import { useScheduleState } from '../../../state/scheduleState'
+import { getLintQueueCached } from '../../../lib/lintQueueCache'
 
 type PrdStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unqueued'
 
@@ -129,23 +132,24 @@ export function SchedulerPrdsView() {
           setLoading(false)
         }
       })
-      .catch(() => {
-        if (alive) setLoading(false)
+      .catch((e) => {
+        if (alive) {
+          setLoading(false)
+          toast.error(`Scheduler: failed to load PRD list — ${e instanceof Error ? e.message : 'unknown error'}`)
+        }
       })
-    window.api.schedule
-      .state()
-      .then((s) => {
-        if (alive) setQueueState(s)
-      })
-      .catch(() => {})
-    const off = window.api.schedule.onState((s) => {
-      if (alive) setQueueState(s)
-    })
+    // Schedule snapshot is owned by state/scheduleState.ts; subscribe via
+    // useScheduleState() above and mirror into queueState (kept as local
+    // state so existing render logic doesn't change).
     return () => {
       alive = false
-      off()
     }
   }, [])
+
+  const liveSnap = useScheduleState((s) => s.snapshot)
+  useEffect(() => {
+    if (liveSnap) setQueueState(liveSnap)
+  }, [liveSnap])
 
   // Auto-select first PRD on initial load
   useEffect(() => {
@@ -173,8 +177,16 @@ export function SchedulerPrdsView() {
         setSaveError(null)
         setLogText(null)
         setShowLog(false)
+        if (!res.ok) {
+          const msg = res.error ?? 'PRD read returned not-ok'
+          toast.error(`Could not load PRD "${selectedSlug}": ${msg}`)
+        }
       })
-      .catch(() => {})
+      .catch((e) => {
+        if (!alive) return
+        const msg = e instanceof Error ? e.message : String(e)
+        toast.error(`Could not load PRD "${selectedSlug}": ${msg}`)
+      })
     return () => {
       alive = false
     }
@@ -201,7 +213,7 @@ export function SchedulerPrdsView() {
 
   async function runLint(forSlug: string) {
     try {
-      const res = await window.api.schedule.lintQueue()
+      const res = await getLintQueueCached()
       const report = res.reports.find((r) => r.slug === forSlug)
       setLintFindings(report?.findings ?? [])
     } catch {
@@ -648,6 +660,10 @@ export function SchedulerPrdsView() {
       if (!res.ok) {
         setBulkError(res.error ?? 'archive failed')
       } else {
+        const failed = res.results?.filter((r: { ok: boolean }) => !r.ok) ?? []
+        if (failed.length > 0) {
+          toast.warn(`Archive: ${failed.length} of ${res.results.length} PRD${failed.length === 1 ? '' : 's'} failed to move`)
+        }
         clearChecked()
         setArchiveOpen(false)
         await refreshPrds()

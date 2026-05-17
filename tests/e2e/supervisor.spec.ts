@@ -213,15 +213,7 @@ test('supervisor tick kills wedged bash subprocess and logs kill-bash', async ()
       expect(tickResult).toHaveProperty('ok', true)
 
       // 7. Wait up to 30 s for the bash process to die.
-      let bashDead = false
-      for (let i = 0; i < 30; i++) {
-        await sleep(1000)
-        if (!isAlive(bashPid)) {
-          bashDead = true
-          break
-        }
-      }
-      expect(bashDead).toBe(true)
+      await expect.poll(() => !isAlive(bashPid!), { timeout: 30_000 }).toBe(true)
 
       // 8. Assert supervisor.log has a kill-bash entry for our slug.
       let logHasEntry = false

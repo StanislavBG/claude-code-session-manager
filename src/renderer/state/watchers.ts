@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { WatcherInfo, WatcherLineEvent } from '../../preload/api'
+import { toast } from './toast'
 
 const RING_SIZE = 200
 const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*m/g
@@ -84,6 +85,7 @@ export const useWatchers = create<WatchersState>((set, get) => ({
       return w
     } catch (e) {
       console.error('[watchers] add failed:', e)
+      toast.error('Failed to add watcher')
       return null
     }
   },
@@ -93,6 +95,8 @@ export const useWatchers = create<WatchersState>((set, get) => ({
       await window.api.watchers.remove(watcherId)
     } catch (e) {
       console.error('[watchers] remove failed:', e)
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(`Could not remove watcher: ${msg}`)
     }
     // Listener-driven removal handles the dictionary cleanup, but force it now
     // so the UI reacts immediately even if the close event is delayed.

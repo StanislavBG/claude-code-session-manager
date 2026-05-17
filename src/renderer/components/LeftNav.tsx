@@ -6,6 +6,7 @@ import { SchedulePanel } from './SchedulePanel'
 import { SubmitCountdown } from './SubmitCountdown'
 import { useVoice } from '../state/voice'
 import { useLive } from '../state/live'
+import { useScheduleState } from '../state/scheduleState'
 import { log } from '../lib/logger'
 import { useDensity, type Density } from '../lib/useDensity'
 import { StatusDot } from './ui/StatusDot'
@@ -284,20 +285,16 @@ function SchedulerSection() {
   const [pendingCount, setPendingCount] = useState(0)
   const [activeBadge, setActiveBadge] = useState<'idle' | 'running' | 'paused'>('idle')
 
+  // Snapshot lives in state/scheduleState.ts; the singleton poller updates it.
+  const snap = useScheduleState((s) => s.snapshot)
   useEffect(() => {
-    let off: (() => void) | null = null
-    const apply = (snap: { jobs: { status: string }[]; paused?: { reason: string } | null } | null) => {
-      if (!snap) return
-      const p = snap.jobs.filter((j) => j.status === 'pending').length
-      const r = snap.jobs.some((j) => j.status === 'running')
-      const next: 'idle' | 'running' | 'paused' = snap.paused ? 'paused' : (r ? 'running' : 'idle')
-      setPendingCount((prev) => (prev === p ? prev : p))
-      setActiveBadge((prev) => (prev === next ? prev : next))
-    }
-    window.api.schedule.state().then(apply).catch(() => {})
-    off = window.api.schedule.onState(apply)
-    return () => { if (off) off() }
-  }, [])
+    if (!snap) return
+    const p = snap.jobs.filter((j) => j.status === 'pending').length
+    const r = snap.jobs.some((j) => j.status === 'running')
+    const next: 'idle' | 'running' | 'paused' = snap.paused ? 'paused' : (r ? 'running' : 'idle')
+    setPendingCount((prev) => (prev === p ? prev : p))
+    setActiveBadge((prev) => (prev === next ? prev : next))
+  }, [snap])
 
   const hasWork = pendingCount > 0 || activeBadge !== 'idle'
   const badge = (

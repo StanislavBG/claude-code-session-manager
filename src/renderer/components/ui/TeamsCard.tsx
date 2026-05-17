@@ -1,38 +1,21 @@
-import { useEffect, useState } from 'react'
 import type { TeamInfo } from '../../../preload/api'
+import { useTeams } from '../../state/teams'
+import { prettyModel } from '../../lib/prettyModel'
 
 /**
  * Compact roster panel rendered on Overview below the instrument cluster.
- * Polls `window.api.teams.list()` every 30s. Renders nothing while loading;
- * shows a faint "no teams configured" if the list comes back empty.
+ * Reads from the singleton `useTeams` store; the underlying 30s poller is
+ * owned by state/teams.ts (started once in App.tsx). Renders nothing until
+ * the first list arrives.
  *
  * Aesthetic: terminal-cabinet — 1px border, 4px radius, no shadows. Aligns
  * with research-03's anti-recommendations (kept verbatim in synthesis).
  */
 export function TeamsCard() {
-  const [teams, setTeams] = useState<TeamInfo[] | null>(null)
+  const teams = useTeams((s) => s.teams)
+  const loaded = useTeams((s) => s.loaded)
 
-  useEffect(() => {
-    let cancelled = false
-    let timer: number | null = null
-    const tick = async () => {
-      try {
-        const r = await window.api.teams.list()
-        if (cancelled) return
-        setTeams(r.teams)
-      } catch {
-        if (!cancelled) setTeams([])
-      }
-      timer = window.setTimeout(tick, 30_000)
-    }
-    tick()
-    return () => {
-      cancelled = true
-      if (timer !== null) clearTimeout(timer)
-    }
-  }, [])
-
-  if (teams === null) return null
+  if (!loaded) return null
   const activeCount = teams.length
 
   return (
@@ -86,10 +69,3 @@ function TeamRow({ team }: { team: TeamInfo }) {
   )
 }
 
-function prettyModel(model: string): string {
-  // Compress noisy model strings (e.g. claude-opus-4-7[1m]) to a short tag.
-  if (model === 'unknown') return 'unknown'
-  const m = model.match(/(opus|sonnet|haiku)[-_]?(\d+[-_.]?\d*)?/i)
-  if (m) return `${m[1].charAt(0).toUpperCase()}${m[1].slice(1).toLowerCase()}${m[2] ? ' ' + m[2].replace(/-/g, '.') : ''}`
-  return model
-}

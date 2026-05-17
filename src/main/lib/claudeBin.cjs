@@ -19,8 +19,12 @@ let cached = null;
 
 function resolveClaudeBin() {
   if (cached) return cached;
+  // Merged candidate list — was forked in scheduler vs pluginInstall before.
+  const home = os.homedir();
   const candidates = [
-    path.join(os.homedir(), '.claude', 'local', 'claude'),
+    path.join(home, '.claude', 'local', 'claude'),    // Claude Code bundled install
+    path.join(home, '.local', 'bin', 'claude'),       // user pip-style install
+    path.join(home, '.npm-global', 'bin', 'claude'),  // user npm-global
     '/usr/local/bin/claude',
     '/opt/homebrew/bin/claude',
     '/usr/bin/claude',

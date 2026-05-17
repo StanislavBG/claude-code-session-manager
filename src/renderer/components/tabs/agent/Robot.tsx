@@ -121,17 +121,20 @@ function Eye({ state, cx, cy, slowBlink }: { state: RobotState; cx: number; cy: 
   }, [slowBlink])
 
   const open = state !== 'offline' && !blinking
+  // Animate the blink via wrapper transform (scaleY) instead of animating the
+  // <rect> height attribute directly. Motion.rect animating an SVG presentation
+  // attr like `height` emits "height=undefined" on the first paint.
   return (
-    <motion.rect
-      x={cx - 5} width={10} rx={2}
-      fill={state === 'working' ? '#fbbf24' : state === 'offline' ? '#4b5563' : '#22d3ee'}
-      animate={{
-        height: open ? 10 : 1.5,
-        y: open ? cy - 5 : cy - 0.75,
-        opacity: state === 'offline' ? 0.5 : 1,
-      }}
+    <motion.g
+      style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+      animate={{ scaleY: open ? 1 : 0.15, opacity: state === 'offline' ? 0.5 : 1 }}
       transition={{ duration: 0.09, ease: 'easeOut' }}
-    />
+    >
+      <rect
+        x={cx - 5} y={cy - 5} width={10} height={10} rx={2}
+        fill={state === 'working' ? '#fbbf24' : state === 'offline' ? '#4b5563' : '#22d3ee'}
+      />
+    </motion.g>
   )
 }
 
@@ -205,18 +208,21 @@ export function Robot({
         <motion.g animate={state} variants={rigVariants} initial={false}>
           <g transform={`scale(${ROBOT_SCALE}) translate(-80, -190)`}>
 
-            {/* Ground shadow */}
-            <motion.ellipse
-              cx="80" cy="194" rx="42" ry="4" fill="#000"
+            {/* Ground shadow — pulse via wrapper scaleX, not rx, to avoid
+                framer-motion emitting "rx=undefined" on first paint. */}
+            <motion.g
+              style={{ transformBox: 'fill-box', transformOrigin: '80px 194px' }}
               animate={{
                 opacity: state === 'offline' ? 0.2 : 0.4,
-                rx: state === 'working' && !rm ? [42, 44, 42] : 42,
+                scaleX: state === 'working' && !rm ? [1, 1.05, 1] : 1,
               }}
               transition={state === 'working' && !rm
-                ? { rx: { duration: 0.9, repeat: Infinity, ease: 'easeInOut' } }
+                ? { scaleX: { duration: 0.9, repeat: Infinity, ease: 'easeInOut' } }
                 : { duration: 0.3 }
               }
-            />
+            >
+              <ellipse cx="80" cy="194" rx="42" ry="4" fill="#000" />
+            </motion.g>
 
             {/* BODY — stretch wrapper for the stretch idle behavior */}
             <motion.g
@@ -297,11 +303,13 @@ export function Robot({
               >
                 {/* String as a thin rect that grows */}
                 <g transform="translate(132, 152)">
-                  <motion.rect
-                    x="-0.5" y="0" width="1" rx="0.5" fill="#9ca3af"
-                    animate={{ height: [0, 66, 0, 66, 0, 66, 0] as number[] }}
+                  <motion.g
+                    style={{ transformBox: 'fill-box', transformOrigin: 'top' }}
+                    animate={{ scaleY: [0, 1, 0, 1, 0, 1, 0] as number[] }}
                     transition={{ duration: 3.6, ease: 'easeInOut', times: [0, 0.14, 0.29, 0.43, 0.57, 0.71, 1], repeat: Infinity }}
-                  />
+                  >
+                    <rect x="-0.5" y="0" width="1" height="66" rx="0.5" fill="#9ca3af" />
+                  </motion.g>
                   <motion.g
                     animate={{ y: [0, 66, 0, 66, 0, 66, 0] as number[] }}
                     transition={{ duration: 3.6, ease: 'easeInOut', times: [0, 0.14, 0.29, 0.43, 0.57, 0.71, 1], repeat: Infinity }}

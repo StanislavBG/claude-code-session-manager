@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
+import { toast } from '../state/toast'
+import { formatDuration, formatRelative, formatClock, formatAgo } from '../lib/formatTime'
+import { useScheduleState } from '../state/scheduleState'
+import { getLintQueueCached } from '../lib/lintQueueCache'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -45,7 +49,10 @@ function projectTag(cwd: string | null | undefined): string | null {
  * `schedule.state()` and listen for `schedule:state` broadcasts.
  */
 export function SchedulePanel() {
-  const [snap, setSnap] = useState<ScheduleStateSnapshot | null>(null)
+  // Snapshot is owned by the singleton poller in state/scheduleState.ts
+  // (started once in App.tsx). Health is panel-local — periodic refresh
+  // best-effort, logger-only on failure.
+  const snap = useScheduleState((s) => s.snapshot)
   const [health, setHealth] = useState<ScheduleHealthSnapshot | null>(null)
   const [showHealth, setShowHealth] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -55,15 +62,11 @@ export function SchedulePanel() {
   const [panelView, setPanelView] = useState<'queue' | 'supervisor'>('queue')
 
   useEffect(() => {
-    let off: (() => void) | null = null
-    window.api.schedule.state().then(setSnap).catch(() => {})
-    off = window.api.schedule.onState((s) => {
-      setSnap(s)
-      // Refresh health on every state broadcast so running-job list stays live.
+    window.api.schedule.health().then(setHealth).catch(() => {})
+    const off = window.api.schedule.onState(() => {
       window.api.schedule.health().then(setHealth).catch(() => {})
     })
-    window.api.schedule.health().then(setHealth).catch(() => {})
-    return () => { if (off) off() }
+    return off
   }, [])
 
   useEffect(() => {
@@ -127,10 +130,8 @@ export function SchedulePanel() {
     const msg = `Archive ${victims} pending/failed PRD${victims === 1 ? '' : 's'} and remove from the queue?\n\nFiles are moved to prds-archived/<timestamp>/ and can be restored from disk.`
     if (!window.confirm(msg)) return
     const r = await window.api.schedule.clearQueue()
-    if (r.ok && r.archived > 0 && r.archivedTo) {
-      // Silent success — the state broadcast will refresh the panel. Surface
-      // the archive path in the console so the user can find it if needed.
-      console.info('[scheduler] clear-queue: archived', r.archived, '→', r.archivedTo)
+    if (!r.ok) {
+      toast.error(`Clear queue failed: ${(r as { error?: string }).error ?? 'unknown error'}`)
     }
   }
   const onUnhideAll = () => {
@@ -809,38 +810,6 @@ function SupervisorLogRow({ entry, now }: { entry: SupervisorLogEntry; now: numb
   )
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 0) ms = 0
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m${(s % 60).toString().padStart(2, '0')}s`
-  const h = Math.floor(m / 60)
-  return `${h}h${(m % 60).toString().padStart(2, '0')}m`
-}
-
-function formatRelative(ms: number): string {
-  if (ms < 0) ms = 0
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  return `${h}h${m % 60 ? ` ${m % 60}m` : ''}`
-}
-
-function formatClock(ms: number): string {
-  const d = new Date(ms)
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-}
-
-function formatAgo(ms: number | null, now: number): string {
-  if (ms === null) return 'never'
-  const diff = now - ms
-  if (diff < 0) return 'soon'
-  if (diff < 5_000) return 'just now'
-  return `${formatRelative(diff)} ago`
-}
 
 function SchedulerHealthSection({
   health,
@@ -926,8 +895,7 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
   useEffect(() => {
     let alive = true
     setLoading(true)
-    window.api.schedule
-      .lintQueue()
+    getLintQueueCached()
       .then((r) => { if (alive) setReport(r) })
       .catch(() => { /* */ })
       .finally(() => { if (alive) setLoading(false) })
@@ -975,8 +943,7 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
           onClick={(e) => {
             e.stopPropagation()
             setLoading(true)
-            window.api.schedule
-              .lintQueue()
+            getLintQueueCached({ fresh: true })
               .then(setReport)
               .catch(() => {})
               .finally(() => setLoading(false))

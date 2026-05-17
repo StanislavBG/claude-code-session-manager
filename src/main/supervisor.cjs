@@ -101,20 +101,7 @@ function getChildBashCmdlines(jobPid) {
 
 // ─── Log tail helpers ───────────────────────────────────────────────────────
 
-function readTailBytes(filePath, bytes) {
-  try {
-    const stat = fs.statSync(filePath);
-    const n = Math.min(stat.size, bytes);
-    if (n <= 0) return '';
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(n);
-    fs.readSync(fd, buf, 0, n, stat.size - n);
-    fs.closeSync(fd);
-    return buf.toString('utf8');
-  } catch {
-    return '';
-  }
-}
+const { readTail: readTailBytes } = require('./lib/fileTail.cjs');
 
 /**
  * Skim the last 16 KB of a run log for the most recent assistant/user/result

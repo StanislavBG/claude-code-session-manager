@@ -24,6 +24,8 @@ const path = require('node:path');
 const os = require('node:os');
 const chokidar = require('chokidar');
 const otel = require('./otel.cjs');
+const logs = require('./logs.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 let window = null;
 
@@ -34,9 +36,7 @@ function attachWindow(w) {
   window = w;
 }
 
-function encodeCwd(cwd) {
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
-}
+const { encodeCwd } = require('./lib/encodeCwd.cjs');
 
 function transcriptPath(cwd, sessionUuid) {
   return path.join(os.homedir(), '.claude', 'projects', encodeCwd(cwd), `${sessionUuid}.jsonl`);
@@ -135,9 +135,7 @@ async function flush(sub, { emit = true } = {}) {
     // Ring buffer (cap at 500 entries to bound memory).
     sub.buffer.push(ev);
     if (sub.buffer.length > 500) sub.buffer.shift();
-    if (emit && window && !window.isDestroyed()) {
-      window.webContents.send(`transcript:event:${sub.tabId}`, ev);
-    }
+    if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
     // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
     // so backfilled transcripts show up in the trace store.
     otel.recordTranscriptEvent({
@@ -184,7 +182,7 @@ async function subscribe({ tabId, cwd, sessionUuid }) {
   });
   watcher.on('add', () => flush(sub).catch(() => {}));
   watcher.on('change', () => flush(sub).catch(() => {}));
-  watcher.on('error', (err) => console.warn('[transcripts] watcher error:', err.message));
+  watcher.on('error', (err) => logs.writeLine({ level: 'warn', scope: 'transcripts', message: 'chokidar watcher error', meta: { error: err?.message } }));
   sub.watcher = watcher;
   subs.set(tabId, sub);
   return { ok: true, path: filePath };

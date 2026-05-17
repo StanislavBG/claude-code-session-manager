@@ -15,6 +15,8 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 // Splits a readable stream into lines capped at maxLineBytes. Prevents OOM
 // from commands that produce no newlines (e.g. cat /dev/urandom | base64).
@@ -59,17 +61,8 @@ class WatcherManager {
   add({ tabId, label, command, cwd }) {
     const resolvedCwd = cwd || process.cwd();
 
-    // Require cwd's realpath to be inside homedir.
-    const home = os.homedir();
-    let realCwd;
-    try {
-      realCwd = fs.realpathSync(resolvedCwd);
-    } catch {
-      realCwd = path.resolve(resolvedCwd);
-    }
-    if (realCwd !== home && !realCwd.startsWith(home + path.sep)) {
-      throw new Error(`watcher cwd outside home directory: ${realCwd}`);
-    }
+    const r = assertCwdInsideHome(resolvedCwd);
+    if (!r.ok) throw new Error(`watcher ${r.error}`);
 
     const watcherId = crypto.randomUUID();
     const trimmedLabel = (label && label.trim()) || command.slice(0, 40);
@@ -95,14 +88,12 @@ class WatcherManager {
 
     const emitLine = (line) => {
       entry.lineCount++;
-      if (this.window && !this.window.isDestroyed()) {
-        this.window.webContents.send('watcher:line', {
-          tabId,
-          watcherId,
-          line,
-          ts: Date.now(),
-        });
-      }
+      sendIfAlive(this.window, 'watcher:line', {
+        tabId,
+        watcherId,
+        line,
+        ts: Date.now(),
+      });
     };
 
     lineSplit(child.stdout, emitLine);
@@ -119,9 +110,7 @@ class WatcherManager {
       if (this.watchers.has(watcherId)) {
         emitLine(`[exited code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}]`);
         this.watchers.delete(watcherId);
-        if (this.window && !this.window.isDestroyed()) {
-          this.window.webContents.send('watcher:closed', { tabId, watcherId });
-        }
+        sendIfAlive(this.window, 'watcher:closed', { tabId, watcherId });
       }
     });
 
@@ -164,9 +153,7 @@ class WatcherManager {
     setTimeout(() => {
       try { if (w.child.exitCode === null && w.child.signalCode === null) w.child.kill('SIGKILL'); } catch { /* */ }
     }, 2000).unref?.();
-    if (this.window && !this.window.isDestroyed()) {
-      this.window.webContents.send('watcher:closed', { tabId: w.tabId, watcherId });
-    }
+    sendIfAlive(this.window, 'watcher:closed', { tabId: w.tabId, watcherId });
     return { ok: true };
   }
 
@@ -186,27 +173,16 @@ function attachWindow(window) {
 }
 
 function registerWatcherHandlers() {
-  const { z } = require('zod');
-  const addSchema = z.object({
-    tabId: z.string().min(1).max(128),
-    label: z.string().max(256).optional().default(''),
-    command: z.string().min(1).max(8192),
-    cwd: z.string().max(4096).optional().nullable(),
-  });
-  const listSchema = z.object({ tabId: z.string().min(1).max(128) });
-  const removeSchema = z.object({ watcherId: z.string().min(1).max(128) });
-  const killTabSchema = z.object({ tabId: z.string().min(1).max(128) });
-
-  ipcMain.handle('watchers:add', (_e, payload) => manager.add(addSchema.parse(payload)));
-  ipcMain.handle('watchers:list', (_e, payload) => manager.list(listSchema.parse(payload)));
-  ipcMain.handle('watchers:remove', (_e, payload) => manager.remove(removeSchema.parse(payload)));
-  ipcMain.handle('watchers:kill-tab', (_e, payload) => {
-    const { tabId } = killTabSchema.parse(payload);
+  const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
+  ipcMain.handle('watchers:add', v(s.watchersAdd, (payload) => manager.add(payload)));
+  ipcMain.handle('watchers:list', v(s.watchersList, (payload) => manager.list(payload)));
+  ipcMain.handle('watchers:remove', v(s.watchersRemove, (payload) => manager.remove(payload)));
+  ipcMain.handle('watchers:kill-tab', v(s.watchersKillTab, ({ tabId }) => {
     for (const [id, w] of manager.watchers) {
       if (w.tabId === tabId) manager.remove({ watcherId: id });
     }
     return { ok: true };
-  });
+  }));
 }
 
 module.exports = { manager, attachWindow, registerWatcherHandlers };

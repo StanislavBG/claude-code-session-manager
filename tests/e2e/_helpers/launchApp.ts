@@ -60,7 +60,12 @@ export async function navigateToTab(win: Page, navKey: string): Promise<void> {
   await win.keyboard.press('Control+K')
   const palette = win.locator('[data-testid="command-palette"]')
   await palette.waitFor({ state: 'visible', timeout: 5_000 })
-  const opt = win.locator(`button[data-cmd-id="nav:${navKey}"]`)
-  await opt.click({ timeout: 5_000 })
+  // Type the nav key (with dashes turned into spaces so kebab keys like
+  // 'system-prompt' fuzzy-match "Go to System Prompt"). The matching command
+  // becomes the first entry; Enter dispatches it.
+  const input = win.locator('[data-testid="command-palette"] input[role="combobox"]')
+  await input.fill(navKey.replace(/-/g, ' '))
+  await win.locator(`button[data-cmd-id="nav:${navKey}"]`).first().waitFor({ state: 'visible', timeout: 3_000 })
+  await win.keyboard.press('Enter')
   await palette.waitFor({ state: 'hidden', timeout: 3_000 })
 }

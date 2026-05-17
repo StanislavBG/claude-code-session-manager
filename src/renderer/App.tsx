@@ -13,7 +13,11 @@ import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
 import { useWatchers } from './state/watchers'
-import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd, shellQuote } from './lib/presets'
+import { startBillingPolling } from './state/billing'
+import { startTeamsPolling } from './state/teams'
+import { startSchedulePolling } from './state/scheduleState'
+import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
+import { createPickedSession } from './lib/createPickedSession'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
 import { isRecognitionSupported } from './lib/speechRecognition'
@@ -22,15 +26,6 @@ import { log } from './lib/logger'
 // Module-scope once-flag for the unsupported warning. Survives StrictMode
 // double-effect; resets only on full reload.
 let unsupportedLogged = false
-
-/** Pick a directory via the OS dialog, then open a claude session there. */
-async function createPickedSession() {
-  const cwd = await window.api.app.pickDirectory()
-  if (!cwd) return // user cancelled
-  const id = crypto.randomUUID()
-  const cmd = `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`
-  useSessions.getState().addTab({ id, cwd, startupCommand: cmd, presetId: 'pick-dangerous' })
-}
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
@@ -139,7 +134,10 @@ export function App() {
 
     // Menu → New Session (Ctrl+N): pick a directory and open claude there.
     const offNewSession = window.api.app.onNewSession(() => {
-      createPickedSession().catch((e) => console.error('[App] new-session from menu failed:', e))
+      createPickedSession().catch((e) => {
+        console.error('[App] new-session from menu failed:', e)
+        toast.error('Could not start new session. Is the claude CLI on PATH?')
+      })
     })
 
     // Menu → Reboot Session: kill active tab's PTY, respawn with fresh session.
@@ -149,6 +147,12 @@ export function App() {
     })
 
     useWatchers.getState().init()
+
+    // Singleton pollers — replace per-component timers in AppStatusBar,
+    // Overview, SchedulePanel, TeamsCard, etc.
+    startBillingPolling()
+    startTeamsPolling()
+    startSchedulePolling()
 
     const off = installConfigChangeListener()
     installMonacoSchemas([
@@ -250,20 +254,30 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
-        // Don't hijack when Monaco / inputs are focused — Monaco wires its
-        // own Cmd-K and editing input feels weird if global palette steals it.
-        const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase() ?? ''
-        if (tag === 'input' || tag === 'textarea') return
-        const inMonaco = (e.target as HTMLElement | null)?.closest('.monaco-editor')
+        // Don't hijack when Monaco / non-xterm text inputs are focused —
+        // Monaco wires its own Cmd-K and editing input feels weird if the
+        // global palette steals it. xterm's hidden helper-textarea is NOT a
+        // "real" input — terminals claim focus at boot, so excluding it
+        // would leave Cmd-K unreachable in the most common state.
+        const target = e.target as HTMLElement | null
+        const tag = target?.tagName?.toLowerCase() ?? ''
+        const isXtermHelper = target?.classList?.contains('xterm-helper-textarea') ?? false
+        if ((tag === 'input' || tag === 'textarea') && !isXtermHelper) return
+        const inMonaco = target?.closest('.monaco-editor')
         if (inMonaco) return
         e.preventDefault()
+        e.stopPropagation()
         setPaletteOpen((v) => !v)
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Capture phase: xterm.js consumes Cmd-K on the terminal textarea before
+    // bubble-phase listeners on window can see it. By registering on capture
+    // we intercept BEFORE xterm — the early-return for input/textarea above
+    // keeps other shortcuts (typing) from being affected.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [paletteOpen])
 
   // F8 — read persisted turn-detector settings on mount, seed the store, and

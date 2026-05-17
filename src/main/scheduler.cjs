@@ -51,6 +51,11 @@ const billing = require('./usage.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { readTail } = require('./lib/fileTail.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const prdParser = require('./scheduler/prdParser.cjs');
+const logs = require('./logs.cjs');
+const { schemas } = require('./ipcSchemas.cjs');
 const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
@@ -97,8 +102,6 @@ const ENV_CAP = process.env.SM_SCHEDULER_MAX_CONCURRENCY
   : null;
 
 const DEFAULT_CONFIG = {
-  // Legacy on/off retained for backwards compat; v0.5+ uses firePolicy.
-  enabled: false,
   offsetMinutes: 15,
   concurrencyCap: ENV_CAP ?? 4,
   defaultCwd: DEFAULT_PROJECT_CWD,
@@ -137,27 +140,13 @@ function ensureDirs() {
   fs.mkdirSync(RUNS_DIR, { recursive: true });
 }
 
-// Sync variant — retained for the executeJob exit handler (Promise resolver
-// callback that must flush meta.json before resolving) and the heartbeat-log
-// rotation path. NOT reachable from ipcMain.handle callbacks.
-function atomicWriteJsonSync(p, data) {
-  const tmp = `${p}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, p);
-}
-
-// Async version used by mutate() and any IPC-reachable write path. Cleans up
-// the tmp file if rename fails so a botched write doesn't litter the dir.
-async function atomicWriteJson(p, data) {
-  const tmp = `${p}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  try {
-    await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
-    await fsp.rename(tmp, p);
-  } catch (e) {
-    try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
-    throw e;
-  }
-}
+// Atomic JSON write helpers delegate to config.cjs's shared implementation.
+// Sync variant is required for the executeJob exit handler (Promise resolver
+// callback that must flush meta.json before resolving) — replacing with async
+// would deadlock the exit path.
+const config = require('./config.cjs');
+const atomicWriteJsonSync = (p, data) => config.writeJsonSync(p, data);
+const atomicWriteJson = (p, data) => config.writeJson(p, data);
 
 // ---------- scheduler-state.json (sidecar) ----------
 
@@ -282,119 +271,13 @@ function mutate(fn) {
  * yaml dep; the schema is small (title, cwd, estimateMinutes, parallelGroup)
  * and the format is documented in the user-facing README.
  */
-async function parsePrdRaw(filePath) {
-  // Async read: reconcile() walks all PRDs on every IPC schedule:state call,
-  // so the cumulative readFileSync cost was the main thread hog the audit flagged.
-  const text = await fsp.readFile(filePath, 'utf8');
-  const meta = { title: null, cwd: null, estimateMinutes: null, parallelGroup: null };
-  let body = text;
-
-  if (text.startsWith('---\n')) {
-    const end = text.indexOf('\n---', 4);
-    if (end !== -1) {
-      const fm = text.slice(4, end);
-      body = text.slice(end + 4).replace(/^\n/, '');
-      for (const line of fm.split('\n')) {
-        const m = line.match(/^([a-zA-Z]+):\s*(.+?)\s*$/);
-        if (!m) continue;
-        const k = m[1];
-        let v = m[2];
-        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-          v = v.slice(1, -1);
-        }
-        if (k === 'title') meta.title = v;
-        else if (k === 'cwd') meta.cwd = v;
-        else if (k === 'estimateMinutes') meta.estimateMinutes = Number(v) || null;
-        else if (k === 'parallelGroup') meta.parallelGroup = Number(v) || null;
-      }
-    }
-  }
-
-  const base = path.basename(filePath, '.md');
-  const groupFromName = (() => {
-    const m = base.match(/^(\d+)-/);
-    return m ? Number(m[1]) : null;
-  })();
-
-  return {
-    slug: base,
-    path: filePath,
-    title: meta.title || base,
-    cwd: meta.cwd || null,
-    estimateMinutes: meta.estimateMinutes,
-    parallelGroup: meta.parallelGroup ?? groupFromName ?? 99,
-    body: body.trim(),
-  };
-}
-
-// Two-level cache for reconcile():
-//   - dirCache: keyed by PRDS_DIR mtimeMs — invalidated when files added/removed.
-//   - fileCache: per-PRD parse keyed by individual file mtimeMs — survives across
-//     dir-cache invalidations so adding ONE new PRD doesn't re-parse the other 197.
-// Both layers also bound by ino so a rename + re-create can't alias.
-let prdDirMtime = -1;
-let prdDirFiles = null; // sorted absolute paths
-const prdFileCache = new Map(); // path -> { mtimeMs, ino, parsed }
-
+// PRD parsing + dir-mtime cache live in scheduler/prdParser.cjs. Local wrappers
+// preserve the existing call shape (callers don't need to thread PRDS_DIR).
+const parsePrdRaw = prdParser.parsePrdRaw;
+const parsePrd = prdParser.parsePrd;
 async function listPrdFiles() {
   ensureDirs();
-  let dirMtime;
-  try {
-    // Async stat: the mtime-cache short-circuit means this only hits the
-    // kernel on dir change, but the call itself was blocking IPC.
-    dirMtime = (await fsp.stat(PRDS_DIR)).mtimeMs;
-  } catch {
-    dirMtime = -1;
-  }
-  if (dirMtime === prdDirMtime && prdDirFiles) return prdDirFiles;
-  const entries = await fsp.readdir(PRDS_DIR);
-  const files = entries
-    .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
-    .map((f) => path.join(PRDS_DIR, f))
-    .sort();
-  // Drop file-cache entries whose path is no longer on disk so the map
-  // doesn't accumulate ghosts after archives/deletes.
-  if (prdFileCache.size > 0) {
-    const live = new Set(files);
-    for (const k of prdFileCache.keys()) {
-      if (!live.has(k)) prdFileCache.delete(k);
-    }
-  }
-  prdDirMtime = dirMtime;
-  prdDirFiles = files;
-  return files;
-}
-
-// Hard cap to keep one malformed PRD (e.g. a binary blob accidentally renamed
-// .md) from wedging the main thread. PRDs are PRDs, not media files; 1 MB is
-// already ~25k lines and well beyond any legitimate authored doc.
-const PRD_READ_MAX_BYTES = 1024 * 1024;
-
-async function parsePrd(filePath) {
-  let st;
-  try {
-    // Async stat: cache validation runs on every reconcile (per-PRD), which
-    // is IPC-reachable via schedule:state / schedule:rescan.
-    st = await fsp.stat(filePath);
-  } catch {
-    // fall back to direct parse (will throw the original ENOENT to caller)
-    return parsePrdRaw(filePath);
-  }
-  if (st.size > PRD_READ_MAX_BYTES) {
-    // Evict any stale cached entry so callers see this as a parse miss.
-    prdFileCache.delete(filePath);
-    throw new Error(`PRD too large (${st.size}B > ${PRD_READ_MAX_BYTES}B): ${filePath}`);
-  }
-  const cached = prdFileCache.get(filePath);
-  if (cached && cached.mtimeMs === st.mtimeMs && cached.ino === st.ino) {
-    return cached.parsed;
-  }
-  // Evict BEFORE re-parsing so a parse exception leaves the cache empty
-  // rather than holding a stale-good entry for the new mtime.
-  prdFileCache.delete(filePath);
-  const parsed = await parsePrdRaw(filePath);
-  prdFileCache.set(filePath, { mtimeMs: st.mtimeMs, ino: st.ino, parsed });
-  return parsed;
+  return prdParser.listPrdFiles(PRDS_DIR);
 }
 
 // ---------- queue reconciliation ----------
@@ -503,13 +386,14 @@ let cancelToken = { cancelled: false };
 
 function attachWindow(w) { mainWindow = w; }
 
-async function broadcast() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const state = await readQueue();
-  await reconcile(state);
-  await writeQueue(state);
-  if (!mainWindow || mainWindow.isDestroyed()) return; // window may have closed during awaits
-  mainWindow.webContents.send('schedule:state', {
+/**
+ * Build the snapshot payload consumed by both the `schedule:state` IPC
+ * handler and the `schedule:state` broadcast event. The IPC return adds a
+ * `paths` map (renderer uses it for "open folder" actions); broadcast omits
+ * it because subscribers don't need to re-derive paths on every tick.
+ */
+function buildScheduleStatePayload(state, { withPaths = false } = {}) {
+  const payload = {
     config: state.config,
     jobs: state.jobs,
     scheduledFor: state.scheduledFor,
@@ -517,7 +401,19 @@ async function broadcast() {
     nextReset: getNextResetCached(),
     paused: state.paused,
     utilization: cachedUtilization,
-  });
+  };
+  if (withPaths) {
+    payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: QUEUE_PATH };
+  }
+  return payload;
+}
+
+async function broadcast() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const state = await readQueue();
+  await reconcile(state);
+  await writeQueue(state);
+  sendIfAlive(mainWindow, 'schedule:state', buildScheduleStatePayload(state));
 }
 
 function clearFireTimer() {
@@ -1007,23 +903,6 @@ function isFixPlanSlug(slug) {
 }
 
 /**
- * Read the last `bytes` of a file as utf8. Returns '' on error.
- */
-function readTail(filePath, bytes) {
-  try {
-    const stat = fs.statSync(filePath);
-    const n = Math.min(stat.size, bytes);
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(n);
-    fs.readSync(fd, buf, 0, n, stat.size - n);
-    fs.closeSync(fd);
-    return buf.toString('utf8');
-  } catch {
-    return '';
-  }
-}
-
-/**
  * Spawn an Opus investigation session for a failed job. The investigator's job
  * is to read the failure log + original PRD, identify the root cause, and write
  * a fix-plan PRD into prds/<NN>-fix-<base>.md. Reconcile picks it up; the next
@@ -1401,16 +1280,7 @@ function registerScheduleHandlers() {
     const state = await readQueue();
     await reconcile(state);
     await writeQueue(state);
-    return {
-      config: state.config,
-      jobs: state.jobs,
-      scheduledFor: state.scheduledFor,
-      lastRunAt: state.lastRunAt,
-      nextReset: getNextResetCached(),
-      paused: state.paused,
-      utilization: cachedUtilization,
-      paths: { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: QUEUE_PATH },
-    };
+    return buildScheduleStatePayload(state, { withPaths: true });
   });
 
   ipcMain.handle('schedule:health', async () => {
@@ -1443,15 +1313,14 @@ function registerScheduleHandlers() {
     // Bypass the billing-poll gate entirely — fire pending jobs immediately regardless of meter state.
     // Clears any existing pause first (same semantics as run-now).
     await clearPause('run-now');
-    runDueJobs().catch((e) => console.error('[scheduler] runDueJobs error (force-tick)', e));
+    runDueJobs().catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (force-tick)', meta: { error: e?.message } }));
     return { ok: true };
   });
 
   ipcMain.handle('schedule:set-config', async (_e, partial) => {
-    const { schemas: s } = require('./ipcSchemas.cjs');
     let validated;
     try {
-      validated = s.setConfigSchema.parse(partial || {});
+      validated = schemas.setConfigSchema.parse(partial || {});
     } catch (e) {
       return { ok: false, error: e?.message ?? 'invalid config' };
     }
@@ -1468,10 +1337,9 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:reset-job', async (_e, payload) => {
-    const { schemas: s } = require('./ipcSchemas.cjs');
     let slug;
     try {
-      ({ slug } = s.scheduleSlug.parse(payload));
+      ({ slug } = schemas.scheduleSlug.parse(payload));
     } catch (e) {
       return { ok: false, error: 'invalid slug' };
     }
@@ -1490,7 +1358,7 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
-    runDueJobs().catch((e) => console.error('[scheduler] runDueJobs error', e));
+    runDueJobs().catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (run-now)', meta: { error: e?.message } }));
     return { ok: true };
   });
 
@@ -1543,7 +1411,7 @@ function registerScheduleHandlers() {
         // ENOENT: the .md is already gone (reconcile would drop it on next
         // read anyway). Either way, fall through and remove from queue.
         if (e?.code !== 'ENOENT') {
-          console.warn('[scheduler] clear-queue: rename failed', job.slug, e?.message);
+          logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'clear-queue: rename failed', meta: { slug: job.slug, error: e?.message } });
         }
       }
     }
@@ -1564,10 +1432,9 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:read-prd', async (_e, payload) => {
-    const { schemas: s } = require('./ipcSchemas.cjs');
     let slug;
     try {
-      ({ slug } = s.scheduleSlug.parse(payload));
+      ({ slug } = schemas.scheduleSlug.parse(payload));
     } catch {
       return { ok: false, error: 'invalid slug' };
     }
@@ -1582,10 +1449,9 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:read-log', async (_e, payload) => {
-    const { schemas: s } = require('./ipcSchemas.cjs');
     let slug, runId;
     try {
-      ({ slug, runId } = s.scheduleReadLog.parse(payload));
+      ({ slug, runId } = schemas.scheduleReadLog.parse(payload));
     } catch {
       return { ok: false, error: 'invalid slug or runId' };
     }
@@ -1604,20 +1470,14 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:write-prd', async (_e, payload) => {
-    const { schemas: s } = require('./ipcSchemas.cjs');
     let parsed;
-    try { parsed = s.scheduleWritePrd.parse(payload); }
+    try { parsed = schemas.scheduleWritePrd.parse(payload); }
     catch (e) { return { ok: false, error: e?.message ?? 'invalid payload' }; }
     const resolved = safeSlugPath(parsed.slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
-    const tmp = `${resolved}.${process.pid}.${Date.now()}.tmp`;
     try {
-      await fsp.writeFile(tmp, parsed.body, { encoding: 'utf8', mode: 0o644 });
-      await fsp.rename(tmp, resolved);
+      await config.writeTextAtomic(resolved, parsed.body);
     } catch (e) {
-      // Best-effort cleanup so a botched rename doesn't litter the prds/ dir
-      // with .tmp files (matches the orphan-cleanup pattern in queueOps.retag).
-      try { await fsp.unlink(tmp); } catch { /* */ }
       return { ok: false, error: e?.message ?? 'write failed' };
     }
     try {
@@ -1633,7 +1493,8 @@ function registerScheduleHandlers() {
     let entries;
     try {
       entries = await fsp.readdir(PRDS_DIR);
-    } catch {
+    } catch (e) {
+      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: readdir failed', meta: { error: e?.message } });
       return [];
     }
     const out = [];
@@ -1652,7 +1513,7 @@ function registerScheduleHandlers() {
           mtimeMs: stat.mtimeMs,
         });
       } catch (e) {
-        console.warn('[scheduler] list-prds: skipping unparseable', name, e?.message);
+        logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
       }
     }
     out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));

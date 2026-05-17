@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { BillingFetchResult, TeamInfo } from '../../preload/api'
+import { useEffect, useMemo, useState } from 'react'
+import type { BillingFetchResult } from '../../preload/api'
 import { useConfig } from '../state/config'
 import { useSessions } from '../state/sessions'
 import { useVoice } from '../state/voice'
+import { useBilling } from '../state/billing'
+import { useTeams } from '../state/teams'
 import { useHomeDir } from '../lib/useHomeDir'
 import { SETTINGS_SCOPES, type Scope } from '../lib/scopes'
 import { mergeScopes, getAtPath } from '../lib/mergeScopes'
 import { parseScopedJson } from '../lib/parseScopedJson'
 import { StatusDot } from './ui/StatusDot'
-import { toast } from '../state/toast'
+import { prettyModel } from '../lib/prettyModel'
 
 /**
  * App-level 28px status bar mounted between RecordingStatus and TabBar.
@@ -30,7 +32,6 @@ import { toast } from '../state/toast'
  */
 
 const SETTINGS_REFRESH_MS = 30_000
-const BILLING_REFRESH_MS = 60_000
 
 interface Props {
   onNavigate: (key: 'settings' | 'overview') => void
@@ -91,54 +92,10 @@ export function AppStatusBar({ onNavigate }: Props) {
   const teamsEnabled =
     readLeafString(effective, ['env', 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS']) === '1'
 
-  // Active teams count — even when feature flag is OFF, we report what's
-  // present on disk so toggling the flag back ON is obvious.
-  const [teams, setTeams] = useState<TeamInfo[]>([])
-  useEffect(() => {
-    let cancelled = false
-    let timer: number | null = null
-    const tick = async () => {
-      try {
-        const r = await window.api.teams.list()
-        if (!cancelled) setTeams(r.teams)
-      } catch { /* swallow */ }
-      timer = window.setTimeout(tick, SETTINGS_REFRESH_MS)
-    }
-    tick()
-    return () => {
-      cancelled = true
-      if (timer !== null) clearTimeout(timer)
-    }
-  }, [])
-
-  // Billing usage — 60s tick. billing.cjs caches; duplicate fetches with
-  // Overview are cheap and ensure the bar stays live even when Overview
-  // isn't mounted. Surface the FIRST failure as a toast so users learn why
-  // the 5h pill is missing; subsequent failures stay silent to avoid spam.
-  const [billing, setBilling] = useState<BillingFetchResult | null>(null)
-  const billingToastedRef = useRef(false)
-  useEffect(() => {
-    let cancelled = false
-    let timer: number | null = null
-    const tick = async () => {
-      try {
-        const r = await window.api.billing.fetch()
-        if (!cancelled) setBilling(r)
-      } catch (e) {
-        if (!billingToastedRef.current) {
-          billingToastedRef.current = true
-          const msg = e instanceof Error ? e.message : String(e)
-          toast.warn(`Billing usage fetch failed: ${msg}`)
-        }
-      }
-      timer = window.setTimeout(tick, BILLING_REFRESH_MS)
-    }
-    tick()
-    return () => {
-      cancelled = true
-      if (timer !== null) clearTimeout(timer)
-    }
-  }, [])
+  // Active teams + billing data are owned by the singleton pollers in
+  // state/billing.ts and state/teams.ts (started once in App.tsx).
+  const teams = useTeams((s) => s.teams)
+  const billing = useBilling((s) => s.data)
 
   const fivePct = readFiveHourPct(billing)
   const voiceDotKind = isRecording
@@ -284,14 +241,3 @@ function fiveHourTextColor(pct: number): string {
   return 'text-fg-dim'
 }
 
-/** Compress long model identifiers for pill display. */
-function prettyModel(model: string): string {
-  if (!model || model === '—') return model
-  // claude-opus-4-7[1m] → Opus 4.7 1m. claude-sonnet-4-6-20250514 → Sonnet 4.6.
-  const ctx = /\[(\dm)\]/.exec(model)
-  const m = /(opus|sonnet|haiku)[-_](\d+)[-_.]?(\d+)?/i.exec(model)
-  if (!m) return model
-  const fam = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()
-  const ver = m[3] ? `${m[2]}.${m[3]}` : m[2]
-  return ctx ? `${fam} ${ver} ${ctx[1]}` : `${fam} ${ver}`
-}

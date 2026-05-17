@@ -35,6 +35,8 @@ const path = require('node:path');
 const os = require('node:os');
 const { ipcMain } = require('electron');
 const { SCHEDULE_SLUG_RE: SLUG_RE, schemas } = require('./ipcSchemas.cjs');
+const logs = require('./logs.cjs');
+const config = require('./config.cjs');
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
@@ -79,28 +81,7 @@ const LINE_RULES = [
   },
 ];
 
-function splitFrontmatter(raw) {
-  if (!raw.startsWith('---\n')) return { fm: {}, body: raw, fmLineCount: 0 };
-  const end = raw.indexOf('\n---', 4);
-  if (end === -1) return { fm: {}, body: raw, fmLineCount: 0 };
-  const fmRaw = raw.slice(4, end);
-  const fm = {};
-  for (const line of fmRaw.split('\n')) {
-    const m = line.match(/^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)\s*$/);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-      v = v.slice(1, -1);
-    }
-    fm[m[1]] = v;
-  }
-  return {
-    fm,
-    body: raw.slice(end + 4).replace(/^\n/, ''),
-    // +2 for the two `---` fences themselves
-    fmLineCount: fmRaw.split('\n').length + 2,
-  };
-}
+const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
 
 /**
  * Lint a single PRD asynchronously. Returns { slug, findings: [...] }.
@@ -248,7 +229,12 @@ async function archiveMany(slugs) {
   }
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
-  await fsp.mkdir(archiveDir, { recursive: true });
+  try {
+    await fsp.mkdir(archiveDir, { recursive: true });
+  } catch (e) {
+    logs.writeLine({ level: 'error', scope: 'queueOps', message: 'archiveMany: mkdir failed', meta: { error: e?.message } });
+    return { ok: false, archived: 0, archivedTo: null, results: [], error: e?.message ?? 'mkdir failed' };
+  }
   const results = [];
   for (const slug of slugs) {
     results.push(await archiveOne(slug, archiveDir));
@@ -339,24 +325,14 @@ async function retagOne({ slug, parallelGroup, estimateMinutes }) {
   const dst = path.resolve(path.join(PRDS_DIR, `${newSlug}.md`));
   if (!dst.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'new path escape' };
 
-  // Atomic write: tmp + rename. If slug changed, the tmp is named off the new
-  // path (so the rename atomically materializes at the new slug).
-  const tmp = `${dst}.${process.pid}.${Date.now()}.tmp`;
+  // Atomic write via shared helper. If slug changed, write at the new path
+  // and unlink the old slug.
   try {
-    await fsp.writeFile(tmp, newRaw, { encoding: 'utf8', mode: 0o644 });
+    await config.writeTextAtomic(dst, newRaw);
     if (dst !== src) {
-      // Rename: first move into place at new slug, then unlink old slug.
-      await fsp.rename(tmp, dst);
-      try {
-        await fsp.unlink(src);
-      } catch {
-        /* if src is already the same as dst (race), fine */
-      }
-    } else {
-      await fsp.rename(tmp, dst);
+      try { await fsp.unlink(src); } catch { /* if src is already same as dst (race), fine */ }
     }
   } catch (e) {
-    try { await fsp.unlink(tmp); } catch { /* */ }
     return { ok: false, slug, error: `write failed: ${e?.message}` };
   }
 
@@ -377,7 +353,7 @@ async function appendRetagLog(entries) {
     const lines = entries.map((e) => JSON.stringify({ ts: new Date().toISOString(), ...e }) + '\n').join('');
     await fsp.appendFile(RETAG_LOG, lines);
   } catch (e) {
-    console.warn('[queueOps] retag log append failed', e?.message);
+    logs.writeLine({ level: 'warn', scope: 'queueOps', message: 'retag log append failed', meta: { error: e?.message } });
   }
 }
 

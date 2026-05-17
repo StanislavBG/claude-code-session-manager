@@ -265,15 +265,25 @@ function CatSilhouette({ direction }: { direction: 'ltr' | 'rtl' }) {
       {/* Ears */}
       <polygon points="11,-10 9,-16 15,-10" fill="#1e2433" />
       <polygon points="14,-10 12,-16 18,-9" fill="#1e2433" />
-      {/* Eyes */}
-      <motion.ellipse cx="13.5" cy="-5" rx="1.5" ry="1" fill="#22d3ee"
-        animate={{ rx: [1.5, 0.3, 1.5] }}
+      {/* Eyes — animate via scaleX on a wrapper <motion.g> instead of
+          animating the `rx` SVG presentation attr directly. framer-motion
+          emits "rx=undefined" on the first paint when animating the attr,
+          even with `initial` set; transforming the group avoids that path
+          and produces the same blink effect (squeeze horizontally). */}
+      <motion.g
+        style={{ transformBox: 'fill-box', transformOrigin: '13.5px -5px' }}
+        animate={{ scaleX: [1, 0.2, 1] }}
         transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-      />
-      <motion.ellipse cx="17" cy="-5" rx="1.5" ry="1" fill="#22d3ee"
-        animate={{ rx: [1.5, 0.3, 1.5] }}
+      >
+        <ellipse cx="13.5" cy="-5" rx="1.5" ry="1" fill="#22d3ee" />
+      </motion.g>
+      <motion.g
+        style={{ transformBox: 'fill-box', transformOrigin: '17px -5px' }}
+        animate={{ scaleX: [1, 0.2, 1] }}
         transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-      />
+      >
+        <ellipse cx="17" cy="-5" rx="1.5" ry="1" fill="#22d3ee" />
+      </motion.g>
       {/* Tail */}
       <path d="M -13 -1 C -23 -1 -25 6 -21 8" fill="none" stroke="#1e2433" strokeWidth="2.5" strokeLinecap="round" />
       {/* Walking legs */}

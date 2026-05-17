@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { useWatchers } from '../state/watchers'
-import { shellQuote } from '../lib/presets'
+import { createPickedSession } from '../lib/createPickedSession'
 import { useTabDragReorder } from './useTabDragReorder'
 
 const ACTIVITY_WINDOW_MS = 30_000
@@ -13,7 +13,6 @@ export function TabBar() {
   // post-render with all e2e selectors timing out.
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
-  const addTab = useSessions((s) => s.addTab)
   const closeTab = useSessions((s) => s.closeTab)
   const setActive = useSessions((s) => s.setActive)
   const reorderTab = useSessions((s) => s.reorderTab)
@@ -46,14 +45,10 @@ export function TabBar() {
     },
   })
 
-  const createPickedSession = async () => {
+  const onPickedSession = async () => {
     setError(null)
     try {
-      const cwd = await window.api.app.pickDirectory()
-      if (!cwd) return
-      const id = crypto.randomUUID()
-      const startupCommand = `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`
-      addTab({ id, cwd, startupCommand, presetId: 'pick-dangerous' })
+      await createPickedSession()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)
@@ -119,7 +114,7 @@ export function TabBar() {
       </div>
       <div className="shrink-0">
         <button
-          onClick={createPickedSession}
+          onClick={onPickedSession}
           className="px-2 py-1 text-fg-dim hover:text-fg text-xs"
           title="New session — pick a project directory"
         >

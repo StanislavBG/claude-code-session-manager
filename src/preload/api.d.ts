@@ -662,6 +662,15 @@ export interface SessionManagerAPI {
     install: (payload: { slug: string }) => Promise<PluginInstallResult>;
     onInstallProgress: (handler: (ev: PluginInstallProgressEvent) => void) => () => void;
   };
+  clipboard: {
+    /** Ctrl+V image paste — reads OS clipboard, saves any image to a temp
+     *  PNG, and returns the absolute path so the renderer can type it into
+     *  the PTY. `ok:false, empty:true` when the clipboard holds no image. */
+    pasteImage: () => Promise<
+      | { ok: true; path: string; bytes: number }
+      | { ok: false; empty?: true; error?: string }
+    >;
+  };
   memory: {
     /** List markdown memory entries for the given workspace (defaults to 'default'). */
     list: (workspace?: string) => Promise<MemoryListResult>;

@@ -186,6 +186,9 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('plugins:install-progress', listener);
     },
   },
+  clipboard: {
+    pasteImage: () => ipcRenderer.invoke('clipboard:paste-image'),
+  },
   memory: {
     list: (workspace) => ipcRenderer.invoke('memory:list', workspace ? { workspace } : {}),
     read: (name, workspace) => ipcRenderer.invoke('memory:read', workspace ? { name, workspace } : { name }),

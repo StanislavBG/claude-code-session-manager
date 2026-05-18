@@ -46,8 +46,9 @@ test('darwin: app boots, renderer mounts, no boot-poller timeouts', async () => 
       if (msg.type() === 'error') consoleErrors.push(msg.text())
     })
 
-    // Renderer mounted within the boot-poller deadline.
-    await win.waitForSelector('[data-testid="app-status-bar"]', { timeout: 10_000 })
+    // Renderer mounted within the boot-poller deadline. The version label in
+    // TabBar paints once the root App component is on-screen.
+    await win.waitForSelector('text=Claude Session Manager', { timeout: 10_000 })
 
     // Give the three withTimeout-wrapped boot IPCs a moment to settle so
     // their rejections (if any) hit the console before we assert.

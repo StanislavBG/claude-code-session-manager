@@ -67,7 +67,9 @@ export function Terminal({ tabId, cwd }: Props) {
     fit.fit()
     term.focus()
 
-    // Ctrl+Shift+C copies selection, Ctrl+Shift+V pastes clipboard.
+    // Ctrl+Shift+C copies selection.
+    // Ctrl+V / Ctrl+Shift+V both paste: image first (saved to a temp PNG and
+    // typed in as a path so claude can read it), text otherwise.
     // Returning false stops xterm from forwarding the keystroke to the PTY.
     // Alt+drag selects text even when the running program (e.g. claude) has
     // mouse tracking enabled — that's an xterm built-in, no wiring needed.
@@ -80,10 +82,22 @@ export function Terminal({ tabId, cwd }: Props) {
           return false
         }
       }
-      if (e.ctrlKey && e.shiftKey && e.key === 'V') {
-        navigator.clipboard.readText().then((text) => {
-          if (text) writeInChunks(tabId, text)
-        }).catch(() => {})
+      const isPaste = e.ctrlKey && (e.key === 'v' || e.key === 'V')
+      if (isPaste) {
+        ;(async () => {
+          try {
+            const img = await window.api.clipboard.pasteImage()
+            if (img.ok) {
+              writeInChunks(tabId, img.path + ' ')
+              toast.info(`Pasted image: ${img.path.split('/').pop()}`)
+              return
+            }
+            const text = await navigator.clipboard.readText()
+            if (text) writeInChunks(tabId, text)
+          } catch {
+            /* clipboard unavailable — ignore */
+          }
+        })()
         return false
       }
       return true

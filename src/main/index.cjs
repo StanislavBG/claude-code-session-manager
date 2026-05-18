@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -295,6 +295,27 @@ ipcMain.handle('app:pick-directory', async () => {
 });
 
 ipcMain.on('app:reboot-app', () => rebootApp());
+
+// Image paste — Ctrl+V in the Terminal pane. Reads the OS clipboard via
+// Electron's native API (renderer's navigator.clipboard.read() doesn't expose
+// raw image MIME types under contextIsolation), saves the bitmap to a temp
+// PNG, and returns the path. Renderer types the path into the PTY so claude
+// can `@<path>`-reference it.
+ipcMain.handle('clipboard:paste-image', async () => {
+  try {
+    const img = clipboard.readImage();
+    if (!img || img.isEmpty()) return { ok: false, empty: true };
+    const buf = img.toPNG();
+    if (!buf || buf.length === 0) return { ok: false, empty: true };
+    const dir = path.join(os.tmpdir(), 'session-manager-clipboard');
+    await fsp.mkdir(dir, { recursive: true });
+    const file = path.join(dir, `clipboard-${Date.now()}.png`);
+    await fsp.writeFile(file, buf);
+    return { ok: true, path: file, bytes: buf.length };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+});
 
 // Hooks tab "Test fire": run a hook command with a fake event payload piped
 // to stdin. shell:true is intentional — Claude Code's hook field is a shell

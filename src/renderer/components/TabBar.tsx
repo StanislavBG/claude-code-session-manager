@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { useWatchers } from '../state/watchers'
-import { createPickedSession } from '../lib/createPickedSession'
 import { useTabDragReorder } from './useTabDragReorder'
 
 const ACTIVITY_WINDOW_MS = 30_000
@@ -17,7 +16,6 @@ export function TabBar() {
   const setActive = useSessions((s) => s.setActive)
   const reorderTab = useSessions((s) => s.reorderTab)
   const watchersById = useWatchers((s) => s.watchers)
-  const [error, setError] = useState<string | null>(null)
 
   // Re-render the badge layer once a second so the 30s activity window can
   // expire on its own — lastLineAt itself doesn't change when no new line
@@ -44,17 +42,6 @@ export function TabBar() {
       if (tab) setActive(tab.id)
     },
   })
-
-  const onPickedSession = async () => {
-    setError(null)
-    try {
-      await createPickedSession()
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setError(msg)
-      console.error('[TabBar] createPickedSession failed:', e)
-    }
-  }
 
   return (
     <div className="h-9 bg-bg-elev border-b border-line flex items-center px-2 gap-1 shrink-0">
@@ -112,16 +99,6 @@ export function TabBar() {
           )
         })}
       </div>
-      <div className="shrink-0">
-        <button
-          onClick={onPickedSession}
-          className="px-2 py-1 text-fg-dim hover:text-fg text-xs"
-          title="New session — pick a project directory"
-        >
-          + new
-        </button>
-      </div>
-      {error && <div className="text-red-400 text-xs px-2 shrink-0">{error}</div>}
       <div className="text-fg-faint text-xs px-2 shrink-0">
         Claude Session Manager{' '}
         <span className="font-mono text-fg-dim">v{__APP_VERSION__}</span>

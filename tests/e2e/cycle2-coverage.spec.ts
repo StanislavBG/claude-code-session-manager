@@ -1,28 +1,28 @@
 /**
  * Cycle 2 coverage spec — bundle C deliverables.
  *
- * Six tests covering the work shipped in cycle 2 bundle C:
- *   1. AppStatusBar pill aria-labels.
+ * Five tests covering the work shipped in cycle 2 bundle C:
+ *   1. Overview cockpit pill aria-labels (model / effort / team).
  *   2. Cmd-K opens CommandPalette, fuzzy filter narrows, Enter dispatches
  *      nav:settings, Esc closes and restores focus.
  *   3. Overview cockpit renders instrument tiles; clicking one fires onNavigate.
  *   4. RecordingStatus stays above CommandPalette when isRecording=true.
  *   5. Toast appears when toast.error() fires and auto-expires after 5s.
  *   6. Density toggle persists across reload (cycle 1 smoke).
+ *
+ * v0.10.2 dropped the 28px AppStatusBar (voice idle pill was redundant with
+ * the LeftNav Microphone section badge; 5h chip duplicated the bottom
+ * StatusBar), so the former "AppStatusBar renders" assertion was folded into
+ * the cockpit-pill test.
  */
 import { test, expect } from '@playwright/test'
 import { launchApp, navigateToTab } from './_helpers/launchApp'
 
-test('AppStatusBar renders; config pills live on Overview with correct aria-labels', async () => {
+test('Overview cockpit pills carry the expected aria-labels', async () => {
   const { app, win } = await launchApp()
   try {
-    const bar = win.locator('[data-testid="app-status-bar"]')
-    await expect(bar).toBeVisible({ timeout: 10_000 })
-    await expect(bar).toHaveAttribute('role', 'toolbar')
-    await expect(bar).toHaveAttribute('aria-label', /status/i)
-
-    // Model / effort / team pills moved off the top bar into Overview's
-    // CockpitStrip — navigate deterministically (avoids fuzzy-filter race).
+    // Model / effort / team pills live on Overview's CockpitStrip — navigate
+    // deterministically (avoids fuzzy-filter race).
     await navigateToTab(win, 'overview')
 
     const modelPill = win.locator('button[data-pill="model"]')

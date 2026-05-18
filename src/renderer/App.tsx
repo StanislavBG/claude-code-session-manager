@@ -4,7 +4,6 @@ import { LeftNav, type NavKey } from './components/LeftNav'
 import { StatusBar } from './components/StatusBar'
 import { MainPane } from './components/MainPane'
 import { RecordingStatus } from './components/RecordingStatus'
-import { AppStatusBar } from './components/AppStatusBar'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { Toast } from './components/ui/Toast'
@@ -175,8 +174,8 @@ export function App() {
 
     useWatchers.getState().init()
 
-    // Singleton pollers — replace per-component timers in AppStatusBar,
-    // Overview, SchedulePanel, TeamsCard, etc.
+    // Singleton pollers — replace per-component timers in Overview,
+    // SchedulePanel, TeamsCard, etc.
     startBillingPolling()
     startTeamsPolling()
     startSchedulePolling()
@@ -297,30 +296,49 @@ export function App() {
   // focused, leaving the global one alone. Confirmed acceptable in research-04
   // §1.
   useEffect(() => {
+    const skipForRealInput = (e: KeyboardEvent): boolean => {
+      // Don't hijack when Monaco / non-xterm text inputs are focused —
+      // Monaco wires its own shortcuts and typing in an input feels weird
+      // if the binding steals it. xterm's hidden helper-textarea is NOT a
+      // "real" input — terminals claim focus at boot, so excluding it
+      // would leave these shortcuts unreachable in the most common state.
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName?.toLowerCase() ?? ''
+      const isXtermHelper = target?.classList?.contains('xterm-helper-textarea') ?? false
+      if ((tag === 'input' || tag === 'textarea') && !isXtermHelper) return true
+      if (target?.closest('.monaco-editor')) return true
+      return false
+    }
+
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
-        // Don't hijack when Monaco / non-xterm text inputs are focused —
-        // Monaco wires its own Cmd-K and editing input feels weird if the
-        // global palette steals it. xterm's hidden helper-textarea is NOT a
-        // "real" input — terminals claim focus at boot, so excluding it
-        // would leave Cmd-K unreachable in the most common state.
-        const target = e.target as HTMLElement | null
-        const tag = target?.tagName?.toLowerCase() ?? ''
-        const isXtermHelper = target?.classList?.contains('xterm-helper-textarea') ?? false
-        if ((tag === 'input' || tag === 'textarea') && !isXtermHelper) return
-        const inMonaco = target?.closest('.monaco-editor')
-        if (inMonaco) return
+        if (skipForRealInput(e)) return
         e.preventDefault()
         e.stopPropagation()
         setPaletteOpen((v) => !v)
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
+      } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        // Alt+1..Alt+5 — activate tab at index 0..4. e.code is layout-stable
+        // (e.key is the alt-modified char on some non-US layouts). Capture
+        // phase + preventDefault is required because xterm would otherwise
+        // forward "\x1bN" to the PTY as an ESC-prefixed key.
+        const m = /^Digit([1-5])$/.exec(e.code)
+        if (!m) return
+        if (skipForRealInput(e)) return
+        const idx = parseInt(m[1], 10) - 1
+        const { tabs, setActive } = useSessions.getState()
+        const target = tabs[idx]
+        if (!target) return
+        e.preventDefault()
+        e.stopPropagation()
+        setActive(target.id)
       }
     }
-    // Capture phase: xterm.js consumes Cmd-K on the terminal textarea before
-    // bubble-phase listeners on window can see it. By registering on capture
-    // we intercept BEFORE xterm — the early-return for input/textarea above
-    // keeps other shortcuts (typing) from being affected.
+    // Capture phase: xterm.js consumes shortcuts on the terminal textarea
+    // before bubble-phase listeners on window can see them. By registering
+    // on capture we intercept BEFORE xterm — the early-return for input/
+    // textarea keeps other shortcuts (typing) from being affected.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [paletteOpen])
@@ -429,9 +447,8 @@ export function App() {
           whenever isRecording === true. It is fixed-positioned at z-[60] so
           it paints over any z-50 overlay (Modal, CommandPalette). The pt-7
           spacer on the outer container shifts the rest of the app down by
-          the banner's 28px height to keep AppStatusBar visible. */}
+          the banner's 28px height so TabBar stays visible. */}
       <RecordingStatus />
-      <AppStatusBar />
       <TabBar />
       <div className="flex-1 flex min-h-0">
         <LeftNav

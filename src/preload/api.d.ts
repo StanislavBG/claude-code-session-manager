@@ -531,6 +531,12 @@ export interface SessionManagerAPI {
     testFireHook: (args: TestFireHookArgs) => Promise<TestFireHookResult>;
     /** F7 — true under SM_E2E=1; renderer uses this to suppress wizard auto-trigger. */
     isE2E: () => Promise<boolean>;
+    /** Boot diagnostic — resolved claude binary path + whether it was found
+     *  on disk (false means spawn will rely on PATH and may ENOENT). */
+    claudeBinStatus: () => Promise<{ resolved: string; foundOnDisk: boolean }>;
+    /** Boot diagnostic — assertCwdInsideHome(os.homedir()) result. ok=false
+     *  on macOS symlinked-/Users mismatch and blocks all session spawns. */
+    homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     openInEditor: (cwd: string, editor?: string | null) => Promise<{ ok: boolean; editor?: string; error?: string }>;

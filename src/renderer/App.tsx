@@ -181,6 +181,24 @@ export function App() {
     startTeamsPolling()
     startSchedulePolling()
 
+    // Boot diagnostics (v0.10.1) — surface bad startup state as a toast.
+    // Otherwise the data only lives in the boot-fail log file no one reads.
+    window.api.app.claudeBinStatus().then((r) => {
+      if (!r.foundOnDisk) {
+        toast.warn(
+          'Claude binary not found at any known path — sessions will rely on $PATH and may fail to spawn. Install via `npm i -g @anthropic-ai/claude-code` if spawn fails.',
+        )
+      }
+    }).catch(() => { /* main-process churn during boot; ignore */ })
+
+    window.api.app.homeSelfCheck().then((r) => {
+      if (!r.ok) {
+        toast.error(
+          `Home-directory self-check failed: ${r.error ?? 'unknown'}. Session spawns will reject every cwd. Likely a symlinked /Users on macOS.`,
+        )
+      }
+    }).catch(() => { /* ignore */ })
+
     const off = installConfigChangeListener()
     installMonacoSchemas([
       {

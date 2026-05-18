@@ -4,26 +4,13 @@
 import { test, expect, _electron as electron } from '@playwright/test'
 import { execSync } from 'node:child_process'
 import path from 'node:path'
-import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { installTabsJsonBackup } from './_helpers/tabsJsonBackup.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
-const TABS_JSON = path.join(process.env.HOME, '.config', 'session-manager', 'tabs.json')
 
-test.beforeEach(() => {
-  if (fs.existsSync(TABS_JSON)) {
-    fs.copyFileSync(TABS_JSON, TABS_JSON + '.bak')
-    fs.unlinkSync(TABS_JSON)
-  }
-})
-
-test.afterEach(() => {
-  if (fs.existsSync(TABS_JSON + '.bak')) {
-    fs.copyFileSync(TABS_JSON + '.bak', TABS_JSON)
-    fs.unlinkSync(TABS_JSON + '.bak')
-  }
-})
+installTabsJsonBackup(test)
 
 async function launchApp() {
   const app = await electron.launch({

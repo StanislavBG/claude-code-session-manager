@@ -21,6 +21,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { ipcMain } = require('electron');
 const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
+const { writeJson } = require('./config.cjs');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'billing-cache.json');
@@ -62,10 +63,7 @@ async function hydrateCache() {
 }
 
 async function persistCache(c) {
-  await fsp.mkdir(path.dirname(CACHE_PATH), { recursive: true });
-  const tmp = `${CACHE_PATH}.${process.pid}.${Date.now()}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(c), { encoding: 'utf8', mode: 0o600 });
-  await fsp.rename(tmp, CACHE_PATH);
+  await writeJson(CACHE_PATH, c);
 }
 
 async function fetchUsage() {

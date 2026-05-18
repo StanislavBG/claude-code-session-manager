@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('api', {
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
     // F7: lets the renderer suppress the wizard auto-trigger under SM_E2E=1.
     isE2E: () => ipcRenderer.invoke('app:is-e2e'),
+    // Boot diagnostics (v0.10.1) — renderer polls at mount to surface
+    // missing-claude-bin / home-symlink-mismatch as toasts.
+    claudeBinStatus: () => ipcRenderer.invoke('app:claude-bin-status'),
+    homeSelfCheck: () => ipcRenderer.invoke('app:home-self-check'),
     onNewSession: (handler) => {
       const listener = () => handler();
       ipcRenderer.on('app:new-session', listener);

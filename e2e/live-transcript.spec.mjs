@@ -2,12 +2,12 @@ import { test, expect, _electron as electron } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { installTabsJsonBackup } from './_helpers/tabsJsonBackup.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 const FIXTURE_WAV = path.join(__dirname, 'fixtures', 'speech.wav')
 const USER_DATA_DIR = path.join(__dirname, '.cache', 'userdata-lt')
-const TABS_JSON = path.join(process.env.HOME, '.config', 'session-manager', 'tabs.json')
 
 async function launchApp() {
   return electron.launch({
@@ -56,22 +56,12 @@ async function jsClickTestId(win, testid) {
   }, testid)
 }
 
+installTabsJsonBackup(test)
 test.beforeEach(() => {
   if (!fs.existsSync(FIXTURE_WAV)) {
     throw new Error(`Fixture missing: ${FIXTURE_WAV}. Run: npm run test:e2e:gen-fixture`)
   }
-  if (fs.existsSync(TABS_JSON)) {
-    fs.copyFileSync(TABS_JSON, TABS_JSON + '.bak')
-    fs.unlinkSync(TABS_JSON)
-  }
   fs.mkdirSync(USER_DATA_DIR, { recursive: true })
-})
-
-test.afterEach(() => {
-  if (fs.existsSync(TABS_JSON + '.bak')) {
-    fs.copyFileSync(TABS_JSON + '.bak', TABS_JSON)
-    fs.unlinkSync(TABS_JSON + '.bak')
-  }
 })
 
 test('overlay shows when recording starts and hides when it ends', async () => {

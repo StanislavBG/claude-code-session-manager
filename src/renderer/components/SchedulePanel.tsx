@@ -125,9 +125,9 @@ export function SchedulePanel() {
     saveHidden(next)
   }
   const onClearQueue = async () => {
-    const victims = counts.pending + counts.failed
+    const victims = jobs.filter((j) => j.status !== 'running').length
     if (victims === 0) return
-    const msg = `Archive ${victims} pending/failed PRD${victims === 1 ? '' : 's'} and remove from the queue?\n\nFiles are moved to prds-archived/<timestamp>/ and can be restored from disk.`
+    const msg = `Archive ${victims} non-running PRD${victims === 1 ? '' : 's'} and remove from the queue?\n\nFiles are moved to prds-archived/<timestamp>/ and can be restored from disk. Running jobs are kept.`
     if (!window.confirm(msg)) return
     const r = await window.api.schedule.clearQueue()
     if (!r.ok) {
@@ -246,9 +246,9 @@ export function SchedulePanel() {
           <button
             type="button"
             onClick={onClearQueue}
-            disabled={counts.pending === 0 && counts.failed === 0}
+            disabled={jobs.every((j) => j.status === 'running')}
             className="px-1.5 py-0.5 text-fg-dim hover:text-red-400 border border-line hover:border-red-400/60 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Archive all pending and failed PRDs (moved to prds-archived/<timestamp>/) and remove them from the queue. Completed entries are kept."
+            title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
           >
             Clear
           </button>

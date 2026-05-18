@@ -30,11 +30,38 @@ let unsupportedLogged = false
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [broadcastOpen, setBroadcastOpen] = useState(false)
+  const [watchersOpen, setWatchersOpen] = useState(false)
   const activeTabId = useSessions((s) => s.activeTabId)
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
   const closeWizard = useVoice((s) => s.closeWizard)
   useVoiceTTS(activeTabId)
+
+  const restartActiveTab = useCallback(() => {
+    const { activeTabId, restartTab } = useSessions.getState()
+    if (activeTabId) restartTab(activeTabId)
+  }, [])
+
+  const rebootApp = useCallback(() => {
+    window.api.app.rebootApp()
+  }, [])
+
+  // Toggling open switches to terminal nav so the popover/bar (rendered in
+  // MainPane and gated on active === 'terminal') is actually visible.
+  const toggleBroadcast = useCallback(() => {
+    setBroadcastOpen((prev) => {
+      if (!prev) setActiveNav('terminal')
+      return !prev
+    })
+  }, [])
+
+  const toggleWatchers = useCallback(() => {
+    setWatchersOpen((prev) => {
+      if (!prev) setActiveNav('terminal')
+      return !prev
+    })
+  }, [])
 
   // F1: ref'd so the hotkey listener (mount-once) sees fresh values.
   const activeTabIdRef = useRef<string | null>(activeTabId)
@@ -386,11 +413,28 @@ export function App() {
           spacer on the outer container shifts the rest of the app down by
           the banner's 28px height to keep AppStatusBar visible. */}
       <RecordingStatus />
-      <AppStatusBar onNavigate={setActiveNav} />
+      <AppStatusBar />
       <TabBar />
       <div className="flex-1 flex min-h-0">
-        <LeftNav active={activeNav} onChange={setActiveNav} onNewSession={handleNewSession} />
-        <MainPane active={activeNav} onNavigate={setActiveNav} />
+        <LeftNav
+          active={activeNav}
+          onChange={setActiveNav}
+          onNewSession={handleNewSession}
+          onRestartSession={restartActiveTab}
+          onRestartApp={rebootApp}
+          onToggleBroadcast={toggleBroadcast}
+          onToggleWatchers={toggleWatchers}
+          broadcastOpen={broadcastOpen}
+          watchersOpen={watchersOpen}
+        />
+        <MainPane
+          active={activeNav}
+          onNavigate={setActiveNav}
+          broadcastOpen={broadcastOpen}
+          watchersOpen={watchersOpen}
+          onCloseBroadcast={() => setBroadcastOpen(false)}
+          onCloseWatchers={() => setWatchersOpen(false)}
+        />
       </div>
       <StatusBar />
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null

@@ -23,3 +23,25 @@ jobs:
           SM_E2E: '1'
           SM_SUPERVISOR_DISABLE: '1'
           SM_MOCK_BILLING_KIND: 'ok'
+
+  # Mac startup paths (Homebrew claude bin, /Users -> /System/Volumes/Data/Users
+  # symlink, dock activation) were uncovered until v0.10.0 shipped broken.
+  # This job boots the Electron app on a real macOS runner and asserts the
+  # three boot pollers (billing/teams/schedule) settle before withTimeout fires.
+  smoke-darwin:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run smoke:darwin
+        env:
+          SM_E2E: '1'
+          SM_SUPERVISOR_DISABLE: '1'
+          SM_MOCK_BILLING_KIND: 'ok'

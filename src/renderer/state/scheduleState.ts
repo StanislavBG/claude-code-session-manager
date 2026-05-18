@@ -13,6 +13,9 @@
 import { create } from 'zustand'
 import type { ScheduleStateSnapshot } from '../../preload/api'
 import { toast } from './toast'
+import { withTimeout } from '../lib/withTimeout'
+
+const SCHEDULE_IPC_TIMEOUT_MS = 5_000
 
 interface ScheduleState {
   snapshot: ScheduleStateSnapshot | null
@@ -29,7 +32,11 @@ export async function startSchedulePolling(): Promise<void> {
   if (started) return
   started = true
   try {
-    const snap = await window.api.schedule.state()
+    const snap = await withTimeout(
+      window.api.schedule.state(),
+      SCHEDULE_IPC_TIMEOUT_MS,
+      'schedule.state',
+    )
     useScheduleState.setState({ snapshot: snap, loaded: true })
   } catch (e) {
     if (!toastedFailure) {
@@ -38,6 +45,9 @@ export async function startSchedulePolling(): Promise<void> {
       toast.error(`Scheduler state hydrate failed: ${msg}`)
     }
   }
+  // Install the live subscription regardless of whether the initial hydrate
+  // succeeded — if the first state() timed out, broadcasts will still drive
+  // useScheduleState once main starts responding.
   offSubscription = window.api.schedule.onState((s) => {
     useScheduleState.setState({ snapshot: s, loaded: true })
   })

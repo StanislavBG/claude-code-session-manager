@@ -7,9 +7,12 @@ import { SubmitCountdown } from './SubmitCountdown'
 import { useVoice } from '../state/voice'
 import { useLive } from '../state/live'
 import { useScheduleState } from '../state/scheduleState'
+import { useSessions } from '../state/sessions'
+import { useWatchers } from '../state/watchers'
 import { log } from '../lib/logger'
 import { useDensity, type Density } from '../lib/useDensity'
 import { StatusDot } from './ui/StatusDot'
+import { Tooltip } from './ui/Tooltip'
 import type { VoiceHotkeyConfig } from '../../preload/api'
 
 export type NavKey =
@@ -201,15 +204,29 @@ function CollapsibleSection({
   )
 }
 
+interface LeftNavProps {
+  active: NavKey
+  onChange: (k: NavKey) => void
+  onNewSession?: () => void
+  onRestartSession?: () => void
+  onRestartApp?: () => void
+  onToggleBroadcast?: () => void
+  onToggleWatchers?: () => void
+  broadcastOpen?: boolean
+  watchersOpen?: boolean
+}
+
 export function LeftNav({
   active,
   onChange,
   onNewSession,
-}: {
-  active: NavKey
-  onChange: (k: NavKey) => void
-  onNewSession?: () => void
-}) {
+  onRestartSession,
+  onRestartApp,
+  onToggleBroadcast,
+  onToggleWatchers,
+  broadcastOpen = false,
+  watchersOpen = false,
+}: LeftNavProps) {
   const indicators = useLiveIndicators()
   const [width, setWidth] = useState<number>(() => loadWidth())
 
@@ -226,7 +243,7 @@ export function LeftNav({
       className="bg-bg-elev border-r border-line shrink-0 overflow-hidden flex flex-col relative"
       style={{ width: `${width}px` }}
     >
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {GROUPS.map((group) => {
           // Bubble live activity up to the group header so collapsing a group
           // doesn't hide a working/active indicator.
@@ -269,7 +286,15 @@ export function LeftNav({
         <div className="shrink-0 max-h-[60vh] overflow-y-auto">
           <SchedulerSection />
           <MicrophoneSection />
-          <SessionSection onNewSession={onNewSession} />
+          <SessionSection
+            onNewSession={onNewSession}
+            onRestartSession={onRestartSession}
+            onRestartApp={onRestartApp}
+            onToggleBroadcast={onToggleBroadcast}
+            onToggleWatchers={onToggleWatchers}
+            broadcastOpen={broadcastOpen}
+            watchersOpen={watchersOpen}
+          />
           <DensityToggle />
         </div>
       )}
@@ -409,20 +434,100 @@ function formatAccelerator(accel: string): string {
     .replace(/Shift/g, isMac ? '⇧' : 'Shift')
 }
 
-function SessionSection({ onNewSession }: { onNewSession: () => void }) {
+function SessionSection({
+  onNewSession,
+  onRestartSession,
+  onRestartApp,
+  onToggleBroadcast,
+  onToggleWatchers,
+  broadcastOpen,
+  watchersOpen,
+}: {
+  onNewSession: () => void
+  onRestartSession?: () => void
+  onRestartApp?: () => void
+  onToggleBroadcast?: () => void
+  onToggleWatchers?: () => void
+  broadcastOpen: boolean
+  watchersOpen: boolean
+}) {
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const tabs = useSessions((s) => s.tabs)
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
+  const sessionRestartable = activeTab?.status === 'running'
+  const watcherCount = useWatchers((s) =>
+    activeTab ? s.watchersForTab(activeTab.id).length : 0,
+  )
+
   return (
     <CollapsibleSection
       title="Session"
       storageKey="session"
       defaultCollapsed={false}
     >
-      <div className="px-3 py-2">
+      <div className="px-3 py-2 space-y-1.5">
         <button
           onClick={onNewSession}
           className="w-full px-3 py-1.5 text-xs text-fg-dim hover:text-fg bg-bg hover:bg-bg-hi border border-line rounded transition-colors"
         >
           + New Session
         </button>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Tooltip content="Kill claude and start a fresh session in the same directory (picks up config changes).">
+            <button
+              type="button"
+              onClick={onRestartSession}
+              disabled={!sessionRestartable || !onRestartSession}
+              className="w-full px-2 py-1 text-[11px] text-fg-dim hover:text-fg border border-line rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-dim"
+              title="Restart current session"
+            >
+              Restart Session
+            </button>
+          </Tooltip>
+          <Tooltip content="Kill all sessions, quit the app, and relaunch — all tabs restore automatically.">
+            <button
+              type="button"
+              onClick={onRestartApp}
+              disabled={!onRestartApp}
+              className="w-full px-2 py-1 text-[11px] text-fg-dim hover:text-fg border border-line rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Restart Session Manager (Ctrl+Shift+R)"
+            >
+              Restart App
+            </button>
+          </Tooltip>
+          <Tooltip content="Send the same prompt to multiple selected tabs at once.">
+            <button
+              type="button"
+              onClick={onToggleBroadcast}
+              disabled={!onToggleBroadcast}
+              aria-pressed={broadcastOpen}
+              data-testid="broadcast-toggle"
+              className={`w-full px-2 py-1 text-[11px] border rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                broadcastOpen
+                  ? 'bg-bg-hi text-fg border-fg-faint'
+                  : 'text-fg-dim hover:text-fg border-line'
+              }`}
+            >
+              Broadcast
+            </button>
+          </Tooltip>
+          <Tooltip content="Attach a long-running shell command (e.g. npm test --watch, tail -f) to the current tab.">
+            <button
+              type="button"
+              onClick={onToggleWatchers}
+              disabled={!activeTab || !onToggleWatchers}
+              aria-pressed={watchersOpen}
+              data-testid="watchers-toggle"
+              className={`w-full px-2 py-1 text-[11px] border rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                watchersOpen
+                  ? 'bg-bg-hi text-fg border-fg-faint'
+                  : 'text-fg-dim hover:text-fg border-line'
+              }`}
+            >
+              Watchers{watcherCount > 0 ? ` (${watcherCount})` : ''}
+            </button>
+          </Tooltip>
+        </div>
       </div>
     </CollapsibleSection>
   )

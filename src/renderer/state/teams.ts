@@ -10,8 +10,10 @@
 import { create } from 'zustand'
 import type { TeamInfo } from '../../preload/api'
 import { toast } from './toast'
+import { withTimeout } from '../lib/withTimeout'
 
 const TEAMS_REFRESH_MS = 30_000
+const TEAMS_IPC_TIMEOUT_MS = 5_000
 
 interface TeamsState {
   teams: TeamInfo[]
@@ -26,7 +28,7 @@ let toastedFailure = false
 
 async function tick(): Promise<void> {
   try {
-    const r = await window.api.teams.list()
+    const r = await withTimeout(window.api.teams.list(), TEAMS_IPC_TIMEOUT_MS, 'teams.list')
     useTeams.setState({ teams: r.teams, loaded: true })
   } catch (e) {
     if (!toastedFailure) {

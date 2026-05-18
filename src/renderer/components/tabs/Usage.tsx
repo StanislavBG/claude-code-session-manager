@@ -1,24 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
+import { UsageDial } from '../ui/UsageDial'
 import { useActiveTab } from '../../lib/useActiveTab'
-import { useLive } from '../../state/live'
+import { useBilling, refreshBilling } from '../../state/billing'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
-import type { BillingData, BillingFetchResult } from '../../../preload/api'
+import type { BillingData, BillingFetchResult, UsageWindow } from '../../../preload/api'
 
 /**
- * Usage tab — aggregates token counts from the transcript and converts to a
- * rough USD estimate. Prices are user-editable because they drift; defaults
- * reflect Apr 2026 pricing.
+ * Usage tab — mirrors what `claude /usage` shows: the live billing meter from
+ * ~/.claude/.credentials.json (5h + 7d windows, extra credits). Previously
+ * this tab estimated cost from JSONL transcript tokens × a hand-edited price
+ * table, which had nothing to do with the user's actual quota state.
+ *
+ * Data comes from the singleton `useBilling` store (state/billing.ts) — no
+ * per-component poll loop here.
  */
-const DEFAULT_PRICES: Record<string, { input: number; output: number }> = {
-  'opus-4.6': { input: 5, output: 25 },
-  'sonnet-4.6': { input: 3, output: 15 },
-  'haiku-4.5': { input: 1, output: 5 },
-}
-
-const BILLING_REFRESH_MS = 60_000
-
 function getBillingData(r: BillingFetchResult | null): BillingData | null {
   if (!r) return null
   if (r.kind === 'ok' || r.kind === 'ok-stale') return r.data
@@ -28,29 +25,8 @@ function getBillingData(r: BillingFetchResult | null): BillingData | null {
 
 export function Usage() {
   const activeTab = useActiveTab()
-  const subscribe = useLive((s) => s.subscribe)
-  const unsubscribe = useLive((s) => s.unsubscribe)
-  const live = useLive((s) => (activeTab ? s.tabs[activeTab.id] : undefined))
-
-  const [model, setModel] = useState<keyof typeof DEFAULT_PRICES>('opus-4.6')
-  type PriceTable = Record<string, { input: number; output: number }>
-  const [prices, setPrices] = useState<PriceTable>(() => {
-    try {
-      const saved = localStorage.getItem('sm:pricing')
-      if (saved) return { ...DEFAULT_PRICES, ...(JSON.parse(saved) as PriceTable) }
-    } catch { /* ignore */ }
-    return DEFAULT_PRICES
-  })
-  const updatePrices = (next: PriceTable) => {
-    setPrices(next)
-    try { localStorage.setItem('sm:pricing', JSON.stringify(next)) } catch { /* ignore */ }
-  }
-
-  useEffect(() => {
-    if (!activeTab) return
-    subscribe(activeTab.id, activeTab.cwd, activeTab.claudeSessionId)
-    return () => unsubscribe(activeTab.id)
-  }, [activeTab, subscribe, unsubscribe])
+  const billing = useBilling((s) => s.data)
+  const data = getBillingData(billing)
 
   if (!activeTab) {
     return (
@@ -60,10 +36,12 @@ export function Usage() {
     )
   }
 
-  const usage = live?.usage ?? { inputTokens: 0, outputTokens: 0 }
-  const p = prices[model]
-  const cost =
-    (usage.inputTokens * p.input) / 1_000_000 + (usage.outputTokens * p.output) / 1_000_000
+  const fiveHour = data?.usage.five_hour ?? null
+  const sonnet = data?.usage.seven_day_sonnet ?? null
+  const opus = data?.usage.seven_day_opus ?? null
+  const sevenDay = data?.usage.seven_day ?? null
+  const oauthApps = data?.usage.seven_day_oauth_apps ?? null
+  const extra = data?.usage.extra_usage ?? null
 
   return (
     <Panel
@@ -71,115 +49,68 @@ export function Usage() {
         <>
           <span className="text-fg-faint">session {activeTab.claudeSessionId.slice(0, 8)}</span>
           <div className="flex-1" />
-          <label className="text-fg-faint flex items-center gap-2">
-            model
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value as keyof typeof DEFAULT_PRICES)}
-              className="bg-bg-elev border border-line rounded px-2 py-0.5 text-xs text-fg"
-            >
-              {Object.keys(prices).map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </label>
+          {data && (
+            <span className="text-fg-faint text-xs">
+              {data.subscriptionType ?? 'unknown plan'}
+              {data.rateLimitTier ? ` · ${data.rateLimitTier}` : ''}
+            </span>
+          )}
         </>
       }
     >
-      <BurnRate />
-      <div className="p-6 max-w-2xl space-y-6">
-        <section className="grid grid-cols-2 gap-4">
-          <Stat label="input tokens" value={usage.inputTokens.toLocaleString()} />
-          <Stat label="output tokens" value={usage.outputTokens.toLocaleString()} />
-          {usage.cacheCreationInputTokens != null && (
-            <Stat
-              label="cache creation"
-              value={usage.cacheCreationInputTokens.toLocaleString()}
-            />
-          )}
-          {usage.cacheReadInputTokens != null && (
-            <Stat label="cache read" value={usage.cacheReadInputTokens.toLocaleString()} />
-          )}
-          <Stat
-            label="estimated cost"
-            value={`$${cost.toFixed(4)}`}
-            highlight
-          />
-        </section>
+      <BurnRate billing={billing} />
+      <div className="p-6 max-w-3xl space-y-4">
+        {billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale' && (
+          <BillingStatusOverlay result={billing} onRetry={refreshBilling} />
+        )}
 
-        <section>
-          <h3 className="text-xs uppercase tracking-wider text-fg mb-2">Pricing ($/MTok)</h3>
-          <table className="text-xs">
-            <thead className="text-fg-faint">
-              <tr>
-                <th className="text-left px-2 py-1">model</th>
-                <th className="text-left px-2 py-1">input</th>
-                <th className="text-left px-2 py-1">output</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(prices).map(([m, pr]) => (
-                <tr key={m} className="border-t border-line">
-                  <td className="px-2 py-1 text-fg-dim">{m}</td>
-                  <td className="px-2 py-1">
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={pr.input}
-                      onChange={(e) =>
-                        updatePrices({
-                          ...prices,
-                          [m]: { ...pr, input: Number(e.target.value) },
-                        })
-                      }
-                      className="w-16 bg-bg-elev border border-line rounded px-1 py-0.5 text-fg"
-                    />
-                  </td>
-                  <td className="px-2 py-1">
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={pr.output}
-                      onChange={(e) =>
-                        updatePrices({
-                          ...prices,
-                          [m]: { ...pr, output: Number(e.target.value) },
-                        })
-                      }
-                      className="w-16 bg-bg-elev border border-line rounded px-1 py-0.5 text-fg"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="mt-2 text-fg-faint text-xs">
-            edits are saved locally and persist across sessions.
-          </div>
-        </section>
+        {!billing && <div className="text-xs text-fg-faint">loading usage…</div>}
+
+        {data && (
+          <>
+            <UsageDial label="5-hour window" window={fiveHour} />
+            <div className="grid grid-cols-2 gap-3">
+              <UsageDial label="7-day · Sonnet" window={sonnet} />
+              <UsageDial label="7-day · Opus" window={opus} />
+            </div>
+            {(sevenDay || oauthApps) && (
+              <div className="grid grid-cols-2 gap-3">
+                <UsageDial label="7-day · combined" window={sevenDay} />
+                <UsageDial label="7-day · oauth apps" window={oauthApps} />
+              </div>
+            )}
+            {extra?.is_enabled && extra.utilization != null && (
+              <ExtraCredits extra={extra} />
+            )}
+          </>
+        )}
       </div>
     </Panel>
   )
 }
 
-function Stat({
-  label,
-  value,
-  highlight,
+function ExtraCredits({
+  extra,
 }: {
-  label: string
-  value: string
-  highlight?: boolean
+  extra: NonNullable<BillingData['usage']['extra_usage']>
 }) {
+  const pct = Math.max(0, Math.min(100, extra.utilization ?? 0))
+  const remaining =
+    extra.monthly_limit != null && extra.used_credits != null
+      ? extra.monthly_limit - extra.used_credits
+      : null
   return (
     <div className="border border-line rounded p-3 bg-bg-elev">
-      <div className="text-xs text-fg-faint uppercase tracking-wider mb-1">{label}</div>
-      <div
-        className={`text-lg font-mono ${highlight ? 'text-accent' : 'text-fg'}`}
-      >
-        {value}
+      <div className="text-xs uppercase tracking-wider text-fg-faint mb-2">
+        Extra credits ({extra.currency ?? '—'})
+      </div>
+      <div className="flex items-baseline gap-3 text-sm">
+        <span className="font-mono text-fg">{pct.toFixed(0)}%</span>
+        {remaining != null && (
+          <span className="text-fg-dim text-xs">
+            {remaining.toFixed(2)} of {extra.monthly_limit?.toFixed(2)} remaining
+          </span>
+        )}
       </div>
     </div>
   )
@@ -203,49 +134,30 @@ function formatPT(ms: number): string {
   })
 }
 
-function BurnRate() {
-  const [billing, setBilling] = useState<BillingFetchResult | null>(null)
-  const [now, setNow] = useState(() => Date.now())
-  const lastKindRef = useRef<string | null>(null)
-  const tickRef = useRef<() => void>(() => {})
+interface BurnRateProps {
+  billing: BillingFetchResult | null
+}
 
+function BurnRate({ billing }: BurnRateProps) {
+  const [now, setNow] = useState(() => Date.now())
+  const lastNotifyKey = useRef<string | null>(null)
+
+  // Re-tick `now` once a minute so elapsed/projected stay live without a
+  // dedicated poller — the billing data itself comes from useBilling.
   useEffect(() => {
-    let cancelled = false
-    let timer: number | null = null
-    const tick = async () => {
-      if (timer !== null) { clearTimeout(timer); timer = null }
-      const r = await window.api.billing.fetch()
-      if (cancelled) return
-      setBilling(r)
-      setNow(Date.now())
-      let next: number
-      if (r.kind === 'transient') {
-        next = lastKindRef.current === 'transient' ? 30_000 : 5_000
-      } else if (r.kind === 'auth') {
-        next = 30_000
-      } else {
-        next = BILLING_REFRESH_MS
-      }
-      lastKindRef.current = r.kind
-      timer = window.setTimeout(tick, next)
-    }
-    tickRef.current = tick
-    tick()
-    return () => {
-      cancelled = true
-      if (timer !== null) clearTimeout(timer)
-    }
+    const id = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
   }, [])
 
-  const data: BillingData | null = getBillingData(billing)
-  const five = data?.usage?.five_hour ?? null
+  const data = getBillingData(billing)
+  const five: UsageWindow | null = data?.usage?.five_hour ?? null
   const resetsAt = five?.resets_at ?? null
   const utilization = five?.utilization ?? 0
   const resetsAtMs = resetsAt ? new Date(resetsAt).getTime() : Number.NaN
   const validReset = Number.isFinite(resetsAtMs)
   const windowStartMs = validReset ? resetsAtMs - 5 * 3_600_000 : 0
   const elapsedMin = validReset ? Math.max(0, (now - windowStartMs) / 60_000) : 0
-  // Need ≥1 min of elapsed time before extrapolation is meaningful.
+  // Need >=1 min of elapsed time before extrapolation is meaningful.
   const projectable = elapsedMin >= 1 && utilization > 0
   const projected = projectable ? (utilization / elapsedMin) * 300 : utilization
   const level: BurnLevel = projected > 95 ? 'critical' : projected > 80 ? 'warn' : 'ok'
@@ -253,6 +165,7 @@ function BurnRate() {
   useEffect(() => {
     if (!resetsAt || level === 'ok') return
     const key = `sm:burnRateLastNotified:${resetsAt}`
+    if (lastNotifyKey.current === key) return
     const last = (localStorage.getItem(key) ?? 'ok') as BurnLevel
     if (BURN_LEVEL_ORDER[level] <= BURN_LEVEL_ORDER[last]) return
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -263,17 +176,10 @@ function BurnRate() {
       new Notification(title, { body: `Projected ${projected.toFixed(0)}% by reset.` })
     }
     localStorage.setItem(key, level)
+    lastNotifyKey.current = key
   }, [level, resetsAt, projected])
 
-  // Show error status overlay when billing data is unavailable
-  if (billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale') {
-    return (
-      <div className="sticky top-0 z-10 border-b border-line px-6 py-3 bg-bg-elev">
-        <BillingStatusOverlay result={billing} onRetry={tickRef.current} />
-      </div>
-    )
-  }
-
+  if (billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale') return null
   if (!billing || !five || !validReset) return null
 
   const elapsedH = Math.floor(elapsedMin / 60)
@@ -288,11 +194,14 @@ function BurnRate() {
   }
 
   return (
-    <div
-      className={`sticky top-0 z-10 border-b px-6 py-3 ${BURN_LEVEL_CLASS[level]}`}
-    >
+    <div className={`sticky top-0 z-10 border-b px-6 py-3 ${BURN_LEVEL_CLASS[level]}`}>
       {billing.kind === 'ok-stale' && (
-        <div className="text-xs opacity-60 mb-1">stale data · <button onClick={tickRef.current} className="underline hover:no-underline">Retry</button></div>
+        <div className="text-xs opacity-60 mb-1">
+          stale data ·{' '}
+          <button onClick={refreshBilling} className="underline hover:no-underline">
+            Retry
+          </button>
+        </div>
       )}
       <div className="flex items-baseline justify-between mb-2">
         <h3 className="text-xs uppercase tracking-wider">Burn rate</h3>

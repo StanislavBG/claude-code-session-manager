@@ -68,22 +68,33 @@ test.afterEach(() => {
   cleanupMockPrds()
 })
 
+/**
+ * The Scheduler section in LeftNav is collapsed-by-default whenever the
+ * snapshot reports no pending/running/paused work. `defaultCollapsed` is
+ * read once at mount, before the snapshot poller hydrates — so even when
+ * PRDs exist on disk, the section starts collapsed and the SchedulePanel
+ * (which hosts "Fire next batch now") isn't in the DOM. Force it open via
+ * the localStorage key the section persists to, then reload so the
+ * useState initializer reads it.
+ */
+async function expandSchedulerSection(win: import('@playwright/test').Page) {
+  await win.evaluate(() => {
+    localStorage.setItem('sm.leftNav.section.scheduler.collapsed', '0')
+  })
+  await win.reload()
+  await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+}
+
 test('meter_rate_limited billing responses do not pause the queue', async () => {
   const { app, win } = await launchApp()
+  await expandSchedulerSection(win)
   // Give the scheduler time to boot and run its first poll (which will get meter_rate_limited).
   await win.waitForTimeout(5000)
 
-  // Navigate to the Scheduler panel.
-  const schedulerNav = win.locator('button', { hasText: /scheduler/i }).first()
-  if (await schedulerNav.count() > 0) {
-    await schedulerNav.click()
-    await win.waitForTimeout(500)
-  }
-
   // Click "Fire next batch now" to bypass the billing gate.
-  const fireBtn = win.locator('button', { hasText: /fire next batch now/i })
+  const fireBtn = win.locator('button', { hasText: /fire next batch now/i }).first()
   if (await fireBtn.count() > 0 && !(await fireBtn.isDisabled())) {
-    await fireBtn.click()
+    await fireBtn.click({ force: true })
     await win.waitForTimeout(3000)
   }
 
@@ -96,6 +107,7 @@ test('meter_rate_limited billing responses do not pause the queue', async () => 
 
 test('"Fire next batch now" button is visible in SchedulePanel', async () => {
   const { app, win } = await launchApp()
+  await expandSchedulerSection(win)
   await win.waitForTimeout(2000)
 
   // The "Fire next batch now" button should exist somewhere in the page.

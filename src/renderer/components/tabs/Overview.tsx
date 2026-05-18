@@ -14,6 +14,9 @@ import { toast } from '../../state/toast'
 import { formatAgoSec } from '../../lib/formatTime'
 import { useBilling, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
+import { useTeams } from '../../state/teams'
+import { useEffectiveSettings, readLeafString, readLeafWithSource } from '../../lib/useEffectiveSettings'
+import { prettyModel } from '../../lib/prettyModel'
 import type {
   BillingFetchResult,
   ScheduleStateSnapshot,
@@ -211,6 +214,7 @@ export function Overview({ onNavigate }: OverviewProps) {
           refreshing={refreshing}
           tabCount={tabs.length}
           updateInfo={updateInfo}
+          onNavigate={onNavigate}
         />
 
         {!counts ? (
@@ -247,12 +251,14 @@ function CockpitStrip({
   refreshing,
   tabCount,
   updateInfo,
+  onNavigate,
 }: {
   billing: BillingFetchResult | null
   onRetry: () => void
   refreshing: boolean
   tabCount: number
   updateInfo: UpdateCheckResult | null
+  onNavigate?: (k: NavKey) => void
 }) {
   const hasUsage = billing && (billing.kind === 'ok' || billing.kind === 'ok-stale')
   const data = hasUsage ? billing.data : null
@@ -290,6 +296,8 @@ function CockpitStrip({
         </button>
       </div>
 
+      <ConfigPills onNavigate={onNavigate} />
+
       {billing && billing.kind !== 'ok' && (
         <div className="mb-3">
           <BillingStatusOverlay result={billing} onRetry={onRetry} />
@@ -312,6 +320,105 @@ function CockpitStrip({
         </div>
       )}
     </section>
+  )
+}
+
+/* ---------------------------------------------------------- Config pills */
+
+function ConfigPills({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
+  const effective = useEffectiveSettings()
+  const teams = useTeams((s) => s.teams)
+
+  // When `source` is null the key is unset in every scope — render "default"
+  // so the Pop_OS-vs-Mac drift case (model set on one machine, not the other)
+  // is self-explanatory instead of an empty dash that looks like a render bug.
+  const model = readLeafWithSource(effective, ['model'])
+  const effort = readLeafWithSource(effective, ['effortLevel'])
+  const teamsEnabled =
+    readLeafString(effective, ['env', 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS']) === '1'
+
+  const modelValue = model.value ? prettyModel(model.value) : 'default'
+  const modelTitle = model.value
+    ? `Model: ${model.value} (from ${model.source} settings) — click to edit`
+    : 'Model: no value in user/project/local settings — Claude default applies. Click to set one.'
+
+  const effortValue = effort.value ?? 'default'
+  const effortTitle = effort.value
+    ? `Thinking effort: ${effort.value} (from ${effort.source} settings) — click to edit`
+    : 'Thinking effort: no value in user/project/local settings — Claude default applies. Click to set one.'
+
+  const goSettings = onNavigate ? () => onNavigate('settings') : undefined
+
+  return (
+    <div className="flex items-center gap-2 mb-3 flex-wrap text-xs">
+      <Pill
+        label="model"
+        value={modelValue}
+        source={model.source}
+        title={modelTitle}
+        ariaLabel={modelTitle}
+        onClick={goSettings}
+      />
+      <Pill
+        label="effort"
+        value={effortValue}
+        source={effort.source}
+        title={effortTitle}
+        ariaLabel={effortTitle}
+        onClick={goSettings}
+      />
+      <Pill
+        label="team"
+        value={`${teamsEnabled ? 'ON' : 'OFF'} · ${teams.length}`}
+        title={
+          teamsEnabled
+            ? `Agent teams enabled — ${teams.length} configured.`
+            : `Agent teams disabled. Set env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1" in settings.`
+        }
+        ariaLabel={
+          teamsEnabled
+            ? `Agent teams enabled, ${teams.length} configured.`
+            : 'Agent teams disabled.'
+        }
+        onClick={goSettings}
+      />
+    </div>
+  )
+}
+
+function Pill({
+  label,
+  value,
+  source,
+  onClick,
+  title,
+  ariaLabel,
+}: {
+  label: string
+  value: string
+  source?: string | null
+  onClick?: () => void
+  title: string
+  ariaLabel: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
+      data-pill={label}
+      data-pill-source={source ?? 'default'}
+      disabled={!onClick}
+      className="flex items-center gap-1 px-2 py-0.5 rounded border border-line/70 hover:border-line hover:bg-bg text-fg-dim hover:text-fg transition-colors disabled:hover:border-line/70 disabled:hover:bg-transparent disabled:hover:text-fg-dim disabled:cursor-default"
+    >
+      <span className="text-fg-faint" aria-hidden="true">{label}:</span>
+      <span className="font-mono text-fg" aria-hidden="true">{value}</span>
+      {source && (
+        <span className="text-fg-faint text-[10px]" aria-hidden="true">({source})</span>
+      )}
+      {onClick && <span className="text-fg-faint" aria-hidden="true">▾</span>}
+    </button>
   )
 }
 

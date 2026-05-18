@@ -17,8 +17,10 @@
 import { create } from 'zustand'
 import type { BillingFetchResult } from '../../preload/api'
 import { toast } from './toast'
+import { withTimeout } from '../lib/withTimeout'
 
 const BILLING_REFRESH_MS = 60_000
+const BILLING_IPC_TIMEOUT_MS = 5_000
 
 interface BillingState {
   data: BillingFetchResult | null
@@ -36,7 +38,7 @@ async function tick(): Promise<void> {
   useBilling.setState({ refreshing: true })
   let next = BILLING_REFRESH_MS
   try {
-    const r = await window.api.billing.fetch()
+    const r = await withTimeout(window.api.billing.fetch(), BILLING_IPC_TIMEOUT_MS, 'billing.fetch')
     useBilling.setState({ data: r, refreshing: false })
     if (r.kind === 'transient') {
       next = lastKind === 'transient' ? 30_000 : 5_000

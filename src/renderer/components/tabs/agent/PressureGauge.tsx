@@ -2,10 +2,10 @@ import { motion } from 'framer-motion'
 import { PAL } from './sceneConstants'
 
 interface PressureGaugeProps {
-  /** Cumulative session tokens (input + output). */
-  tokens: number
-  /** Assumed cap; default 1M. Needle saturates at this value. */
-  cap?: number
+  /** 5-hour window utilization percent (0-100) from billing — same source as
+   * `claude /usage`. Replaces the prior transcript-token / hardcoded cap
+   * estimate, which had no relationship to the user's real quota state. */
+  utilization: number
   reducedMotion: boolean
 }
 
@@ -35,8 +35,8 @@ const greenEnd  = START_DEG + SWEEP_DEG * 0.5  // 0–50%
 const yellowEnd = START_DEG + SWEEP_DEG * 0.8  // 50–80%
 const redEnd    = START_DEG + SWEEP_DEG        // 80–100%
 
-export function PressureGauge({ tokens, cap = 1_000_000, reducedMotion }: PressureGaugeProps) {
-  const ratio = Math.max(0, Math.min(1, tokens / cap))
+export function PressureGauge({ utilization, reducedMotion }: PressureGaugeProps) {
+  const ratio = Math.max(0, Math.min(1, utilization / 100))
   const needleDeg = START_DEG + SWEEP_DEG * ratio
   const tip = polar(CX, CY, R - 4, needleDeg)
 
@@ -90,7 +90,7 @@ export function PressureGauge({ tokens, cap = 1_000_000, reducedMotion }: Pressu
       {/* Label */}
       <text x={CX} y={CY + R - 8} textAnchor="middle"
         fontSize={6} fontFamily="monospace" fill={PAL.toolHook} letterSpacing="1.5">
-        TOKENS
+        5H USAGE
       </text>
     </g>
   )

@@ -24,9 +24,31 @@ const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs');
 const memoryTool = require('./memoryTool.cjs');
+const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
 
 let mainWindow = null;
 let rebooting = false;
+
+// Boot diagnostics — populated at app.whenReady so the renderer can poll their
+// state via IPC and surface toasts on the failure paths. The first-paint
+// deadline timer reads these into the boot log if ready-to-show never fires.
+let bootClaudeBin = { resolved: 'claude', foundOnDisk: false };
+let bootHomeSelfCheck = { ok: true };
+const bootRecentIpcInvocations = [];
+let firstPaintTimer = null;
+
+// Wrap ipcMain.handle once to track which channels the renderer actually
+// invokes — the boot log dumps the last 5 so a hang is attributable to a
+// specific handler.
+const originalIpcHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = function trackedHandle(channel, listener) {
+  return originalIpcHandle(channel, (...args) => {
+    bootRecentIpcInvocations.push({ channel, at: new Date().toISOString() });
+    if (bootRecentIpcInvocations.length > 5) bootRecentIpcInvocations.shift();
+    return listener(...args);
+  });
+};
 
 const REBOOT_LOG = path.join(os.homedir(), '.claude', 'session-manager-reboot.log');
 
@@ -37,6 +59,52 @@ function logReboot(line) {
     // mode used by logs.cjs / otelSettings.cjs for consistency.
     fs.appendFileSync(REBOOT_LOG, `[${new Date().toISOString()}] ${line}\n`, { mode: 0o600 });
   } catch { /* best-effort */ }
+}
+
+// Writes a diagnostic dump when the renderer fails to fire ready-to-show
+// within the boot deadline. Sync I/O is fine — this is the failure path and
+// the user is already staring at a blank window.
+function writeFirstPaintFailureLog() {
+  try {
+    const logDir = path.join(os.homedir(), '.claude', 'session-manager', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+
+    const ymd = new Date().toISOString().slice(0, 10);
+    const logPath = path.join(logDir, `boot-${ymd}.log`);
+
+    const homeCheck = assertCwdInsideHome(os.homedir());
+    const lines = [
+      `=== first-paint deadline exceeded @ ${new Date().toISOString()} ===`,
+      `process.versions: ${JSON.stringify(process.versions)}`,
+      `process.platform: ${process.platform}`,
+      `process.arch: ${process.arch}`,
+      `os.homedir(): ${os.homedir()}`,
+      `claudeBin: ${JSON.stringify(bootClaudeBin)}`,
+      `homeSelfCheck: ${JSON.stringify(homeCheck)}`,
+      `recentIpcInvocations: ${JSON.stringify(bootRecentIpcInvocations)}`,
+      'RENDERER DID NOT FIRE ready-to-show WITHIN 10s — likely renderer JS error or main-process IPC hang.',
+      '',
+    ];
+    fs.appendFileSync(logPath, lines.join('\n'), { mode: 0o600 });
+
+    // Keep last 3 boot-*.log files; unlink older ones.
+    try {
+      const entries = fs.readdirSync(logDir)
+        .filter((f) => /^boot-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+        .map((f) => {
+          const full = path.join(logDir, f);
+          let mtimeMs = 0;
+          try { mtimeMs = fs.statSync(full).mtimeMs; } catch { /* */ }
+          return { full, mtimeMs };
+        })
+        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+      for (const e of entries.slice(3)) {
+        try { fs.unlinkSync(e.full); } catch { /* */ }
+      }
+    } catch { /* */ }
+  } catch (err) {
+    console.error('[firstPaint] failed to write boot log:', err?.message);
+  }
 }
 
 function resolveNpx() {
@@ -161,7 +229,14 @@ function createWindow() {
     },
   });
 
+  // Boot-time detection 3: if ready-to-show never fires (blank window from
+  // renderer JS error or main-process IPC hang), write a diagnostic dump so
+  // the user has a postmortem instead of just an empty window.
+  if (firstPaintTimer) clearTimeout(firstPaintTimer);
+  firstPaintTimer = setTimeout(() => { writeFirstPaintFailureLog(); }, 10_000);
+
   mainWindow.once('ready-to-show', () => {
+    if (firstPaintTimer) { clearTimeout(firstPaintTimer); firstPaintTimer = null; }
     mainWindow.maximize();
     mainWindow.show();
   });
@@ -183,6 +258,7 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    if (firstPaintTimer) { clearTimeout(firstPaintTimer); firstPaintTimer = null; }
     mainWindow = null;
   });
 }
@@ -200,6 +276,11 @@ ipcMain.handle('app:cwd', () => process.cwd());
 ipcMain.handle('app:is-e2e', () => process.env.SM_E2E === '1');
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
+
+// Boot diagnostics — renderer polls these to surface toasts when `claude` isn't
+// on disk or the home self-check failed (e.g. macOS /Users symlink mismatch).
+ipcMain.handle('app:claude-bin-status', () => bootClaudeBin);
+ipcMain.handle('app:home-self-check', () => bootHomeSelfCheck);
 
 ipcMain.handle('app:pick-directory', async () => {
   console.log('[main] pick-directory invoked');
@@ -549,6 +630,26 @@ app.on('web-contents-created', (_e, wc) => {
 app.whenReady().then(async () => {
   logs.pruneOld();
   logs.writeLine({ scope: 'main', level: 'info', message: 'app start', meta: { version: app.getVersion(), platform: process.platform } });
+
+  // Boot-time detection 1: surface `claude` binary resolution so a missing
+  // install becomes visible to the renderer instead of failing silently on
+  // first spawn attempt.
+  const claudeResolved = resolveClaudeBin();
+  const claudeFoundOnDisk = claudeResolved !== 'claude';
+  bootClaudeBin = { resolved: claudeResolved, foundOnDisk: claudeFoundOnDisk };
+  if (claudeFoundOnDisk) {
+    console.log(`[claudeBin] resolved=${claudeResolved}`);
+  } else {
+    console.warn('[claudeBin] FALLBACK no candidate found; spawn will rely on PATH');
+  }
+
+  // Boot-time detection 2: symlinked /Users on macOS can make os.homedir()
+  // realpath to a path outside itself, which breaks every cwd containment
+  // check downstream. Surface here rather than failing on first session spawn.
+  bootHomeSelfCheck = assertCwdInsideHome(os.homedir());
+  if (!bootHomeSelfCheck.ok) {
+    console.error(`[insideHome] SELF-CHECK FAILED: ${bootHomeSelfCheck.error}; sessions will not be able to spawn`);
+  }
 
   process.on('uncaughtException', (err) => {
     logs.writeLine({ scope: 'main', level: 'error', message: 'uncaughtException', meta: { error: err?.message, stack: err?.stack } });

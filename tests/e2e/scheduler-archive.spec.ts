@@ -17,7 +17,7 @@ import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
-import { launchApp } from './_helpers/launchApp'
+import { launchApp, navigateToTab } from './_helpers/launchApp'
 
 const ROOT_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans')
 const PRDS_DIR = path.join(ROOT_DIR, 'prds')
@@ -68,11 +68,10 @@ test('Archive moves PRD from prds/ to prds-archived/<ts>/', async () => {
     env: { SM_MOCK_BILLING_KIND: 'ok' },
   })
   try {
-    // Navigate to Plans via the command palette (deterministic).
-    await win.keyboard.press('Control+K')
-    await win.locator('[data-testid="command-palette"]').waitFor()
-    await win.locator('button[data-cmd-id="nav:plans"]').click()
-    await win.locator('[data-testid="command-palette"]').waitFor({ state: 'hidden' })
+    // Navigate to Plans via the command palette helper (deterministic —
+    // filters by query then presses Enter, avoiding click-stability flake
+    // when the snapshot poller mutates LeftNav badges mid-click).
+    await navigateToTab(win, 'plans')
 
     // Plans defaults to the Scheduler PRDs subview (localStorage 'sm.plansTab.subView').
     // Force it in case a previous test set 'session'.
@@ -89,18 +88,25 @@ test('Archive moves PRD from prds/ to prds-archived/<ts>/', async () => {
     await expect(slugRow).toBeVisible({ timeout: 10_000 })
 
     // Click the checkbox in the same row as the slug.
-    // SchedulerPrdsView.tsx:382 — each row wraps an <input type="checkbox">
-    // in a <label> next to the slug button.
-    const row = win.locator('div', { has: win.locator(`text=${TEST_SLUG}`) }).first()
-    await row.locator('input[type="checkbox"]').first().check()
+    // SchedulerPrdsView.tsx:382 — each row is a flex container with a
+    // checkbox label and a slug button. Match the row by its own class so
+    // we don't accidentally pick the whole sidebar (which would yield the
+    // wrong PRD's checkbox when other PRDs exist in the user's prds/).
+    // Force the click — the snapshot poller re-renders rows every 2s,
+    // defeating Playwright's stability check even though the checkbox
+    // itself is functionally hittable.
+    const row = win.locator('div.flex.items-stretch', {
+      has: win.locator(`text=${TEST_SLUG}`),
+    }).first()
+    await row.locator('input[type="checkbox"]').first().check({ force: true })
 
     // Click the bulk-bar Archive button.
     const archiveBtn = win.locator('button', { hasText: /^archive…$/i }).first()
-    await archiveBtn.click()
+    await archiveBtn.click({ force: true })
 
     // Modal confirm — button text is "Archive 1".
     const confirmBtn = win.locator('button', { hasText: /^archive 1$/i }).first()
-    await confirmBtn.click()
+    await confirmBtn.click({ force: true })
 
     // Modal closes + list refreshes; the slug should disappear from sidebar.
     await expect(win.locator(`text=${TEST_SLUG}`)).toHaveCount(0, { timeout: 10_000 })

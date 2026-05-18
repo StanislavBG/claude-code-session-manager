@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useSessions } from '../../state/sessions'
 import { useLive, type ToolUseEntry } from '../../state/live'
+import { useBilling } from '../../state/billing'
 import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
 import { Robot, type IdleAction, type RobotState } from './agent/Robot'
 import { Workbench, type CrateSpawn } from './agent/Workbench'
@@ -379,6 +380,19 @@ export function AgentView() {
   const unsubscribe  = useLive((s) => s.unsubscribe)
   const live         = useLive((s) => (activeTabId ? s.tabs[activeTabId] : undefined))
   const tab          = tabs.find((t) => t.id === activeTabId) ?? null
+
+  // 5h utilization for the back-wall PressureGauge — same source as
+  // `claude /usage`. Falls back to 0 until billing hydrates.
+  const billing = useBilling((s) => s.data)
+  const fiveHourUtil = (() => {
+    const d =
+      billing && (billing.kind === 'ok' || billing.kind === 'ok-stale')
+        ? billing.data
+        : billing && billing.kind === 'auth' && billing.cached
+          ? billing.cached
+          : null
+    return d?.usage.five_hour?.utilization ?? 0
+  })()
 
   const prefersReducedMotion = useReducedMotion() ?? false
 
@@ -766,9 +780,10 @@ export function AgentView() {
         {/* Back-wall sky window — tints by user's local hour (self-polls 60s) */}
         <SkyWindow reducedMotion={prefersReducedMotion} />
 
-        {/* Back-wall token pressure gauge */}
+        {/* Back-wall 5h-usage pressure gauge — same source as `claude /usage`
+            (the singleton billing store), not transcript-derived tokens. */}
         <PressureGauge
-          tokens={(live?.usage.inputTokens ?? 0) + (live?.usage.outputTokens ?? 0)}
+          utilization={fiveHourUtil}
           reducedMotion={prefersReducedMotion}
         />
 

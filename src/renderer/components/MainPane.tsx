@@ -3,7 +3,6 @@ import type { NavKey } from './LeftNav'
 import { Terminal } from './Terminal'
 import { BroadcastBar } from './BroadcastBar'
 import { LearningPanel } from './LearningPanel'
-import { Tooltip } from './ui/Tooltip'
 import { Overview } from './tabs/Overview'
 import { Settings } from './tabs/Settings'
 import { SystemPrompt } from './tabs/SystemPrompt'
@@ -23,7 +22,6 @@ import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
-import { useWatchers } from '../state/watchers'
 import { WatchersPopover } from './WatchersPopover'
 import { LiveTranscript } from './LiveTranscript'
 
@@ -89,18 +87,28 @@ function renderTab(active: NavKey, onNavigate?: (k: NavKey) => void): React.Reac
   }
 }
 
-export function MainPane({ active, onNavigate }: { active: NavKey; onNavigate?: (k: NavKey) => void }) {
+interface MainPaneProps {
+  active: NavKey
+  onNavigate?: (k: NavKey) => void
+  broadcastOpen: boolean
+  watchersOpen: boolean
+  onCloseBroadcast: () => void
+  onCloseWatchers: () => void
+}
+
+export function MainPane({
+  active,
+  onNavigate,
+  broadcastOpen,
+  watchersOpen,
+  onCloseBroadcast,
+  onCloseWatchers,
+}: MainPaneProps) {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
-  const restartTab = useSessions((s) => s.restartTab)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
 
-  const [broadcastOpen, setBroadcastOpen] = useState(false)
-  const [watchersOpen, setWatchersOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  const watcherCount = useWatchers((s) =>
-    activeTab ? s.watchersForTab(activeTab.id).length : 0,
-  )
 
   useEffect(() => {
     if (!toast) return
@@ -129,64 +137,19 @@ export function MainPane({ active, onNavigate }: { active: NavKey; onNavigate?: 
           <span className="ml-4 text-xs text-fg-faint truncate">{activeTab.cwd}</span>
         )}
         <div className="flex-1" />
-        {activeTab && active === 'terminal' && (
-          <div className="flex items-center gap-2">
-            <Tooltip content="Kill claude and start a fresh session in the same directory (picks up config changes).">
-              <button
-                onClick={() => restartTab(activeTab.id)}
-                className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line hover:border-fg-faint rounded transition-colors"
-                title="Kill claude and start a fresh session in the same directory (picks up config changes)"
-              >
-                Restart Session
-              </button>
-            </Tooltip>
-            <Tooltip content="Kill all sessions, quit the app, and relaunch — all tabs restore automatically.">
-              <button
-                onClick={() => window.api.app.rebootApp()}
-                className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line hover:border-fg-faint rounded transition-colors"
-                title="Kill all sessions, quit the app, and relaunch — all tabs restore automatically"
-              >
-                Restart App
-              </button>
-            </Tooltip>
-            <Tooltip content="Send the same prompt to multiple selected tabs at once. Useful for shipping the same instruction to several Claude sessions.">
-              <button
-                onClick={() => setBroadcastOpen((v) => !v)}
-                className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line hover:border-fg-faint rounded transition-colors"
-                title="Send the same prompt to multiple tabs at once"
-                aria-pressed={broadcastOpen}
-                data-testid="broadcast-toggle"
-              >
-                Broadcast
-              </button>
-            </Tooltip>
-            <Tooltip content="Attach a long-running shell command (e.g. npm test --watch, tail -f) to this tab. Each line of stdout streams back as a toast and is kept in a 200-line ring buffer.">
-              <button
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={() => setWatchersOpen((v) => !v)}
-                className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line hover:border-fg-faint rounded transition-colors"
-                title="Attach a shell command and stream its stdout into this tab"
-                aria-pressed={watchersOpen}
-                data-testid="watchers-toggle"
-              >
-                Watchers{watcherCount > 0 ? ` (${watcherCount})` : ''}
-              </button>
-            </Tooltip>
-          </div>
-        )}
         {active === 'terminal' && activeTab && watchersOpen && (
           <WatchersPopover
             tabId={activeTab.id}
             cwd={activeTab.cwd}
-            onClose={() => setWatchersOpen(false)}
+            onClose={onCloseWatchers}
           />
         )}
       </header>
       {active === 'terminal' && broadcastOpen && (
         <BroadcastBar
-          onClose={() => setBroadcastOpen(false)}
+          onClose={onCloseBroadcast}
           onSent={(n) => {
-            setBroadcastOpen(false)
+            onCloseBroadcast()
             setToast(`Sent to ${n} tab${n === 1 ? '' : 's'}`)
           }}
         />

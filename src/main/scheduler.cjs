@@ -1385,16 +1385,16 @@ function registerScheduleHandlers() {
     return { ok: true };
   });
 
-  // Archive all pending+failed PRDs and drop their entries from queue.json.
-  // Completed/running entries are kept. PRD files are moved (not deleted) to
-  // prds-archived/<ISO>/ so the user can recover them. Path containment is
-  // enforced — only files inside PRDS_DIR are moved.
+  // Archive every non-running PRD and drop its entry from queue.json.
+  // Running entries are kept (would orphan an in-flight job). PRD files are
+  // moved (not deleted) to prds-archived/<ISO>/ so the user can recover them.
+  // Path containment is enforced — only files inside PRDS_DIR are moved.
   ipcMain.handle('schedule:clear-queue', async () => {
     ensureDirs();
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
     const state = await readQueue();
-    const victims = state.jobs.filter((j) => j.status === 'pending' || j.status === 'failed');
+    const victims = state.jobs.filter((j) => j.status !== 'running');
     if (victims.length === 0) {
       return { ok: true, archived: 0, archivedTo: null };
     }

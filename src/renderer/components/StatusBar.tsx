@@ -25,7 +25,6 @@ function formatCountdown(iso: string | null): string {
 export function StatusBar() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
-  const restartTab = useSessions((s) => s.restartTab)
   const tab = tabs.find((t) => t.id === activeTabId) ?? null
   const lastEventAt = useLive((s) => (activeTabId ? s.tabs[activeTabId]?.lastEventAt ?? 0 : 0))
 
@@ -135,22 +134,6 @@ export function StatusBar() {
         <Field label="last" value={lastTxt} />
       </div>
       <div className="flex-1" />
-      {tab.status === 'running' && (
-        <button
-          onClick={() => restartTab(tab.id)}
-          className="text-fg-faint hover:text-fg transition-colors whitespace-nowrap"
-          title="Restart session — kill claude and start fresh (picks up config changes)"
-        >
-          restart session
-        </button>
-      )}
-      <button
-        onClick={() => window.api.app.rebootApp()}
-        className="text-fg-faint hover:text-fg transition-colors whitespace-nowrap"
-        title="Restart Session Manager — reload app code (Ctrl+Shift+R)"
-      >
-        restart app
-      </button>
       <span className="truncate max-w-md text-fg-faint">
         cwd: <span className="text-fg-dim font-mono">{tab.cwd}</span>
       </span>

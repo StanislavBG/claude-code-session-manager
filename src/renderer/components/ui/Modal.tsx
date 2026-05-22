@@ -17,12 +17,37 @@ export interface ModalProps {
   onClose: () => void
   children: ReactNode
   title?: string
+  /** Width preset. Defaults to `sm` (max-w-md, original behavior). */
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+  /** When true, the dialog fills available vertical space (max-h ~90vh) and
+   *  scrolls inside. Use for tab-as-modal hosting where the inner panel
+   *  already has its own scroll regions. */
+  fillHeight?: boolean
+  /** Skip the internal padding. Useful when the child renders its own
+   *  header / scope switcher / save bar that should reach the dialog edges. */
+  noPadding?: boolean
+}
+
+const SIZE_CLASS: Record<NonNullable<ModalProps['size']>, string> = {
+  sm: 'max-w-md',
+  md: 'max-w-xl',
+  lg: 'max-w-3xl',
+  xl: 'max-w-5xl',
+  full: 'max-w-[min(96vw,1400px)]',
 }
 
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export function Modal({ open, onClose, children, title }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  children,
+  title,
+  size = 'sm',
+  fillHeight = false,
+  noPadding = false,
+}: ModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const previouslyFocusedRef = useRef<Element | null>(null)
   // Stable ref to the latest onClose so the keydown effect's deps stay `[open]`.
@@ -123,11 +148,21 @@ export function Modal({ open, onClose, children, title }: ModalProps) {
         aria-modal="true"
         aria-label={title ?? 'Dialog'}
         tabIndex={-1}
-        className="bg-bg-elev border border-line rounded-lg shadow-xl max-w-md w-full mx-4 p-6 outline-none"
+        className={`bg-bg-elev border border-line rounded-lg shadow-xl w-full mx-4 outline-none flex flex-col ${SIZE_CLASS[size]} ${
+          fillHeight ? 'max-h-[90vh] h-[90vh]' : ''
+        } ${noPadding ? '' : 'p-6'}`}
         data-testid="modal-dialog"
       >
-        {title ? <h2 className="text-base font-medium text-fg mb-3">{title}</h2> : null}
-        {children}
+        {title ? <h2 className={`text-base font-medium text-fg ${noPadding ? 'px-6 pt-6 pb-3' : 'mb-3'}`}>{title}</h2> : null}
+        {/* When fillHeight is on, the dialog is a vertical flex container and
+         *  children are expected to manage their own scroll. When off, no
+         *  layout wrapper is added so existing small-dialog callers
+         *  (MicWizard, BootBadDialog) keep behaving exactly as before. */}
+        {fillHeight ? (
+          <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+        ) : (
+          children
+        )}
       </div>
     </div>
   )

@@ -4,88 +4,43 @@ import { Terminal } from './Terminal'
 import { BroadcastBar } from './BroadcastBar'
 import { LearningPanel } from './LearningPanel'
 import { Overview } from './tabs/Overview'
-import { Settings } from './tabs/Settings'
-import { SystemPrompt } from './tabs/SystemPrompt'
-import { Keybindings } from './tabs/Keybindings'
-import { Permissions } from './tabs/Permissions'
 import { Skills } from './tabs/Skills'
-import { Plugins } from './tabs/Plugins'
-import { McpServers } from './tabs/McpServers'
-import { Hooks } from './tabs/Hooks'
 import { Subagents } from './tabs/Subagents'
-import { Plans } from './tabs/Plans'
-import { Tasks } from './tabs/Tasks'
-import { Memory } from './tabs/Memory'
-import { Projects } from './tabs/Projects'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
-import { DocEditor } from './tabs/DocEditor'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
 import { WatchersPopover } from './WatchersPopover'
 import { LiveTranscript } from './LiveTranscript'
 
-const LABELS: Record<NavKey, string> = {
-  'overview': 'Overview',
+/** MainPane only renders the 7 screen-level NavKeys reachable via the Header
+ *  tabs. All other NavKey values open as TabModal overlays handled in
+ *  App.tsx — they never reach this switch. */
+const LABELS: Partial<Record<NavKey, string>> = {
+  'overview': 'Home',
   'terminal': 'Terminal',
-  'system-prompt': 'System Prompt / Personality',
-  'settings': 'Settings',
-  'permissions': 'Permissions',
-  'skills': 'Skills',
-  'plugins': 'Plugins',
-  'mcp': 'MCP Servers',
-  'hooks': 'Hooks',
-  'subagents': 'Subagents',
-  'plans': 'Plans',
-  'tasks': 'Tasks / Todos',
-  'memory': 'Memory',
-  'projects': 'Projects',
-  'history': 'History',
-  'keybindings': 'Keybindings',
-  'usage': 'Usage',
   'agent-view': 'Agent-View',
-  'doc-editor': 'Doc Editor',
+  'skills': 'Skills',
+  'subagents': 'Hive — Subagents',
+  'history': 'History',
+  'usage': 'Usage',
 }
 
 function renderTab(active: NavKey, onNavigate?: (k: NavKey) => void): React.ReactNode {
   switch (active) {
     case 'overview':
       return <Overview onNavigate={onNavigate} />
-    case 'system-prompt':
-      return <SystemPrompt />
-    case 'settings':
-      return <Settings />
-    case 'permissions':
-      return <Permissions />
     case 'skills':
       return <Skills />
-    case 'plugins':
-      return <Plugins />
-    case 'mcp':
-      return <McpServers />
-    case 'hooks':
-      return <Hooks />
     case 'subagents':
       return <Subagents />
-    case 'plans':
-      return <Plans />
-    case 'tasks':
-      return <Tasks />
-    case 'memory':
-      return <Memory />
-    case 'projects':
-      return <Projects />
     case 'history':
       return <History />
-    case 'keybindings':
-      return <Keybindings />
     case 'usage':
       return <Usage />
     case 'agent-view':
       return <AgentView />
-    case 'doc-editor':
-      return <DocEditor />
     default:
       return null
   }
@@ -135,11 +90,8 @@ export function MainPane({
 
   return (
     <main className="flex-1 min-w-0 bg-bg flex flex-col">
-      <header className="relative h-9 border-b border-line px-4 flex items-center shrink-0">
-        <h1 className="text-xs text-fg-dim uppercase tracking-wider">{LABELS[active]}</h1>
-        {activeTab && (
-          <span className="ml-4 text-xs text-fg-faint truncate">{activeTab.cwd}</span>
-        )}
+      <header className="relative h-8 border-b border-line px-4 flex items-center shrink-0">
+        <h1 className="text-[10px] text-fg-faint uppercase tracking-wider">{LABELS[active] ?? ''}</h1>
         <div className="flex-1" />
         {active === 'terminal' && activeTab && watchersOpen && (
           <WatchersPopover

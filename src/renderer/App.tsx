@@ -1,12 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TabBar } from './components/TabBar'
-import { LeftNav, type NavKey } from './components/LeftNav'
+import { type NavKey } from './components/LeftNav'
+import { Header, type ScreenKey } from './components/layout/Header'
+import { TabModal } from './components/layout/TabModal'
+import { VoiceModal } from './components/layout/VoiceModal'
+import { SchedulerModal } from './components/layout/SchedulerModal'
 import { StatusBar } from './components/StatusBar'
 import { MainPane } from './components/MainPane'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { Toast } from './components/ui/Toast'
+import { Settings } from './components/tabs/Settings'
+import { SystemPrompt } from './components/tabs/SystemPrompt'
+import { Keybindings } from './components/tabs/Keybindings'
+import { Permissions } from './components/tabs/Permissions'
+import { Plugins } from './components/tabs/Plugins'
+import { McpServers } from './components/tabs/McpServers'
+import { Hooks } from './components/tabs/Hooks'
+import { Plans } from './components/tabs/Plans'
+import { Tasks } from './components/tabs/Tasks'
+import { Memory } from './components/tabs/Memory'
+import { Projects } from './components/tabs/Projects'
+import { DocEditor } from './components/tabs/DocEditor'
 import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
@@ -26,11 +42,40 @@ import { log } from './lib/logger'
 // double-effect; resets only on full reload.
 let unsupportedLogged = false
 
+/** Which NavKeys are rendered as full screens via Header tabs. Everything
+ *  else is treated as a modal target. Keeping the wider NavKey union lets
+ *  existing callers (CommandPalette nav:*, Overview's InstrumentTile linkTo,
+ *  LearningPanel) keep working — App.tsx routes screen keys to setActiveNav
+ *  and any other NavKey to setOpenModal. */
+const SCREEN_KEYS = new Set<NavKey>([
+  'overview',
+  'terminal',
+  'agent-view',
+  'skills',
+  'history',
+  'usage',
+  'subagents',
+])
+
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
+  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
+
+  // Route any NavKey to the right destination. Used by CommandPalette nav:*
+  // entries, Overview's tile links, and Header's More menu.
+  const navigate = useCallback((k: NavKey) => {
+    if (SCREEN_KEYS.has(k)) {
+      setActiveNav(k)
+      setOpenModal(null)
+    } else {
+      setOpenModal(k)
+    }
+  }, [])
+
+  const closeModal = useCallback(() => setOpenModal(null), [])
   const activeTabId = useSessions((s) => s.activeTabId)
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
@@ -450,21 +495,24 @@ export function App() {
           the banner's 28px height so TabBar stays visible. */}
       <RecordingStatus />
       <TabBar />
+      <Header
+        active={activeNav}
+        onScreenChange={(k: ScreenKey) => { setActiveNav(k); setOpenModal(null) }}
+        onOpenModal={navigate}
+        onNewSession={handleNewSession}
+        onRestartSession={restartActiveTab}
+        onRestartApp={rebootApp}
+        onToggleBroadcast={toggleBroadcast}
+        onToggleWatchers={toggleWatchers}
+        onOpenVoice={() => setOpenModal('voice')}
+        onOpenScheduler={() => setOpenModal('scheduler')}
+        broadcastOpen={broadcastOpen}
+        watchersOpen={watchersOpen}
+      />
       <div className="flex-1 flex min-h-0">
-        <LeftNav
-          active={activeNav}
-          onChange={setActiveNav}
-          onNewSession={handleNewSession}
-          onRestartSession={restartActiveTab}
-          onRestartApp={rebootApp}
-          onToggleBroadcast={toggleBroadcast}
-          onToggleWatchers={toggleWatchers}
-          broadcastOpen={broadcastOpen}
-          watchersOpen={watchersOpen}
-        />
         <MainPane
           active={activeNav}
-          onNavigate={setActiveNav}
+          onNavigate={navigate}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}
@@ -472,6 +520,14 @@ export function App() {
         />
       </div>
       <StatusBar />
+
+      {/* Tab-as-modal overlays. NavKey targets are routed through navigate(),
+       *  which sets openModal to the relevant key. Each modal mounts only when
+       *  its key matches so we don't pay for hidden subscriptions. */}
+      <ModalRouter openModal={openModal} onClose={closeModal} />
+      <VoiceModal open={openModal === 'voice'} onClose={closeModal} />
+      <SchedulerModal open={openModal === 'scheduler'} onClose={closeModal} />
+
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
       <MicWizard open={wizardOpen} onClose={closeWizard} />
@@ -484,12 +540,69 @@ export function App() {
         onCommand={(cmd: Command) => {
           setPaletteOpen(false)
           if (cmd.id.startsWith('nav:')) {
-            setActiveNav(cmd.id.slice(4) as NavKey)
+            navigate(cmd.id.slice(4) as NavKey)
           } else if (cmd.id === 'doc:open-file' || cmd.id.startsWith('doc:recent:')) {
-            setActiveNav('doc-editor')
+            navigate('doc-editor')
           }
         }}
       />
     </div>
+  )
+}
+
+/** Dispatch for the 12 NavKeys that are rendered as modal overlays.
+ *  Voice/Scheduler aren't NavKeys so they have their own dedicated modals
+ *  in App.tsx; everything here is a former-tab whose component we
+ *  wrap in TabModal unchanged. */
+function ModalRouter({
+  openModal,
+  onClose,
+}: {
+  openModal: NavKey | 'voice' | 'scheduler' | null
+  onClose: () => void
+}) {
+  const titleMap = useMemo<Partial<Record<NavKey, string>>>(() => ({
+    'settings': 'Settings',
+    'permissions': 'Permissions',
+    'system-prompt': 'System Prompt / Personality',
+    'keybindings': 'Keybindings',
+    'memory': 'Memory',
+    'plugins': 'Plugins',
+    'mcp': 'MCP Servers',
+    'hooks': 'Hooks',
+    'plans': 'Plans',
+    'tasks': 'Tasks / Todos',
+    'projects': 'Projects',
+    'doc-editor': 'Doc Editor',
+  }), [])
+
+  const render = (): React.ReactNode => {
+    switch (openModal) {
+      case 'settings': return <Settings />
+      case 'permissions': return <Permissions />
+      case 'system-prompt': return <SystemPrompt />
+      case 'keybindings': return <Keybindings />
+      case 'memory': return <Memory />
+      case 'plugins': return <Plugins />
+      case 'mcp': return <McpServers />
+      case 'hooks': return <Hooks />
+      case 'plans': return <Plans />
+      case 'tasks': return <Tasks />
+      case 'projects': return <Projects />
+      case 'doc-editor': return <DocEditor />
+      default: return null
+    }
+  }
+
+  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler'
+    ? titleMap[openModal] ?? ''
+    : ''
+
+  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && title !== ''
+
+  return (
+    <TabModal open={isTabModal} onClose={onClose} title={title}>
+      {render()}
+    </TabModal>
   )
 }

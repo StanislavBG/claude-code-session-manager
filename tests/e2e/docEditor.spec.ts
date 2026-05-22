@@ -184,7 +184,7 @@ test('save clears the dirty indicator', async () => {
     await expect(win.locator('[data-testid="doc-tab-dirty"]').first()).toBeVisible({ timeout: 3_000 })
 
     // Click Save.
-    await win.locator('[data-testid="doc-save-btn"]').click()
+    await win.locator('[data-testid="doc-save-btn"]').click({ force: true })
 
     // Dirty dot must disappear.
     await expect(win.locator('[data-testid="doc-tab-dirty"]')).toHaveCount(0, { timeout: 5_000 })

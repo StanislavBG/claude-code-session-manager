@@ -203,4 +203,9 @@ contextBridge.exposeInMainWorld('api', {
       return ipcRenderer.invoke('memory:create', payload);
     },
   },
+  docEditor: {
+    pickFile: (payload) => ipcRenderer.invoke('doc-editor:pick-file', payload),
+    readFile: (p) => ipcRenderer.invoke('doc-editor:read-file', { path: p }),
+    writeFile: (p, text) => ipcRenderer.invoke('doc-editor:write-file', { path: p, text }),
+  },
 });

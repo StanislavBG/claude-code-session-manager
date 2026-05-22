@@ -10,7 +10,7 @@ interface RobotProps {
   /** degrees: positive = lean right (toward board), negative = lean left (toward dock) */
   headTilt: number
   lively: boolean
-  nextToolName?: string
+  lastToolName?: string
   workingMicro: 'none' | 'twitch'
   idleAction: IdleAction
   discoHipShake?: boolean
@@ -141,10 +141,10 @@ function Eye({ state, cx, cy, slowBlink }: { state: RobotState; cx: number; cy: 
 // ── Robot ─────────────────────────────────────────────────────────────────────
 
 export function Robot({
-  state, headTilt, lively, nextToolName, workingMicro, idleAction, discoHipShake,
+  state, headTilt, lively, lastToolName, workingMicro, idleAction, discoHipShake,
 }: RobotProps): JSX.Element {
   const prefersReducedMotion = useReducedMotion() ?? false
-  const antennaFill = nextToolColor(nextToolName)
+  const antennaFill = nextToolColor(lastToolName)
 
   const isStretching   = idleAction === 'stretch'    && lively && !prefersReducedMotion
   const isWatchingUser = idleAction === 'watch-user' && lively

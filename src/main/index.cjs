@@ -24,6 +24,7 @@ const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs');
 const memoryTool = require('./memoryTool.cjs');
+const { registerDocEditorHandlers } = require('./docEditor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
 
@@ -577,6 +578,7 @@ queueOps.registerQueueOpsHandlers();
 registerHistoryAggregatorHandlers();
 pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
+registerDocEditorHandlers();
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());

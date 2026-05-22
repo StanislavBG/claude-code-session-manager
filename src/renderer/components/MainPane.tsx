@@ -20,6 +20,7 @@ import { Projects } from './tabs/Projects'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
+import { DocEditor } from './tabs/DocEditor'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
 import { WatchersPopover } from './WatchersPopover'
@@ -44,6 +45,7 @@ const LABELS: Record<NavKey, string> = {
   'keybindings': 'Keybindings',
   'usage': 'Usage',
   'agent-view': 'Agent-View',
+  'doc-editor': 'Doc Editor',
 }
 
 function renderTab(active: NavKey, onNavigate?: (k: NavKey) => void): React.ReactNode {
@@ -82,6 +84,8 @@ function renderTab(active: NavKey, onNavigate?: (k: NavKey) => void): React.Reac
       return <Usage />
     case 'agent-view':
       return <AgentView />
+    case 'doc-editor':
+      return <DocEditor />
     default:
       return null
   }

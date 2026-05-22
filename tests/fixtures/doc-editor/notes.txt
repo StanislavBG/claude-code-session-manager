@@ -1,0 +1,3 @@
+Test fixture notes file.
+Used by the doc editor e2e spec.
+Line three.

@@ -683,6 +683,11 @@ export interface SessionManagerAPI {
     /** Create a new memory entry with starter frontmatter + body. */
     create: (name: string, description?: string, workspace?: string) => Promise<MemoryMutationResult>;
   };
+  docEditor: {
+    pickFile: (payload?: { lastDir?: string }) => Promise<{ path: string | null; error?: string }>;
+    readFile: (path: string) => Promise<{ ok: boolean; text?: string; mtimeMs?: number; error?: string }>;
+    writeFile: (path: string, text: string) => Promise<{ ok: boolean; mtimeMs?: number; error?: string }>;
+  };
 }
 
 declare global {

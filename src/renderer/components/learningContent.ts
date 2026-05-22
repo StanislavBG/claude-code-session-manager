@@ -543,4 +543,24 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'No interaction here, just observation. To act, switch back to Terminal.',
     ],
   },
+
+  'doc-editor': {
+    headline: 'WYSIWYG editor for Markdown files and plain text',
+    intro:
+      'Doc Editor opens .md, .markdown, .txt, .json and other text files in a multi-tab surface. Markdown files get a WYSIWYG mode (Tiptap/ProseMirror) with a formatting toolbar; plain text and JSON use the Monaco source editor.',
+    sections: [
+      {
+        title: 'Key bindings',
+        items: [
+          { term: 'Ctrl/Cmd-S', body: 'Save the active document.' },
+          { term: 'Ctrl/Cmd-W', body: 'Close the active document tab (prompts if unsaved).' },
+          { term: 'Ctrl/Cmd-B / I', body: 'Bold / Italic in WYSIWYG mode.' },
+        ],
+      },
+    ],
+    tips: [
+      'Switch to Source mode for surgical edits to PRDs and agent files — WYSIWYG normalizes list markers and heading style.',
+      'YAML frontmatter is preserved verbatim regardless of mode. The frontmatter chip in the toolbar shows what is there.',
+    ],
+  },
 }

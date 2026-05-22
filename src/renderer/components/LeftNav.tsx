@@ -34,6 +34,7 @@ export type NavKey =
   | 'keybindings'
   | 'usage'
   | 'agent-view'
+  | 'doc-editor'
 
 type NavItem = { key: NavKey; label: string; liveKind?: 'subagents' | 'tasks' | 'agentView' }
 
@@ -72,6 +73,7 @@ const GROUPS: { title: string; storageKey: string; items: NavItem[] }[] = [
       { key: 'projects', label: 'Projects' },
       { key: 'history', label: 'History' },
       { key: 'usage', label: 'Usage' },
+      { key: 'doc-editor', label: 'Doc Editor' },
     ],
   },
 ]

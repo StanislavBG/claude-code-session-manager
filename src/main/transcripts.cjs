@@ -69,13 +69,20 @@ function classifyLine(obj) {
           return { kind: 'plan', data: block.input, raw: obj };
         }
         if (block.name === 'Agent' || block.name === 'Task') {
-          return { kind: 'agent_spawn', data: block.input, raw: obj };
+          // Include block.id as toolUseId so the live store can match the
+          // corresponding tool_result and update per-agent lastActivityAt.
+          return { kind: 'agent_spawn', data: { ...block.input, toolUseId: block.id }, raw: obj };
         }
         return {
           kind: 'tool_use',
           data: { name: block.name, input: block.input, id: block.id },
           raw: obj,
         };
+      }
+      // tool_result carries the tool_use_id of the completed Task/Agent call.
+      // The live store uses this to update the agent's lastActivityAt bookend.
+      if (block?.type === 'tool_result' && block.tool_use_id) {
+        return { kind: 'tool_result', data: { toolUseId: block.tool_use_id }, raw: obj };
       }
     }
   }

@@ -119,8 +119,13 @@ export function SchedulePanel() {
   const { inline, collapsedCount } = partitionJobs(jobs, hiddenSlugs, now, showAllCompleted)
 
   const onClearCompleted = () => {
+    // Hide both completed AND failed rows. Pre-2026-05-22 this only handled
+    // completed, which meant a failed/red row had NO UI affordance to dismiss
+    // (e.g. a stale auto-investigation fix-PRD whose file was archived but the
+    // queue entry lingered). Failed jobs are still "done" from the user's
+    // perspective; hiding them is no different from hiding green.
     const next = new Set(hiddenSlugs)
-    for (const j of jobs) if (j.status === 'completed') next.add(j.slug)
+    for (const j of jobs) if (j.status === 'completed' || j.status === 'failed') next.add(j.slug)
     setHiddenSlugs(next)
     saveHidden(next)
   }
@@ -531,6 +536,10 @@ function partitionJobs(
   const inline: ScheduleJob[] = []
   let collapsedCount = 0
   for (const j of jobs) {
+    // Failed jobs are normally always inline (actionable), BUT if the user
+    // explicitly hid one via "Clear done" we honor that intent. Use the
+    // disclosure-all toggle to see them again.
+    if (j.status === 'failed' && hiddenSlugs.has(j.slug)) { collapsedCount++; continue }
     if (j.status !== 'completed') { inline.push(j); continue }
     if (keepCompleted.has(j.slug)) inline.push(j)
     else collapsedCount++

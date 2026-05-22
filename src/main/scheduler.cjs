@@ -280,6 +280,81 @@ async function listPrdFiles() {
   return prdParser.listPrdFiles(PRDS_DIR);
 }
 
+/**
+ * Best-effort kill of a child claude PID that the previous app instance spawned
+ * but never reaped. Used by init() to clean up the orphan tree on boot.
+ *
+ * Safety:
+ *   - PID-recycling: between app death and this call, another process may have
+ *     reused the PID. We read /proc/<pid>/cmdline (Linux) or `ps -p` (macOS)
+ *     and only SIGTERM if the cmdline starts with the claude bin path.
+ *   - Detached process group: jobs are spawned with detached:true so we kill
+ *     -pid (the group). If the group leader is already gone, that fails
+ *     silently and we fall back to single-pid kill.
+ *   - Returns synchronously after issuing SIGTERM; a 5s SIGKILL follow-up is
+ *     scheduled via setTimeout to clean up any process ignoring SIGTERM.
+ *
+ * Returns: 'killed' (cmdline matched + signal sent), 'gone' (pid not alive),
+ *          'mismatch' (pid alive but cmdline doesn't look like claude),
+ *          'unknown' (couldn't read cmdline — leave the pid alone).
+ */
+function killOrphanClaudePid(pid) {
+  if (!pid || typeof pid !== 'number' || pid <= 1) return 'gone';
+  try { process.kill(pid, 0); } catch { return 'gone'; }
+  let cmdline = '';
+  try {
+    cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+  } catch {
+    try {
+      const out = require('node:child_process').execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8', stdio: ['ignore','pipe','ignore'] });
+      cmdline = out.trim();
+    } catch { return 'unknown'; }
+  }
+  if (!/\bclaude\b/.test(cmdline)) return 'mismatch';
+  try { process.kill(-pid, 'SIGTERM'); }
+  catch { try { process.kill(pid, 'SIGTERM'); } catch { /* race: died between checks */ } }
+  setTimeout(() => {
+    try { process.kill(pid, 0); } catch { return; /* already gone */ }
+    try { process.kill(-pid, 'SIGKILL'); }
+    catch { try { process.kill(pid, 'SIGKILL'); } catch { /* race */ } }
+  }, 5000).unref?.();
+  return 'killed';
+}
+
+/**
+ * Validate that a string is safe to pass as a child_process.spawn argv element.
+ *
+ * Node.js rejects argv strings containing NUL bytes with a cryptic error:
+ *   "The argument 'args[1]' must be a string without null bytes. Received '...'"
+ *
+ * The error message truncates the offending string at ~120 chars, so when it
+ * surfaces in the queue.json `error` field the user has no way to find the
+ * actual byte. The real incident (2026-05-21, PRD 03-doc-editor-foundation)
+ * was a single NUL inside backtick code-fence in the PRD body. Total wall-clock
+ * to diagnose: ~30min. This validator catches it pre-spawn and reports the
+ * file + offset + surrounding context.
+ *
+ * Also flags other ASCII control bytes (< 0x20 except TAB/LF/CR), since they
+ * are virtually always a typo or copy-paste artifact in a markdown PRD body
+ * and may cause subtle issues in claude's prompt tokenizer.
+ */
+function validatePromptForSpawn(body, srcLabel) {
+  for (let i = 0; i < body.length; i++) {
+    const code = body.charCodeAt(i);
+    if (code < 0x20 && code !== 0x09 && code !== 0x0A && code !== 0x0D) {
+      const start = Math.max(0, i - 20);
+      const end = Math.min(body.length, i + 20);
+      const ctx = body.slice(start, end).replace(/[\x00-\x1F]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+      const hex = code.toString(16).padStart(2, '0');
+      return {
+        ok: false,
+        error: `PRD body contains control char 0x${hex} at byte offset ${i} in ${srcLabel} (context: "${ctx}"). child_process.spawn would reject this with a truncated error message; remove the control char and re-queue.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
 // ---------- queue reconciliation ----------
 
 /**
@@ -607,13 +682,22 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
 
   // Read full PRD body fresh from disk (queue stored only the preview).
   let prompt;
+  const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
   try {
-    const parsed = await parsePrd(path.join(PRDS_DIR, `${job.slug}.md`));
+    const parsed = await parsePrd(prdPath);
     prompt = parsed.body;
   } catch (e) {
     safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
     closeFd();
     return { exitCode: -1, durationMs: 0, error: e?.message };
+  }
+
+  const promptCheck = validatePromptForSpawn(prompt, prdPath);
+  if (!promptCheck.ok) {
+    safeLog(`[scheduler] ${promptCheck.error}\n`);
+    closeFd();
+    atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    return { exitCode: -1, durationMs: 0, error: promptCheck.error, sessionId };
   }
 
   return await new Promise((resolve) => {
@@ -822,6 +906,28 @@ function pickNextBatch(allJobs, running, cap) {
   const pending = allJobs.filter((j) => j.status === 'pending' && !running.has(j.slug));
   if (pending.length === 0) return [];
 
+  // Lowest pending group (computed up-front so the failure gate can compare).
+  const lowestPendingGroup = pending.reduce(
+    (min, j) => Math.min(min, j.parallelGroup ?? 99),
+    Infinity,
+  );
+
+  // Cross-group failure gate: refuse to advance past a group with failed jobs.
+  // Without this, a failed foundation PRD (e.g. 03-doc-editor-foundation
+  // crashed with a NUL-byte spawn error on 2026-05-21) doesn't stop later
+  // groups (04, 05, 06...) from running and silently corrupting the project
+  // state. The user can re-queue the failed job (pending) or archive it to
+  // unblock the gate, but the default is to halt until the failure is
+  // acknowledged.
+  const blockingFailures = allJobs.filter((j) =>
+    j.status === 'failed' && (j.parallelGroup ?? 99) < lowestPendingGroup,
+  );
+  if (blockingFailures.length > 0) {
+    const slugs = blockingFailures.map((j) => j.slug).join(', ');
+    console.log(`[scheduler] failure-gate: holding g${lowestPendingGroup} — ${blockingFailures.length} failed job(s) in earlier groups [${slugs}]. Reset to pending or archive to unblock.`);
+    return [];
+  }
+
   // Groups with at least one job in flight: either tracked in runningSet
   // (this process spawned it) or still marked 'running' in queue.json
   // (persisted from a previous session that hasn't been orphan-reset yet).
@@ -839,11 +945,7 @@ function pickNextBatch(allJobs, running, cap) {
   const queueRunningCount = allJobs.filter((j) => j.status === 'running').length;
   const effectiveRunning = Math.max(running.size, queueRunningCount);
 
-  // Lowest pending group.
-  const lowestPendingGroup = pending.reduce(
-    (min, j) => Math.min(min, j.parallelGroup ?? 99),
-    Infinity,
-  );
+  // (lowestPendingGroup was computed up-front for the failure-gate check.)
 
   if (activeGroups.size > 0) {
     const lowestActive = Math.min(...activeGroups);
@@ -1002,6 +1104,12 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
 
   const claudeBin = resolveClaudeBin();
   const childEnv = cleanChildEnv();
+  const investigationPromptCheck = validatePromptForSpawn(prompt, `<investigation prompt for ${failedJob.slug}>`);
+  if (!investigationPromptCheck.ok) {
+    try { fs.writeSync(fd, `\n[scheduler] ${investigationPromptCheck.error}\n`); } catch { /* */ }
+    try { fs.closeSync(fd); } catch { /* */ }
+    return;
+  }
   let child;
   try {
     child = spawn(claudeBin, [
@@ -1103,9 +1211,33 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     await broadcast();
 
     if (actuallyFailed && failedJobSnapshot) {
-      spawnInvestigation(failedJobSnapshot, runDir).catch((e) => {
-        console.error('[scheduler] spawnInvestigation error', job.slug, e);
-      });
+      // Transient-failure detector: SIGTERM/SIGKILL within 30s = almost
+      // always external kill (user-initiated app restart, OOM-kill, manual
+      // process kill). The PRD itself didn't fail; the run was interrupted
+      // before it could do meaningful work. Spawning an Opus investigator on
+      // these is wasted tokens AND pollutes the queue with redundant fix-PRDs
+      // (real example 2026-05-21: 07-agent-view-robot-rename-lasttool got
+      // SIGTERMed at 10s by an app restart, the rename had already been done
+      // anyway, and the auto-generated fix-PRD just sat in queue.json as
+      // noise). Auto-retry up to 2x before falling through to investigation.
+      const ec = failedJobSnapshot.exitCode;
+      const transient = (ec === 143 || ec === 137) && res.durationMs < 30_000;
+      const retries = failedJobSnapshot.transientRetries ?? 0;
+      if (transient && retries < 2) {
+        console.log(`[scheduler] transient failure (exit=${ec} dur=${res.durationMs}ms) — auto-retry ${retries + 1}/2 for ${job.slug}`);
+        await mutate((s) => {
+          const i = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (i >= 0) {
+            resetJobFields(s.jobs[i], null);
+            s.jobs[i].transientRetries = retries + 1;
+          }
+        });
+        await broadcast();
+      } else {
+        spawnInvestigation(failedJobSnapshot, runDir).catch((e) => {
+          console.error('[scheduler] spawnInvestigation error', job.slug, e);
+        });
+      }
     }
   } catch (e) {
     console.error('[scheduler] spawnJob error', job.slug, e);
@@ -1529,12 +1661,24 @@ async function init() {
   bootedAt = Date.now();
 
   // Boot reconciliation: mark any job that was 'running' when the app died as
-  // 'failed'. mutate() creates queue.json from defaults if it doesn't exist.
+  // 'failed', AND kill its detached claude child if still alive. Without the
+  // kill step the child keeps running as a zombie writing to the project on
+  // its own schedule, which is exactly what happened on 2026-05-21 (PID 78230
+  // writing PRD 05's output while the scheduler thought the job was orphaned).
   await mutate((state) => {
     for (const j of state.jobs) {
       if (j.status === 'running') {
+        const pid = j.runtime?.pid;
+        let killNote = '';
+        if (pid) {
+          const result = killOrphanClaudePid(pid);
+          killNote = ` (orphan pid=${pid}: ${result})`;
+          if (result === 'killed') {
+            console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${j.slug}`);
+          }
+        }
         j.status = 'failed';
-        j.error = 'orphaned: app restarted while running';
+        j.error = `orphaned: app restarted while running${killNote}`;
         j.finishedAt = new Date().toISOString();
         delete j.runtime;
       }

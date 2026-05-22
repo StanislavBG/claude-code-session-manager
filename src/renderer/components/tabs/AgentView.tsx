@@ -18,6 +18,7 @@ import {
   BOARD_X, BOARD_Y, BOARD_W, BOARD_H,
   FLOOR_Y, SCENE_H,
 } from './agent/sceneConstants'
+import { TOOL_RECIPES, FALLBACK_RECIPE } from './agent/toolRecipes'
 
 /**
  * AgentView — workshop world visualisation of the active session.
@@ -44,20 +45,6 @@ const IDLE_MIN_DUR    = 6_000
 const IDLE_MAX_DUR    = 12_000
 
 const DISCO_COLORS = ['#f43f5e', '#facc15', '#22d3ee', '#a78bfa'] as const
-
-// Single mono-font letter per tool for the conveyor crate badge. Avoids emoji
-// per project rule; readability at 7px favours capital ASCII over symbols.
-const CRATE_GLYPH_FOR_TOOL: Record<string, string> = {
-  Bash: '$', BashOutput: '>', KillBash: 'X',
-  Read: 'R', Write: 'W', Edit: 'E', NotebookEdit: 'N',
-  Grep: 'G', Glob: 'L',
-  WebFetch: 'F', WebSearch: 'S',
-  Task: 'T', TodoWrite: 'O', ExitPlanMode: 'P',
-}
-function crateGlyphFor(toolName?: string): string {
-  if (!toolName) return '?'
-  return CRATE_GLYPH_FOR_TOOL[toolName] ?? toolName.charAt(0).toUpperCase()
-}
 
 const STARS = Array.from({ length: 40 }, (_, i) => ({
   x:     (i * 37 + 11) % 100,
@@ -512,7 +499,7 @@ export function AgentView() {
     prevCrateSeqRef.current = seq
     if (newEvents.length === 0) return
     const latest = newEvents[newEvents.length - 1]
-    setCrateSpawn({ id: latest.id, glyph: crateGlyphFor(latest.toolName) })
+    setCrateSpawn({ id: latest.id, glyph: (TOOL_RECIPES[latest.toolName ?? ''] ?? FALLBACK_RECIPE).glyphChar })
   }, [live?.activitySeq, live?.activityRing])
 
   // ── Idle action state machine ──────────────────────────────────────────────
@@ -695,7 +682,7 @@ export function AgentView() {
   const toolCount = live?.lastToolUses.filter((t) => now - t.at < 60000).length  ?? 0
   const planCount = live?.plans.length  ?? 0
 
-  const nextToolName = live?.activityRing.at(-1)?.toolName
+  const lastToolName = live?.activityRing.at(-1)?.toolName
 
   const statusLabel =
     state === 'offline'
@@ -798,7 +785,7 @@ export function AgentView() {
         </AnimatePresence>
 
         {/* Subagent dock (left wall) */}
-        <SubagentDock agents={live?.agents ?? []} lastActivityAt={live?.lastEventAt ?? 0} />
+        <SubagentDock agents={live?.agents ?? []} />
 
         {/* Todo board (right wall) */}
         <TodoBoard todos={live?.todos ?? []} towerActive={towerActive} />
@@ -843,7 +830,7 @@ export function AgentView() {
           state={state}
           headTilt={headTilt}
           lively={lively}
-          nextToolName={nextToolName}
+          lastToolName={lastToolName}
           workingMicro={workingMicro}
           idleAction={idleAction}
           discoHipShake={discoActive}

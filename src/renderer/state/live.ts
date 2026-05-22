@@ -28,9 +28,19 @@ export interface PlanEntry {
 }
 
 export interface AgentSpawnEntry {
+  /** toolUseId from the spawning Task/Agent tool_use block; used to match tool_result events. */
+  id?: string
   at: number
   subagentType?: string
   description?: string
+  /**
+   * Updated when the Task tool_use begins (spawn) and again when its tool_result
+   * returns (completion). Claude Code's JSONL does not carry per-sub-event agent
+   * attribution — subagent activity only appears in the parent stream at these two
+   * bookend points. Finer granularity requires following the subagent's own
+   * transcript file (out of scope).
+   */
+  lastActivityAt: number
 }
 
 export interface UsageSnapshot {
@@ -81,6 +91,11 @@ interface LiveState {
   subscribe: (tabId: string, cwd: string, sessionUuid: string) => void
   unsubscribe: (tabId: string) => void
   ingest: (tabId: string, ev: TranscriptEvent, opts?: { replay?: boolean }) => void
+}
+
+function touchAgent(agents: AgentSpawnEntry[], agentId: string | undefined, ts: number): AgentSpawnEntry[] {
+  if (!agentId) return agents
+  return agents.map((a) => a.id === agentId ? { ...a, lastActivityAt: ts } : a)
 }
 
 function blankTab(tabId: string, cwd: string, sessionUuid: string): LiveTab {
@@ -234,9 +249,9 @@ export const useLive = create<LiveState>((set, get) => ({
         break
       }
       case 'agent_spawn': {
-        const d = ev.data as { subagent_type?: string; description?: string }
+        const d = ev.data as { subagent_type?: string; description?: string; toolUseId?: string }
         next.agents = [
-          { at: now, subagentType: d?.subagent_type, description: d?.description },
+          { id: d?.toolUseId, at: now, subagentType: d?.subagent_type, description: d?.description, lastActivityAt: now },
           ...cur.agents,
         ].slice(0, 50)
         if (!opts?.replay) {
@@ -277,6 +292,13 @@ export const useLive = create<LiveState>((set, get) => ({
             at: now,
             label: `${Math.floor(newTotal / 1000)}k tokens`,
           })
+        }
+        break
+      }
+      case 'tool_result': {
+        if (!opts?.replay) {
+          const d = ev.data as { toolUseId?: string }
+          next.agents = touchAgent(cur.agents, d?.toolUseId, now)
         }
         break
       }

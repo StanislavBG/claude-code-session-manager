@@ -2,6 +2,7 @@ import ReactDOM from 'react-dom/client'
 import { loader as monacoLoader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 import { App } from './App'
+import { runApiBootCheck } from './lib/apiBootCheck'
 import './styles.css'
 
 // @monaco-editor/react defaults to fetching Monaco from cdn.jsdelivr.net,
@@ -32,6 +33,14 @@ if (typeof (window as unknown as { api?: unknown }).api === 'undefined') {
       'Check main/index.cjs BrowserWindow webPreferences.preload path.',
   )
 }
+
+// Catch the more common drift case: preload partially loaded but a namespace
+// declared in api.d.ts isn't actually exposed in preload/index.cjs. Without
+// this, the bug only surfaces the first time a user touches the affected
+// feature, with a useless `Cannot read properties of undefined` deep in the
+// bundle (real example: Doc Editor crashed because docEditor namespace was in
+// api.d.ts but missing from preload/index.cjs).
+runApiBootCheck()
 
 // NOTE: StrictMode is intentionally disabled. The Terminal component owns an
 // xterm instance tied to a PTY process in the main process; StrictMode's

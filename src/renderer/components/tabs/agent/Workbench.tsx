@@ -11,7 +11,7 @@ import {
 export interface CrateSpawn {
   /** Monotonic id from AgentView. */
   id: number
-  /** Single ASCII glyph (no emoji) — see CRATE_GLYPH_FOR_TOOL in AgentView. */
+  /** Single char rendered on the crate — sourced from ToolRecipe.glyphChar. */
   glyph: string
 }
 

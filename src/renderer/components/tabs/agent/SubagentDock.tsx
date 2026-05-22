@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { DOCK_X, DOCK_Y, DOCK_W, DOCK_H, PAL } from './sceneConstants'
 
 interface SubagentDockProps {
-  agents: Array<{ at: number; subagentType?: string; description?: string }>
-  lastActivityAt: number
+  agents: Array<{ at: number; subagentType?: string; description?: string; lastActivityAt: number }>
 }
 
 const MAX_VISIBLE = 4
@@ -140,7 +139,7 @@ function MiniBot({ x, y, poweredDown, lastActivityAt }: MiniBotProps) {
   )
 }
 
-export function SubagentDock({ agents, lastActivityAt }: SubagentDockProps) {
+export function SubagentDock({ agents }: SubagentDockProps) {
   const visible = agents.slice(0, MAX_VISIBLE)
   const overflow = agents.length - MAX_VISIBLE
   const now = Date.now()
@@ -168,9 +167,8 @@ export function SubagentDock({ agents, lastActivityAt }: SubagentDockProps) {
       <g clipPath="url(#dock-clip)">
         <AnimatePresence>
           {visible.map((agent, i) => {
-            // Heuristic: bot is powered down if no activity for POWERDOWN_MS
-            const lastReport = Math.max(lastActivityAt, agent.at)
-            const poweredDown = now - lastReport > POWERDOWN_MS
+            const lastActivityAt: number = agent.lastActivityAt
+            const poweredDown = now - lastActivityAt > POWERDOWN_MS
             const botX = DOCK_X + BOT_PAD + i * (BOT_W + BOT_PAD) + BOT_W / 2
             const botY = DOCK_Y + DOCK_H - 12 - BOT_H + 6
             return (

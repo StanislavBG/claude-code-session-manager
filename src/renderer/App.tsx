@@ -485,6 +485,8 @@ export function App() {
           setPaletteOpen(false)
           if (cmd.id.startsWith('nav:')) {
             setActiveNav(cmd.id.slice(4) as NavKey)
+          } else if (cmd.id === 'doc:open-file' || cmd.id.startsWith('doc:recent:')) {
+            setActiveNav('doc-editor')
           }
         }}
       />

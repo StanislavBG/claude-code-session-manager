@@ -7,6 +7,9 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useWatchers } from '../../state/watchers'
 import { StatusDot } from '../ui/StatusDot'
 import { Tooltip } from '../ui/Tooltip'
+import { NotificationCenter } from './NotificationCenter'
+import { GitActionsMenu } from './GitActionsMenu'
+import { DeployMenu } from './DeployMenu'
 
 /**
  * Top navigation header — mirror of ClaudeCodeUnleashed's Header pattern.
@@ -156,6 +159,12 @@ export function Header({
 
         <SchedulerButton onOpen={onOpenScheduler} />
         <VoiceButton onOpen={onOpenVoice} />
+        <NotificationCenter />
+
+        <Divider />
+
+        <GitActionsMenu />
+        <DeployMenu />
 
         <Divider />
 

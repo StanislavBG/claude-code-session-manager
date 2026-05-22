@@ -189,11 +189,15 @@ function CollapsibleSection({
     saveCollapsed(storageKey, v)
   }
   return (
-    <div className="border-t border-line">
+    // Visual separation: 2px top border + tinted header band so the eye can
+    // tell where one section ends and the next begins, especially in the
+    // fixed bottom stack (Scheduler / Microphone / Session / Density) which
+    // previously blended together with a 1px line and identical bg.
+    <div className="border-t-2 border-line/80">
       <button
         type="button"
         onClick={toggle}
-        className="w-full px-3 py-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-fg-faint hover:text-fg-dim"
+        className="w-full px-3 py-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-fg-faint hover:text-fg-dim bg-bg/40"
       >
         <span className="flex items-center gap-2">
           <span>{title}</span>

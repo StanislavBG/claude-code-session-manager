@@ -1,10 +1,19 @@
 import { useEffect, useRef } from 'react'
-import { Terminal as XTerm } from '@xterm/xterm'
+import { Terminal as XTerm, type ILinkProvider, type IBufferRange } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
+
+// Matches plausible source-path tokens: optional ./ or ../ prefix, dotted name
+// with extension, optional :line[:col] suffix. Word-boundary on the front
+// stops `package.json` mid-sentence being captured with leading word chars.
+// Examples that should match:
+//   src/main/index.cjs       src/main/index.cjs:633        ./foo.ts:42:8
+// Examples that should NOT match:
+//   www.example.com (no extension after final dot is rejected by \.[A-Za-z]\w+)
+const FILE_LINK_RE = /(?:^|[\s(])((?:\.{1,2}\/)?[\w./-]+\.[A-Za-z]\w*(?::(\d+))?(?::(\d+))?)/g
 
 interface Props {
   tabId: string
@@ -62,7 +71,51 @@ export function Terminal({ tabId, cwd }: Props) {
 
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon())
+    // WebLinksAddon with an explicit handler: by default the addon underlines
+    // URLs but the click hits the xterm <div> and dies (setWindowOpenHandler
+    // only fires on window.open()). Routing through the new app:open-external
+    // IPC opens the URL in the OS default browser via shell.openExternal,
+    // with main-side filter rejecting non-http(s) schemes.
+    term.loadAddon(new WebLinksAddon((_event, url) => {
+      window.api.app.openExternal(url).catch(() => {
+        toast.error(`Couldn't open URL: ${url}`)
+      })
+    }))
+    // Custom link provider for file paths like src/foo.ts:42:8 — opens in
+    // the user's editor at the right line. Resolves relative paths against
+    // the tab's cwd in the main process via fs.access + validatePath.
+    const fileLinkProvider: ILinkProvider = {
+      provideLinks(y, callback) {
+        const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const links: Array<{ range: IBufferRange; text: string; activate: () => void }> = []
+        for (const m of line.matchAll(FILE_LINK_RE)) {
+          const full = m[0]
+          const pathPart = m[1]
+          const lineStr = m[2]
+          const colStr = m[3]
+          // Offset of pathPart within full: full may have one leading whitespace/paren char.
+          const xtermStart = (m.index ?? 0) + (full.length - pathPart.length) + 1 // xterm is 1-indexed
+          const xtermEnd = xtermStart + pathPart.length - 1
+          links.push({
+            range: { start: { x: xtermStart, y }, end: { x: xtermEnd, y } },
+            text: pathPart,
+            activate: () => {
+              // Strip the :line:col suffix from the path before sending; main
+              // resolves relative paths against $HOME (validatePath enforces).
+              const filePath = pathPart.replace(/(?::\d+)+$/, '')
+              const ln = lineStr ? parseInt(lineStr, 10) : undefined
+              const col = colStr ? parseInt(colStr, 10) : undefined
+              const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
+              window.api.app.openFileInEditor(absPath, ln, col).then((r) => {
+                if (!r.ok) toast.error(r.error ?? `Couldn't open ${filePath}`)
+              }).catch((e: Error) => toast.error(e.message))
+            },
+          })
+        }
+        callback(links)
+      },
+    }
+    term.registerLinkProvider(fileLinkProvider)
     term.open(hostRef.current)
     fit.fit()
     term.focus()
@@ -75,6 +128,18 @@ export function Terminal({ tabId, cwd }: Props) {
     // mouse tracking enabled — that's an xterm built-in, no wiring needed.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
+      // Smart Ctrl-C: if there's a selection, copy + clear it; otherwise fall
+      // through to PTY as SIGINT (gnome-terminal / iTerm2 behavior). Reserved
+      // shortcut Ctrl-Shift-C below still copies unconditionally.
+      if (e.ctrlKey && !e.shiftKey && !e.metaKey && (e.key === 'c' || e.key === 'C')) {
+        const sel = term.getSelection()
+        if (sel) {
+          navigator.clipboard.writeText(sel).catch(() => {})
+          term.clearSelection()
+          return false
+        }
+        // No selection — let Ctrl-C reach the PTY (return true below).
+      }
       if (e.ctrlKey && e.shiftKey && e.key === 'C') {
         const sel = term.getSelection()
         if (sel) {

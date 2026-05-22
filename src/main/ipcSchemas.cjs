@@ -135,6 +135,17 @@ const openInEditor = z.object({
   editor: z.string().max(256).nullable().optional(),
 });
 
+const openExternal = z.object({
+  url: z.string().min(1).max(4096),
+});
+
+const openFileInEditor = z.object({
+  path: z.string().min(1).max(4096),
+  line: z.number().int().positive().optional(),
+  col: z.number().int().positive().optional(),
+  editor: z.string().max(256).nullable().optional(),
+});
+
 const openInFinder = z.object({
   cwd: z.string().min(1).max(4096),
 });
@@ -319,6 +330,8 @@ module.exports = {
     scheduleRetagPrd,
     setConfigSchema,
     openInEditor,
+    openExternal,
+    openFileInEditor,
     openInFinder,
     openInTerminal,
     archiveProject,

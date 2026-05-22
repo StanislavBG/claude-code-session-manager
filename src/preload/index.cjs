@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('api', {
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
     rebootApp: () => ipcRenderer.send('app:reboot-app'),
     openInEditor: (cwd, editor) => ipcRenderer.invoke('app:open-in-editor', { cwd, editor }),
+    openExternal: (url) => ipcRenderer.invoke('app:open-external', { url }),
+    openFileInEditor: (filePath, line, col, editor) => ipcRenderer.invoke('app:open-file-in-editor', { path: filePath, line, col, editor }),
     openInFinder: (cwd) => ipcRenderer.invoke('app:open-in-finder', { cwd }),
     openInTerminal: (cwd) => ipcRenderer.invoke('app:open-in-terminal', { cwd }),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),

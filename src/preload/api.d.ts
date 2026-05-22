@@ -540,6 +540,13 @@ export interface SessionManagerAPI {
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     openInEditor: (cwd: string, editor?: string | null) => Promise<{ ok: boolean; editor?: string; error?: string }>;
+    /** Open an http/https URL in the OS default browser. file://, javascript:,
+     *  and other schemes are rejected with `ok:false` to prevent abuse. */
+    openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+    /** Open a specific file at line:col in the user's editor. Editors with
+     *  goto-line support (code/cursor/subl) get the `-g file:line:col` form;
+     *  others open the file alone. */
+    openFileInEditor: (filePath: string, line?: number, col?: number, editor?: string | null) => Promise<{ ok: boolean; editor?: string; error?: string }>;
     openInFinder: (cwd: string) => Promise<{ ok: boolean; error?: string }>;
     openInTerminal: (cwd: string) => Promise<{ ok: boolean; terminal?: string; error?: string }>;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;

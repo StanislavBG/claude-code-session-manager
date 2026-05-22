@@ -242,6 +242,20 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Native right-click menu — Copy / Paste / Select All everywhere. Roles
+  // hook into Electron's built-in clipboard/selection plumbing, which xterm.js
+  // (and Monaco, and Tiptap) all participate in via the standard DOM
+  // selection API, so this single block covers Terminal + Doc Editor + plain
+  // text inputs without per-component wiring.
+  mainWindow.webContents.on('context-menu', (_e, params) => {
+    const items = [];
+    if (params.editFlags.canCopy) items.push({ label: 'Copy', role: 'copy' });
+    if (params.editFlags.canPaste) items.push({ label: 'Paste', role: 'paste' });
+    if (items.length) items.push({ type: 'separator' });
+    items.push({ label: 'Select All', role: 'selectAll' });
+    Menu.buildFromTemplate(items).popup({ window: mainWindow });
+  });
+
   const distIndex = path.join(__dirname, '..', '..', 'dist', 'index.html');
   const useDevServer = process.env.SM_DEV === '1';
   if (useDevServer) {
@@ -517,6 +531,44 @@ ipcMain.handle('app:open-in-editor', async (_e, payload) => {
   for (const cmd of candidates) {
     if (!findCommand(cmd)) continue;
     const child = spawn(cmd, [cwd], { detached: true, stdio: 'ignore', env: cleanChildEnv() });
+    child.unref();
+    return { ok: true, editor: cmd };
+  }
+  return { ok: false, error: 'no editor found' };
+});
+
+ipcMain.handle('app:open-external', async (_e, payload) => {
+  // URL filter mirrors setWindowOpenHandler at line ~631: without it, the
+  // renderer could be tricked into asking shell.openExternal to launch
+  // `file:///etc/passwd`, `javascript:…`, or `mailto:…`. Stick to web URLs.
+  const { url } = schemas.openExternal.parse(payload);
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return { ok: false, error: 'only http/https URLs are allowed' };
+  }
+  await shell.openExternal(url);
+  return { ok: true };
+});
+
+ipcMain.handle('app:open-file-in-editor', async (_e, payload) => {
+  // Open a specific file (with optional line:col) in the user's editor.
+  // Distinct from app:open-in-editor above which opens a project root.
+  // GUI editors that support the goto-line flag (code/cursor/subl) get
+  // `-g file:line:col`; everything else falls back to opening the file alone.
+  const { path: p, line, col, editor } = schemas.openFileInEditor.parse(payload);
+  const home = os.homedir();
+  const abs = path.isAbsolute(p) ? p : path.resolve(home, p);
+  const err = checkInsideHome(abs);
+  if (err) throw new Error(err);
+  try { await fsp.access(abs); } catch { return { ok: false, error: `file not found: ${abs}` }; }
+  const candidates = (editor && editor !== 'auto')
+    ? [editor]
+    : [process.env.VISUAL, process.env.EDITOR, 'code', 'cursor', 'subl', 'nano'].filter(Boolean);
+  for (const cmd of candidates) {
+    if (!findCommand(cmd)) continue;
+    const supportsGoto = /^(code|cursor|subl)$/.test(cmd);
+    const target = (supportsGoto && line) ? `${abs}:${line}${col ? `:${col}` : ''}` : abs;
+    const args = supportsGoto ? ['-g', target] : [abs];
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
     child.unref();
     return { ok: true, editor: cmd };
   }

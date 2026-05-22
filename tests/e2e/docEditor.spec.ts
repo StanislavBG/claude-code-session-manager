@@ -117,12 +117,12 @@ test('clicking each tab shows correct content', async () => {
     const settingsContent = await fs.readFile(PATHS.settings, 'utf8')
     const notesContent = await fs.readFile(PATHS.notes, 'utf8')
 
-    // readme.md and settings.json are Monaco-backed — verify via store and assert
-    // no textarea is rendered (Monaco replaced it).
+    // readme.md uses TiptapBody (wysiwyg); settings.json uses Monaco. Both avoid
+    // the plain textarea. TiptapBody may normalize trailing whitespace, so trim.
     await win.locator('[data-testid="doc-tab-readme.md"]').click({ force: true })
     await win.waitForTimeout(300)
     const readmeBuf = await storeBufferText(win, PATHS.readme)
-    expect(readmeBuf).toBe(readmeContent)
+    expect(readmeBuf?.trim()).toBe(readmeContent.trim())
     await expect(win.locator('[data-testid="doc-textarea"]')).not.toBeVisible()
 
     await win.locator('[data-testid="doc-tab-settings.json"]').click({ force: true })

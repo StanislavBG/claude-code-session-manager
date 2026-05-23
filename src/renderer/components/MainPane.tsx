@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { NavKey } from './LeftNav'
 import { Terminal } from './Terminal'
 import { BroadcastBar } from './BroadcastBar'
@@ -13,6 +13,7 @@ import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
 import { WatchersPopover } from './WatchersPopover'
 import { LiveTranscript } from './LiveTranscript'
+import { FileTree } from './layout/FileTree'
 
 /** MainPane only renders the 7 screen-level NavKeys reachable via the Header
  *  tabs. All other NavKey values open as TabModal overlays handled in
@@ -68,6 +69,34 @@ export function MainPane({
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
 
   const [toast, setToast] = useState<string | null>(null)
+  // FileTree sidebar — default visible on terminal screen, Cmd/Ctrl+B toggles.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('sm.fileTree.open') !== '0' } catch { return true }
+  })
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((v) => {
+      const next = !v
+      try { localStorage.setItem('sm.fileTree.open', next ? '1' : '0') } catch { /* */ }
+      return next
+    })
+  }, [])
+
+  // Cmd/Ctrl+B toggles only when terminal screen is active. Skip when typing
+  // in inputs/textareas (BroadcastBar's textarea) so we don't steal characters.
+  useEffect(() => {
+    if (active !== 'terminal') return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
+      if (e.key.toLowerCase() !== 'b') return
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'textarea') return
+      e.preventDefault()
+      toggleSidebar()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [active, toggleSidebar])
 
   useEffect(() => {
     if (!toast) return
@@ -89,7 +118,15 @@ export function MainPane({
   }, [activeTab?.id])
 
   return (
-    <main className="flex-1 min-w-0 bg-bg flex flex-col">
+    <main className="flex-1 min-w-0 bg-bg flex flex-row">
+      {active === 'terminal' && sidebarOpen && activeTab && (
+        <div className="w-60 shrink-0 border-r border-line overflow-hidden flex flex-col">
+          <ErrorBoundary>
+            <FileTree cwd={activeTab.cwd} />
+          </ErrorBoundary>
+        </div>
+      )}
+      <div className="flex-1 min-w-0 flex flex-col">
       <header className="relative h-8 border-b border-line px-4 flex items-center shrink-0">
         <h1 className="text-[10px] text-fg-faint uppercase tracking-wider">{LABELS[active] ?? ''}</h1>
         <div className="flex-1" />
@@ -153,6 +190,7 @@ export function MainPane({
           {toast}
         </div>
       )}
+      </div>
     </main>
   )
 }

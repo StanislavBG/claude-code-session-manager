@@ -123,7 +123,7 @@ export function Header({
   const sessionRestartable = activeTab?.status === 'running'
 
   return (
-    <header className="shrink-0 bg-bg-elev border-b border-line flex items-stretch h-10">
+    <header className="shrink-0 bg-bg-elev border-b border-line flex items-stretch h-10" data-testid="tour-leftnav">
       <FolderPill cwd={activeTab?.cwd ?? null} />
 
       <nav className="flex items-stretch" role="tablist" aria-label="Primary navigation">
@@ -152,20 +152,22 @@ export function Header({
       <div className="flex-1" />
 
       <div className="flex items-stretch gap-0.5 pr-1">
-        <SessionCluster
-          onNewSession={onNewSession}
-          onRestartSession={onRestartSession}
-          onRestartApp={onRestartApp}
-          onToggleBroadcast={onToggleBroadcast}
-          onToggleWatchers={onToggleWatchers}
-          broadcastOpen={broadcastOpen}
-          watchersOpen={watchersOpen}
-          sessionRestartable={sessionRestartable}
-        />
+        <div data-testid="tour-mainpane-actions" className="flex items-stretch gap-0.5">
+          <SessionCluster
+            onNewSession={onNewSession}
+            onRestartSession={onRestartSession}
+            onRestartApp={onRestartApp}
+            onToggleBroadcast={onToggleBroadcast}
+            onToggleWatchers={onToggleWatchers}
+            broadcastOpen={broadcastOpen}
+            watchersOpen={watchersOpen}
+            sessionRestartable={sessionRestartable}
+          />
+        </div>
 
         <Divider />
 
-        <SchedulerButton onOpen={onOpenScheduler} />
+        <div data-testid="tour-scheduler" className="flex items-stretch"><SchedulerButton onOpen={onOpenScheduler} /></div>
         <VoiceButton onOpen={onOpenVoice} />
         <NotificationCenter />
 

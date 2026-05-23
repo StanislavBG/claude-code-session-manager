@@ -29,6 +29,8 @@ import { RaceModal } from './components/modals/RaceModal'
 import { AgentMemoryModal } from './components/modals/AgentMemoryModal'
 import { BackgroundAgentsModal } from './components/modals/BackgroundAgentsModal'
 import { installSuperAgentListener } from './state/superagent'
+import { TourOverlay } from './components/TourOverlay'
+import { useTour, hasCompletedTour } from './state/tour'
 import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
@@ -464,6 +466,22 @@ export function App() {
     }
   }, [])
 
+  // First-run tour: auto-open if not completed, after mic wizard's chance to
+  // claim attention. Skipped in E2E.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const isE2E = await window.api.app.isE2E?.()
+        if (cancelled || isE2E) return
+        if (hasCompletedTour()) return
+        if (useVoice.getState().wizardOpen) return
+        useTour.getState().start()
+      } catch { /* */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   // F7: arm the wizard on mount when the user has not completed it under the
   // current schema, unless we're under SM_E2E. The wizard never auto-opens —
   // it opens on the first mic click while armed (see VoiceButton).
@@ -545,6 +563,7 @@ export function App() {
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
       <MicWizard open={wizardOpen} onClose={closeWizard} />
+      <TourOverlay />
       {/* Toast host — z-[55] sits above z-50 dialogs but below z-[60]
           RecordingStatus so the privacy banner is never obscured. */}
       <Toast />

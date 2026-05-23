@@ -146,6 +146,22 @@ contextBridge.exposeInMainWorld('api', {
   },
   history: {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
+    listConversations: () => ipcRenderer.invoke('history:list-conversations'),
+  },
+  projectSkills: {
+    get: (cwd) => ipcRenderer.invoke('project-skills:get', { cwd }),
+    set: (cwd, skillId, enabled) =>
+      ipcRenderer.invoke('project-skills:set', { cwd, skillId, enabled }),
+  },
+  files: {
+    list: (path, showHidden) => ipcRenderer.invoke('files:list', { path, showHidden }),
+    read: (path) => ipcRenderer.invoke('files:read', { path }),
+    write: (path, content) => ipcRenderer.invoke('files:write', { path, content }),
+    create: (parentPath, name, kind) => ipcRenderer.invoke('files:create', { parentPath, name, kind }),
+    rename: (path, newName) => ipcRenderer.invoke('files:rename', { path, newName }),
+    delete: (path) => ipcRenderer.invoke('files:delete', { path }),
+    openExternal: (path) => ipcRenderer.invoke('files:open-external', { path }),
+    showInFinder: (path) => ipcRenderer.invoke('files:show-in-finder', { path }),
   },
   schedule: {
     state: () => ipcRenderer.invoke('schedule:state'),
@@ -205,9 +221,40 @@ contextBridge.exposeInMainWorld('api', {
       return ipcRenderer.invoke('memory:create', payload);
     },
   },
+  agentMemory: {
+    list: (agentId) => ipcRenderer.invoke('agent-memory:list', { agentId }),
+    get: (agentId, entryId) => ipcRenderer.invoke('agent-memory:get', { agentId, entryId }),
+    set: (agentId, entryId, body, category) => {
+      const payload = { agentId, entryId, body };
+      if (category) payload.category = category;
+      return ipcRenderer.invoke('agent-memory:set', payload);
+    },
+    delete: (agentId, entryId) => ipcRenderer.invoke('agent-memory:delete', { agentId, entryId }),
+    listAgents: () => ipcRenderer.invoke('agent-memory:list-agents'),
+  },
   docEditor: {
     pickFile: (payload) => ipcRenderer.invoke('doc-editor:pick-file', payload),
     readFile: (p) => ipcRenderer.invoke('doc-editor:read-file', { path: p }),
     writeFile: (p, text) => ipcRenderer.invoke('doc-editor:write-file', { path: p, text }),
+  },
+  git: {
+    // Returns null when cwd is not a git repo, git is missing, or the call
+    // times out (5s ceiling). The existing `app.gitBranch` is intentionally
+    // kept — StatusBar still uses it for the cheap per-tab branch readout.
+    status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
+    fileStatus: (cwd) => ipcRenderer.invoke('git:file-status', { cwd }),
+  },
+  superagent: {
+    /** Start a SuperAgent boss run on a tab — writes a structured prompt to
+     *  the PTY asking Claude to pick + dispatch specialists. Single live run
+     *  per tab; starting again on a running tab terminates the prior one. */
+    start: (payload) => ipcRenderer.invoke('superagent:start', payload),
+    status: (tabId) => ipcRenderer.invoke('superagent:status', { tabId }),
+    stop: (tabId) => ipcRenderer.invoke('superagent:stop', { tabId }),
+    onStateChanged: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('superagent:state-changed', listener);
+      return () => ipcRenderer.removeListener('superagent:state-changed', listener);
+    },
   },
 });

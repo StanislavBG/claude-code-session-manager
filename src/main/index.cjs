@@ -24,7 +24,12 @@ const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs');
 const memoryTool = require('./memoryTool.cjs');
+const agentMemory = require('./agentMemory.cjs');
 const { registerDocEditorHandlers } = require('./docEditor.cjs');
+const git = require('./git.cjs');
+const superagent = require('./superagent.cjs');
+const { registerProjectSkillsHandlers } = require('./projectSkills.cjs');
+const filesIpc = require('./files.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
 
@@ -184,6 +189,7 @@ async function rebootApp() {
     scheduler.attachWindow(mainWindow);
     watchers.attachWindow(mainWindow);
     pluginInstall.attachWindow(mainWindow);
+    superagent.attachWindow(mainWindow);
     rebooting = false;
     return;
   }
@@ -630,7 +636,12 @@ queueOps.registerQueueOpsHandlers();
 registerHistoryAggregatorHandlers();
 pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
+agentMemory.registerAgentMemoryHandlers();
 registerDocEditorHandlers();
+git.register(ipcMain);
+superagent.registerSuperAgentHandlers();
+registerProjectSkillsHandlers();
+filesIpc.registerFilesHandlers();
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());
@@ -842,6 +853,7 @@ app.whenReady().then(async () => {
   scheduler.attachWindow(mainWindow);
   watchers.attachWindow(mainWindow);
   pluginInstall.attachWindow(mainWindow);
+  superagent.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });

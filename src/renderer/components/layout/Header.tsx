@@ -10,6 +10,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { NotificationCenter } from './NotificationCenter'
 import { GitActionsMenu } from './GitActionsMenu'
 import { DeployMenu } from './DeployMenu'
+import { ToolbeltMenu } from './ToolbeltMenu'
 
 /**
  * Top navigation header — mirror of ClaudeCodeUnleashed's Header pattern.
@@ -60,6 +61,7 @@ const MORE_GROUPS: { title: string; items: { key: NavKey; label: string }[] }[] 
       { key: 'tasks', label: 'Tasks' },
       { key: 'projects', label: 'Projects' },
       { key: 'doc-editor', label: 'Doc Editor' },
+      { key: 'agent-memory', label: 'Agent Memory' },
     ],
   },
 ]
@@ -90,6 +92,9 @@ interface HeaderProps {
   onToggleWatchers: () => void
   onOpenVoice: () => void
   onOpenScheduler: () => void
+  onOpenSuperAgent: () => void
+  onOpenRace: () => void
+  onOpenBackgroundAgents: () => void
   broadcastOpen: boolean
   watchersOpen: boolean
 }
@@ -105,6 +110,9 @@ export function Header({
   onToggleWatchers,
   onOpenVoice,
   onOpenScheduler,
+  onOpenSuperAgent,
+  onOpenRace,
+  onOpenBackgroundAgents,
   broadcastOpen,
   watchersOpen,
 }: HeaderProps) {
@@ -165,6 +173,16 @@ export function Header({
 
         <GitActionsMenu />
         <DeployMenu />
+        <Tooltip content="SuperAgent — Claude dispatches specialist subagents">
+          <IconButton label="SuperAgent" glyph="🤖" onClick={onOpenSuperAgent} />
+        </Tooltip>
+        <Tooltip content="Race — send the same prompt to multiple tabs">
+          <IconButton label="Race" glyph="🏁" onClick={onOpenRace} />
+        </Tooltip>
+        <Tooltip content="Background Agents — long-running scheduler queue">
+          <IconButton label="Background Agents" glyph="🐝" onClick={onOpenBackgroundAgents} />
+        </Tooltip>
+        <ToolbeltMenu />
 
         <Divider />
 

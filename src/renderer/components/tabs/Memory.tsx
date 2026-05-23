@@ -3,12 +3,16 @@ import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { EmptyState } from '../ui/EmptyState'
+import { ViewTabs } from '../ui/ViewTabs'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { formatBytes } from '../../lib/formatBytes'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import type { MemoryEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
+import { MemoryNaturalPanel } from './MemoryNaturalPanel'
+
+type MemoryView = 'classic' | 'natural'
 
 const SLUG_RE = /^[a-z0-9-_]+$/
 
@@ -28,6 +32,7 @@ export function Memory() {
   const cwd = activeTab?.cwd ?? null
   const workspace = useMemo(() => encodeWorkspace(cwd), [cwd])
 
+  const [view, setView] = useState<MemoryView>('classic')
   const [entries, setEntries] = useState<MemoryEntry[]>([])
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -135,6 +140,15 @@ export function Memory() {
     <Panel
       toolbar={
         <>
+          <ViewTabs
+            options={[
+              { key: 'classic', label: 'Editor' },
+              { key: 'natural', label: 'Natural' },
+            ]}
+            active={view}
+            onChange={setView}
+          />
+          <span className="mx-2 text-fg-faint">·</span>
           <span className="text-fg-faint">Workspace</span>
           <span className="font-mono text-fg-dim truncate max-w-[24rem]" title={workspace}>{workspace}</span>
           <span className="mx-2 text-fg-faint">·</span>
@@ -142,12 +156,14 @@ export function Memory() {
             {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
           </span>
           <div className="flex-1" />
-          <button
-            onClick={() => setCreatingOpen(true)}
-            className="px-2 py-0.5 text-xs text-fg-dim hover:text-fg border border-line hover:border-fg-faint rounded transition-colors"
-          >
-            + New memory
-          </button>
+          {view === 'classic' && (
+            <button
+              onClick={() => setCreatingOpen(true)}
+              className="px-2 py-0.5 text-xs text-fg-dim hover:text-fg border border-line hover:border-fg-faint rounded transition-colors"
+            >
+              + New memory
+            </button>
+          )}
           <button
             onClick={refresh}
             className="ml-2 px-2 py-0.5 text-xs text-fg-faint hover:text-fg-dim border border-line hover:border-fg-faint rounded transition-colors"
@@ -157,7 +173,7 @@ export function Memory() {
         </>
       }
       footer={
-        selectedEntry ? (
+        view === 'classic' && selectedEntry ? (
           <div className="px-3 py-1.5 flex items-center gap-3 text-xs">
             <button
               onClick={onSave}
@@ -179,6 +195,9 @@ export function Memory() {
         ) : null
       }
     >
+      {view === 'natural' ? (
+        <MemoryNaturalPanel workspace={workspace} entries={entries} onChanged={refresh} />
+      ) : (
       <ListDetail
         sidebar={
           <div className="py-1">
@@ -254,6 +273,7 @@ export function Memory() {
           )
         }
       />
+      )}
     </Panel>
   )
 }

@@ -5,12 +5,14 @@ import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
+import { Toggle } from '../ui/Toggle'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { SkillsLibrary, ViewSwitcher } from './Library'
+import { useProjectSkills } from '../../state/projectSkills'
 
 type Kind = 'skills' | 'commands'
 
@@ -116,6 +118,16 @@ export function Skills() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, scopeRoots])
+
+  // Project-scoped skill enable/disable.
+  const loadProjectSkills = useProjectSkills((s) => s.load)
+  const setProjectSkillEnabled = useProjectSkills((s) => s.setEnabled)
+  const projectSkillMap = useProjectSkills((s) => (cwd ? s.byCwd[cwd] : undefined))
+
+  useEffect(() => {
+    if (scope === 'project' && cwd) loadProjectSkills(cwd)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, cwd])
 
   const files = useConfig((s) => s.files)
   const loadText = useConfig((s) => s.loadText)
@@ -223,25 +235,43 @@ export function Skills() {
                   {group.length === 0 ? (
                     <div className="px-3 py-1 text-xs text-fg-faint italic">none</div>
                   ) : (
-                    group.map((i) => (
-                      <button
-                        key={i.path}
-                        onClick={() => setSelectedPath(i.path)}
-                        className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
-                          selectedPath === i.path
-                            ? 'bg-bg-hi text-fg'
-                            : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                        }`}
-                      >
-                        <span className="truncate">
-                          {i.kind === 'commands' ? '/' : ''}
-                          {i.name}
-                        </span>
-                        {files[i.path]?.dirty && (
-                          <span className="w-1 h-1 rounded-full bg-accent shrink-0 ml-2" />
-                        )}
-                      </button>
-                    ))
+                    group.map((i) => {
+                      const showProjectToggle =
+                        scope === 'project' && cwd && i.kind === 'skills'
+                      const isEnabled =
+                        showProjectToggle && projectSkillMap
+                          ? projectSkillMap[i.name] !== false
+                          : true
+                      return (
+                        <div
+                          key={i.path}
+                          className={`w-full px-3 py-1 text-xs flex items-center justify-between gap-2 ${
+                            selectedPath === i.path
+                              ? 'bg-bg-hi text-fg'
+                              : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                          }`}
+                        >
+                          <button
+                            onClick={() => setSelectedPath(i.path)}
+                            className="flex-1 min-w-0 text-left truncate"
+                          >
+                            {i.kind === 'commands' ? '/' : ''}
+                            {i.name}
+                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {files[i.path]?.dirty && (
+                              <span className="w-1 h-1 rounded-full bg-accent" />
+                            )}
+                            {showProjectToggle && cwd && (
+                              <Toggle
+                                checked={isEnabled}
+                                onChange={(v) => setProjectSkillEnabled(cwd, i.name, v)}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               )

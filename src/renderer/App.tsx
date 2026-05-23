@@ -23,6 +23,12 @@ import { Tasks } from './components/tabs/Tasks'
 import { Memory } from './components/tabs/Memory'
 import { Projects } from './components/tabs/Projects'
 import { DocEditor } from './components/tabs/DocEditor'
+import { SuperAgentModal } from './components/modals/SuperAgentModal'
+import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
+import { RaceModal } from './components/modals/RaceModal'
+import { AgentMemoryModal } from './components/modals/AgentMemoryModal'
+import { BackgroundAgentsModal } from './components/modals/BackgroundAgentsModal'
+import { installSuperAgentListener } from './state/superagent'
 import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
@@ -59,7 +65,7 @@ const SCREEN_KEYS = new Set<NavKey>([
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
-  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | null>(null)
+  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
@@ -218,6 +224,7 @@ export function App() {
     })
 
     useWatchers.getState().init()
+    const offSuperagent = installSuperAgentListener()
 
     // Singleton pollers — replace per-component timers in Overview,
     // SchedulePanel, TeamsCard, etc.
@@ -320,7 +327,7 @@ export function App() {
     }
 
     return () => {
-      off(); offNewSession(); offReboot(); offCfg(); offHotkey()
+      off(); offNewSession(); offReboot(); offCfg(); offHotkey(); offSuperagent()
       window.removeEventListener('beforeunload', onBeforeUnload)
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.removeEventListener) {
         navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
@@ -494,6 +501,7 @@ export function App() {
           spacer on the outer container shifts the rest of the app down by
           the banner's 28px height so TabBar stays visible. */}
       <RecordingStatus />
+      <SuperAgentStatusBar />
       <TabBar />
       <Header
         active={activeNav}
@@ -506,6 +514,9 @@ export function App() {
         onToggleWatchers={toggleWatchers}
         onOpenVoice={() => setOpenModal('voice')}
         onOpenScheduler={() => setOpenModal('scheduler')}
+        onOpenSuperAgent={() => setOpenModal('superagent')}
+        onOpenRace={() => setOpenModal('race')}
+        onOpenBackgroundAgents={() => setOpenModal('background-agents')}
         broadcastOpen={broadcastOpen}
         watchersOpen={watchersOpen}
       />
@@ -527,6 +538,9 @@ export function App() {
       <ModalRouter openModal={openModal} onClose={closeModal} />
       <VoiceModal open={openModal === 'voice'} onClose={closeModal} />
       <SchedulerModal open={openModal === 'scheduler'} onClose={closeModal} />
+      <SuperAgentModal open={openModal === 'superagent'} onClose={closeModal} />
+      <RaceModal open={openModal === 'race'} onClose={closeModal} />
+      <BackgroundAgentsModal open={openModal === 'background-agents'} onClose={closeModal} />
 
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
@@ -558,7 +572,7 @@ function ModalRouter({
   openModal,
   onClose,
 }: {
-  openModal: NavKey | 'voice' | 'scheduler' | null
+  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | null
   onClose: () => void
 }) {
   const titleMap = useMemo<Partial<Record<NavKey, string>>>(() => ({
@@ -567,6 +581,7 @@ function ModalRouter({
     'system-prompt': 'System Prompt / Personality',
     'keybindings': 'Keybindings',
     'memory': 'Memory',
+    'agent-memory': 'Agent Memory',
     'plugins': 'Plugins',
     'mcp': 'MCP Servers',
     'hooks': 'Hooks',
@@ -583,6 +598,7 @@ function ModalRouter({
       case 'system-prompt': return <SystemPrompt />
       case 'keybindings': return <Keybindings />
       case 'memory': return <Memory />
+      case 'agent-memory': return <AgentMemoryModal />
       case 'plugins': return <Plugins />
       case 'mcp': return <McpServers />
       case 'hooks': return <Hooks />
@@ -594,11 +610,11 @@ function ModalRouter({
     }
   }
 
-  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler'
+  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents'
     ? titleMap[openModal] ?? ''
     : ''
 
-  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && title !== ''
+  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && title !== ''
 
   return (
     <TabModal open={isTabModal} onClose={onClose} title={title}>

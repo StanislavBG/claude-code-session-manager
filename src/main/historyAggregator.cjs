@@ -105,6 +105,34 @@ async function parseJSONL(filePath, stat) {
   return acc;
 }
 
+/** Lightweight per-file meta: { firstTs, lastTs, inputTokens, outputTokens, skipped }.
+ *  Powers the `history:list-conversations` IPC used by the Overview detailed-
+ *  stats panel. Single-pass O(L) scan, only honors ts + usage blocks. */
+async function parseConversationMeta(filePath, stat) {
+  const meta = { firstTs: null, lastTs: null, inputTokens: 0, outputTokens: 0, skipped: false };
+  if (stat.size > MAX_FILE_BYTES) { meta.skipped = true; return meta; }
+  let text;
+  try { text = await fsp.readFile(filePath, 'utf8'); } catch { return meta; }
+  const lines = text.split('\n');
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    const ts = obj.ts ?? obj.timestamp;
+    if (ts) {
+      if (meta.firstTs === null) meta.firstTs = ts;
+      meta.lastTs = ts;
+    }
+    const usage = obj.usage ?? obj.message?.usage;
+    if (usage && typeof usage === 'object') {
+      if (typeof usage.inputTokens === 'number') meta.inputTokens += usage.inputTokens;
+      if (typeof usage.outputTokens === 'number') meta.outputTokens += usage.outputTokens;
+    }
+  }
+  return meta;
+}
+
 function registerHistoryAggregatorHandlers() {
   ipcMain.handle('history:aggregate', async (_e, rawReq) => {
     // Wire the historyAggregate schema (previously defined but never used).
@@ -207,6 +235,48 @@ function registerHistoryAggregatorHandlers() {
 
     const scannedMs = Date.now() - t0;
     return { rows, partial, scannedMs, skippedLargeFiles };
+  });
+
+  /** Per-conversation metadata: one row per JSONL with derived duration +
+   *  token totals. Used by the Overview detailed-stats panel to compute
+   *  hourly/daily distribution + top-projects. */
+  ipcMain.handle('history:list-conversations', async () => {
+    const t0 = Date.now();
+    const conversations = [];
+    let projectEntries;
+    try {
+      projectEntries = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
+    } catch {
+      return { conversations: [], scannedMs: Date.now() - t0 };
+    }
+    for (const ent of projectEntries) {
+      if (!ent.isDirectory()) continue;
+      const projectDir = path.join(PROJECTS_DIR, ent.name);
+      const projectFolder = '/' + ent.name.replace(/-/g, '/');
+      let files;
+      try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { continue; }
+      for (const f of files) {
+        if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
+        const filePath = path.join(projectDir, f.name);
+        let stat;
+        try { stat = await fsp.stat(filePath); } catch { continue; }
+        const meta = await parseConversationMeta(filePath, stat);
+        const firstTs = meta.firstTs || new Date(stat.mtimeMs).toISOString();
+        const duration =
+          meta.firstTs && meta.lastTs
+            ? Math.max(0, Date.parse(meta.lastTs) - Date.parse(meta.firstTs))
+            : undefined;
+        conversations.push({
+          timestamp: firstTs,
+          projectFolder,
+          stats: {
+            ...(duration !== undefined ? { duration } : {}),
+            estimatedTokens: meta.inputTokens + meta.outputTokens,
+          },
+        });
+      }
+    }
+    return { conversations, scannedMs: Date.now() - t0 };
   });
 }
 

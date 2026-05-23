@@ -212,6 +212,36 @@ const memoryCreate = z.object({
   description: z.string().max(2048).optional(),
 }).strict();
 
+// ──────────────────────────────────────────── Per-subagent memory
+// Distinct from the workspace-scoped Memory tool: agentMemory is keyed by
+// subagent name (the .md filename in ~/.claude/agents/, e.g. "code-reviewer"),
+// not by cwd. Storage lives at ~/.claude/session-manager/agent-memory/<agentId>.json.
+// Regex caps must stay in lockstep with agentMemory.cjs AGENT_ID_RE / ENTRY_ID_RE.
+const AGENT_MEMORY_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const AGENT_MEMORY_CATEGORY = z.enum(['command', 'preference', 'pattern', 'failure', 'workflow']);
+const AGENT_MEMORY_MAX_BODY = 1024 * 1024; // 1 MiB — must match MAX_BODY_BYTES in agentMemory.cjs
+
+const agentMemoryList = z.object({
+  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
+}).strict();
+
+const agentMemoryGet = z.object({
+  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
+  entryId: z.string().regex(AGENT_MEMORY_ID_RE),
+}).strict();
+
+const agentMemorySet = z.object({
+  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
+  entryId: z.string().regex(AGENT_MEMORY_ID_RE),
+  body: z.string().max(AGENT_MEMORY_MAX_BODY),
+  category: AGENT_MEMORY_CATEGORY.optional(),
+}).strict();
+
+const agentMemoryDelete = z.object({
+  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
+  entryId: z.string().regex(AGENT_MEMORY_ID_RE),
+}).strict();
+
 // ──────────────────────────────────────────── History
 const DATE_YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -283,12 +313,36 @@ const appGitBranch = z.object({
   cwd: z.string().min(1).max(4096),
 }).passthrough();
 
+// git:status / git:file-status — see src/main/git.cjs. cwd is validatePath'd
+// inside the handler (allowedRoots = home), so the schema only enforces shape.
+const gitStatus = z.object({
+  cwd: z.string().min(1).max(4096),
+}).passthrough();
+
+const gitFileStatus = z.object({
+  cwd: z.string().min(1).max(4096),
+}).passthrough();
+
 // Plugin install: mirrors pluginInstall.cjs SLUG_RE + length cap. Defense in
 // depth — install() re-checks; the schema rejects earlier.
 const PLUGIN_SLUG_RE = /^[a-z0-9\-/]+$/;
 const pluginsInstall = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
 }).passthrough();
+
+// SuperAgent — "boss" run that writes a structured prompt to the active
+// tab's PTY. Bounds match the inline schemas in superagent.cjs; centralizing
+// here so the schema is the boundary fence rather than each handler.
+const superagentStart = z.object({
+  tabId: z.string().min(1).max(128),
+  prompt: z.string().min(1).max(8 * 1024),
+  specialistCount: z.number().int().min(1).max(8),
+  depth: z.enum(['quick', 'standard', 'deep']),
+}).strict();
+
+const superagentTabId = z.object({
+  tabId: z.string().min(1).max(128),
+}).strict();
 
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
@@ -342,12 +396,20 @@ module.exports = {
     voiceSetRecording,
     appTestFireHook,
     appGitBranch,
+    gitStatus,
+    gitFileStatus,
     pluginsInstall,
+    superagentStart,
+    superagentTabId,
     memoryList,
     memoryRead,
     memoryWrite,
     memoryDelete,
     memoryCreate,
+    agentMemoryList,
+    agentMemoryGet,
+    agentMemorySet,
+    agentMemoryDelete,
     watchersAdd,
     watchersList,
     watchersRemove,

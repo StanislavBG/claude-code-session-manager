@@ -35,6 +35,7 @@ export type NavKey =
   | 'usage'
   | 'agent-view'
   | 'doc-editor'
+  | 'agent-memory'
 
 type NavItem = { key: NavKey; label: string; liveKind?: 'subagents' | 'tasks' | 'agentView' }
 

@@ -563,4 +563,21 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'YAML frontmatter is preserved verbatim regardless of mode. The frontmatter chip in the toolbar shows what is there.',
     ],
   },
+  'agent-memory': {
+    headline: 'Per-agent memory store — facts about specific subagents',
+    intro:
+      'Agent Memory keeps notes scoped to individual subagents (e.g., the "code-reviewer" agent\'s preferred test runner). Distinct from workspace Memory, which is keyed by cwd. Stored at ~/.claude/session-manager/agent-memory/<agentId>.json.',
+    sections: [
+      {
+        title: 'Use cases',
+        items: [
+          { body: 'Note an agent\'s preferred conventions or domain knowledge so future runs can re-load it.' },
+          { body: 'Maintain a per-agent context that survives across projects.' },
+        ],
+      },
+    ],
+    tips: [
+      'Distinct from workspace memory (~/.claude/memory/<workspace>/). This one is keyed by agent, not project.',
+    ],
+  },
 }

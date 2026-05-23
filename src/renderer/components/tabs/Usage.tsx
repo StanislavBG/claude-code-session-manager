@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { UsageDial } from '../ui/UsageDial'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useBilling, refreshBilling } from '../../state/billing'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
-import type { BillingData, BillingFetchResult, UsageWindow } from '../../../preload/api'
+import type { BillingData, BillingFetchResult, UsageWindow, DayProjectRow, HistoryAggregateResult } from '../../../preload/api'
 
 /**
  * Usage tab — mirrors what `claude /usage` shows: the live billing meter from
@@ -85,6 +85,8 @@ export function Usage() {
           </>
         )}
       </div>
+
+      <AnalyticsSection />
     </Panel>
   )
 }
@@ -224,6 +226,350 @@ function BurnStat({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] uppercase tracking-wider opacity-75 mb-0.5">{label}</div>
       <div className="text-lg font-mono tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+/* ---------- AnalyticsSection -------------------------------------------- */
+
+type RangeDays = 7 | 30 | 90
+
+interface DailyTotals {
+  date: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  sessions: number
+  prompts: number
+  cost: number
+}
+
+interface ProjectTotals {
+  projectCwd: string
+  sessions: number
+  prompts: number
+  totalTokens: number
+  cost: number
+}
+
+function shortDate(iso: string): string {
+  // iso is yyyy-mm-dd; render m/d local
+  const [y, m, d] = iso.split('-').map((n) => Number(n))
+  if (!y || !m || !d) return iso
+  return `${m}/${d}`
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toFixed(0)
+}
+
+function isoDaysAgo(days: number): string {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function shortProject(cwd: string): string {
+  const parts = cwd.split('/').filter(Boolean)
+  if (parts.length >= 2) return parts.slice(-2).join('/')
+  return parts[parts.length - 1] || cwd
+}
+
+function AnalyticsSection() {
+  const [range, setRange] = useState<RangeDays>(() => {
+    const saved = localStorage.getItem('sm:usageAnalyticsRange')
+    const n = saved ? Number(saved) : 30
+    return (n === 7 || n === 30 || n === 90 ? n : 30) as RangeDays
+  })
+  const [result, setResult] = useState<HistoryAggregateResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    // Fetch a 90-day window once; slice client-side per range so toggling is instant.
+    window.api.history.aggregate({ fromDate: isoDaysAgo(90), toDate: isoDaysAgo(0) })
+      .then((r) => { if (!cancelled) { setResult(r); setLoading(false) } })
+      .catch((e: unknown) => { if (!cancelled) { setError(String(e)); setLoading(false) } })
+    return () => { cancelled = true }
+  }, [])
+
+  const persistRange = (r: RangeDays) => {
+    setRange(r)
+    try { localStorage.setItem('sm:usageAnalyticsRange', String(r)) } catch { /* ignore */ }
+  }
+
+  // Filter rows to the active window. O(rows).
+  const windowedRows = useMemo<DayProjectRow[]>(() => {
+    if (!result) return []
+    const cutoff = isoDaysAgo(range)
+    return result.rows.filter((r) => r.date >= cutoff)
+  }, [result, range])
+
+  // Build per-day totals, indexed by date for O(1) lookup during bar rendering.
+  const daily = useMemo<DailyTotals[]>(() => {
+    const byDate = new Map<string, DailyTotals>()
+    // Seed every day in the window so the bar chart has a stable x-axis.
+    for (let i = range - 1; i >= 0; i--) {
+      const d = isoDaysAgo(i)
+      byDate.set(d, {
+        date: d,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        sessions: 0,
+        prompts: 0,
+        cost: 0,
+      })
+    }
+    for (const r of windowedRows) {
+      const entry = byDate.get(r.date)
+      if (!entry) continue
+      entry.inputTokens += r.inputTokens
+      entry.outputTokens += r.outputTokens
+      entry.totalTokens += r.inputTokens + r.outputTokens
+      entry.sessions += r.sessionCount
+      entry.prompts += r.promptCount
+      entry.cost += r.estimatedCostUsd
+    }
+    return Array.from(byDate.values())
+  }, [windowedRows, range])
+
+  // Per-project totals for top-N bar list. O(rows + projects log projects).
+  const projects = useMemo<ProjectTotals[]>(() => {
+    const m = new Map<string, ProjectTotals>()
+    for (const r of windowedRows) {
+      let cur = m.get(r.projectCwd)
+      if (!cur) {
+        cur = { projectCwd: r.projectCwd, sessions: 0, prompts: 0, totalTokens: 0, cost: 0 }
+        m.set(r.projectCwd, cur)
+      }
+      cur.sessions += r.sessionCount
+      cur.prompts += r.promptCount
+      cur.totalTokens += r.inputTokens + r.outputTokens
+      cur.cost += r.estimatedCostUsd
+    }
+    return Array.from(m.values()).sort((a, b) => b.sessions - a.sessions)
+  }, [windowedRows])
+
+  const totals = useMemo(() => {
+    let input = 0, output = 0, sessions = 0, prompts = 0, cost = 0
+    for (const d of daily) {
+      input += d.inputTokens
+      output += d.outputTokens
+      sessions += d.sessions
+      prompts += d.prompts
+      cost += d.cost
+    }
+    return { input, output, total: input + output, sessions, prompts, cost }
+  }, [daily])
+
+  // Week-over-week token trend: recent 7 days vs prior 7 days within the loaded 90d window.
+  const wowChange = useMemo<number | null>(() => {
+    if (!result) return null
+    const cutoffRecent = isoDaysAgo(7)
+    const cutoffPrev = isoDaysAgo(14)
+    let recent = 0, prev = 0
+    for (const r of result.rows) {
+      const tokens = r.inputTokens + r.outputTokens
+      if (r.date >= cutoffRecent) recent += tokens
+      else if (r.date >= cutoffPrev) prev += tokens
+    }
+    if (prev === 0) return null
+    return ((recent - prev) / prev) * 100
+  }, [result])
+
+  const maxDailyTokens = useMemo(
+    () => daily.reduce((m, d) => Math.max(m, d.totalTokens), 1),
+    [daily]
+  )
+  const maxDailySessions = useMemo(
+    () => daily.reduce((m, d) => Math.max(m, d.sessions), 1),
+    [daily]
+  )
+  const maxProjectSessions = projects[0]?.sessions ?? 1
+
+  return (
+    <div className="border-t border-line">
+      <div className="px-6 py-3 border-b border-line bg-bg-elev flex items-center gap-3 text-xs">
+        <h2 className="uppercase tracking-wider text-fg">Analytics</h2>
+        <span className="text-fg-faint">historical usage across all projects</span>
+        <div className="flex-1" />
+        <div className="flex items-center border border-line rounded overflow-hidden">
+          {([7, 30, 90] as RangeDays[]).map((r) => (
+            <button
+              key={r}
+              onClick={() => persistRange(r)}
+              className={`px-3 py-1 ${range === r ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'} ${r !== 7 ? 'border-l border-line' : ''}`}
+            >
+              {r}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-6 space-y-6 max-w-5xl">
+        {loading && <EmptyState title="scanning transcripts…" />}
+        {error && <EmptyState title="scan failed" hint={error} />}
+        {!loading && !error && result && (
+          <>
+            {result.partial && (
+              <div className="text-xs text-yellow-400 border border-yellow-800 bg-yellow-950/30 rounded px-3 py-2">
+                Scan took longer than expected — showing partial results.
+              </div>
+            )}
+
+            {/* Top-line stats */}
+            <section className="grid grid-cols-4 gap-3">
+              <Stat label={`tokens · ${range}d`} value={formatTokens(totals.total)} />
+              <Stat label="sessions" value={totals.sessions.toLocaleString()} />
+              <Stat label="prompts" value={totals.prompts.toLocaleString()} />
+              <Stat
+                label="week-over-week"
+                value={
+                  wowChange === null
+                    ? '—'
+                    : `${wowChange >= 0 ? '+' : ''}${wowChange.toFixed(1)}%`
+                }
+                highlight={wowChange !== null && wowChange !== 0}
+              />
+            </section>
+
+            {/* Sessions over time */}
+            <section className="border border-line rounded bg-bg-elev p-4">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-fg">Sessions over time</h3>
+                <span className="text-xs text-fg-faint">last {range} days</span>
+              </div>
+              <div className="flex items-end gap-px h-24">
+                {daily.map((d) => {
+                  const h = d.sessions > 0 ? Math.max((d.sessions / maxDailySessions) * 100, 4) : 2
+                  return (
+                    <div
+                      key={d.date}
+                      className="flex-1 group relative"
+                      title={`${d.date} · ${d.sessions} sessions · ${d.prompts} prompts`}
+                    >
+                      <div
+                        className={`w-full rounded-sm ${d.sessions > 0 ? 'bg-accent/70 group-hover:bg-accent' : 'bg-bg-hi'}`}
+                        style={{ height: `${(h / 100) * 96}px` }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex justify-between mt-2 text-[10px] text-fg-faint">
+                <span>{shortDate(daily[0]?.date ?? '')}</span>
+                <span>today</span>
+              </div>
+            </section>
+
+            {/* Tokens over time — stacked input/output */}
+            <section className="border border-line rounded bg-bg-elev p-4">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-fg">Tokens over time</h3>
+                <div className="flex items-center gap-3 text-[10px] text-fg-faint">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-cyan-500/70" />input</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500/70" />output</span>
+                </div>
+              </div>
+              <div className="flex items-end gap-px h-32">
+                {daily.map((d) => {
+                  const inH = (d.inputTokens / maxDailyTokens) * 100
+                  const outH = (d.outputTokens / maxDailyTokens) * 100
+                  return (
+                    <div
+                      key={d.date}
+                      className="flex-1 flex flex-col justify-end gap-px"
+                      title={`${d.date} · in ${formatTokens(d.inputTokens)} · out ${formatTokens(d.outputTokens)} · $${d.cost.toFixed(4)}`}
+                    >
+                      <div
+                        className="w-full bg-purple-500/70 rounded-t-sm"
+                        style={{ height: `${outH}%`, minHeight: d.outputTokens > 0 ? 2 : 0 }}
+                      />
+                      <div
+                        className="w-full bg-cyan-500/70 rounded-b-sm"
+                        style={{ height: `${inH}%`, minHeight: d.inputTokens > 0 ? 2 : 0 }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex justify-between mt-2 text-[10px] text-fg-faint">
+                <span>in {formatTokens(totals.input)}</span>
+                <span>out {formatTokens(totals.output)}</span>
+                <span>est. cost ${totals.cost.toFixed(2)}</span>
+              </div>
+            </section>
+
+            {/* By-project session count — top 10 */}
+            <section className="border border-line rounded bg-bg-elev p-4">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-fg">Top projects by sessions</h3>
+                <span className="text-xs text-fg-faint">{projects.length} active</span>
+              </div>
+              {projects.length === 0 ? (
+                <div className="text-xs text-fg-faint">no project activity in this window.</div>
+              ) : (
+                <div className="space-y-2">
+                  {projects.slice(0, 10).map((p) => {
+                    const pct = (p.sessions / maxProjectSessions) * 100
+                    return (
+                      <div key={p.projectCwd} className="flex items-center gap-3 text-xs">
+                        <span
+                          className="font-mono text-fg-dim truncate w-64"
+                          title={p.projectCwd}
+                        >
+                          {shortProject(p.projectCwd)}
+                        </span>
+                        <div className="flex-1 h-2 bg-bg-hi rounded-sm overflow-hidden">
+                          <div
+                            className="h-full bg-accent/70 rounded-sm"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="w-16 text-right text-fg-dim tabular-nums">
+                          {p.sessions} ses
+                        </span>
+                        <span className="w-20 text-right text-fg-faint tabular-nums">
+                          {formatTokens(p.totalTokens)} tok
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+
+            <div className="text-xs text-fg-faint space-y-1">
+              <p>
+                By-model breakdown is not shown here — our history aggregator does not
+                track per-event model. See the
+                {' '}
+                <span className="text-fg-dim">History → Dashboard</span> tab for per-project tables
+                and a selectable daily metric.
+              </p>
+              <p>
+                Sessions from today may be excluded by the aggregator until they close.
+                Cost estimate uses Sonnet-4.6 flat rate ($3/$15 per MTok).
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="border border-line rounded p-3 bg-bg-elev">
+      <div className="text-xs text-fg-faint uppercase tracking-wider mb-1">{label}</div>
+      <div className={`text-lg font-mono ${highlight ? "text-accent" : "text-fg"}`}>{value}</div>
     </div>
   )
 }

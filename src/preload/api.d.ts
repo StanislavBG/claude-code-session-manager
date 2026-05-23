@@ -377,6 +377,46 @@ export interface HistoryAggregateResult {
   scannedMs: number;
 }
 
+export interface ConversationSummary {
+  /** ISO 8601 timestamp of the first event in the conversation (or file mtime fallback). */
+  timestamp: string;
+  /** Decoded project cwd, e.g. /home/user/Projects/foo. */
+  projectFolder: string;
+  stats: {
+    /** Wall-clock duration in ms (first event ts → last event ts). Omitted when unknown. */
+    duration?: number;
+    /** Sum of input + output tokens across the file. 0 when no usage blocks present. */
+    estimatedTokens: number;
+  };
+}
+
+export interface ListConversationsResult {
+  conversations: ConversationSummary[];
+  scannedMs: number;
+}
+
+export interface ProjectSkillState {
+  skillId: string;
+  enabled: boolean;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  isFile: boolean;
+  size: number;
+  mtimeMs: number;
+}
+
+export interface FilesListResult { ok: boolean; entries: FileEntry[]; error: string | null }
+export interface FilesReadResult { ok: boolean; text: string; error: string | null; size: number }
+export interface FilesWriteResult { ok: boolean; error: string | null }
+export interface FilesCreateResult { ok: boolean; path?: string; error: string | null }
+export interface FilesRenameResult { ok: boolean; newPath?: string; error: string | null }
+export interface FilesDeleteResult { ok: boolean; error: string | null }
+export interface FilesShellResult { ok: boolean; error?: string }
+
 export interface WatcherInfo {
   watcherId: string;
   tabId: string;
@@ -506,6 +546,83 @@ export interface MemoryMutationResult {
   error: string | null;
 }
 
+// ────────────────────────────────────────────── Per-subagent memory
+// Stored at ~/.claude/session-manager/agent-memory/<agentId>.json. Keyed by
+// agent name (the .md filename in ~/.claude/agents/), not by workspace cwd.
+
+export type AgentMemoryCategory = 'command' | 'preference' | 'pattern' | 'failure' | 'workflow';
+
+export interface AgentMemoryEntry {
+  id: string;
+  body: string;
+  category: AgentMemoryCategory | null;
+  createdAt: number;
+  updatedAt: number;
+  bytes: number;
+}
+
+export interface AgentMemoryListResult {
+  entries: AgentMemoryEntry[];
+  agentId: string;
+  error: string | null;
+}
+
+export interface AgentMemoryGetResult {
+  entry: AgentMemoryEntry | null;
+  error: string | null;
+}
+
+export interface AgentMemoryMutationResult {
+  ok: boolean;
+  error: string | null;
+}
+
+export interface AgentMemoryAgentSummary {
+  agentId: string;
+  bytes: number;
+  mtimeMs: number;
+}
+
+export interface AgentMemoryListAgentsResult {
+  agents: AgentMemoryAgentSummary[];
+  error: string | null;
+}
+
+// ────────────────────────────────────────────── Git status (richer than app:git-branch)
+
+/** Mirrors the status returned by src/main/git.cjs mapStatus(). */
+export type GitFileStatusType =
+  | 'modified'
+  | 'added'
+  | 'deleted'
+  | 'renamed'
+  | 'untracked'
+  | 'staged'
+  | 'conflict';
+
+export interface GitFileStatus {
+  /** Absolute path. Always inside cwd (we resolve relative paths against it). */
+  path: string;
+  /** Path as git reported it, relative to the repo root. */
+  relativePath: string;
+  status: GitFileStatusType;
+  /** Raw porcelain X (index) character. ' ', 'M', 'A', 'D', 'R', 'C', 'U', '?'. */
+  indexStatus: string;
+  /** Raw porcelain Y (worktree) character. ' ', 'M', 'D', 'U', '?'. */
+  workTreeStatus: string;
+}
+
+export interface GitStatusResult {
+  branch: string;
+  ahead: number;
+  behind: number;
+  uncommittedCount: number;
+  files: GitFileStatus[];
+}
+
+/** Map keyed by absolute path. Same enum as GitFileStatus.status. */
+export type GitFileStatusMap = Record<string, GitFileStatusType>;
+
 // ────────────────────────────────────────────── Bundle F — plugins install
 
 export interface PluginInstallResult {
@@ -517,6 +634,40 @@ export interface PluginInstallResult {
 export interface PluginInstallProgressEvent {
   slug: string;
   line: string;
+}
+
+// ────────────────────────────────────────────── SuperAgent
+// "Boss" run that dispatches specialist subagents on the active tab's claude
+// session. Renderer-driven progress — main only owns lifecycle + prompt write.
+
+export type SuperAgentDepth = 'quick' | 'standard' | 'deep';
+export type SuperAgentStatus = 'idle' | 'running' | 'done' | 'error';
+
+export interface SuperAgentRunState {
+  status: SuperAgentStatus;
+  prompt: string;
+  specialistCount: number;
+  depth: SuperAgentDepth;
+  startedAt: number | null;
+  finishedAt: number | null;
+  error?: string;
+}
+
+export interface SuperAgentStartArgs {
+  tabId: string;
+  prompt: string;
+  specialistCount: number;
+  depth: SuperAgentDepth;
+}
+
+export interface SuperAgentStartResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface SuperAgentStateChangedEvent {
+  tabId: string;
+  state: SuperAgentRunState | null;
 }
 
 export interface SessionManagerAPI {
@@ -623,8 +774,23 @@ export interface SessionManagerAPI {
     status: () => Promise<OtelStatus>;
     configPath: () => Promise<string>;
   };
+  projectSkills: {
+    get: (cwd: string) => Promise<ProjectSkillState[]>;
+    set: (cwd: string, skillId: string, enabled: boolean) => Promise<{ ok: boolean }>;
+  };
+  files: {
+    list: (path: string, showHidden?: boolean) => Promise<FilesListResult>;
+    read: (path: string) => Promise<FilesReadResult>;
+    write: (path: string, content: string) => Promise<FilesWriteResult>;
+    create: (parentPath: string, name: string, kind: 'file' | 'folder') => Promise<FilesCreateResult>;
+    rename: (path: string, newName: string) => Promise<FilesRenameResult>;
+    delete: (path: string) => Promise<FilesDeleteResult>;
+    openExternal: (path: string) => Promise<FilesShellResult>;
+    showInFinder: (path: string) => Promise<FilesShellResult>;
+  };
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
+    listConversations: () => Promise<ListConversationsResult>;
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;
@@ -690,10 +856,47 @@ export interface SessionManagerAPI {
     /** Create a new memory entry with starter frontmatter + body. */
     create: (name: string, description?: string, workspace?: string) => Promise<MemoryMutationResult>;
   };
+  agentMemory: {
+    /** List all memory entries for one subagent. Sorted newest first. */
+    list: (agentId: string) => Promise<AgentMemoryListResult>;
+    /** Get one entry's full body. Returns `{entry:null}` if missing. */
+    get: (agentId: string, entryId: string) => Promise<AgentMemoryGetResult>;
+    /** Upsert one entry. Atomic write through config.cjs; max body 1 MiB. */
+    set: (
+      agentId: string,
+      entryId: string,
+      body: string,
+      category?: AgentMemoryCategory,
+    ) => Promise<AgentMemoryMutationResult>;
+    /** Delete one entry. Removes the file outright when last entry is removed. */
+    delete: (agentId: string, entryId: string) => Promise<AgentMemoryMutationResult>;
+    /** List all agents that currently have a memory file on disk. */
+    listAgents: () => Promise<AgentMemoryListAgentsResult>;
+  };
   docEditor: {
     pickFile: (payload?: { lastDir?: string }) => Promise<{ path: string | null; error?: string }>;
     readFile: (path: string) => Promise<{ ok: boolean; text?: string; mtimeMs?: number; error?: string }>;
     writeFile: (path: string, text: string) => Promise<{ ok: boolean; mtimeMs?: number; error?: string }>;
+  };
+  git: {
+    /** Full git status for `cwd`. Returns null when not a git repo, git is
+     *  missing, or the call times out (5s ceiling). Cached per-cwd for 5s. */
+    status: (cwd: string) => Promise<GitStatusResult | null>;
+    /** `{ absPath: status }` map. Returns `{}` for non-git / errored cwds.
+     *  Same 5s cache as status(). Designed for a file-tree sidebar where the
+     *  renderer needs per-row badges without a separate git call per file. */
+    fileStatus: (cwd: string) => Promise<GitFileStatusMap>;
+  };
+  superagent: {
+    /** Start a SuperAgent boss run — writes a structured prompt to the tab's
+     *  PTY asking Claude to pick + dispatch specialists. Single run per tab. */
+    start: (args: SuperAgentStartArgs) => Promise<SuperAgentStartResult>;
+    /** Current run state for tab, or null if no run has been started. */
+    status: (tabId: string) => Promise<SuperAgentRunState | null>;
+    /** Mark the run as done. Does not interrupt Claude — the user can stop
+     *  the in-PTY work via Ctrl-C; this only flips the renderer indicator. */
+    stop: (tabId: string) => Promise<{ ok: boolean }>;
+    onStateChanged: (handler: (ev: SuperAgentStateChangedEvent) => void) => () => void;
   };
 }
 

@@ -23,6 +23,7 @@ import type {
   UsageWindow,
 } from '../../../preload/api'
 import type { NavKey } from '../LeftNav'
+import { OverviewActivitySection } from './OverviewActivitySection'
 
 interface Counts {
   projects: number
@@ -236,6 +237,8 @@ export function Overview({ onNavigate }: OverviewProps) {
               lastPollAt={lastPollAt}
               now={nowTick}
             />
+
+            <OverviewActivitySection />
           </>
         )}
       </div>

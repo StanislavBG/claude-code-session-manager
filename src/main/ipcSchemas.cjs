@@ -323,6 +323,10 @@ const gitFileStatus = z.object({
   cwd: z.string().min(1).max(4096),
 }).passthrough();
 
+const repoAnalyze = z.object({
+  cwd: z.string().min(1).max(4096),
+}).passthrough();
+
 // Plugin install: mirrors pluginInstall.cjs SLUG_RE + length cap. Defense in
 // depth — install() re-checks; the schema rejects earlier.
 const PLUGIN_SLUG_RE = /^[a-z0-9\-/]+$/;
@@ -398,6 +402,7 @@ module.exports = {
     appGitBranch,
     gitStatus,
     gitFileStatus,
+    repoAnalyze,
     pluginsInstall,
     superagentStart,
     superagentTabId,

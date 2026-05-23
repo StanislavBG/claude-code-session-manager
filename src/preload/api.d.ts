@@ -417,6 +417,47 @@ export interface FilesRenameResult { ok: boolean; newPath?: string; error: strin
 export interface FilesDeleteResult { ok: boolean; error: string | null }
 export interface FilesShellResult { ok: boolean; error?: string }
 
+export interface SearchFileEntry {
+  name: string;
+  path: string;
+  isDirectory: false;
+  isFile: true;
+}
+export interface SearchFilesResult {
+  ok: boolean;
+  files: SearchFileEntry[];
+  error: string | null;
+  usedRipgrep: boolean;
+}
+export interface SearchTextMatch {
+  path: string;
+  line: number;
+  column: number;
+  text: string;
+}
+export interface SearchTextResult {
+  ok: boolean;
+  matches: SearchTextMatch[];
+  error: string | null;
+  usedRipgrep: boolean;
+}
+
+export interface RepoLanguageStats { files: number; lines: number }
+export interface RepoTopDirectory { path: string; fileCount: number; totalLines: number }
+export interface RepoGitStatusSummary { uncommitted: number; branch: string | null }
+export interface RepoAnalyzeResult {
+  ok: true;
+  cwd: string;
+  totalFiles: number;
+  totalLines: number;
+  languageBreakdown: Record<string, RepoLanguageStats>;
+  topDirectories: RepoTopDirectory[];
+  gitStatus: RepoGitStatusSummary;
+  truncated: boolean;
+  durationMs: number;
+}
+export interface RepoAnalyzeError { ok: false; error: string }
+
 export interface WatcherInfo {
   watcherId: string;
   tabId: string;
@@ -787,6 +828,13 @@ export interface SessionManagerAPI {
     delete: (path: string) => Promise<FilesDeleteResult>;
     openExternal: (path: string) => Promise<FilesShellResult>;
     showInFinder: (path: string) => Promise<FilesShellResult>;
+  };
+  search: {
+    files: (cwd: string, query?: string, opts?: { limit?: number }) => Promise<SearchFilesResult>;
+    text: (cwd: string, query: string, opts?: { limit?: number; caseSensitive?: boolean }) => Promise<SearchTextResult>;
+  };
+  repo: {
+    analyze: (cwd: string) => Promise<RepoAnalyzeResult | RepoAnalyzeError>;
   };
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;

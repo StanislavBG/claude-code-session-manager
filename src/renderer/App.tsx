@@ -30,6 +30,9 @@ import { AgentMemoryModal } from './components/modals/AgentMemoryModal'
 import { BackgroundAgentsModal } from './components/modals/BackgroundAgentsModal'
 import { OrchestratorModal } from './components/modals/OrchestratorModal'
 import { OrchestratorStatusPanel } from './components/layout/OrchestratorStatusPanel'
+import { QuickOpenModal } from './components/modals/QuickOpenModal'
+import { GlobalSearchModal } from './components/modals/GlobalSearchModal'
+import { RepoVisualizationModal } from './components/modals/RepoVisualizationModal'
 import { installSuperAgentListener } from './state/superagent'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
@@ -69,7 +72,7 @@ const SCREEN_KEYS = new Set<NavKey>([
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
-  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | null>(null)
+  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'quick-open' | 'global-search' | 'repoviz' | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
@@ -372,6 +375,16 @@ export function App() {
         e.preventDefault()
         e.stopPropagation()
         setPaletteOpen((v) => !v)
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        if (skipForRealInput(e)) return
+        e.preventDefault()
+        e.stopPropagation()
+        setOpenModal('quick-open')
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        if (skipForRealInput(e)) return
+        e.preventDefault()
+        e.stopPropagation()
+        setOpenModal('global-search')
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
       } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -539,6 +552,7 @@ export function App() {
         onOpenRace={() => setOpenModal('race')}
         onOpenBackgroundAgents={() => setOpenModal('background-agents')}
         onOpenOrchestrator={() => setOpenModal('orchestrator')}
+        onOpenRepoViz={() => setOpenModal('repoviz')}
         broadcastOpen={broadcastOpen}
         watchersOpen={watchersOpen}
       />
@@ -564,6 +578,9 @@ export function App() {
       <RaceModal open={openModal === 'race'} onClose={closeModal} />
       <BackgroundAgentsModal open={openModal === 'background-agents'} onClose={closeModal} />
       <OrchestratorModal open={openModal === 'orchestrator'} onClose={closeModal} />
+      <QuickOpenModal open={openModal === 'quick-open'} onClose={closeModal} />
+      <GlobalSearchModal open={openModal === 'global-search'} onClose={closeModal} />
+      <RepoVisualizationModal open={openModal === 'repoviz'} onClose={closeModal} />
 
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
@@ -596,7 +613,7 @@ function ModalRouter({
   openModal,
   onClose,
 }: {
-  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | null
+  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'quick-open' | 'global-search' | 'repoviz' | null
   onClose: () => void
 }) {
   const titleMap = useMemo<Partial<Record<NavKey, string>>>(() => ({
@@ -634,11 +651,11 @@ function ModalRouter({
     }
   }
 
-  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator'
+  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz'
     ? titleMap[openModal] ?? ''
     : ''
 
-  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && title !== ''
+  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz' && title !== ''
 
   return (
     <TabModal open={isTabModal} onClose={onClose} title={title}>

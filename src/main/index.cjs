@@ -30,6 +30,8 @@ const git = require('./git.cjs');
 const superagent = require('./superagent.cjs');
 const { registerProjectSkillsHandlers } = require('./projectSkills.cjs');
 const filesIpc = require('./files.cjs');
+const searchIpc = require('./search.cjs');
+const repoAnalyzer = require('./repoAnalyzer.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
 
@@ -642,6 +644,8 @@ git.register(ipcMain);
 superagent.registerSuperAgentHandlers();
 registerProjectSkillsHandlers();
 filesIpc.registerFilesHandlers();
+searchIpc.registerSearchHandlers();
+repoAnalyzer.register(ipcMain);
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());

@@ -96,6 +96,7 @@ interface HeaderProps {
   onOpenRace: () => void
   onOpenBackgroundAgents: () => void
   onOpenOrchestrator: () => void
+  onOpenRepoViz: () => void
   broadcastOpen: boolean
   watchersOpen: boolean
 }
@@ -115,6 +116,7 @@ export function Header({
   onOpenRace,
   onOpenBackgroundAgents,
   onOpenOrchestrator,
+  onOpenRepoViz,
   broadcastOpen,
   watchersOpen,
 }: HeaderProps) {
@@ -188,6 +190,9 @@ export function Header({
         </Tooltip>
         <Tooltip content="Background Agents — long-running scheduler queue">
           <IconButton label="Background Agents" glyph="🐝" onClick={onOpenBackgroundAgents} />
+        </Tooltip>
+        <Tooltip content="Repo Visualization — language + directory map">
+          <IconButton label="Repo Visualization" glyph="🗺" onClick={onOpenRepoViz} />
         </Tooltip>
         <ToolbeltMenu />
 

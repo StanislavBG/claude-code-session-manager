@@ -163,6 +163,13 @@ contextBridge.exposeInMainWorld('api', {
     openExternal: (path) => ipcRenderer.invoke('files:open-external', { path }),
     showInFinder: (path) => ipcRenderer.invoke('files:show-in-finder', { path }),
   },
+  search: {
+    files: (cwd, query, opts) => ipcRenderer.invoke('search:files', { cwd, query, opts }),
+    text: (cwd, query, opts) => ipcRenderer.invoke('search:text', { cwd, query, opts }),
+  },
+  repo: {
+    analyze: (cwd) => ipcRenderer.invoke('repo:analyze', { cwd }),
+  },
   schedule: {
     state: () => ipcRenderer.invoke('schedule:state'),
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),

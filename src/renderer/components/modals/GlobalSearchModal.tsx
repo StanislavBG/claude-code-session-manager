@@ -21,6 +21,7 @@ import type { SearchTextMatch } from '../../../preload/api'
 interface GlobalSearchModalProps {
   open: boolean
   onClose: () => void
+  variant?: 'overlay' | 'page'
 }
 
 interface FileGroup {
@@ -51,7 +52,7 @@ function highlightMatch(line: string, query: string, caseSensitive: boolean) {
   )
 }
 
-export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
+export function GlobalSearchModal({ open, onClose, variant = 'overlay' }: GlobalSearchModalProps) {
   const activeTab = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null)
   const cwd = activeTab?.cwd ?? ''
 
@@ -189,21 +190,26 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
   }, [flat, highlight, handleSelect, onClose])
 
   if (!open) return null
+  const isPage = variant === 'page'
 
   // Flat index counter shared across groups so arrow keys traverse linearly.
   let matchIdx = -1
 
   const node = (
     <div
-      className="fixed inset-0 z-[55] flex items-start justify-center bg-black/60 pt-[8vh]"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      className={isPage
+        ? 'h-full w-full flex flex-col bg-bg'
+        : 'fixed inset-0 z-[55] flex items-start justify-center bg-black/60 pt-[8vh]'}
+      onClick={isPage ? undefined : (e) => { if (e.target === e.currentTarget) onClose() }}
       data-testid="global-search-backdrop"
     >
       <div
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? undefined : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-label="Search in project"
-        className="w-[840px] max-w-[95vw] h-[80vh] bg-bg-elev border border-line rounded shadow-xl flex flex-col"
+        className={isPage
+          ? 'h-full w-full flex flex-col'
+          : 'w-[840px] max-w-[95vw] h-[80vh] bg-bg-elev border border-line rounded shadow-xl flex flex-col'}
         data-testid="global-search"
         onKeyDown={onKeyDown}
       >
@@ -291,7 +297,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
     </div>
   )
 
-  if (typeof document !== 'undefined' && document.body) {
+  if (!isPage && typeof document !== 'undefined' && document.body) {
     return createPortal(node, document.body)
   }
   return node

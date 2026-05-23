@@ -24,10 +24,16 @@ import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { FileTree } from './FileTree'
 
-type ToolKey =
+// v0.13.1 — Tools are now full pages too. We still keep them in a separate
+// group below Configure so users see them as workflow surfaces (not
+// configuration). Same NavKey type as Workspace/Configure rows.
+type ToolKey = Extract<NavKey,
   | 'voice' | 'superagent' | 'race' | 'background-agents'
   | 'orchestrator' | 'hives' | 'repoviz' | 'quick-open' | 'global-search'
   | 'agent-memory'
+>
+void useScheduleState; void useBilling; void useMemo // (kept for future signal additions)
+
 
 interface NavGroupItem {
   key: NavKey
@@ -114,10 +120,9 @@ interface AlmanacSidebarProps {
   active: NavKey
   onNavigate: (k: NavKey) => void
   onNewSession: () => void
-  onOpenTool: (k: ToolKey) => void
 }
 
-export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenTool }: AlmanacSidebarProps) {
+export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSidebarProps) {
   const [mode, setMode] = useState<Mode>(() => loadMode())
   const setModePersist = useCallback((m: Mode) => {
     setMode(m)
@@ -182,7 +187,12 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenTool }:
 
             <NavGroupHeader>Tools</NavGroupHeader>
             {TOOLS.map((tool) => (
-              <ToolRow key={tool.key} tool={tool} onClick={() => onOpenTool(tool.key)} />
+              <ToolRow
+                key={tool.key}
+                tool={tool}
+                active={active === tool.key}
+                onClick={() => onNavigate(tool.key)}
+              />
             ))}
           </>
         ) : (
@@ -293,14 +303,24 @@ function NavRow({
   )
 }
 
-function ToolRow({ tool, onClick }: { tool: ToolItem; onClick: () => void }) {
+function ToolRow({ tool, active, onClick }: { tool: ToolItem; active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       title={tool.hint}
-      className="w-full flex items-center gap-3 px-3.5 py-[7px] rounded-[10px] text-left text-[13px] mb-0.5 text-fg-dim hover:bg-bg-hi/50 hover:text-fg transition-colors"
+      className={`relative w-full flex items-center gap-3 px-3.5 py-[7px] rounded-[10px] text-left text-[13px] mb-0.5 transition-colors ${
+        active
+          ? 'bg-bg-hi text-fg font-semibold border border-line'
+          : 'text-fg-dim hover:bg-bg-hi/50 hover:text-fg border border-transparent'
+      }`}
     >
-      <span className="inline-flex text-fg-faint">
+      {active && (
+        <span
+          aria-hidden
+          className="absolute -left-[10px] top-2 bottom-2 w-[3px] rounded-sm bg-accent"
+        />
+      )}
+      <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
         <AlmanacIcon name={tool.icon} size={15} stroke={1.6} />
       </span>
       <span className="flex-1 truncate">{tool.label}</span>
@@ -381,6 +401,3 @@ function shortModel(m: string): string {
   return m
 }
 
-// Suppress unused-import warnings — these are intentionally available for
-// future signal additions (scheduler badge, billing-derived sidebar copy).
-void useScheduleState; void useBilling; void useMemo

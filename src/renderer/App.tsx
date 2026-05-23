@@ -3,24 +3,13 @@ import { TabBar } from './components/TabBar'
 import { type NavKey } from './components/LeftNav'
 import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
-import { VoiceModal } from './components/layout/VoiceModal'
 import { MainPane } from './components/MainPane'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { Toast } from './components/ui/Toast'
-import { TabModal } from './components/layout/TabModal'
-import { SuperAgentModal } from './components/modals/SuperAgentModal'
 import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
-import { RaceModal } from './components/modals/RaceModal'
-import { AgentMemoryModal } from './components/modals/AgentMemoryModal'
-import { BackgroundAgentsModal } from './components/modals/BackgroundAgentsModal'
-import { OrchestratorModal } from './components/modals/OrchestratorModal'
 import { OrchestratorStatusPanel } from './components/layout/OrchestratorStatusPanel'
-import { QuickOpenModal } from './components/modals/QuickOpenModal'
-import { GlobalSearchModal } from './components/modals/GlobalSearchModal'
-import { RepoVisualizationModal } from './components/modals/RepoVisualizationModal'
-import { HiveManagerModal } from './components/modals/HiveManagerModal'
 import { installSuperAgentListener } from './state/superagent'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
@@ -43,10 +32,10 @@ import { log } from './lib/logger'
 // double-effect; resets only on full reload.
 let unsupportedLogged = false
 
-// Almanac: every Workspace + Configure nav item is a full page. Tools
-// (SuperAgent, Orchestrator, Race, Background Agents, Hives, RepoViz, Voice,
-// QuickOpen, GlobalSearch, AgentMemory) remain modal targets — they're
-// workflow dialogs rather than configuration surfaces.
+// v0.13.1 — every nav item is a full page; no more App-level modal overlays.
+// SCREEN_KEYS lists what MainPane can render. (Cmd+P / Cmd+Shift+F still
+// trigger keyboard nav to 'quick-open' / 'global-search', they just no
+// longer mount as overlays.)
 const SCREEN_KEYS = new Set<NavKey>([
   // Workspace
   'overview',
@@ -70,49 +59,32 @@ const SCREEN_KEYS = new Set<NavKey>([
   'system-prompt',
   'permissions',
   'settings',
+  // Tools (promoted from modal in v0.13.1)
+  'voice',
+  'superagent',
+  'race',
+  'background-agents',
+  'orchestrator',
+  'hives',
+  'repoviz',
+  'quick-open',
+  'global-search',
+  'agent-memory',
 ])
-
-// Modal keys handled by App-level overlays (not promoted to screens).
-type ModalKey =
-  | 'voice'
-  | 'superagent'
-  | 'race'
-  | 'background-agents'
-  | 'orchestrator'
-  | 'hives'
-  | 'quick-open'
-  | 'global-search'
-  | 'repoviz'
-  | 'agent-memory'
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('overview')
-  const [openModal, setOpenModal] = useState<ModalKey | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
 
-  // Route any NavKey to the right destination. Used by CommandPalette nav:*
-  // entries + AlmanacSidebar. The only NavKey left that isn't a screen is
-  // 'agent-memory' (intentionally a modal because it's stateful + transient).
+  // Every NavKey routes to MainPane. Used by CommandPalette nav:* entries,
+  // AlmanacSidebar, and the Cmd-P / Cmd-Shift-F keyboard shortcuts.
   const navigate = useCallback((k: NavKey) => {
     if (SCREEN_KEYS.has(k)) {
       setActiveNav(k)
-      setOpenModal(null)
-    } else if (k === 'agent-memory') {
-      setOpenModal('agent-memory')
     }
   }, [])
-
-  const openTool = useCallback((k:
-    | 'voice' | 'superagent' | 'race' | 'background-agents'
-    | 'orchestrator' | 'hives' | 'repoviz' | 'quick-open'
-    | 'global-search' | 'agent-memory'
-  ) => {
-    setOpenModal(k)
-  }, [])
-
-  const closeModal = useCallback(() => setOpenModal(null), [])
   const activeTabId = useSessions((s) => s.activeTabId)
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
@@ -403,12 +375,12 @@ export function App() {
         if (skipForRealInput(e)) return
         e.preventDefault()
         e.stopPropagation()
-        setOpenModal('quick-open')
+        navigate('quick-open')
       } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         if (skipForRealInput(e)) return
         e.preventDefault()
         e.stopPropagation()
-        setOpenModal('global-search')
+        navigate('global-search')
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
       } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -566,14 +538,13 @@ export function App() {
           active={activeNav}
           onNavigate={navigate}
           onNewSession={handleNewSession}
-          onOpenTool={openTool}
         />
         <MainPane
           active={activeNav}
           onNavigate={navigate}
           onNewSession={handleNewSession}
-          onOpenVoice={() => setOpenModal('voice')}
-          onOpenScheduler={() => setActiveNav('scheduler')}
+          onOpenVoice={() => navigate('voice')}
+          onOpenScheduler={() => navigate('scheduler')}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}
@@ -582,22 +553,8 @@ export function App() {
       </div>
       <AlmanacFooter onNavigate={navigate} />
 
-      {/* Tools-group + workflow modals. Promoted screens (Settings, Skills,
-       *  etc.) are NO LONGER modals — they render as full pages via MainPane. */}
-      <AgentMemoryWrapper open={openModal === 'agent-memory'} onClose={closeModal} />
-      <VoiceModal open={openModal === 'voice'} onClose={closeModal} />
-      <SuperAgentModal open={openModal === 'superagent'} onClose={closeModal} />
-      <RaceModal open={openModal === 'race'} onClose={closeModal} />
-      <BackgroundAgentsModal open={openModal === 'background-agents'} onClose={closeModal} />
-      <OrchestratorModal open={openModal === 'orchestrator'} onClose={closeModal} />
-      <QuickOpenModal open={openModal === 'quick-open'} onClose={closeModal} />
-      <GlobalSearchModal open={openModal === 'global-search'} onClose={closeModal} />
-      <RepoVisualizationModal open={openModal === 'repoviz'} onClose={closeModal} />
-      <HiveManagerModal
-        open={openModal === 'hives'}
-        onClose={closeModal}
-        onLaunch={() => setOpenModal('orchestrator')}
-      />
+      {/* v0.13.1 — all former-modal tools render as full pages via MainPane.
+       *  No App-level modal mounts remain. */}
 
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
@@ -622,14 +579,3 @@ export function App() {
   )
 }
 
-/** Agent Memory survives as a modal — stateful, transient, opens on-demand
- *  from the Tools group rather than living as a Configure screen. Wrapped in
- *  TabModal because the inner component renders its own content without an
- *  overlay/close-chrome of its own. */
-function AgentMemoryWrapper({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <TabModal open={open} onClose={onClose} title="Agent Memory">
-      {open && <AgentMemoryModal />}
-    </TabModal>
-  )
-}

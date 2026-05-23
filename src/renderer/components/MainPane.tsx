@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { NavKey } from './LeftNav'
 import { Terminal } from './Terminal'
+import { TerminalControls } from './TerminalControls'
 import { BroadcastBar } from './BroadcastBar'
 import { LearningPanel } from './LearningPanel'
 import { Home } from './tabs/Home'
@@ -9,6 +10,16 @@ import { Subagents } from './tabs/Subagents'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
+import { SuperAgentModal } from './modals/SuperAgentModal'
+import { RaceModal } from './modals/RaceModal'
+import { OrchestratorModal } from './modals/OrchestratorModal'
+import { HiveManagerModal } from './modals/HiveManagerModal'
+import { BackgroundAgentsModal } from './modals/BackgroundAgentsModal'
+import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
+import { QuickOpenModal } from './modals/QuickOpenModal'
+import { GlobalSearchModal } from './modals/GlobalSearchModal'
+import { AgentMemoryModal } from './modals/AgentMemoryModal'
+import { VoiceModal } from './layout/VoiceModal'
 import { Settings } from './tabs/Settings'
 import { Permissions } from './tabs/Permissions'
 import { SystemPrompt } from './tabs/SystemPrompt'
@@ -76,7 +87,20 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'system-prompt': { eyebrow: 'Configure',  title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'permissions':   { eyebrow: 'Configure',  title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
   'settings':      { eyebrow: 'Configure',  title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
+  // Tools — promoted from modals in v0.13.1.
+  'voice':            { eyebrow: 'Tools', title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
+  'superagent':       { eyebrow: 'Tools', title: 'SuperAgent',          intro: 'Claude dispatches a specialist subagent for the task you describe.' },
+  'race':             { eyebrow: 'Tools', title: 'Race',                intro: 'Send the same prompt to multiple tabs and watch them compete; the winner is graded against a rubric.' },
+  'orchestrator':     { eyebrow: 'Tools', title: 'Orchestrator',        intro: 'Assign different sub-tasks across N tabs in parallel. Useful for coordinated multi-file work.' },
+  'hives':            { eyebrow: 'Tools', title: 'Hives',               intro: 'Pre-baked agent swarm templates. Pick a hive and Orchestrator launches its members against your target.' },
+  'background-agents':{ eyebrow: 'Tools', title: 'Background agents',   intro: 'Long-running scheduler queue. Run claude -p jobs from PRDs while you keep working.' },
+  'repoviz':          { eyebrow: 'Tools', title: 'Repo visualization',  intro: 'Language + directory map of the current project, computed locally.' },
+  'quick-open':       { eyebrow: 'Tools', title: 'Quick open',          intro: '⌘P — fuzzy-find any file in the current cwd. Recently-opened files surface first.' },
+  'global-search':    { eyebrow: 'Tools', title: 'Search in project',   intro: '⌘⇧F — ripgrep across every file under the active cwd (falls back to fs walk if rg is missing).' },
+  'agent-memory':     { eyebrow: 'Tools', title: 'Agent memory',        intro: 'Per-subagent notes — facts about specific agents that persist across projects.' },
 }
+
+const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
 
 function renderScreen(active: NavKey, ctx: {
   onNavigate?: (k: NavKey) => void
@@ -119,6 +143,19 @@ function renderScreen(active: NavKey, ctx: {
       case 'system-prompt': return <SystemPrompt />
       case 'permissions':   return <Permissions />
       case 'settings':      return <Settings />
+      // Former-modal tools rendered with variant="page" so they paint inline
+      // with no overlay/portal. Pass a noop onClose since the route owns
+      // visibility; the navigate-away action effectively closes them.
+      case 'voice':             return <VoiceModal open={true} onClose={noop} variant="page" />
+      case 'superagent':        return <SuperAgentModal open={true} onClose={noop} variant="page" />
+      case 'race':              return <RaceModal open={true} onClose={noop} variant="page" />
+      case 'orchestrator':      return <OrchestratorModal open={true} onClose={noop} variant="page" />
+      case 'hives':             return <HiveManagerModal open={true} onClose={noop} variant="page" />
+      case 'background-agents': return <BackgroundAgentsModal open={true} onClose={noop} variant="page" />
+      case 'repoviz':           return <RepoVisualizationModal open={true} onClose={noop} variant="page" />
+      case 'quick-open':        return <QuickOpenModal open={true} onClose={noop} variant="page" />
+      case 'global-search':     return <GlobalSearchModal open={true} onClose={noop} variant="page" />
+      case 'agent-memory':      return <AgentMemoryModal />
       default: return null
     }
   })()
@@ -184,6 +221,9 @@ export function MainPane({
           />
         </div>
       )}
+      {/* Terminal settings overlay — theme + font-size; only shown when the
+       *  terminal screen is active so it doesn't bleed into other pages. */}
+      {active === 'terminal' && <TerminalControls />}
       <LearningPanel active={active} />
       <div className="flex-1 min-h-0 relative">
         {/*

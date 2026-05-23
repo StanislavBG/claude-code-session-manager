@@ -14,9 +14,9 @@ import type { VoiceHotkeyConfig } from '../../../preload/api'
  * sidebar section. The HotkeyHint and HotkeyModeToggle were inlined here
  * (they were private helpers in LeftNav.tsx).
  */
-export function VoiceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function VoiceModal({ open, onClose, variant = 'overlay' }: { open: boolean; onClose: () => void; variant?: 'overlay' | 'page' }) {
   return (
-    <TabModal open={open} onClose={onClose} title="Voice / Microphone">
+    <TabModal open={open} onClose={onClose} title="Voice / Microphone" variant={variant}>
       <div className="p-4 space-y-4">
         <MicActivityPanel />
         <SubmitCountdown />

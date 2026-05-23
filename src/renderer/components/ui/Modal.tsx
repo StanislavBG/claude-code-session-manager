@@ -26,6 +26,13 @@ export interface ModalProps {
   /** Skip the internal padding. Useful when the child renders its own
    *  header / scope switcher / save bar that should reach the dialog edges. */
   noPadding?: boolean
+  /**
+   * Render style. Defaults to `overlay` (fixed-position, backdrop, ESC closes,
+   * focus trap — the original modal behavior). `page` renders inline at full
+   * width with no overlay/backdrop/portal — for using a former-modal as a
+   * full-page screen in MainPane (post-v0.13 "no pop-ups" goal).
+   */
+  variant?: 'overlay' | 'page'
 }
 
 const SIZE_CLASS: Record<NonNullable<ModalProps['size']>, string> = {
@@ -47,7 +54,25 @@ export function Modal({
   size = 'sm',
   fillHeight = false,
   noPadding = false,
+  variant = 'overlay',
 }: ModalProps) {
+  // Page variant — render inline (no overlay, no portal, no focus trap, no
+  // ESC handler). The host route (MainPane) owns visibility and navigation.
+  if (variant === 'page') {
+    if (!open) return null
+    return (
+      <div className="h-full w-full flex flex-col bg-bg">
+        {title && (
+          <h2 className={`text-base font-medium text-fg ${noPadding ? 'px-6 pt-6 pb-3' : 'px-6 pt-4 pb-2'}`}>
+            {title}
+          </h2>
+        )}
+        <div className={`flex-1 min-h-0 flex flex-col ${noPadding ? '' : 'p-6 pt-0'}`}>
+          {children}
+        </div>
+      </div>
+    )
+  }
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const previouslyFocusedRef = useRef<Element | null>(null)
   // Stable ref to the latest onClose so the keydown effect's deps stay `[open]`.

@@ -16,7 +16,7 @@ import { toast } from '../../state/toast'
  * The store (state/race.ts) owns transcript subscriptions and grading. This
  * component is presentation + form input only.
  */
-export function RaceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function RaceModal({ open, onClose, variant = 'overlay' }: { open: boolean; onClose: () => void; variant?: 'overlay' | 'page' }) {
   const status = useRace((s) => s.status)
   const participants = useRace((s) => s.participants)
   const winnerTabId = useRace((s) => s.winnerTabId)
@@ -83,7 +83,7 @@ export function RaceModal({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   return (
-    <Modal open={open} onClose={handleClose} size="xl" fillHeight noPadding>
+    <Modal open={open} onClose={handleClose} size="xl" fillHeight noPadding variant={variant}>
       <div className="flex items-center justify-between px-4 py-2 border-b border-line shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-base">🏁</span>

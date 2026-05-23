@@ -29,6 +29,7 @@ import { useSessions } from '../../state/sessions'
 interface RepoVisualizationModalProps {
   open: boolean
   onClose: () => void
+  variant?: 'overlay' | 'page'
 }
 
 // Per-language colour. Stays in lockstep with LANG_LABELS in
@@ -121,7 +122,7 @@ function formatNumber(n: number): string {
   return String(n)
 }
 
-export function RepoVisualizationModal({ open, onClose }: RepoVisualizationModalProps) {
+export function RepoVisualizationModal({ open, onClose, variant = 'overlay' }: RepoVisualizationModalProps) {
   const activeTab = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null)
   const cwd = activeTab?.cwd ?? null
 
@@ -224,19 +225,24 @@ export function RepoVisualizationModal({ open, onClose }: RepoVisualizationModal
 
   const folderName = cwd ? (cwd.split('/').filter(Boolean).pop() || cwd) : 'no folder'
 
+  const isPage = variant === 'page'
   const node = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={onBackdrop}
+      className={isPage
+        ? 'h-full w-full flex flex-col bg-bg'
+        : 'fixed inset-0 z-50 flex items-center justify-center bg-black/60'}
+      onClick={isPage ? undefined : onBackdrop}
       data-testid="repoviz-backdrop"
     >
       <div
         ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? undefined : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-label="Repository Visualization"
         tabIndex={-1}
-        className="bg-bg-elev border border-line rounded-lg shadow-xl w-[900px] max-w-[95vw] max-h-[85vh] flex flex-col outline-none"
+        className={isPage
+          ? 'h-full w-full flex flex-col outline-none bg-bg'
+          : 'bg-bg-elev border border-line rounded-lg shadow-xl w-[900px] max-w-[95vw] max-h-[85vh] flex flex-col outline-none'}
         data-testid="repoviz-dialog"
       >
         {/* Header */}
@@ -383,7 +389,7 @@ export function RepoVisualizationModal({ open, onClose }: RepoVisualizationModal
     </div>
   )
 
-  if (typeof document !== 'undefined' && document.body) {
+  if (!isPage && typeof document !== 'undefined' && document.body) {
     return createPortal(node, document.body)
   }
   return node

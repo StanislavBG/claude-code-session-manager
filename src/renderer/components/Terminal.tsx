@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
+import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from './TerminalControls'
 
 // Matches plausible source-path tokens: optional ./ or ../ prefix, dotted name
 // with extension, optional :line[:col] suffix. Word-boundary on the front
@@ -39,37 +40,23 @@ export function Terminal({ tabId, cwd }: Props) {
     if (!hostRef.current || spawnedRef.current) return
     spawnedRef.current = true
 
+    const initial = loadTerminalSettings()
     const term = new XTerm({
       fontFamily: '"IBM Plex Mono", JetBrains Mono, ui-monospace, Menlo, monospace',
-      fontSize: 13,
+      fontSize: initial.fontSize,
       lineHeight: 1.2,
       cursorBlink: true,
       allowProposedApi: true,
-      // Paper-warm xterm palette. ANSI colors retuned for readability on a
-      // #f6efe1 paper background — darker saturated hues so red/yellow don't
-      // wash out, and a darker bright-white that's actually visible.
-      theme: {
-        background: '#f6efe1',
-        foreground: '#2a221a',
-        cursor: '#b85c34',
-        selectionBackground: '#e0d3b8',
-        black: '#2a221a',
-        red: '#b8443c',
-        green: '#5c6f3a',
-        yellow: '#a8761f',
-        blue: '#3a6ea5',
-        magenta: '#8a4a8c',
-        cyan: '#3a7a82',
-        white: '#5b4a36',
-        brightBlack: '#8a7a60',
-        brightRed: '#c44e44',
-        brightGreen: '#6f7d52',
-        brightYellow: '#c08a2a',
-        brightBlue: '#4a7eb8',
-        brightMagenta: '#9c5a9e',
-        brightCyan: '#4a8a94',
-        brightWhite: '#2a221a',
-      },
+      theme: TERMINAL_THEMES[initial.theme],
+    })
+
+    // Live theme + font updates from the TerminalControls popover. xterm v5
+    // accepts assignment to `term.options.*` without remount, but font size
+    // changes need a refit so the existing rows reflow.
+    const offSettings = onTerminalSettingsChange((s) => {
+      term.options.theme = TERMINAL_THEMES[s.theme]
+      term.options.fontSize = s.fontSize
+      try { fitRef.current?.fit() } catch { /* ignore */ }
     })
 
     const fit = new FitAddon()
@@ -222,6 +209,7 @@ export function Terminal({ tabId, cwd }: Props) {
       ro.disconnect()
       offData()
       offExit()
+      offSettings()
       term.dispose()
     }
   }, [tabId, cwd])

@@ -20,7 +20,7 @@ import { toast } from '../../state/toast'
  * MVP scope: requires existing running tabs (no auto-spawn). Matches the
  * Race feature's constraint until the spawn-ready handshake lands.
  */
-export function OrchestratorModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function OrchestratorModal({ open, onClose, variant = 'overlay' }: { open: boolean; onClose: () => void; variant?: 'overlay' | 'page' }) {
   const status = useOrchestrator((s) => s.status)
   const orchPlan = useOrchestrator((s) => s.plan)
   const tasks = useOrchestrator((s) => s.tasks)
@@ -134,7 +134,7 @@ export function OrchestratorModal({ open, onClose }: { open: boolean; onClose: (
   }
 
   return (
-    <Modal open={open} onClose={onClose} size="xl" fillHeight noPadding>
+    <Modal open={open} onClose={onClose} size="xl" fillHeight noPadding variant={variant}>
       <div className="flex items-center justify-between px-4 py-2 border-b border-line shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-base">🎼</span>

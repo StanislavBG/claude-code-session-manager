@@ -27,7 +27,7 @@ const DEPTHS: { value: SuperAgentDepth; label: string; help: string }[] = [
   { value: 'deep', label: 'Deep', help: 'Multi-step plans per specialist, recurse on findings.' },
 ]
 
-export function SuperAgentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SuperAgentModal({ open, onClose, variant = 'overlay' }: { open: boolean; onClose: () => void; variant?: 'overlay' | 'page' }) {
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null)
   const sessionRunning = activeTab?.status === 'running'
@@ -102,7 +102,7 @@ export function SuperAgentModal({ open, onClose }: { open: boolean; onClose: () 
   }
 
   return (
-    <Modal open={open} onClose={onClose} size="lg" title="SuperAgent">
+    <Modal open={open} onClose={onClose} size="lg" title="SuperAgent" variant={variant}>
       <div className="space-y-4">
         <div className="text-xs text-fg-dim leading-relaxed">
           Pick a task and SuperAgent will instruct Claude to act as a "boss" — choosing specialist

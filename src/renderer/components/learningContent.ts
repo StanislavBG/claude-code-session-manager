@@ -598,4 +598,16 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
     ],
   },
+  // v0.13.1 — Tools-group screens. Bodies are intentionally short; SectionFrame
+  // already provides the editorial header so LearningPanel only needs to add
+  // the "how to use" facts that aren't obvious from the UI itself.
+  'voice':            { headline: 'Voice & microphone',  intro: 'Whisper transcription + push-to-talk hotkey. The model loads on first use; the wizard runs once per schema bump to confirm your mic works.', sections: [], tips: ['Default hotkey is F1. Tap on/off, or hold-to-talk — both modes configurable.'] },
+  'superagent':       { headline: 'SuperAgent',          intro: 'Claude dispatches a specialist subagent for the task you describe. Useful when the active tab doesn\'t have the right context.', sections: [], tips: [] },
+  'race':             { headline: 'Race',                intro: 'Send the same prompt to multiple tabs and have them compete. Their transcripts are graded against a rubric you provide.', sections: [], tips: ['Needs at least two running tabs; auto-spawn isn\'t wired yet.'] },
+  'orchestrator':     { headline: 'Orchestrator',        intro: 'Assign different sub-tasks across N tabs in parallel. Each tab gets its own brief; the orchestrator tracks completion.', sections: [], tips: [] },
+  'hives':            { headline: 'Hives',               intro: 'Pre-baked agent swarm templates. Pick a hive and the Orchestrator launches its members against your target with a coordinated brief.', sections: [], tips: [] },
+  'background-agents':{ headline: 'Background agents',   intro: 'Long-running scheduler queue — same engine as the Scheduler tab, but framed for fire-and-forget batches you start now and check on later.', sections: [], tips: [] },
+  'repoviz':          { headline: 'Repo visualization',  intro: 'Language + directory breakdown of the active project. Computed locally; no telemetry leaves your machine.', sections: [], tips: [] },
+  'quick-open':       { headline: 'Quick open',          intro: '⌘P. Fuzzy-find any file in the current cwd. Recently-opened files surface first; arrow keys navigate, Enter opens.', sections: [], tips: [] },
+  'global-search':    { headline: 'Search in project',   intro: '⌘⇧F. Ripgrep across every file under the active cwd, with fs-walk fallback if rg isn\'t installed.', sections: [], tips: ['Use the case toggle for case-sensitive matches.'] },
 }

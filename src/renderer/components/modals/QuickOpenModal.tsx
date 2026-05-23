@@ -29,6 +29,7 @@ import type { SearchFileEntry } from '../../../preload/api'
 interface QuickOpenModalProps {
   open: boolean
   onClose: () => void
+  variant?: 'overlay' | 'page'
 }
 
 interface Ranked {
@@ -138,7 +139,7 @@ function getDirectory(full: string): string {
 const RECENT_KEY = 'session-manager.quickopen.recent'
 const RECENT_MAX = 8
 
-export function QuickOpenModal({ open, onClose }: QuickOpenModalProps) {
+export function QuickOpenModal({ open, onClose, variant = 'overlay' }: QuickOpenModalProps) {
   const activeTab = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null)
   const cwd = activeTab?.cwd ?? ''
 
@@ -304,18 +305,23 @@ export function QuickOpenModal({ open, onClose }: QuickOpenModalProps) {
   }
 
   let rowIndex = -1
+  const isPage = variant === 'page'
 
   const node = (
     <div
-      className="fixed inset-0 z-[55] flex items-start justify-center bg-black/60 pt-[12vh]"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      className={isPage
+        ? 'h-full w-full flex flex-col bg-bg'
+        : 'fixed inset-0 z-[55] flex items-start justify-center bg-black/60 pt-[12vh]'}
+      onClick={isPage ? undefined : (e) => { if (e.target === e.currentTarget) onClose() }}
       data-testid="quick-open-backdrop"
     >
       <div
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? undefined : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-label="Quick Open"
-        className="w-[640px] max-w-[90vw] max-h-[70vh] bg-bg-elev border border-line rounded shadow-xl flex flex-col"
+        className={isPage
+          ? 'h-full w-full flex flex-col'
+          : 'w-[640px] max-w-[90vw] max-h-[70vh] bg-bg-elev border border-line rounded shadow-xl flex flex-col'}
         data-testid="quick-open"
         onKeyDown={onKeyDown}
       >
@@ -413,7 +419,7 @@ export function QuickOpenModal({ open, onClose }: QuickOpenModalProps) {
     </div>
   )
 
-  if (typeof document !== 'undefined' && document.body) {
+  if (!isPage && typeof document !== 'undefined' && document.body) {
     return createPortal(node, document.body)
   }
   return node

@@ -94,6 +94,7 @@ function buildPrdBody(opts: { title: string; cwd: string; prompt: string }): str
 }
 
 interface Props {
+  variant?: 'overlay' | 'page'
   open: boolean
   onClose: () => void
 }
@@ -104,7 +105,7 @@ interface RowState {
   loadingLog: boolean
 }
 
-export function BackgroundAgentsModal({ open, onClose }: Props) {
+export function BackgroundAgentsModal({ open, onClose, variant = 'overlay' }: Props) {
   const [snap, setSnap] = useState<ScheduleStateSnapshot | null>(null)
   const [prdList, setPrdList] = useState<PrdListItem[]>([])
   const [hidden, setHidden] = useState<Set<string>>(() => loadHidden())
@@ -373,19 +374,24 @@ export function BackgroundAgentsModal({ open, onClose }: Props) {
   const onBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose()
   }
+  const isPage = variant === 'page'
 
   const node = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={onBackdrop}
+      className={isPage
+        ? 'h-full w-full flex flex-col bg-bg'
+        : 'fixed inset-0 z-50 flex items-center justify-center bg-black/60'}
+      onClick={isPage ? undefined : onBackdrop}
       data-testid="background-agents-backdrop"
     >
       <div
         ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? undefined : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-label="Background Agents"
-        className="bg-bg-elev border border-line rounded-lg shadow-xl w-[900px] max-w-[95vw] max-h-[85vh] flex flex-col outline-none"
+        className={isPage
+          ? 'h-full w-full flex flex-col outline-none bg-bg'
+          : 'bg-bg-elev border border-line rounded-lg shadow-xl w-[900px] max-w-[95vw] max-h-[85vh] flex flex-col outline-none'}
         data-testid="background-agents-dialog"
       >
         {/* Header */}
@@ -674,7 +680,7 @@ export function BackgroundAgentsModal({ open, onClose }: Props) {
     </div>
   )
 
-  if (typeof document !== 'undefined' && document.body) {
+  if (!isPage && typeof document !== 'undefined' && document.body) {
     return createPortal(node, document.body)
   }
   return node

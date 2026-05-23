@@ -37,9 +37,10 @@ interface HiveManagerModalProps {
   /** Called after the user clicks Launch, so the parent (App.tsx) can switch
    *  the open modal from 'hives' to 'orchestrator'. */
   onLaunch?: () => void
+  variant?: 'overlay' | 'page'
 }
 
-export function HiveManagerModal({ open, onClose, onLaunch }: HiveManagerModalProps) {
+export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' }: HiveManagerModalProps) {
   const list = useHives((s) => s.list)
   const selectedSlug = useHives((s) => s.selectedSlug)
   const loading = useHives((s) => s.loading)
@@ -220,7 +221,7 @@ export function HiveManagerModal({ open, onClose, onLaunch }: HiveManagerModalPr
   )
 
   return (
-    <Modal open={open} onClose={onClose} size="xl" fillHeight noPadding>
+    <Modal open={open} onClose={onClose} size="xl" fillHeight noPadding variant={variant}>
       <div className="flex items-center justify-between px-4 py-2 border-b border-line shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-base">⛓</span>

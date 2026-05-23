@@ -28,6 +28,8 @@ import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
 import { RaceModal } from './components/modals/RaceModal'
 import { AgentMemoryModal } from './components/modals/AgentMemoryModal'
 import { BackgroundAgentsModal } from './components/modals/BackgroundAgentsModal'
+import { OrchestratorModal } from './components/modals/OrchestratorModal'
+import { OrchestratorStatusPanel } from './components/layout/OrchestratorStatusPanel'
 import { installSuperAgentListener } from './state/superagent'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
@@ -67,7 +69,7 @@ const SCREEN_KEYS = new Set<NavKey>([
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
-  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | null>(null)
+  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
@@ -520,6 +522,7 @@ export function App() {
           the banner's 28px height so TabBar stays visible. */}
       <RecordingStatus />
       <SuperAgentStatusBar />
+      <OrchestratorStatusPanel />
       <TabBar />
       <Header
         active={activeNav}
@@ -535,6 +538,7 @@ export function App() {
         onOpenSuperAgent={() => setOpenModal('superagent')}
         onOpenRace={() => setOpenModal('race')}
         onOpenBackgroundAgents={() => setOpenModal('background-agents')}
+        onOpenOrchestrator={() => setOpenModal('orchestrator')}
         broadcastOpen={broadcastOpen}
         watchersOpen={watchersOpen}
       />
@@ -559,6 +563,7 @@ export function App() {
       <SuperAgentModal open={openModal === 'superagent'} onClose={closeModal} />
       <RaceModal open={openModal === 'race'} onClose={closeModal} />
       <BackgroundAgentsModal open={openModal === 'background-agents'} onClose={closeModal} />
+      <OrchestratorModal open={openModal === 'orchestrator'} onClose={closeModal} />
 
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
@@ -591,7 +596,7 @@ function ModalRouter({
   openModal,
   onClose,
 }: {
-  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | null
+  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | null
   onClose: () => void
 }) {
   const titleMap = useMemo<Partial<Record<NavKey, string>>>(() => ({
@@ -629,11 +634,11 @@ function ModalRouter({
     }
   }
 
-  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents'
+  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator'
     ? titleMap[openModal] ?? ''
     : ''
 
-  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && title !== ''
+  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && title !== ''
 
   return (
     <TabModal open={isTabModal} onClose={onClose} title={title}>

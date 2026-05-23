@@ -95,6 +95,7 @@ interface HeaderProps {
   onOpenSuperAgent: () => void
   onOpenRace: () => void
   onOpenBackgroundAgents: () => void
+  onOpenOrchestrator: () => void
   broadcastOpen: boolean
   watchersOpen: boolean
 }
@@ -113,6 +114,7 @@ export function Header({
   onOpenSuperAgent,
   onOpenRace,
   onOpenBackgroundAgents,
+  onOpenOrchestrator,
   broadcastOpen,
   watchersOpen,
 }: HeaderProps) {
@@ -180,6 +182,9 @@ export function Header({
         </Tooltip>
         <Tooltip content="Race — send the same prompt to multiple tabs">
           <IconButton label="Race" glyph="🏁" onClick={onOpenRace} />
+        </Tooltip>
+        <Tooltip content="Orchestrator — assign different sub-tasks to N tabs">
+          <IconButton label="Orchestrator" glyph="🎼" onClick={onOpenOrchestrator} />
         </Tooltip>
         <Tooltip content="Background Agents — long-running scheduler queue">
           <IconButton label="Background Agents" glyph="🐝" onClick={onOpenBackgroundAgents} />

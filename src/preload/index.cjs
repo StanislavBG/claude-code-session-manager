@@ -170,6 +170,12 @@ contextBridge.exposeInMainWorld('api', {
   repo: {
     analyze: (cwd) => ipcRenderer.invoke('repo:analyze', { cwd }),
   },
+  hives: {
+    list: () => ipcRenderer.invoke('hives:list'),
+    get: (slug) => ipcRenderer.invoke('hives:get', { slug }),
+    save: (slug, hive) => ipcRenderer.invoke('hives:save', { slug, hive }),
+    delete: (slug) => ipcRenderer.invoke('hives:delete', { slug }),
+  },
   schedule: {
     state: () => ipcRenderer.invoke('schedule:state'),
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),

@@ -25,6 +25,7 @@ export function OrchestratorModal({ open, onClose }: { open: boolean; onClose: (
   const orchPlan = useOrchestrator((s) => s.plan)
   const tasks = useOrchestrator((s) => s.tasks)
   const startedAt = useOrchestrator((s) => s.startedAt)
+  const pendingRoles = useOrchestrator((s) => s.pendingRoles)
   const configure = useOrchestrator((s) => s.configure)
   const start = useOrchestrator((s) => s.start)
   const pause = useOrchestrator((s) => s.pause)
@@ -42,14 +43,34 @@ export function OrchestratorModal({ open, onClose }: { open: boolean; onClose: (
   const runningTabs = useMemo(() => allTabs.filter((t) => t.status === 'running'), [allTabs])
   const isActive = status === 'running' || status === 'paused'
 
-  // Reset local form whenever the modal opens fresh.
+  // Reset local form whenever the modal opens fresh, or seed it from a Hive
+  // launch if `pendingRoles` is populated. Hive seeding wins over the blank
+  // reset because launchHive() drops the user here with non-empty roles.
   useEffect(() => {
     if (!open) return
-    if (status === 'idle' || status === 'stopped') {
-      setPlan('')
-      setRows([])
+    if (status !== 'idle' && status !== 'stopped') return
+    if (pendingRoles.length > 0) {
+      // Seed one row per role with empty tabId — user picks which tab gets
+      // each role. We pre-fill unique running tabs in order so the form is
+      // usable on first render; the user can re-assign.
+      setPlan(orchPlan || '')
+      const seeded: { tabId: string; prompt: string }[] = []
+      const used = new Set<string>()
+      for (const role of pendingRoles) {
+        const tab = runningTabs.find((t) => !used.has(t.id))
+        const tabId = tab?.id ?? ''
+        if (tabId) used.add(tabId)
+        // Prepend the role label so the user sees which role each row is.
+        seeded.push({ tabId, prompt: `[${role.label}]\n${role.prompt}` })
+      }
+      setRows(seeded)
+      // Clear the mailbox so a subsequent open won't re-seed.
+      useOrchestrator.setState({ pendingRoles: [] })
+      return
     }
-  }, [open, status])
+    setPlan('')
+    setRows([])
+  }, [open, status, pendingRoles, orchPlan, runningTabs])
 
   const handleAddRow = () => {
     // Pick the first running tab that isn't already in rows.

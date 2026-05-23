@@ -458,6 +458,18 @@ export interface RepoAnalyzeResult {
 }
 export interface RepoAnalyzeError { ok: false; error: string }
 
+export interface HiveRole { label: string; prompt: string }
+export interface Hive {
+  slug: string;
+  name: string;
+  description: string;
+  roles: HiveRole[];
+  defaultPlan?: string;
+}
+export interface HiveListResult { hives: Hive[]; error: string | null }
+export interface HiveGetResult { hive: Hive | null; error: string | null }
+export interface HiveMutationResult { ok: boolean; error: string | null }
+
 export interface WatcherInfo {
   watcherId: string;
   tabId: string;
@@ -835,6 +847,12 @@ export interface SessionManagerAPI {
   };
   repo: {
     analyze: (cwd: string) => Promise<RepoAnalyzeResult | RepoAnalyzeError>;
+  };
+  hives: {
+    list: () => Promise<HiveListResult>;
+    get: (slug: string) => Promise<HiveGetResult>;
+    save: (slug: string, hive: Hive) => Promise<HiveMutationResult>;
+    delete: (slug: string) => Promise<HiveMutationResult>;
   };
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;

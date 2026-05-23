@@ -32,6 +32,7 @@ const { registerProjectSkillsHandlers } = require('./projectSkills.cjs');
 const filesIpc = require('./files.cjs');
 const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
+const hivesIpc = require('./hives.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
 
@@ -646,6 +647,7 @@ registerProjectSkillsHandlers();
 filesIpc.registerFilesHandlers();
 searchIpc.registerSearchHandlers();
 repoAnalyzer.register(ipcMain);
+hivesIpc.registerHiveHandlers();
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());

@@ -97,6 +97,7 @@ interface HeaderProps {
   onOpenBackgroundAgents: () => void
   onOpenOrchestrator: () => void
   onOpenRepoViz: () => void
+  onOpenHives: () => void
   broadcastOpen: boolean
   watchersOpen: boolean
 }
@@ -117,6 +118,7 @@ export function Header({
   onOpenBackgroundAgents,
   onOpenOrchestrator,
   onOpenRepoViz,
+  onOpenHives,
   broadcastOpen,
   watchersOpen,
 }: HeaderProps) {
@@ -187,6 +189,9 @@ export function Header({
         </Tooltip>
         <Tooltip content="Orchestrator — assign different sub-tasks to N tabs">
           <IconButton label="Orchestrator" glyph="🎼" onClick={onOpenOrchestrator} />
+        </Tooltip>
+        <Tooltip content="Hives — pre-baked agent swarm templates">
+          <IconButton label="Hives" glyph="⛓" onClick={onOpenHives} />
         </Tooltip>
         <Tooltip content="Background Agents — long-running scheduler queue">
           <IconButton label="Background Agents" glyph="🐝" onClick={onOpenBackgroundAgents} />

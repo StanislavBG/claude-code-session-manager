@@ -57,6 +57,12 @@ interface OrchestratorState {
   plan: string
   startedAt: number | null
   tasks: OrchestratorTask[]
+  /** When a Hive launches, it seeds this with one entry per role. The
+   *  Orchestrator modal reads it on open, copies the prompts into its local
+   *  row form (each role becomes one row, tabId empty until the user picks),
+   *  and then clears this. Acts as a one-shot mailbox between
+   *  HiveManagerModal and OrchestratorModal. */
+  pendingRoles: { label: string; prompt: string }[]
   /** Per-tab unsubscribe handles from transcripts.onEvent. */
   _unsubs: Record<string, () => void>
 
@@ -76,6 +82,16 @@ interface OrchestratorState {
   stop: () => void
   /** Hard reset back to idle. */
   reset: () => void
+  /** Pre-fill the orchestrator with a Hive's roles. Does NOT bind tabs (the
+   *  user still has to pick which tab gets each role in the modal) and does
+   *  NOT start the run. Each role becomes a row with an empty `tabId` until
+   *  the user assigns one. The orchestrator modal must filter these out or
+   *  treat them as "needs tab" placeholders before calling start().
+   *
+   *  This is the bridge HiveManagerModal calls when the user hits Launch. The
+   *  hive's defaultPlan (if any) seeds the plan box; otherwise it stays empty
+   *  and the user types one. */
+  launchHive: (hive: { name: string; defaultPlan?: string; roles: { label: string; prompt: string }[] }) => void
 }
 
 const DIGEST_CAP = 5
@@ -142,6 +158,7 @@ export const useOrchestrator = create<OrchestratorState>((set, get) => ({
   plan: '',
   startedAt: null,
   tasks: [],
+  pendingRoles: [],
   _unsubs: {},
 
   configure: (plan, picks) => {
@@ -160,6 +177,7 @@ export const useOrchestrator = create<OrchestratorState>((set, get) => ({
       plan,
       startedAt: null,
       tasks,
+      pendingRoles: [],
       _unsubs: {},
     })
   },
@@ -261,6 +279,20 @@ export const useOrchestrator = create<OrchestratorState>((set, get) => ({
       plan: '',
       startedAt: null,
       tasks: [],
+      pendingRoles: [],
+      _unsubs: {},
+    })
+  },
+
+  launchHive: (hive) => {
+    // Hard reset any prior run before seeding new roles.
+    tearDownListeners(get()._unsubs)
+    set({
+      status: 'idle',
+      plan: hive.defaultPlan?.trim() || `Launch hive: ${hive.name}`,
+      startedAt: null,
+      tasks: [],
+      pendingRoles: hive.roles.map((r) => ({ label: r.label, prompt: r.prompt })),
       _unsubs: {},
     })
   },

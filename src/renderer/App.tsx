@@ -33,6 +33,7 @@ import { OrchestratorStatusPanel } from './components/layout/OrchestratorStatusP
 import { QuickOpenModal } from './components/modals/QuickOpenModal'
 import { GlobalSearchModal } from './components/modals/GlobalSearchModal'
 import { RepoVisualizationModal } from './components/modals/RepoVisualizationModal'
+import { HiveManagerModal } from './components/modals/HiveManagerModal'
 import { installSuperAgentListener } from './state/superagent'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
@@ -72,7 +73,7 @@ const SCREEN_KEYS = new Set<NavKey>([
 
 export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('terminal')
-  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'quick-open' | 'global-search' | 'repoviz' | null>(null)
+  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'hives' | 'quick-open' | 'global-search' | 'repoviz' | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
@@ -553,6 +554,7 @@ export function App() {
         onOpenBackgroundAgents={() => setOpenModal('background-agents')}
         onOpenOrchestrator={() => setOpenModal('orchestrator')}
         onOpenRepoViz={() => setOpenModal('repoviz')}
+        onOpenHives={() => setOpenModal('hives')}
         broadcastOpen={broadcastOpen}
         watchersOpen={watchersOpen}
       />
@@ -581,6 +583,11 @@ export function App() {
       <QuickOpenModal open={openModal === 'quick-open'} onClose={closeModal} />
       <GlobalSearchModal open={openModal === 'global-search'} onClose={closeModal} />
       <RepoVisualizationModal open={openModal === 'repoviz'} onClose={closeModal} />
+      <HiveManagerModal
+        open={openModal === 'hives'}
+        onClose={closeModal}
+        onLaunch={() => setOpenModal('orchestrator')}
+      />
 
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
@@ -613,7 +620,7 @@ function ModalRouter({
   openModal,
   onClose,
 }: {
-  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'quick-open' | 'global-search' | 'repoviz' | null
+  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'hives' | 'quick-open' | 'global-search' | 'repoviz' | null
   onClose: () => void
 }) {
   const titleMap = useMemo<Partial<Record<NavKey, string>>>(() => ({
@@ -651,11 +658,11 @@ function ModalRouter({
     }
   }
 
-  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz'
+  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz' && openModal !== 'hives'
     ? titleMap[openModal] ?? ''
     : ''
 
-  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz' && title !== ''
+  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz' && openModal !== 'hives' && title !== ''
 
   return (
     <TabModal open={isTabModal} onClose={onClose} title={title}>

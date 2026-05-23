@@ -44,44 +44,53 @@ export function TabBar() {
     },
   })
 
+  // Project-dot color rotates by tab index — gives each project a small,
+  // recognizable accent without needing the user to assign one.
+  const DOT_PALETTE = ['#6f7d52', '#b85c34', '#a39079', '#7a8466', '#5b4a36']
+
   return (
-    <div className="h-9 bg-bg-elev border-b border-line flex items-center px-2 gap-1 shrink-0" data-testid="tour-tabbar">
-      {/* Scrollable tab list — overflow-x-auto must NOT wrap the dropdown */}
+    <div
+      className="h-11 bg-bg-elev border-b border-line flex items-end px-3 gap-0 shrink-0 relative"
+      data-testid="tour-tabbar"
+    >
       <div
         ref={containerRef}
-        className={`flex items-center gap-1 overflow-x-auto min-w-0 flex-1 select-none ${isDragging ? 'cursor-grabbing' : ''}`}
+        className={`flex items-end gap-0.5 overflow-x-auto min-w-0 flex-1 select-none ${isDragging ? 'cursor-grabbing' : ''}`}
       >
         {tabs.map((t, index) => {
           const active = t.id === activeTabId
           const dragProps = getTabDragProps(index)
+          const dot = DOT_PALETTE[index % DOT_PALETTE.length]
           return (
             <div
               key={t.id}
               {...dragProps}
               style={dragProps.style}
-              className={`group px-3 py-1 flex items-center gap-2 rounded-t text-xs shrink-0 transition-colors ${
+              className={`group flex items-center gap-2 px-3.5 pt-1.5 pb-2 rounded-t-[10px] text-[13px] shrink-0 transition-colors ${
                 isDragging ? '' : 'cursor-grab'
               } ${
                 active
-                  ? 'bg-bg-hi text-fg font-semibold border border-b-0 border-accent border-t-2 -mb-px relative z-10'
-                  : 'bg-bg-elev text-fg-dim border border-line hover:text-fg hover:bg-bg'
+                  ? 'bg-bg text-fg font-medium relative z-10 -mb-px border border-b-0 border-line'
+                  : 'text-fg-dim hover:text-fg hover:bg-bg-hi/40'
               }`}
               title={t.cwd}
               aria-current={active ? 'true' : undefined}
             >
               <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  t.status === 'running'
-                    ? 'bg-green-500'
-                    : t.status === 'spawning'
-                    ? 'bg-yellow-500 animate-pulse'
-                    : 'bg-fg-faint'
-                }`}
+                className="w-2 h-2 rounded-full"
+                style={{
+                  background: dot,
+                  boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.15)',
+                  opacity: t.status === 'spawning' ? 0.55 : 1,
+                }}
               />
-              <span>{t.label}</span>
+              <span className="truncate max-w-[200px]">{t.label}</span>
+              {t.status === 'spawning' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-butter animate-pulse" title="spawning" />
+              )}
               {activeTabIds(t.id) && (
                 <span
-                  className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"
+                  className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"
                   title="watcher emitted a line in the last 30s"
                   data-testid="tab-watcher-dot"
                 />
@@ -91,8 +100,9 @@ export function TabBar() {
                   e.stopPropagation()
                   closeTab(t.id)
                 }}
-                className="text-fg-faint opacity-0 group-hover:opacity-100 hover:text-fg ml-1"
+                className="text-fg-faint opacity-0 group-hover:opacity-100 hover:text-fg ml-1 leading-none"
                 title="Close session"
+                aria-label={`Close ${t.label}`}
               >
                 ×
               </button>
@@ -100,9 +110,9 @@ export function TabBar() {
           )
         })}
       </div>
-      <div className="text-fg-faint text-xs px-2 shrink-0">
-        Claude Session Manager{' '}
-        <span className="font-mono text-fg-dim">v{__APP_VERSION__}</span>
+      <div className="flex items-center gap-2 pb-2 pl-3 text-[12px] text-fg-faint shrink-0">
+        <span className="font-semibold text-fg-dim">Claude Session Manager</span>
+        <span className="font-mono text-[11px] text-fg-faint">v{__APP_VERSION__}</span>
       </div>
     </div>
   )

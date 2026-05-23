@@ -62,34 +62,37 @@ export const BOARD_Y = 58
 export const BOARD_W = 148
 export const BOARD_H = 230
 
-// Palette
+// Palette — paper-warm Almanac scene. Sky is the page background (cream),
+// floor and walls in slightly darker warmth so the workshop still reads as
+// a "room." Bench wood keeps its terracotta-adjacent oak tones. Cards and
+// stickies retuned to paper-light variants of their meaning colors.
 export const PAL = {
-  sky: '#0b0d10',
-  floor: '#1a1d23',
-  benchTop: '#7a5c1e',
-  benchFace: '#5c4415',
-  benchGrain: '#6a5019',
-  wallPanel: '#141720',
-  wallBorder: '#2a2f3a',
-  whiteboardFill: '#e8dfc8',
+  sky: '#f6efe1',
+  floor: '#e8dcc0',
+  benchTop: '#a87836',
+  benchFace: '#7d5824',
+  benchGrain: '#92682c',
+  wallPanel: '#efe6d3',
+  wallBorder: '#d9c9a8',
+  whiteboardFill: '#fbf6ec',
   whiteboardBorder: '#c9b98a',
-  rackBar: '#374151',
-  toolHook: '#9ca3af',
-  stickyFill: '#fef3c7',
-  stickyBorder: '#fde68a',
-  miniBotFill: '#6b7280',
-  miniBotActive: '#34d399',
-  cardPending: '#1e293b',
-  cardActive: '#1e3a5f',
-  cardDone: '#142a1a',
-  cardBorderPending: '#334155',
-  cardBorderActive: '#3b82f6',
-  cardBorderDone: '#22c55e',
-  steam: '#94a3b8',
-  inkLine: '#374151',
-  accentGreen: '#34d399',
-  accentAmber: '#fbbf24',
-  conveyor: '#1f2937',
+  rackBar: '#8a7a60',
+  toolHook: '#5b4a36',
+  stickyFill: '#fde9a3',
+  stickyBorder: '#e4b85a',
+  miniBotFill: '#8a7a60',
+  miniBotActive: '#6f7d52',
+  cardPending: '#fbf6ec',
+  cardActive: '#fde6d3',
+  cardDone: '#e6ecd3',
+  cardBorderPending: '#d9c9a8',
+  cardBorderActive: '#b85c34',
+  cardBorderDone: '#6f7d52',
+  steam: '#a89c80',
+  inkLine: '#5b4a36',
+  accentGreen: '#6f7d52',
+  accentAmber: '#b85c34',
+  conveyor: '#5b4a36',
 } as const
 
 // Reusable transition objects (defined once for perf)

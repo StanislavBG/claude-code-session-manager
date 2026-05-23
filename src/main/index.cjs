@@ -757,9 +757,14 @@ app.whenReady().then(async () => {
   const CSP = [
     "default-src 'self'",
     "script-src 'self' 'wasm-unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
+    // Google Fonts: stylesheet served from fonts.googleapis.com, font files
+    // from fonts.gstatic.com. Required for the Almanac UI (Newsreader serif,
+    // Geist sans, IBM Plex Mono). The alternative — bundling via @fontsource
+    // — adds ~3 packages and ~2MB to the renderer build; the network fetch
+    // happens once per cold launch and is cached by Electron's HTTP cache.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob:",
-    "font-src 'self' data:",
+    "font-src 'self' data: https://fonts.gstatic.com",
     // schemastore.org is used by Monaco for JSON schema validation
     // (settings.json, keybindings.json — see App.tsx::installMonacoSchemas).
     // The json.schemastore.org URL redirects to www.schemastore.org, so both

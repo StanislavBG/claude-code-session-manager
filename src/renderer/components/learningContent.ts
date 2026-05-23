@@ -580,4 +580,22 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'Distinct from workspace memory (~/.claude/memory/<workspace>/). This one is keyed by agent, not project.',
     ],
   },
+  'scheduler': {
+    headline: 'Run claude -p jobs against your 5-hour window',
+    intro:
+      'The scheduler queues PRDs from ~/.claude/session-manager/scheduled-plans/prds/ and fires them as headless claude -p jobs. Auto-pauses on rate-limit, auto-resumes on the next 5-hour reset.',
+    sections: [
+      {
+        title: 'Fire policies',
+        items: [
+          { term: 'manual', body: 'You hit Run for each job. Useful when you want to stagger work yourself.' },
+          { term: 'on-reset', body: 'Fire each job at the next 5-hour boundary.' },
+          { term: 'when-available', body: 'Default. Polls billing every 2 min and fires when utilization is below the threshold.' },
+        ],
+      },
+    ],
+    tips: [
+      'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
+    ],
+  },
 }

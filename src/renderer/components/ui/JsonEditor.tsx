@@ -31,11 +31,11 @@ export function JsonEditor({ value, onChange, path, readOnly }: Props) {
       value={value}
       onChange={(v) => onChange(v ?? '')}
       onMount={onMount}
-      theme="vs-dark"
+      theme="vs"
       options={{
         minimap: { enabled: false },
         fontSize: 12,
-        fontFamily: 'JetBrains Mono, ui-monospace, Menlo, monospace',
+        fontFamily: '"IBM Plex Mono", JetBrains Mono, ui-monospace, Menlo, monospace',
         lineNumbers: 'on',
         renderLineHighlight: 'line',
         scrollBeyondLastLine: false,

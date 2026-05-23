@@ -1,28 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { TabBar } from './components/TabBar'
 import { type NavKey } from './components/LeftNav'
-import { Header, type ScreenKey } from './components/layout/Header'
-import { TabModal } from './components/layout/TabModal'
+import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
+import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { VoiceModal } from './components/layout/VoiceModal'
-import { SchedulerModal } from './components/layout/SchedulerModal'
-import { StatusBar } from './components/StatusBar'
 import { MainPane } from './components/MainPane'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { Toast } from './components/ui/Toast'
-import { Settings } from './components/tabs/Settings'
-import { SystemPrompt } from './components/tabs/SystemPrompt'
-import { Keybindings } from './components/tabs/Keybindings'
-import { Permissions } from './components/tabs/Permissions'
-import { Plugins } from './components/tabs/Plugins'
-import { McpServers } from './components/tabs/McpServers'
-import { Hooks } from './components/tabs/Hooks'
-import { Plans } from './components/tabs/Plans'
-import { Tasks } from './components/tabs/Tasks'
-import { Memory } from './components/tabs/Memory'
-import { Projects } from './components/tabs/Projects'
-import { DocEditor } from './components/tabs/DocEditor'
+import { TabModal } from './components/layout/TabModal'
 import { SuperAgentModal } from './components/modals/SuperAgentModal'
 import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
 import { RaceModal } from './components/modals/RaceModal'
@@ -56,37 +43,73 @@ import { log } from './lib/logger'
 // double-effect; resets only on full reload.
 let unsupportedLogged = false
 
-/** Which NavKeys are rendered as full screens via Header tabs. Everything
- *  else is treated as a modal target. Keeping the wider NavKey union lets
- *  existing callers (CommandPalette nav:*, Overview's InstrumentTile linkTo,
- *  LearningPanel) keep working — App.tsx routes screen keys to setActiveNav
- *  and any other NavKey to setOpenModal. */
+// Almanac: every Workspace + Configure nav item is a full page. Tools
+// (SuperAgent, Orchestrator, Race, Background Agents, Hives, RepoViz, Voice,
+// QuickOpen, GlobalSearch, AgentMemory) remain modal targets — they're
+// workflow dialogs rather than configuration surfaces.
 const SCREEN_KEYS = new Set<NavKey>([
+  // Workspace
   'overview',
   'terminal',
   'agent-view',
-  'skills',
+  'subagents',
+  'scheduler',
+  'plans',
+  'tasks',
   'history',
   'usage',
-  'subagents',
+  // Configure
+  'skills',
+  'plugins',
+  'mcp',
+  'hooks',
+  'keybindings',
+  'doc-editor',
+  'memory',
+  'projects',
+  'system-prompt',
+  'permissions',
+  'settings',
 ])
 
+// Modal keys handled by App-level overlays (not promoted to screens).
+type ModalKey =
+  | 'voice'
+  | 'superagent'
+  | 'race'
+  | 'background-agents'
+  | 'orchestrator'
+  | 'hives'
+  | 'quick-open'
+  | 'global-search'
+  | 'repoviz'
+  | 'agent-memory'
+
 export function App() {
-  const [activeNav, setActiveNav] = useState<NavKey>('terminal')
-  const [openModal, setOpenModal] = useState<NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'hives' | 'quick-open' | 'global-search' | 'repoviz' | null>(null)
+  const [activeNav, setActiveNav] = useState<NavKey>('overview')
+  const [openModal, setOpenModal] = useState<ModalKey | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
 
   // Route any NavKey to the right destination. Used by CommandPalette nav:*
-  // entries, Overview's tile links, and Header's More menu.
+  // entries + AlmanacSidebar. The only NavKey left that isn't a screen is
+  // 'agent-memory' (intentionally a modal because it's stateful + transient).
   const navigate = useCallback((k: NavKey) => {
     if (SCREEN_KEYS.has(k)) {
       setActiveNav(k)
       setOpenModal(null)
-    } else {
-      setOpenModal(k)
+    } else if (k === 'agent-memory') {
+      setOpenModal('agent-memory')
     }
+  }, [])
+
+  const openTool = useCallback((k:
+    | 'voice' | 'superagent' | 'race' | 'background-agents'
+    | 'orchestrator' | 'hives' | 'repoviz' | 'quick-open'
+    | 'global-search' | 'agent-memory'
+  ) => {
+    setOpenModal(k)
   }, [])
 
   const closeModal = useCallback(() => setOpenModal(null), [])
@@ -538,44 +561,31 @@ export function App() {
       <SuperAgentStatusBar />
       <OrchestratorStatusPanel />
       <TabBar />
-      <Header
-        active={activeNav}
-        onScreenChange={(k: ScreenKey) => { setActiveNav(k); setOpenModal(null) }}
-        onOpenModal={navigate}
-        onNewSession={handleNewSession}
-        onRestartSession={restartActiveTab}
-        onRestartApp={rebootApp}
-        onToggleBroadcast={toggleBroadcast}
-        onToggleWatchers={toggleWatchers}
-        onOpenVoice={() => setOpenModal('voice')}
-        onOpenScheduler={() => setOpenModal('scheduler')}
-        onOpenSuperAgent={() => setOpenModal('superagent')}
-        onOpenRace={() => setOpenModal('race')}
-        onOpenBackgroundAgents={() => setOpenModal('background-agents')}
-        onOpenOrchestrator={() => setOpenModal('orchestrator')}
-        onOpenRepoViz={() => setOpenModal('repoviz')}
-        onOpenHives={() => setOpenModal('hives')}
-        broadcastOpen={broadcastOpen}
-        watchersOpen={watchersOpen}
-      />
       <div className="flex-1 flex min-h-0">
+        <AlmanacSidebar
+          active={activeNav}
+          onNavigate={navigate}
+          onNewSession={handleNewSession}
+          onOpenTool={openTool}
+        />
         <MainPane
           active={activeNav}
           onNavigate={navigate}
+          onNewSession={handleNewSession}
+          onOpenVoice={() => setOpenModal('voice')}
+          onOpenScheduler={() => setActiveNav('scheduler')}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}
           onCloseWatchers={() => setWatchersOpen(false)}
         />
       </div>
-      <StatusBar />
+      <AlmanacFooter onNavigate={navigate} />
 
-      {/* Tab-as-modal overlays. NavKey targets are routed through navigate(),
-       *  which sets openModal to the relevant key. Each modal mounts only when
-       *  its key matches so we don't pay for hidden subscriptions. */}
-      <ModalRouter openModal={openModal} onClose={closeModal} />
+      {/* Tools-group + workflow modals. Promoted screens (Settings, Skills,
+       *  etc.) are NO LONGER modals — they render as full pages via MainPane. */}
+      <AgentMemoryWrapper open={openModal === 'agent-memory'} onClose={closeModal} />
       <VoiceModal open={openModal === 'voice'} onClose={closeModal} />
-      <SchedulerModal open={openModal === 'scheduler'} onClose={closeModal} />
       <SuperAgentModal open={openModal === 'superagent'} onClose={closeModal} />
       <RaceModal open={openModal === 'race'} onClose={closeModal} />
       <BackgroundAgentsModal open={openModal === 'background-agents'} onClose={closeModal} />
@@ -612,61 +622,14 @@ export function App() {
   )
 }
 
-/** Dispatch for the 12 NavKeys that are rendered as modal overlays.
- *  Voice/Scheduler aren't NavKeys so they have their own dedicated modals
- *  in App.tsx; everything here is a former-tab whose component we
- *  wrap in TabModal unchanged. */
-function ModalRouter({
-  openModal,
-  onClose,
-}: {
-  openModal: NavKey | 'voice' | 'scheduler' | 'superagent' | 'race' | 'background-agents' | 'orchestrator' | 'hives' | 'quick-open' | 'global-search' | 'repoviz' | null
-  onClose: () => void
-}) {
-  const titleMap = useMemo<Partial<Record<NavKey, string>>>(() => ({
-    'settings': 'Settings',
-    'permissions': 'Permissions',
-    'system-prompt': 'System Prompt / Personality',
-    'keybindings': 'Keybindings',
-    'memory': 'Memory',
-    'agent-memory': 'Agent Memory',
-    'plugins': 'Plugins',
-    'mcp': 'MCP Servers',
-    'hooks': 'Hooks',
-    'plans': 'Plans',
-    'tasks': 'Tasks / Todos',
-    'projects': 'Projects',
-    'doc-editor': 'Doc Editor',
-  }), [])
-
-  const render = (): React.ReactNode => {
-    switch (openModal) {
-      case 'settings': return <Settings />
-      case 'permissions': return <Permissions />
-      case 'system-prompt': return <SystemPrompt />
-      case 'keybindings': return <Keybindings />
-      case 'memory': return <Memory />
-      case 'agent-memory': return <AgentMemoryModal />
-      case 'plugins': return <Plugins />
-      case 'mcp': return <McpServers />
-      case 'hooks': return <Hooks />
-      case 'plans': return <Plans />
-      case 'tasks': return <Tasks />
-      case 'projects': return <Projects />
-      case 'doc-editor': return <DocEditor />
-      default: return null
-    }
-  }
-
-  const title = openModal && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz' && openModal !== 'hives'
-    ? titleMap[openModal] ?? ''
-    : ''
-
-  const isTabModal = openModal !== null && openModal !== 'voice' && openModal !== 'scheduler' && openModal !== 'superagent' && openModal !== 'race' && openModal !== 'background-agents' && openModal !== 'orchestrator' && openModal !== 'quick-open' && openModal !== 'global-search' && openModal !== 'repoviz' && openModal !== 'hives' && title !== ''
-
+/** Agent Memory survives as a modal — stateful, transient, opens on-demand
+ *  from the Tools group rather than living as a Configure screen. Wrapped in
+ *  TabModal because the inner component renders its own content without an
+ *  overlay/close-chrome of its own. */
+function AgentMemoryWrapper({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <TabModal open={isTabModal} onClose={onClose} title={title}>
-      {render()}
+    <TabModal open={open} onClose={onClose} title="Agent Memory">
+      {open && <AgentMemoryModal />}
     </TabModal>
   )
 }

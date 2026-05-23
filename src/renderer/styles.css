@@ -2,21 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tiptap WYSIWYG editor content typography */
-.tiptap-content h1 { font-size: 1.5rem; font-weight: 700; margin: 0.75rem 0 0.5rem; line-height: 1.3; color: #e6e8ec; }
-.tiptap-content h2 { font-size: 1.25rem; font-weight: 600; margin: 0.75rem 0 0.4rem; line-height: 1.3; color: #e6e8ec; }
-.tiptap-content h3 { font-size: 1.1rem;  font-weight: 600; margin: 0.6rem 0 0.3rem;  line-height: 1.3; color: #e6e8ec; }
-.tiptap-content p  { margin: 0.4rem 0; color: #e6e8ec; line-height: 1.6; }
-.tiptap-content ul { list-style: disc;    padding-left: 1.5rem; margin: 0.4rem 0; color: #e6e8ec; }
-.tiptap-content ol { list-style: decimal; padding-left: 1.5rem; margin: 0.4rem 0; color: #e6e8ec; }
+/* Tiptap WYSIWYG editor content typography — paper-warm Almanac palette. */
+.tiptap-content h1 { font-size: 1.5rem; font-weight: 600; margin: 0.75rem 0 0.5rem; line-height: 1.3; color: #2a221a; font-family: 'Newsreader', Georgia, serif; }
+.tiptap-content h2 { font-size: 1.25rem; font-weight: 600; margin: 0.75rem 0 0.4rem; line-height: 1.3; color: #2a221a; font-family: 'Newsreader', Georgia, serif; }
+.tiptap-content h3 { font-size: 1.1rem;  font-weight: 600; margin: 0.6rem 0 0.3rem;  line-height: 1.3; color: #2a221a; font-family: 'Newsreader', Georgia, serif; }
+.tiptap-content p  { margin: 0.4rem 0; color: #2a221a; line-height: 1.6; }
+.tiptap-content ul { list-style: disc;    padding-left: 1.5rem; margin: 0.4rem 0; color: #2a221a; }
+.tiptap-content ol { list-style: decimal; padding-left: 1.5rem; margin: 0.4rem 0; color: #2a221a; }
 .tiptap-content li { margin: 0.15rem 0; }
-.tiptap-content blockquote { border-left: 3px solid #242a33; padding-left: 0.75rem; color: #8a93a0; margin: 0.4rem 0; }
-.tiptap-content code { background: #12151a; color: #d97757; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: 'JetBrains Mono', ui-monospace, monospace; }
-.tiptap-content pre  { background: #12151a; color: #e6e8ec; padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; font-size: 0.85em; font-family: 'JetBrains Mono', ui-monospace, monospace; }
-.tiptap-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
-.tiptap-content a   { color: #d97757; text-decoration: underline; }
-.tiptap-content hr  { border: none; border-top: 1px solid #242a33; margin: 0.75rem 0; }
-.tiptap-content strong { font-weight: 700; }
+.tiptap-content blockquote { border-left: 3px solid #d9c9a8; padding-left: 0.75rem; color: #5b4a36; margin: 0.4rem 0; font-style: italic; }
+.tiptap-content code { background: #fbf6ec; color: #b85c34; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: 'IBM Plex Mono', ui-monospace, monospace; border: 1px solid #e0d3b8; }
+.tiptap-content pre  { background: #fbf6ec; color: #2a221a; padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; font-size: 0.85em; font-family: 'IBM Plex Mono', ui-monospace, monospace; border: 1px solid #e0d3b8; }
+.tiptap-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; border: 0; }
+.tiptap-content a   { color: #b85c34; text-decoration: underline; }
+.tiptap-content hr  { border: none; border-top: 1px solid #d9c9a8; margin: 0.75rem 0; }
+.tiptap-content strong { font-weight: 600; }
 .tiptap-content em     { font-style: italic; }
 /* Tiptap focus ring */
 .tiptap-content:focus { outline: none; }
@@ -32,12 +32,12 @@ html, body, #root {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b0d10;
+  background: #efe6d3;
 }
 ::-webkit-scrollbar-thumb {
-  background: #242a33;
+  background: #d9c9a8;
   border-radius: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2f3742;
+  background: #c8b88f;
 }

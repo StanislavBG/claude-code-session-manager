@@ -1,0 +1,386 @@
+/**
+ * AlmanacSidebar — primary navigation. Replaces both the old top Header
+ * (action toolbar) and the old LeftNav. Three nav groups (Workspace,
+ * Configure, Tools), a Navigate/Files toggle, project caption, persistent
+ * recording status in the footer, and a New Session primary button.
+ *
+ * Click handlers come in via props. Workspace + Configure items navigate via
+ * `onNavigate(NavKey)` (these render as full pages in MainPane). Tools items
+ * open existing modals via dedicated callbacks the same way the old Header
+ * wired them, so no modal logic needs to change.
+ *
+ * Files mode mounts the existing FileTree rooted at the active tab's cwd.
+ * Persisted to localStorage so the user's last mode is restored on launch.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { NavKey } from '../LeftNav'
+import { useSessions } from '../../state/sessions'
+import { useLive } from '../../state/live'
+import { useVoice } from '../../state/voice'
+import { useScheduleState } from '../../state/scheduleState'
+import { useBilling } from '../../state/billing'
+import { findPreset } from '../../lib/presets'
+import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
+import { FileTree } from './FileTree'
+
+type ToolKey =
+  | 'voice' | 'superagent' | 'race' | 'background-agents'
+  | 'orchestrator' | 'hives' | 'repoviz' | 'quick-open' | 'global-search'
+  | 'agent-memory'
+
+interface NavGroupItem {
+  key: NavKey
+  label: string
+  icon: AlmanacIconName
+  liveKind?: 'subagents' | 'tasks' | 'agentView'
+  hint?: string
+}
+
+const WORKSPACE: NavGroupItem[] = [
+  { key: 'overview',   label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
+  { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
+  { key: 'agent-view', label: 'Agent-View', icon: 'agent-view',   liveKind: 'agentView', hint: 'Workshop scene of the active session' },
+  { key: 'subagents',  label: 'Hive',       icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
+  { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    hint: 'Queue claude -p jobs against your 5h window' },
+  { key: 'plans',      label: 'Plans',      icon: 'plans',        hint: 'PRDs that drive the scheduler' },
+  { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
+  { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
+  { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
+]
+
+const CONFIGURE: NavGroupItem[] = [
+  { key: 'skills',        label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads' },
+  { key: 'plugins',       label: 'Plugins',        icon: 'plugins',        hint: 'Extensions for Claude Code' },
+  { key: 'mcp',           label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations' },
+  { key: 'hooks',         label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events' },
+  { key: 'keybindings',   label: 'Keybindings',    icon: 'keys',           hint: 'Shortcuts you can override' },
+  { key: 'doc-editor',    label: 'Doc Editor',     icon: 'docs',           hint: 'Edit CLAUDE.md and friends' },
+  { key: 'memory',        label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store' },
+  { key: 'projects',      label: 'Projects',       icon: 'projects',       hint: 'All known project folders' },
+  { key: 'system-prompt', label: 'System Prompt',  icon: 'system-prompt',  hint: 'Personality and behavior' },
+  { key: 'permissions',   label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },
+  { key: 'settings',      label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window' },
+]
+
+interface ToolItem {
+  key: ToolKey
+  label: string
+  icon: AlmanacIconName
+  hint?: string
+}
+
+const TOOLS: ToolItem[] = [
+  { key: 'voice',             label: 'Voice',             icon: 'mic',           hint: 'Whisper transcription + push-to-talk' },
+  { key: 'superagent',        label: 'SuperAgent',        icon: 'sparkle',       hint: 'Dispatch specialist subagents' },
+  { key: 'orchestrator',      label: 'Orchestrator',      icon: 'orchestrator',  hint: 'Different sub-tasks across N tabs' },
+  { key: 'hives',             label: 'Hives',             icon: 'leaf',          hint: 'Pre-baked agent swarm templates' },
+  { key: 'race',              label: 'Race',              icon: 'race',          hint: 'Same prompt to multiple tabs' },
+  { key: 'background-agents', label: 'Background Agents', icon: 'background',    hint: 'Long-running scheduler queue' },
+  { key: 'repoviz',           label: 'Repo Viz',          icon: 'repoviz',       hint: 'Language + directory map' },
+  { key: 'agent-memory',      label: 'Agent Memory',      icon: 'agent-memory',  hint: 'Long-term context store' },
+  { key: 'quick-open',        label: 'Quick Open',        icon: 'quick-open',    hint: '⌘P · jump to file' },
+  { key: 'global-search',     label: 'Global Search',     icon: 'global-search', hint: '⌘⇧F · search across files' },
+]
+
+const MODE_KEY = 'sm.almanac.sidebarMode'
+type Mode = 'nav' | 'files'
+
+function loadMode(): Mode {
+  try {
+    const v = localStorage.getItem(MODE_KEY)
+    return v === 'files' ? 'files' : 'nav'
+  } catch {
+    return 'nav'
+  }
+}
+
+function useLiveIndicators() {
+  const tabs = useLive((s) => s.tabs)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5_000)
+    return () => clearInterval(id)
+  }, [])
+  const list = Object.values(tabs)
+  return {
+    subagents: list.some((t) => t.agents.some((a) => now - a.at < 60_000)),
+    tasks: list.some((t) => t.todos.some((todo) => todo.status === 'in_progress')),
+    agentView: list.some((t) => t.lastEventAt > 0 && now - t.lastEventAt < 5_000),
+  }
+}
+
+interface AlmanacSidebarProps {
+  active: NavKey
+  onNavigate: (k: NavKey) => void
+  onNewSession: () => void
+  onOpenTool: (k: ToolKey) => void
+}
+
+export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenTool }: AlmanacSidebarProps) {
+  const [mode, setMode] = useState<Mode>(() => loadMode())
+  const setModePersist = useCallback((m: Mode) => {
+    setMode(m)
+    try { localStorage.setItem(MODE_KEY, m) } catch { /* ignore */ }
+  }, [])
+
+  const tabs = useSessions((s) => s.tabs)
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
+  const indicators = useLiveIndicators()
+
+  return (
+    <aside
+      className="w-[252px] shrink-0 bg-bg-elev border-r border-line flex flex-col"
+      data-testid="tour-leftnav"
+      aria-label="Primary navigation"
+    >
+      <ProjectCaption tab={activeTab} onNewSession={onNewSession} />
+
+      {/* Navigate / Files toggle */}
+      <div className="px-3.5 pt-3 pb-2 flex gap-1">
+        {(['nav', 'files'] as Mode[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => setModePersist(m)}
+            aria-pressed={mode === m}
+            className={`flex-1 py-1.5 rounded-md text-[12px] font-semibold tracking-[0.02em] transition-colors ${
+              mode === m
+                ? 'bg-bg-hi text-fg border border-line'
+                : 'text-fg-faint hover:text-fg-dim border border-transparent'
+            }`}
+          >
+            {m === 'nav' ? 'Navigate' : 'Files'}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-auto px-2 pb-3">
+        {mode === 'nav' ? (
+          <>
+            <NavGroupHeader>Workspace</NavGroupHeader>
+            {WORKSPACE.map((item) => (
+              <NavRow
+                key={item.key}
+                item={item}
+                active={active === item.key}
+                live={item.liveKind ? indicators[item.liveKind] : false}
+                onClick={() => onNavigate(item.key)}
+              />
+            ))}
+
+            <NavGroupHeader>Configure</NavGroupHeader>
+            {CONFIGURE.map((item) => (
+              <NavRow
+                key={item.key}
+                item={item}
+                active={active === item.key}
+                live={false}
+                onClick={() => onNavigate(item.key)}
+              />
+            ))}
+
+            <NavGroupHeader>Tools</NavGroupHeader>
+            {TOOLS.map((tool) => (
+              <ToolRow key={tool.key} tool={tool} onClick={() => onOpenTool(tool.key)} />
+            ))}
+          </>
+        ) : (
+          <FilesMode tab={activeTab} />
+        )}
+      </div>
+
+      <SidebarFooter />
+    </aside>
+  )
+}
+
+function ProjectCaption({ tab, onNewSession }: { tab: { cwd: string; label: string } | null; onNewSession: () => void }) {
+  const name = tab?.label ?? 'no session'
+  const branch = useBranch(tab?.cwd ?? null)
+  return (
+    <div className="px-[18px] pt-[14px] pb-[10px] border-b border-rule">
+      <div className="text-[11px] font-semibold tracking-[0.06em] text-fg-faint uppercase">
+        Project
+      </div>
+      <div className="flex items-baseline gap-2 mt-1">
+        <span className="self-center w-2 h-2 rounded-full bg-sage" />
+        <span className="font-serif text-[18px] font-medium text-fg truncate" title={tab?.cwd ?? ''}>
+          {name}
+        </span>
+      </div>
+      <div className="text-[12px] text-fg-faint font-mono mt-0.5 truncate">
+        {branch ? `⌥${branch}` : tab ? tab.cwd : '—'}
+      </div>
+      <button
+        onClick={onNewSession}
+        data-testid="tour-new-session"
+        className="mt-3 w-full px-3 py-1.5 rounded-md bg-bg-hi border border-line text-fg text-[12.5px] font-medium hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center gap-1.5"
+      >
+        <AlmanacIcon name="plus" size={13} stroke={1.8} />
+        New session
+      </button>
+    </div>
+  )
+}
+
+const branchCache = new Map<string, { value: string | null; ts: number }>()
+const BRANCH_TTL_MS = 30_000
+
+function useBranch(cwd: string | null): string | null {
+  const [branch, setBranch] = useState<string | null>(() => (cwd ? branchCache.get(cwd)?.value ?? null : null))
+  useEffect(() => {
+    if (!cwd) { setBranch(null); return }
+    let cancelled = false
+    const load = async () => {
+      const hit = branchCache.get(cwd)
+      if (hit && Date.now() - hit.ts < BRANCH_TTL_MS) {
+        if (!cancelled) setBranch(hit.value)
+        return
+      }
+      try {
+        const v = await window.api.app.gitBranch(cwd)
+        if (cancelled) return
+        branchCache.set(cwd, { value: v, ts: Date.now() })
+        setBranch(v)
+      } catch {
+        if (cancelled) return
+        branchCache.set(cwd, { value: null, ts: Date.now() })
+        setBranch(null)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [cwd])
+  return branch
+}
+
+function NavGroupHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-3 pt-3.5 pb-1.5 font-serif italic text-[11px] font-bold tracking-[0.07em] uppercase text-fg-faint">
+      {children}
+    </div>
+  )
+}
+
+function NavRow({
+  item, active, live, onClick,
+}: { item: NavGroupItem; active: boolean; live: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={item.hint}
+      className={`relative w-full flex items-center gap-3 px-3.5 py-[9px] rounded-[10px] text-left text-[14px] mb-0.5 transition-colors ${
+        active
+          ? 'bg-bg-hi text-fg font-semibold border border-line'
+          : 'text-fg-dim hover:bg-bg-hi/50 hover:text-fg border border-transparent'
+      }`}
+    >
+      {active && (
+        <span
+          aria-hidden
+          className="absolute -left-[10px] top-3 bottom-3 w-[3px] rounded-sm bg-accent"
+        />
+      )}
+      <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
+        <AlmanacIcon name={item.icon} size={17} stroke={1.6} />
+      </span>
+      <span className="flex-1 truncate">{item.label}</span>
+      {live && (
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="live activity" />
+      )}
+    </button>
+  )
+}
+
+function ToolRow({ tool, onClick }: { tool: ToolItem; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={tool.hint}
+      className="w-full flex items-center gap-3 px-3.5 py-[7px] rounded-[10px] text-left text-[13px] mb-0.5 text-fg-dim hover:bg-bg-hi/50 hover:text-fg transition-colors"
+    >
+      <span className="inline-flex text-fg-faint">
+        <AlmanacIcon name={tool.icon} size={15} stroke={1.6} />
+      </span>
+      <span className="flex-1 truncate">{tool.label}</span>
+    </button>
+  )
+}
+
+function FilesMode({ tab }: { tab: { id: string; cwd: string } | null }) {
+  if (!tab) {
+    return (
+      <div className="px-3 py-6 text-center text-[12px] text-fg-faint">
+        No session selected.
+      </div>
+    )
+  }
+  return (
+    <div className="pt-1">
+      <div className="px-3 pb-2 text-[11.5px] text-fg-faint font-mono truncate" title={tab.cwd}>
+        {compactPath(tab.cwd)}
+      </div>
+      <FileTree cwd={tab.cwd} activeTabId={tab.id} />
+    </div>
+  )
+}
+
+function compactPath(p: string): string {
+  const home = '/home/'
+  if (p.startsWith(home)) {
+    const tail = p.slice(home.length).split('/').slice(1).join('/')
+    return tail ? `~/${tail}` : '~'
+  }
+  return p
+}
+
+function SidebarFooter() {
+  const isRecording = useVoice((s) => s.isRecording)
+  const tabs = useSessions((s) => s.tabs)
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
+  const [model, setModel] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!activeTab?.presetId) { setModel(null); return }
+    findPreset(activeTab.presetId)
+      .then((p) => { if (!cancelled) setModel(p?.model ?? null) })
+      .catch(() => { if (!cancelled) setModel(null) })
+    return () => { cancelled = true }
+  }, [activeTab?.presetId])
+
+  return (
+    <div className="px-3.5 py-2.5 border-t border-rule flex items-center gap-2 text-[11.5px] text-fg-dim font-mono">
+      <span
+        className={`w-1.5 h-1.5 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-sage'}`}
+        title={isRecording ? 'recording' : 'idle'}
+      />
+      <span className="truncate" title={model ?? ''}>
+        {isRecording ? 'recording…' : (model ? `Claude · ${shortModel(model)}` : 'Claude Code')}
+      </span>
+    </div>
+  )
+}
+
+function shortModel(m: string): string {
+  // claude-opus-4-7 → Opus 4.7
+  const lower = m.toLowerCase()
+  if (lower.includes('opus')) {
+    const v = m.match(/(\d+[-.]?\d*)/)?.[1]?.replace('-', '.')
+    return v ? `Opus ${v}` : 'Opus'
+  }
+  if (lower.includes('sonnet')) {
+    const v = m.match(/(\d+[-.]?\d*)/)?.[1]?.replace('-', '.')
+    return v ? `Sonnet ${v}` : 'Sonnet'
+  }
+  if (lower.includes('haiku')) {
+    const v = m.match(/(\d+[-.]?\d*)/)?.[1]?.replace('-', '.')
+    return v ? `Haiku ${v}` : 'Haiku'
+  }
+  return m
+}
+
+// Suppress unused-import warnings — these are intentionally available for
+// future signal additions (scheduler badge, billing-derived sidebar copy).
+void useScheduleState; void useBilling; void useMemo

@@ -105,7 +105,7 @@ export function StatusBar() {
 
   if (!tab) {
     return (
-      <div className="h-6 bg-bg-elev border-t border-line flex items-center px-3 gap-4 text-xs text-fg-faint shrink-0" />
+      <div className="h-6 bg-bg-elev border-t border-line flex items-center px-3 gap-4 text-xs text-fg-faint shrink-0" data-testid="tour-statusbar" />
     )
   }
 
@@ -121,7 +121,7 @@ export function StatusBar() {
     : '—'
 
   return (
-    <div className="h-6 bg-bg-elev border-t border-line flex items-center px-3 gap-3 text-xs shrink-0 overflow-x-auto">
+    <div className="h-6 bg-bg-elev border-t border-line flex items-center px-3 gap-3 text-xs shrink-0 overflow-x-auto" data-testid="tour-statusbar">
       <div className="font-mono text-fg-dim flex items-center gap-1 whitespace-nowrap tabular-nums">
         <Field label="model" value={modelTxt} />
         <Sep />

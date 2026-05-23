@@ -296,7 +296,7 @@ function SessionCluster({
   return (
     <>
       <Tooltip content="New Session (pick a directory)">
-        <IconButton label="New session" glyph="+" onClick={onNewSession} />
+        <span data-testid="tour-new-session"><IconButton label="New session" glyph="+" onClick={onNewSession} /></span>
       </Tooltip>
       <Tooltip content="Restart current session — kills claude and respawns in same cwd">
         <IconButton

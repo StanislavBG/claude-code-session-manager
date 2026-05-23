@@ -19,6 +19,7 @@ export function TabBar() {
 
   // Re-render the badge layer once a second so the 30s activity window can
   // expire on its own — lastLineAt itself doesn't change when no new line
+  // Note: tour-tabbar testid is on the root container below.
   // arrives, so without a tick the dot would never clear.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -44,7 +45,7 @@ export function TabBar() {
   })
 
   return (
-    <div className="h-9 bg-bg-elev border-b border-line flex items-center px-2 gap-1 shrink-0">
+    <div className="h-9 bg-bg-elev border-b border-line flex items-center px-2 gap-1 shrink-0" data-testid="tour-tabbar">
       {/* Scrollable tab list — overflow-x-auto must NOT wrap the dropdown */}
       <div
         ref={containerRef}

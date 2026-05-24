@@ -75,7 +75,8 @@ export interface TranscriptEvent {
 
 export interface SubscribeResult {
   ok: boolean;
-  path: string;
+  path: string | null;
+  error?: string;
 }
 
 export interface PersistedTab {
@@ -245,7 +246,7 @@ export interface ScheduleConfig {
   schemaVersion: 1;
 }
 
-export type ScheduleJobStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type ScheduleJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'needs_review';
 
 export interface ScheduleJobRuntime {
   pid: number;
@@ -275,6 +276,14 @@ export interface ScheduleJob {
    *  transcript even after restart. */
   sessionId?: string;
   runtime?: ScheduleJobRuntime;
+  /**
+   * Set when the post-run verifier downgrades the job.
+   * Values: 'halt' | 'deps_unmet' | 'transcript_errors' | 'verify_unavailable'
+   * Cleared when the job is reset to 'pending'.
+   */
+  verifierVerdict?: string;
+  /** Per-job values carried in queue.json for dependency checking. */
+  dependsOn?: string[];
 }
 
 export interface SchedulePaths {
@@ -743,16 +752,16 @@ export interface SessionManagerAPI {
     homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
-    openInEditor: (cwd: string, editor?: string | null) => Promise<{ ok: boolean; editor?: string; error?: string }>;
+    openInEditor: (cwd: string, editor?: string | null) => Promise<{ ok: boolean; opener?: string; error?: string }>;
     /** Open an http/https URL in the OS default browser. file://, javascript:,
      *  and other schemes are rejected with `ok:false` to prevent abuse. */
     openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
     /** Open a specific file at line:col in the user's editor. Editors with
      *  goto-line support (code/cursor/subl) get the `-g file:line:col` form;
-     *  others open the file alone. */
-    openFileInEditor: (filePath: string, line?: number, col?: number, editor?: string | null) => Promise<{ ok: boolean; editor?: string; error?: string }>;
-    openInFinder: (cwd: string) => Promise<{ ok: boolean; error?: string }>;
-    openInTerminal: (cwd: string) => Promise<{ ok: boolean; terminal?: string; error?: string }>;
+     *  others open the file alone. Image files are routed to the OS default viewer. */
+    openFileInEditor: (filePath: string, line?: number, col?: number, editor?: string | null) => Promise<{ ok: boolean; opener?: string; error?: string }>;
+    openInFinder: (cwd: string) => Promise<{ ok: boolean; opener?: string; error?: string }>;
+    openInTerminal: (cwd: string) => Promise<{ ok: boolean; opener?: string; error?: string }>;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;
   };
   pty: {

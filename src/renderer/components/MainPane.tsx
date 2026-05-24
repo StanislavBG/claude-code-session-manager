@@ -202,7 +202,11 @@ export function MainPane({
   }, [activeTab?.id])
 
   return (
-    <main className="flex-1 min-w-0 bg-bg flex flex-col">
+    // `relative` so absolute-positioned children (TerminalControls gear,
+    // WatchersPopover) anchor to MainPane rather than falling through to the
+    // viewport — without it, the gear at `top-2 right-2` lands inside the
+    // TabBar and visually overlaps the "v{__APP_VERSION__}" text at its right edge.
+    <main className="relative flex-1 min-w-0 bg-bg flex flex-col">
       {active === 'terminal' && broadcastOpen && (
         <BroadcastBar
           onClose={onCloseBroadcast}

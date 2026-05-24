@@ -11,7 +11,7 @@ import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
 import { getLintQueueCached } from '../../../lib/lintQueueCache'
 
-type PrdStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unqueued'
+type PrdStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unqueued' | 'needs_review'
 
 interface PrdMeta {
   slug: string
@@ -42,6 +42,7 @@ function StatusPill({ status }: { status: PrdStatus }) {
     completed: `${base} text-green-400 border-green-400/50`,
     failed: `${base} text-red-400 border-red-400/50`,
     unqueued: `${base} text-fg-faint border-dashed border-line`,
+    needs_review: `${base} text-orange-400 border-orange-400/50`,
   }
   return (
     <span className={cls[status]}>
@@ -516,6 +517,16 @@ export function SchedulerPrdsView() {
             }}
             disabled={status !== 'failed'}
           />
+          {status === 'needs_review' && (
+            <TBtn
+              label="Re-fire"
+              tip="Reset to pending and re-queue for next scheduler run"
+              onClick={() => {
+                window.api.schedule.resetJob(selectedSlug)
+              }}
+              primary
+            />
+          )}
           <TBtn
             label="Run now"
             tip="Run all pending jobs immediately"
@@ -583,6 +594,16 @@ export function SchedulerPrdsView() {
               <FmRow label="queued status">{status}</FmRow>
               {job?.finishedAt && (
                 <FmRow label="last run">{new Date(job.finishedAt).toLocaleString()}</FmRow>
+              )}
+              {job?.verifierVerdict && (
+                <FmRow label="verifier verdict">
+                  <span className="font-mono text-orange-400">{job.verifierVerdict}</span>
+                </FmRow>
+              )}
+              {job?.verifierVerdict && job?.error && (
+                <FmRow label="verdict reason">
+                  <span className="font-mono text-[10px] text-fg-faint break-words">{job.error.slice(0, 160)}</span>
+                </FmRow>
               )}
               {customFieldKeys.length > 0 && (
                 <div className="pt-1 mt-1 border-t border-line/60">

@@ -154,7 +154,7 @@ export function BackgroundAgentsModal({ open, onClose, variant = 'overlay' }: Pr
   const visibleJobs = useMemo<ScheduleJob[]>(() => {
     if (!snap) return []
     const statusRank: Record<ScheduleJob['status'], number> = {
-      running: 0, pending: 1, failed: 2, completed: 3,
+      running: 0, pending: 1, failed: 2, needs_review: 2, completed: 3,
     }
     return snap.jobs
       .filter((j) => !hidden.has(j.slug))
@@ -692,6 +692,7 @@ function StatusBadge({ status }: { status: ScheduleJob['status'] }) {
     running: { ch: '◐', cls: 'text-blue-400 animate-pulse' },
     completed: { ch: '✓', cls: 'text-green-400' },
     failed: { ch: '✕', cls: 'text-red-400' },
+    needs_review: { ch: '⚠', cls: 'text-orange-400' },
   }[status] ?? { ch: '?', cls: 'text-fg-faint' }
   return <span className={`text-sm w-4 text-center ${style.cls}`}>{style.ch}</span>
 }

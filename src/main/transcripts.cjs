@@ -160,6 +160,12 @@ const MAX_TRANSCRIPT_SUBS = 20;
 async function subscribe({ tabId, cwd, sessionUuid }) {
   if (subs.has(tabId)) return { ok: true, path: subs.get(tabId).filePath };
   if (subs.size >= MAX_TRANSCRIPT_SUBS) {
+    logs.writeLine({
+      level: 'warn',
+      scope: 'transcripts',
+      message: 'subscribe rejected: at cap',
+      meta: { tabId, cap: MAX_TRANSCRIPT_SUBS, cwd },
+    });
     return { ok: false, path: null, error: 'too many active subscriptions' };
   }
   const filePath = transcriptPath(cwd, sessionUuid);

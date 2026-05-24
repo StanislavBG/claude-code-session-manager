@@ -333,6 +333,9 @@ const PLUGIN_SLUG_RE = /^[a-z0-9\-/]+$/;
 const pluginsInstall = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
 }).passthrough();
+const pluginsAbort = z.object({
+  slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
+}).passthrough();
 
 // SuperAgent — "boss" run that writes a structured prompt to the active
 // tab's PTY. Bounds match the inline schemas in superagent.cjs; centralizing
@@ -404,6 +407,7 @@ module.exports = {
     gitFileStatus,
     repoAnalyze,
     pluginsInstall,
+    pluginsAbort,
     superagentStart,
     superagentTabId,
     memoryList,

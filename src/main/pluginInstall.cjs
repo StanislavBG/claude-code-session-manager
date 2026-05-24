@@ -28,6 +28,7 @@ const { schemas } = require('./ipcSchemas.cjs');
 const SLUG_RE = /^[a-z0-9\-/]+$/;
 const MAX_LINE_BYTES = 16 * 1024;
 const KILL_AFTER_MS = 5 * 60 * 1000; // 5 min hard ceiling per install
+const KILL_GRACE_MS = 5_000;          // SIGTERM → SIGKILL escalation window
 
 let mainWindow = null;
 const inFlight = new Map(); // slug -> proc
@@ -81,9 +82,28 @@ function install({ slug }) {
     inFlight.set(slug, proc);
 
     let lineBuf = '';
+    let settled = false;
+
     const killTimer = setTimeout(() => {
-      try { proc.kill(); } catch { /* */ }
+      try { proc.kill('SIGTERM'); } catch { /* */ }
+      // Escalate to SIGKILL after KILL_GRACE_MS if the pty hasn't exited.
+      const escalate = setTimeout(() => {
+        try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      }, KILL_GRACE_MS);
+      if (escalate.unref) escalate.unref();
     }, KILL_AFTER_MS);
+    if (killTimer.unref) killTimer.unref();
+
+    // Belt-and-suspenders: if onExit never fires (broken pty event path after
+    // SIGKILL — analogous to anthropics/claude-code #61735's unreachable pts),
+    // force-release the inFlight lock so the slug isn't permanently stuck.
+    const deadman = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      inFlight.delete(slug);
+      resolve({ ok: false, exitCode: -1, error: 'install hung — pty onExit never fired' });
+    }, KILL_AFTER_MS + KILL_GRACE_MS + 30_000);
+    if (deadman.unref) deadman.unref();
 
     proc.onData((data) => {
       lineBuf += data;
@@ -101,7 +121,10 @@ function install({ slug }) {
     });
 
     proc.onExit(({ exitCode }) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(killTimer);
+      clearTimeout(deadman);
       if (lineBuf.length > 0) {
         send('plugins:install-progress', { slug, line: lineBuf });
         lineBuf = '';
@@ -123,6 +146,21 @@ function registerPluginInstallHandlers() {
       return { ok: false, exitCode: -1, error: 'invalid slug' };
     }
     return install({ slug: parsed.data.slug });
+  });
+
+  // plugins:abort — send SIGKILL to a stuck install and release the inFlight
+  // lock immediately, analogous to pty:kill. UI wiring is a follow-up PRD.
+  ipcMain.handle('plugins:abort', async (_e, payload) => {
+    const parsed = schemas.pluginsAbort.safeParse(payload);
+    if (!parsed.success) {
+      return { ok: false, error: 'invalid slug' };
+    }
+    const { slug } = parsed.data;
+    const proc = inFlight.get(slug);
+    if (!proc) return { ok: false, error: 'no install in progress for slug' };
+    try { proc.kill('SIGKILL'); } catch { /* */ }
+    inFlight.delete(slug);
+    return { ok: true };
   });
 }
 

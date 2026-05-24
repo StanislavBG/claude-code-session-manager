@@ -55,7 +55,7 @@ const { readTail } = require('./lib/fileTail.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const logs = require('./logs.cjs');
-const { schemas } = require('./ipcSchemas.cjs');
+const { schemas, validated } = require('./ipcSchemas.cjs');
 const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
@@ -1228,17 +1228,19 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     await broadcast();
 
     if (actuallyFailed && failedJobSnapshot) {
-      // Transient-failure detector: SIGTERM/SIGKILL within 30s = almost
+      // Transient-failure detector: SIGTERM/SIGKILL within 45s = almost
       // always external kill (user-initiated app restart, OOM-kill, manual
-      // process kill). The PRD itself didn't fail; the run was interrupted
-      // before it could do meaningful work. Spawning an Opus investigator on
-      // these is wasted tokens AND pollutes the queue with redundant fix-PRDs
-      // (real example 2026-05-21: 07-agent-view-robot-rename-lasttool got
+      // process kill, Electron HMR). The PRD itself didn't fail; the run was
+      // interrupted before it could do meaningful work. Spawning an Opus
+      // investigator on these is wasted tokens AND pollutes the queue with
+      // redundant fix-PRDs (real example 2026-05-21: 07-agent-view-... got
       // SIGTERMed at 10s by an app restart, the rename had already been done
-      // anyway, and the auto-generated fix-PRD just sat in queue.json as
-      // noise). Auto-retry up to 2x before falling through to investigation.
+      // anyway). The 45s cutoff (was 30s) catches Electron-HMR borderline
+      // cases like PRD 26 SIGTERM'd at 33s — that was 3s over the old cutoff
+      // and fell through to a fix-PRD that just acknowledged the work was
+      // already done. Auto-retry up to 2x before falling through to investigation.
       const ec = failedJobSnapshot.exitCode;
-      const transient = (ec === 143 || ec === 137) && res.durationMs < 30_000;
+      const transient = (ec === 143 || ec === 137) && res.durationMs < 45_000;
       const retries = failedJobSnapshot.transientRetries ?? 0;
       if (transient && retries < 2) {
         console.log(`[scheduler] transient failure (exit=${ec} dur=${res.durationMs}ms) — auto-retry ${retries + 1}/2 for ${job.slug}`);
@@ -1466,15 +1468,10 @@ function registerScheduleHandlers() {
     return { ok: true };
   });
 
-  ipcMain.handle('schedule:set-config', async (_e, partial) => {
-    let validated;
-    try {
-      validated = schemas.setConfigSchema.parse(partial || {});
-    } catch (e) {
-      return { ok: false, error: e?.message ?? 'invalid config' };
-    }
+  // .default({}) so callers may omit the payload entirely (same as the old `partial || {}`).
+  ipcMain.handle('schedule:set-config', validated(schemas.setConfigSchema.default({}), async (data) => {
     const config = await mutate((state) => {
-      const { supervisor: supPartial, ...rest } = validated;
+      const { supervisor: supPartial, ...rest } = data;
       state.config = { ...state.config, ...rest };
       if (supPartial !== undefined) {
         state.config.supervisor = { ...(state.config.supervisor ?? {}), ...supPartial };
@@ -1483,15 +1480,9 @@ function registerScheduleHandlers() {
     });
     await rescheduleTimer();
     return { ok: true, config };
-  });
+  }));
 
-  ipcMain.handle('schedule:reset-job', async (_e, payload) => {
-    let slug;
-    try {
-      ({ slug } = schemas.scheduleSlug.parse(payload));
-    } catch (e) {
-      return { ok: false, error: 'invalid slug' };
-    }
+  ipcMain.handle('schedule:reset-job', validated(schemas.scheduleSlug, async ({ slug }) => {
     if (!safeSlugPath(slug)) return { ok: false, error: 'invalid slug' };
     const found = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
@@ -1502,7 +1493,7 @@ function registerScheduleHandlers() {
     if (!found) return { ok: false, error: 'not found' };
     await broadcast();
     return { ok: true };
-  });
+  }));
 
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
@@ -1580,13 +1571,7 @@ function registerScheduleHandlers() {
     return { ok: true };
   });
 
-  ipcMain.handle('schedule:read-prd', async (_e, payload) => {
-    let slug;
-    try {
-      ({ slug } = schemas.scheduleSlug.parse(payload));
-    } catch {
-      return { ok: false, error: 'invalid slug' };
-    }
+  ipcMain.handle('schedule:read-prd', validated(schemas.scheduleSlug, async ({ slug }) => {
     const filePath = safeSlugPath(slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
@@ -1595,15 +1580,9 @@ function registerScheduleHandlers() {
     } catch (e) {
       return { ok: false, error: e?.message };
     }
-  });
+  }));
 
-  ipcMain.handle('schedule:read-log', async (_e, payload) => {
-    let slug, runId;
-    try {
-      ({ slug, runId } = schemas.scheduleReadLog.parse(payload));
-    } catch {
-      return { ok: false, error: 'invalid slug or runId' };
-    }
+  ipcMain.handle('schedule:read-log', validated(schemas.scheduleReadLog, async ({ slug, runId }) => {
     // Defense-in-depth: re-check containment after path.resolve even though
     // SLUG_RE / RUN_ID_RE already forbid path separators.
     const logPath = path.resolve(path.join(RUNS_DIR, runId, `${slug}.log`));
@@ -1616,16 +1595,13 @@ function registerScheduleHandlers() {
     } catch (e) {
       return { ok: false, error: e?.message };
     }
-  });
+  }));
 
-  ipcMain.handle('schedule:write-prd', async (_e, payload) => {
-    let parsed;
-    try { parsed = schemas.scheduleWritePrd.parse(payload); }
-    catch (e) { return { ok: false, error: e?.message ?? 'invalid payload' }; }
-    const resolved = safeSlugPath(parsed.slug);
+  ipcMain.handle('schedule:write-prd', validated(schemas.scheduleWritePrd, async (data) => {
+    const resolved = safeSlugPath(data.slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
-      await config.writeTextAtomic(resolved, parsed.body);
+      await config.writeTextAtomic(resolved, data.body);
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };
     }
@@ -1635,7 +1611,7 @@ function registerScheduleHandlers() {
     } catch (e) {
       return { ok: false, error: e?.message ?? 'stat failed' };
     }
-  });
+  }));
 
   ipcMain.handle('schedule:list-prds', async () => {
     ensureDirs();

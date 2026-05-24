@@ -161,6 +161,22 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
     return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
   }, [filteredRows])
 
+  // Per-date input/output token sums for the stacked-bar chart below.
+  // O(rows); maxTokens kept separate so the bars share a y-scale.
+  const { stackedBars, maxStackedTokens } = useMemo(() => {
+    const byDate = new Map<string, { date: string; input: number; output: number; cost: number }>()
+    for (const r of filteredRows) {
+      let cur = byDate.get(r.date)
+      if (!cur) { cur = { date: r.date, input: 0, output: 0, cost: 0 }; byDate.set(r.date, cur) }
+      cur.input += r.inputTokens
+      cur.output += r.outputTokens
+      cur.cost += r.estimatedCostUsd
+    }
+    const bars = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+    const max = bars.reduce((m, d) => Math.max(m, d.input + d.output), 1)
+    return { stackedBars: bars, maxStackedTokens: max }
+  }, [filteredRows])
+
   const { chartData, projectKeys } = useMemo(() => {
     const projects = [...new Set(filteredRows.map((r) => r.projectCwd))]
     const byDate = new Map<string, Record<string, number | string>>()
@@ -275,6 +291,43 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
         </ResponsiveContainer>
       </div>
 
+      <div className="border border-line rounded bg-bg-elev p-4">
+        <div className="flex items-baseline justify-between mb-3">
+          <h3 className="text-xs uppercase tracking-wider text-fg">Input vs output tokens</h3>
+          <div className="flex items-center gap-3 text-[10px] text-fg-faint">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-cyan-500/70" />input</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500/70" />output</span>
+          </div>
+        </div>
+        <div className="flex items-end gap-px h-32">
+          {stackedBars.map((d) => {
+            const inH = (d.input / maxStackedTokens) * 100
+            const outH = (d.output / maxStackedTokens) * 100
+            return (
+              <div
+                key={d.date}
+                className="flex-1 flex flex-col justify-end gap-px"
+                title={`${d.date} · in ${formatTokens(d.input)} · out ${formatTokens(d.output)} · $${d.cost.toFixed(4)}`}
+              >
+                <div
+                  className="w-full bg-purple-500/70 rounded-t-sm"
+                  style={{ height: `${outH}%`, minHeight: d.output > 0 ? 2 : 0 }}
+                />
+                <div
+                  className="w-full bg-cyan-500/70 rounded-b-sm"
+                  style={{ height: `${inH}%`, minHeight: d.input > 0 ? 2 : 0 }}
+                />
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex justify-between mt-2 text-[10px] text-fg-faint">
+          <span>in {formatTokens(totals.inputTokens)}</span>
+          <span>out {formatTokens(totals.outputTokens)}</span>
+          <span>est. cost ${totals.estimatedCostUsd.toFixed(2)}</span>
+        </div>
+      </div>
+
       <div className="border border-line rounded overflow-hidden">
         <table className="w-full text-xs">
           <thead className="bg-bg-elev sticky top-0">
@@ -336,6 +389,12 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
       <div className={`text-lg font-mono ${highlight ? 'text-accent' : 'text-fg'}`}>{value}</div>
     </div>
   )
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toFixed(0)
 }
 
 function FreshnessIndicator({ lastFetchedAt }: { lastFetchedAt: number | null }) {

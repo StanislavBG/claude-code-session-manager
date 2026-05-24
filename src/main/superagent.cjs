@@ -176,6 +176,15 @@ function getStatus(tabId) {
   return runs.get(tabId) ?? null;
 }
 
+function dropTab(tabId) {
+  if (runs.has(tabId)) {
+    runs.delete(tabId);
+    if (process.env.SM_DEBUG_LEAKS === '1') {
+      console.log('[superagent] dropTab', tabId, 'runs.size=', runs.size);
+    }
+  }
+}
+
 function registerSuperAgentHandlers() {
   ipcMain.handle('superagent:start', (_e, payload) => {
     const parsed = schemas.superagentStart.parse(payload);
@@ -196,6 +205,7 @@ function registerSuperAgentHandlers() {
 module.exports = {
   attachWindow,
   registerSuperAgentHandlers,
+  dropTab,
   // Exposed for tests.
   buildBossPrompt,
   _runs: runs,

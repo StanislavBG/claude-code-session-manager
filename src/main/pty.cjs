@@ -164,6 +164,9 @@ class PtyManager {
       }
       this.sessions.delete(tabId);
     }
+    // Always drop superagent run state — a run can be started before the pty
+    // finishes spawning, so clean up regardless of whether a session existed.
+    try { require('./superagent.cjs').dropTab(tabId); } catch { /* superagent not loaded (e2e) */ }
   }
 
   killAll() {
@@ -178,7 +181,11 @@ function registerPtyHandlers() {
   ipcMain.handle('pty:spawn', v(s.ptySpawn, (payload) => manager.spawn(payload)));
   ipcMain.on('pty:write', (_e, payload) => { try { manager.write(s.ptyWrite.parse(payload)); } catch { /* ignore */ } });
   ipcMain.on('pty:resize', (_e, payload) => { try { manager.resize(s.ptyResize.parse(payload)); } catch { /* ignore */ } });
-  ipcMain.on('pty:kill', (_e, tabId) => { if (typeof tabId === 'string') manager.kill(tabId); });
+  ipcMain.on('pty:kill', (_e, tabId) => {
+    if (typeof tabId !== 'string') return;
+    manager.kill(tabId);
+    try { require('./superagent.cjs').dropTab(tabId); } catch { /* superagent module not initialized (e2e) */ }
+  });
 }
 
 module.exports = { manager, registerPtyHandlers };

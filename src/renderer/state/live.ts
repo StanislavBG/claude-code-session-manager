@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { create } from 'zustand'
 import type { TranscriptEvent } from '../../preload/api'
+import type { SessionTab } from './sessions'
 
 /**
  * Per-tab live state derived from the session transcript JSONL. Consumers
@@ -141,6 +143,15 @@ export const useLive = create<LiveState>((set, get) => ({
       .then(async (r) => {
         const cur = get().tabs[tabId]
         if (!cur) return
+        if (!r.ok) {
+          // Surface to the user — silent failure leaves the AgentView blank
+          // forever (matches the "transcripts loss" pattern from upstream).
+          const { toast } = await import('./toast')
+          toast.error(`Live view unavailable: ${r.error ?? 'subscribe failed'}`)
+          // Set path: null so AgentView shows "offline" instead of spinning.
+          set({ tabs: { ...get().tabs, [tabId]: { ...cur, path: null } } })
+          return
+        }
         set({ tabs: { ...get().tabs, [tabId]: { ...cur, path: r.path } } })
         const events = await window.api.transcripts.buffer(tabId)
         // Replay of historical events — don't bump lastEventAt, otherwise
@@ -320,3 +331,29 @@ export const useLive = create<LiveState>((set, get) => ({
     set({ tabs: { ...get().tabs, [tabId]: next } })
   },
 }))
+
+/**
+ * Bind a SessionTab to the live store: subscribe on mount, unsubscribe on
+ * unmount, and re-bind whenever the tab's identity (id/cwd/claudeSessionId)
+ * changes. Returns the LiveTab slice for the given tab, or undefined if
+ * `tab` is null/undefined or no slice exists yet.
+ *
+ * Centralizes the subscribe/unsubscribe lifecycle so every consumer
+ * (AgentView, Tasks, Subagents, SessionPlansView, AlmanacFooter) gets the
+ * same refcounted behavior. Previously AgentView's mount-effect implicitly
+ * drove `lastEventAt`; if it stopped mounting, peer consumers (like the
+ * footer) would silently stall at 0.
+ */
+export function useLiveTab(tab: SessionTab | null | undefined): LiveTab | undefined {
+  const subscribe = useLive((s) => s.subscribe)
+  const unsubscribe = useLive((s) => s.unsubscribe)
+  const live = useLive((s) => (tab ? s.tabs[tab.id] : undefined))
+
+  useEffect(() => {
+    if (!tab) return
+    subscribe(tab.id, tab.cwd, tab.claudeSessionId)
+    return () => unsubscribe(tab.id)
+  }, [tab?.id, tab?.cwd, tab?.claudeSessionId, subscribe, unsubscribe])
+
+  return live
+}

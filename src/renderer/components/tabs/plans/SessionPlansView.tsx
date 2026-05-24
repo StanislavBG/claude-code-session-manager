@@ -6,7 +6,7 @@ import { ListDetail } from '../../ui/ListDetail'
 import { EmptyState } from '../../ui/EmptyState'
 import { Toggle } from '../../ui/Toggle'
 import { useActiveTab } from '../../../lib/useActiveTab'
-import { useLive } from '../../../state/live'
+import { useLiveTab } from '../../../state/live'
 
 type DiffRow = { sign: ' ' | '+' | '-'; text: string }
 
@@ -49,17 +49,9 @@ function lineDiff(a: string, b: string): DiffRow[] {
 
 export function SessionPlansView() {
   const activeTab = useActiveTab()
-  const subscribe = useLive((s) => s.subscribe)
-  const unsubscribe = useLive((s) => s.unsubscribe)
-  const live = useLive((s) => (activeTab ? s.tabs[activeTab.id] : undefined))
+  const live = useLiveTab(activeTab)
   const [selectedAt, setSelectedAt] = useState<number | null>(null)
   const [showDiff, setShowDiff] = useState(false)
-
-  useEffect(() => {
-    if (!activeTab) return
-    subscribe(activeTab.id, activeTab.cwd, activeTab.claudeSessionId)
-    return () => unsubscribe(activeTab.id)
-  }, [activeTab, subscribe, unsubscribe])
 
   const plans = live?.plans ?? []
 

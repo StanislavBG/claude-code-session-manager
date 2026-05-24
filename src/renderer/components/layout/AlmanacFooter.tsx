@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
-import { useLive } from '../../state/live'
+import { useLiveTab } from '../../state/live'
 import { useBilling } from '../../state/billing'
 import type { NavKey } from '../LeftNav'
 
@@ -21,7 +21,8 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const tab = tabs.find((t) => t.id === activeTabId) ?? null
-  const lastEventAt = useLive((s) => (activeTabId ? s.tabs[activeTabId]?.lastEventAt ?? 0 : 0))
+  const live = useLiveTab(tab)
+  const lastEventAt = live?.lastEventAt ?? 0
   const billing = useBilling((s) => s.data)
   const [branch, setBranch] = useState<string | null>(null)
   // Force re-render every 60s so the "X min ago" + remaining tick.

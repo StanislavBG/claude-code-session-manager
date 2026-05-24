@@ -1,23 +1,14 @@
-import { useEffect } from 'react'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { useActiveTab } from '../../lib/useActiveTab'
-import { useLive } from '../../state/live'
+import { useLiveTab } from '../../state/live'
 
 /**
  * Tasks tab — live view of TodoWrite state from the active session transcript.
  */
 export function Tasks() {
   const activeTab = useActiveTab()
-  const subscribe = useLive((s) => s.subscribe)
-  const unsubscribe = useLive((s) => s.unsubscribe)
-  const live = useLive((s) => (activeTab ? s.tabs[activeTab.id] : undefined))
-
-  useEffect(() => {
-    if (!activeTab) return
-    subscribe(activeTab.id, activeTab.cwd, activeTab.claudeSessionId)
-    return () => unsubscribe(activeTab.id)
-  }, [activeTab, subscribe, unsubscribe])
+  const live = useLiveTab(activeTab)
 
   if (!activeTab) {
     return (

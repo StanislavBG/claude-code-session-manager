@@ -8,7 +8,7 @@ import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
-import { useLive } from '../../state/live'
+import { useLiveTab, type LiveTab } from '../../state/live'
 import type { Scope } from '../../lib/scopes'
 import { AgentsLibrary } from './Library'
 import {
@@ -98,15 +98,10 @@ export function Subagents() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPath])
 
-  // Live mode: subscribe to transcripts for active tab.
-  const subscribe = useLive((s) => s.subscribe)
-  const unsubscribe = useLive((s) => s.unsubscribe)
-  const liveTabs = useLive((s) => s.tabs)
-  useEffect(() => {
-    if (mode !== 'live' || !activeTab) return
-    subscribe(activeTab.id, activeTab.cwd, activeTab.claudeSessionId)
-    return () => unsubscribe(activeTab.id)
-  }, [mode, activeTab, subscribe, unsubscribe])
+  // Live mode: subscribe to transcripts for active tab. Gating the input to
+  // `useLiveTab` preserves the prior behavior of only subscribing when the
+  // user is actually looking at the live panel.
+  const live = useLiveTab(mode === 'live' ? activeTab : null)
 
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -216,7 +211,7 @@ export function Subagents() {
       ) : !activeTab ? (
         <EmptyState title="no active session" hint="open a terminal tab to watch live subagents" />
       ) : (
-        <LiveAgentsPanel tabId={activeTab.id} live={liveTabs[activeTab.id]} />
+        <LiveAgentsPanel tabId={activeTab.id} live={live} />
       )}
     </Panel>
   )
@@ -227,7 +222,7 @@ function LiveAgentsPanel({
   live,
 }: {
   tabId: string
-  live: ReturnType<typeof useLive.getState>['tabs'][string] | undefined
+  live: LiveTab | undefined
 }) {
   if (!live) return <EmptyState title={`waiting for transcript (tab ${tabId.slice(0, 8)})`} />
   if (live.agents.length === 0)

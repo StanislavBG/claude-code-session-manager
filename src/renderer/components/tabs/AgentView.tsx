@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
-import { useLive, type ToolUseEntry, type ActivityEvent, type TodoItem } from '../../state/live'
+import { useLiveTab, type ToolUseEntry, type ActivityEvent, type TodoItem } from '../../state/live'
 import { useBilling } from '../../state/billing'
 import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
 
@@ -50,10 +50,8 @@ function extractToolTarget(entry: ToolUseEntry): string {
 export function AgentView() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
-  const subscribe = useLive((s) => s.subscribe)
-  const unsubscribe = useLive((s) => s.unsubscribe)
-  const live = useLive((s) => (activeTabId ? s.tabs[activeTabId] : undefined))
   const tab = tabs.find((t) => t.id === activeTabId) ?? null
+  const live = useLiveTab(tab)
 
   const billing = useBilling((s) => s.data)
   const fiveHourUtil = (() => {
@@ -65,12 +63,6 @@ export function AgentView() {
           : null
     return d?.usage.five_hour?.utilization ?? 0
   })()
-
-  useEffect(() => {
-    if (!tab) return
-    subscribe(tab.id, tab.cwd, tab.claudeSessionId)
-    return () => unsubscribe(tab.id)
-  }, [tab?.id, tab?.cwd, tab?.claudeSessionId, subscribe, unsubscribe])
 
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {

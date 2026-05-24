@@ -1206,6 +1206,22 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             actuallyFailed = true;
             failedJobSnapshot = { ...s.jobs[i2] };
           }
+          // Auto-promote: when a fix-* PRD completes successfully, the original
+          // failed PRD's work is logically done. Flip its status to 'completed'
+          // so the cross-group failure gate in pickNextBatch releases. Without
+          // this, the queue stalls indefinitely behind a stale failure even
+          // though the auto-recovery did its job.
+          if (s.jobs[i2].status === 'completed' && isFixPlanSlug(job.slug)) {
+            const originalSlug = job.slug.replace(/^(\d+)-fix-/, '$1-');
+            const orig = s.jobs.findIndex((x) => x.slug === originalSlug && x.status === 'failed');
+            if (orig >= 0) {
+              console.log(`[scheduler] auto-promote: ${originalSlug} (failed) → completed because ${job.slug} succeeded`);
+              s.jobs[orig].status = 'completed';
+              s.jobs[orig].exitCode = 0;
+              s.jobs[orig].error = null;
+              s.jobs[orig].completedBy = job.slug;
+            }
+          }
         }
       }
     });

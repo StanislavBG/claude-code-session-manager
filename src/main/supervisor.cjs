@@ -154,15 +154,23 @@ function appendSupervisorLog(entry) {
 }
 
 function readSupervisorLog(n) {
-  try {
-    const text = fs.readFileSync(SUPERVISOR_LOG_PATH, 'utf8');
-    const lines = text.split('\n').filter((l) => l.trim());
-    return lines.slice(-n).map((l) => {
-      try { return JSON.parse(l); } catch { return null; }
-    }).filter(Boolean).reverse();
-  } catch {
-    return [];
+  const lines = [];
+  for (const p of [SUPERVISOR_LOG_PATH + '.1', SUPERVISOR_LOG_PATH]) {
+    let stat;
+    try { stat = fs.statSync(p); } catch { continue; }
+    // Sanity-cap: skip any file larger than 2× the rotation ceiling.
+    // The rotated file is bounded to SUPERVISOR_LOG_MAX_BYTES by policy;
+    // anything larger indicates corruption or a hand-edit — skip it.
+    if (stat.size > 2 * SUPERVISOR_LOG_MAX_BYTES) continue;
+    try {
+      const t = fs.readFileSync(p, 'utf8');
+      for (const l of t.split('\n')) if (l.trim()) lines.push(l);
+    } catch { /* file vanished between stat and read — skip */ }
   }
+  return lines.slice(-n)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean)
+    .reverse();
 }
 
 // ─── Probe ──────────────────────────────────────────────────────────────────

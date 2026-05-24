@@ -1097,17 +1097,18 @@ ${logTail}
 DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
 
   const fd = fs.openSync(investigationLogPath, 'a');
+  let fdClosed = false;
+  const closeFd = () => { if (fdClosed) return; fdClosed = true; try { fs.closeSync(fd); } catch { /* */ } };
+  const safeLog = (msg) => { if (fdClosed) return; try { fs.writeSync(fd, msg); } catch { /* fd vanished mid-write */ } };
   const sessionId = randomUUID();
-  try {
-    fs.writeSync(fd, `[scheduler] investigation starting for ${failedJob.slug} at ${new Date().toISOString()}\n[scheduler] target fix PRD: ${fixPath}\n[scheduler] sessionId=${sessionId}\n\n`);
-  } catch { /* */ }
+  safeLog(`[scheduler] investigation starting for ${failedJob.slug} at ${new Date().toISOString()}\n[scheduler] target fix PRD: ${fixPath}\n[scheduler] sessionId=${sessionId}\n\n`);
 
   const claudeBin = resolveClaudeBin();
   const childEnv = cleanChildEnv();
   const investigationPromptCheck = validatePromptForSpawn(prompt, `<investigation prompt for ${failedJob.slug}>`);
   if (!investigationPromptCheck.ok) {
-    try { fs.writeSync(fd, `\n[scheduler] ${investigationPromptCheck.error}\n`); } catch { /* */ }
-    try { fs.closeSync(fd); } catch { /* */ }
+    safeLog(`\n[scheduler] ${investigationPromptCheck.error}\n`);
+    closeFd();
     return;
   }
   let child;
@@ -1125,29 +1126,29 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
       stdio: ['ignore', fd, fd],
     });
   } catch (e) {
-    try { fs.writeSync(fd, `\n[scheduler] investigation spawn failed: ${e?.message ?? e}\n`); } catch { /* */ }
-    try { fs.closeSync(fd); } catch { /* */ }
+    safeLog(`\n[scheduler] investigation spawn failed: ${e?.message ?? e}\n`);
+    closeFd();
     return;
   }
 
-  try { fs.writeSync(fd, `[scheduler] investigation pid=${child.pid}\n\n`); } catch { /* */ }
+  safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
 
   const watchdog = setTimeout(() => {
-    try { fs.writeSync(fd, `\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`); } catch { /* */ }
+    safeLog(`\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`);
     try { child.kill('SIGKILL'); } catch { /* already dead */ }
   }, MAX_INVESTIGATION_DURATION_MS);
   if (watchdog.unref) watchdog.unref();
 
   child.on('error', (err) => {
     clearTimeout(watchdog);
-    try { fs.writeSync(fd, `\n[scheduler] investigation error: ${err.message}\n`); } catch { /* */ }
-    try { fs.closeSync(fd); } catch { /* */ }
+    safeLog(`\n[scheduler] investigation error: ${err.message}\n`);
+    closeFd();
   });
 
   child.on('exit', (code) => {
     clearTimeout(watchdog);
-    try { fs.writeSync(fd, `\n[scheduler] investigation exit code=${code}\n`); } catch { /* */ }
-    try { fs.closeSync(fd); } catch { /* */ }
+    safeLog(`\n[scheduler] investigation exit code=${code}\n`);
+    closeFd();
     if (fs.existsSync(fixPath)) {
       console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
     } else {

@@ -18,14 +18,17 @@ interface SessionRow {
 
 type View = 'dashboard' | 'log'
 
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10)
+// Local-TZ ISO dates — must match the aggregator's bucket TZ (see
+// historyAggregator.cjs's `localDate`), otherwise the upper bound mis-aligns
+// for users west of UTC and today's data disappears.
+function todayLocal(): string {
+  return new Date().toLocaleDateString('en-CA')
 }
 
-function thirtyDaysAgoUtc(): string {
+function thirtyDaysAgoLocal(): string {
   const d = new Date()
-  d.setUTCDate(d.getUTCDate() - 30)
-  return d.toISOString().slice(0, 10)
+  d.setDate(d.getDate() - 30)
+  return d.toLocaleDateString('en-CA')
 }
 
 export function History() {
@@ -38,8 +41,8 @@ export function History() {
   const [view, setView] = useState<View>(() =>
     (localStorage.getItem('sm.historyTab.view') as View) ?? 'dashboard'
   )
-  const [fromDate, setFromDate] = useState(thirtyDaysAgoUtc)
-  const [toDate, setToDate] = useState(todayUtc)
+  const [fromDate, setFromDate] = useState(thirtyDaysAgoLocal)
+  const [toDate, setToDate] = useState(todayLocal)
   const [projectFilter, setProjectFilter] = useState('')
 
   const switchView = (v: View) => {

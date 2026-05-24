@@ -52,6 +52,11 @@ interface Props {
   onProjectClick: (cwd: string) => void
 }
 
+// Auto-refresh interval — long enough to avoid hammering the aggregator
+// (which walks every JSONL on disk) but short enough that an active session
+// shows up in the dashboard without the user reaching for the refresh button.
+const REFRESH_INTERVAL_MS = 30_000
+
 export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectClick }: Props) {
   const [result, setResult] = useState<HistoryAggregateResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -59,16 +64,45 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
   const [metric, setMetric] = useState<MetricKey>('estimatedCostUsd')
   const [sortCol, setSortCol] = useState<TableColKey>('estimatedCostUsd')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  // `tick` bumps to force a refetch — incremented by the manual refresh button
+  // and by a 30s interval so a live session's numbers eventually flow in
+  // without the user having to do anything.
+  const [tick, setTick] = useState(0)
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    // Suppress the full-screen "scanning…" empty state on background
+    // refreshes — only show it on the first load or when the user changed
+    // the date range. Otherwise auto-refresh would flash the empty state
+    // every 30s.
+    if (lastFetchedAt === null) setLoading(true)
     setError(null)
     window.api.history.aggregate({ fromDate, toDate })
-      .then((r) => { if (!cancelled) { setResult(r); setLoading(false) } })
+      .then((r) => {
+        if (cancelled) return
+        setResult(r)
+        setLastFetchedAt(Date.now())
+        setLoading(false)
+      })
       .catch((e: unknown) => { if (!cancelled) { setError(String(e)); setLoading(false) } })
     return () => { cancelled = true }
+    // lastFetchedAt is intentionally omitted: it's a derived effect output,
+    // not an input. Including it would re-fire the effect after every fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromDate, toDate, tick])
+
+  // Reset the first-load gate when the date range changes so the user sees
+  // a "scanning…" affordance, not a stale chart, while the new range fetches.
+  useEffect(() => {
+    setLastFetchedAt(null)
   }, [fromDate, toDate])
+
+  // Auto-refresh tick.
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), REFRESH_INTERVAL_MS)
+    return () => window.clearInterval(id)
+  }, [])
 
   const filteredRows = useMemo<DayProjectRow[]>(() => {
     if (!result) return []
@@ -166,12 +200,14 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
     else { setSortCol(col); setSortDir('desc') }
   }
 
+  const refresh = () => setTick((t) => t + 1)
+
   if (loading) return <EmptyState title="scanning transcripts…" />
   if (error) return <EmptyState title="scan failed" hint={error} />
   if (!filteredRows.length) return (
     <EmptyState
-      title="no completed sessions found"
-      hint="Sessions from today are excluded; check back tomorrow."
+      title="no sessions in range"
+      hint="Widen the date range, clear the project filter, or click ↻ to rescan."
     />
   )
 
@@ -182,6 +218,17 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
           Scan took longer than expected — showing partial results. Full results may differ.
         </div>
       )}
+
+      <div className="flex items-center justify-end gap-2 text-xs text-fg-faint">
+        <FreshnessIndicator lastFetchedAt={lastFetchedAt} />
+        <button
+          onClick={refresh}
+          className="px-2 py-0.5 border border-line rounded hover:text-fg hover:bg-bg-hi"
+          title="Rescan transcripts"
+        >
+          ↻ refresh
+        </button>
+      </div>
 
       <div className="grid grid-cols-5 gap-3">
         <Stat label="total prompts" value={totals.promptCount.toLocaleString()} />
@@ -289,4 +336,22 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
       <div className={`text-lg font-mono ${highlight ? 'text-accent' : 'text-fg'}`}>{value}</div>
     </div>
   )
+}
+
+function FreshnessIndicator({ lastFetchedAt }: { lastFetchedAt: number | null }) {
+  // Ticks once per second so the displayed age stays current without
+  // forcing the dashboard to re-render every tick.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  if (lastFetchedAt === null) return null
+  const age = Math.max(0, now - lastFetchedAt)
+  const text =
+    age < 5_000 ? 'just now'
+    : age < 60_000 ? `updated ${Math.floor(age / 1000)}s ago`
+    : age < 3_600_000 ? `updated ${Math.floor(age / 60_000)}m ago`
+    : `updated ${Math.floor(age / 3_600_000)}h ago`
+  return <span className="font-mono tabular-nums">{text}</span>
 }

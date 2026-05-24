@@ -14,10 +14,20 @@ function decodeCwd(encoded) {
   return '/' + encoded.replace(/-+/g, '/');
 }
 
+// All date strings in this module are LOCAL-TZ YYYY-MM-DD. A previous version
+// used UTC (toISOString().slice(0,10)) which silently shifted late-evening
+// sessions a day forward for Pacific-time users, then the >= effectiveTo
+// filter dropped them entirely. en-CA locale yields ISO-format dates in the
+// JS environment's TZ. Parse with 'T12:00:00' (local noon) so DST boundaries
+// don't shift the date by a day.
+function localDate(d) {
+  return d.toLocaleDateString('en-CA');
+}
+
 function subtractDays(dateStr, days) {
-  const d = new Date(dateStr + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() - days);
+  return localDate(d);
 }
 
 async function parseJSONL(filePath, stat) {
@@ -69,10 +79,18 @@ async function parseJSONL(filePath, stat) {
 
     const usage = obj.usage ?? obj.message?.usage;
     if (usage && typeof usage === 'object') {
-      if (typeof usage.inputTokens === 'number') acc.inputTokens += usage.inputTokens;
-      if (typeof usage.outputTokens === 'number') acc.outputTokens += usage.outputTokens;
-      if (typeof usage.cacheReadInputTokens === 'number') acc.cacheReadTokens += usage.cacheReadInputTokens;
-      if (typeof usage.cacheCreationInputTokens === 'number') acc.cacheCreationTokens += usage.cacheCreationInputTokens;
+      // Claude Code JSONLs use snake_case (matching the Anthropic API). The
+      // previous camelCase-only check meant every token count read as 0.
+      // Accept both shapes for forward-compat with any future renderer-side
+      // emitter (live.ts already normalizes both).
+      const inT = usage.input_tokens ?? usage.inputTokens;
+      const outT = usage.output_tokens ?? usage.outputTokens;
+      const cacheR = usage.cache_read_input_tokens ?? usage.cacheReadInputTokens;
+      const cacheC = usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens;
+      if (typeof inT === 'number') acc.inputTokens += inT;
+      if (typeof outT === 'number') acc.outputTokens += outT;
+      if (typeof cacheR === 'number') acc.cacheReadTokens += cacheR;
+      if (typeof cacheC === 'number') acc.cacheCreationTokens += cacheC;
     }
 
     const content = obj.message?.content ?? obj.content;
@@ -96,10 +114,10 @@ async function parseJSONL(filePath, stat) {
 
   try {
     acc.sessionDate = firstTs
-      ? new Date(firstTs).toISOString().slice(0, 10)
-      : new Date(stat.mtimeMs).toISOString().slice(0, 10);
+      ? localDate(new Date(firstTs))
+      : localDate(new Date(stat.mtimeMs));
   } catch {
-    acc.sessionDate = new Date(stat.mtimeMs).toISOString().slice(0, 10);
+    acc.sessionDate = localDate(new Date(stat.mtimeMs));
   }
 
   return acc;
@@ -126,8 +144,10 @@ async function parseConversationMeta(filePath, stat) {
     }
     const usage = obj.usage ?? obj.message?.usage;
     if (usage && typeof usage === 'object') {
-      if (typeof usage.inputTokens === 'number') meta.inputTokens += usage.inputTokens;
-      if (typeof usage.outputTokens === 'number') meta.outputTokens += usage.outputTokens;
+      const inT = usage.input_tokens ?? usage.inputTokens;
+      const outT = usage.output_tokens ?? usage.outputTokens;
+      if (typeof inT === 'number') meta.inputTokens += inT;
+      if (typeof outT === 'number') meta.outputTokens += outT;
     }
   }
   return meta;
@@ -142,7 +162,7 @@ function registerHistoryAggregatorHandlers() {
     const parsed = schemas.historyAggregate.safeParse(rawReq);
     const req = parsed.success ? (parsed.data ?? {}) : {};
     const t0 = Date.now();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDate(new Date());
     let effectiveTo = req?.toDate ? req.toDate : today;
     if (effectiveTo > today) effectiveTo = today;
     const effectiveFrom = req?.fromDate ? req.fromDate : subtractDays(today, 30);
@@ -185,7 +205,10 @@ function registerHistoryAggregatorHandlers() {
         if (parsed.skipped) { skippedLargeFiles++; continue; }
 
         const { sessionDate } = parsed;
-        if (!sessionDate || sessionDate < effectiveFrom || sessionDate >= effectiveTo) continue;
+        // Inclusive upper bound — `>=` here previously meant "today's data is
+        // always dropped", which combined with the (then-UTC) date bucket to
+        // hide a Pacific-time user's most recent activity entirely.
+        if (!sessionDate || sessionDate < effectiveFrom || sessionDate > effectiveTo) continue;
 
         const key = `${sessionDate}|${encodedCwd}`;
         if (!buckets.has(key)) {

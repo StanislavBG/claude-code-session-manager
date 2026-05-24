@@ -44,7 +44,6 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
@@ -52,8 +51,10 @@ const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
+const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
+const { verifyRun } = require('./runVerify.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const {
@@ -146,7 +147,6 @@ function ensureDirs() {
 // would deadlock the exit path.
 const config = require('./config.cjs');
 const atomicWriteJsonSync = (p, data) => config.writeJsonSync(p, data);
-const atomicWriteJson = (p, data) => config.writeJson(p, data);
 
 // ---------- scheduler-state.json (sidecar) ----------
 
@@ -168,7 +168,7 @@ function persistSchedulerState() {
   // require threading awaits through pause/resume bookkeeping for negligible
   // benefit — the file is well under one page.
   try {
-    atomicWriteJsonSync(SCHEDULER_STATE_PATH, {
+    config.writeJsonSync(SCHEDULER_STATE_PATH, {
       version: 1,
       lastObservedReset: cachedNextReset,
       lastResetObservedAt: cachedNextReset ? Date.now() : null,
@@ -242,7 +242,7 @@ async function readQueue() {
 
 async function writeQueue(state) {
   ensureDirs();
-  await atomicWriteJson(QUEUE_PATH, state);
+  await config.writeJson(QUEUE_PATH, state);
 }
 
 // ---------- serialized mutation queue ----------
@@ -608,21 +608,16 @@ function resetJobFields(job, errorMsg) {
   job.exitCode = null;
   job.error = errorMsg ?? null;
   delete job.runtime;
+  delete job.verifierVerdict;
 }
 
 /** Scan the tail of a job's log for the canonical rate-limit signal. We look
- *  at the last 16 KB — final result event always lands at the end. */
+ *  at the last 16 KB — final result event always lands at the end.
+ *  Uses readTail() so no raw fd lifecycle is needed here. */
 function detectRateLimitInLog(logPath) {
   try {
-    const stat = fs.statSync(logPath);
-    const start = Math.max(0, stat.size - 16384);
-    const len = stat.size - start;
-    if (len <= 0) return false;
-    const fd = fs.openSync(logPath, 'r');
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, start);
-    fs.closeSync(fd);
-    const text = buf.toString('utf8');
+    const text = readTail(logPath, 16384);
+    if (!text) return false;
     return /"rateLimitType":"five_hour"/.test(text)
       || /"api_error_status":429/.test(text)
       || /You'?ve hit your limit/.test(text);
@@ -644,6 +639,10 @@ function pickRunDir() {
  * Execute a single PRD job. Writes stdout/stderr to a log file and a meta
  * JSON sidecar. Accepts an optional onPid(pid) callback called synchronously
  * after spawn so callers can persist the pid before the job finishes.
+ *
+ * Uses withChildAndLog for the child lifecycle (fd open/close, watchdog timers).
+ * Watchdogs are declared as an array; the result-tailer's exit-code mapping
+ * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
 async function executeJob(job, runDir, defaultCwd, onPid) {
   const logPath = path.join(runDir, `${job.slug}.log`);
@@ -652,17 +651,10 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   const startedAt = Date.now();
   const sessionId = randomUUID();
 
-  const fd = fs.openSync(logPath, 'a');
-  let fdClosed = false;
-  const closeFd = () => { if (fdClosed) return; fdClosed = true; try { fs.closeSync(fd); } catch { /* */ } };
-  // safeLog: no-op once the fd is closed, never throws on the watchdog timer
-  // path. Pre-fix, a post-result/idle watchdog firing AFTER closeFd would
-  // throw EBADF and crash the host. Every fs.writeSync(fd, …) below goes
-  // through this helper.
-  const safeLog = (msg) => {
-    if (fdClosed) return;
-    try { fs.writeSync(fd, msg); } catch { /* fd vanished mid-write */ }
-  };
+  // Phase 1: open log fd so we can emit pre-spawn diagnostics (early-exit
+  // error paths) before the child is created. withChildAndLog takes ownership
+  // of fd/safeLog/closeFd from the point it is called.
+  const { fd, safeLog, closeFd } = openLog(logPath);
 
   safeLog(`[scheduler] starting ${job.slug} at ${new Date().toISOString()}\n[scheduler] cwd=${cwd}\n\n`);
 
@@ -676,7 +668,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     // Sync write: this is an early-exit error path inside an async function,
     // so we could await, but using the sync variant keeps the error path
     // ordering identical to the spawn-failed branch below (also sync).
-    atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
     return { exitCode: -1, durationMs: 0, error: errMsg, sessionId };
   }
 
@@ -696,7 +688,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   if (!promptCheck.ok) {
     safeLog(`[scheduler] ${promptCheck.error}\n`);
     closeFd();
-    atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0 });
     return { exitCode: -1, durationMs: 0, error: promptCheck.error, sessionId };
   }
 
@@ -706,178 +698,182 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     // launched from a `claude` shell. CLAUDE_EFFORT=xhigh forces Opus and
     // overrides `--model sonnet`, so scheduled jobs burn Opus credits silently.
     const childEnv = cleanChildEnv();
-    // Guard against synchronous spawn failures (EAGAIN, ENOMEM on fork).
-    // Without this, the throw bubbles out of the Promise executor and the
-    // outer await rejects — but the open fd is leaked.
-    let child;
-    try {
-      child = spawn(claudeBin, [
-        '-p', prompt,
-        '--model', 'sonnet',
-        '--dangerously-skip-permissions',
-        '--output-format', 'stream-json',
-        '--verbose',
-        '--session-id', sessionId,
-      ], {
-        cwd,
-        env: childEnv,
-        stdio: ['ignore', fd, fd],
-        // detached:true puts the child in its own process group so we can kill
-        // the entire descendant tree (including any stray background bashes the
-        // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
-        // only kills the immediate `claude` process, leaving orphaned subprocs
-        // that keep the parent alive (the 2026-05-10 cellar-publish hang).
-        detached: true,
-      });
-    } catch (e) {
-      const errMsg = `spawn failed: ${e?.message ?? String(e)}`;
-      safeLog(`[scheduler] ${errMsg}\n`);
-      closeFd();
-      const durationMs = Date.now() - startedAt;
-      // Sync write: inside the Promise executor, before resolve(). Awaiting
-      // here would require restructuring the executor; the meta file is tiny
-      // and this is an error path, not the IPC hot path.
-      atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs });
-      resolve({ exitCode: -1, durationMs, error: errMsg, sessionId });
-      return;
-    }
-
-    safeLog(`[scheduler] spawned pid=${child.pid} sessionId=${sessionId} (process group)\n\n`);
-
-    // Fire-and-forget pid persistence — best effort.
-    if (onPid) onPid(child.pid, sessionId, cwd).catch(() => {});
 
     // Track whether the agent has emitted a `result` event in its JSONL stream.
-    // null until seen; then one of "success" | "error_max_turns" | ... per the
+    // null until seen; then one of "success" | "error_max_turns" | … per the
     // claude harness's result subtype taxonomy.
+    // Declared here (outer scope) so the onExit handler can reference it for
+    // the success+killedBySignal → exitCode:0 mapping.
     let agentResultSubtype = null;
-    let postResultTimer = null;
-    let postResultKillTimer = null;
 
-    const killTree = (signal) => {
-      // Kill the whole process group. Negative pid targets the group leader's
-      // group (only works because we spawned with detached:true).
-      try { process.kill(-child.pid, signal); return true; }
-      catch {
-        try { process.kill(child.pid, signal); return true; }
-        catch { return false; /* already dead */ }
-      }
-    };
+    // ---------- watchdog declarations ----------
+    //
+    // All three use fire-once-on-condition semantics (auto-clear on first fire).
+    // Secondary timers created inside action() are registered via ctx.addTimer()
+    // so they are cleared on child exit even if fired after the primary watchdog.
 
-    // Tail the log for {"type":"result","subtype":"..."} events. When we see
-    // one, start the post-result grace timer — the agent has declared done,
-    // so the process should exit promptly. If not, something is hanging
-    // (the cellar-publish failure mode).
-    const resultTailer = setInterval(() => {
-      if (agentResultSubtype) return; // already seen; tailer will be cleared below
-      try {
-        const stat = fs.statSync(logPath);
-        if (stat.size === 0) return;
-        const n = Math.min(stat.size, RESULT_TAIL_BYTES);
-        const buf = Buffer.alloc(n);
-        const fdR = fs.openSync(logPath, 'r');
-        fs.readSync(fdR, buf, 0, n, stat.size - n);
-        fs.closeSync(fdR);
-        const m = buf.toString('utf8').match(/\{"type":"result","subtype":"([a-z_]+)"/);
-        if (!m) return;
-        agentResultSubtype = m[1];
-        safeLog(`\n[scheduler] result event detected (subtype=${agentResultSubtype}); ` +
+    // Result-tailer: scan the log tail for a {"type":"result"} event. On
+    // detection, start a grace timer — the agent declared done, so it should
+    // exit promptly. If it doesn't, SIGTERM the process group (the
+    // cellar-publish failure mode: unbounded background bashes kept the parent
+    // alive 22 min after the agent emitted result=success).
+    // Note: killedByWatchdog is set inside the cascade timer, NOT when the
+    // result is first detected, so a clean exit during the grace period leaves
+    // killedByWatchdog null (not misattributed to this watchdog).
+    const resultTailWatchdog = {
+      label: 'result-tail',
+      intervalMs: RESULT_TAIL_POLL_MS,
+      shouldFire(ctx) {
+        try {
+          const tail = readTail(ctx.logPath, RESULT_TAIL_BYTES);
+          if (!tail) return false;
+          const m = tail.match(/\{"type":"result","subtype":"([a-z_]+)"/);
+          if (!m) return false;
+          agentResultSubtype = m[1];
+          return true;
+        } catch { return false; }
+      },
+      action(ctx) {
+        ctx.safeLog(`\n[scheduler] result event detected (subtype=${agentResultSubtype}); ` +
           `starting ${Math.round(POST_RESULT_GRACE_MS/1000)}s exit-grace timer\n`);
-        clearInterval(resultTailer);
-        postResultTimer = setTimeout(() => {
-          safeLog(`\n[scheduler] post-result grace expired (${Math.round(POST_RESULT_GRACE_MS/1000)}s); ` +
+        const postResultTimer = setTimeout(() => {
+          ctx.safeLog(`\n[scheduler] post-result grace expired (${Math.round(POST_RESULT_GRACE_MS/1000)}s); ` +
             `child still alive — SIGTERM process group\n`);
-          killTree('SIGTERM');
-          postResultKillTimer = setTimeout(() => {
-            safeLog(`\n[scheduler] still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
-            killTree('SIGKILL');
+          ctx.killedByWatchdog = 'result-tail';
+          ctx.killTree('SIGTERM');
+          const postResultKillTimer = setTimeout(() => {
+            ctx.safeLog(`\n[scheduler] still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+            ctx.killTree('SIGKILL');
           }, POST_RESULT_KILL_MS);
           if (postResultKillTimer.unref) postResultKillTimer.unref();
+          ctx.addTimer(postResultKillTimer);
         }, POST_RESULT_GRACE_MS);
         if (postResultTimer.unref) postResultTimer.unref();
-      } catch { /* log not readable yet; try again */ }
-    }, RESULT_TAIL_POLL_MS);
-    if (resultTailer.unref) resultTailer.unref();
-
-    // Kill the child if it runs past the maximum allowed duration.
-    const watchdog = setTimeout(() => {
-      safeLog(`\n[scheduler] watchdog SIGKILL after ${MAX_JOB_DURATION_MS}ms\n`);
-      killTree('SIGKILL');
-    }, MAX_JOB_DURATION_MS);
-    if (watchdog.unref) watchdog.unref();
-
-    // Idle-output watchdog: poll log mtime every IDLE_CHECK_INTERVAL_MS; if
-    // it hasn't advanced in IDLE_OUTPUT_KILL_MS, presume the agent is stuck
-    // and SIGTERM the process group.
-    let idleKillTimer = null;
-    const idleChecker = setInterval(() => {
-      try {
-        const stat = fs.statSync(logPath);
-        const idleMs = Date.now() - stat.mtimeMs;
-        if (idleMs > IDLE_OUTPUT_KILL_MS) {
-          safeLog(`\n[scheduler] idle-output watchdog: log mtime stalled ` +
-            `${Math.round(idleMs/1000)}s (> ${Math.round(IDLE_OUTPUT_KILL_MS/1000)}s threshold) — SIGTERM process group\n`);
-          clearInterval(idleChecker);
-          killTree('SIGTERM');
-          idleKillTimer = setTimeout(() => {
-            safeLog(`\n[scheduler] idle watchdog: still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
-            killTree('SIGKILL');
-          }, POST_RESULT_KILL_MS);
-          if (idleKillTimer.unref) idleKillTimer.unref();
-        }
-      } catch { /* log not statable; skip */ }
-    }, IDLE_CHECK_INTERVAL_MS);
-    if (idleChecker.unref) idleChecker.unref();
-
-    const clearAllTimers = () => {
-      clearTimeout(watchdog);
-      clearInterval(resultTailer);
-      clearInterval(idleChecker);
-      if (postResultTimer) clearTimeout(postResultTimer);
-      if (postResultKillTimer) clearTimeout(postResultKillTimer);
-      if (idleKillTimer) clearTimeout(idleKillTimer);
+        ctx.addTimer(postResultTimer);
+      },
     };
 
-    child.on('error', (err) => {
-      clearAllTimers();
-      const durationMs = Date.now() - startedAt;
-      safeLog(`\n[scheduler] error: ${err.message}\n`);
-      closeFd();
-      // Sync write: child event handler must flush meta before resolve().
-      atomicWriteJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: err.message, startedAt, finishedAt: Date.now(), durationMs });
-      resolve({ exitCode: -1, durationMs, error: err.message, sessionId });
+    // Deadman: kill the child unconditionally after MAX_JOB_DURATION_MS.
+    // shouldFire: () => true means the interval fires once at intervalMs then
+    // auto-clears (fire-once-on-condition with a condition that's always true).
+    const deadmanWatchdog = {
+      label: 'deadman',
+      intervalMs: MAX_JOB_DURATION_MS,
+      shouldFire: () => true,
+      action(ctx) {
+        ctx.safeLog(`\n[scheduler] watchdog SIGKILL after ${MAX_JOB_DURATION_MS}ms\n`);
+        ctx.killedByWatchdog = 'deadman';
+        ctx.killTree('SIGKILL');
+      },
+    };
+
+    // Idle-output watchdog: if log mtime stalls for IDLE_OUTPUT_KILL_MS the
+    // agent is presumed stuck (network stall, infinite tool loop, compaction
+    // wedge). SIGTERM the group, SIGKILL after POST_RESULT_KILL_MS.
+    const idleTailWatchdog = {
+      label: 'idle-tail',
+      intervalMs: IDLE_CHECK_INTERVAL_MS,
+      shouldFire(ctx) {
+        try {
+          const stat = fs.statSync(ctx.logPath);
+          return Date.now() - stat.mtimeMs > IDLE_OUTPUT_KILL_MS;
+        } catch { return false; }
+      },
+      action(ctx) {
+        let idleMs = 0;
+        try { idleMs = Date.now() - fs.statSync(ctx.logPath).mtimeMs; } catch { /* */ }
+        ctx.safeLog(`\n[scheduler] idle-output watchdog: log mtime stalled ` +
+          `${Math.round(idleMs/1000)}s (> ${Math.round(IDLE_OUTPUT_KILL_MS/1000)}s threshold) — SIGTERM process group\n`);
+        ctx.killedByWatchdog = 'idle-tail';
+        ctx.killTree('SIGTERM');
+        const idleKillTimer = setTimeout(() => {
+          ctx.safeLog(`\n[scheduler] idle watchdog: still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+          ctx.killTree('SIGKILL');
+        }, POST_RESULT_KILL_MS);
+        if (idleKillTimer.unref) idleKillTimer.unref();
+        ctx.addTimer(idleKillTimer);
+      },
+    };
+
+    // ---------- spawn ----------
+
+    const { child } = withChildAndLog({
+      fd,
+      logPath,
+      safeLog,
+      closeFd,
+      spawn: {
+        command: claudeBin,
+        args: [
+          '-p', prompt,
+          '--model', 'sonnet',
+          '--dangerously-skip-permissions',
+          '--output-format', 'stream-json',
+          '--verbose',
+          '--session-id', sessionId,
+        ],
+        options: {
+          cwd,
+          env: childEnv,
+          // detached:true puts the child in its own process group so we can kill
+          // the entire descendant tree (including any stray background bashes the
+          // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
+          // only kills the immediate `claude` process, leaving orphaned subprocs
+          // that keep the parent alive (the 2026-05-10 cellar-publish hang).
+          detached: true,
+        },
+      },
+      watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog],
+      onExit({ exitCode, signal, killedByWatchdog: _kbw, error, spawnFailed, safeLog: sl }) {
+        const durationMs = Date.now() - startedAt;
+
+        if (error) {
+          // Covers both synchronous spawn failure and child 'error' events.
+          const errMsg = spawnFailed
+            ? `spawn failed: ${error?.message ?? String(error)}`
+            : error.message;
+          sl(`\n[scheduler] ${errMsg}\n`);
+          // Sync write: inside a Promise executor callback; must flush meta
+          // before resolve() so the spawnJob mutate() that follows sees it.
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs });
+          resolve({ exitCode: -1, durationMs, error: errMsg, sessionId });
+          return;
+        }
+
+        // If we killed the child (via any watchdog or externally) AND the agent
+        // had already emitted result=success, the work succeeded; only the
+        // cleanup hung. Map the kill exit code to 0 so the job is marked
+        // completed, not failed.
+        // Node's child.on('exit') reports either code (normal) or signal (killed);
+        // when killed by signal, code is null. We also check 143 (128+SIGTERM)
+        // and 137 (128+SIGKILL) in case the process exited via signal-as-code.
+        let effectiveCode = exitCode;
+        const killedBySignal = signal === 'SIGTERM' || signal === 'SIGKILL' || exitCode === 143 || exitCode === 137 || exitCode === null;
+        const mappedToSuccess = agentResultSubtype === 'success' && killedBySignal;
+        if (mappedToSuccess) {
+          effectiveCode = 0;
+          sl(`\n[scheduler] mapping exit code=${exitCode} signal=${signal} → 0 ` +
+            `(result=success was emitted before kill)\n`);
+        }
+        sl(`\n[scheduler] exit code=${effectiveCode} (raw code=${exitCode} signal=${signal}) ` +
+          `duration=${Math.round(durationMs / 1000)}s\n`);
+        const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
+        // Sync write: child 'exit' handler must flush meta before resolve()
+        // so the spawnJob mutate() that follows sees the persisted exit code.
+        config.writeJsonSync(metaPath, {
+          slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited,
+          startedAt, finishedAt: Date.now(), durationMs,
+          agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
+        });
+        resolve({ exitCode: effectiveCode, durationMs, rateLimited, sessionId });
+      },
     });
 
-    child.on('exit', (code, signal) => {
-      clearAllTimers();
-      const durationMs = Date.now() - startedAt;
-      // If we SIGTERM'd because of the post-result watchdog AND the agent had
-      // emitted result=success, the work succeeded; only the cleanup hung.
-      // Map the kill exit code to 0 so the job is marked completed, not failed.
-      // Node's child.on('exit') reports either code (normal) or signal (killed);
-      // when killed by signal, code is null. We also check 143 (128+SIGTERM)
-      // and 137 (128+SIGKILL) in case the process exited via signal-as-code.
-      let effectiveCode = code;
-      const killedBySignal = signal === 'SIGTERM' || signal === 'SIGKILL' || code === 143 || code === 137 || code === null;
-      const mappedToSuccess = agentResultSubtype === 'success' && killedBySignal;
-      if (mappedToSuccess) {
-        effectiveCode = 0;
-        safeLog(`\n[scheduler] mapping exit code=${code} signal=${signal} → 0 ` +
-          `(result=success was emitted before kill)\n`);
-      }
-      safeLog(`\n[scheduler] exit code=${effectiveCode} (raw code=${code} signal=${signal}) ` +
-        `duration=${Math.round(durationMs / 1000)}s\n`);
-      closeFd();
-      const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
-      // Sync write: child 'exit' handler must flush meta before resolve()
-      // so the spawnJob mutate() that follows sees the persisted exit code.
-      atomicWriteJsonSync(metaPath, {
-        slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited,
-        startedAt, finishedAt: Date.now(), durationMs,
-        agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${code}` : null,
-      });
-      resolve({ exitCode: effectiveCode, durationMs, rateLimited, sessionId });
-    });
+    if (child) {
+      safeLog(`[scheduler] spawned pid=${child.pid} sessionId=${sessionId} (process group)\n\n`);
+      // Fire-and-forget pid persistence — best effort.
+      if (onPid) onPid(child.pid, sessionId, cwd).catch(() => {});
+    }
   });
 }
 
@@ -920,7 +916,8 @@ function pickNextBatch(allJobs, running, cap) {
   // unblock the gate, but the default is to halt until the failure is
   // acknowledged.
   const blockingFailures = allJobs.filter((j) =>
-    j.status === 'failed' && (j.parallelGroup ?? 99) < lowestPendingGroup,
+    (j.status === 'failed' || j.status === 'needs_review') &&
+    (j.parallelGroup ?? 99) < lowestPendingGroup,
   );
   if (blockingFailures.length > 0) {
     const slugs = blockingFailures.map((j) => j.slug).join(', ');
@@ -1096,67 +1093,75 @@ ${logTail}
 
 DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
 
-  const fd = fs.openSync(investigationLogPath, 'a');
-  let fdClosed = false;
-  const closeFd = () => { if (fdClosed) return; fdClosed = true; try { fs.closeSync(fd); } catch { /* */ } };
-  const safeLog = (msg) => { if (fdClosed) return; try { fs.writeSync(fd, msg); } catch { /* fd vanished mid-write */ } };
+  // Phase 1: open log fd for pre-spawn diagnostics.
+  const { fd, safeLog, closeFd } = openLog(investigationLogPath);
   const sessionId = randomUUID();
   safeLog(`[scheduler] investigation starting for ${failedJob.slug} at ${new Date().toISOString()}\n[scheduler] target fix PRD: ${fixPath}\n[scheduler] sessionId=${sessionId}\n\n`);
 
-  const claudeBin = resolveClaudeBin();
-  const childEnv = cleanChildEnv();
   const investigationPromptCheck = validatePromptForSpawn(prompt, `<investigation prompt for ${failedJob.slug}>`);
   if (!investigationPromptCheck.ok) {
     safeLog(`\n[scheduler] ${investigationPromptCheck.error}\n`);
     closeFd();
     return;
   }
-  let child;
-  try {
-    child = spawn(claudeBin, [
-      '-p', prompt,
-      '--model', 'opus',
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
-      '--verbose',
-      '--session-id', sessionId,
-    ], {
-      cwd,
-      env: childEnv,
-      stdio: ['ignore', fd, fd],
-    });
-  } catch (e) {
-    safeLog(`\n[scheduler] investigation spawn failed: ${e?.message ?? e}\n`);
-    closeFd();
-    return;
+
+  const claudeBin = resolveClaudeBin();
+  const childEnv = cleanChildEnv();
+
+  // Investigation needs only a deadman watchdog — no idle-tail or result-tail
+  // since investigations are short-running Opus probes with a hard ceiling.
+  const deadmanWatchdog = {
+    label: 'deadman',
+    intervalMs: MAX_INVESTIGATION_DURATION_MS,
+    shouldFire: () => true,
+    action(ctx) {
+      ctx.safeLog(`\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`);
+      ctx.killedByWatchdog = 'deadman';
+      ctx.killTree('SIGKILL');
+    },
+  };
+
+  // Phase 2: spawn with lifecycle managed by withChildAndLog.
+  const { child } = withChildAndLog({
+    fd,
+    logPath: investigationLogPath,
+    safeLog,
+    closeFd,
+    spawn: {
+      command: claudeBin,
+      args: [
+        '-p', prompt,
+        '--model', 'opus',
+        '--dangerously-skip-permissions',
+        '--output-format', 'stream-json',
+        '--verbose',
+        '--session-id', sessionId,
+      ],
+      options: { cwd, env: childEnv },
+    },
+    watchdogs: [deadmanWatchdog],
+    onExit({ exitCode, error, spawnFailed, safeLog: sl }) {
+      if (error) {
+        const errMsg = spawnFailed
+          ? `investigation spawn failed: ${error?.message ?? String(error)}`
+          : `investigation error: ${error.message}`;
+        sl(`\n[scheduler] ${errMsg}\n`);
+        return;
+      }
+      sl(`\n[scheduler] investigation exit code=${exitCode}\n`);
+      if (fs.existsSync(fixPath)) {
+        console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
+      } else {
+        console.log(`[scheduler] investigation finished WITHOUT producing fix plan (slug=${failedJob.slug}, code=${exitCode})`);
+      }
+      // Trigger a tick so the new fix plan is reconciled into the queue and fired.
+      tickQueue().catch(() => {});
+    },
+  });
+
+  if (child) {
+    safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
   }
-
-  safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
-
-  const watchdog = setTimeout(() => {
-    safeLog(`\n[scheduler] investigation watchdog SIGKILL after ${MAX_INVESTIGATION_DURATION_MS}ms\n`);
-    try { child.kill('SIGKILL'); } catch { /* already dead */ }
-  }, MAX_INVESTIGATION_DURATION_MS);
-  if (watchdog.unref) watchdog.unref();
-
-  child.on('error', (err) => {
-    clearTimeout(watchdog);
-    safeLog(`\n[scheduler] investigation error: ${err.message}\n`);
-    closeFd();
-  });
-
-  child.on('exit', (code) => {
-    clearTimeout(watchdog);
-    safeLog(`\n[scheduler] investigation exit code=${code}\n`);
-    closeFd();
-    if (fs.existsSync(fixPath)) {
-      console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
-    } else {
-      console.log(`[scheduler] investigation finished WITHOUT producing fix plan (slug=${failedJob.slug}, code=${code})`);
-    }
-    // Trigger a tick so the new fix plan is reconciled into the queue and fired.
-    tickQueue().catch(() => {});
-  });
 }
 
 async function spawnJob(job, runId, runDir, defaultCwd) {
@@ -1188,6 +1193,33 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       await setPaused('rate_limit', resetIso);
     }
 
+    // Post-run verification: for exit=0 runs, scan the transcript and check
+    // dependency prerequisites before stamping 'completed'. This catches the
+    // false-positive class where an agent exits cleanly while leaving failures
+    // in its tool output (see incidents: PRD 39, 44, 56 on 2026-05-23→24).
+    // Called outside mutate() so the queue lock is not held during I/O.
+    let verifyResult = null;
+    if (res.exitCode === 0 && !res.rateLimited) {
+      const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+      const stateForDeps = await readQueue();
+      verifyResult = await verifyRun({
+        runDir,
+        prdPath,
+        queueEntry: job,
+        allJobs: stateForDeps.jobs,
+      }).catch((e) => ({
+        verdict: 'verify_unavailable',
+        reason: `verifier threw: ${e?.message ?? String(e)}`,
+        downgradeTo: 'needs_review',
+      }));
+      if (verifyResult.verdict !== 'clean') {
+        console.log(
+          `[scheduler] verifier: ${job.slug} verdict=${verifyResult.verdict}` +
+          ` → ${verifyResult.downgradeTo ?? 'completed'}: ${verifyResult.reason}`,
+        );
+      }
+    }
+
     let actuallyFailed = false;
     let failedJobSnapshot = null;
     await mutate((s) => {
@@ -1197,12 +1229,36 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         if (treatAsPending) {
           resetJobFields(s.jobs[i2], res.rateLimited ? 'paused: rate limit' : 'paused: queue halted');
         } else {
-          s.jobs[i2].status = res.exitCode === 0 ? 'completed' : 'failed';
+          // Determine effective status, applying the verifier verdict for exit=0 runs.
+          let effectiveStatus;
+          if (res.exitCode !== 0) {
+            effectiveStatus = 'failed';
+          } else if (!verifyResult || verifyResult.verdict === 'clean') {
+            effectiveStatus = 'completed';
+          } else if (verifyResult.downgradeTo === 'pending') {
+            // HALT or deps_unmet: reset to pending so the job re-fires.
+            resetJobFields(s.jobs[i2], verifyResult.reason);
+            return; // job already mutated by resetJobFields; skip the rest
+          } else {
+            // transcript_errors or verify_unavailable: escalate to needs_review.
+            effectiveStatus = 'needs_review';
+          }
+
+          s.jobs[i2].status = effectiveStatus;
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
-          s.jobs[i2].error = res.error || null;
+          s.jobs[i2].error = effectiveStatus === 'needs_review'
+            ? (verifyResult?.reason ?? null)
+            : (res.error || null);
+          // Persist the verifier's verdict string so the renderer can show it.
+          if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
+            s.jobs[i2].verifierVerdict = verifyResult.verdict;
+          } else {
+            delete s.jobs[i2].verifierVerdict;
+          }
           delete s.jobs[i2].runtime;
-          if (s.jobs[i2].status === 'failed') {
+
+          if (effectiveStatus === 'failed') {
             actuallyFailed = true;
             failedJobSnapshot = { ...s.jobs[i2] };
           }
@@ -1211,7 +1267,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           // so the cross-group failure gate in pickNextBatch releases. Without
           // this, the queue stalls indefinitely behind a stale failure even
           // though the auto-recovery did its job.
-          if (s.jobs[i2].status === 'completed' && isFixPlanSlug(job.slug)) {
+          if (effectiveStatus === 'completed' && isFixPlanSlug(job.slug)) {
             const originalSlug = job.slug.replace(/^(\d+)-fix-/, '$1-');
             const orig = s.jobs.findIndex((x) => x.slug === originalSlug && x.status === 'failed');
             if (orig >= 0) {

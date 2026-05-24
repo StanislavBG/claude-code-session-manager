@@ -566,9 +566,33 @@ ipcMain.handle('app:open-file-in-editor', async (_e, payload) => {
   const { path: p, line, col, editor } = schemas.openFileInEditor.parse(payload);
   const home = os.homedir();
   const abs = path.isAbsolute(p) ? p : path.resolve(home, p);
-  const err = checkInsideHome(abs);
-  if (err) throw new Error(err);
+  // Allowed roots: $HOME (the usual case) plus our own clipboard temp dir
+  // (clipboard-paste writes PNGs there; clicks on those paths from the
+  // terminal must resolve). Resolve symlinks on both sides — on macOS
+  // /tmp is a symlink to /private/tmp, so a literal prefix check fails.
+  const clipboardDirRaw = path.join(os.tmpdir(), 'session-manager-clipboard');
+  let clipboardDirReal = clipboardDirRaw;
+  try { clipboardDirReal = fs.realpathSync(clipboardDirRaw); } catch { /* not yet created */ }
+  let absReal = abs;
+  try { absReal = fs.realpathSync(abs); } catch { /* file may not exist yet — fall through to access() below */ }
+  const inClipboardTmp =
+    absReal === clipboardDirReal ||
+    absReal.startsWith(clipboardDirReal + path.sep) ||
+    abs === clipboardDirRaw ||
+    abs.startsWith(clipboardDirRaw + path.sep);
+  if (!inClipboardTmp) {
+    const err = checkInsideHome(abs);
+    if (err) throw new Error(err);
+  }
   try { await fsp.access(abs); } catch { return { ok: false, error: `file not found: ${abs}` }; }
+  // Image files: open in the OS default image viewer via shell.openPath
+  // rather than a code editor. Clipboard PNGs are the main use case — the
+  // user wants to preview the image, not stare at a binary blob in VS Code.
+  if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|avif|heic|ico)$/i.test(abs)) {
+    const errStr = await shell.openPath(abs);
+    if (errStr) return { ok: false, error: errStr };
+    return { ok: true, opener: 'shell' };
+  }
   const candidates = (editor && editor !== 'auto')
     ? [editor]
     : [process.env.VISUAL, process.env.EDITOR, 'code', 'cursor', 'subl', 'nano'].filter(Boolean);

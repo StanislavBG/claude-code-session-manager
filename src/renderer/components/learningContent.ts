@@ -523,18 +523,18 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   },
 
   'agent-view': {
-    headline: 'A whimsical workshop visualisation of what Claude is doing right now',
+    headline: 'A single-glance live status of what the active session is doing',
     intro:
-      'Agent-View is a fun, low-information-density alternative to the terminal — a little robot at a workbench, reading from a todo board, walking off to spawn subagents. State is derived live from the active session\'s transcript: idle vs working, current verb, todo progress. It\'s not meant to replace the terminal; it\'s a calmer place to glance at while a long task runs.',
+      'Agent-View is a minimal observability panel derived live from the active session\'s transcript. Status, current tool, counters, 5h usage, and a short list of recent activity — nothing else. Use it to glance at long runs without scrolling the terminal.',
     sections: [
       {
         title: 'What you see',
         items: [
-          { term: 'Robot', body: 'Working when transcript events are recent (<3s); idle when quiet for longer; offline when no claude process is attached. Idle robots occasionally wander or doze off.' },
-          { term: 'Workbench', body: 'Current tool calls — a quick visual flicker for each Bash / Edit / Read.' },
-          { term: 'TodoBoard', body: 'Same data as the Tasks tab but rendered as a chalkboard.' },
-          { term: 'SubagentDock', body: 'Recently-spawned subagents as little helpers next to the robot.' },
-          { term: 'PlanWhiteboard', body: 'Current plan if Claude is in plan mode.' },
+          { term: 'Status pill', body: 'working when transcript events are recent (<3s), idle when quiet for longer, offline when no claude process is attached.' },
+          { term: 'Now line', body: 'Latest tool call (name + target — file, command, URL hostname). Hidden after 30s of no activity.' },
+          { term: 'Counters', body: 'Todos as pending/in-progress/done, tool calls in the last 60s, subagent spawns, plan revisions.' },
+          { term: '5h usage bar', body: 'Same source as `claude /usage` and the 5h pill in the sidebar footer.' },
+          { term: 'Lists', body: 'Running scheduler jobs, active subagents (touched in last 5m), and the eight most recent tool calls.' },
         ],
       },
     ],

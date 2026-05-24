@@ -151,10 +151,18 @@ export function SchedulerPrdsView() {
     if (liveSnap) setQueueState(liveSnap)
   }, [liveSnap])
 
-  // Auto-select first PRD on initial load
+  // Latest-addition-on-top. mtimeMs captures both new files and freshly
+  // edited ones, which matches "latest" better than slug order (slugs lead
+  // with the parallel group prefix, not creation order).
+  const sortedPrds = useMemo(
+    () => [...prds].sort((a, b) => b.mtimeMs - a.mtimeMs || a.slug.localeCompare(b.slug)),
+    [prds],
+  )
+
+  // Auto-select first (= newest) PRD on initial load
   useEffect(() => {
-    if (!selectedSlug && prds.length > 0) setSelectedSlug(prds[0].slug)
-  }, [prds, selectedSlug])
+    if (!selectedSlug && sortedPrds.length > 0) setSelectedSlug(sortedPrds[0].slug)
+  }, [sortedPrds, selectedSlug])
 
   // Load body when selection changes
   useEffect(() => {
@@ -308,17 +316,17 @@ export function SchedulerPrdsView() {
       return next
     })
   }
-  const allVisibleChecked = prds.length > 0 && prds.every((p) => checked.has(p.slug))
-  const someVisibleChecked = !allVisibleChecked && prds.some((p) => checked.has(p.slug))
+  const allVisibleChecked = sortedPrds.length > 0 && sortedPrds.every((p) => checked.has(p.slug))
+  const someVisibleChecked = !allVisibleChecked && sortedPrds.some((p) => checked.has(p.slug))
   const toggleAllVisible = () => {
     setChecked((prev) => {
       if (allVisibleChecked) {
         const next = new Set(prev)
-        for (const p of prds) next.delete(p.slug)
+        for (const p of sortedPrds) next.delete(p.slug)
         return next
       }
       const next = new Set(prev)
-      for (const p of prds) next.add(p.slug)
+      for (const p of sortedPrds) next.add(p.slug)
       return next
     })
   }
@@ -351,7 +359,7 @@ export function SchedulerPrdsView() {
 
   const sidebar = (
     <div className="py-2">
-      {prds.length === 0 ? (
+      {sortedPrds.length === 0 ? (
         <div className="px-3 py-2 text-xs text-fg-faint">no PRDs found</div>
       ) : (
         <>
@@ -367,7 +375,7 @@ export function SchedulerPrdsView() {
               onChange={toggleAllVisible}
               className="cursor-pointer"
             />
-            <span>{checked.size > 0 ? `${checked.size} selected` : `${prds.length} PRDs`}</span>
+            <span>{checked.size > 0 ? `${checked.size} selected` : `${sortedPrds.length} PRDs`}</span>
             {checked.size > 0 && (
               <button
                 type="button"
@@ -378,7 +386,7 @@ export function SchedulerPrdsView() {
               </button>
             )}
           </label>
-          {prds.map((p) => {
+          {sortedPrds.map((p) => {
             const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
             const s: PrdStatus = j == null ? 'unqueued' : (j.status as PrdStatus)
             const sel = p.slug === selectedSlug

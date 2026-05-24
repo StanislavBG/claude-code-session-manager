@@ -32,14 +32,14 @@ type ToolKey = Extract<NavKey,
   | 'orchestrator' | 'hives' | 'repoviz' | 'quick-open' | 'global-search'
   | 'agent-memory'
 >
-void useScheduleState; void useBilling; void useMemo // (kept for future signal additions)
+void useBilling; void useMemo // (kept for future signal additions)
 
 
 interface NavGroupItem {
   key: NavKey
   label: string
   icon: AlmanacIconName
-  liveKind?: 'subagents' | 'tasks' | 'agentView'
+  liveKind?: 'subagents' | 'tasks' | 'agentView' | 'scheduler'
   hint?: string
 }
 
@@ -48,7 +48,7 @@ const WORKSPACE: NavGroupItem[] = [
   { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
   { key: 'agent-view', label: 'Agent-View', icon: 'agent-view',   liveKind: 'agentView', hint: 'Workshop scene of the active session' },
   { key: 'subagents',  label: 'Hive',       icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
-  { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    hint: 'Queue claude -p jobs against your 5h window' },
+  { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Queue claude -p jobs against your 5h window' },
   { key: 'plans',      label: 'Plans',      icon: 'plans',        hint: 'PRDs that drive the scheduler' },
   { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
@@ -101,8 +101,32 @@ function loadMode(): Mode {
   }
 }
 
+// Collapsible nav groups. Each section header (Workspace / Configure / Tools)
+// can be folded away independently; the set of collapsed group names is
+// persisted as a JSON array.
+const COLLAPSED_KEY = 'sm.almanac.collapsedGroups'
+type GroupName = 'Workspace' | 'Configure' | 'Tools'
+
+function loadCollapsed(): Set<GroupName> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    if (!raw) return new Set()
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return new Set()
+    return new Set(arr.filter((s): s is GroupName =>
+      s === 'Workspace' || s === 'Configure' || s === 'Tools'))
+  } catch {
+    return new Set()
+  }
+}
+
 function useLiveIndicators() {
   const tabs = useLive((s) => s.tabs)
+  // Selector returns a primitive so this component only re-renders when the
+  // boolean flips, not on every scheduler snapshot broadcast.
+  const schedulerRunning = useScheduleState((s) =>
+    (s.snapshot?.jobs ?? []).some((j) => j.status === 'running'),
+  )
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 5_000)
@@ -113,6 +137,7 @@ function useLiveIndicators() {
     subagents: list.some((t) => t.agents.some((a) => now - a.at < 60_000)),
     tasks: list.some((t) => t.todos.some((todo) => todo.status === 'in_progress')),
     agentView: list.some((t) => t.lastEventAt > 0 && now - t.lastEventAt < 5_000),
+    scheduler: schedulerRunning,
   }
 }
 
@@ -127,6 +152,17 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   const setModePersist = useCallback((m: Mode) => {
     setMode(m)
     try { localStorage.setItem(MODE_KEY, m) } catch { /* ignore */ }
+  }, [])
+
+  const [collapsed, setCollapsed] = useState<Set<GroupName>>(() => loadCollapsed())
+  const toggleGroup = useCallback((g: GroupName) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(g)) next.delete(g); else next.add(g)
+      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(next))) }
+      catch { /* ignore */ }
+      return next
+    })
   }, [])
 
   const tabs = useSessions((s) => s.tabs)
@@ -163,8 +199,13 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
       <div className="flex-1 min-h-0 overflow-auto px-2 pb-3">
         {mode === 'nav' ? (
           <>
-            <NavGroupHeader>Workspace</NavGroupHeader>
-            {WORKSPACE.map((item) => (
+            <NavGroupHeader
+              label="Workspace"
+              collapsed={collapsed.has('Workspace')}
+              count={WORKSPACE.length}
+              onToggle={() => toggleGroup('Workspace')}
+            />
+            {!collapsed.has('Workspace') && WORKSPACE.map((item) => (
               <NavRow
                 key={item.key}
                 item={item}
@@ -174,8 +215,13 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               />
             ))}
 
-            <NavGroupHeader>Configure</NavGroupHeader>
-            {CONFIGURE.map((item) => (
+            <NavGroupHeader
+              label="Configure"
+              collapsed={collapsed.has('Configure')}
+              count={CONFIGURE.length}
+              onToggle={() => toggleGroup('Configure')}
+            />
+            {!collapsed.has('Configure') && CONFIGURE.map((item) => (
               <NavRow
                 key={item.key}
                 item={item}
@@ -185,8 +231,13 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               />
             ))}
 
-            <NavGroupHeader>Tools</NavGroupHeader>
-            {TOOLS.map((tool) => (
+            <NavGroupHeader
+              label="Tools"
+              collapsed={collapsed.has('Tools')}
+              count={TOOLS.length}
+              onToggle={() => toggleGroup('Tools')}
+            />
+            {!collapsed.has('Tools') && TOOLS.map((tool) => (
               <ToolRow
                 key={tool.key}
                 tool={tool}
@@ -265,11 +316,30 @@ function useBranch(cwd: string | null): string | null {
   return branch
 }
 
-function NavGroupHeader({ children }: { children: React.ReactNode }) {
+function NavGroupHeader({
+  label, collapsed, count, onToggle,
+}: { label: string; collapsed: boolean; count: number; onToggle: () => void }) {
   return (
-    <div className="px-3 pt-3.5 pb-1.5 font-serif italic text-[11px] font-bold tracking-[0.07em] uppercase text-fg-faint">
-      {children}
-    </div>
+    <button
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      className="group w-full flex items-center gap-1.5 px-3 pt-3.5 pb-1.5 font-serif italic text-[11px] font-bold tracking-[0.07em] uppercase text-fg-faint hover:text-fg-dim transition-colors text-left"
+    >
+      <span
+        aria-hidden
+        className="inline-block w-2 text-[9px] not-italic transition-transform"
+        style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+      >
+        ▾
+      </span>
+      <span className="flex-1">{label}</span>
+      {collapsed && (
+        <span className="not-italic text-[10px] font-mono text-fg-faint/70 normal-case tracking-normal">
+          {count}
+        </span>
+      )}
+    </button>
   )
 }
 

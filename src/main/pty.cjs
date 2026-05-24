@@ -5,7 +5,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const { addAllowedRoot } = require('./config.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
-const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
+const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**
@@ -28,9 +28,9 @@ class PtyManager {
 
     // Validate that cwd is inside homedir before widening the allowed-root set.
     if (cwd) {
-      const r = assertCwdInsideHome(cwd);
+      const r = checkInsideHome(cwd);
       if (!r.ok) throw new Error(`pty ${r.error}`);
-      addAllowedRoot(r.realCwd);
+      addAllowedRoot(r.realPath);
     }
 
     // Idempotent reattach: renderer reloads (HMR/Ctrl+R) re-run App.tsx's

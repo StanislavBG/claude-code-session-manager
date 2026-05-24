@@ -15,7 +15,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
-const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
+const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 // Splits a readable stream into lines capped at maxLineBytes. Prevents OOM
@@ -61,7 +61,7 @@ class WatcherManager {
   add({ tabId, label, command, cwd }) {
     const resolvedCwd = cwd || process.cwd();
 
-    const r = assertCwdInsideHome(resolvedCwd);
+    const r = checkInsideHome(resolvedCwd);
     if (!r.ok) throw new Error(`watcher ${r.error}`);
 
     const watcherId = crypto.randomUUID();

@@ -22,6 +22,7 @@ const os = require('node:os');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const { expandHome } = require('./lib/expandHome.cjs');
 
 /** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
 const watchers = new Map();
@@ -29,13 +30,6 @@ let window = null;
 
 function attachWindow(w) {
   window = w;
-}
-
-function expandHome(p) {
-  if (!p) return p;
-  if (p === '~') return os.homedir();
-  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
-  return p;
 }
 
 /**

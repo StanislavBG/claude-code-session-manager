@@ -14,42 +14,13 @@
  */
 
 const { ipcMain, shell } = require('electron');
-const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 
 const { z } = require('zod');
-
-function expandHome(p) {
-  if (!p) return p;
-  if (p === '~') return os.homedir();
-  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
-  return p;
-}
-
-/**
- * Resolve to realpath; on ENOENT resolve the parent then re-append basename so
- * we can still validate create destinations. Mirrors config.cjs.
- */
-function realResolve(abs) {
-  const lex = path.resolve(expandHome(abs));
-  try {
-    return fs.realpathSync(lex);
-  } catch (e) {
-    if (e.code === 'ENOENT') {
-      const parent = path.dirname(lex);
-      try {
-        return path.join(fs.realpathSync(parent), path.basename(lex));
-      } catch {
-        return lex;
-      }
-    }
-    throw e;
-  }
-}
-
-const HOME = os.homedir();
+const { assertInsideHome } = require('./lib/insideHome.cjs');
+const { expandHome } = require('./lib/expandHome.cjs');
 
 /**
  * Validates that the path is under the home directory. Returns the realpath
@@ -58,11 +29,7 @@ const HOME = os.homedir();
  * ~ — but never escapes the home tree.
  */
 function validateHomePath(abs) {
-  const real = realResolve(abs);
-  let realHome;
-  try { realHome = fs.realpathSync(HOME); } catch { realHome = HOME; }
-  if (real === realHome || real.startsWith(realHome + path.sep)) return real;
-  throw new Error(`Path outside home directory: ${real}`);
+  return assertInsideHome(expandHome(abs)).realPath;
 }
 
 /** Reject .credentials.json writes regardless of where they sit. */

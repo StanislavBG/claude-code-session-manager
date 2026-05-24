@@ -34,7 +34,8 @@ const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
-const { assertCwdInsideHome } = require('./lib/insideHome.cjs');
+const { checkInsideHome } = require('./lib/insideHome.cjs');
+const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
 
 let mainWindow = null;
 let rebooting = false;
@@ -81,7 +82,7 @@ function writeFirstPaintFailureLog() {
     const ymd = new Date().toISOString().slice(0, 10);
     const logPath = path.join(logDir, `boot-${ymd}.log`);
 
-    const homeCheck = assertCwdInsideHome(os.homedir());
+    const homeCheck = checkInsideHome(os.homedir());
     const lines = [
       `=== first-paint deadline exceeded @ ${new Date().toISOString()} ===`,
       `process.versions: ${JSON.stringify(process.versions)}`,
@@ -464,12 +465,9 @@ ipcMain.handle('app:test-fire-hook', async (_e, payload) => {
 // for non-git dirs, detached HEAD, missing git, or timeouts so callers can
 // render `—` without branching on error shape. 1s ceiling keeps a wedged git
 // (network filesystem, hung index lock) from blocking the renderer.
-ipcMain.handle('app:git-branch', async (_e, payload) => {
-  // safeParse (not throw) so a malformed call resolves to null — matches the
-  // existing semantics where StatusBar renders `—` on any failure.
-  const parsed = schemas.appGitBranch.safeParse(payload);
-  if (!parsed.success) return null;
-  const { cwd } = parsed.data;
+ipcMain.handle('app:git-branch', validated(schemas.appGitBranch, async ({ cwd }) => {
+  // Both renderer callsites (AlmanacFooter, AlmanacSidebar) already `.catch`
+  // rejections and render `—`, so a ZodError throw is handled correctly.
   return await new Promise((resolve) => {
     execFile('git', ['branch', '--show-current'], { cwd, timeout: 1000, windowsHide: true }, (err, stdout) => {
       if (err) { resolve(null); return; }
@@ -477,93 +475,30 @@ ipcMain.handle('app:git-branch', async (_e, payload) => {
       resolve(out.length ? out : null);
     });
   });
-});
+}));
 
-// Containment check used by the open-in-{editor,finder,terminal} handlers.
-// Bare `startsWith(home)` matches `/home/bilkoEVIL` when home=`/home/bilko` —
-// the classic prefix-trap. Resolve real paths (follow symlinks) and require
-// either exact equality or a separator boundary. Returns null on success or
-// an error string on failure. ENOENT (cwd doesn't exist) is a soft fail —
-// downstream `spawn`/`shell.openPath` will surface a more precise error.
-function checkInsideHome(cwd) {
-  if (typeof cwd !== 'string' || !cwd) return 'cwd outside home';
-  const home = os.homedir();
-  let realCwd;
-  let realHome;
-  try {
-    realHome = fs.realpathSync(home);
-  } catch {
-    return 'home directory unresolved';
-  }
-  try {
-    realCwd = fs.realpathSync(cwd);
-  } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      // Fall through to the existing error path: the resolved-but-nonexistent
-      // path still has to be home-contained to avoid information disclosure
-      // via stat-probes (`/etc/secrets/...` → editor errors that reveal
-      // existence).
-      const resolved = path.resolve(cwd);
-      if (resolved !== realHome && !resolved.startsWith(realHome + path.sep)) {
-        return 'cwd outside home';
-      }
-      return null;
-    }
-    return 'cwd outside home';
-  }
-  if (realCwd !== realHome && !realCwd.startsWith(realHome + path.sep)) {
-    return 'cwd outside home';
-  }
-  return null;
-}
+// Containment check for the open-in-{editor,finder,terminal} handlers lives
+// in lib/insideHome.cjs — single chokepoint for the /home/bilkoEVIL prefix-trap.
+// Editor / finder / terminal logic lives in lib/openExternalApp.cjs.
 
-// Returns the resolved path of a command, or null if not found on PATH.
-function findCommand(name) {
-  try {
-    const out = execFileSync(
-      process.platform === 'win32' ? 'where' : 'which',
-      [name],
-      { encoding: 'utf8', env: process.env, timeout: 500 },
-    ).trim().split(/\r?\n/)[0];
-    if (out) return out;
-  } catch { /* not found */ }
-  return null;
-}
+ipcMain.handle('app:open-in-editor', validated(schemas.openInEditor, async ({ cwd, editor }) => {
+  const r = checkInsideHome(cwd);
+  if (!r.ok) throw new Error(r.error);
+  return openInEditor({ cwd, editor });
+}));
 
-ipcMain.handle('app:open-in-editor', async (_e, payload) => {
-  const { cwd, editor } = schemas.openInEditor.parse(payload);
-  const err = checkInsideHome(cwd);
-  if (err) throw new Error(err);
-  const candidates = (editor && editor !== 'auto')
-    ? [editor]
-    : [process.env.VISUAL, process.env.EDITOR, 'code', 'cursor', 'subl', 'nano'].filter(Boolean);
-  for (const cmd of candidates) {
-    if (!findCommand(cmd)) continue;
-    const child = spawn(cmd, [cwd], { detached: true, stdio: 'ignore', env: cleanChildEnv() });
-    child.unref();
-    return { ok: true, editor: cmd };
-  }
-  return { ok: false, error: 'no editor found' };
-});
-
-ipcMain.handle('app:open-external', async (_e, payload) => {
+ipcMain.handle('app:open-external', validated(schemas.openExternal, async ({ url }) => {
   // URL filter mirrors setWindowOpenHandler at line ~631: without it, the
   // renderer could be tricked into asking shell.openExternal to launch
   // `file:///etc/passwd`, `javascript:…`, or `mailto:…`. Stick to web URLs.
-  const { url } = schemas.openExternal.parse(payload);
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     return { ok: false, error: 'only http/https URLs are allowed' };
   }
   await shell.openExternal(url);
   return { ok: true };
-});
+}));
 
-ipcMain.handle('app:open-file-in-editor', async (_e, payload) => {
-  // Open a specific file (with optional line:col) in the user's editor.
-  // Distinct from app:open-in-editor above which opens a project root.
-  // GUI editors that support the goto-line flag (code/cursor/subl) get
-  // `-g file:line:col`; everything else falls back to opening the file alone.
-  const { path: p, line, col, editor } = schemas.openFileInEditor.parse(payload);
+ipcMain.handle('app:open-file-in-editor', validated(schemas.openFileInEditor, async ({ path: p, line, col, editor }) => {
   const home = os.homedir();
   const abs = path.isAbsolute(p) ? p : path.resolve(home, p);
   // Allowed roots: $HOME (the usual case) plus our own clipboard temp dir
@@ -581,72 +516,32 @@ ipcMain.handle('app:open-file-in-editor', async (_e, payload) => {
     abs === clipboardDirRaw ||
     abs.startsWith(clipboardDirRaw + path.sep);
   if (!inClipboardTmp) {
-    const err = checkInsideHome(abs);
-    if (err) throw new Error(err);
+    const r = checkInsideHome(abs);
+    if (!r.ok) throw new Error(r.error);
   }
-  try { await fsp.access(abs); } catch { return { ok: false, error: `file not found: ${abs}` }; }
-  // Image files: open in the OS default image viewer via shell.openPath
-  // rather than a code editor. Clipboard PNGs are the main use case — the
-  // user wants to preview the image, not stare at a binary blob in VS Code.
-  if (/\.(png|jpe?g|gif|webp|bmp|svg|tiff?|avif|heic|ico)$/i.test(abs)) {
-    const errStr = await shell.openPath(abs);
-    if (errStr) return { ok: false, error: errStr };
-    return { ok: true, opener: 'shell' };
-  }
-  const candidates = (editor && editor !== 'auto')
-    ? [editor]
-    : [process.env.VISUAL, process.env.EDITOR, 'code', 'cursor', 'subl', 'nano'].filter(Boolean);
-  for (const cmd of candidates) {
-    if (!findCommand(cmd)) continue;
-    const supportsGoto = /^(code|cursor|subl)$/.test(cmd);
-    const target = (supportsGoto && line) ? `${abs}:${line}${col ? `:${col}` : ''}` : abs;
-    const args = supportsGoto ? ['-g', target] : [abs];
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
-    child.unref();
-    return { ok: true, editor: cmd };
-  }
-  return { ok: false, error: 'no editor found' };
-});
+  return openFileInEditor({ path: abs, line, col, editor });
+}));
 
-ipcMain.handle('app:open-in-finder', async (_e, payload) => {
-  const { cwd } = schemas.openInFinder.parse(payload);
-  const err = checkInsideHome(cwd);
-  if (err) throw new Error(err);
-  await shell.openPath(cwd);
-  return { ok: true };
-});
+ipcMain.handle('app:open-in-finder', validated(schemas.openInFinder, async ({ cwd }) => {
+  const r = checkInsideHome(cwd);
+  if (!r.ok) throw new Error(r.error);
+  return openInFinder({ cwd });
+}));
 
-ipcMain.handle('app:open-in-terminal', async (_e, payload) => {
-  const { cwd } = schemas.openInTerminal.parse(payload);
-  const err = checkInsideHome(cwd);
-  if (err) throw new Error(err);
-  if (process.platform === 'linux') {
-    const terms = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-    for (const t of terms) {
-      if (!findCommand(t)) continue;
-      const args = t === 'gnome-terminal'
-        ? ['--working-directory=' + cwd]
-        : ['-e', `bash -c "cd '${cwd.replace(/'/g, "'\\''")}' && exec bash"`];
-      const child = spawn(t, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
-      child.unref();
-      return { ok: true, terminal: t };
-    }
-  } else if (process.platform === 'darwin') {
-    spawn('open', ['-a', 'Terminal', cwd], { detached: true, stdio: 'ignore', env: cleanChildEnv() }).unref();
-    return { ok: true, terminal: 'Terminal.app' };
-  }
-  return { ok: false, error: 'no terminal found' };
-});
+ipcMain.handle('app:open-in-terminal', validated(schemas.openInTerminal, async ({ cwd }) => {
+  const r = checkInsideHome(cwd);
+  if (!r.ok) throw new Error(r.error);
+  return openInTerminal({ cwd });
+}));
 
-ipcMain.handle('app:archive-project', async (_e, payload) => {
-  const { encoded } = schemas.archiveProject.parse(payload);
+ipcMain.handle('app:archive-project', validated(schemas.archiveProject, async ({ encoded }) => {
   const home = os.homedir();
   const src = path.join(home, '.claude', 'projects', encoded);
   const dst = path.join(home, '.claude', 'projects-archive', encoded);
   await fsp.mkdir(path.dirname(dst), { recursive: true });
   await fsp.rename(src, dst);
   return { ok: true };
-});
+}));
 
 registerPtyHandlers();
 configMgr.registerConfigHandlers();
@@ -762,7 +657,7 @@ app.whenReady().then(async () => {
   // Boot-time detection 2: symlinked /Users on macOS can make os.homedir()
   // realpath to a path outside itself, which breaks every cwd containment
   // check downstream. Surface here rather than failing on first session spawn.
-  bootHomeSelfCheck = assertCwdInsideHome(os.homedir());
+  bootHomeSelfCheck = checkInsideHome(os.homedir());
   if (!bootHomeSelfCheck.ok) {
     console.error(`[insideHome] SELF-CHECK FAILED: ${bootHomeSelfCheck.error}; sessions will not be able to spawn`);
   }

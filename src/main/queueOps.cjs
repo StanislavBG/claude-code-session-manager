@@ -37,6 +37,7 @@ const { ipcMain } = require('electron');
 const { SCHEDULE_SLUG_RE: SLUG_RE, schemas } = require('./ipcSchemas.cjs');
 const logs = require('./logs.cjs');
 const config = require('./config.cjs');
+const { expandHome } = require('./lib/expandHome.cjs');
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
@@ -114,8 +115,7 @@ function lintParsed(slug, raw) {
     findings.push({ rule: 'missing-cwd', line: 1, snippet: 'frontmatter "cwd" is required', severity: 'error' });
   } else {
     // cwd existence — only if it looks like an absolute path. ~ -> homedir.
-    let candidate = fm.cwd;
-    if (candidate.startsWith('~/')) candidate = path.join(os.homedir(), candidate.slice(2));
+    const candidate = expandHome(fm.cwd);
     if (path.isAbsolute(candidate)) {
       try {
         fs.accessSync(candidate, fs.constants.F_OK);

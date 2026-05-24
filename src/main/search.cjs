@@ -53,12 +53,7 @@ function probeRipgrep() {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
-function expandHome(p) {
-  if (!p) return p;
-  if (p === '~') return os.homedir();
-  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
-  return p;
-}
+const { expandHome } = require('./lib/expandHome.cjs');
 
 /**
  * Spawn rg with argv (no shell), capture stdout/stderr, enforce TIMEOUT_MS.

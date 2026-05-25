@@ -29,6 +29,7 @@ import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
 import { Plans } from './tabs/Plans'
+import { Prompts } from './tabs/Prompts'
 import { Tasks } from './tabs/Tasks'
 import { Projects } from './tabs/Projects'
 import { DocEditor } from './tabs/DocEditor'
@@ -75,6 +76,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { eyebrow: 'Workspace',  title: 'Tokens, cost, cadence',     intro: 'Daily and per-session usage from the Anthropic billing API. The 5-hour window in the footer is the same source.' },
   'plans':         { eyebrow: 'Workspace',  title: 'Plans & PRDs',              intro: 'PRDs that drive the scheduler. Edit, queue, or peek at the body that will be sent to claude -p.' },
+  'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
   'tasks':         { eyebrow: 'Workspace',  title: 'Tasks across sessions',     intro: 'Active to-dos pulled from every running Claude session. Use this to see what is in flight without tab-hopping.' },
   'scheduler':     { eyebrow: 'Workspace',  title: 'Scheduler',                 intro: 'Queue claude -p jobs against your 5-hour window. Jobs auto-pause on rate-limit and resume on the next reset.' },
   'plugins':       { eyebrow: 'Configure',  title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
@@ -131,6 +133,7 @@ function renderScreen(active: NavKey, ctx: {
       case 'history':       return <History />
       case 'usage':         return <Usage />
       case 'plans':         return <Plans />
+      case 'prompts':       return <Prompts />
       case 'tasks':         return <Tasks />
       case 'scheduler':     return <SchedulePanel />
       case 'plugins':       return <Plugins />

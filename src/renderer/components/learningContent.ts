@@ -379,6 +379,32 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     ],
   },
 
+  'prompts': {
+    headline: 'Click-to-insert prompt library — 46 curated templates across 8 categories',
+    intro:
+      'The Prompts tab is a personal prompt-snippet library. Pick a template from the sidebar, tweak the body in the modal, choose how to send it (paste or auto-fire), and it lands in your active terminal session. Every prompt has a default send mode you can override per-use. You can also edit any prompt permanently — your override shadows the bundled seed until you reset it.',
+    sections: [
+      {
+        title: 'Send modes',
+        items: [
+          { term: 'Paste', body: 'Writes the prompt text to the terminal without a trailing newline. You review it on the prompt line and press Enter yourself — useful when you want to edit further before sending.' },
+          { term: 'Auto-fire', body: 'Appends \\n so Claude receives and acts on the prompt immediately. Good for one-shot queries you trust to run as-is.' },
+        ],
+      },
+      {
+        title: 'Customising prompts',
+        items: [
+          { term: 'Edit root template', body: 'Opens an inline editor for the prompt body. Saving writes to ~/.claude/session-manager/prompts/<category>/<slug>.md — your override is used on every future open of that prompt.' },
+          { term: 'Reset to default', body: 'Visible only when you have a custom override. Clicking it restores the bundled seed text — your edits are discarded.' },
+        ],
+      },
+    ],
+    tips: [
+      'Auto-fire prompts like "Review staged diff for OWASP Top 10" are designed to run without hand-holding — they produce structured output you can act on straight away.',
+      'Paste mode lets you personalise the prompt on the fly (add a specific file path, scope it to one function) before submitting.',
+    ],
+  },
+
   'tasks': {
     headline: 'Live view of Claude\'s in-session to-do list',
     intro:

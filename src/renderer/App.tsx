@@ -44,6 +44,7 @@ const SCREEN_KEYS = new Set<NavKey>([
   'subagents',
   'scheduler',
   'plans',
+  'prompts',
   'tasks',
   'history',
   'usage',

@@ -43,3 +43,4 @@ export type NavKey =
   | 'repoviz'
   | 'quick-open'
   | 'global-search'
+  | 'prompts'

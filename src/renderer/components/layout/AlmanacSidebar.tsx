@@ -50,6 +50,7 @@ const WORKSPACE: NavGroupItem[] = [
   { key: 'subagents',  label: 'Hive',       icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
   { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Queue claude -p jobs against your 5h window' },
   { key: 'plans',      label: 'Plans',      icon: 'plans',        hint: 'PRDs that drive the scheduler' },
+  { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
   { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
   { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },

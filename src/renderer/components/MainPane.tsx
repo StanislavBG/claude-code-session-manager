@@ -202,10 +202,10 @@ export function MainPane({
   }, [activeTab?.id])
 
   return (
-    // `relative` so absolute-positioned children (TerminalControls gear,
-    // WatchersPopover) anchor to MainPane rather than falling through to the
-    // viewport — without it, the gear at `top-2 right-2` lands inside the
-    // TabBar and visually overlaps the "v{__APP_VERSION__}" text at its right edge.
+    // `relative` so absolute-positioned children (WatchersPopover) anchor to
+    // MainPane rather than the viewport. TerminalControls now lives inside the
+    // inner terminal-viewport div so its gear can't overlap the TabBar's
+    // "v{__APP_VERSION__}" text.
     <main className="relative flex-1 min-w-0 bg-bg flex flex-col">
       {active === 'terminal' && broadcastOpen && (
         <BroadcastBar
@@ -225,9 +225,6 @@ export function MainPane({
           />
         </div>
       )}
-      {/* Terminal settings overlay — theme + font-size; only shown when the
-       *  terminal screen is active so it doesn't bleed into other pages. */}
-      {active === 'terminal' && <TerminalControls />}
       <LearningPanel active={active} />
       <div className="flex-1 min-h-0 relative">
         {/*
@@ -255,6 +252,10 @@ export function MainPane({
             <NoSession />
           )}
           <LiveTranscript />
+          {/* Terminal settings overlay — theme + font-size. Anchored to the
+           *  terminal viewport (not MainPane) so the gear sits well below the
+           *  TabBar's "v{__APP_VERSION__}" text. */}
+          {active === 'terminal' && <TerminalControls />}
         </div>
         {active !== 'terminal' && (
           <div className="absolute inset-0 bg-bg overflow-auto">

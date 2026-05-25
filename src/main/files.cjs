@@ -195,7 +195,7 @@ async function renameEntry(oldPath, newName) {
   }
 }
 
-const CRITICAL_PATHS = new Set([HOME, '/', '/usr', '/bin', '/etc', '/var', '/System', '/Applications']);
+const CRITICAL_PATHS = new Set([os.homedir(), '/', '/usr', '/bin', '/etc', '/var', '/System', '/Applications']);
 
 async function deleteEntry(filePath) {
   let resolved;

@@ -179,6 +179,7 @@ function buildCommands(): Command[] {
     { id: 'nav:agent-view', label: 'Go to Agent View', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
     { id: 'nav:doc-editor', label: 'Go to Doc Editor', section: 'nav', emitOnly: true },
+    { id: 'nav:prompts', label: 'Go to Prompts', section: 'nav', emitOnly: true },
   ]
   return cmds
 }

@@ -25,6 +25,7 @@ const os = require('node:os');
 const chokidar = require('chokidar');
 const otel = require('./otel.cjs');
 const logs = require('./logs.cjs');
+const usageMatrix = require('./usageMatrix.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 let window = null;
@@ -142,6 +143,14 @@ async function flush(sub, { emit = true } = {}) {
     // Ring buffer (cap at 500 entries to bound memory).
     sub.buffer.push(ev);
     if (sub.buffer.length > 500) sub.buffer.shift();
+    // Feed the AgOps aggregator on every event — both replay and live, so
+    // freshly-attached tabs land with full history reflected in the matrix.
+    usageMatrix.recordEvent({
+      tabId: sub.tabId,
+      cwd: sub.cwd,
+      sessionUuid: sub.sessionUuid,
+      ev,
+    });
     if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
     // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
     // so backfilled transcripts show up in the trace store.
@@ -206,6 +215,8 @@ function unsubscribe(tabId) {
   if (!sub) return;
   sub.watcher?.close().catch(() => {});
   subs.delete(tabId);
+  // Drop the tab from the AgOps matrix — "active sessions" only.
+  usageMatrix.removeTab(tabId);
 }
 
 function getBuffer(tabId) {
@@ -216,6 +227,7 @@ function getBuffer(tabId) {
 function closeAll() {
   for (const sub of subs.values()) sub.watcher?.close().catch(() => {});
   subs.clear();
+  usageMatrix.closeAll();
 }
 
 function registerTranscriptHandlers() {

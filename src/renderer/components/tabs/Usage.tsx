@@ -4,7 +4,11 @@ import { EmptyState } from '../ui/EmptyState'
 import { UsageDial } from '../ui/UsageDial'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useBilling, refreshBilling } from '../../state/billing'
+import { useUsageMatrix, useStartUsageMatrix } from '../../state/usageMatrix'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
+import { TopologyHeader } from './usage/TopologyHeader'
+import { SessionMatrix } from './usage/SessionMatrix'
+import { AlertsStrip } from './usage/AlertsStrip'
 import type { BillingData, BillingFetchResult, UsageWindow } from '../../../preload/api'
 
 /**
@@ -31,6 +35,8 @@ export function Usage() {
   const activeTab = useActiveTab()
   const billing = useBilling((s) => s.data)
   const data = getBillingData(billing)
+  useStartUsageMatrix()
+  const matrix = useUsageMatrix((s) => s.snapshot)
 
   if (!activeTab) {
     return (
@@ -63,7 +69,10 @@ export function Usage() {
         </>
       }
     >
+      <TopologyHeader snap={matrix} />
       <BurnRate billing={billing} />
+      <SessionMatrix snap={matrix} />
+      <AlertsStrip snap={matrix} />
       <div className="p-6 max-w-3xl space-y-4">
         {billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale' && (
           <BillingStatusOverlay result={billing} onRetry={refreshBilling} />

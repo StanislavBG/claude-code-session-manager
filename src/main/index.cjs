@@ -9,6 +9,7 @@ const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
 const configMgr = require('./config.cjs');
 const transcripts = require('./transcripts.cjs');
+const usageMatrix = require('./usageMatrix.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const billing = require('./usage.cjs');
 const logs = require('./logs.cjs');
@@ -187,6 +188,7 @@ async function rebootApp() {
     ptyManager.attachWindow(mainWindow);
     configMgr.attachWindow(mainWindow);
     transcripts.attachWindow(mainWindow);
+    usageMatrix.attachWindow(mainWindow);
     voiceHotkey.init(mainWindow).catch((e) => {
       logs.writeLine({ scope: 'voice-hotkey', level: 'error', message: 'reinit failed', meta: { error: e?.message } });
     });
@@ -546,6 +548,7 @@ ipcMain.handle('app:archive-project', validated(schemas.archiveProject, async ({
 registerPtyHandlers();
 configMgr.registerConfigHandlers();
 transcripts.registerTranscriptHandlers();
+usageMatrix.registerHandlers();
 sessionsStore.registerSessionsHandlers();
 billing.registerBillingHandlers();
 logs.registerLogHandlers();
@@ -777,6 +780,7 @@ app.whenReady().then(async () => {
   ptyManager.attachWindow(mainWindow);
   configMgr.attachWindow(mainWindow);
   transcripts.attachWindow(mainWindow);
+  usageMatrix.attachWindow(mainWindow);
   voiceHotkey.init(mainWindow).catch((e) => {
     logs.writeLine({ scope: 'voice-hotkey', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });

@@ -76,6 +76,14 @@ contextBridge.exposeInMainWorld('api', {
   billing: {
     fetch: () => ipcRenderer.invoke('billing:fetch'),
   },
+  usageMatrix: {
+    snapshot: () => ipcRenderer.invoke('usage:matrix:snapshot'),
+    onTick: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('usage:matrix:tick', listener);
+      return () => ipcRenderer.removeListener('usage:matrix:tick', listener);
+    },
+  },
   logs: {
     write: (scope, level, message, meta) =>
       ipcRenderer.send('log:write', { scope, level, message, meta }),

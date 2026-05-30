@@ -23,6 +23,7 @@ import { useBilling } from '../../state/billing'
 import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { FileTree } from './FileTree'
+import { VoiceButton } from '../VoiceButton'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -274,14 +275,19 @@ function ProjectCaption({ tab, onNewSession }: { tab: { cwd: string; label: stri
       <div className="text-[12px] text-fg-faint font-mono mt-0.5 truncate">
         {branch ? `⌥${branch}` : tab ? tab.cwd : '—'}
       </div>
-      <button
-        onClick={onNewSession}
-        data-testid="tour-new-session"
-        className="mt-3 w-full px-3 py-1.5 rounded-md bg-bg-hi border border-line text-fg text-[12.5px] font-medium hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center gap-1.5"
-      >
-        <AlmanacIcon name="plus" size={13} stroke={1.8} />
-        New session
-      </button>
+      <div className="mt-3 flex items-stretch gap-1.5">
+        <button
+          onClick={onNewSession}
+          data-testid="tour-new-session"
+          className="flex-1 px-3 py-1.5 rounded-md bg-bg-hi border border-line text-fg text-[12.5px] font-medium hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center gap-1.5"
+        >
+          <AlmanacIcon name="plus" size={13} stroke={1.8} />
+          New session
+        </button>
+        <div className="flex items-center rounded-md bg-bg-hi border border-line">
+          <VoiceButton />
+        </div>
+      </div>
     </div>
   )
 }

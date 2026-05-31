@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -40,6 +40,9 @@ const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require
 
 let mainWindow = null;
 let rebooting = false;
+// powerSaveBlocker handle — keeps the system from suspending while the app runs
+// so the scheduler's polling and jobs aren't frozen. -1 = not held.
+let powerBlockerId = -1;
 
 // Boot diagnostics — populated at app.whenReady so the renderer can poll their
 // state via IPC and surface toasts on the failure paths. The first-paint
@@ -792,6 +795,19 @@ app.whenReady().then(async () => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
 
+  // Keep the machine awake while the app is open. The scheduler polls billing
+  // usage every 2 min and runs `claude -p` jobs that must survive an idle
+  // laptop — a system suspend (GNOME/Pop!_OS idle or lid timeout) would freeze
+  // both. `prevent-app-suspension` stops suspend but still lets the display
+  // dim/sleep, so battery impact is limited to keeping the CPU resumable.
+  // On Linux this routes through the org.freedesktop.login1 inhibitor.
+  try {
+    powerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    logs.writeLine({ scope: 'main', level: 'info', message: 'powerSaveBlocker started', meta: { id: powerBlockerId } });
+  } catch (e) {
+    logs.writeLine({ scope: 'main', level: 'warn', message: 'powerSaveBlocker failed', meta: { error: e?.message } });
+  }
+
   // OTEL: load persisted config and start the exporter only if `enabled`.
   // Failures are non-fatal — the app must keep working without telemetry.
   otelSettings.load()
@@ -810,6 +826,10 @@ app.on('will-quit', () => {
   // PRD F1 v2 §IPC plumbing: must unregisterAll on will-quit.
   try { globalShortcut.unregisterAll(); } catch { /* */ }
   voiceHotkey.disposeOnQuit();
+  if (powerBlockerId !== -1) {
+    try { powerSaveBlocker.stop(powerBlockerId); } catch { /* */ }
+    powerBlockerId = -1;
+  }
 });
 
 app.on('window-all-closed', () => {

@@ -17,6 +17,7 @@ import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
+import { useEditor } from './state/editor'
 import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startTeamsPolling } from './state/teams'
@@ -71,6 +72,8 @@ const SCREEN_KEYS = new Set<NavKey>([
   'quick-open',
   'global-search',
   'agent-memory',
+  // In-app file editor (Files sidebar / terminal links route here).
+  'editor',
 ])
 
 export function App() {
@@ -86,6 +89,20 @@ export function App() {
       setActiveNav(k)
     }
   }, [])
+
+  // Open a file in the main-space Editor scene and route there. Used by the
+  // Files sidebar; terminal file-links reach the same place via the
+  // 'sm:open-editor' event below (Terminal has no `navigate` of its own).
+  const openFileInApp = useCallback((path: string) => {
+    useEditor.getState().openFile(path)
+    navigate('editor')
+  }, [navigate])
+
+  useEffect(() => {
+    const h = () => navigate('editor')
+    window.addEventListener('sm:open-editor', h)
+    return () => window.removeEventListener('sm:open-editor', h)
+  }, [navigate])
   const activeTabId = useSessions((s) => s.activeTabId)
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
@@ -539,6 +556,7 @@ export function App() {
           active={activeNav}
           onNavigate={navigate}
           onNewSession={handleNewSession}
+          onOpenFile={openFileInApp}
         />
         <MainPane
           active={activeNav}

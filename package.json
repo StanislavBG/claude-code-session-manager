@@ -1,6 +1,6 @@
 {
   "name": "claude-code-session-manager",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Local cockpit for the Claude Code CLI — multi-tab terminal, full config surface, scheduler, voice dictation, and live observability.",
   "type": "module",
   "main": "src/main/index.cjs",
@@ -90,8 +90,10 @@
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
     "chokidar": "^4.0.1",
+    "dompurify": "^3.2.7",
     "electron": "42.1.0",
     "framer-motion": "^12.38.0",
+    "marked": "^14.0.0",
     "monaco-editor": "0.55.1",
     "node-pty": "^1.2.0-beta.12",
     "onnxruntime-web": "^1.24.3",

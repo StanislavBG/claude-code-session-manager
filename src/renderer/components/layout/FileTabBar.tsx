@@ -19,6 +19,8 @@ export interface OpenFile {
 interface FileTabBarProps {
   openFiles: OpenFile[]
   activeFilePath: string | null
+  /** path → has-unsaved-changes; renders a dirty dot in place of the close glyph. */
+  dirty?: Record<string, boolean>
   onSelectFile: (path: string) => void
   onCloseFile: (path: string) => void
   onCloseOthers?: (path: string) => void
@@ -28,6 +30,7 @@ interface FileTabBarProps {
 export function FileTabBar({
   openFiles,
   activeFilePath,
+  dirty,
   onSelectFile,
   onCloseFile,
   onCloseOthers,
@@ -85,13 +88,21 @@ export function FileTabBar({
               <button
                 onClick={(e) => { e.stopPropagation(); onCloseFile(f.path) }}
                 className={`
-                  p-0.5 rounded transition-opacity
+                  relative p-0.5 rounded transition-opacity
                   ${isActive ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100'}
                   hover:bg-bg
                 `}
-                title="Close"
+                title={dirty?.[f.path] ? 'Unsaved changes — close' : 'Close'}
               >
-                <CloseIcon size={10} />
+                {dirty?.[f.path] ? (
+                  // Dirty dot, swapped for the × on hover (VS Code convention).
+                  <>
+                    <span className="block w-2 h-2 rounded-full bg-accent group-hover:hidden" />
+                    <span className="hidden group-hover:block"><CloseIcon size={10} /></span>
+                  </>
+                ) : (
+                  <CloseIcon size={10} />
+                )}
               </button>
             </div>
           )

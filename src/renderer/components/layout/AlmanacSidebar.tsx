@@ -147,9 +147,11 @@ interface AlmanacSidebarProps {
   active: NavKey
   onNavigate: (k: NavKey) => void
   onNewSession: () => void
+  /** Open a file in the main-space Editor scene (and navigate there). */
+  onOpenFile: (path: string) => void
 }
 
-export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSidebarProps) {
+export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenFile }: AlmanacSidebarProps) {
   const [mode, setMode] = useState<Mode>(() => loadMode())
   const setModePersist = useCallback((m: Mode) => {
     setMode(m)
@@ -249,7 +251,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
             ))}
           </>
         ) : (
-          <FilesMode tab={activeTab} />
+          <FilesMode tab={activeTab} onOpenFile={onOpenFile} />
         )}
       </div>
 
@@ -405,7 +407,7 @@ function ToolRow({ tool, active, onClick }: { tool: ToolItem; active: boolean; o
   )
 }
 
-function FilesMode({ tab }: { tab: { id: string; cwd: string } | null }) {
+function FilesMode({ tab, onOpenFile }: { tab: { id: string; cwd: string } | null; onOpenFile: (path: string) => void }) {
   if (!tab) {
     return (
       <div className="px-3 py-6 text-center text-[12px] text-fg-faint">
@@ -418,7 +420,7 @@ function FilesMode({ tab }: { tab: { id: string; cwd: string } | null }) {
       <div className="px-3 pb-2 text-[11.5px] text-fg-faint font-mono truncate" title={tab.cwd}>
         {compactPath(tab.cwd)}
       </div>
-      <FileTree cwd={tab.cwd} activeTabId={tab.id} />
+      <FileTree cwd={tab.cwd} activeTabId={tab.id} onPreviewFile={onOpenFile} />
     </div>
   )
 }

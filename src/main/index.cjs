@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker, protocol } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -35,7 +35,7 @@ const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
-const { checkInsideHome } = require('./lib/insideHome.cjs');
+const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
 
 let mainWindow = null;
@@ -597,6 +597,29 @@ if (process.env.SM_E2E === '1') {
   try { app.disableHardwareAcceleration(); } catch { /* */ }
 }
 
+// smfile:// — privileged scheme that serves home-scoped files to the in-app
+// Editor's HTML preview iframe. Loading the user's HTML via a custom scheme
+// (rather than srcdoc) gives the iframe document its OWN origin + empty CSP, so
+// the page's own visualization scripts run — while the iframe is still
+// sandboxed without allow-same-origin (opaque origin), keeping it walled off
+// from the host app, its IPC bridge, and the user's filesystem. Must be
+// registered before app.whenReady() (Electron rejects late scheme privileges).
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'smfile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
+
+// Common content types for previewed assets. Anything unknown is served as
+// octet-stream so the browser sniffs / downloads rather than mis-rendering.
+const SMFILE_MIME = {
+  '.html': 'text/html', '.htm': 'text/html',
+  '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.json': 'application/json', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+  '.txt': 'text/plain', '.csv': 'text/csv', '.xml': 'application/xml',
+};
+
 // Single-instance lock (PRD F1 v2 §requestSingleInstanceLock).
 // In dev mode we skip the lock so two-dev-instance workflows still work.
 // E2E tests also skip so playwright.electron.launch can run multiple specs
@@ -688,7 +711,7 @@ app.whenReady().then(async () => {
     // — adds ~3 packages and ~2MB to the renderer build; the network fetch
     // happens once per cold launch and is cached by Electron's HTTP cache.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: smfile:",
     "font-src 'self' data: https://fonts.gstatic.com",
     // schemastore.org is used by Monaco for JSON schema validation
     // (settings.json, keybindings.json — see App.tsx::installMonacoSchemas).
@@ -697,16 +720,47 @@ app.whenReady().then(async () => {
     "connect-src 'self' https://api.anthropic.com https://registry.npmjs.org https://json.schemastore.org https://www.schemastore.org",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
-    "frame-src 'none'",
+    // smfile: powers the Editor's sandboxed HTML preview iframe. The iframe is
+    // sandboxed WITHOUT allow-same-origin, so its document has an opaque origin
+    // and cannot reach the host even though it may run its own scripts.
+    "frame-src smfile:",
     "frame-ancestors 'none'",
   ].join('; ') + ';';
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+    // smfile:// serves the Editor's HTML-preview documents. They must NOT
+    // inherit the app CSP — `frame-ancestors 'none'` would forbid framing them,
+    // and `script-src 'self'` would block the page's own visualization scripts.
+    // Isolation comes from the iframe sandbox (opaque origin), not from CSP.
+    if (details.url.startsWith('smfile:')) { cb({}); return; }
     cb({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [CSP],
       },
     });
+  });
+
+  // smfile:// handler — serves a single home-scoped file for the Editor's HTML
+  // preview iframe (and its relative assets: ./chart.js, ./data.json, images).
+  // URL shape: smfile://local/<absolute-path>. The pathname IS the absolute
+  // path; assertInsideHome enforces containment + rejects symlink escapes. The
+  // sandboxed iframe's relative requests resolve against this same scheme, so
+  // co-located assets load while everything stays inside home.
+  protocol.handle('smfile', async (request) => {
+    try {
+      const url = new URL(request.url);
+      const abs = decodeURIComponent(url.pathname);
+      const { realPath } = assertInsideHome(abs); // throws if outside home
+      const st = await fs.promises.stat(realPath);
+      if (st.isDirectory()) return new Response('Not a file', { status: 404 });
+      if (st.size > 25 * 1024 * 1024) return new Response('Too large', { status: 413 });
+      const buf = await fs.promises.readFile(realPath);
+      const ext = path.extname(realPath).toLowerCase();
+      const type = SMFILE_MIME[ext] || 'application/octet-stream';
+      return new Response(buf, { headers: { 'content-type': type } });
+    } catch (err) {
+      return new Response(`smfile error: ${err && err.message}`, { status: 404 });
+    }
   });
 
   // Grant microphone / media permissions only for trusted origins.

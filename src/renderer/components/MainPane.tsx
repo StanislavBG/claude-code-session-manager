@@ -10,6 +10,7 @@ import { Subagents } from './tabs/Subagents'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
+import { EditorView } from './tabs/EditorView'
 import { SuperAgentModal } from './modals/SuperAgentModal'
 import { RaceModal } from './modals/RaceModal'
 import { OrchestratorModal } from './modals/OrchestratorModal'
@@ -123,6 +124,8 @@ function renderScreen(active: NavKey, ctx: {
       )
     case 'agent-view':
       return <AgentView />
+    case 'editor':
+      return <EditorView />
   }
 
   const meta = PAGE_META[active]

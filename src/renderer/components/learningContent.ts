@@ -636,4 +636,5 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'repoviz':          { headline: 'Repo visualization',  intro: 'Language + directory breakdown of the active project. Computed locally; no telemetry leaves your machine.', sections: [], tips: [] },
   'quick-open':       { headline: 'Quick open',          intro: '⌘P. Fuzzy-find any file in the current cwd. Recently-opened files surface first; arrow keys navigate, Enter opens.', sections: [], tips: [] },
   'global-search':    { headline: 'Search in project',   intro: '⌘⇧F. Ripgrep across every file under the active cwd, with fs-walk fallback if rg isn\'t installed.', sections: [], tips: ['Use the case toggle for case-sensitive matches.'] },
+  'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the Files sidebar or a file link in the terminal. Edit text with Monaco (Cmd-S saves), read Markdown rendered, and run HTML as a sandboxed visualization layer. URLs still open in your browser.', sections: [], tips: ['Toggle Edit/Preview for .md and .html files.', 'HTML previews are sandboxed — page scripts run in an isolated origin.'] },
 }

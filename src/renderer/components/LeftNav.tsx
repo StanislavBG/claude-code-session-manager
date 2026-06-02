@@ -31,6 +31,9 @@ export type NavKey =
   | 'doc-editor'
   | 'agent-memory'
   | 'scheduler'
+  // In-app file editor scene. Launched from the Files sidebar + terminal links
+  // (no left-nav row of its own — Files is the launch point).
+  | 'editor'
   // v0.13.1 — pop-ups promoted to full pages. Every former Tools-group modal
   // also gets a NavKey + MainPane screen. Screens render the same modal
   // components with variant="page" so the body content is unchanged.

@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
+import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from './TerminalControls'
 
@@ -90,15 +91,18 @@ export function Terminal({ tabId, cwd }: Props) {
             range: { start: { x: xtermStart, y }, end: { x: xtermEnd, y } },
             text: pathPart,
             activate: () => {
-              // Strip the :line:col suffix from the path before sending; main
-              // resolves relative paths against $HOME (validatePath enforces).
+              // Open the file in the IN-APP Editor scene (not an external
+              // editor): keeps the user in the cockpit. URLs are handled by the
+              // WebLinksAddon above and still open in the OS browser. The line
+              // (foo.ts:42) is preserved so the editor reveals it. The
+              // 'sm:open-editor' event lets App route to the editor scene since
+              // Terminal has no navigate of its own.
               const filePath = pathPart.replace(/(?::\d+)+$/, '')
               const ln = lineStr ? parseInt(lineStr, 10) : undefined
               const col = colStr ? parseInt(colStr, 10) : undefined
               const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
-              window.api.app.openFileInEditor(absPath, ln, col).then((r) => {
-                if (!r.ok) toast.error(r.error ?? `Couldn't open ${filePath}`)
-              }).catch((e: Error) => toast.error(e.message))
+              useEditor.getState().openFile(absPath, { line: ln, col })
+              window.dispatchEvent(new CustomEvent('sm:open-editor'))
             },
           })
         }

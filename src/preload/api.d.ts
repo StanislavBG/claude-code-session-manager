@@ -467,7 +467,7 @@ export interface FileEntry {
 }
 
 export interface FilesListResult { ok: boolean; entries: FileEntry[]; error: string | null }
-export interface FilesReadResult { ok: boolean; text: string; error: string | null; size: number }
+export interface FilesReadResult { ok: boolean; text: string; error: string | null; size: number; binary?: boolean; mime?: string }
 export interface FilesWriteResult { ok: boolean; error: string | null }
 export interface FilesCreateResult { ok: boolean; path?: string; error: string | null }
 export interface FilesRenameResult { ok: boolean; newPath?: string; error: string | null }

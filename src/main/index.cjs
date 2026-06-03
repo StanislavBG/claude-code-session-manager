@@ -242,6 +242,10 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Enables Chromium's built-in PDF viewer so the Editor's PdfPane iframe
+      // renders .pdf over smfile:// instead of triggering a download. The only
+      // Pepper "plugin" in modern Electron is the PDF viewer (Flash is gone).
+      plugins: true,
     },
   });
 
@@ -616,8 +620,10 @@ const SMFILE_MIME = {
   '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon',
+  '.avif': 'image/avif', '.bmp': 'image/bmp',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
   '.txt': 'text/plain', '.csv': 'text/csv', '.xml': 'application/xml',
+  '.pdf': 'application/pdf',
 };
 
 // Single-instance lock (PRD F1 v2 §requestSingleInstanceLock).

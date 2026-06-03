@@ -16,7 +16,7 @@ export interface OpenFile {
   name: string
 }
 
-export type ViewMode = 'edit' | 'preview'
+export type ViewMode = 'edit' | 'preview' | 'split'
 
 /** A pending request to reveal a line after a file opens (terminal links). */
 interface PendingReveal {
@@ -166,7 +166,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
 const RENDERABLE_MD = new Set(['md', 'mdx', 'markdown'])
 const RENDERABLE_HTML = new Set(['html', 'htm'])
-export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'])
+const TABULAR_EXTS = new Set(['csv', 'tsv'])
+export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'avif', 'bmp'])
 
 export function extOf(p: string): string {
   return p.toLowerCase().split('.').pop() || ''
@@ -181,12 +182,22 @@ export function isHtml(p: string): boolean {
 export function isImage(p: string): boolean {
   return IMAGE_EXTS.has(extOf(p))
 }
-/** Markdown + HTML are the renderable types that expose an Edit↔Preview toggle. */
+export function isPdf(p: string): boolean {
+  return extOf(p) === 'pdf'
+}
+export function isTabular(p: string): boolean {
+  return TABULAR_EXTS.has(extOf(p))
+}
+/** Types that expose an Edit↔Preview(↔Split) toggle: markdown, HTML, CSV/TSV. */
 export function isRenderable(p: string): boolean {
-  return isMarkdown(p) || isHtml(p)
+  return isMarkdown(p) || isHtml(p) || isTabular(p)
+}
+/** Markdown is the only type that gets the full three-way edit/preview/split. */
+export function supportsSplit(p: string): boolean {
+  return isMarkdown(p)
 }
 
-/** Per-extension default view mode: prose/markup defaults to preview. */
+/** Per-extension default view mode: prose/markup/tabular defaults to preview. */
 export function defaultViewMode(p: string): ViewMode {
   return isRenderable(p) ? 'preview' : 'edit'
 }

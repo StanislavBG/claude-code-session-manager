@@ -90,6 +90,30 @@ async function listDir(dirPath, showHidden) {
   }
 }
 
+// Extension → MIME used for the binary-file fallback summary. Mirrors the
+// SMFILE_MIME table in index.cjs; kept here so readFile can label binaries
+// without importing the renderer-facing scheme handler.
+const BINARY_MIME = {
+  pdf: 'application/pdf', zip: 'application/zip', gz: 'application/gzip',
+  tar: 'application/x-tar', png: 'image/png', jpg: 'image/jpeg',
+  jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif',
+  bmp: 'image/bmp', ico: 'image/x-icon', mp3: 'audio/mpeg', wav: 'audio/wav',
+  mp4: 'video/mp4', mov: 'video/quicktime', woff: 'font/woff', woff2: 'font/woff2',
+  ttf: 'font/ttf', otf: 'font/otf', exe: 'application/octet-stream',
+  bin: 'application/octet-stream', so: 'application/octet-stream',
+  dylib: 'application/octet-stream', wasm: 'application/wasm',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+
+/** Heuristic binary sniff: a NUL byte in the first 8 KB ⇒ treat as binary.
+ *  O(min(n, 8192)) — bounded by the sample, not file size. */
+function looksBinary(buf) {
+  const n = Math.min(buf.length, 8192);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
+
 async function readFile(filePath) {
   let resolved;
   try { resolved = validateHomePath(filePath); }
@@ -98,12 +122,19 @@ async function readFile(filePath) {
   try {
     const st = await fsp.stat(resolved);
     if (st.isDirectory()) return { ok: false, text: '', error: 'Path is a directory', size: 0 };
-    // 5 MB cap — preview pane shouldn't try to load huge logs.
+    const ext = resolved.toLowerCase().split('.').pop() || '';
+    const mime = BINARY_MIME[ext] || 'application/octet-stream';
+    // 5 MB cap — preview pane shouldn't try to load huge logs. Oversize files
+    // report as binary so the renderer shows the fallback pane (Open externally)
+    // rather than a bare error string.
     if (st.size > 5 * 1024 * 1024) {
-      return { ok: false, text: '', error: 'File too large to preview (> 5 MB)', size: st.size };
+      return { ok: false, text: '', error: 'File too large to preview (> 5 MB)', size: st.size, binary: true, mime };
     }
-    const text = await fsp.readFile(resolved, 'utf8');
-    return { ok: true, text, error: null, size: st.size };
+    const buf = await fsp.readFile(resolved);
+    if (looksBinary(buf)) {
+      return { ok: false, text: '', error: 'Binary file', size: st.size, binary: true, mime };
+    }
+    return { ok: true, text: buf.toString('utf8'), error: null, size: st.size, binary: false, mime };
   } catch (e) {
     return { ok: false, text: '', error: e.message, size: 0 };
   }

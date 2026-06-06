@@ -1479,6 +1479,21 @@ async function pollLoop() {
 
 // ---------- IPC ----------
 
+// Pure helper: filter to completed/failed, sort newest-finished first, cap to
+// limit clamped to [1, 500] (default 50). O(n log n) on queue size (small).
+// Exported for unit testing.
+function selectHistoryJobs(jobs, limit) {
+  const cap = Math.max(1, Math.min(500, Number.isFinite(limit) ? Math.floor(limit) : 50));
+  return (Array.isArray(jobs) ? jobs : [])
+    .filter((j) => j && (j.status === 'completed' || j.status === 'failed'))
+    .sort((a, b) => {
+      const at = a.finishedAt ? Date.parse(a.finishedAt) : 0;
+      const bt = b.finishedAt ? Date.parse(b.finishedAt) : 0;
+      return bt - at;
+    })
+    .slice(0, cap);
+}
+
 function registerScheduleHandlers() {
   ensureDirs();
   supervisor.registerHandlers();
@@ -1700,6 +1715,18 @@ function registerScheduleHandlers() {
     out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
     return out;
   });
+
+  // Return last N completed/failed jobs from queue.json, newest first.
+  // Purely additive: no schema change, no archive-folder read needed.
+  ipcMain.handle('schedule:get-history', async (_e, payload) => {
+    const limit = (payload && typeof payload.limit === 'number') ? payload.limit : 50;
+    try {
+      const state = await readQueue();
+      return { ok: true, jobs: selectHistoryJobs(state.jobs, limit) };
+    } catch (e) {
+      return { ok: false, jobs: [], error: e?.message ?? 'read failed' };
+    }
+  });
 }
 
 async function init() {
@@ -1806,4 +1833,4 @@ async function init() {
   }
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs };

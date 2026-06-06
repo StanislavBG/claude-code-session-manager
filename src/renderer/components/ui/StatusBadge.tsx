@@ -6,14 +6,15 @@
  * is light enough to achieve the required ratio.
  */
 
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'needs_review'
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'needs_review' | 'unqueued'
 
-const CLASSES: Record<JobStatus, string> = {
+export const CLASSES: Record<JobStatus, string> = {
   pending:      'bg-bg-hi text-fg-dim border-line',
   running:      'bg-amber-950/50 text-amber-200 border-amber-800/60',
   completed:    'bg-green-950/50 text-green-200 border-green-800/60',
   failed:       'bg-red-950/50 text-red-200 border-red-800/60',
   needs_review: 'bg-orange-950/50 text-orange-200 border-orange-800/60',
+  unqueued:     'bg-bg-elev text-fg-faint border-dashed border-line',
 }
 
 interface StatusBadgeProps {

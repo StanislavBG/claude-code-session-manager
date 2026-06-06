@@ -628,6 +628,12 @@ export interface RetagPrdResult {
   error?: string;
 }
 
+export interface ScheduleHistoryResult {
+  ok: boolean;
+  jobs: ScheduleJob[];
+  error?: string;
+}
+
 // ────────────────────────────────────────────── Bundle C (cycle 3) — Memory tab
 
 export interface MemoryEntry {
@@ -945,6 +951,8 @@ export interface SessionManagerAPI {
     archivePrds: (slugs: string[]) => Promise<ArchivePrdResult>;
     /** Bundle D — bulk retag parallelGroup and/or estimateMinutes. */
     retagPrds: (items: RetagPrdItem[]) => Promise<RetagPrdResult>;
+    /** Return the last N completed/failed jobs from queue.json (newest first). */
+    getHistory: (limit?: number) => Promise<ScheduleHistoryResult>;
   };
   supervisor: {
     /** Debug-only: run a supervisor tick immediately. Used by e2e tests. */

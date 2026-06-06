@@ -209,6 +209,8 @@ contextBridge.exposeInMainWorld('api', {
     lintQueue: () => ipcRenderer.invoke('schedule:lint-queue'),
     archivePrds: (slugs) => ipcRenderer.invoke('schedule:archive-prd', { slugs }),
     retagPrds: (items) => ipcRenderer.invoke('schedule:retag-prd', { items }),
+    // History — last N completed/failed jobs from queue.json.
+    getHistory: (limit) => ipcRenderer.invoke('schedule:get-history', limit !== undefined ? { limit } : {}),
   },
   supervisor: {
     tickNow: () => ipcRenderer.invoke('supervisor:tick-now'),

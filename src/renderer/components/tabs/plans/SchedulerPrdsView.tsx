@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
 import { ListDetail } from '../../ui/ListDetail'
@@ -10,8 +10,100 @@ import { parsePrdFile, serializePrdFile, type PrdFrontmatter } from '../../../li
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
 import { getLintQueueCached } from '../../../lib/lintQueueCache'
+import { StatusBadge } from '../../ui/StatusBadge'
+import type { JobStatus } from '../../ui/StatusBadge'
 
-type PrdStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unqueued' | 'needs_review'
+function projectTag(cwd: string | null | undefined): string | null {
+  if (!cwd) return null
+  const segs = cwd.replace(/\/+$/, '').split('/')
+  return segs[segs.length - 1] || cwd
+}
+
+// ─── Real-time PRD linting ───────────────────────────────────────────────────
+
+// Mirrors the LINE_RULES in queueOps.cjs for instant client-side feedback.
+const CLIENT_LINT_RULES: Array<{ id: string; re: RegExp; severity: 'warn' | 'error'; label: string }> = [
+  { id: 'unbounded-until', re: /^\s*until\s+/, severity: 'error', label: '"until" loop — risk of unbounded poll' },
+  { id: 'while-true',      re: /^\s*while\s+(?:true|:)/i, severity: 'error', label: '"while true" — unbounded loop' },
+  { id: 'unbounded-seq',   re: /for\s+\S+\s+in\s+\$\(seq\s+1\s+[5-9][0-9]{2,}/, severity: 'error', label: 'unbounded seq — range ≥500' },
+  { id: 'no-verify',       re: /--no-verify\b/, severity: 'warn', label: '--no-verify — skips git hooks' },
+  { id: 'no-gpg-sign',     re: /--no-gpg-sign\b/, severity: 'warn', label: '--no-gpg-sign — bypasses signing' },
+]
+
+function lintPrdText(text: string): LintFinding[] {
+  const findings: LintFinding[] = []
+
+  // Frontmatter validation
+  const { frontmatter: fm } = parsePrdFile(text)
+  if (!fm.title?.trim()) {
+    findings.push({ rule: 'missing-title', line: 1, snippet: 'frontmatter "title" is required', severity: 'error' })
+  }
+  if (!fm.cwd?.trim()) {
+    findings.push({ rule: 'missing-cwd', line: 1, snippet: 'frontmatter "cwd" is required', severity: 'error' })
+  }
+  if (fm.estimateMinutes !== undefined && (!Number.isInteger(fm.estimateMinutes) || fm.estimateMinutes <= 0)) {
+    findings.push({ rule: 'invalid-estimate', line: 1, snippet: '"estimateMinutes" must be a positive integer', severity: 'error' })
+  }
+
+  // Line-by-line loop/flag detection
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    for (const rule of CLIENT_LINT_RULES) {
+      if (rule.re.test(line)) {
+        findings.push({
+          rule: rule.id,
+          line: i + 1,
+          snippet: line.trim().slice(0, 80),
+          severity: rule.severity,
+        })
+      }
+    }
+  }
+
+  return findings
+}
+
+/** Debounced real-time linting of the current PRD draft. */
+function useLintPrd(text: string): { findings: LintFinding[] } {
+  const [findings, setFindings] = useState<LintFinding[]>([])
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      setFindings(lintPrdText(text))
+    }, 300)
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+  }, [text])
+
+  return { findings }
+}
+
+function LintPanel({ findings }: { findings: LintFinding[] }) {
+  if (findings.length === 0) return null
+  const errors = findings.filter((f) => f.severity === 'error')
+  const warns = findings.filter((f) => f.severity === 'warn')
+  return (
+    <div className="mx-4 mt-2 mb-1 p-3 rounded border border-amber-400/30 bg-amber-950/10 text-xs space-y-1" role="alert">
+      <div className="text-[10px] uppercase tracking-wide text-amber-300 font-medium">
+        {errors.length > 0 && `${errors.length} error${errors.length !== 1 ? 's' : ''}`}
+        {errors.length > 0 && warns.length > 0 && ' · '}
+        {warns.length > 0 && `${warns.length} warning${warns.length !== 1 ? 's' : ''}`}
+      </div>
+      {findings.map((f, idx) => (
+        <div key={idx} className="font-mono text-[11px] flex gap-2 items-baseline">
+          <span className={`shrink-0 ${f.severity === 'error' ? 'text-red-300' : 'text-amber-300'}`}>
+            {f.severity === 'error' ? '✗' : '⚠'} L{f.line}
+          </span>
+          <span className="text-fg-faint truncate">{f.rule}: {f.snippet}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+type PrdStatus = JobStatus
 
 interface PrdMeta {
   slug: string
@@ -34,25 +126,6 @@ function validateDraft(draft: string): string | null {
   return null
 }
 
-function StatusPill({ status }: { status: PrdStatus }) {
-  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border'
-  const cls: Record<PrdStatus, string> = {
-    pending: `${base} text-fg-dim border-line`,
-    running: `${base} text-amber-400 border-amber-400/50`,
-    completed: `${base} text-green-400 border-green-400/50`,
-    failed: `${base} text-red-400 border-red-400/50`,
-    unqueued: `${base} text-fg-faint border-dashed border-line`,
-    needs_review: `${base} text-orange-400 border-orange-400/50`,
-  }
-  return (
-    <span className={cls[status]}>
-      {status === 'running' && (
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-      )}
-      {status}
-    </span>
-  )
-}
 
 function TBtn({
   label,
@@ -111,6 +184,12 @@ export function SchedulerPrdsView() {
   const [formBody, setFormBody] = useState('')
   const [showCustomFields, setShowCustomFields] = useState(false)
   const [lintFindings, setLintFindings] = useState<LintFinding[]>([])
+
+  // Real-time lint: derive the current "live text" from whichever edit mode is active
+  const liveEditText = editing
+    ? editMode === 'raw' ? draft : serializePrdFile(formFm, formBody)
+    : ''
+  const { findings: realtimeLintFindings } = useLintPrd(liveEditText)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [logText, setLogText] = useState<string | null>(null)
   const [showLog, setShowLog] = useState(false)
@@ -417,7 +496,15 @@ export function SchedulerPrdsView() {
                 >
                   <div className="font-mono text-[11px] text-fg truncate">{p.slug}</div>
                   <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                    <StatusPill status={s} />
+                    <StatusBadge status={s} />
+                    {projectTag(p.cwd) && (
+                      <span
+                        className="font-mono text-[10px] text-accent shrink-0 px-1.5 py-0.5 rounded border border-accent/30 bg-accent/10"
+                        title={`Project: ${p.cwd}`}
+                      >
+                        {projectTag(p.cwd)}
+                      </span>
+                    )}
                     {p.estimateMinutes != null && (
                       <span className="text-[10px] text-fg-faint">{p.estimateMinutes}m</span>
                     )}
@@ -479,7 +566,7 @@ export function SchedulerPrdsView() {
         {bulkBar}
         {/* Toolbar */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-line flex-wrap">
-          <StatusPill status={status} />
+          <StatusBadge status={status} />
           <div className="flex-1" />
           {editing ? (
             <>
@@ -557,31 +644,46 @@ export function SchedulerPrdsView() {
 
         {/* Content */}
         {editing ? (
-          editMode === 'raw' ? (
-            <div style={{ height: '600px' }}>
-              <MarkdownEditor
-                value={draft}
-                onChange={setDraft}
-                path={`/scheduler/prds/${selectedSlug}.md`}
+          <>
+            {editMode === 'raw' ? (
+              <div style={{ height: '600px' }}>
+                <MarkdownEditor
+                  value={draft}
+                  onChange={setDraft}
+                  path={`/scheduler/prds/${selectedSlug}.md`}
+                />
+              </div>
+            ) : (
+              <StructuredPrdEditor
+                fm={formFm}
+                body={formBody}
+                onFmChange={setFormFm}
+                onBodyChange={setFormBody}
+                onPickCwd={pickCwd}
+                slug={selectedSlug}
+                showCustomFields={showCustomFields}
+                onToggleCustomFields={() => setShowCustomFields((v) => !v)}
               />
-            </div>
-          ) : (
-            <StructuredPrdEditor
-              fm={formFm}
-              body={formBody}
-              onFmChange={setFormFm}
-              onBodyChange={setFormBody}
-              onPickCwd={pickCwd}
-              slug={selectedSlug}
-              showCustomFields={showCustomFields}
-              onToggleCustomFields={() => setShowCustomFields((v) => !v)}
-            />
-          )
+            )}
+            <LintPanel findings={realtimeLintFindings} />
+          </>
         ) : (
           <div className="p-4 max-w-3xl space-y-4">
             {/* Frontmatter card */}
             <div className="p-3 rounded border border-line bg-bg-elev text-xs space-y-1">
               <FmRow label="title">{fm.title || '—'}</FmRow>
+              <FmRow label="project">
+                {projectTag(fm.cwd) ? (
+                  <span
+                    className="font-mono text-accent px-2 py-1 rounded border border-accent/30 bg-accent/10 inline-block"
+                    title={`Project: ${fm.cwd}`}
+                  >
+                    {projectTag(fm.cwd)}
+                  </span>
+                ) : (
+                  <span className="text-fg-faint italic">—</span>
+                )}
+              </FmRow>
               <FmRow label="cwd">
                 <span className="font-mono">{fm.cwd || '—'}</span>
               </FmRow>

@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
 import { toast } from '../state/toast'
-import { formatDuration, formatRelative, formatClock, formatAgo } from '../lib/formatTime'
+import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
 import { useScheduleState } from '../state/scheduleState'
 import { getLintQueueCached } from '../lib/lintQueueCache'
+import { StatusBadge } from './ui/StatusBadge'
+import type { JobStatus } from './ui/StatusBadge'
+import { RunLogViewer } from './tabs/plans/RunLogViewer'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -14,6 +17,53 @@ const COMPLETED_FRESH_MS = 24 * 60 * 60 * 1000
 /** localStorage key for the user's "Clear completed" visual hides. The
  *  underlying queue.json is unchanged — this is renderer-side only. */
 const HIDDEN_KEY = 'sm.scheduler.hiddenCompletedSlugs'
+const FOCUSED_IDX_KEY = 'sm.scheduler.focusedJobIndex'
+const LS_FILTER_KEY = 'sm.scheduler.queueFilter'
+
+type FilterStatus = 'all' | 'running' | 'pending' | 'completed' | 'failed'
+interface QueueFilter { text: string; status: FilterStatus }
+
+const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'pending', 'completed', 'failed']
+
+function loadFilter(): QueueFilter {
+  try {
+    const raw = localStorage.getItem(LS_FILTER_KEY)
+    if (!raw) return { text: '', status: 'all' }
+    const p = JSON.parse(raw)
+    return {
+      text: '',
+      status: FILTER_STATUS_VALUES.includes(p.status) ? p.status : 'all',
+    }
+  } catch {
+    return { text: '', status: 'all' }
+  }
+}
+
+function saveFilter(f: QueueFilter) {
+  try { localStorage.setItem(LS_FILTER_KEY, JSON.stringify({ status: f.status })) } catch { /* */ }
+}
+
+function applyFilter(jobs: ScheduleJob[], filter: QueueFilter): ScheduleJob[] {
+  if (filter.status === 'all' && !filter.text) return jobs
+  const q = filter.text.toLowerCase()
+  return jobs.filter((j) => {
+    if (filter.status !== 'all' && j.status !== filter.status) return false
+    if (!q) return true
+    const tag = projectTag(j.cwd) ?? ''
+    return (
+      j.title.toLowerCase().includes(q) ||
+      j.slug.toLowerCase().includes(q) ||
+      tag.toLowerCase().includes(q)
+    )
+  })
+}
+
+const VERDICT_LABELS: Record<string, string> = {
+  halt: 'verifier halted',
+  deps_unmet: 'dependencies unmet',
+  transcript_errors: 'transcript had errors',
+  verify_unavailable: 'verify unavailable',
+}
 
 function loadHidden(): Set<string> {
   try {
@@ -58,8 +108,18 @@ export function SchedulePanel() {
   const [now, setNow] = useState(() => Date.now())
   const [hiddenSlugs, setHiddenSlugs] = useState<Set<string>>(() => loadHidden())
   const [showAllCompleted, setShowAllCompleted] = useState(false)
+  const [filter, setFilter] = useState<QueueFilter>(() => loadFilter())
   const [meterBannerDismissed, setMeterBannerDismissed] = useState(false)
   const [panelView, setPanelView] = useState<'queue' | 'supervisor'>('queue')
+
+  // Keyboard navigation state for the job list
+  const jobListRef = useRef<HTMLDivElement>(null)
+  const [focusedJobIdx, setFocusedJobIdx] = useState(() => {
+    try { return Number(localStorage.getItem(FOCUSED_IDX_KEY)) || 0 } catch { return 0 }
+  })
+
+  // Screen-reader live region — updated whenever a job status changes
+  const [announcement, setAnnouncement] = useState('')
 
   useEffect(() => {
     window.api.schedule.health().then(setHealth).catch(() => {})
@@ -88,6 +148,21 @@ export function SchedulePanel() {
     return durs.reduce((a, b) => a + b, 0) / durs.length
   }, [snap])
 
+  // Announce status changes for screen readers
+  const prevJobStatuses = useRef<Map<string, string>>(new Map())
+  useEffect(() => {
+    if (!snap) return
+    const changed: string[] = []
+    for (const j of snap.jobs) {
+      const prev = prevJobStatuses.current.get(j.slug)
+      if (prev && prev !== j.status) {
+        changed.push(`${j.title}: ${prev} → ${j.status}`)
+      }
+      prevJobStatuses.current.set(j.slug, j.status)
+    }
+    if (changed.length > 0) setAnnouncement(changed.join('; '))
+  }, [snap])
+
   if (!snap) return null
 
   if (panelView === 'supervisor') {
@@ -111,12 +186,16 @@ export function SchedulePanel() {
   const runningJobs = jobs.filter((j) => j.status === 'running')
   const status = computeStatus({ snap, now, avgDurationMs, runningJobs })
 
+  // Apply text + status filter before partitioning so the "+N more" count
+  // reflects the filtered set (PRD requirement).
+  const filteredJobs = applyFilter(jobs, filter)
+
   // Pre-compute "ahead" cumulative counts per job in (group, slug) order so
   // etaForJob is O(1) instead of O(N) per call. Done once per render.
-  const aheadCount = computeAheadCounts(jobs)
+  const aheadCount = computeAheadCounts(filteredJobs)
 
   // Partition: inline visible jobs vs. completed-collapsed-into-rollup.
-  const { inline, collapsedCount } = partitionJobs(jobs, hiddenSlugs, now, showAllCompleted)
+  const { inline, collapsedCount } = partitionJobs(filteredJobs, hiddenSlugs, now, showAllCompleted)
 
   const onClearCompleted = () => {
     // Hide both completed AND failed rows. Pre-2026-05-22 this only handled
@@ -146,8 +225,36 @@ export function SchedulePanel() {
   }
   const hasInlineCompleted = inline.some((j) => j.status === 'completed')
 
+  // Keyboard navigation for the job list
+  const handleJobListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const rows = jobListRef.current?.querySelectorAll<HTMLButtonElement>('[data-job-row]')
+    if (!rows || rows.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const next = Math.min(focusedJobIdx + 1, rows.length - 1)
+      setFocusedJobIdx(next)
+      try { localStorage.setItem(FOCUSED_IDX_KEY, String(next)) } catch { /* */ }
+      rows[next]?.focus()
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const prev = Math.max(focusedJobIdx - 1, 0)
+      setFocusedJobIdx(prev)
+      try { localStorage.setItem(FOCUSED_IDX_KEY, String(prev)) } catch { /* */ }
+      rows[prev]?.focus()
+    }
+  }, [focusedJobIdx])
+
   return (
     <div className="bg-bg-elev/60">
+      {/* Screen-reader live region for status change announcements */}
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </div>
+
       {/* Status banner — always visible, always actionable */}
       <div className={`px-3 py-2 ${statusBannerClass(status.kind)}`} title={status.tooltip}>
         <div className="flex items-center justify-between gap-2">
@@ -294,8 +401,22 @@ export function SchedulePanel() {
           )
         })()}
 
+        {/* Filter bar — hidden when the queue is empty */}
+        {jobs.length > 0 && (
+          <FilterBar
+            filter={filter}
+            onChange={(f) => { setFilter(f); saveFilter(f) }}
+          />
+        )}
+
         {/* job list — show pending first (with ETA), then running, then recent completed */}
-        <div className="space-y-0.5 max-h-72 overflow-y-auto">
+        <div
+          ref={jobListRef}
+          role="list"
+          aria-label="Job queue"
+          className="space-y-0.5 max-h-72 overflow-y-auto"
+          onKeyDown={handleJobListKeyDown}
+        >
           {jobs.length === 0 && (
             <div className="text-[10px] text-fg-faint italic">
               No PRDs queued. Drop .md files in:
@@ -308,12 +429,16 @@ export function SchedulePanel() {
               </button>
             </div>
           )}
-          {inline.map((j) => (
+          {jobs.length > 0 && inline.length === 0 && collapsedCount === 0 && (
+            <div className="text-[10px] text-fg-faint italic px-1.5 py-1">no matching jobs</div>
+          )}
+          {inline.map((j, idx) => (
             <JobRow
               key={j.slug}
               job={j}
               eta={etaForJob(j, jobs, aheadCount.get(j.slug) ?? 0, avgDurationMs, status.kind, now)}
               now={now}
+              listIndex={idx}
             />
           ))}
           {collapsedCount > 0 && (
@@ -402,7 +527,7 @@ function computeStatus({
     const concurrencyLabel = runningCount > 1 ? ` · ${runningCount}/${cap} parallel` : ''
     return {
       kind: 'running',
-      line1: `Running ${k}/${n}${concurrencyLabel} · ${formatDuration(elapsed)}`,
+      line1: `Running ${k}/${n}${concurrencyLabel} · ${formatTimingLabel(elapsed)}`,
       line2: runningCount === 1
         ? oldest.title
         : runningJobs.map((j) => j.title).join(', '),
@@ -584,91 +709,198 @@ function etaForJob(
     }
   }
   if (estMs <= 5_000) return '~now'
-  return `~+${formatRelative(estMs)}`
+  return `~${formatTimingLabel(estMs)}`
 }
 
-function JobRow({ job, eta, now }: { job: ScheduleJob; eta: string | null; now: number }) {
+function JobRow({ job, eta, now, listIndex }: { job: ScheduleJob; eta: string | null; now: number; listIndex: number }) {
   const [open, setOpen] = useState(false)
-  const dot =
-    job.status === 'running' ? 'bg-amber-400 animate-pulse' :
-    job.status === 'completed' ? 'bg-green-500' :
-    job.status === 'failed' ? 'bg-red-400' :
-    'bg-fg-faint/40'
+  const [showLog, setShowLog] = useState(false)
 
-  let trailing: string | null = null
+  const isFailed = job.status === 'failed'
+
+  let trailingLabel: string | null = null
   if (job.status === 'running' && job.startedAt) {
-    trailing = formatDuration(now - Date.parse(job.startedAt))
+    trailingLabel = `${formatDuration(now - Date.parse(job.startedAt))} elapsed`
   } else if (job.status === 'completed' && job.startedAt && job.finishedAt) {
-    trailing = formatDuration(Date.parse(job.finishedAt) - Date.parse(job.startedAt))
+    trailingLabel = `took ${formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))}`
   } else if (eta) {
-    trailing = eta
+    trailingLabel = eta
   }
+
+  const errorText = job.error ?? null
 
   const tag = projectTag(job.cwd)
 
   return (
-    <div className="text-[11px]">
+    <div
+      role="listitem"
+      className={`text-[11px] rounded ${isFailed ? 'bg-red-950/20 border-l-2 border-red-600/60' : ''}`}
+    >
       <button
         type="button"
+        data-job-row
+        data-job-index={listIndex}
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-1.5 py-1 hover:bg-bg-hi rounded text-left"
+        className="w-full flex items-center gap-2 px-1.5 py-1 hover:bg-bg-hi rounded text-left focus:outline-none focus:ring-1 focus:ring-accent"
+        aria-expanded={open}
+        aria-label={`${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
         title={job.title}
       >
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+        <StatusBadge status={job.status as JobStatus} className="shrink-0" />
         <span className="truncate flex-1 text-fg-dim">{job.title}</span>
         {tag && (
           <span
-            className="font-mono text-[9px] text-fg-faint shrink-0 px-1 rounded bg-bg/50"
-            title={job.cwd ?? ''}
+            className="font-mono text-[10px] text-accent shrink-0 px-1.5 py-0.5 rounded border border-accent/30 bg-accent/10"
+            title={`Project: ${job.cwd}`}
           >
             {tag}
           </span>
         )}
-        {trailing && (
-          <span className="font-mono text-[9px] text-fg-faint shrink-0">{trailing}</span>
+        {trailingLabel && (
+          <span className="font-mono text-[9px] text-fg-faint shrink-0">{trailingLabel}</span>
         )}
       </button>
-      {open && (
-        <div className="px-3 py-1 text-[10px] text-fg-faint space-y-1 bg-bg/50 rounded">
-          <div className="font-mono">g{job.parallelGroup} · {job.slug}</div>
-          {job.cwd && <div className="font-mono truncate" title={job.cwd}>cwd: {job.cwd}</div>}
-          {job.exitCode !== null && (
-            <div className={job.exitCode === 0 ? 'text-green-500' : 'text-red-400'}>
-              exit {job.exitCode}
-            </div>
-          )}
-          {job.error && <div className="text-red-400 break-all">{job.error}</div>}
-          <div className="flex gap-2 pt-1">
-            {job.status !== 'pending' && (
-              <button
-                type="button"
-                onClick={() => window.api.schedule.resetJob(job.slug)}
-                className="text-fg-dim hover:text-fg underline"
-              >
-                reset to pending
-              </button>
-            )}
-            {job.runId && (
-              <button
-                type="button"
-                onClick={async () => {
-                  const r = await window.api.schedule.readLog(job.runId!, job.slug)
-                  if (r.ok && r.text) {
-                    const w = window.open('', '_blank')
-                    if (w) {
-                      w.document.body.innerText = r.text
-                      w.document.title = `${job.slug} — ${job.runId}`
-                    }
-                  }
-                }}
-                className="text-fg-dim hover:text-fg underline"
-              >
-                view log
-              </button>
-            )}
-          </div>
+
+      {/* 1-line inline error summary for failed rows */}
+      {isFailed && !open && (errorText || job.exitCode !== null) && (
+        <div className="px-3 pb-1.5 text-[10px] text-red-300/90 truncate overflow-hidden text-ellipsis">
+          {errorText ? errorText.split('\n')[0] : `exit ${job.exitCode}`}
         </div>
       )}
+      {/* 1-line inline verdict summary for needs_review rows */}
+      {job.status === 'needs_review' && job.verifierVerdict && !open && (
+        <div className="px-3 pb-1.5 text-[10px] text-orange-300/80 truncate overflow-hidden text-ellipsis">
+          verifier: {VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict}
+        </div>
+      )}
+
+      {open && (
+        <div className="px-3 py-2 space-y-3 bg-bg/50 rounded text-[10px] text-fg-faint">
+          {/* Status section */}
+          <section>
+            <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Status</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusBadge status={job.status as JobStatus} />
+              {job.exitCode !== null && (
+                <span className={`font-mono ${job.exitCode === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  exit {job.exitCode}
+                </span>
+              )}
+              {job.verifierVerdict && (
+                <span className="font-mono text-orange-300/90">
+                  {VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict}
+                </span>
+              )}
+            </div>
+            {errorText && (
+              <div className="mt-1.5 text-red-300/90 break-words">{errorText}</div>
+            )}
+          </section>
+
+          {/* Timing section */}
+          {(job.startedAt || job.finishedAt) && (
+            <section>
+              <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Timing</div>
+              <div className="font-mono space-y-0.5">
+                {job.startedAt && (
+                  <div>started: {formatClock(Date.parse(job.startedAt))}</div>
+                )}
+                {job.finishedAt && (
+                  <div>finished: {formatClock(Date.parse(job.finishedAt))} · {formatAgo(Date.parse(job.finishedAt), now)}</div>
+                )}
+                {job.startedAt && job.finishedAt && (
+                  <div>duration: took {formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))}</div>
+                )}
+                {job.status === 'running' && job.startedAt && (
+                  <div>elapsed: {formatDuration(now - Date.parse(job.startedAt))}</div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Location section */}
+          <section>
+            <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Location</div>
+            <div className="font-mono space-y-0.5">
+              <div>group {job.parallelGroup} · {job.slug}</div>
+              {job.cwd && <div className="truncate" title={job.cwd}>cwd: {job.cwd}</div>}
+            </div>
+          </section>
+
+          {/* Actions section */}
+          <section>
+            <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Actions</div>
+            <div className="flex gap-3 flex-wrap">
+              {job.status !== 'pending' && (
+                <button
+                  type="button"
+                  onClick={() => window.api.schedule.resetJob(job.slug)}
+                  className="text-fg-dim hover:text-fg underline"
+                >
+                  reset to pending
+                </button>
+              )}
+              {job.runId && (
+                <button
+                  type="button"
+                  onClick={() => setShowLog(true)}
+                  className="text-fg-dim hover:text-fg underline"
+                >
+                  view log
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+      {showLog && job.runId && (
+        <RunLogViewer
+          runId={job.runId}
+          slug={job.slug}
+          title={job.title || job.slug}
+          onClose={() => setShowLog(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Filter bar ─────────────────────────────────────────────────────────────
+
+function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: QueueFilter) => void }) {
+  const chips: Array<{ label: string; value: FilterStatus }> = [
+    { label: 'All', value: 'all' },
+    { label: 'Running', value: 'running' },
+    { label: 'Pending', value: 'pending' },
+    { label: 'Completed', value: 'completed' },
+    { label: 'Failed', value: 'failed' },
+  ]
+  return (
+    <div className="space-y-1">
+      <input
+        type="text"
+        value={filter.text}
+        onChange={(e) => onChange({ ...filter, text: e.target.value })}
+        placeholder="filter jobs…"
+        className="w-full bg-bg border border-line rounded px-2 py-0.5 text-[10px] text-fg-dim placeholder:text-fg-faint focus:outline-none focus:border-fg-faint"
+        aria-label="Filter jobs by title, slug, or project"
+      />
+      <div className="flex items-center gap-1 flex-wrap">
+        {chips.map((c) => (
+          <button
+            key={c.value}
+            type="button"
+            onClick={() => onChange({ ...filter, status: c.value })}
+            className={`px-1.5 py-0.5 text-[9px] rounded border ${
+              filter.status === c.value
+                ? 'bg-accent/20 text-accent border-accent/40'
+                : 'text-fg-faint border-line hover:border-fg-faint hover:text-fg-dim'
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -882,30 +1114,27 @@ function SchedulerHealthSection({
  * mount and re-runs whenever the schedule:state broadcast comes in (i.e. the
  * scheduler has nudged the queue — PRDs may have been added/edited).
  *
- * Surface shape:
- *   ▸ Queue health · all clear        (no findings)
- *   ▾ Queue health · 3 errors, 2 warn (drill down)
- *
- * Findings sort: severity desc, then slug. Renders in a collapsible block to
- * keep the dense left-nav scannable when there are no issues.
+ * When there are errors the panel is expanded by default so they're visible
+ * without user interaction.
  */
 function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
   const [report, setReport] = useState<LintQueueResult | null>(null)
-  const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  // Auto-expand when there are errors; user can collapse manually.
+  const [open, setOpen] = useState(false)
 
-  // Run once on mount + every time the queue state broadcast fires. The
-  // `snap` prop is updated by the parent on every onState callback so this
-  // dependency closure correctly re-runs the lint after refresh/rescan/etc.
-  // We ignore the `snap` value itself in the body — it's only here as a
-  // change signal. We use jobs.length + lastRunAt as a stable identity to
-  // avoid re-running on every minor field flip.
   const signal = `${snap.jobs.length}:${snap.lastRunAt ?? ''}`
   useEffect(() => {
     let alive = true
     setLoading(true)
     getLintQueueCached()
-      .then((r) => { if (alive) setReport(r) })
+      .then((r) => {
+        if (!alive) return
+        setReport(r)
+        // Auto-expand if errors found — make issues visible without manual drill-down
+        const hasErrors = r.reports.some((rep) => rep.findings.some((f) => f.severity === 'error'))
+        if (hasErrors) setOpen(true)
+      })
       .catch(() => { /* */ })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -919,7 +1148,6 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
     )
   }
 
-  // Aggregate. O(F × findings) but bounded by the queue size.
   let errors = 0
   let warns = 0
   const flaggedPrds = report.reports.filter((r) => r.findings.length > 0)
@@ -940,6 +1168,7 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1 hover:text-fg-dim w-full text-left ${summaryClass}`}
         title="Static lint of queued PRDs for unbounded loops, missing frontmatter, etc."
+        aria-expanded={open}
       >
         <span>{open ? '▾' : '▸'}</span>
         <span>
@@ -979,6 +1208,11 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
               ))}
             </div>
           ))}
+        </div>
+      )}
+      {open && clean && (
+        <div className="mt-1 pl-2 text-green-400/70 font-mono">
+          ✓ no issues in {report.reports.length} PRD{report.reports.length !== 1 ? 's' : ''}
         </div>
       )}
     </div>

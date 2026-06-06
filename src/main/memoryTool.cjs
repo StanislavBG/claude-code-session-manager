@@ -1,10 +1,10 @@
 /**
  * memoryTool.cjs — Memory tab backend (cycle 3, Bundle C).
  *
- * Workspace-scoped markdown store at
- *   ~/.claude/session-manager/memories/<workspace>/
- * where <workspace> is a derived encoding of an active cwd (mirrors the
- * Claude-Code transcript-dir convention). The Memory tab is a list+detail
+ * Workspace-scoped markdown store at Claude's native auto-memory location:
+ *   ~/.claude/projects/<workspace>/memory/
+ * where <workspace> is a derived encoding of an active cwd (the same
+ * transcript-dir slug Claude Code uses). The Memory tab is a list+detail
  * view over these files. Files are plain markdown with optional frontmatter:
  *
  *   ---
@@ -37,11 +37,17 @@ const SLUG_RE = /^[a-z0-9-_]+\.md$/;
 const { encodeCwd: encodeWorkspace } = require('./lib/encodeCwd.cjs');
 
 function memoryRoot() {
-  return path.join(os.homedir(), '.claude', 'session-manager', 'memories');
+  return path.join(os.homedir(), '.claude', 'projects');
 }
 
 function workspaceDir(workspace) {
-  return path.join(memoryRoot(), workspace);
+  // Repointed at Claude's native auto-memory store:
+  //   ~/.claude/projects/<encodedCwd>/memory/
+  // where <encodedCwd> is the same transcript-dir slug produced by encodeCwd.
+  // Reads AND writes target this dir so the user's real memories (incl. the
+  // Claude-managed MEMORY.md index) appear in the Memory tab, and new entries
+  // land where Claude actually reads them.
+  return path.join(memoryRoot(), workspace, 'memory');
 }
 
 /**

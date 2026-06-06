@@ -34,6 +34,7 @@ const agentMemory = require('./agentMemory.cjs');
 const { registerDocEditorHandlers } = require('./docEditor.cjs');
 const git = require('./git.cjs');
 const superagent = require('./superagent.cjs');
+const kg = require('./kg.cjs');
 const { registerProjectSkillsHandlers } = require('./projectSkills.cjs');
 const filesIpc = require('./files.cjs');
 const searchIpc = require('./search.cjs');
@@ -916,9 +917,14 @@ app.whenReady().then(async () => {
   watchers.attachWindow(mainWindow);
   pluginInstall.attachWindow(mainWindow);
   superagent.attachWindow(mainWindow);
+  kg.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
+  // Knowledge Graph: watch the prompt log + register kg:* IPC. Best-effort.
+  try { kg.init({ logger: logs }); } catch (e) {
+    logs.writeLine({ scope: 'kg', level: 'error', message: 'init failed', meta: { error: e?.message } });
+  }
 
   // Keep the machine awake while the app is open. The scheduler polls billing
   // usage every 2 min and runs `claude -p` jobs that must survive an idle

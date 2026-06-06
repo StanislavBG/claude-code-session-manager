@@ -51,6 +51,7 @@ const SCREEN_KEYS = new Set<NavKey>([
   'tasks',
   'history',
   'usage',
+  'knowledge-graph',
   // Configure
   'skills',
   'plugins',

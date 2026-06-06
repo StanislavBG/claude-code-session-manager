@@ -524,6 +524,32 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     ],
   },
 
+  'knowledge-graph': {
+    headline: 'A graph distilled from everything you have actually typed',
+    intro:
+      'A UserPromptSubmit hook appends every prompt you send to an append-only log (~/.claude/knowledge-log/prompts.jsonl). This tab runs an incremental back-end job that reads only the NEW lines, sends them in batches to `claude -p` to extract entities and relations, and merges them into a canonical graph — node size is how often you mention something, color is its type. Ask questions and they are answered from the graph plus your real prompts, grounded and cited.',
+    sections: [
+      {
+        title: 'How it differs from Memory',
+        items: [
+          { term: 'Memory', body: 'Curated facts Claude reads back into context — small, hand/Claude-authored, editable.' },
+          { term: 'Knowledge Graph', body: 'Derived analytics over your raw prompt LOG — read-only, never hand-edited. It answers "what was I trying to build" / "summarize my intent threads".' },
+        ],
+      },
+      {
+        title: 'The pipeline',
+        items: [
+          { term: 'Incremental', body: 'A byte-offset watermark means each run only processes new prompts — never the whole log. Click "Process now" or let the file-watcher trigger it.' },
+          { term: 'Grounded Q&A', body: 'Retrieval = top graph entities + keyword-matched prompts; synthesis = claude -p. Answers cite the real prompts they drew from.' },
+        ],
+      },
+    ],
+    tips: [
+      'It only sees prompts logged AFTER you enabled the hook — open /hooks once to activate it for the current session.',
+      'Roadmap: local MiniLM embeddings + SQLite vector search + community-summary themes are the v2 upgrade path.',
+    ],
+  },
+
   'agent-view': {
     headline: 'A single-glance live status of what the active session is doing',
     intro:

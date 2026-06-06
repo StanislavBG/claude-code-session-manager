@@ -1025,6 +1025,53 @@ export interface SessionManagerAPI {
     stop: (tabId: string) => Promise<{ ok: boolean }>;
     onStateChanged: (handler: (ev: SuperAgentStateChangedEvent) => void) => () => void;
   };
+  kg: {
+    /** Distilled knowledge graph + ingest status over the prompt log. */
+    get: () => Promise<KgState>;
+    /** Process new prompt-log lines into the graph (incremental). */
+    ingest: () => Promise<{ ok: boolean; added?: number; nodes?: number; edges?: number; error?: string; note?: string }>;
+    /** Ask a question answered from the graph + your real prompts via claude -p. */
+    ask: (question: string) => Promise<{ ok: boolean; answer?: string; cited?: { ts: string; prompt: string }[]; error?: string }>;
+    onIngestProgress: (handler: (ev: KgIngestProgress) => void) => () => void;
+  };
+}
+
+export interface KgNode {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+  description: string;
+  count: number;
+  firstTs: string | null;
+  lastTs: string | null;
+}
+export interface KgEdge {
+  src: string;
+  dst: string;
+  relation: string;
+  weight: number;
+  lastTs: string | null;
+}
+export interface KgState {
+  nodes: KgNode[];
+  edges: KgEdge[];
+  status: {
+    promptCount: number;
+    totalPrompts: number;
+    pending: number;
+    lastIngest: string | null;
+    ingesting: boolean;
+    logPath: string;
+  };
+}
+export interface KgIngestProgress {
+  phase: 'start' | 'extract' | 'done' | 'error';
+  ingesting: boolean;
+  batch?: number;
+  totalBatches?: number;
+  added?: number;
+  error?: string;
 }
 
 declare global {

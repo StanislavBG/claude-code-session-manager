@@ -52,6 +52,7 @@ const WORKSPACE: NavGroupItem[] = [
   { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
   { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
+  { key: 'knowledge-graph', label: 'Knowledge Graph', icon: 'knowledge-graph', hint: 'Distilled graph + Q&A over your prompt log' },
 ]
 
 const CONFIGURE: NavGroupItem[] = [

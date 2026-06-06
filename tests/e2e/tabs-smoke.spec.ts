@@ -35,6 +35,7 @@ const TABS: NavKey[] = [
   'history',
   'keybindings',
   'usage',
+  'knowledge-graph',
   'agent-view',
 ]
 

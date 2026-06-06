@@ -279,4 +279,15 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('superagent:state-changed', listener);
     },
   },
+  kg: {
+    /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log). */
+    get: () => ipcRenderer.invoke('kg:get'),
+    ingest: () => ipcRenderer.invoke('kg:ingest'),
+    ask: (question) => ipcRenderer.invoke('kg:ask', { question }),
+    onIngestProgress: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('kg:ingest-progress', listener);
+      return () => ipcRenderer.removeListener('kg:ingest-progress', listener);
+    },
+  },
 });

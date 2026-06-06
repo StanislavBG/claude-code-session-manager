@@ -12,6 +12,7 @@ import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
 import { EditorView } from './tabs/EditorView'
 import { DispatchModal, type DispatchMode } from './modals/DispatchModal'
+import { KnowledgeGraph } from './tabs/KnowledgeGraph'
 import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
 import { SearchModal, type SearchMode } from './modals/SearchModal'
 import { VoiceModal } from './layout/VoiceModal'
@@ -72,6 +73,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'subagents':     { eyebrow: 'Workspace',  title: 'The hive',                  intro: 'Sub-agents working in parallel on the active session. Each row shows what it was asked to do and where it landed.' },
   'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { eyebrow: 'Workspace',  title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
+  'knowledge-graph': { eyebrow: 'Workspace', title: 'Knowledge Graph',          intro: 'Distilled intelligence over your raw prompt log — entities and relations extracted from what you actually typed, with grounded Q&A over your own history. Distinct from Memory (curated facts Claude reads back); this is derived analytics you never hand-edit.' },
   'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
   'tasks':         { eyebrow: 'Workspace',  title: 'Tasks across sessions',     intro: 'Active to-dos pulled from every running Claude session. Use this to see what is in flight without tab-hopping.' },
   'scheduler':     { eyebrow: 'Workspace',  title: 'Scheduler',                 intro: 'Author PRDs and run them as claude -p jobs against your 5-hour window. Jobs auto-pause on rate-limit and resume on the next reset.' },
@@ -125,6 +127,7 @@ function renderScreen(active: NavKey, ctx: {
     switch (active) {
       case 'skills':        return <Skills />
       case 'subagents':     return <Subagents onLaunchHive={ctx.onLaunchHive} />
+      case 'knowledge-graph': return <KnowledgeGraph />
       case 'history':       return <History />
       case 'usage':         return <Usage />
       case 'prompts':       return <Prompts />

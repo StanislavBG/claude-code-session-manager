@@ -176,6 +176,7 @@ function buildCommands(): Command[] {
     { id: 'nav:history', label: 'Go to History', section: 'nav', emitOnly: true },
     { id: 'nav:keybindings', label: 'Go to Keybindings', section: 'nav', emitOnly: true },
     { id: 'nav:usage', label: 'Go to Usage', section: 'nav', emitOnly: true },
+    { id: 'nav:knowledge-graph', label: 'Go to Knowledge Graph', section: 'nav', emitOnly: true },
     { id: 'nav:agent-view', label: 'Go to Agent View', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
     { id: 'nav:doc-editor', label: 'Go to Doc Editor', section: 'nav', emitOnly: true },

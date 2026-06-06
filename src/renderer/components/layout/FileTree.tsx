@@ -3,7 +3,9 @@
  *
  * Features:
  *   - Lazy expand: children are fetched on first toggle, then cached on the node.
- *   - Hidden-file toggle (re-fetches the root + collapses all expansions).
+ *   - Hidden-file toggle (re-fetches the root + re-restores expanded subtrees so
+ *     their children reflect the new filter).
+ *   - Expansion persists per-cwd (localStorage) and is restored on return.
  *   - Fuzzy substring search filter against node names.
  *   - Per-row right-click context menu: rename / delete / new file / new folder
  *     / open externally / reveal in OS / copy path / send to chat.
@@ -11,8 +13,8 @@
  *     call is wrapped so a missing IPC degrades silently.
  *
  * The component does not own the cwd selector — MainPane passes the active
- * terminal tab's cwd in. When the cwd changes, all transient state (expansion,
- * search, inline rename) is reset.
+ * terminal tab's cwd in. When the cwd changes, transient state (search, inline
+ * rename) is reset and the persisted expansion for the new cwd is restored.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -32,6 +34,19 @@ function loadExpanded(cwd: string): string[] {
 }
 function saveExpanded(cwd: string, set: Set<string>) {
   try { localStorage.setItem(EXPAND_KEY(cwd), JSON.stringify([...set].slice(0, 500))) } catch { /* quota */ }
+}
+// Drop `path` and any descendant of it from the expanded set, so a deleted or
+// renamed folder doesn't leave a dead entry that fires a doomed files.list on
+// every project switch. Returns a new set only when something was removed.
+function pruneExpanded(set: Set<string>, path: string): Set<string> {
+  const prefix = path + '/'
+  let changed = false
+  const next = new Set<string>()
+  for (const p of set) {
+    if (p === path || p.startsWith(prefix)) { changed = true; continue }
+    next.add(p)
+  }
+  return changed ? next : set
 }
 
 interface FileTreeProps {
@@ -112,6 +127,10 @@ interface ContextMenuState {
 export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: FileTreeProps) {
   const [root, setRoot] = useState<TreeNode[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // Live mirror of `expanded` so effects keyed on other deps (e.g. showHidden)
+  // can read the current set without re-subscribing to every expand/collapse.
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
   const [search, setSearch] = useState('')
   const [showHidden, setShowHidden] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -127,11 +146,18 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
   const renameInputRef = useRef<HTMLInputElement>(null)
   const createInputRef = useRef<HTMLInputElement>(null)
 
+  // Monotonic load-request id. Every root load / subtree restore stamps the
+  // request it belongs to and drops its writes if a newer load (a faster cwd
+  // switch, a hidden-toggle) has superseded it — so a slow IPC for project A
+  // can never clobber the tree after the user moved to project B.
+  const loadReqRef = useRef(0)
   const loadRoot = useCallback(async () => {
     if (!cwd) return
+    const req = ++loadReqRef.current
     setLoading(true)
     setError(null)
     const result = await window.api.files.list(cwd, showHidden)
+    if (loadReqRef.current !== req) return
     if (!result.ok) {
       setError(result.error ?? 'failed to list')
       setRoot([])
@@ -141,20 +167,48 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     setLoading(false)
   }, [cwd, showHidden])
 
-  // Re-fetch children for already-expanded folders (shallow-first so a parent's
-  // children exist before a grandchild attaches). Used to rehydrate the lazily-
-  // loaded subtrees after a fresh root load on return to a project.
-  const restoreSubtrees = useCallback(async (paths: string[]) => {
-    const ordered = [...paths].sort((a, b) => a.split('/').length - b.split('/').length)
-    for (const p of ordered) {
-      const result = await window.api.files.list(p, showHidden)
-      if (result.ok) setRoot((prev) => attachChildren(prev, p, result.entries.map((e) => ({ ...e }))))
+  // Re-fetch children for already-expanded folders. Shallow-first so a parent's
+  // children exist before a grandchild attaches, but siblings AT THE SAME DEPTH
+  // are fetched concurrently — O(maxDepth) IPC round-trips instead of O(N)
+  // serial, which matters for the "return instantly to where you were" feature.
+  // Returns the paths that no longer exist so the caller can prune dead entries.
+  const restoreSubtrees = useCallback(async (paths: string[]): Promise<string[]> => {
+    const req = loadReqRef.current
+    const byDepth = new Map<number, string[]>()
+    for (const p of paths) {
+      const d = p.split('/').length
+      const bucket = byDepth.get(d)
+      if (bucket) bucket.push(p); else byDepth.set(d, [p])
     }
+    const dead: string[] = []
+    for (const d of [...byDepth.keys()].sort((a, b) => a - b)) {
+      const level = byDepth.get(d)!
+      const results = await Promise.all(
+        level.map(async (p) => ({ p, result: await window.api.files.list(p, showHidden) }))
+      )
+      if (loadReqRef.current !== req) return dead   // superseded by a newer load
+      for (const { p, result } of results) {
+        if (result.ok) setRoot((prev) => attachChildren(prev, p, result.entries.map((e) => ({ ...e }))))
+        else dead.push(p)
+      }
+    }
+    return dead
   }, [showHidden])
 
-  // Load + RESTORE expansion when cwd changes. Persisted expanded folders are
-  // re-opened (and their children re-fetched) so you return to a project right
-  // where you were browsing instead of a collapsed root.
+  // Fresh root load, then re-open the persisted expanded folders (children
+  // re-fetched) so you return to a project right where you were browsing.
+  // Returns the paths that no longer exist for the caller to prune. Both the
+  // load and the restore are loadReqRef-guarded, so a superseding cwd/hidden
+  // change discards stale writes.
+  const reloadAndRestore = useCallback(async (paths: string[]): Promise<string[]> => {
+    await loadRoot()
+    if (!paths.length) return []
+    return restoreSubtrees(paths)
+  }, [loadRoot, restoreSubtrees])
+
+  // Load + RESTORE expansion when cwd changes. `cancelled` gates only the
+  // non-root tail (dead-entry prune + git status); the tree writes themselves
+  // are guarded by loadReqRef inside reloadAndRestore.
   useEffect(() => {
     setSearch('')
     setRenaming(null)
@@ -163,17 +217,46 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     setDeleteConfirm(null)
     setGitStatus({})
     const restored = loadExpanded(cwd)
-    setExpanded(new Set(restored))
-    ;(async () => { await loadRoot(); if (restored.length) await restoreSubtrees(restored) })()
-    tryLoadGitStatus(cwd).then(setGitStatus)
-    // restoreSubtrees only depends on showHidden; cwd+loadRoot drive this.
+    const initial = new Set(restored)
+    expandedRef.current = initial
+    setExpanded(initial)
+    let cancelled = false
+    ;(async () => {
+      const dead = await reloadAndRestore(restored)
+      if (cancelled || !dead.length) return
+      // Single pass: drop every persisted path that is dead or a descendant of
+      // one, so a folder deleted while away leaves no ghost re-firing files.list.
+      persistExpanded((prev) => {
+        const next = new Set<string>()
+        let changed = false
+        for (const p of prev) {
+          if (dead.some((d) => p === d || p.startsWith(d + '/'))) { changed = true; continue }
+          next.add(p)
+        }
+        return changed ? next : prev
+      })
+    })()
+    tryLoadGitStatus(cwd).then((s) => { if (!cancelled) setGitStatus(s) })
+    return () => { cancelled = true }
+    // cwd alone drives this effect. reloadAndRestore also closes over showHidden,
+    // so listing it would wrongly re-reset transient state on a hidden toggle —
+    // the separate effect below owns that path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, loadRoot])
+  }, [cwd])
 
-  // Re-load when hidden toggle changes.
+  // Re-load when the hidden toggle changes. Skip the initial mount (the cwd
+  // effect already loaded), and re-restore expanded subtrees so their children
+  // reflect the new hidden-filter instead of showing stale pre-toggle contents.
+  // loadReqRef guards the writes, so no per-effect cancellation flag is needed.
+  const hiddenMountRef = useRef(true)
   useEffect(() => {
-    loadRoot()
-  }, [showHidden, loadRoot])
+    if (hiddenMountRef.current) { hiddenMountRef.current = false; return }
+    void reloadAndRestore([...expandedRef.current])
+    // showHidden alone drives this effect: reloadAndRestore reads the current
+    // cwd/expansion at call time, and depending on `expanded` would reload on
+    // every folder toggle. The cwd effect owns cwd changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showHidden])
 
   // Refresh git status every 5s while mounted.
   useEffect(() => {
@@ -207,23 +290,35 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     if (createPrompt) setTimeout(() => createInputRef.current?.focus(), 30)
   }, [createPrompt])
 
+  // Single point where the expanded set mutates: apply the update, persist the
+  // result, and sync the live mirror — so "expanded in memory" and "expanded on
+  // disk" can never drift. `expandedRef.current` is the source of truth for the
+  // previous set (kept current every render + updated here for back-to-back
+  // calls), keeping the setExpanded updater a pure value, not a side effect.
+  const persistExpanded = useCallback((updater: (prev: Set<string>) => Set<string>) => {
+    const prev = expandedRef.current
+    const next = updater(prev)
+    if (next === prev) return
+    expandedRef.current = next
+    setExpanded(next)
+    saveExpanded(cwd, next)
+  }, [cwd])
+
   const toggleDir = useCallback(async (node: TreeNode) => {
-    const next = new Set(expanded)
-    if (next.has(node.path)) {
-      next.delete(node.path)
-      setExpanded(next)
-      saveExpanded(cwd, next)
+    if (expanded.has(node.path)) {
+      // Collapsing also drops descendants from the set — a closed folder's
+      // children aren't visible, so persisting them as "expanded" would leave
+      // ghost entries that re-fire a doomed files.list on every project return.
+      persistExpanded((prev) => pruneExpanded(prev, node.path))
       return
     }
-    next.add(node.path)
-    setExpanded(next)
-    saveExpanded(cwd, next)   // persist so it survives navigating away + back
+    persistExpanded((prev) => new Set(prev).add(node.path))
     if (node.children) return
     const result = await window.api.files.list(node.path, showHidden)
     if (!result.ok) return
     // Mutate the tree to attach children.
     setRoot((prev) => attachChildren(prev, node.path, result.entries.map((e) => ({ ...e }))))
-  }, [expanded, showHidden, cwd])
+  }, [expanded, showHidden, persistExpanded])
 
   const refreshNode = useCallback(async (nodePath: string) => {
     if (nodePath === cwd) {
@@ -279,6 +374,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     setRenaming(null)
     if (result.ok) {
       const parent = renaming.slice(0, renaming.lastIndexOf('/'))
+      persistExpanded((prev) => pruneExpanded(prev, renaming))
       await refreshNode(parent || cwd)
       tryLoadGitStatus(cwd).then(setGitStatus)
     } else {
@@ -296,7 +392,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     if (result.ok) {
       await refreshNode(createPrompt.parent)
       if (createPrompt.kind === 'folder') {
-        setExpanded((prev) => { const next = new Set([...prev, createPrompt.parent]); saveExpanded(cwd, next); return next })
+        persistExpanded((prev) => new Set(prev).add(createPrompt.parent))
       }
     } else {
       setError(result.error ?? 'create failed')
@@ -309,6 +405,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     const parent = deleteConfirm.path.slice(0, deleteConfirm.path.lastIndexOf('/'))
     setDeleteConfirm(null)
     if (result.ok) {
+      persistExpanded((prev) => pruneExpanded(prev, deleteConfirm.path))
       await refreshNode(parent || cwd)
       tryLoadGitStatus(cwd).then(setGitStatus)
     } else {

@@ -115,20 +115,31 @@ export function App() {
     return () => window.removeEventListener('sm:open-editor', h)
   }, [navigate])
   const activeTabId = useSessions((s) => s.activeTabId)
+  const tabs = useSessions((s) => s.tabs)
 
-  // QoL: switching the active session tab on the TabBar lands you on THAT
-  // project's terminal — each tab is primarily a terminal, so a tab switch is a
-  // project switch. Only fires on a genuine tab→tab change (not first hydration,
-  // not a no-op re-render), so it never yanks you off a config screen you opened
-  // for the current tab.
+  // QoL: switching the active session tab lands you on THAT project's terminal —
+  // each tab is primarily a terminal, so a tab switch is a project switch. Fires
+  // ONLY on a pure switch between already-open tabs: the active tab changed, the
+  // tab SET did not (no open/close), the newly-active tab already existed, and
+  // the previously-active tab still exists. Opening/closing a tab also reassigns
+  // activeTabId, but their initiators set the nav themselves (e.g. "Launch a
+  // hive →" routes to Dispatch), so those must not be hijacked to terminal.
+  // Tracking the id SET — refreshed on every tab change, not a count sampled
+  // only when activeTabId moves — keeps the discriminator correct even when a
+  // background tab open/close doesn't move the active tab.
   const prevActiveTabRef = useRef<string | null>(activeTabId)
+  const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)))
   useEffect(() => {
-    const prev = prevActiveTabRef.current
+    const prevActive = prevActiveTabRef.current
+    const prevIds = prevTabIdsRef.current
+    const curIds = new Set(tabs.map((t) => t.id))
     prevActiveTabRef.current = activeTabId
-    if (prev !== null && activeTabId !== null && activeTabId !== prev) {
-      setActiveNav('terminal')
-    }
-  }, [activeTabId])
+    prevTabIdsRef.current = curIds
+    const isPureSwitch =
+      prevActive !== null && activeTabId !== null && activeTabId !== prevActive &&
+      curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
+    if (isPureSwitch) setActiveNav('terminal')
+  }, [activeTabId, tabs])
 
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)

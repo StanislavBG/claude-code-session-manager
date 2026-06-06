@@ -6,6 +6,7 @@ import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { Toggle } from '../ui/Toggle'
+import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -190,7 +191,13 @@ export function Skills() {
             {items.length} {items.length === 1 ? 'item' : 'items'}
           </span>
           <div className="flex-1" />
-          <span className="text-fg-faint truncate">{selectedItem?.path ?? ''}</span>
+          {selectedItem && (
+            <ProvenanceBadge
+              scope={selectedItem.scope}
+              input={{ type: selectedItem.kind === 'commands' ? 'command' : 'skill', name: selectedItem.name }}
+            />
+          )}
+          <span className="ml-2 text-fg-faint truncate">{selectedItem?.path ?? ''}</span>
         </>
       }
       footer={
@@ -259,6 +266,11 @@ export function Skills() {
                             {i.name}
                           </button>
                           <div className="flex items-center gap-2 shrink-0">
+                            <ProvenanceBadge
+                              interactive={false}
+                              scope={i.scope}
+                              input={{ type: i.kind === 'commands' ? 'command' : 'skill', name: i.name }}
+                            />
                             {files[i.path]?.dirty && (
                               <span className="w-1 h-1 rounded-full bg-accent" />
                             )}

@@ -5,6 +5,7 @@ import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
+import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -107,6 +108,7 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
 
   if (!home) return <EmptyState title="loading…" />
   const file = selectedPath ? files[selectedPath] : null
+  const selectedAgent = selectedPath ? agents.find((a) => a.path === selectedPath) ?? null : null
 
   return (
     <Panel
@@ -131,6 +133,13 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
                 <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
               </div>
               <span className="ml-3 text-fg-faint">{agents.length} agents</span>
+              {selectedAgent && (
+                <ProvenanceBadge
+                  scope={selectedAgent.scope}
+                  input={{ type: 'subagent', name: selectedAgent.name }}
+                  className="ml-3"
+                />
+              )}
             </>
           )}
           <div className="flex-1" />
@@ -192,13 +201,18 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
                     <button
                       key={a.path}
                       onClick={() => setSelectedPath(a.path)}
-                      className={`w-full text-left px-3 py-1 text-xs ${
+                      className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between gap-2 ${
                         selectedPath === a.path
                           ? 'bg-bg-hi text-fg'
                           : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
                       }`}
                     >
-                      {a.name}
+                      <span className="truncate">{a.name}</span>
+                      <ProvenanceBadge
+                        interactive={false}
+                        scope={a.scope}
+                        input={{ type: 'subagent', name: a.name }}
+                      />
                     </button>
                   ))
                 )}

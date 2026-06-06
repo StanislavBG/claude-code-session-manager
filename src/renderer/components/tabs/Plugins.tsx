@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
+import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
@@ -76,6 +77,17 @@ export function Plugins() {
 
   const columns: Column<PluginRow>[] = [
     { key: 'name', header: 'name', render: (r) => r.name, width: '12rem' },
+    {
+      key: 'origin',
+      header: 'origin',
+      render: (r) => (
+        <ProvenanceBadge
+          interactive={false}
+          input={{ type: 'plugin', name: r.name, repository: r.manifest?.repository, homepage: r.manifest?.homepage }}
+        />
+      ),
+      width: '7rem',
+    },
     {
       key: 'version',
       header: 'version',
@@ -161,6 +173,12 @@ export function Plugins() {
           <span className="mx-2 text-fg-faint">·</span>
           <span className="text-fg-faint">{rows.length} plugins</span>
           <div className="flex-1" />
+          {selectedRow && (
+            <ProvenanceBadge
+              input={{ type: 'plugin', name: selectedRow.name, repository: selectedRow.manifest?.repository, homepage: selectedRow.manifest?.homepage }}
+              className="mr-2"
+            />
+          )}
           <span className="text-fg-faint font-mono truncate">~/.claude/plugins/</span>
         </>
       }

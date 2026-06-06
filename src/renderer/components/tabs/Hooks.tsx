@@ -5,6 +5,7 @@ import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { Modal } from '../ui/Modal'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
+import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -526,6 +527,12 @@ function HookRuleEditor({
             : 'agent'
   const value = (rule[valueKey] as string | undefined) ?? ''
   const argsText = (rule.args ?? []).join(' ')
+  const provInput = {
+    type: 'hook' as const,
+    name: value || rule.type,
+    command: rule.type === 'command' ? rule.command : undefined,
+    url: rule.type === 'http' ? rule.url : undefined,
+  }
 
   return (
     <div className="space-y-1.5">
@@ -541,6 +548,7 @@ function HookRuleEditor({
             </option>
           ))}
         </select>
+        <ProvenanceBadge interactive={false} input={provInput} />
         <input
           value={value}
           onChange={(e) => onChange({ ...rule, [valueKey]: e.target.value })}

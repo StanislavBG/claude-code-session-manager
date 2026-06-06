@@ -4,6 +4,7 @@ import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
+import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -169,6 +170,13 @@ export function McpServers() {
           <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
           <span className="ml-3 text-fg-faint truncate">{path}</span>
           <div className="flex-1" />
+          {selectedName && selected && (
+            <ProvenanceBadge
+              scope={scope}
+              input={{ type: 'mcp', name: selectedName, command: selected.command, args: selected.args, url: selected.url }}
+              className="mr-2"
+            />
+          )}
           <button
             onClick={addServer}
             className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
@@ -222,8 +230,13 @@ export function McpServers() {
                   }`}
                 >
                   <span className="truncate">{n}</span>
-                  <span className="text-fg-faint ml-2 shrink-0">
-                    {servers[n].type ?? 'stdio'}
+                  <span className="ml-2 flex items-center gap-2 shrink-0">
+                    <ProvenanceBadge
+                      interactive={false}
+                      scope={scope}
+                      input={{ type: 'mcp', name: n, command: servers[n].command, args: servers[n].args, url: servers[n].url }}
+                    />
+                    <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
                   </span>
                 </button>
               ))

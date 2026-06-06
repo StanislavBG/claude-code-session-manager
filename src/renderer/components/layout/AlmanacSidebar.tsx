@@ -13,7 +13,7 @@
  * Persisted to localStorage so the user's last mode is restored on launch.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NavKey } from '../LeftNav'
 import { useSessions } from '../../state/sessions'
 import { useLive } from '../../state/live'
@@ -82,6 +82,19 @@ const TOOLS: ToolItem[] = [
   { key: 'repoviz',           label: 'Repo Viz',          icon: 'repoviz',       hint: 'Language + directory map' },
   { key: 'search',            label: 'Search',            icon: 'global-search', hint: '⌘P file · ⌘⇧F content' },
 ]
+
+// Resizable width — persisted per the user's drag, clamped to a sane range.
+const WIDTH_KEY = 'sm.almanac.sidebarWidth'
+const WIDTH_MIN = 180
+const WIDTH_MAX = 480
+const WIDTH_DEFAULT = 252
+function loadWidth(): number {
+  try {
+    const v = parseInt(localStorage.getItem(WIDTH_KEY) ?? '', 10)
+    if (Number.isFinite(v)) return Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, v))
+  } catch { /* ignore */ }
+  return WIDTH_DEFAULT
+}
 
 const MODE_KEY = 'sm.almanac.sidebarMode'
 type Mode = 'nav' | 'files'
@@ -166,9 +179,42 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenFile }:
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const indicators = useLiveIndicators()
 
+  // Drag-to-resize. widthRef mirrors width so a new drag starts from the
+  // current size; the move/up listeners live on window so the drag keeps
+  // tracking even if the pointer leaves the thin handle.
+  const [width, setWidth] = useState<number>(() => loadWidth())
+  const widthRef = useRef(width)
+  widthRef.current = width
+  const startResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = widthRef.current
+    let lastW = startW
+    const onMove = (ev: PointerEvent) => {
+      lastW = Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, startW + (ev.clientX - startX)))
+      setWidth(lastW)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      try { localStorage.setItem(WIDTH_KEY, String(lastW)) } catch { /* ignore */ }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [])
+  const resetWidth = useCallback(() => {
+    setWidth(WIDTH_DEFAULT)
+    try { localStorage.setItem(WIDTH_KEY, String(WIDTH_DEFAULT)) } catch { /* ignore */ }
+  }, [])
+
   return (
     <aside
-      className="w-[252px] shrink-0 bg-bg-elev border-r border-line flex flex-col"
+      className="shrink-0 bg-bg-elev border-r border-line flex flex-col relative"
+      style={{ width }}
       data-testid="tour-leftnav"
       aria-label="Primary navigation"
     >
@@ -248,6 +294,17 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenFile }:
       </div>
 
       <SidebarFooter />
+
+      {/* Drag-to-resize handle, straddling the right border. Double-click resets. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        title="Drag to resize · double-click to reset"
+        onPointerDown={startResize}
+        onDoubleClick={resetWidth}
+        className="absolute top-0 right-0 h-full w-1.5 translate-x-1/2 z-10 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
+      />
     </aside>
   )
 }

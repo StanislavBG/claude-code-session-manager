@@ -12,3 +12,6 @@ playwright-report
 .claude/
 .research/
 <path>
+
+# Generated scheduler skill-discovery output (not source)
+skill-proposals/

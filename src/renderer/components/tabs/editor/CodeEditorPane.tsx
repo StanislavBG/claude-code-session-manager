@@ -34,7 +34,7 @@ interface Props {
 // Extension → Monaco language id. Anything unlisted falls back to plaintext.
 const LANG: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  mjs: 'javascript', cjs: 'javascript', json: 'json', py: 'python', go: 'go',
+  mjs: 'javascript', cjs: 'javascript', json: 'json', jsonl: 'json', ndjson: 'json', py: 'python', go: 'go',
   rs: 'rust', rb: 'ruby', c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp',
   java: 'java', sh: 'shell', bash: 'shell', zsh: 'shell', css: 'css',
   scss: 'scss', less: 'less', html: 'html', htm: 'html', xml: 'xml',

@@ -11,15 +11,9 @@ import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
 import { EditorView } from './tabs/EditorView'
-import { SuperAgentModal } from './modals/SuperAgentModal'
-import { RaceModal } from './modals/RaceModal'
-import { OrchestratorModal } from './modals/OrchestratorModal'
-import { HiveManagerModal } from './modals/HiveManagerModal'
-import { BackgroundAgentsModal } from './modals/BackgroundAgentsModal'
+import { DispatchModal } from './modals/DispatchModal'
 import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
-import { QuickOpenModal } from './modals/QuickOpenModal'
-import { GlobalSearchModal } from './modals/GlobalSearchModal'
-import { AgentMemoryModal } from './modals/AgentMemoryModal'
+import { SearchModal, type SearchMode } from './modals/SearchModal'
 import { VoiceModal } from './layout/VoiceModal'
 import { Settings } from './tabs/Settings'
 import { Permissions } from './tabs/Permissions'
@@ -29,12 +23,11 @@ import { Memory } from './tabs/Memory'
 import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
-import { Plans } from './tabs/Plans'
 import { Prompts } from './tabs/Prompts'
 import { Tasks } from './tabs/Tasks'
 import { Projects } from './tabs/Projects'
 import { DocEditor } from './tabs/DocEditor'
-import { SchedulePanel } from './SchedulePanel'
+import { Scheduler } from './tabs/Scheduler'
 import { SectionFrame } from './layout/SectionFrame'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
@@ -59,6 +52,7 @@ interface MainPaneProps {
   onNewSession?: () => void
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
+  searchMode?: SearchMode
   broadcastOpen: boolean
   watchersOpen: boolean
   onCloseBroadcast: () => void
@@ -76,31 +70,24 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'subagents':     { eyebrow: 'Workspace',  title: 'The hive',                  intro: 'Sub-agents working in parallel on the active session. Each row shows what it was asked to do and where it landed.' },
   'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { eyebrow: 'Workspace',  title: 'Tokens, cost, cadence',     intro: 'Daily and per-session usage from the Anthropic billing API. The 5-hour window in the footer is the same source.' },
-  'plans':         { eyebrow: 'Workspace',  title: 'Plans & PRDs',              intro: 'PRDs that drive the scheduler. Edit, queue, or peek at the body that will be sent to claude -p.' },
   'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
   'tasks':         { eyebrow: 'Workspace',  title: 'Tasks across sessions',     intro: 'Active to-dos pulled from every running Claude session. Use this to see what is in flight without tab-hopping.' },
-  'scheduler':     { eyebrow: 'Workspace',  title: 'Scheduler',                 intro: 'Queue claude -p jobs against your 5-hour window. Jobs auto-pause on rate-limit and resume on the next reset.' },
+  'scheduler':     { eyebrow: 'Workspace',  title: 'Scheduler',                 intro: 'Author PRDs and run them as claude -p jobs against your 5-hour window. Jobs auto-pause on rate-limit and resume on the next reset.' },
   'plugins':       { eyebrow: 'Configure',  title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
   'mcp':           { eyebrow: 'Configure',  title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
   'hooks':         { eyebrow: 'Configure',  title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
   'keybindings':   { eyebrow: 'Configure',  title: 'Keybindings',               intro: 'Shortcuts you can override. Bindings here apply to Claude Code itself, not the Session Manager chrome.' },
   'doc-editor':    { eyebrow: 'Configure',  title: 'Doc Editor',                intro: 'Edit CLAUDE.md and project documentation with WYSIWYG. Saves are atomic and live-update Claude when present.' },
-  'memory':        { eyebrow: 'Configure',  title: 'Workspace memory',          intro: 'Files in ~/.claude that persist across conversations. Stored locally — nothing leaves your machine.' },
+  'memory':        { eyebrow: 'Configure',  title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
   'projects':      { eyebrow: 'Configure',  title: 'Known projects',            intro: 'Every folder Claude has run in. Pin favorites, prune stale entries, or quickly start a session in one.' },
   'system-prompt': { eyebrow: 'Configure',  title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'permissions':   { eyebrow: 'Configure',  title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
   'settings':      { eyebrow: 'Configure',  title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { eyebrow: 'Tools', title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
-  'superagent':       { eyebrow: 'Tools', title: 'SuperAgent',          intro: 'Claude dispatches a specialist subagent for the task you describe.' },
-  'race':             { eyebrow: 'Tools', title: 'Race',                intro: 'Send the same prompt to multiple tabs and watch them compete; the winner is graded against a rubric.' },
-  'orchestrator':     { eyebrow: 'Tools', title: 'Orchestrator',        intro: 'Assign different sub-tasks across N tabs in parallel. Useful for coordinated multi-file work.' },
-  'hives':            { eyebrow: 'Tools', title: 'Hives',               intro: 'Pre-baked agent swarm templates. Pick a hive and Orchestrator launches its members against your target.' },
-  'background-agents':{ eyebrow: 'Tools', title: 'Background agents',   intro: 'Long-running scheduler queue. Run claude -p jobs from PRDs while you keep working.' },
+  'dispatch':         { eyebrow: 'Tools', title: 'Dispatch',            intro: 'Broadcast work to multiple agents: Boss (specialists on the active tab), Orchestrate (a sub-task per tab), Race (same prompt, pick a winner), or launch a pre-baked Hive template.' },
   'repoviz':          { eyebrow: 'Tools', title: 'Repo visualization',  intro: 'Language + directory map of the current project, computed locally.' },
-  'quick-open':       { eyebrow: 'Tools', title: 'Quick open',          intro: '⌘P — fuzzy-find any file in the current cwd. Recently-opened files surface first.' },
-  'global-search':    { eyebrow: 'Tools', title: 'Search in project',   intro: '⌘⇧F — ripgrep across every file under the active cwd (falls back to fs walk if rg is missing).' },
-  'agent-memory':     { eyebrow: 'Tools', title: 'Agent memory',        intro: 'Per-subagent notes — facts about specific agents that persist across projects.' },
+  'search':           { eyebrow: 'Tools', title: 'Search',              intro: 'Find by filename (⌘P) or by content (⌘⇧F) across the active cwd. The chosen path is inserted into the active terminal.' },
 }
 
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
@@ -110,6 +97,7 @@ function renderScreen(active: NavKey, ctx: {
   onNewSession?: () => void
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
+  searchMode?: SearchMode
 }): React.ReactNode {
   // Screens that draw their own chrome — render bare.
   switch (active) {
@@ -135,10 +123,9 @@ function renderScreen(active: NavKey, ctx: {
       case 'subagents':     return <Subagents />
       case 'history':       return <History />
       case 'usage':         return <Usage />
-      case 'plans':         return <Plans />
       case 'prompts':       return <Prompts />
       case 'tasks':         return <Tasks />
-      case 'scheduler':     return <SchedulePanel />
+      case 'scheduler':     return <Scheduler />
       case 'plugins':       return <Plugins />
       case 'mcp':           return <McpServers />
       case 'hooks':         return <Hooks />
@@ -153,15 +140,9 @@ function renderScreen(active: NavKey, ctx: {
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.
       case 'voice':             return <VoiceModal open={true} onClose={noop} variant="page" />
-      case 'superagent':        return <SuperAgentModal open={true} onClose={noop} variant="page" />
-      case 'race':              return <RaceModal open={true} onClose={noop} variant="page" />
-      case 'orchestrator':      return <OrchestratorModal open={true} onClose={noop} variant="page" />
-      case 'hives':             return <HiveManagerModal open={true} onClose={noop} variant="page" />
-      case 'background-agents': return <BackgroundAgentsModal open={true} onClose={noop} variant="page" />
+      case 'dispatch':          return <DispatchModal open={true} onClose={noop} variant="page" />
       case 'repoviz':           return <RepoVisualizationModal open={true} onClose={noop} variant="page" />
-      case 'quick-open':        return <QuickOpenModal open={true} onClose={noop} variant="page" />
-      case 'global-search':     return <GlobalSearchModal open={true} onClose={noop} variant="page" />
-      case 'agent-memory':      return <AgentMemoryModal />
+      case 'search':            return <SearchModal open={true} onClose={noop} variant="page" initialMode={ctx.searchMode ?? 'files'} />
       default: return null
     }
   })()
@@ -177,6 +158,7 @@ export function MainPane({
   onNewSession,
   onOpenVoice,
   onOpenScheduler,
+  searchMode,
   broadcastOpen,
   watchersOpen,
   onCloseBroadcast,
@@ -266,7 +248,7 @@ export function MainPane({
         {active !== 'terminal' && (
           <div className="absolute inset-0 bg-bg overflow-auto">
             <ErrorBoundary>
-              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler })}
+              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler, searchMode })}
             </ErrorBoundary>
           </div>
         )}

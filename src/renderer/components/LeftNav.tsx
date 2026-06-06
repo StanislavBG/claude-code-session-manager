@@ -20,7 +20,6 @@ export type NavKey =
   | 'mcp'
   | 'hooks'
   | 'subagents'
-  | 'plans'
   | 'tasks'
   | 'memory'
   | 'projects'
@@ -29,7 +28,6 @@ export type NavKey =
   | 'usage'
   | 'agent-view'
   | 'doc-editor'
-  | 'agent-memory'
   | 'scheduler'
   // In-app file editor scene. Launched from the Files sidebar + terminal links
   // (no left-nav row of its own — Files is the launch point).
@@ -38,12 +36,7 @@ export type NavKey =
   // also gets a NavKey + MainPane screen. Screens render the same modal
   // components with variant="page" so the body content is unchanged.
   | 'voice'
-  | 'superagent'
-  | 'race'
-  | 'background-agents'
-  | 'orchestrator'
-  | 'hives'
+  | 'dispatch'
   | 'repoviz'
-  | 'quick-open'
-  | 'global-search'
+  | 'search'
   | 'prompts'

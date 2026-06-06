@@ -29,9 +29,7 @@ import { VoiceButton } from '../VoiceButton'
 // group below Configure so users see them as workflow surfaces (not
 // configuration). Same NavKey type as Workspace/Configure rows.
 type ToolKey = Extract<NavKey,
-  | 'voice' | 'superagent' | 'race' | 'background-agents'
-  | 'orchestrator' | 'hives' | 'repoviz' | 'quick-open' | 'global-search'
-  | 'agent-memory'
+  | 'voice' | 'dispatch' | 'repoviz' | 'search'
 >
 void useBilling; void useMemo // (kept for future signal additions)
 
@@ -48,9 +46,8 @@ const WORKSPACE: NavGroupItem[] = [
   { key: 'overview',   label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
   { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
   { key: 'agent-view', label: 'Agent-View', icon: 'agent-view',   liveKind: 'agentView', hint: 'Workshop scene of the active session' },
-  { key: 'subagents',  label: 'Hive',       icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
-  { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Queue claude -p jobs against your 5h window' },
-  { key: 'plans',      label: 'Plans',      icon: 'plans',        hint: 'PRDs that drive the scheduler' },
+  { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
+  { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
   { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
@@ -80,15 +77,9 @@ interface ToolItem {
 
 const TOOLS: ToolItem[] = [
   { key: 'voice',             label: 'Voice',             icon: 'mic',           hint: 'Whisper transcription + push-to-talk' },
-  { key: 'superagent',        label: 'SuperAgent',        icon: 'sparkle',       hint: 'Dispatch specialist subagents' },
-  { key: 'orchestrator',      label: 'Orchestrator',      icon: 'orchestrator',  hint: 'Different sub-tasks across N tabs' },
-  { key: 'hives',             label: 'Hives',             icon: 'leaf',          hint: 'Pre-baked agent swarm templates' },
-  { key: 'race',              label: 'Race',              icon: 'race',          hint: 'Same prompt to multiple tabs' },
-  { key: 'background-agents', label: 'Background Agents', icon: 'background',    hint: 'Long-running scheduler queue' },
+  { key: 'dispatch',          label: 'Dispatch',          icon: 'orchestrator',  hint: 'Boss · Orchestrate · Race · Hives' },
   { key: 'repoviz',           label: 'Repo Viz',          icon: 'repoviz',       hint: 'Language + directory map' },
-  { key: 'agent-memory',      label: 'Agent Memory',      icon: 'agent-memory',  hint: 'Long-term context store' },
-  { key: 'quick-open',        label: 'Quick Open',        icon: 'quick-open',    hint: '⌘P · jump to file' },
-  { key: 'global-search',     label: 'Global Search',     icon: 'global-search', hint: '⌘⇧F · search across files' },
+  { key: 'search',            label: 'Search',            icon: 'global-search', hint: '⌘P file · ⌘⇧F content' },
 ]
 
 const MODE_KEY = 'sm.almanac.sidebarMode'

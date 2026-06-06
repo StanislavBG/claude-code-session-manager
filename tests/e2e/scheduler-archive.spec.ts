@@ -3,7 +3,7 @@
  *
  * Verifies the full archive flow:
  *   1. Seed PRDS_DIR/test-archive-e2e.md with valid frontmatter.
- *   2. Launch app, navigate to Plans → Scheduler PRDs.
+ *   2. Launch app, navigate to Plans → prds.
  *   3. Select the seeded PRD via its checkbox, click Archive…, confirm.
  *   4. Assert: source file gone, present under prds-archived/<ts>/.
  *
@@ -68,19 +68,17 @@ test('Archive moves PRD from prds/ to prds-archived/<ts>/', async () => {
     env: { SM_MOCK_BILLING_KIND: 'ok' },
   })
   try {
-    // Navigate to Plans via the command palette helper (deterministic —
-    // filters by query then presses Enter, avoiding click-stability flake
-    // when the snapshot poller mutates LeftNav badges mid-click).
-    await navigateToTab(win, 'plans')
-
-    // Plans defaults to the Scheduler PRDs subview (localStorage 'sm.plansTab.subView').
-    // Force it in case a previous test set 'session'.
-    await win.evaluate(() => localStorage.setItem('sm.plansTab.subView', 'prds'))
-    // Reload only the renderer state isn't an option in Electron without a
-    // full reload — click the Scheduler PRDs view tab if needed.
-    const prdsTab = win.locator('button', { hasText: /scheduler prds/i }).first()
+    // Force the prds subview BEFORE navigating: the Scheduler reads
+    // 'sm.schedulerTab.subView' in a mount-time useState initializer, so setting
+    // it after navigateToTab (when the tab is already mounted on 'queue') is too
+    // late and leaves SchedulePanel showing instead of SchedulerPrdsView — the
+    // seeded slug then never renders. Force-click the PRDs subtab as a backup
+    // (the poller's LeftNav-badge churn defeats normal click stability).
+    await win.evaluate(() => localStorage.setItem('sm.schedulerTab.subView', 'prds'))
+    await navigateToTab(win, 'scheduler')
+    const prdsTab = win.locator('button', { hasText: /^prds$/i }).first()
     if (await prdsTab.count() > 0) {
-      await prdsTab.click().catch(() => { /* may already be active */ })
+      await prdsTab.click({ force: true }).catch(() => { /* may already be active */ })
     }
 
     // Wait for the seeded slug to appear in the sidebar list.

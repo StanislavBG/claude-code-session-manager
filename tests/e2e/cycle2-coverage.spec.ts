@@ -18,24 +18,15 @@
 import { test, expect } from '@playwright/test'
 import { launchApp, navigateToTab } from './_helpers/launchApp'
 
-test('Overview cockpit pills carry the expected aria-labels', async () => {
+test('Overview renders the Home dashboard hero + 5-hour window meter', async () => {
   const { app, win } = await launchApp()
   try {
-    // Model / effort / team pills live on Overview's CockpitStrip — navigate
-    // deterministically (avoids fuzzy-filter race).
+    // The old CockpitStrip (model/effort/team pills) was replaced by the Home
+    // dashboard in the Almanac redesign. Assert the new hero + usage meter.
     await navigateToTab(win, 'overview')
 
-    const modelPill = win.locator('button[data-pill="model"]')
-    await expect(modelPill).toBeVisible({ timeout: 10_000 })
-    const aria = await modelPill.getAttribute('aria-label')
-    expect(aria).toMatch(/model[:.]/i)
-    expect(aria).toMatch(/click/i)
-
-    const effortPill = win.locator('button[data-pill="effort"]')
-    await expect(effortPill).toHaveAttribute('aria-label', /thinking effort/i)
-
-    const teamPill = win.locator('button[data-pill="team"]')
-    await expect(teamPill).toHaveAttribute('aria-label', /agent teams/i)
+    await expect(win.locator('h1:has-text("Claude Code")')).toBeVisible({ timeout: 10_000 })
+    await expect(win.locator('text=5-hour window').first()).toBeVisible({ timeout: 5_000 })
   } finally {
     await app.close()
   }
@@ -79,24 +70,22 @@ test('Cmd-K opens CommandPalette, fuzzy filters, Enter navigates, Esc closes', a
   }
 })
 
-test('Overview cockpit renders instrument tiles', async () => {
+test('Overview Home shows quick-start actions and the recent/scheduler cards', async () => {
   const { app, win } = await launchApp()
   try {
-    // navigateToTab uses input.fill + waits for the specific nav:overview
-    // button before pressing Enter — more deterministic than keyboard.type
-    // with a hard sleep, which races the CommandPalette's fuzzy filter.
     await navigateToTab(win, 'overview')
 
-    // "Instrument Cluster" mounts once Overview's ~/.claude scan resolves.
-    await expect(win.locator('h3:has-text("Instrument Cluster")')).toBeVisible({ timeout: 15_000 })
+    // The Instrument Cluster was replaced by the Home dashboard's Quick start
+    // actions plus the Recent-sessions and Scheduler-peek cards.
+    await expect(win.locator('text=Quick start').first()).toBeVisible({ timeout: 15_000 })
+    await expect(win.locator('h2:has-text("Recent sessions")')).toBeVisible({ timeout: 5_000 })
 
-    // Each InstrumentTile renders as a button (with linkTo) or div. Anchor
-    // on label text instead of brittle class chains.
-    const tiles = win.locator('[class*="border-line"][class*="rounded"][class*="p-3"]').filter({
-      hasText: /sessions|skills|subagents|mcp servers|plugins|hooks|tasks|plans|scheduler|history/i,
+    // Quick-start exposes several actionable buttons (Resume last / Draft a PRD
+    // / Add a project / Start a session).
+    const actions = win.locator('button').filter({
+      hasText: /resume last|draft a prd|add a project|start a session/i,
     })
-    const count = await tiles.count()
-    expect(count).toBeGreaterThanOrEqual(3)
+    expect(await actions.count()).toBeGreaterThanOrEqual(3)
   } finally {
     await app.close()
   }

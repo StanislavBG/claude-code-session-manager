@@ -184,7 +184,7 @@ function QuickStartCard({
   const actions = [
     { id: 'new',    label: 'Start a session',  hint: 'Open Claude Code in a project',  icon: 'play'    as const, run: () => onNewSession?.() },
     { id: 'resume', label: 'Resume last',      hint: 'Reattach to a recent session',   icon: 'sparkle' as const, run: () => onNavigate?.('history') },
-    { id: 'plan',   label: 'Draft a PRD',      hint: 'Plan a job for the scheduler',   icon: 'book'    as const, run: () => onNavigate?.('plans') },
+    { id: 'plan',   label: 'Draft a PRD',      hint: 'Plan a job for the scheduler',   icon: 'book'    as const, run: () => onNavigate?.('scheduler') },
     { id: 'invite', label: 'Add a project',    hint: 'Point me at a folder on disk',   icon: 'plus'    as const, run: () => onNavigate?.('projects') },
   ]
   return (

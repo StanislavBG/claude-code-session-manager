@@ -11,10 +11,49 @@ import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import type { MemoryEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
 import { MemoryNaturalPanel } from './MemoryNaturalPanel'
+import { SubagentMemoryView } from './memory/SubagentMemoryView'
 
 type MemoryView = 'classic' | 'natural'
+type MemoryScope = 'workspace' | 'subagent'
 
 const SLUG_RE = /^[a-z0-9-_]+$/
+
+const SCOPE_OPTIONS = [
+  { key: 'workspace' as const, label: 'Workspace' },
+  { key: 'subagent' as const, label: 'Subagent' },
+]
+const SCOPE_LS_KEY = 'sm.memoryTab.scope'
+
+/**
+ * Memory — single home for both memory stores, split by scope:
+ *   • Workspace — cwd-keyed .md memories (~/.claude/session-manager/memories/<cwd>/)
+ *   • Subagent  — agentId-keyed JSON entries (the old "Agent Memory" tool)
+ *
+ * Consolidates two former nav destinations (Memory + Agent Memory) that were
+ * the same list+detail CRUD over different keys. One surface, scope toggle.
+ */
+export function Memory() {
+  const [scope, setScope] = useState<MemoryScope>(() =>
+    localStorage.getItem(SCOPE_LS_KEY) === 'subagent' ? 'subagent' : 'workspace',
+  )
+  useEffect(() => {
+    localStorage.setItem(SCOPE_LS_KEY, scope)
+  }, [scope])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="shrink-0 flex items-center gap-3 px-3 py-2 border-b border-line">
+        <ViewTabs options={SCOPE_OPTIONS} active={scope} onChange={setScope} />
+        <span className="text-[11px] text-fg-faint">
+          {scope === 'workspace' ? 'memories scoped to the active project' : 'long-term memory per subagent'}
+        </span>
+      </div>
+      <div className="flex-1 min-h-0">
+        {scope === 'workspace' ? <WorkspaceMemoryView /> : <SubagentMemoryView />}
+      </div>
+    </div>
+  )
+}
 
 
 function formatMtime(ms: number): string {
@@ -26,7 +65,7 @@ function formatMtime(ms: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
-export function Memory() {
+function WorkspaceMemoryView() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null

@@ -203,6 +203,14 @@ test('reload restores previously open docs', async () => {
     await openDocViaEval(win, PATHS.settings)
     await openDocViaEval(win, PATHS.notes)
 
+    // Confirm all three tabs are actually open BEFORE reloading. Under
+    // full-suite memory pressure the third open can lag, and a bare
+    // waitForTimeout would let the reload fire before it persisted — the app
+    // would then restore only 2 tabs. Asserting the live count first guarantees
+    // the debounce snapshot includes all three.
+    const openTabs = win.locator('[data-testid="doc-tab-strip"] > [data-testid^="doc-tab-"]:not([data-testid^="doc-tab-close-"])')
+    await expect(openTabs).toHaveCount(3, { timeout: 10_000 })
+
     // Wait for the 500ms persistence debounce + margin.
     await win.waitForTimeout(800)
 

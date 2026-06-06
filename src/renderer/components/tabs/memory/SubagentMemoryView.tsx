@@ -1,28 +1,29 @@
 /**
- * AgentMemoryModal — list+detail view over per-subagent memory entries.
+ * SubagentMemoryView — list+detail view over per-subagent memory entries.
+ * Rendered as the "Subagent" scope of the Memory tab.
  *
- * Layout (inside TabModal):
+ * Layout:
  *   toolbar:  Agent dropdown (user + project agents) · entries count · + New entry · Refresh
  *   sidebar:  filter input + list of entries (newest first)
  *   detail:   MarkdownEditor on the selected entry's body, with Save / Delete
  *
- * Distinct from the workspace Memory tab — that's keyed by cwd, this is keyed
+ * Distinct from the Workspace scope — that's keyed by cwd, this is keyed
  * by agentId (subagent name). The agent dropdown is populated by scanning
  * ~/.claude/agents/ (user scope) and <cwd>/.claude/agents/ (project scope) via
  * the existing config.listDir IPC; we don't add a new "list subagents" call.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Panel } from '../ui/Panel'
-import { ListDetail } from '../ui/ListDetail'
-import { MarkdownEditor } from '../ui/MarkdownEditor'
-import { EmptyState } from '../ui/EmptyState'
-import { useActiveTab } from '../../lib/useActiveTab'
-import { useHomeDir } from '../../lib/useHomeDir'
-import { useAgentMemory } from '../../state/agentMemory'
-import { formatBytes } from '../../lib/formatBytes'
-import { toast } from '../../state/toast'
-import type { AgentMemoryCategory, AgentMemoryEntry } from '../../../preload/api'
+import { Panel } from '../../ui/Panel'
+import { ListDetail } from '../../ui/ListDetail'
+import { MarkdownEditor } from '../../ui/MarkdownEditor'
+import { EmptyState } from '../../ui/EmptyState'
+import { useActiveTab } from '../../../lib/useActiveTab'
+import { useHomeDir } from '../../../lib/useHomeDir'
+import { useAgentMemory } from '../../../state/agentMemory'
+import { formatBytes } from '../../../lib/formatBytes'
+import { toast } from '../../../state/toast'
+import type { AgentMemoryCategory, AgentMemoryEntry } from '../../../../preload/api'
 
 interface AgentOption {
   id: string
@@ -81,7 +82,7 @@ async function loadAgentList(home: string, cwd: string | null): Promise<AgentOpt
   return Array.from(byId.values()).sort((a, b) => a.id.localeCompare(b.id))
 }
 
-export function AgentMemoryModal() {
+export function SubagentMemoryView() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -119,10 +120,12 @@ export function AgentMemoryModal() {
     }
   }, [home, cwd])
 
-  // Load entries when agent changes.
+  // Load entries when agent changes. Drafts are keyed `agent::entry`, so we do
+  // NOT clear draftMap here — wiping it would silently discard unsaved edits on
+  // the previous agent. Per-agent keying means switching away and back restores
+  // any in-progress draft, like unsaved tabs.
   useEffect(() => {
     if (!selectedAgent) return
-    setDraftMap({})
     setSelectedEntryId(null)
     loadAgent(selectedAgent)
   }, [selectedAgent, loadAgent])
@@ -144,14 +147,17 @@ export function AgentMemoryModal() {
     [entries, selectedEntryId],
   )
 
-  // Auto-select first entry when list changes.
+  // Auto-select first entry when list changes. The guard checks `filtered`
+  // (the visible list), not `entries`: if the current selection is filtered out
+  // by the search box, re-point to the first visible row so the detail pane
+  // never shows an entry that isn't in the sidebar.
   useEffect(() => {
     if (!selectedEntryId && filtered.length > 0) {
       setSelectedEntryId(filtered[0].id)
-    } else if (selectedEntryId && !entries.find((e) => e.id === selectedEntryId)) {
+    } else if (selectedEntryId && !filtered.find((e) => e.id === selectedEntryId)) {
       setSelectedEntryId(filtered[0]?.id ?? null)
     }
-  }, [filtered, entries, selectedEntryId])
+  }, [filtered, selectedEntryId])
 
   const draftKey = selectedAgent && selectedEntryId ? `${selectedAgent}::${selectedEntryId}` : null
   const draft = draftKey ? draftMap[draftKey] ?? (selectedEntry?.body ?? '') : ''

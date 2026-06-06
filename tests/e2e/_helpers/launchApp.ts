@@ -28,10 +28,17 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<{
 }> {
   const errors: string[] = []
   const app = await electron.launch({
-    args: [path.join(ROOT, 'src', 'main', 'index.cjs')],
+    // Force the X11 ozone backend: under `xvfb-run` DISPLAY points at a virtual
+    // X server, but a COSMIC/Wayland login also exports WAYLAND_DISPLAY, which
+    // Electron will otherwise probe — creating a live terminal (xterm opens a
+    // new surface) then crashes the renderer with "zxdg_exporter_v2 … invalid
+    // role". Pinning x11 + clearing WAYLAND_DISPLAY keeps headless runs stable.
+    args: ['--ozone-platform=x11', path.join(ROOT, 'src', 'main', 'index.cjs')],
     cwd: ROOT,
     env: {
       ...process.env,
+      WAYLAND_DISPLAY: '',
+      ELECTRON_OZONE_PLATFORM_HINT: 'x11',
       NODE_ENV: 'development',
       SM_E2E: '1',
       SM_SUPERVISOR_DISABLE: '1',
@@ -60,11 +67,15 @@ export async function navigateToTab(win: Page, navKey: string): Promise<void> {
   await win.keyboard.press('Control+K')
   const palette = win.locator('[data-testid="command-palette"]')
   await palette.waitFor({ state: 'visible', timeout: 5_000 })
-  // Type the nav key (with dashes turned into spaces so kebab keys like
-  // 'system-prompt' fuzzy-match "Go to System Prompt"). The matching command
-  // becomes the first entry; Enter dispatches it.
+  // Query with the full "go to <key>" label, not just the bare key. Bare
+  // 'scheduler' also matches action commands ("Scheduler — Run now") that
+  // outrank "Go to Scheduler", so Enter would fire the wrong command. Prefixing
+  // "go to " filters those out (they have no 'g' to subsequence-match), leaving
+  // the nav entry as the sole top result. We dispatch with Enter rather than a
+  // click because the palette list re-renders on the scheduler's 2s poller and
+  // is never "stable" enough for Playwright's click actionability checks.
   const input = win.locator('[data-testid="command-palette"] input[role="combobox"]')
-  await input.fill(navKey.replace(/-/g, ' '))
+  await input.fill(`go to ${navKey.replace(/-/g, ' ')}`)
   await win.locator(`button[data-cmd-id="nav:${navKey}"]`).first().waitFor({ state: 'visible', timeout: 3_000 })
   await win.keyboard.press('Enter')
   await palette.waitFor({ state: 'hidden', timeout: 3_000 })

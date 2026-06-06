@@ -4,6 +4,7 @@ import { type NavKey } from './components/LeftNav'
 import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { MainPane } from './components/MainPane'
+import { type SearchMode } from './components/modals/SearchModal'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
@@ -27,6 +28,7 @@ import { createPickedSession } from './lib/createPickedSession'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
 import { isRecognitionSupported } from './lib/speechRecognition'
+import { useDensity } from './lib/useDensity'
 import { log } from './lib/logger'
 
 // Module-scope once-flag for the unsupported warning. Survives StrictMode
@@ -35,8 +37,8 @@ let unsupportedLogged = false
 
 // v0.13.1 — every nav item is a full page; no more App-level modal overlays.
 // SCREEN_KEYS lists what MainPane can render. (Cmd+P / Cmd+Shift+F still
-// trigger keyboard nav to 'quick-open' / 'global-search', they just no
-// longer mount as overlays.)
+// trigger keyboard nav to the 'search' screen — in Files and Content mode
+// respectively — they just no longer mount as overlays.)
 const SCREEN_KEYS = new Set<NavKey>([
   // Workspace
   'overview',
@@ -44,7 +46,6 @@ const SCREEN_KEYS = new Set<NavKey>([
   'agent-view',
   'subagents',
   'scheduler',
-  'plans',
   'prompts',
   'tasks',
   'history',
@@ -63,22 +64,22 @@ const SCREEN_KEYS = new Set<NavKey>([
   'settings',
   // Tools (promoted from modal in v0.13.1)
   'voice',
-  'superagent',
-  'race',
-  'background-agents',
-  'orchestrator',
-  'hives',
+  'dispatch',
   'repoviz',
-  'quick-open',
-  'global-search',
-  'agent-memory',
+  'search',
   // In-app file editor (Files sidebar / terminal links route here).
   'editor',
 ])
 
 export function App() {
+  // Subscribe to the density singleton at the app root so its module loads and
+  // applies the `density-compact` body class from persisted localStorage on
+  // every boot. Without a caller the hook is dead code and the class is never
+  // applied (the LeftNav-footer toggle that used to call it was dropped).
+  useDensity()
   const [activeNav, setActiveNav] = useState<NavKey>('overview')
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [searchMode, setSearchMode] = useState<SearchMode>('files')
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
 
@@ -393,12 +394,14 @@ export function App() {
         if (skipForRealInput(e)) return
         e.preventDefault()
         e.stopPropagation()
-        navigate('quick-open')
+        setSearchMode('files')
+        navigate('search')
       } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         if (skipForRealInput(e)) return
         e.preventDefault()
         e.stopPropagation()
-        navigate('global-search')
+        setSearchMode('content')
+        navigate('search')
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
       } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -564,6 +567,7 @@ export function App() {
           onNewSession={handleNewSession}
           onOpenVoice={() => navigate('voice')}
           onOpenScheduler={() => navigate('scheduler')}
+          searchMode={searchMode}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}

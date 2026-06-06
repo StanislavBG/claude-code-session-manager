@@ -13,6 +13,11 @@ const usageMatrix = require('./usageMatrix.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const billing = require('./usage.cjs');
 const logs = require('./logs.cjs');
+const crashDiagnostics = require('./crashDiagnostics.cjs');
+// Start the local minidump collector before app-ready (required by Electron).
+// Catches renderer/GPU SIGSEGV/SIGABRT; OOM-kills leave no dump but are caught
+// by the sentinel + render-process-gone hooks in crashDiagnostics.init().
+crashDiagnostics.startCrashReporter();
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
@@ -43,6 +48,52 @@ let rebooting = false;
 // powerSaveBlocker handle — keeps the system from suspending while the app runs
 // so the scheduler's polling and jobs aren't frozen. -1 = not held.
 let powerBlockerId = -1;
+// Linux-only backstop. Electron's `powerSaveBlocker('prevent-app-suspension')`
+// leans on org.gnome.SessionManager, which COSMIC (Pop!_OS 24.04+) doesn't
+// implement — under COSMIC it silently registers only a *delay*-mode logind
+// lock, which postpones suspend by seconds instead of blocking it, so the
+// machine idle-suspends with the app open. We spawn our own block-mode
+// `systemd-inhibit` child, which talks straight to logind and is
+// desktop-agnostic. Handle to the child so we can release it on quit.
+let systemdInhibitChild = null;
+
+function startSystemdInhibit() {
+  if (process.platform !== 'linux') return;
+  // Idempotent: if a live child already holds the lock, don't spawn a second.
+  if (systemdInhibitChild && systemdInhibitChild.exitCode === null && !systemdInhibitChild.killed) return;
+  try {
+    // `sleep:idle` blocks both explicit suspend and the idle-action timer.
+    // The holder is a poll on OUR pid rather than `sleep infinity`: when the
+    // main process dies — graceful quit, SIGKILL, OR an OOM crash — `kill -0`
+    // fails within one tick and the holder exits, releasing the lock. Without
+    // this the child reparents to init on a hard kill and the inhibitor leaks
+    // forever (one stranded lock per crash). 5s tick = worst-case 5s of stale
+    // lock after death, which errs toward "stay awake" — the safe direction.
+    const child = spawn('systemd-inhibit', [
+      '--what=sleep:idle',
+      '--who=Claude Session Manager',
+      '--why=Scheduler polling and claude -p jobs must survive idle',
+      '--mode=block',
+      'sh', '-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 5; done`,
+    ], { stdio: 'ignore', detached: false });
+    child.on('error', (e) => {
+      logs.writeLine({ scope: 'main', level: 'warn', message: 'systemd-inhibit spawn failed', meta: { error: e?.message } });
+    });
+    if (child.pid) {
+      systemdInhibitChild = child;
+      logs.writeLine({ scope: 'main', level: 'info', message: 'systemd-inhibit block lock held', meta: { pid: child.pid } });
+    }
+  } catch (e) {
+    logs.writeLine({ scope: 'main', level: 'warn', message: 'systemd-inhibit unavailable', meta: { error: e?.message } });
+  }
+}
+
+function stopSystemdInhibit() {
+  if (systemdInhibitChild) {
+    try { systemdInhibitChild.kill('SIGTERM'); } catch { /* */ }
+    systemdInhibitChild = null;
+  }
+}
 
 // Boot diagnostics — populated at app.whenReady so the renderer can poll their
 // state via IPC and surface toasts on the failure paths. The first-paint
@@ -225,6 +276,7 @@ async function rebootApp() {
     logReboot('falling back to app.relaunch()');
     app.relaunch();
   }
+  runShutdownCleanup();   // app.exit bypasses will-quit
   app.exit(0);
 }
 
@@ -287,6 +339,7 @@ function createWindow() {
     // instead of blindly trying http://localhost:5173, which would (a) load
     // remote content and (b) almost always fail in a packaged install.
     console.error('[main] dist/index.html missing and SM_DEV is not set — refusing to load remote content. Reinstall or set SM_DEV=1 for dev.');
+    runShutdownCleanup();   // app.exit bypasses will-quit
     app.exit(1);
     return;
   }
@@ -617,7 +670,7 @@ protocol.registerSchemesAsPrivileged([
 const SMFILE_MIME = {
   '.html': 'text/html', '.htm': 'text/html',
   '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.json': 'application/json', '.svg': 'image/svg+xml',
+  '.json': 'application/json', '.jsonl': 'application/jsonl', '.ndjson': 'application/x-ndjson', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.avif': 'image/avif', '.bmp': 'image/bmp',
@@ -676,6 +729,18 @@ app.on('web-contents-created', (_e, wc) => {
 app.whenReady().then(async () => {
   logs.pruneOld();
   logs.writeLine({ scope: 'main', level: 'info', message: 'app start', meta: { version: app.getVersion(), platform: process.platform } });
+
+  // Crash/OOM diagnostics: logs a postmortem if the PREVIOUS run died
+  // uncleanly (the silent OOM-kill we've been chasing), then starts the memory
+  // heartbeat + render/child-process-gone hooks for this run. See
+  // crashDiagnostics.cjs for the full rationale.
+  crashDiagnostics.init({
+    logs,
+    getPowerBlockerId: () => powerBlockerId,
+    // If a suspend ever fires while we're alive, the OS lock lapsed — re-assert
+    // our block-mode systemd-inhibit so the next idle window stays covered.
+    onSuspendWhileAlive: () => { stopSystemdInhibit(); startSystemdInhibit(); },
+  });
 
   // Boot-time detection 1: surface `claude` binary resolution so a missing
   // install becomes visible to the renderer instead of failing silently on
@@ -867,6 +932,8 @@ app.whenReady().then(async () => {
   } catch (e) {
     logs.writeLine({ scope: 'main', level: 'warn', message: 'powerSaveBlocker failed', meta: { error: e?.message } });
   }
+  // Linux backstop — Electron's blocker no-ops under COSMIC (see above).
+  startSystemdInhibit();
 
   // OTEL: load persisted config and start the exporter only if `enabled`.
   // Failures are non-fatal — the app must keep working without telemetry.
@@ -882,7 +949,18 @@ app.whenReady().then(async () => {
     });
 });
 
-app.on('will-quit', () => {
+// Centralized teardown. `will-quit` fires on a normal quit, but `app.exit()`
+// (in-app reboot, dist-missing abort) bypasses will-quit entirely — so those
+// sites must call this directly, otherwise markCleanShutdown never runs and the
+// next boot misreports a clean reboot as an UNCLEAN OOM crash, and the
+// powerSaveBlocker/inhibitor leak until process death.
+let teardownDone = false;
+function runShutdownCleanup() {
+  if (teardownDone) return;          // idempotent — will-quit may still fire after an app.exit path
+  teardownDone = true;
+  // Mark a clean exit so the next boot can distinguish a graceful quit from an
+  // OOM-kill / native crash (which leaves the sentinel `open`).
+  crashDiagnostics.markCleanShutdown();
   // PRD F1 v2 §IPC plumbing: must unregisterAll on will-quit.
   try { globalShortcut.unregisterAll(); } catch { /* */ }
   voiceHotkey.disposeOnQuit();
@@ -890,7 +968,10 @@ app.on('will-quit', () => {
     try { powerSaveBlocker.stop(powerBlockerId); } catch { /* */ }
     powerBlockerId = -1;
   }
-});
+  stopSystemdInhibit();
+}
+
+app.on('will-quit', runShutdownCleanup);
 
 app.on('window-all-closed', () => {
   if (rebooting) return; // new window is about to be created

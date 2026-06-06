@@ -47,7 +47,7 @@ const GIT_BADGES: Record<GitStatusType, { color: string; label: string }> = {
 }
 
 const PREVIEWABLE_EXTS = new Set([
-  'md', 'txt', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'rb',
+  'md', 'txt', 'json', 'jsonl', 'ndjson', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'rb',
   'c', 'cpp', 'h', 'hpp', 'java', 'sh', 'bash', 'css', 'scss', 'html', 'xml',
   'yaml', 'yml', 'toml', 'ini', 'conf', 'env', 'log', 'sql', 'gitignore',
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp',

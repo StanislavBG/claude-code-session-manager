@@ -14,7 +14,7 @@ import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
-import { launchApp } from './_helpers/launchApp'
+import { launchApp, navigateToTab } from './_helpers/launchApp'
 
 const PRDS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds')
 const QUEUE_JSON = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json')
@@ -77,12 +77,19 @@ test.afterEach(() => {
  * the localStorage key the section persists to, then reload so the
  * useState initializer reads it.
  */
+// Scheduler is now a top-level nav tab (was a collapsible left-nav section).
+// Navigate to it via the command palette and land on the Queue subview, which
+// hosts SchedulePanel and its "Fire next batch now" control. The subview is
+// persisted in localStorage and other scheduler specs leave it on 'prds', so
+// force 'queue' BEFORE navigating — the Scheduler reads it in a mount-time
+// useState initializer.
 async function expandSchedulerSection(win: import('@playwright/test').Page) {
-  await win.evaluate(() => {
-    localStorage.setItem('sm.leftNav.section.scheduler.collapsed', '0')
-  })
-  await win.reload()
   await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+  await win.evaluate(() => localStorage.setItem('sm.schedulerTab.subView', 'queue'))
+  await navigateToTab(win, 'scheduler')
+  // Belt-and-suspenders: if the tab was already mounted, click the Queue subtab.
+  const queueTab = win.locator('button', { hasText: /^queue$/i }).first()
+  if (await queueTab.count() > 0) await queueTab.click().catch(() => { /* already active */ })
 }
 
 test('meter_rate_limited billing responses do not pause the queue', async () => {

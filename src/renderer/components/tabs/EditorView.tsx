@@ -8,8 +8,9 @@
  * renderers of the active file's buffer (held in the editor store).
  *
  * File dispatch: images → ImagePane, PDFs → PdfPane, binary/oversize → BinaryPane
- * (files.cjs flags these), CSV/TSV → TablePane, markdown/html → preview, else
- * Monaco. Wide-file support rides the smfile:// scheme + binary sniff; the Docs
+ * (files.cjs flags these), CSV/TSV → TablePane, JSONL → JsonlPane (record CRUD),
+ * markdown/html → preview, else Monaco. Wide-file support rides the smfile://
+ * scheme + binary sniff; the Docs
  * feel rides marked + the .markdown-body page canvas. Zero new npm deps.
  */
 
@@ -22,6 +23,7 @@ import {
   isMarkdown,
   isHtml,
   isTabular,
+  isJsonl,
   isRenderable,
   supportsSplit,
   defaultViewMode,
@@ -40,6 +42,7 @@ import { HtmlPreview } from './editor/HtmlPreview'
 import { ImagePane } from './editor/ImagePane'
 import { PdfPane } from './editor/PdfPane'
 import { TablePane } from './editor/TablePane'
+import { JsonlPane } from './editor/JsonlPane'
 import { BinaryPane } from './editor/BinaryPane'
 
 interface BinaryInfo { binary: true; size: number; mime: string; reason: string }
@@ -336,6 +339,8 @@ export function EditorView() {
             <HtmlPreview path={path} dirty={!!dirty[path]} reloadToken={reloadTokens[path] ?? 0} />
           ) : effMode === 'preview' && isTabular(path) ? (
             <TablePane path={path} text={buffers[path] ?? ''} />
+          ) : effMode === 'preview' && isJsonl(path) ? (
+            <JsonlPane path={path} text={buffers[path] ?? ''} />
           ) : isMarkdown(path) ? (
             <div className="flex flex-col h-full">
               <MarkdownToolbar getEditor={getEditor} />

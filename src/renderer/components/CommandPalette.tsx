@@ -169,7 +169,7 @@ function buildCommands(): Command[] {
     { id: 'nav:mcp', label: 'Go to MCP Servers', section: 'nav', emitOnly: true },
     { id: 'nav:hooks', label: 'Go to Hooks', section: 'nav', emitOnly: true },
     { id: 'nav:subagents', label: 'Go to Subagents', section: 'nav', emitOnly: true },
-    { id: 'nav:plans', label: 'Go to Plans', section: 'nav', emitOnly: true },
+    { id: 'nav:scheduler', label: 'Go to Scheduler', section: 'nav', emitOnly: true },
     { id: 'nav:tasks', label: 'Go to Tasks', section: 'nav', emitOnly: true },
     { id: 'nav:memory', label: 'Go to Memory', section: 'nav', emitOnly: true },
     { id: 'nav:projects', label: 'Go to Projects', section: 'nav', emitOnly: true },

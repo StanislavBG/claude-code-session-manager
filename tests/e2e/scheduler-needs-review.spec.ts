@@ -3,7 +3,7 @@
  *
  * Verifies the 'needs_review' UI surface added by the post-run verifier:
  *   1. Seed a PRD file + inject a queue.json entry with status 'needs_review'.
- *   2. Launch app, navigate to Plans → Scheduler PRDs.
+ *   2. Launch app, navigate to Plans → prds.
  *   3. Assert the 'needs_review' chip is visible in the sidebar.
  *   4. Assert the detail panel shows the verifier verdict row.
  *   5. Assert the 'Re-fire' button is present.
@@ -127,18 +127,19 @@ test.afterEach(() => {
 
 // ─── test: chip is visible ────────────────────────────────────────────────────
 
-test('needs_review chip visible in Scheduler PRDs sidebar after seeding downgraded entry', async () => {
+test('needs_review chip visible in prds sidebar after seeding downgraded entry', async () => {
   const { app, win } = await launchApp({
     env: { SM_MOCK_BILLING_KIND: 'ok' },
   })
   try {
-    await navigateToTab(win, 'plans')
-
-    // Force the Scheduler PRDs subview (Plans tab defaults may vary).
-    await win.evaluate(() => localStorage.setItem('sm.plansTab.subView', 'prds'))
-    const prdsTab = win.locator('button', { hasText: /scheduler prds/i }).first()
+    // Set the prds subview BEFORE navigating so the Scheduler mounts on it
+    // (the subview is read in a mount-time useState initializer; setting it
+    // after navigate leaves SchedulePanel showing and the seeded slug hidden).
+    await win.evaluate(() => localStorage.setItem('sm.schedulerTab.subView', 'prds'))
+    await navigateToTab(win, 'scheduler')
+    const prdsTab = win.locator('button', { hasText: /^prds$/i }).first()
     if (await prdsTab.count() > 0) {
-      await prdsTab.click().catch(() => { /* may already be active */ })
+      await prdsTab.click({ force: true }).catch(() => { /* may already be active */ })
     }
 
     // Wait for the seeded slug to appear in the sidebar.
@@ -158,12 +159,11 @@ test('needs_review detail panel shows verifier verdict and Re-fire button', asyn
     env: { SM_MOCK_BILLING_KIND: 'ok' },
   })
   try {
-    await navigateToTab(win, 'plans')
-
-    await win.evaluate(() => localStorage.setItem('sm.plansTab.subView', 'prds'))
-    const prdsTab = win.locator('button', { hasText: /scheduler prds/i }).first()
+    await win.evaluate(() => localStorage.setItem('sm.schedulerTab.subView', 'prds'))
+    await navigateToTab(win, 'scheduler')
+    const prdsTab = win.locator('button', { hasText: /^prds$/i }).first()
     if (await prdsTab.count() > 0) {
-      await prdsTab.click().catch(() => { /* */ })
+      await prdsTab.click({ force: true }).catch(() => { /* */ })
     }
 
     // Click the PRD in the sidebar to load the detail panel.

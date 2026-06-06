@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab, type ToolUseEntry, type ActivityEvent, type TodoItem } from '../../state/live'
 import { useBilling } from '../../state/billing'
+import { SessionPlansView } from './plans/SessionPlansView'
 import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
 
 /**
@@ -10,8 +11,12 @@ import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
  * Three zones, each answering a clear question:
  *   1. Hero    — what is the agent doing right now?
  *   2. Body    — what is it trying to accomplish (todos) and what just
- *                happened (activity feed)?
+ *                happened (activity feed) or planned (session plans)?
  *   3. Footer  — resource status (5h budget, subagents, scheduler).
+ *
+ * The right body column toggles Activity ⇄ Plans; "Session Plans" used to be a
+ * top-level nav destination but is session-scoped observability, so it lives
+ * here. Scheduler PRDs (the long-term planning surface) live in the Scheduler.
  */
 
 const IDLE_AFTER_MS = 3000
@@ -180,24 +185,13 @@ export function AgentView() {
           )}
         </Panel>
 
-        <Panel
-          title="Activity"
-          subtitle={activity.length === 0 ? 'no events yet' : `${toolCount60} tool calls in last 60s`}
-        >
-          {activity.length === 0 ? (
-            <EmptyHint>
-              {state === 'offline'
-                ? 'Activity will appear once the session is running.'
-                : 'Waiting for the agent to act…'}
-            </EmptyHint>
-          ) : (
-            <ol className="space-y-1">
-              {activity.map((ev) => (
-                <ActivityRow key={ev.id} ev={ev} now={now} />
-              ))}
-            </ol>
-          )}
-        </Panel>
+        <ActivityPlansPanel
+          activity={activity}
+          now={now}
+          toolCount60={toolCount60}
+          state={state}
+          planCount={live?.plans.length ?? 0}
+        />
       </div>
 
       {/* FOOTER — resources & background work */}
@@ -214,9 +208,6 @@ export function AgentView() {
             value={runningJobs.length}
             detail={runningJobs.slice(0, 1).map((j) => j.slug).join(', ')}
           />
-          {(live?.plans.length ?? 0) > 0 && (
-            <Pill label="Plans" value={live!.plans.length} detail="revisions" />
-          )}
         </div>
       </footer>
     </div>
@@ -244,6 +235,71 @@ function Panel({
       </div>
       <div className="flex-1 min-h-0 overflow-auto px-6 pb-6">
         {children}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Right body column — switches between the live Activity feed and this
+ * session's Plans (revisions parsed from the transcript). Plans used to be a
+ * top-level nav destination ("Plans → Session Plans"); it's session-scoped
+ * observability, so it belongs here next to the activity feed.
+ */
+function ActivityPlansPanel({
+  activity, now, toolCount60, state, planCount,
+}: {
+  activity: ActivityEvent[]
+  now: number
+  toolCount60: number
+  state: SessionState
+  planCount: number
+}) {
+  const [view, setView] = useState<'activity' | 'plans'>('activity')
+  return (
+    <section className="bg-bg min-h-0 flex flex-col">
+      <div className="shrink-0 px-6 pt-5 pb-3 flex items-baseline gap-4">
+        {(['activity', 'plans'] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={[
+              'font-serif text-[18px] font-medium m-0 transition-colors',
+              view === v ? 'text-fg' : 'text-fg-faint hover:text-fg-dim',
+            ].join(' ')}
+          >
+            {v === 'activity' ? 'Activity' : 'Plans'}
+            {v === 'plans' && planCount > 0 && (
+              <span className="ml-1.5 text-[11px] font-mono text-fg-faint align-middle">{planCount}</span>
+            )}
+          </button>
+        ))}
+        {view === 'activity' && (
+          <span className="ml-auto text-[11px] font-mono text-fg-faint uppercase tracking-[0.08em]">
+            {activity.length === 0 ? 'no events yet' : `${toolCount60} tool calls in last 60s`}
+          </span>
+        )}
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto">
+        {view === 'plans' ? (
+          <SessionPlansView />
+        ) : (
+          <div className="px-6 pb-6">
+            {activity.length === 0 ? (
+              <EmptyHint>
+                {state === 'offline'
+                  ? 'Activity will appear once the session is running.'
+                  : 'Waiting for the agent to act…'}
+              </EmptyHint>
+            ) : (
+              <ol className="space-y-1">
+                {activity.map((ev) => (
+                  <ActivityRow key={ev.id} ev={ev} now={now} />
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
       </div>
     </section>
   )

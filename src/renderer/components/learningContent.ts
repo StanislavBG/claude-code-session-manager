@@ -352,33 +352,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     ],
   },
 
-  'plans': {
-    headline: 'Two views: scheduler PRDs (queued for later) and live session plans',
-    intro:
-      'Claude does two kinds of planning: short-term (the to-do list inside one session) and long-term (work scheduled across many sessions). This tab handles both. Scheduler PRDs are markdown files you queue up; the scheduler runs them as headless claude -p jobs when budget is available. Session Plans are the in-flight planning state Claude maintains during a single conversation.',
-    sections: [
-      {
-        title: 'Scheduler PRDs',
-        items: [
-          { body: 'Live in ~/.claude/session-manager/scheduled-plans/prds/. Each file is one task — frontmatter (title, cwd, estimateMinutes) plus a self-contained body Claude can act on without conversation context.' },
-          { term: 'Filename prefix (NN-)', body: 'A two-digit group number. PRDs in the same group run in parallel; different groups run sequentially. Pick a higher number to run later.' },
-          { term: 'estimateMinutes', body: 'Roughly how long you expect the job to take. The scheduler uses this to pick jobs that fit in your remaining 5-hour budget.' },
-        ],
-      },
-      {
-        title: 'Session Plans',
-        items: [
-          { body: 'Read-only view of the plan Claude maintains during the active session — its current goal, sub-tasks, and progress notes.' },
-          { body: 'Updated whenever Claude calls TaskCreate / TaskUpdate or its plan tool. Useful for "where is it stuck?" debugging.' },
-        ],
-      },
-    ],
-    tips: [
-      'Use the /prd skill to create a fresh PRD with the right structure — manually-written ones often miss the cwd or estimate fields.',
-      'The scheduler\'s default mode (when-available) only runs jobs while budget remains in the current 5h window. Switch to manual or on-reset for tighter control.',
-    ],
-  },
-
   'prompts': {
     headline: 'Click-to-insert prompt library — 46 curated templates across 8 categories',
     intro:
@@ -432,15 +405,15 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   },
 
   'memory': {
-    headline: 'Per-workspace markdown notes Claude can read and write across sessions',
+    headline: 'Memories Claude can read and write across sessions — by project or by subagent',
     intro:
-      'A workspace-scoped notebook stored at ~/.claude/session-manager/memories/<workspace>/, where workspace is derived from the active tab\'s cwd (or "default" when none). Each entry is a plain markdown file with optional name/description frontmatter. You can hand-edit; Claude can write to it during sessions when you ask it to remember things across context resets.',
+      'Two scopes share one tab, toggled by the Workspace / Subagent switch up top. Workspace is a cwd-scoped notebook at ~/.claude/session-manager/memories/<workspace>/ — plain markdown files with optional name/description frontmatter. Subagent is keyed by agentId at ~/.claude/session-manager/agent-memory/<agentId>.json — facts about a specific agent (e.g. the "code-reviewer" agent\'s preferred test runner) that survive across projects. You can hand-edit either; Claude writes to them during sessions when you ask it to remember things across context resets.',
     sections: [
       {
         title: 'How to use it',
         items: [
-          { term: 'Slug', body: 'Lowercase letters, digits, dashes, underscores. Slugs become the filename (with .md).' },
-          { term: 'Workspace', body: 'Auto-selected from the active tab. Switching tabs (different cwd) shows a different memory set.' },
+          { term: 'Workspace', body: 'Auto-selected from the active tab. Switching tabs (different cwd) shows a different memory set. Slugs are lowercase letters/digits/dashes/underscores and become the .md filename.' },
+          { term: 'Subagent', body: 'Pick an agent from the dropdown (scanned from ~/.claude/agents and <cwd>/.claude/agents). Entries can carry a category (command/preference/pattern/avoid/workflow).' },
           { term: 'Caps', body: '1 MiB per file, 1000 entries per workspace. New writes above the cap are refused.' },
         ],
       },
@@ -589,38 +562,30 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'YAML frontmatter is preserved verbatim regardless of mode. The frontmatter chip in the toolbar shows what is there.',
     ],
   },
-  'agent-memory': {
-    headline: 'Per-agent memory store — facts about specific subagents',
-    intro:
-      'Agent Memory keeps notes scoped to individual subagents (e.g., the "code-reviewer" agent\'s preferred test runner). Distinct from workspace Memory, which is keyed by cwd. Stored at ~/.claude/session-manager/agent-memory/<agentId>.json.',
-    sections: [
-      {
-        title: 'Use cases',
-        items: [
-          { body: 'Note an agent\'s preferred conventions or domain knowledge so future runs can re-load it.' },
-          { body: 'Maintain a per-agent context that survives across projects.' },
-        ],
-      },
-    ],
-    tips: [
-      'Distinct from workspace memory (~/.claude/memory/<workspace>/). This one is keyed by agent, not project.',
-    ],
-  },
   'scheduler': {
-    headline: 'Run claude -p jobs against your 5-hour window',
+    headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
     intro:
-      'The scheduler queues PRDs from ~/.claude/session-manager/scheduled-plans/prds/ and fires them as headless claude -p jobs. Auto-pauses on rate-limit, auto-resumes on the next 5-hour reset.',
+      'One home for the headless-batch workflow, split into two tabs. The Queue tab runs and monitors jobs; the PRDs tab is where you author the markdown files those jobs execute. PRDs live in ~/.claude/session-manager/scheduled-plans/prds/. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
     sections: [
       {
-        title: 'Fire policies',
+        title: 'Queue — fire policies',
         items: [
           { term: 'manual', body: 'You hit Run for each job. Useful when you want to stagger work yourself.' },
           { term: 'on-reset', body: 'Fire each job at the next 5-hour boundary.' },
           { term: 'when-available', body: 'Default. Polls billing every 2 min and fires when utilization is below the threshold.' },
         ],
       },
+      {
+        title: 'PRDs — authoring',
+        items: [
+          { body: 'Each file is one task — frontmatter (title, cwd, estimateMinutes) plus a self-contained body Claude can act on without conversation context.' },
+          { term: 'Filename prefix (NN-)', body: 'A two-digit group number. PRDs in the same group run in parallel; different groups run sequentially. Pick a higher number to run later.' },
+          { term: 'estimateMinutes', body: 'Roughly how long you expect the job to take. The scheduler uses this to pick jobs that fit in your remaining 5-hour budget.' },
+        ],
+      },
     ],
     tips: [
+      'Use the /prd skill to create a fresh PRD with the right structure — manually-written ones often miss the cwd or estimate fields.',
       'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
     ],
   },
@@ -628,13 +593,8 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   // already provides the editorial header so LearningPanel only needs to add
   // the "how to use" facts that aren't obvious from the UI itself.
   'voice':            { headline: 'Voice & microphone',  intro: 'Whisper transcription + push-to-talk hotkey. The model loads on first use; the wizard runs once per schema bump to confirm your mic works.', sections: [], tips: ['Default hotkey is F1. Tap on/off, or hold-to-talk — both modes configurable.'] },
-  'superagent':       { headline: 'SuperAgent',          intro: 'Claude dispatches a specialist subagent for the task you describe. Useful when the active tab doesn\'t have the right context.', sections: [], tips: [] },
-  'race':             { headline: 'Race',                intro: 'Send the same prompt to multiple tabs and have them compete. Their transcripts are graded against a rubric you provide.', sections: [], tips: ['Needs at least two running tabs; auto-spawn isn\'t wired yet.'] },
-  'orchestrator':     { headline: 'Orchestrator',        intro: 'Assign different sub-tasks across N tabs in parallel. Each tab gets its own brief; the orchestrator tracks completion.', sections: [], tips: [] },
-  'hives':            { headline: 'Hives',               intro: 'Pre-baked agent swarm templates. Pick a hive and the Orchestrator launches its members against your target with a coordinated brief.', sections: [], tips: [] },
-  'background-agents':{ headline: 'Background agents',   intro: 'Long-running scheduler queue — same engine as the Scheduler tab, but framed for fire-and-forget batches you start now and check on later.', sections: [], tips: [] },
+  'dispatch':         { headline: 'Dispatch',            intro: 'One surface for broadcasting work to multiple agents, by topology. Boss dispatches a specialist subagent on the active tab. Orchestrate assigns a different sub-task to each of N tabs in parallel. Race sends the same prompt to N tabs and grades them against a rubric. Hives are pre-baked swarm templates whose Launch button seeds Orchestrate with a coordinated brief.', sections: [], tips: ['Race and Orchestrate need at least two running tabs; auto-spawn isn\'t wired yet.', 'Runs keep going when you switch modes or navigate away — the status bar tracks them.'] },
   'repoviz':          { headline: 'Repo visualization',  intro: 'Language + directory breakdown of the active project. Computed locally; no telemetry leaves your machine.', sections: [], tips: [] },
-  'quick-open':       { headline: 'Quick open',          intro: '⌘P. Fuzzy-find any file in the current cwd. Recently-opened files surface first; arrow keys navigate, Enter opens.', sections: [], tips: [] },
-  'global-search':    { headline: 'Search in project',   intro: '⌘⇧F. Ripgrep across every file under the active cwd, with fs-walk fallback if rg isn\'t installed.', sections: [], tips: ['Use the case toggle for case-sensitive matches.'] },
+  'search':           { headline: 'Search',              intro: 'One surface, two modes. Files (⌘P) fuzzy-finds any file in the current cwd — recently-opened surface first. Content (⌘⇧F) ripgreps across every file under the active cwd, with fs-walk fallback if rg isn\'t installed. The chosen path is inserted into the active terminal.', sections: [], tips: ['Toggle Files / Content at the top, or jump straight in with ⌘P / ⌘⇧F.', 'In Content mode, use the case toggle for case-sensitive matches.'] },
   'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the Files sidebar or a file link in the terminal. Edit text with Monaco (Cmd-S saves), read Markdown rendered, and run HTML as a sandboxed visualization layer. URLs still open in your browser.', sections: [], tips: ['Toggle Edit/Preview for .md and .html files.', 'HTML previews are sandboxed — page scripts run in an isolated origin.'] },
 }

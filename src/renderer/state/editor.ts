@@ -167,6 +167,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 const RENDERABLE_MD = new Set(['md', 'mdx', 'markdown'])
 const RENDERABLE_HTML = new Set(['html', 'htm'])
 const TABULAR_EXTS = new Set(['csv', 'tsv'])
+const JSONL_EXTS = new Set(['jsonl', 'ndjson'])
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'avif', 'bmp'])
 
 export function extOf(p: string): string {
@@ -188,9 +189,13 @@ export function isPdf(p: string): boolean {
 export function isTabular(p: string): boolean {
   return TABULAR_EXTS.has(extOf(p))
 }
-/** Types that expose an Edit↔Preview(↔Split) toggle: markdown, HTML, CSV/TSV. */
+/** JSON Lines / newline-delimited JSON — record-oriented CRUD pane. */
+export function isJsonl(p: string): boolean {
+  return JSONL_EXTS.has(extOf(p))
+}
+/** Types that expose an Edit↔Preview(↔Split) toggle: markdown, HTML, CSV/TSV, JSONL. */
 export function isRenderable(p: string): boolean {
-  return isMarkdown(p) || isHtml(p) || isTabular(p)
+  return isMarkdown(p) || isHtml(p) || isTabular(p) || isJsonl(p)
 }
 /** Markdown is the only type that gets the full three-way edit/preview/split. */
 export function supportsSplit(p: string): boolean {

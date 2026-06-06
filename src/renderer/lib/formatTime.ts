@@ -52,3 +52,17 @@ export function formatAgo(ms: number | null, now: number): string {
   if (diff < 5_000) return 'just now'
   return `${formatRelative(diff)} ago`
 }
+
+/** Human-readable label for job durations: "2h 15m", "45m", "30s".
+ *  Unlike formatDuration (compact "XhYYm") this uses spaces and drops
+ *  sub-minute precision for large values, making it easier to scan. */
+export function formatTimingLabel(ms: number): string {
+  if (ms < 0) ms = 0
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  const rem = m % 60
+  return rem > 0 ? `${h}h ${rem}m` : `${h}h`
+}

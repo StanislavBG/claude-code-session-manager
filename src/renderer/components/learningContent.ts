@@ -497,27 +497,30 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   },
 
   'usage': {
-    headline: 'Token-by-token cost breakdown of the active session',
+    headline: 'Your subscription\'s rolling-window limits — the same data as /usage',
     intro:
-      'This tab takes the transcript of the currently-focused session, sums up input/output tokens by model, and converts to a USD estimate using prices you can edit. It also shows your subscription billing status (5h and weekly buckets). Use it to spot expensive sessions, decide whether to switch to a cheaper model, or just satisfy curiosity about how much that big refactor cost.',
+      'This is the in-app mirror of the `claude /usage` command: how much of your plan you have consumed in each rolling window, pulled live from the billing API (api.anthropic.com/api/oauth/usage) using the OAuth token in ~/.claude/.credentials.json. Use it to answer one question — "am I about to hit a limit?" — without dropping to a terminal.',
     sections: [
       {
-        title: 'Two cost views',
+        title: 'The windows',
         items: [
-          { term: 'Subscription billing', body: 'How much of your Claude Code plan you\'ve used in the rolling 5-hour window and the weekly window. Pulled live from the same API /usage shows.' },
-          { term: 'Per-session estimate', body: 'Tokens × your editable prices. Useful for API-based billing or for understanding which kind of request is expensive.' },
+          { term: 'Session · 5-hour', body: 'The rolling 5-hour block. Every meter shows percent used, a color bar (green → yellow ≥70% → red ≥90%), and the reset as both a countdown and an absolute Pacific time.' },
+          { term: 'Weekly · all models', body: 'The 7-day cap across every model. Resets are multi-day, so they show a weekday (e.g. "Tue 3:00 PM PT").' },
+          { term: 'Weekly · Opus / Sonnet', body: 'Per-model weekly sub-limits on Max plans. They collapse automatically on plans that do not have them, so the layout stays clean.' },
+          { term: 'Extra usage', body: 'Pay-as-you-go credits, shown only when enabled — used vs. monthly limit in the plan currency.' },
         ],
       },
       {
-        title: 'Editable prices',
+        title: 'Beyond raw /usage',
         items: [
-          { body: 'Defaults reflect Apr 2026 pricing (Opus $5/$25, Sonnet $3/$15, Haiku $1/$5 per million tokens, input/output respectively). Pricing drifts — update here when it does.' },
-          { body: 'Saved to localStorage, applied to all sessions. Not synced to Claude itself — purely for this dashboard.' },
+          { term: 'Burn rate', body: 'Extrapolates the 5-hour window: current %, projected % at reset, and an estimated exhaust time if you are trending over 100%. Fires a desktop notification past 80% / 95% projected.' },
+          { term: 'Session topology', body: 'A secondary, collapsible view — live activity across every open tab (not part of /usage). Independent of the subscription meters.' },
         ],
       },
     ],
     tips: [
-      'Output tokens cost roughly 5× input. If a session is expensive, look at how much Claude is generating — long markdown reports, redundant summaries, large tool outputs.',
+      'Percentages can read over 100% — the API reports raw utilization; the meter caps the bar at full but shows the true number in red.',
+      'Data is cached; if a fetch is rate-limited or the token expired you will see a stale chip with a Retry button rather than a blank page.',
     ],
   },
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
-import { UsageDial } from '../ui/UsageDial'
+import { UsageMeters } from './usage/UsageMeters'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useBilling, refreshBilling } from '../../state/billing'
 import { useUsageMatrix, useStartUsageMatrix } from '../../state/usageMatrix'
@@ -47,11 +47,6 @@ export function Usage() {
   }
 
   const fiveHour = data?.usage.five_hour ?? null
-  const sonnet = data?.usage.seven_day_sonnet ?? null
-  const opus = data?.usage.seven_day_opus ?? null
-  const sevenDay = data?.usage.seven_day ?? null
-  const oauthApps = data?.usage.seven_day_oauth_apps ?? null
-  const extra = data?.usage.extra_usage ?? null
 
   return (
     <Panel
@@ -60,73 +55,44 @@ export function Usage() {
           <span className="text-fg-faint">session {activeTab.claudeSessionId.slice(0, 8)}</span>
           <div className="flex-1" />
           <ResetCountdown fiveHour={fiveHour} />
-          {data && (
-            <span className="text-fg-faint text-xs">
-              {data.subscriptionType ?? 'unknown plan'}
-              {data.rateLimitTier ? ` · ${data.rateLimitTier}` : ''}
-            </span>
-          )}
+          <button
+            onClick={refreshBilling}
+            className="text-fg-faint hover:text-fg text-xs border border-line rounded px-2 py-0.5"
+            title="Refetch /usage from the billing API"
+          >
+            Refresh
+          </button>
         </>
       }
     >
-      <TopologyHeader snap={matrix} />
+      {/* 5h-window burn-rate alert (sticky) — projects whether the session
+          window will exhaust before reset. */}
       <BurnRate billing={billing} />
-      <SessionMatrix snap={matrix} />
-      <AlertsStrip snap={matrix} />
-      <div className="p-6 max-w-3xl space-y-4">
+
+      <div className="p-6 max-w-2xl space-y-4">
         {billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale' && (
           <BillingStatusOverlay result={billing} onRetry={refreshBilling} />
         )}
 
         {!billing && <div className="text-xs text-fg-faint">loading usage…</div>}
 
-        {data && (
-          <>
-            <UsageDial label="5-hour window" window={fiveHour} />
-            <div className="grid grid-cols-2 gap-3">
-              <UsageDial label="7-day · Sonnet" window={sonnet} />
-              <UsageDial label="7-day · Opus" window={opus} />
-            </div>
-            {(sevenDay || oauthApps) && (
-              <div className="grid grid-cols-2 gap-3">
-                <UsageDial label="7-day · combined" window={sevenDay} />
-                <UsageDial label="7-day · oauth apps" window={oauthApps} />
-              </div>
-            )}
-            {extra?.is_enabled && extra.utilization != null && (
-              <ExtraCredits extra={extra} />
-            )}
-          </>
-        )}
+        {/* The /usage core: subscription window consumption. */}
+        {data && <UsageMeters data={data} updatedAt={data.fetchedAt} />}
       </div>
-    </Panel>
-  )
-}
 
-function ExtraCredits({
-  extra,
-}: {
-  extra: NonNullable<BillingData['usage']['extra_usage']>
-}) {
-  const pct = Math.max(0, Math.min(100, extra.utilization ?? 0))
-  const remaining =
-    extra.monthly_limit != null && extra.used_credits != null
-      ? extra.monthly_limit - extra.used_credits
-      : null
-  return (
-    <div className="border border-line rounded p-3 bg-bg-elev">
-      <div className="text-xs uppercase tracking-wider text-fg-faint mb-2">
-        Extra credits ({extra.currency ?? '—'})
-      </div>
-      <div className="flex items-baseline gap-3 text-sm">
-        <span className="font-mono text-fg">{pct.toFixed(0)}%</span>
-        {remaining != null && (
-          <span className="text-fg-dim text-xs">
-            {remaining.toFixed(2)} of {extra.monthly_limit?.toFixed(2)} remaining
-          </span>
-        )}
-      </div>
-    </div>
+      {/* Secondary — live session topology across all open tabs (not part of
+          /usage; the cross-session analytics layer). */}
+      {matrix && (
+        <details className="px-6 pb-6 max-w-3xl" open>
+          <summary className="text-xs uppercase tracking-wider text-fg-faint cursor-pointer mb-2">
+            Session topology
+          </summary>
+          <TopologyHeader snap={matrix} />
+          <SessionMatrix snap={matrix} />
+          <AlertsStrip snap={matrix} />
+        </details>
+      )}
+    </Panel>
   )
 }
 

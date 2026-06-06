@@ -5,6 +5,7 @@ import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { MainPane } from './components/MainPane'
 import { type SearchMode } from './components/modals/SearchModal'
+import { type DispatchMode } from './components/modals/DispatchModal'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
@@ -80,6 +81,7 @@ export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('overview')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [searchMode, setSearchMode] = useState<SearchMode>('files')
+  const [dispatchMode, setDispatchMode] = useState<DispatchMode>('boss')
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
 
@@ -90,6 +92,13 @@ export function App() {
       setActiveNav(k)
     }
   }, [])
+
+  // Jump to the Dispatch surface pre-set to a given mode (e.g. the Subagents
+  // monitor's "Launch a hive →" → Dispatch/Hives). Mirrors searchMode threading.
+  const goToDispatch = useCallback((mode: DispatchMode) => {
+    setDispatchMode(mode)
+    navigate('dispatch')
+  }, [navigate])
 
   // Open a file in the main-space Editor scene and route there. Used by the
   // Files sidebar; terminal file-links reach the same place via the
@@ -568,6 +577,8 @@ export function App() {
           onOpenVoice={() => navigate('voice')}
           onOpenScheduler={() => navigate('scheduler')}
           searchMode={searchMode}
+          dispatchMode={dispatchMode}
+          onLaunchHive={() => goToDispatch('hives')}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}

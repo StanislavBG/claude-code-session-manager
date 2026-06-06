@@ -24,7 +24,7 @@ import { HiveManagerModal } from './HiveManagerModal'
 
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
 
-type DispatchMode = 'boss' | 'orchestrate' | 'race' | 'hives'
+export type DispatchMode = 'boss' | 'orchestrate' | 'race' | 'hives'
 
 interface DispatchModalProps {
   open: boolean

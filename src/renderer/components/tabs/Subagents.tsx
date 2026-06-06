@@ -37,7 +37,7 @@ function agentsDir(home: string, cwd: string | null, scope: Scope): string | nul
   return `${cwd}/.claude/agents`
 }
 
-export function Subagents() {
+export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -134,6 +134,18 @@ export function Subagents() {
             </>
           )}
           <div className="flex-1" />
+          {/* This tab only MONITORS sub-agents; the launcher lives in
+              Dispatch → Hives. Surface a direct jump so the two aren't
+              orphaned from each other. */}
+          {onLaunchHive && (
+            <button
+              onClick={onLaunchHive}
+              title="Open Dispatch → Hives to launch a pre-baked swarm"
+              className="px-2.5 py-1 text-xs text-accent border border-accent/40 rounded hover:bg-accent/10 transition-colors"
+            >
+              Launch a hive →
+            </button>
+          )}
         </>
       }
       footer={

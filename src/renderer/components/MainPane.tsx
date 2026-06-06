@@ -11,7 +11,7 @@ import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { AgentView } from './tabs/AgentView'
 import { EditorView } from './tabs/EditorView'
-import { DispatchModal } from './modals/DispatchModal'
+import { DispatchModal, type DispatchMode } from './modals/DispatchModal'
 import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
 import { SearchModal, type SearchMode } from './modals/SearchModal'
 import { VoiceModal } from './layout/VoiceModal'
@@ -53,6 +53,8 @@ interface MainPaneProps {
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
   searchMode?: SearchMode
+  dispatchMode?: DispatchMode
+  onLaunchHive?: () => void
   broadcastOpen: boolean
   watchersOpen: boolean
   onCloseBroadcast: () => void
@@ -98,6 +100,8 @@ function renderScreen(active: NavKey, ctx: {
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
   searchMode?: SearchMode
+  dispatchMode?: DispatchMode
+  onLaunchHive?: () => void
 }): React.ReactNode {
   // Screens that draw their own chrome — render bare.
   switch (active) {
@@ -120,7 +124,7 @@ function renderScreen(active: NavKey, ctx: {
   const body = (() => {
     switch (active) {
       case 'skills':        return <Skills />
-      case 'subagents':     return <Subagents />
+      case 'subagents':     return <Subagents onLaunchHive={ctx.onLaunchHive} />
       case 'history':       return <History />
       case 'usage':         return <Usage />
       case 'prompts':       return <Prompts />
@@ -140,7 +144,7 @@ function renderScreen(active: NavKey, ctx: {
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.
       case 'voice':             return <VoiceModal open={true} onClose={noop} variant="page" />
-      case 'dispatch':          return <DispatchModal open={true} onClose={noop} variant="page" />
+      case 'dispatch':          return <DispatchModal open={true} onClose={noop} variant="page" initialMode={ctx.dispatchMode ?? 'boss'} />
       case 'repoviz':           return <RepoVisualizationModal open={true} onClose={noop} variant="page" />
       case 'search':            return <SearchModal open={true} onClose={noop} variant="page" initialMode={ctx.searchMode ?? 'files'} />
       default: return null
@@ -159,6 +163,8 @@ export function MainPane({
   onOpenVoice,
   onOpenScheduler,
   searchMode,
+  dispatchMode,
+  onLaunchHive,
   broadcastOpen,
   watchersOpen,
   onCloseBroadcast,
@@ -248,7 +254,7 @@ export function MainPane({
         {active !== 'terminal' && (
           <div className="absolute inset-0 bg-bg overflow-auto">
             <ErrorBoundary>
-              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler, searchMode })}
+              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler, searchMode, dispatchMode, onLaunchHive })}
             </ErrorBoundary>
           </div>
         )}

@@ -18,10 +18,20 @@
  */
 
 import { pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers'
+import { collapseRepetition } from './transcriptSanitize'
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null
 
 const MODEL_ID = 'onnx-community/moonshine-base-ONNX'
+
+// Generation guard against decoder repetition loops. Moonshine (like Whisper)
+// can get stuck repeating a phrase on silence / low-quality / overlong audio,
+// emitting it dozens of times verbatim. `no_repeat_ngram_size: 3` forbids any
+// 3-gram from repeating (kills verbatim phrase loops at the source);
+// `repetition_penalty` discourages token-level loops. Backstopped by
+// collapseRepetition() on the output. Passed as generation kwargs to the ASR
+// pipeline (typed loosely by the lib, hence the cast).
+const GEN_OPTS = { no_repeat_ngram_size: 3, repetition_penalty: 1.15 } as Record<string, unknown>
 
 function workerLog(level: 'debug' | 'info' | 'warn' | 'error', message: string, meta?: unknown): void {
   self.postMessage({ type: 'log', level, message, meta })
@@ -127,8 +137,8 @@ self.onmessage = async (e: MessageEvent) => {
     }
     const start = Date.now()
     try {
-      const result = await transcriber(audio)
-      const text = (result as { text?: string }).text?.trim() ?? ''
+      const result = await transcriber(audio, GEN_OPTS)
+      const text = collapseRepetition((result as { text?: string }).text?.trim() ?? '')
       workerLog('debug', 'transcribe: ok', { ms: Date.now() - start, samples: audio.length, chars: text.length, seq })
       self.postMessage({ type: 'result', text, seq })
     } catch (err: unknown) {
@@ -154,8 +164,8 @@ self.onmessage = async (e: MessageEvent) => {
     }
     const start = Date.now()
     try {
-      const result = await transcriber(audio)
-      const text = (result as { text?: string }).text?.trim() ?? ''
+      const result = await transcriber(audio, GEN_OPTS)
+      const text = collapseRepetition((result as { text?: string }).text?.trim() ?? '')
       // Per F6 PRD §Security & Privacy: never log partial content. `audio.length`
       // leaks cadence — accepted residual risk.
       // TODO(F6-followup): cadence-leak telemetry hardening.

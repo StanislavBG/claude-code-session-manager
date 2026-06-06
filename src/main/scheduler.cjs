@@ -45,6 +45,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
+const { execFile } = require('node:child_process');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
@@ -87,6 +88,68 @@ const RESULT_TAIL_BYTES = 8 * 1024;
 // distinctly from MAX_JOB_DURATION_MS so post-mortems can tell them apart.
 const IDLE_OUTPUT_KILL_MS = 20 * 60_000;
 const IDLE_CHECK_INTERVAL_MS = 60_000;
+
+// Appended to every scheduled job prompt so the queue can be RELIED ON to finish
+// work to a consistent bar: review → security-review → verify → commit. Enforced
+// centrally here (not per-PRD) so it applies to every current and future PRD.
+// The commit step is also backstopped by the post-run commit guard below: a
+// clean exit that leaves uncommitted changes is downgraded to needs_review.
+const FINISH_PROTOCOL = `
+
+---
+# SCHEDULER FINISH PROTOCOL (mandatory — runs AFTER the work above)
+
+Once every acceptance-criteria line above is satisfied, finish in this EXACT
+sequence. Do not stop before the commit lands; committing is part of the job.
+
+1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
+   surfaces (correctness first). For any finding you judge a false positive, say
+   why in your result; do not silently skip it. If \`/code-review\` is not
+   available in this environment, do an equivalent careful self-review instead.
+2. SECURITY REVIEW — run \`/security-review\` and address every finding (or
+   justify it). If unavailable, self-review the diff for injection, secrets,
+   path traversal, and unsafe input handling.
+3. VERIFY — run the project's OWN check commands (typecheck / lint / tests — the
+   project's CLAUDE.md names them; infer from the repo if not) and make them
+   pass. Do not assume npm; use whatever the target project uses.
+4. COMMIT — stage and commit ALL changes with a clear conventional message:
+   \`git add -A && git commit -m "<type>(<scope>): <summary>"\`.
+
+A job that exits with uncommitted changes is treated as INCOMPLETE and flagged
+for review. Do NOT add work beyond the acceptance criteria — this protocol is the
+only post-AC work. If a review finding can't be fixed within scope, commit what
+you have, describe the finding in the commit body, and note the follow-up in your
+final result.`;
+
+// Parse \`git status --porcelain\` output into a list of changed paths. Pure +
+// exported for unit testing. Each porcelain line is "XY<space>PATH" (2 status
+// chars + space), so the path starts at index 3; rename lines ("R  a -> b")
+// keep the "a -> b" tail, which is fine for a human-facing dirty-file list.
+function parsePorcelain(stdout) {
+  return String(stdout || '')
+    .split('\n')
+    .filter((l) => l.length > 0)
+    .map((l) => l.slice(3))
+    .filter(Boolean);
+}
+
+// Return the list of uncommitted paths in cwd, or null when the guard does not
+// apply (cwd is not a git work tree, git is missing, or the call errors). Never
+// throws — a guard failure must not fail an otherwise-successful job.
+function uncommittedChanges(cwd) {
+  return new Promise((resolve) => {
+    if (!cwd) { resolve(null); return; }
+    execFile(
+      'git',
+      ['-C', cwd, 'status', '--porcelain'],
+      { timeout: 10_000, windowsHide: true },
+      (err, stdout) => {
+        if (err) { resolve(null); return; } // not a repo / git missing → skip
+        resolve(parsePorcelain(stdout));
+      },
+    );
+  });
+}
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
@@ -677,7 +740,9 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
   try {
     const parsed = await parsePrd(prdPath);
-    prompt = parsed.body;
+    // Centrally enforce the review → security-review → verify → commit finish
+    // sequence on every job, regardless of what the PRD body says.
+    prompt = parsed.body + FINISH_PROTOCOL;
   } catch (e) {
     safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
     closeFd();
@@ -1177,6 +1242,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     });
     await broadcast();
 
+    // Commit-guard baseline: snapshot the working tree BEFORE the run so the
+    // post-run check flags only paths THIS job left dirty, not pre-existing WIP.
+    const guardCwd = job.cwd || defaultCwd;
+    const guardBaseline = await uncommittedChanges(guardCwd);
+
     const res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
       await mutate((s) => {
         const idx = s.jobs.findIndex((x) => x.slug === job.slug);
@@ -1217,6 +1287,36 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           `[scheduler] verifier: ${job.slug} verdict=${verifyResult.verdict}` +
           ` → ${verifyResult.downgradeTo ?? 'completed'}: ${verifyResult.reason}`,
         );
+      }
+    }
+
+    // Commit guard: a clean exit that left NEW uncommitted changes means the
+    // finish protocol's COMMIT step did not run. Surface it as needs_review
+    // instead of letting it masquerade as 'completed' (the PRD 03/04
+    // left-uncommitted incident). Two false-positive defenses:
+    //   - baseline DELTA: only files dirtied during THIS run count, so
+    //     pre-existing user WIP is excluded; and
+    //   - sibling skip: if another job is concurrently writing the same repo,
+    //     working-tree dirt can't be attributed to this job, so skip the guard.
+    // Non-git cwds resolve to null and are skipped (the guard is best-effort).
+    if (res.exitCode === 0 && !res.rateLimited && (!verifyResult || verifyResult.verdict === 'clean')) {
+      const after = await uncommittedChanges(guardCwd);
+      if (after && after.length > 0) {
+        const baseSet = new Set(guardBaseline || []);
+        const newlyDirty = after.filter((p) => !baseSet.has(p));
+        const guardState = await readQueue().catch(() => ({ jobs: [] }));
+        const siblingRunning = (guardState.jobs || []).some(
+          (j) => j.slug !== job.slug && j.status === 'running' && (j.cwd || defaultCwd) === guardCwd,
+        );
+        if (newlyDirty.length > 0 && !siblingRunning) {
+          const sample = newlyDirty.slice(0, 3).join(', ');
+          verifyResult = {
+            verdict: 'uncommitted_changes',
+            reason: `finish protocol incomplete: ${newlyDirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
+            downgradeTo: 'needs_review',
+          };
+          console.log(`[scheduler] commit-guard: ${job.slug} left ${newlyDirty.length} files uncommitted → needs_review`);
+        }
       }
     }
 
@@ -1833,4 +1933,4 @@ async function init() {
   }
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL };

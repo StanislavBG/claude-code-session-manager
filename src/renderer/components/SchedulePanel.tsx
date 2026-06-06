@@ -63,6 +63,7 @@ const VERDICT_LABELS: Record<string, string> = {
   deps_unmet: 'dependencies unmet',
   transcript_errors: 'transcript had errors',
   verify_unavailable: 'verify unavailable',
+  uncommitted_changes: 'uncommitted changes',
 }
 
 function loadHidden(): Set<string> {

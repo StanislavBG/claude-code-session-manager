@@ -115,6 +115,21 @@ export function App() {
     return () => window.removeEventListener('sm:open-editor', h)
   }, [navigate])
   const activeTabId = useSessions((s) => s.activeTabId)
+
+  // QoL: switching the active session tab on the TabBar lands you on THAT
+  // project's terminal — each tab is primarily a terminal, so a tab switch is a
+  // project switch. Only fires on a genuine tab→tab change (not first hydration,
+  // not a no-op re-render), so it never yanks you off a config screen you opened
+  // for the current tab.
+  const prevActiveTabRef = useRef<string | null>(activeTabId)
+  useEffect(() => {
+    const prev = prevActiveTabRef.current
+    prevActiveTabRef.current = activeTabId
+    if (prev !== null && activeTabId !== null && activeTabId !== prev) {
+      setActiveNav('terminal')
+    }
+  }, [activeTabId])
+
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
   const closeWizard = useVoice((s) => s.closeWizard)

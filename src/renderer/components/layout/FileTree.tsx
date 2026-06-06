@@ -18,6 +18,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileEntry } from '../../../preload/api'
 
+// Persist which folders are expanded, per-cwd, so browsing state survives
+// navigating away from the Files sidebar and back (the component unmounts, and
+// cwd changes wipe in-memory state). Keyed by cwd; capped to avoid unbounded
+// growth from deep one-off explorations.
+const EXPAND_KEY = (cwd: string) => `sm.fileTree.expanded:${cwd}`
+function loadExpanded(cwd: string): string[] {
+  try {
+    const raw = localStorage.getItem(EXPAND_KEY(cwd))
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.filter((p) => typeof p === 'string') : []
+  } catch { return [] }
+}
+function saveExpanded(cwd: string, set: Set<string>) {
+  try { localStorage.setItem(EXPAND_KEY(cwd), JSON.stringify([...set].slice(0, 500))) } catch { /* quota */ }
+}
+
 interface FileTreeProps {
   cwd: string
   /** When the user picks a previewable file. */
@@ -125,17 +141,33 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     setLoading(false)
   }, [cwd, showHidden])
 
-  // Reset transient state + load when cwd changes.
+  // Re-fetch children for already-expanded folders (shallow-first so a parent's
+  // children exist before a grandchild attaches). Used to rehydrate the lazily-
+  // loaded subtrees after a fresh root load on return to a project.
+  const restoreSubtrees = useCallback(async (paths: string[]) => {
+    const ordered = [...paths].sort((a, b) => a.split('/').length - b.split('/').length)
+    for (const p of ordered) {
+      const result = await window.api.files.list(p, showHidden)
+      if (result.ok) setRoot((prev) => attachChildren(prev, p, result.entries.map((e) => ({ ...e }))))
+    }
+  }, [showHidden])
+
+  // Load + RESTORE expansion when cwd changes. Persisted expanded folders are
+  // re-opened (and their children re-fetched) so you return to a project right
+  // where you were browsing instead of a collapsed root.
   useEffect(() => {
-    setExpanded(new Set())
     setSearch('')
     setRenaming(null)
     setMenu(null)
     setCreatePrompt(null)
     setDeleteConfirm(null)
     setGitStatus({})
-    loadRoot()
+    const restored = loadExpanded(cwd)
+    setExpanded(new Set(restored))
+    ;(async () => { await loadRoot(); if (restored.length) await restoreSubtrees(restored) })()
     tryLoadGitStatus(cwd).then(setGitStatus)
+    // restoreSubtrees only depends on showHidden; cwd+loadRoot drive this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, loadRoot])
 
   // Re-load when hidden toggle changes.
@@ -180,16 +212,18 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     if (next.has(node.path)) {
       next.delete(node.path)
       setExpanded(next)
+      saveExpanded(cwd, next)
       return
     }
     next.add(node.path)
     setExpanded(next)
+    saveExpanded(cwd, next)   // persist so it survives navigating away + back
     if (node.children) return
     const result = await window.api.files.list(node.path, showHidden)
     if (!result.ok) return
     // Mutate the tree to attach children.
     setRoot((prev) => attachChildren(prev, node.path, result.entries.map((e) => ({ ...e }))))
-  }, [expanded, showHidden])
+  }, [expanded, showHidden, cwd])
 
   const refreshNode = useCallback(async (nodePath: string) => {
     if (nodePath === cwd) {
@@ -262,7 +296,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     if (result.ok) {
       await refreshNode(createPrompt.parent)
       if (createPrompt.kind === 'folder') {
-        setExpanded((prev) => new Set([...prev, createPrompt.parent]))
+        setExpanded((prev) => { const next = new Set([...prev, createPrompt.parent]); saveExpanded(cwd, next); return next })
       }
     } else {
       setError(result.error ?? 'create failed')

@@ -5,6 +5,7 @@ import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
+import type { ProvenanceInput } from '../../lib/provenance'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -38,6 +39,11 @@ interface McpServer {
     tools?: 'allow' | 'deny' | string[]
   }
 }
+
+// Single source for the provenance input so the row + toolbar badges agree.
+const mcpProvInput = (name: string, s: McpServer): ProvenanceInput => ({
+  type: 'mcp', name, command: s.command, args: s.args, url: s.url,
+})
 
 const SERVER_TYPES: ServerType[] = ['stdio', 'http', 'streamable-http', 'sse', 'ws']
 // `workspace` is the only doc-reserved name as of v2.1.128; `ide`/`tasks` are
@@ -171,11 +177,7 @@ export function McpServers() {
           <span className="ml-3 text-fg-faint truncate">{path}</span>
           <div className="flex-1" />
           {selectedName && selected && (
-            <ProvenanceBadge
-              scope={scope}
-              input={{ type: 'mcp', name: selectedName, command: selected.command, args: selected.args, url: selected.url }}
-              className="mr-2"
-            />
+            <ProvenanceBadge scope={scope} input={mcpProvInput(selectedName, selected)} className="mr-2" />
           )}
           <button
             onClick={addServer}
@@ -231,11 +233,7 @@ export function McpServers() {
                 >
                   <span className="truncate">{n}</span>
                   <span className="ml-2 flex items-center gap-2 shrink-0">
-                    <ProvenanceBadge
-                      interactive={false}
-                      scope={scope}
-                      input={{ type: 'mcp', name: n, command: servers[n].command, args: servers[n].args, url: servers[n].url }}
-                    />
+                    <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
                     <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
                   </span>
                 </button>

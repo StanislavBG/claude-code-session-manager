@@ -3,6 +3,7 @@ import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
+import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
@@ -36,6 +37,11 @@ interface PluginRow {
   binCount: number
   hasMcp: boolean
 }
+
+// Single source for the provenance input so the column + toolbar badges agree.
+const pluginProvInput = (r: PluginRow): ProvenanceInput => ({
+  type: 'plugin', name: r.name, repository: r.manifest?.repository, homepage: r.manifest?.homepage,
+})
 
 /**
  * Plugins are directories under `~/.claude/plugins/<name>/` that bundle skills,
@@ -80,12 +86,7 @@ export function Plugins() {
     {
       key: 'origin',
       header: 'origin',
-      render: (r) => (
-        <ProvenanceBadge
-          interactive={false}
-          input={{ type: 'plugin', name: r.name, repository: r.manifest?.repository, homepage: r.manifest?.homepage }}
-        />
-      ),
+      render: (r) => <ProvenanceBadge interactive={false} input={pluginProvInput(r)} />,
       width: '7rem',
     },
     {
@@ -173,12 +174,7 @@ export function Plugins() {
           <span className="mx-2 text-fg-faint">·</span>
           <span className="text-fg-faint">{rows.length} plugins</span>
           <div className="flex-1" />
-          {selectedRow && (
-            <ProvenanceBadge
-              input={{ type: 'plugin', name: selectedRow.name, repository: selectedRow.manifest?.repository, homepage: selectedRow.manifest?.homepage }}
-              className="mr-2"
-            />
-          )}
+          {selectedRow && <ProvenanceBadge input={pluginProvInput(selectedRow)} className="mr-2" />}
           <span className="text-fg-faint font-mono truncate">~/.claude/plugins/</span>
         </>
       }

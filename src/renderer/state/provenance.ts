@@ -24,8 +24,10 @@ function sanitize(data: unknown): Record<string, Provenance> {
 interface ProvenanceState {
   overrides: Record<string, Provenance>
   loaded: boolean
+  loading: boolean
   home: string | null
-  /** Idempotent — loads the sidecar once per home dir. */
+  /** Idempotent — loads the sidecar once per home dir (deduped across the many
+   *  badges that mount at once). */
   load: (home: string) => Promise<void>
   /** Set (or clear, with null) an override and persist. */
   setOverride: (key: string, value: Provenance | null) => Promise<void>
@@ -34,15 +36,20 @@ interface ProvenanceState {
 export const useProvenance = create<ProvenanceState>((set, get) => ({
   overrides: {},
   loaded: false,
+  loading: false,
   home: null,
   load: async (home) => {
-    if (get().home === home && get().loaded) return
-    set({ home })
+    const s = get()
+    if (s.home === home && (s.loaded || s.loading)) return
+    set({ home, loading: true })
     try {
       const res = await window.api.config.readJson(sidecarPath(home))
-      set({ overrides: res.exists ? sanitize(res.data) : {}, loaded: true })
+      const fileMap = res.exists ? sanitize(res.data) : {}
+      // In-memory overrides win over the file: a setOverride that landed while
+      // the read was in flight must not be clobbered by stale file contents.
+      set((cur) => ({ overrides: { ...fileMap, ...cur.overrides }, loaded: true, loading: false }))
     } catch {
-      set({ overrides: {}, loaded: true })
+      set({ loaded: true, loading: false })
     }
   },
   setOverride: async (key, value) => {

@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useProvenance } from '../../state/provenance'
+import { Badge, BADGE_TONE, type BadgeTone } from './Badge'
 import {
   classifyProvenance,
   provenanceKey,
@@ -18,10 +19,10 @@ import {
   type ProvenanceInput,
 } from '../../lib/provenance'
 
-const TONE: Record<Provenance, string> = {
-  anthropic: 'bg-accent/15 text-accent border-accent/30',
-  community: 'bg-yellow-950/30 text-yellow-500/80 border-yellow-900/40',
-  local: 'bg-bg-elev text-fg-faint border-line',
+const TONE: Record<Provenance, BadgeTone> = {
+  anthropic: 'accent',
+  community: 'warn',
+  local: 'dim',
 }
 
 const ORDER: Provenance[] = ['anthropic', 'community', 'local']
@@ -72,13 +73,14 @@ export function ProvenanceBadge({
     : `Auto-detected ${PROVENANCE_LABEL[provenance]}: ${auto.reason}`
 
   const pill = (
-    <span
-      className={`inline-flex items-center gap-1 text-[10px] leading-none px-1.5 py-0.5 rounded border uppercase tracking-wide ${TONE[provenance]} ${interactive ? 'cursor-pointer hover:brightness-125' : ''} ${className}`}
+    <Badge
+      tone={TONE[provenance]}
       title={title}
+      className={`${interactive ? 'cursor-pointer hover:brightness-125' : ''} ${className}`}
     >
       {PROVENANCE_LABEL[provenance]}
       {override && <span className="w-1 h-1 rounded-full bg-current opacity-70" aria-hidden />}
-    </span>
+    </Badge>
   )
 
   if (!interactive) return pill
@@ -106,7 +108,7 @@ export function ProvenanceBadge({
               onClick={() => { void setOverride(key, p); setOpen(false) }}
               className={`flex w-full items-center gap-2 px-2 py-1 text-[12px] hover:bg-bg-hi/60 ${provenance === p ? 'text-fg' : 'text-fg-dim'}`}
             >
-              <span className={`w-2 h-2 rounded-full border ${TONE[p]}`} aria-hidden />
+              <span className={`w-2 h-2 rounded-full border ${BADGE_TONE[TONE[p]]}`} aria-hidden />
               {PROVENANCE_LABEL[p]}
               {override === p && <span className="ml-auto text-[10px] text-fg-faint">set</span>}
             </button>

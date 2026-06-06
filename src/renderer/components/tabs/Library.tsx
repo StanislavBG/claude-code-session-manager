@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
+import { Badge } from '../ui/Badge'
 import { useHomeDir } from '../../lib/useHomeDir'
 import {
   CATALOG_MCP,
@@ -942,25 +943,6 @@ function LibraryToolbar({
   )
 }
 
-function Badge({
-  children,
-  tone = 'default',
-}: {
-  children: React.ReactNode
-  tone?: 'default' | 'accent' | 'warn' | 'dim'
-}) {
-  const cls = {
-    default: 'bg-bg-hi text-fg-dim border-line',
-    accent: 'bg-accent/15 text-accent border-accent/30',
-    warn: 'bg-yellow-950/30 text-yellow-500/80 border-yellow-900/40',
-    dim: 'bg-bg-elev text-fg-faint border-line',
-  }[tone]
-  return (
-    <span className={`text-[10px] px-1.5 py-0 rounded border uppercase tracking-wide ${cls}`}>
-      {children}
-    </span>
-  )
-}
 
 function LinkBtn({ href, children }: { href: string; children: React.ReactNode }) {
   return (

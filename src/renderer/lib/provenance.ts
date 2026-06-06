@@ -59,25 +59,29 @@ for (const m of CATALOG_MCP) {
   set.add(lc(m.id))
   set.add(lc(m.name))
 }
-const skillOfficial = new Set(CATALOG_SKILLS.flatMap((s) => [lc(s.id), lc(s.name)]))
+// Catalog skills carry an `official` flag — split it (the 'local' template
+// skills are official:false and must NOT read as Anthropic).
+const skillOfficial = new Set(CATALOG_SKILLS.filter((s) => s.official).flatMap((s) => [lc(s.id), lc(s.name)]))
+const skillCommunity = new Set(CATALOG_SKILLS.filter((s) => !s.official).flatMap((s) => [lc(s.id), lc(s.name)]))
 const pluginOfficial = new Set(CATALOG_PLUGINS.filter((p) => p.official).flatMap((p) => [lc(p.id), lc(p.name)]))
 const pluginCommunity = new Set(CATALOG_PLUGINS.filter((p) => !p.official).flatMap((p) => [lc(p.id), lc(p.name)]))
 const agentCatalog = new Set(CATALOG_AGENTS.flatMap((a) => [lc(a.id), lc(a.name)]))
 const hookCatalogIds = new Set(CATALOG_HOOKS.flatMap((h) => [lc(h.id), lc(h.name)]))
 const hookCatalogCommands = new Set(CATALOG_HOOKS.map((h) => h.command.trim()))
 
-// Anthropic-native built-in slash commands shipped with the Claude Code CLI (or
-// its first-party official plugins). Matched by command/skill NAME — a local
-// file named e.g. `code-review` is treated as the Anthropic one, which the user
-// can override if they actually authored a same-named command.
+// Anthropic-native built-in slash command names. Deliberately conservative:
+// only distinctive, hyphenated Claude Code command names that are unlikely to
+// collide with a user-authored command/skill. Generic single words (memory,
+// config, review, status, …) are intentionally excluded — they'd false-positive
+// on plausible local files. Matched by NAME; the user can override either way.
 const BUILTIN_COMMANDS = new Set([
-  'init', 'review', 'security-review', 'pr-comments', 'compact', 'release-notes',
-  'add-dir', 'agents', 'memory', 'todos', 'config', 'code-review', 'simplify',
-  'context', 'cost', 'doctor', 'login', 'logout', 'mcp', 'resume', 'status',
+  'security-review', 'pr-comments', 'release-notes', 'add-dir', 'code-review', 'simplify',
 ])
 
-// Package / host signatures that mark a thing as coming from Anthropic.
-const ANTHROPIC_SIG = /(@anthropic-ai\/|@modelcontextprotocol\/|modelcontextprotocol\/servers|anthropic\.com|github\.com\/anthropics|github\.com\/modelcontextprotocol)/i
+// Host / package signatures unique to Anthropic. NOTE: @modelcontextprotocol is
+// intentionally NOT here — that org ships community + archived servers too, so
+// the curated catalog (which knows official vs not) is the authority for MCP.
+const ANTHROPIC_SIG = /(@anthropic-ai\/|anthropic\.com|github\.com\/anthropics)/i
 // Published-package launchers — a strong "installed from a registry" signal.
 const PKG_MANAGER = /(^|\s)(npx|uvx|pipx|bunx|mcp-remote|deno\s+run|docker\s+run)(\s|$)/i
 
@@ -88,30 +92,37 @@ function blobOf(input: ProvenanceInput): string {
     .toLowerCase()
 }
 
-function anthropicReason(input: ProvenanceInput, name: string, blob: string): string | null {
-  if (ANTHROPIC_SIG.test(blob)) return 'Anthropic / MCP package or repo'
-  switch (input.type) {
-    case 'command':
-    case 'skill':
-      if (BUILTIN_COMMANDS.has(name)) return 'built-in Claude Code command'
-      if (skillOfficial.has(name)) return 'official Anthropic skill'
-      return null
+const A = (reason: string): ProvenanceVerdict => ({ provenance: 'anthropic', reason })
+const C = (reason: string): ProvenanceVerdict => ({ provenance: 'community', reason })
+
+// The curated catalog is authoritative: a known entry's official flag wins over
+// every heuristic (so an official:false server launched via an @-scoped package
+// stays Community, and an official one stays Anthropic).
+function catalogVerdict(type: ProvItemType, name: string, command?: string): ProvenanceVerdict | null {
+  switch (type) {
     case 'mcp':
-      return mcpOfficial.has(name) ? 'official MCP server (catalog)' : null
+      if (mcpOfficial.has(name)) return A('official MCP server (catalog)')
+      if (mcpCommunity.has(name)) return C('third-party server (catalog)')
+      return null
+    case 'skill':
+    case 'command':
+      if (skillOfficial.has(name)) return A('official Anthropic skill (catalog)')
+      if (skillCommunity.has(name)) return C('third-party skill (catalog)')
+      return null
     case 'plugin':
-      return pluginOfficial.has(name) ? 'official Anthropic plugin (catalog)' : null
+      if (pluginOfficial.has(name)) return A('official Anthropic plugin (catalog)')
+      if (pluginCommunity.has(name)) return C('third-party plugin (catalog)')
+      return null
     case 'subagent':
-      return agentCatalog.has(name) ? 'bundled Anthropic subagent (catalog)' : null
+      return agentCatalog.has(name) ? A('bundled Anthropic subagent (catalog)') : null
     case 'hook':
-      if (hookCatalogIds.has(name)) return 'bundled hook (catalog)'
-      if (input.command && hookCatalogCommands.has(input.command.trim())) return 'bundled hook (catalog)'
+      if (hookCatalogIds.has(name)) return A('bundled hook (catalog)')
+      if (command && hookCatalogCommands.has(command.trim())) return A('bundled hook (catalog)')
       return null
   }
 }
 
-function communityReason(input: ProvenanceInput, name: string, blob: string): string | null {
-  if (input.type === 'mcp' && mcpCommunity.has(name)) return 'third-party server (catalog)'
-  if (input.type === 'plugin' && pluginCommunity.has(name)) return 'third-party plugin (catalog)'
+function communityReason(input: ProvenanceInput, blob: string): string | null {
   if (input.repository) return 'has a source repository'
   if (input.homepage) return 'has a homepage'
   if (input.url) return 'remote endpoint'
@@ -120,18 +131,26 @@ function communityReason(input: ProvenanceInput, name: string, blob: string): st
 }
 
 /**
- * Best-effort origin for a single item. Order: Anthropic-native first (most
- * specific), then community/internet, else self-created local.
+ * Best-effort origin for a single item. Precedence:
+ *   1. curated catalog (authoritative — official flag wins over heuristics)
+ *   2. Anthropic built-in name or @anthropic-ai/anthropics signature
+ *   3. community/internet footprint (repo / homepage / remote URL / registry)
+ *   4. self-created local
  */
 export function classifyProvenance(input: ProvenanceInput): ProvenanceVerdict {
   const name = lc(input.name)
   const blob = blobOf(input)
 
-  const aReason = anthropicReason(input, name, blob)
-  if (aReason) return { provenance: 'anthropic', reason: aReason }
+  const cat = catalogVerdict(input.type, name, input.command)
+  if (cat) return cat
 
-  const cReason = communityReason(input, name, blob)
-  if (cReason) return { provenance: 'community', reason: cReason }
+  if ((input.type === 'command' || input.type === 'skill') && BUILTIN_COMMANDS.has(name)) {
+    return A('built-in Claude Code command')
+  }
+  if (ANTHROPIC_SIG.test(blob)) return A('Anthropic package or repo')
+
+  const cReason = communityReason(input, blob)
+  if (cReason) return C(cReason)
 
   return { provenance: 'local', reason: 'no external source — assumed self-created' }
 }

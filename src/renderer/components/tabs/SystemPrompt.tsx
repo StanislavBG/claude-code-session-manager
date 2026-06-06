@@ -47,7 +47,9 @@ export function SystemPrompt() {
   useEffect(() => {
     const paths = Object.values(scopePaths).filter(Boolean) as string[]
     paths.forEach((p) => {
-      if (!files[p]) loadText(p)
+      // Always re-read on mount so external edits made while the tab was closed
+      // are picked up; keepDirty preserves any unsaved draft.
+      loadText(p, true)
       watchFile(p)
     })
     return () => {

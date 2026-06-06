@@ -540,6 +540,32 @@ export const CATALOG_PROMPT_PRESETS: CatalogPromptPreset[] = [
     tags: ['escalate', 'ask'],
   },
   {
+    id: 'correctness-over-quick-wins',
+    name: 'Correctness Over Quick Wins',
+    description: 'Always takes the correct, more laborious path over the fast partial one.',
+    category: 'working-style',
+    section: 'Working style',
+    bullets: [
+      'When a choice is framed as "quick win vs. the longer correct way", always take the correct, more laborious path — do not ask.',
+      "Don't offer a fast-but-partial path as an option; pick the thorough, correct solution by default.",
+      'Optimize for the right outcome, not the shortest route to a partial one.',
+    ],
+    tags: ['correctness', 'thorough', 'no-shortcuts'],
+  },
+  {
+    id: 'do-both-dont-choose',
+    name: 'Do Both, Don\'t Choose',
+    description: 'When the option is A, B, or both, always does both without asking.',
+    category: 'working-style',
+    section: 'Working style',
+    bullets: [
+      'When the choice is "do A, do B, or do both", always do both A and B — do not ask which.',
+      'Treat inclusive options as a signal to deliver the complete set, not to pick one.',
+      'Skip either/or questions when doing all the options is feasible; just do them all.',
+    ],
+    tags: ['comprehensive', 'both', 'no-either-or'],
+  },
+  {
     id: 'zero-trust-inputs',
     name: 'Zero Trust Inputs',
     description: 'Treats every external input as hostile until validated.',

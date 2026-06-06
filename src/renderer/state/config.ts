@@ -31,7 +31,8 @@ interface ConfigState {
   watchRefs: Record<string, number>
 
   loadJson: (path: string) => Promise<void>
-  loadText: (path: string) => Promise<void>
+  /** Read from disk. When keepDirty is set, an unsaved draft is preserved. */
+  loadText: (path: string, keepDirty?: boolean) => Promise<void>
   setDraft: (path: string, raw: string) => void
   revert: (path: string) => void
   saveJson: (path: string) => Promise<{ ok: boolean; error?: string }>
@@ -111,12 +112,12 @@ export const useConfig = create<ConfigState>((set, get) => ({
     set({ files: { ...get().files, [path]: applyJsonRead(cur, r, false) } })
   },
 
-  loadText: async (path) => {
+  loadText: async (path, keepDirty = false) => {
     const existing = get().files[path]
     set({ files: { ...get().files, [path]: { ...(existing ?? blank(path)), busy: true } } })
     const r = await window.api.config.readText(path)
     const cur = get().files[path] ?? blank(path)
-    set({ files: { ...get().files, [path]: applyTextRead(cur, r, false) } })
+    set({ files: { ...get().files, [path]: applyTextRead(cur, r, keepDirty) } })
   },
 
   setDraft: (path, raw) => {
@@ -199,13 +200,21 @@ export const useConfig = create<ConfigState>((set, get) => ({
     const cur = get().files[path]
     if (!cur) return
     // Refresh from disk, preserving dirty draft if user has unsaved edits.
-    window.api.config.readJson(path).then((r) => {
-      // Heuristic: if the file parses as JSON we treat it as JSON; otherwise
-      // we still populate diskRaw for text-based editors.
-      const cur2 = get().files[path]
-      if (!cur2) return
-      set({ files: { ...get().files, [path]: applyJsonRead(cur2, r, true) } })
-    })
+    // Markdown/text files (e.g. CLAUDE.md) must use the text reader — readJson
+    // would route them through JSON parsing and mis-handle the content.
+    if (path.endsWith('.json')) {
+      window.api.config.readJson(path).then((r) => {
+        const cur2 = get().files[path]
+        if (!cur2) return
+        set({ files: { ...get().files, [path]: applyJsonRead(cur2, r, true) } })
+      })
+    } else {
+      window.api.config.readText(path).then((r) => {
+        const cur2 = get().files[path]
+        if (!cur2) return
+        set({ files: { ...get().files, [path]: applyTextRead(cur2, r, true) } })
+      })
+    }
   },
 }))
 

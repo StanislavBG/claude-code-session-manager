@@ -5,8 +5,11 @@ module.exports = {
   // jobs around the 5-hour limit. Reset-time resume is scheduled exactly (not
   // poll-bound), so 10 min only bounds how late we react to utilization drift.
   POLL_INTERVAL_MS: 10 * 60_000,
+  // Exponential backoff floor for polling retries after transient failures.
   POLL_MIN_INTERVAL_MS: 90_000,
+  // Cadence for refreshing the AppStatusBar's 5h-usage chip (billing meter).
   USAGE_REFRESH_INTERVAL_MS: 15_000,
+  // Timeout for HTTP requests to Anthropic API (billing endpoint, etc).
   HTTP_TIMEOUT_MS: 30_000,
   HTTP_RETRY_DELAY_MS: 1_000,
   OFFSET_MINUTES_MAX: 180,

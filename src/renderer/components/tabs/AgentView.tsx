@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab, type ToolUseEntry, type ActivityEvent, type TodoItem } from '../../state/live'
 import { useBilling, getFiveHourUtil } from '../../state/billing'
+import { useScheduleState } from '../../state/scheduleState'
+import { formatRelative } from '../../lib/formatTime'
 import { SessionPlansView } from './plans/SessionPlansView'
-import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
 
 /**
  * AgentView — single-screen observability for the active session.
@@ -67,15 +68,7 @@ export function AgentView() {
     return () => window.clearInterval(id)
   }, [])
 
-  const [schedulerJobs, setSchedulerJobs] = useState<ScheduleJob[]>([])
-  useEffect(() => {
-    let cancelled = false
-    window.api.schedule.state().then((snap: ScheduleStateSnapshot) => {
-      if (!cancelled) setSchedulerJobs(snap.jobs)
-    }).catch(() => { /* ignore */ })
-    const off = window.api.schedule.onState((snap) => setSchedulerJobs(snap.jobs))
-    return () => { cancelled = true; off() }
-  }, [])
+  const schedulerJobs = useScheduleState((s) => s.snapshot?.jobs ?? [])
 
   const sessionRunning = tab?.status === 'running'
   const lastEventAt = live?.lastEventAt ?? 0
@@ -338,7 +331,7 @@ function TodoRow({ todo, active }: { todo: TodoItem; active: boolean }) {
 }
 
 function ActivityRow({ ev, now }: { ev: ActivityEvent; now: number }) {
-  const age = formatAge(now - ev.at)
+  const age = formatRelative(now - ev.at)
   const accent = activityAccent(ev)
   return (
     <li className="flex items-baseline gap-3 py-1 font-mono text-[12.5px]">
@@ -429,9 +422,3 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   return <div className="text-[12px] text-fg-faint italic">{children}</div>
 }
 
-function formatAge(ms: number): string {
-  if (ms < 1000) return 'now'
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s`
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`
-  return `${Math.floor(ms / 3_600_000)}h`
-}

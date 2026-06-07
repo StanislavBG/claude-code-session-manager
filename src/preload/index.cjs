@@ -282,10 +282,14 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
   kg: {
-    /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log). */
-    get: () => ipcRenderer.invoke('kg:get'),
+    /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log),
+     *  segregated per project. `cwd` selects which project's graph; omit for the
+     *  most-active project. */
+    get: (cwd) => ipcRenderer.invoke('kg:get', { cwd }),
+    /** Projects seen in the log, with per-project graph stats (for the selector). */
+    projects: () => ipcRenderer.invoke('kg:projects'),
     ingest: () => ipcRenderer.invoke('kg:ingest'),
-    ask: (question) => ipcRenderer.invoke('kg:ask', { question }),
+    ask: (question, cwd) => ipcRenderer.invoke('kg:ask', { question, cwd }),
     onIngestProgress: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('kg:ingest-progress', listener);

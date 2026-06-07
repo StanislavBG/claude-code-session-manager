@@ -1376,10 +1376,60 @@ async function maybeLaunchWhenAvailable(state) {
   tickQueue().catch((e) => console.error('[scheduler] tickQueue error', e));
 }
 
+// ---------- dead-process reaper ----------
+
+/**
+ * Scan running jobs, identify those whose claude process is provably dead, and
+ * finalize them to completed/failed by reading the run log. Called once per
+ * poll cycle. Conservative: a job with no runtime.pid yet (spawn mid-flight)
+ * is always skipped. A job whose pid is alive (claudePidAlive) is always skipped.
+ * Exported so unit tests can invoke it directly.
+ */
+async function reapDeadRunningJobs() {
+  try {
+    if (runningSet.size === 0) return; // fast path: no in-flight jobs
+    const state = await readQueue();
+    const dead = [];
+    for (const j of state.jobs) {
+      if (j.status !== 'running') continue;
+      const pid = j.runtime?.pid;
+      if (!pid) continue; // spawn may be mid-flight; give it a cycle
+      if (claudePidAlive(pid)) continue;
+      const logPath = j.runId
+        ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`)
+        : null;
+      const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
+      dead.push({ slug: j.slug, pid, outcome });
+    }
+    if (dead.length === 0) return;
+
+    await mutate((s) => {
+      for (const { slug, pid, outcome } of dead) {
+        const idx = s.jobs.findIndex((x) => x.slug === slug);
+        if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
+        const success = outcome === 'success';
+        s.jobs[idx].status = success ? 'completed' : 'failed';
+        s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
+        s.jobs[idx].finishedAt = new Date().toISOString();
+        s.jobs[idx].error = success ? null : `reaped: process gone, no success result in log (${outcome})`;
+        delete s.jobs[idx].runtime;
+        runningSet.delete(slug);
+        console.log(`[scheduler] reaped dead job slug=${slug} pid=${pid} outcome=${outcome}`);
+      }
+    });
+
+    await broadcast();
+    tickQueue().catch(() => {});
+  } catch (e) {
+    console.warn('[scheduler] reapDeadRunningJobs error', e?.message);
+  }
+}
+
 // ---------- poll loop with exponential backoff ----------
 
 async function pollLoop() {
   try {
+    await reapDeadRunningJobs().catch(() => {});
     const r = await billing.fetchUsage();
 
     if (r.kind === 'ok') {
@@ -1727,11 +1777,22 @@ async function init() {
   loadSchedulerState();
   bootedAt = Date.now();
 
-  // Boot reconciliation: mark any job that was 'running' when the app died as
-  // 'failed', AND kill its detached claude child if still alive. Without the
-  // kill step the child keeps running as a zombie writing to the project on
-  // its own schedule, which is exactly what happened on 2026-05-21 (PID 78230
-  // writing PRD 05's output while the scheduler thought the job was orphaned).
+  // Boot reconciliation: finalize any job that was 'running' when the app died.
+  // Check the run log first — a job that emitted result/success before the crash
+  // should be marked 'completed', not 'failed', so it doesn't wedge the queue
+  // via the failure-gate. Also kill any still-live orphan claude child to prevent
+  // it from continuing to write to the project unsupervised (2026-05-21 incident).
+  //
+  // classifyRunOutcome calls readTail → fs.readFileSync (up to 64 KB per job).
+  // Pre-compute all outcomes BEFORE entering the mutate lock so the blocking I/O
+  // does not stall the event loop or hold the mutateTail chain during startup.
+  const bootSnap = readQueueSync();
+  const bootOutcomes = new Map();
+  for (const j of bootSnap.jobs) {
+    if (j.status !== 'running') continue;
+    const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
+    bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
+  }
   await mutate((state) => {
     for (const j of state.jobs) {
       if (j.status === 'running') {
@@ -1744,10 +1805,14 @@ async function init() {
             console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${j.slug}`);
           }
         }
-        j.status = 'failed';
-        j.error = `orphaned: app restarted while running${killNote}`;
+        const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
+        const success = outcome === 'success';
+        j.status = success ? 'completed' : 'failed';
+        j.exitCode = success ? 0 : (j.exitCode ?? 1);
+        j.error = success ? null : `orphaned: app restarted while running${killNote}`;
         j.finishedAt = new Date().toISOString();
         delete j.runtime;
+        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → ${j.status}`);
       }
     }
   });
@@ -1917,4 +1982,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs };

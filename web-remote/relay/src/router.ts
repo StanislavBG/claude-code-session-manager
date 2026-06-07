@@ -75,7 +75,7 @@ function safeSend(ws: WebSocket, data: unknown): void {
 }
 
 function sendError(ws: WebSocket, code: string, retryAfterMs?: number): void {
-  const msg: Record<string, unknown> = { type: 'error', code };
+  const msg: Record<string, unknown> = { type: 'error', id: crypto.randomUUID(), code, ts: Date.now() };
   if (retryAfterMs !== undefined) msg.retryAfterMs = retryAfterMs;
   safeSend(ws, msg);
 }
@@ -85,8 +85,8 @@ function sendError(ws: WebSocket, code: string, retryAfterMs?: number): void {
 function routeFromBrowser(browser: BrowserConn, envelope: Envelope): void {
   const { type, deviceId } = envelope;
 
-  // Pass-through ping responses and pong frames
-  if (type === 'pong') return; // handled by heartbeat
+  // Pass-through ping/pong frames — handled by WS heartbeat, not routed
+  if (type === 'ping' || type === 'pong') return;
 
   if (!deviceId) {
     sendError(browser.ws, 'missing_device_id');
@@ -220,7 +220,7 @@ function registerBrowser(ws: WebSocket, ticketData: { userId: string; email: str
   browserConns.set(id, conn);
   setupHeartbeat(ws, conn);
 
-  safeSend(ws, { type: 'auth:ok' });
+  safeSend(ws, { type: 'auth:ok', id: crypto.randomUUID(), ts: Date.now() });
 
   ws.on('message', (data) => handleMessage(conn, 'browser', data as Buffer));
   ws.on('close', () => {
@@ -249,13 +249,14 @@ function registerDevice(
   deviceConns.set(ticketData.deviceId, conn);
   setupHeartbeat(ws, conn);
 
-  safeSend(ws, { type: 'auth:ok', deviceId: ticketData.deviceId });
+  safeSend(ws, { type: 'auth:ok', id: crypto.randomUUID(), deviceId: ticketData.deviceId, ts: Date.now() });
 
   // Notify all browser sessions for this user that the device is connected
   for (const browser of browserConns.values()) {
     if (browser.userId === ticketData.userId) {
       safeSend(browser.ws, {
         type: 'event:device:status',
+        id: crypto.randomUUID(),
         deviceId: ticketData.deviceId,
         status: 'connected',
         ts: Date.now(),
@@ -271,6 +272,7 @@ function registerDevice(
       if (browser.userId === ticketData.userId) {
         safeSend(browser.ws, {
           type: 'event:device:status',
+          id: crypto.randomUUID(),
           deviceId: ticketData.deviceId,
           status: 'disconnected',
           ts: Date.now(),

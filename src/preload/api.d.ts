@@ -1066,6 +1066,10 @@ export interface SessionManagerAPI {
     auditTail: (lines?: number) => Promise<WebRemoteAuditTailResult>;
     onStatus: (handler: (status: WebRemoteStatus) => void) => () => void;
     onTokenRevoked: (handler: (ev: { deviceId: string }) => void) => () => void;
+    /** Revoke ALL paired devices and tear down every session immediately (panic). */
+    revokeAll: () => Promise<WebRemoteMutationResult>;
+    /** Subscribe to the completion event broadcast after revokeAll. */
+    onRevokedAll: (handler: (ev: { revokedCount: number }) => void) => () => void;
   };
   kg: {
     /** Distilled knowledge graph + ingest status for ONE project (`cwd`).

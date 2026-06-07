@@ -55,6 +55,7 @@ export function WebRemote() {
   const [pairingStep, setPairingStep] = useState<PairingStep>('idle')
   const [otp, setOtp] = useState('')
   const [revokingId, setRevokingId] = useState<string | null>(null)
+  const [revokingAll, setRevokingAll] = useState(false)
   const [auditLines, setAuditLines] = useState<string[]>([])
   const [showAudit, setShowAudit] = useState(false)
   const otpRef = useRef<HTMLInputElement>(null)
@@ -78,9 +79,15 @@ export function WebRemote() {
       window.api.webRemote.getStatus().then(setStatus).catch(() => {})
     })
 
+    const offRevokedAll = window.api.webRemote.onRevokedAll(({ revokedCount }) => {
+      toast.info(`Panic: all ${revokedCount} device(s) revoked and sessions torn down.`)
+      window.api.webRemote.getStatus().then(setStatus).catch(() => {})
+    })
+
     return () => {
       teardown?.()
       offRevoked()
+      offRevokedAll()
     }
   }, [])
 
@@ -148,6 +155,20 @@ export function WebRemote() {
       toast.error(`Revoke error: ${(e as Error)?.message || String(e)}`)
     } finally {
       setRevokingId(null)
+    }
+  }
+
+  const handleRevokeAll = async () => {
+    setRevokingAll(true)
+    try {
+      const result = await window.api.webRemote.revokeAll()
+      if (!result.ok) {
+        toast.error(result.error || 'Panic revoke failed.')
+      }
+    } catch (e) {
+      toast.error(`Panic revoke error: ${(e as Error)?.message || String(e)}`)
+    } finally {
+      setRevokingAll(false)
     }
   }
 
@@ -330,6 +351,29 @@ export function WebRemote() {
           <code className="text-zinc-500">~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log</code>
           {' '}(0600, never leaves this machine)
         </p>
+      </section>
+
+      {/* Panic — revoke all devices */}
+      <section className="space-y-3 border-t border-zinc-800 pt-6">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-red-500">
+          Danger Zone
+        </h2>
+        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-lg border border-red-900/60 bg-red-950/20">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-red-300">Panic — disconnect &amp; revoke all devices</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              Immediately tears down every active session and invalidates all paired-device tokens.
+              Devices must re-pair to reconnect. Use if you suspect compromise.
+            </p>
+          </div>
+          <button
+            onClick={handleRevokeAll}
+            disabled={revokingAll}
+            className="shrink-0 px-3 py-1.5 text-sm rounded border border-red-700 text-red-400 hover:bg-red-900/40 disabled:opacity-50 transition-colors"
+          >
+            {revokingAll ? 'Revoking…' : 'Revoke All'}
+          </button>
+        </div>
       </section>
     </div>
   )

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import * as fs from 'node:fs'
 import * as fsp from 'node:fs/promises'
@@ -24,32 +24,37 @@ type AnyEntry = any
 
 describe('memoryTool list() reflects external filesystem changes', () => {
   let workdir: string
-  let homeBackup: string | undefined
   let memoryTool: AnyMod
+  let realHomedir: () => string
 
   beforeEach(async () => {
     workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mem-test-'))
-    // Point HOME at the temp dir so memoryTool's memoryRoot() resolves inside it.
-    homeBackup = process.env.HOME
-    process.env.HOME = workdir
-    // Reset config.cjs's allowedRoots cache so validatePath honors the new HOME.
-    // Done by re-requiring the modules from a fresh require cache.
+
+    // Mock os.homedir in the CJS module cache. Capture real function and
+    // stub it with the test workdir. Keep it stubbed through the entire test
+    // so config's allowedRoots and other modules use the mocked path.
+    const osModule = requireCjs('node:os')
+    realHomedir = osModule.homedir
+    osModule.homedir = () => workdir
+
+    // Clear memoryTool and config caches so they load with stubbed os.homedir.
     delete requireCjs.cache?.[requireCjs.resolve('../../src/main/memoryTool.cjs')]
     delete requireCjs.cache?.[requireCjs.resolve('../../src/main/config.cjs')]
     memoryTool = requireCjs('../../src/main/memoryTool.cjs')
-    // Ensure workspace dir exists for the 'default' workspace
-    const ws = path.join(workdir, '.claude', 'session-manager', 'memories', 'default')
-    fs.mkdirSync(ws, { recursive: true })
+
+    // Ensure workspace dir exists for the 'default' workspace.
+    fs.mkdirSync(memoryTool.workspaceDir('default'), { recursive: true })
   })
 
   afterEach(async () => {
-    if (homeBackup !== undefined) process.env.HOME = homeBackup
-    else delete process.env.HOME
+    // Restore real os.homedir now that test is complete.
+    const osModule = requireCjs('node:os')
+    osModule.homedir = realHomedir
     await fsp.rm(workdir, { recursive: true, force: true })
   })
 
   it('list() picks up a file written directly to the workspace dir', async () => {
-    const ws = path.join(workdir, '.claude', 'session-manager', 'memories', 'default')
+    const ws = memoryTool.workspaceDir('default')
     const filename = 'external-write.md'
     const target = path.join(ws, filename)
 
@@ -65,7 +70,7 @@ describe('memoryTool list() reflects external filesystem changes', () => {
   })
 
   it('list() picks up a file deletion immediately', async () => {
-    const ws = path.join(workdir, '.claude', 'session-manager', 'memories', 'default')
+    const ws = memoryTool.workspaceDir('default')
     const target = path.join(ws, 'temp.md')
     await fsp.writeFile(target, '# temp\n', 'utf8')
 

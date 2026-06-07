@@ -301,6 +301,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('webRemote:token-revoked', listener);
       return () => ipcRenderer.removeListener('webRemote:token-revoked', listener);
     },
+    /** Revoke ALL paired devices and tear down every session immediately. */
+    revokeAll: () => ipcRenderer.invoke('webRemote:revoke-all'),
+    /** Push event when revokeAll completes (main broadcasts webRemote:revoked-all). */
+    onRevokedAll: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('webRemote:revoked-all', listener);
+      return () => ipcRenderer.removeListener('webRemote:revoked-all', listener);
+    },
   },
   kg: {
     /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log),

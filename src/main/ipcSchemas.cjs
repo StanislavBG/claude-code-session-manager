@@ -382,11 +382,34 @@ function validated(schema, handler) {
   };
 }
 
+// ──────────────────────────────────────────── Web Remote command allowlist
+// Single source of truth — imported by webRemote.cjs and by the unit test.
+// Only these type strings will ever reach a handler; all others are silently
+// dropped without leaking error details back to the relay (ADR §6.2).
+const ALLOWED_COMMANDS = new Set([
+  'cmd:sessions:load',
+  'cmd:sessions:save',
+  'cmd:pty:spawn',
+  'cmd:pty:write',
+  'cmd:pty:resize',
+  'cmd:pty:kill',
+  'cmd:schedule:state',
+  'cmd:schedule:read-prd',
+  'cmd:schedule:read-log',
+  'cmd:schedule:write-prd',
+  'cmd:schedule:reset-job',
+  'cmd:schedule:run-now',
+  'cmd:schedule:set-config',
+  'cmd:history:aggregate',
+  'cmd:app:version',
+]);
+
 module.exports = {
   // Centralized slug regex — used by scheduler.cjs and queueOps.cjs for
   // direct test()/match() containment checks alongside the zod parses.
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
+  ALLOWED_COMMANDS,
   schemas: {
     webRemotePair,
     webRemoteRevokeDevice,

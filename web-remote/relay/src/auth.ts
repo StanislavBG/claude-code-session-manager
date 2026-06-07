@@ -35,17 +35,19 @@ export function checkAllowlist(email: string, allowlistEnv: string): boolean {
 
 // ── /pair endpoint IP-based rate limiting ─────────────────────────────────
 
-const PAIR_RATE_MAX = 10;                // max attempts per IP per window
+const PAIR_RATE_MAX = 5;                 // max pair attempts per IP per window
 const PAIR_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 interface PairRateEntry { count: number; resetAt: number }
 const pairIpRateStore = new Map<string, PairRateEntry>();
 
 function getClientIp(req: FastifyRequest): string {
-  // Respect X-Forwarded-For set by Render's proxy; fall back to direct address.
+  // Take the LAST element of X-Forwarded-For: Render's load balancer appends the
+  // real client IP, so the rightmost value is infrastructure-controlled and cannot
+  // be spoofed. The leftmost element is attacker-supplied and must not be trusted.
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
+    return forwarded.split(',').at(-1)!.trim();
   }
   return (req.socket?.remoteAddress) ?? 'unknown';
 }
@@ -264,8 +266,11 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)) {
         return reply.status(400).send({ error: 'invalid_device_id' });
       }
-      // devicePubKey is required for E2E (SPKI DER base64url, P-256, ~124 chars)
-      if (!devicePubKey || typeof devicePubKey !== 'string' || devicePubKey.length > 512) {
+      // devicePubKey is required for E2E (SPKI DER base64url, P-256, ~124 chars).
+      // Character-set check rejects newlines/control chars before the value is
+      // stored and returned to all browser sessions via GET /api/devices.
+      const PUB_KEY_RE = /^[A-Za-z0-9+/=_-]+$/;
+      if (!devicePubKey || typeof devicePubKey !== 'string' || devicePubKey.length > 512 || !PUB_KEY_RE.test(devicePubKey)) {
         return reply.status(400).send({ error: 'missing_device_pub_key' });
       }
 

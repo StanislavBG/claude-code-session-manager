@@ -1947,7 +1947,13 @@ const remote = {
     const filePath = safeSlugPath(slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
-      const text = await fsp.readFile(filePath, 'utf8');
+      // realpath resolves symlinks; re-check boundary to block a rogue agent job
+      // that places a symlink inside PRDS_DIR pointing outside the safe root.
+      const real = await fsp.realpath(filePath);
+      if (!real.startsWith(PRDS_DIR + path.sep)) {
+        return { ok: false, error: 'invalid slug' };
+      }
+      const text = await fsp.readFile(real, 'utf8');
       return { ok: true, text };
     } catch (e) {
       return { ok: false, error: e?.message };
@@ -1960,7 +1966,13 @@ const remote = {
       return { ok: false, error: 'invalid slug or runId' };
     }
     try {
-      const text = await fsp.readFile(logPath, 'utf8');
+      // realpath resolves symlinks; re-check boundary to block a rogue agent job
+      // that places a symlink inside RUNS_DIR pointing outside the safe root.
+      const real = await fsp.realpath(logPath);
+      if (!real.startsWith(RUNS_DIR + path.sep)) {
+        return { ok: false, error: 'invalid slug or runId' };
+      }
+      const text = await fsp.readFile(real, 'utf8');
       return { ok: true, text };
     } catch (e) {
       return { ok: false, error: e?.message };

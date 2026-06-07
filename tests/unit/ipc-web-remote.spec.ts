@@ -15,29 +15,10 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 
 // Load the allowlist + schemas directly from ipcSchemas — no Electron dep.
-const { schemas } = require('../../src/main/ipcSchemas.cjs') as {
+const { schemas, ALLOWED_COMMANDS } = require('../../src/main/ipcSchemas.cjs') as {
   schemas: Record<string, { safeParse: (v: unknown) => { success: boolean; error?: unknown }; parse: (v: unknown) => unknown }>
+  ALLOWED_COMMANDS: Set<string>
 }
-
-// ─── The allowlist set (mirrors webRemote.cjs ALLOWED_COMMANDS) ───────────────
-
-const ALLOWED_COMMANDS = new Set([
-  'cmd:sessions:load',
-  'cmd:sessions:save',
-  'cmd:pty:spawn',
-  'cmd:pty:write',
-  'cmd:pty:resize',
-  'cmd:pty:kill',
-  'cmd:schedule:state',
-  'cmd:schedule:read-prd',
-  'cmd:schedule:read-log',
-  'cmd:schedule:write-prd',
-  'cmd:schedule:reset-job',
-  'cmd:schedule:run-now',
-  'cmd:schedule:set-config',
-  'cmd:history:aggregate',
-  'cmd:app:version',
-])
 
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 

@@ -60,25 +60,9 @@ const MSG_MAX_BYTES = 256 * 1024;
 
 // ─── Command allowlist ───────────────────────────────────────────────────────
 
-// ONLY these 15 type strings will ever reach a handler. Everything else is
-// silently dropped without leaking error details back to the relay (ADR §6.2).
-const ALLOWED_COMMANDS = new Set([
-  'cmd:sessions:load',
-  'cmd:sessions:save',
-  'cmd:pty:spawn',
-  'cmd:pty:write',
-  'cmd:pty:resize',
-  'cmd:pty:kill',
-  'cmd:schedule:state',
-  'cmd:schedule:read-prd',
-  'cmd:schedule:read-log',
-  'cmd:schedule:write-prd',
-  'cmd:schedule:reset-job',
-  'cmd:schedule:run-now',
-  'cmd:schedule:set-config',
-  'cmd:history:aggregate',
-  'cmd:app:version',
-]);
+// Single source of truth lives in ipcSchemas.cjs — imported here so the test
+// can verify the same Set without depending on Electron-linked modules.
+const { ALLOWED_COMMANDS } = require('./ipcSchemas.cjs');
 
 // ─── E2E encryption helpers (P-256 ECDH + AES-256-GCM, ADR §5.2) ────────────
 
@@ -152,7 +136,7 @@ function decryptBox(nonceB64, ciphertextB64, sessionKey) {
     const ciphertext = data.subarray(0, data.length - 16);
     const decipher = crypto.createDecipheriv('aes-256-gcm', sessionKey, nonce);
     decipher.setAuthTag(tag);
-    const plain = decipher.update(ciphertext).toString('utf8') + decipher.final('utf8');
+    const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
     return plain;
   } catch {
     return null; // authentication failed — drop the message
@@ -229,7 +213,6 @@ async function saveConfig(data) {
 // NEVER log token values or payload content.
 async function auditLog(ts, type, deviceId, msgId, result) {
   try {
-    await fsp.mkdir(AUDIT_LOG_DIR, { recursive: true });
     const ymd = ts.slice(0, 10);
     const logPath = path.join(AUDIT_LOG_DIR, `remote-audit-${ymd}.log`);
     const line = `${ts}  ${type}  deviceId=${deviceId || '-'}  msgId=${msgId || '-'}  result=${result}\n`;
@@ -586,7 +569,7 @@ async function dispatchEnvelope(envelope, device) {
   const cfg = await loadConfig();
   if (!cfg.remoteEnabled) {
     await auditLog(ts, type, device.deviceId, id, 'error:disabled');
-    sendResponse(id, { error: 'disabled' });
+    respond(id, { error: 'disabled' });
     return;
   }
 
@@ -607,11 +590,7 @@ async function dispatchEnvelope(envelope, device) {
     result = { error: e?.message || 'dispatch failed' };
   }
 
-  sendResponse(id, result);
-}
-
-function sendResponse(msgId, payload, typeOverride) {
-  respond(msgId, payload, typeOverride);
+  respond(id, result);
 }
 
 function respond(msgId, payload, typeOverride) {
@@ -790,6 +769,7 @@ async function pair(otp) {
 }
 
 async function revokeDevice(deviceId) {
+  invalidateConfigCache();
   const cfg = await loadConfig();
   const devices = (cfg.devices || []).filter((d) => d.deviceId !== deviceId);
   await saveConfig({ ...cfg, devices });
@@ -814,10 +794,11 @@ async function revokeDevice(deviceId) {
  */
 async function revokeAllDevices() {
   const cfg = await loadConfig();
+  const revokedCount = (cfg.devices || []).length;
   await saveConfig({ ...cfg, remoteEnabled: false, devices: [] });
   await disconnect(); // tears down WS + clears session key
   broadcastStatus();
-  sendIfAlive(_window, 'webRemote:revoked-all', {});
+  sendIfAlive(_window, 'webRemote:revoked-all', { revokedCount });
   return { ok: true };
 }
 
@@ -890,6 +871,7 @@ function attachWindow(w) {
 }
 
 async function init() {
+  await fsp.mkdir(AUDIT_LOG_DIR, { recursive: true });
   const cfg = await loadConfig();
   if (cfg.remoteEnabled && (cfg.devices || []).some((d) => d.deviceToken)) {
     connect().catch((e) => {

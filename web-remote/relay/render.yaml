@@ -1,0 +1,40 @@
+# Render Web Service configuration for sm-relay
+# Deploy: connect this repo in the Render dashboard, set rootDir = web-remote/relay,
+# and add the env vars listed below in the Render Environment panel.
+#
+# Required env vars (set in Render dashboard — never commit values):
+#   RELAY_SECRET          32-byte hex string; used to sign session cookies.
+#                         Rotating this value invalidates all active browser
+#                         sessions (devices must re-pair if sessions are lost).
+#   ALLOWED_EMAIL         Comma-separated list of allowed Google email addresses.
+#                         Example: "you@gmail.com" or "a@x.com,b@x.com"
+#   GOOGLE_CLIENT_ID      OAuth 2.0 client ID from Google Cloud Console.
+#   GOOGLE_CLIENT_SECRET  OAuth 2.0 client secret.
+#   GOOGLE_REDIRECT_URI   Must match the URI registered in Google Cloud Console.
+#                         Example: https://relay.session-manager.bilko.run/auth/google/callback
+#   SESSION_SECRET        (Optional) separate cookie signing key; falls back to
+#                         RELAY_SECRET if omitted.
+#   ALLOWED_ORIGIN        Web app origin for CORS.
+#                         Default: https://session-manager.bilko.run
+#   NODE_ENV              Set to "production" for secure cookies.
+
+services:
+  - type: web
+    name: sm-relay
+    env: node
+    plan: starter          # Required: free tier sleeps after 15 min inactivity
+    region: oregon
+    rootDir: web-remote/relay
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3010
+      - key: ALLOWED_ORIGIN
+        value: https://session-manager.bilko.run
+      # The following must be set manually in the Render dashboard:
+      # RELAY_SECRET, ALLOWED_EMAIL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+      # GOOGLE_REDIRECT_URI

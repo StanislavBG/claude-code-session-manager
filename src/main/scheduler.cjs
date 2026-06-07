@@ -52,6 +52,7 @@ const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
+const { claudePidAlive, classifyRunOutcome } = require('./lib/reaperHelpers.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');

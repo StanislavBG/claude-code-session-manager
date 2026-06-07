@@ -15,8 +15,19 @@ async function main(): Promise<void> {
   for (const key of required) {
     if (!process.env[key]) throw new Error(`Missing required env var: ${key}`);
   }
+  // RELAY_SECRET signs session cookies — enforce minimum entropy (32 bytes)
+  if (Buffer.from(process.env.RELAY_SECRET!).length < 32) {
+    throw new Error('RELAY_SECRET must be at least 32 bytes');
+  }
 
-  const app = fastify({ logger: { level: 'info' } });
+  const app = fastify({
+    logger: {
+      level: 'info',
+      // Redact auth headers to prevent device tokens and session cookies
+      // from appearing in Render access logs.
+      redact: ['req.headers.authorization', 'req.headers.cookie'],
+    },
+  });
 
   await app.register(fastifyCookie);
 
@@ -25,6 +36,8 @@ async function main(): Promise<void> {
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       httpOnly: true,
+      // 'lax' is required for the OAuth callback (cross-site top-level GET redirect)
+      // to carry the session cookie containing oauthState. 'strict' would break OAuth.
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
     },

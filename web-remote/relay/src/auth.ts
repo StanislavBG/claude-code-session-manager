@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
 
@@ -73,10 +74,29 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
     reply.status(200).send({ ok: true });
   });
 
+  // ── GET /api/me — return session user or 401 ────────────────────────────
+  fastify.get('/api/me', async (req, reply) => {
+    const auth = requireBrowserSession(req, reply);
+    if (!auth) return;
+    reply.send({ userId: auth.userId, email: auth.email });
+  });
+
+  // ── POST /api/logout ─────────────────────────────────────────────────────
+  fastify.post('/api/logout', async (req, reply) => {
+    const userId = req.session.userId;
+    req.session.destroy();
+    // Close any active WS browser sessions so stale tabs stop receiving PTY events
+    if (userId) {
+      const { closeSessionsForUser } = await import('./router');
+      closeSessionsForUser(userId);
+    }
+    reply.send({ ok: true });
+  });
+
   // ── Google OAuth redirect ────────────────────────────────────────────────
   fastify.get('/auth/google', async (req, reply) => {
     const oauth2Client = getOAuth2Client();
-    const state = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    const state = crypto.randomBytes(16).toString('hex');
     req.session.oauthState = state;
 
     const url = oauth2Client.generateAuthUrl({
@@ -130,8 +150,20 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
       req.session.userId = payload.sub;
       req.session.email = payload.email;
 
-      const appOrigin = process.env.ALLOWED_ORIGIN ?? 'https://session-manager.bilko.run';
-      reply.redirect(appOrigin + '/');
+      // Redirect target is fixed — never read from a user-supplied parameter
+      // to prevent open redirect. ALLOWED_ORIGIN is validated against an
+      // explicit allowlist; any other value falls back to the canonical origin.
+      const configuredOrigin = process.env.ALLOWED_ORIGIN ?? 'https://session-manager.bilko.run';
+      const safeOrigins = new Set([
+        'https://session-manager.bilko.run',
+        ...(process.env.NODE_ENV !== 'production'
+          ? ['http://localhost:4173', 'http://localhost:5173']
+          : []),
+      ]);
+      const safeOrigin = safeOrigins.has(configuredOrigin)
+        ? configuredOrigin
+        : 'https://session-manager.bilko.run';
+      reply.redirect(safeOrigin + '/');
     },
   );
 
@@ -214,7 +246,12 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
     const auth = requireBrowserSession(req, reply);
     if (!auth) return;
 
-    reply.send({ devices: getDevicesForUser(auth.userId) });
+    const { isDeviceOnline } = await import('./router');
+    const devices = getDevicesForUser(auth.userId).map((d) => ({
+      ...d,
+      isOnline: isDeviceOnline(d.deviceId),
+    }));
+    reply.send({ devices });
   });
 
   // ── DELETE /api/devices/:deviceId — revoke a device token ───────────────

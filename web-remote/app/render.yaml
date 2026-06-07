@@ -1,0 +1,23 @@
+# Render Static Site configuration for sm-app
+# Deploy: connect this repo in the Render dashboard, set rootDir = web-remote/app,
+# then configure the env vars below in the Render Environment panel.
+#
+# Optional env vars (set in Render dashboard — never commit values):
+#   VITE_RELAY_URL   Override the relay base URL. Default:
+#                    https://relay.session-manager.bilko.run
+#
+# Domain: session-manager.bilko.run
+# DNS: CNAME session-manager → <your-render-static-site-id>.onrender.com
+
+services:
+  - type: web
+    name: sm-app
+    env: static
+    plan: free
+    region: oregon
+    rootDir: web-remote/app
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: false
+    domains:
+      - session-manager.bilko.run

@@ -22,12 +22,15 @@ export const otpRateStore = new Map<string, { count: number; resetAt: number }>(
 // ── OTP ───────────────────────────────────────────────────────────────────
 
 export function generateOtpCode(): string {
-  const bytes = crypto.randomBytes(8);
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += OTP_CHARSET[bytes[i] % OTP_CHARSET.length];
+  // Rejection sampling: only accept bytes below the largest multiple of
+  // charset length that fits in 0-255, ensuring uniform distribution.
+  const maxAccept = Math.floor(256 / OTP_CHARSET.length) * OTP_CHARSET.length;
+  const chars: string[] = [];
+  while (chars.length < 8) {
+    const byte = crypto.randomBytes(1)[0];
+    if (byte < maxAccept) chars.push(OTP_CHARSET[byte % OTP_CHARSET.length]);
   }
-  return code;
+  return chars.join('');
 }
 
 export function issueOtp(

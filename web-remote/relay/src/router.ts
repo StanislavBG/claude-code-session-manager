@@ -284,6 +284,29 @@ function registerDevice(
   startHeartbeat();
 }
 
+// ── Session eviction (called from auth.ts on logout) ──────────────────────
+
+/**
+ * Close all active browser WS connections for the given userId.
+ * Called on POST /api/logout so stale browser tabs stop receiving PTY events.
+ */
+export function closeSessionsForUser(userId: string): void {
+  for (const [id, conn] of browserConns) {
+    if (conn.userId === userId && conn.ws.readyState === WebSocket.OPEN) {
+      conn.ws.close(1000, 'logged_out');
+      browserConns.delete(id);
+    }
+  }
+}
+
+// ── Online status query (called from auth.ts) ──────────────────────────────
+
+/** Returns true if the given device has an open, authenticated WS connection. */
+export function isDeviceOnline(deviceId: string): boolean {
+  const conn = deviceConns.get(deviceId);
+  return conn !== undefined && conn.ws.readyState === WebSocket.OPEN;
+}
+
 // ── Revocation callback (called from auth.ts) ──────────────────────────────
 
 /** Close an active device WS connection after token revocation. */

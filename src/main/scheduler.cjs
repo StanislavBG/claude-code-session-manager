@@ -63,6 +63,7 @@ const {
   USAGE_REFRESH_INTERVAL_MS,
   MAX_JOB_DURATION_MS,
 } = require('./lib/schedulerConfig.cjs');
+const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -159,7 +160,7 @@ const QUEUE_PATH = path.join(ROOT, 'queue.json');
 const SCHEDULER_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-state.json');
 const HEARTBEAT_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-heartbeat.log');
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
-const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
+// DEFAULT_PROJECT_CWD imported from lib/schedulerBatch.cjs (single source of truth).
 
 const ENV_CAP = process.env.SM_SCHEDULER_MAX_CONCURRENCY
   ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 4))
@@ -942,122 +943,10 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   });
 }
 
-/**
- * Pick the next batch of jobs to spawn this tick.
- *
- * Rules:
- *   1. Find the lowest parallelGroup that has pending jobs not already in
- *      runningSet.
- *   2. If that group has jobs in runningSet (i.e., we're mid-group), backfill
- *      up to (cap - runningSet.size) more from the SAME group.
- *   3. If the current group has NO jobs in runningSet (new group), and there
- *      are still jobs from an earlier group in runningSet, do nothing — wait
- *      for the earlier group to drain before advancing.
- *   4. **Late-arrival**: if a lower-numbered (higher-priority) PRD reconciles
- *      AFTER a higher-numbered group was already picked, fire the late-arrival
- *      immediately in parallel with the active group rather than starving it
- *      until the active group drains. This handles the reconcile-race where
- *      a PRD file lands on disk between two pickNextBatch invocations.
- *   5. A singleton group (unique NN, no other jobs share it) runs alone;
- *      no bleed into adjacent groups.
- *
- * Returns array of job objects to spawn. O(N) where N = pending.length.
- */
-function pickNextBatch(allJobs, running, cap) {
-  const pending = allJobs.filter((j) => j.status === 'pending' && !running.has(j.slug));
-  if (pending.length === 0) return [];
-
-  // Lowest pending group (computed up-front so the failure gate can compare).
-  const lowestPendingGroup = pending.reduce(
-    (min, j) => Math.min(min, j.parallelGroup ?? 99),
-    Infinity,
-  );
-
-  // Cross-group failure gate: refuse to advance past a group with failed jobs.
-  // Without this, a failed foundation PRD (e.g. 03-doc-editor-foundation
-  // crashed with a NUL-byte spawn error on 2026-05-21) doesn't stop later
-  // groups (04, 05, 06...) from running and silently corrupting the project
-  // state. The user can re-queue the failed job (pending) or archive it to
-  // unblock the gate, but the default is to halt until the failure is
-  // acknowledged. (needs_review is NOT a blocker — it just means the job ran
-  // but the verifier flagged something for human review.)
-  const blockingFailures = allJobs.filter((j) =>
-    j.status === 'failed' &&
-    (j.parallelGroup ?? 99) < lowestPendingGroup,
-  );
-  if (blockingFailures.length > 0) {
-    const slugs = blockingFailures.map((j) => j.slug).join(', ');
-    console.log(`[scheduler] failure-gate: holding g${lowestPendingGroup} — ${blockingFailures.length} failed job(s) in earlier groups [${slugs}]. Reset to pending or archive to unblock.`);
-    return [];
-  }
-
-  // Groups with at least one job in flight: either tracked in runningSet
-  // (this process spawned it) or still marked 'running' in queue.json
-  // (persisted from a previous session that hasn't been orphan-reset yet).
-  const activeGroups = new Set();
-  for (const slug of running) {
-    const job = allJobs.find((j) => j.slug === slug);
-    if (job) activeGroups.add(job.parallelGroup ?? 99);
-  }
-  for (const j of allJobs) {
-    if (j.status === 'running' && !running.has(j.slug)) {
-      activeGroups.add(j.parallelGroup ?? 99);
-    }
-  }
-  // Total slots consumed: in-process spawns + queue.json running count.
-  const queueRunningCount = allJobs.filter((j) => j.status === 'running').length;
-  const effectiveRunning = Math.max(running.size, queueRunningCount);
-
-  // (lowestPendingGroup was computed up-front for the failure-gate check.)
-
-  if (activeGroups.size > 0) {
-    const lowestActive = Math.min(...activeGroups);
-    if (lowestPendingGroup > lowestActive) {
-      // Earlier group still running — wait for it to drain before advancing.
-      console.log(`[scheduler] concurrency: g${lowestActive} in flight, holding g${lowestPendingGroup}`);
-      return [];
-    }
-    if (lowestPendingGroup < lowestActive) {
-      // Late-arrival: a lower-numbered (higher-priority) PRD reconciled AFTER
-      // a higher-numbered group was already picked. Without this branch the
-      // pending PRD starves until the active group drains — the bug observed
-      // on 2026-05-10 where 118-studio-add-wave2-games (g118) was held while
-      // the g130 hardening trio ran. Honor priority: fire the late-arrival
-      // now, in parallel with the active group. (Strict serial group
-      // ordering still applies between groups that were both present at the
-      // time of picking; this only handles the reconcile-race edge case.)
-      const slots = cap - effectiveRunning;
-      if (slots <= 0) {
-        console.log(`[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots for late-arrival g${lowestPendingGroup}`);
-        return [];
-      }
-      const batch = pending.filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup).slice(0, slots);
-      console.log(`[scheduler] concurrency: firing late-arrival g${lowestPendingGroup} (${batch.length} job(s)) alongside active g${lowestActive}`);
-      return batch;
-    }
-    // Backfill slots remaining in the current group.
-    const slots = cap - effectiveRunning;
-    if (slots <= 0) {
-      console.log(`[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`);
-      return [];
-    }
-    const batch = pending.filter((j) => (j.parallelGroup ?? 99) === lowestActive).slice(0, slots);
-    if (batch.length > 0) {
-      console.log(`[scheduler] concurrency: backfilling ${batch.length} into g${lowestActive} (${effectiveRunning}/${cap} running)`);
-    }
-    return batch;
-  }
-
-  // No active group — start the next group fresh.
-  const slots = cap - effectiveRunning;
-  if (slots <= 0) {
-    console.log(`[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`);
-    return [];
-  }
-  const batch = pending.filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup).slice(0, slots);
-  console.log(`[scheduler] concurrency: starting g${lowestPendingGroup} with ${batch.length} job(s) (cap ${cap})`);
-  return batch;
-}
+// pickNextBatch and pickForProject are defined in lib/schedulerBatch.cjs and
+// required at the top of this file. Group-ordering gates are evaluated per
+// project (keyed by cwd) so jobs in different repos run concurrently up to
+// the cap; within one project, sequential-group semantics are preserved.
 
 /**
  * Recognize fix-plan slugs (NN-fix-...) so we don't recurse on a fix-plan that
@@ -2027,4 +1916,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject };

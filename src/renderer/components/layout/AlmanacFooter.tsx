@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab } from '../../state/live'
-import { useBilling } from '../../state/billing'
+import { useBilling, getBillingData } from '../../state/billing'
 import type { NavKey } from '../LeftNav'
 
 interface AlmanacFooterProps {
@@ -41,11 +41,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
     return () => { cancelled = true }
   }, [tab?.cwd])
 
-  const data = billing && (billing.kind === 'ok' || billing.kind === 'ok-stale')
-    ? billing.data
-    : billing && billing.kind === 'auth' && billing.cached
-      ? billing.cached
-      : null
+  const data = getBillingData(billing)
   const fiveHour = data?.usage.five_hour ?? null
   const util = fiveHour ? Math.round(fiveHour.utilization) : null
   const isConnected = billing?.kind === 'ok' || billing?.kind === 'ok-stale'

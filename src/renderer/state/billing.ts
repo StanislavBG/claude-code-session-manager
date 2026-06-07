@@ -15,7 +15,7 @@
  * existing AppStatusBar pattern, applied once globally).
  */
 import { create } from 'zustand'
-import type { BillingFetchResult } from '../../preload/api'
+import type { BillingData, BillingFetchResult } from '../../preload/api'
 import { toast } from './toast'
 import { withTimeout } from '../lib/withTimeout'
 
@@ -62,6 +62,19 @@ export function startBillingPolling(): void {
   if (started) return
   started = true
   tick()
+}
+
+/** Unwrap a BillingFetchResult to its data payload, or null if unavailable. */
+export function getBillingData(r: BillingFetchResult | null): BillingData | null {
+  if (!r) return null
+  if (r.kind === 'ok' || r.kind === 'ok-stale') return r.data
+  if (r.kind === 'auth' && r.cached) return r.cached
+  return null
+}
+
+/** Five-hour utilization as a 0–100 percentage, 0 if unavailable. */
+export function getFiveHourUtil(r: BillingFetchResult | null): number {
+  return getBillingData(r)?.usage.five_hour?.utilization ?? 0
 }
 
 /** Force an immediate refresh, resetting the timer. */

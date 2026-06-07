@@ -3,13 +3,13 @@ import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { UsageMeters } from './usage/UsageMeters'
 import { useActiveTab } from '../../lib/useActiveTab'
-import { useBilling, refreshBilling } from '../../state/billing'
+import { useBilling, refreshBilling, getBillingData } from '../../state/billing'
 import { useUsageMatrix, useStartUsageMatrix } from '../../state/usageMatrix'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { TopologyHeader } from './usage/TopologyHeader'
 import { SessionMatrix } from './usage/SessionMatrix'
 import { AlertsStrip } from './usage/AlertsStrip'
-import type { BillingData, BillingFetchResult, UsageWindow } from '../../../preload/api'
+import type { BillingFetchResult, UsageWindow } from '../../../preload/api'
 
 /**
  * Usage tab — mirrors what `claude /usage` shows: the live billing meter from
@@ -24,13 +24,6 @@ import type { BillingData, BillingFetchResult, UsageWindow } from '../../../prel
  * transcript analytics (tokens-over-time, top projects) live in the History
  * tab's Dashboard view, which reads JSONL on disk.
  */
-function getBillingData(r: BillingFetchResult | null): BillingData | null {
-  if (!r) return null
-  if (r.kind === 'ok' || r.kind === 'ok-stale') return r.data
-  if (r.kind === 'auth' && r.cached) return r.cached
-  return null
-}
-
 export function Usage() {
   const activeTab = useActiveTab()
   const billing = useBilling((s) => s.data)
@@ -161,6 +154,8 @@ function BurnRate({ billing }: BurnRateProps) {
 
   if (billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale') return null
   if (!billing || !five || !validReset) return null
+  // After the guards above, kind is 'ok' or 'ok-stale'; !== 'ok' means stale.
+  const isStale = billing.kind !== 'ok'
 
   const elapsedH = Math.floor(elapsedMin / 60)
   const elapsedM = Math.floor(elapsedMin % 60)
@@ -175,7 +170,7 @@ function BurnRate({ billing }: BurnRateProps) {
 
   return (
     <div className={`sticky top-0 z-10 border-b px-6 py-3 ${BURN_LEVEL_CLASS[level]}`}>
-      {billing.kind === 'ok-stale' && (
+      {isStale && (
         <div className="text-xs opacity-60 mb-1">
           stale data ·{' '}
           <button onClick={refreshBilling} className="underline hover:no-underline">

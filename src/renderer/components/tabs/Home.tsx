@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { NavKey } from '../LeftNav'
-import { useBilling } from '../../state/billing'
+import { useBilling, getBillingData } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -107,11 +107,7 @@ function Mascot({ size = 28 }: { size?: number }) {
 // ────────────────────────────────────────────────────────────────────
 function BillingWindowCard() {
   const billing = useBilling((s) => s.data)
-  const data = billing && (billing.kind === 'ok' || billing.kind === 'ok-stale')
-    ? billing.data
-    : billing && billing.kind === 'auth' && billing.cached
-      ? billing.cached
-      : null
+  const data = getBillingData(billing)
   const fiveHour = data?.usage.five_hour ?? null
   const util = fiveHour?.utilization ?? 0
   const elapsedPct = Math.min(100, Math.max(0, util))

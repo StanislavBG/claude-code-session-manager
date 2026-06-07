@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab, type ToolUseEntry, type ActivityEvent, type TodoItem } from '../../state/live'
-import { useBilling } from '../../state/billing'
+import { useBilling, getFiveHourUtil } from '../../state/billing'
 import { SessionPlansView } from './plans/SessionPlansView'
 import type { ScheduleJob, ScheduleStateSnapshot } from '../../../preload/api'
 
@@ -59,15 +59,7 @@ export function AgentView() {
   const live = useLiveTab(tab)
 
   const billing = useBilling((s) => s.data)
-  const fiveHourUtil = (() => {
-    const d =
-      billing && (billing.kind === 'ok' || billing.kind === 'ok-stale')
-        ? billing.data
-        : billing && billing.kind === 'auth' && billing.cached
-          ? billing.cached
-          : null
-    return d?.usage.five_hour?.utilization ?? 0
-  })()
+  const fiveHourUtil = getFiveHourUtil(billing)
 
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -386,8 +378,8 @@ function activityAccent(ev: ActivityEvent): string {
 /* ---------- footer chrome ---------- */
 
 function BudgetBar({ util }: { util: number }) {
-  const pct = Math.round(util * 100)
-  const color = util < 0.5 ? '#34d399' : util < 0.8 ? '#fbbf24' : '#f43f5e'
+  const pct = Math.round(util)
+  const color = util < 50 ? '#34d399' : util < 80 ? '#fbbf24' : '#f43f5e'
   return (
     <div className="flex items-center gap-3 min-w-[220px]">
       <span className="text-[10px] uppercase tracking-[0.1em] text-fg-faint font-semibold shrink-0">

@@ -153,14 +153,7 @@ async function parseConversationMeta(filePath, stat) {
   return meta;
 }
 
-function registerHistoryAggregatorHandlers() {
-  ipcMain.handle('history:aggregate', async (_e, rawReq) => {
-    // Wire the historyAggregate schema (previously defined but never used).
-    // safeParse so a malformed payload still falls through to defaults
-    // (today − 30d) rather than throwing — matches the current "best-effort"
-    // semantics expected by the History tab.
-    const parsed = schemas.historyAggregate.safeParse(rawReq);
-    const req = parsed.success ? (parsed.data ?? {}) : {};
+async function aggregate(req) {
     const t0 = Date.now();
     const today = localDate(new Date());
     let effectiveTo = req?.toDate ? req.toDate : today;
@@ -258,6 +251,17 @@ function registerHistoryAggregatorHandlers() {
 
     const scannedMs = Date.now() - t0;
     return { rows, partial, scannedMs, skippedLargeFiles };
+}
+
+function registerHistoryAggregatorHandlers() {
+  ipcMain.handle('history:aggregate', async (_e, rawReq) => {
+    // Wire the historyAggregate schema (previously defined but never used).
+    // safeParse so a malformed payload still falls through to defaults
+    // (today − 30d) rather than throwing — matches the current "best-effort"
+    // semantics expected by the History tab.
+    const parsed = schemas.historyAggregate.safeParse(rawReq);
+    const req = parsed.success ? (parsed.data ?? {}) : {};
+    return aggregate(req);
   });
 
   /** Per-conversation metadata: one row per JSONL with derived duration +
@@ -303,4 +307,6 @@ function registerHistoryAggregatorHandlers() {
   });
 }
 
-module.exports = { registerHistoryAggregatorHandlers };
+const remote = { aggregate };
+
+module.exports = { registerHistoryAggregatorHandlers, remote };

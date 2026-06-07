@@ -80,6 +80,13 @@ export function KnowledgeGraph() {
     const off = window.api.kg.onIngestProgress((ev) => {
       setIngesting(ev.ingesting)
       if (ev.phase === 'extract') setProgress(`distilling batch ${ev.batch}/${ev.totalBatches}…`)
+      else if (ev.phase === 'batch') {
+        // A batch just committed to disk — grow the graph live. Only reload when
+        // the committed batch belongs to the project we're viewing (or unknown).
+        setProgress(`distilled batch ${ev.batch}/${ev.totalBatches}`)
+        if (!ev.cwd || ev.cwd === cwd) reload(cwd)
+        reloadProjects()
+      }
       else if (ev.phase === 'done') { setProgress(null); reload(cwd); reloadProjects() }
       else if (ev.phase === 'error') { setProgress(null); toast.error(`Ingest failed: ${ev.error ?? 'unknown'}`) }
       else setProgress('reading prompt log…')

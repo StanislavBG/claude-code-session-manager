@@ -312,7 +312,7 @@ async function ingest() {
     const units = planUnits(buf.toString('utf8'));
     if (!units) { broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: 0 }); return { ok: true, added: 0 }; }
 
-    const graphs = new Map();   // encodedCwd -> graph (lazy-loaded, saved once at end)
+    const graphs = new Map();   // encodedCwd -> graph (lazy-loaded; persisted per batch)
     async function graphFor(cwd) {
       const enc = encodeCwd(cwd);
       if (!graphs.has(enc)) graphs.set(enc, await loadGraphFor(cwd));
@@ -320,15 +320,23 @@ async function ingest() {
     }
 
     const totalBatches = units.filter((u) => u.type === 'batch').length;
-    let committedBytes = 0;
     let committedPrompts = 0;
     let added = 0;
-    let lastTs = st.lastTs;
     let batchNo = 0;
     let failed = false;
+    const touched = new Set();   // encodedCwds whose graph changed this run
 
+    // Each iteration COMMITS before moving on: persist the touched graph, then
+    // advance the global byte-watermark past exactly this unit. Because units
+    // are processed in log order, the watermark stays a correct contiguous
+    // boundary — a crash, quit, or rate-limit mid-run loses at most the batch
+    // in flight, and the graph grows live as each batch lands.
     for (const u of units) {
-      if (u.type === 'skip') { committedBytes += u.bytes; continue; }
+      if (u.type === 'skip') {
+        st.lastOffset += u.bytes;
+        await saveIngestState(st);
+        continue;
+      }
       batchNo++;
       broadcast('kg:ingest-progress', { phase: 'extract', ingesting: true, batch: batchNo, totalBatches });
 
@@ -342,28 +350,30 @@ async function ingest() {
       const parsed = extractJson(r.out);
       if (!parsed) { logger.writeLine({ scope: 'kg', level: 'warn', message: 'extraction unparseable; stopping (resumable)', meta: { cwd: u.cwd } }); failed = true; break; }
 
-      const batchTs = u.entries[u.entries.length - 1].ts || lastTs || new Date().toISOString();
+      const batchTs = u.entries[u.entries.length - 1].ts || st.lastTs || new Date().toISOString();
       for (const ent of (parsed.entities || [])) { if (upsertNode(byKey, g, ent, batchTs)) added++; }
       for (const rel of (parsed.relations || [])) { upsertEdge(byEdge, g, canonicalize(rel.src), canonicalize(rel.dst), rel.relation, batchTs); }
       g.promptCount += u.entries.length;
       g.updatedAt = new Date().toISOString();
 
-      committedBytes += u.bytes;
+      // Commit this batch: graph first (so a crash can't advance the watermark
+      // past unsaved work), then the watermark.
+      await saveGraph(g);
+      st.lastOffset += u.bytes;
+      st.promptCount += u.entries.length;
+      st.lastTs = batchTs;
+      st.updatedAt = new Date().toISOString();
+      await saveIngestState(st);
+
       committedPrompts += u.entries.length;
-      lastTs = batchTs;
+      touched.add(encodeCwd(u.cwd));
+      // Tell the renderer this batch landed so it can refresh the graph live.
+      broadcast('kg:ingest-progress', { phase: 'batch', ingesting: true, batch: batchNo, totalBatches, cwd: u.cwd, added });
     }
 
-    // Persist every touched graph, then advance the watermark past committed bytes only.
-    for (const g of graphs.values()) await saveGraph(g);
-    st.lastOffset += committedBytes;
-    st.promptCount += committedPrompts;
-    st.lastTs = lastTs;
-    st.updatedAt = new Date().toISOString();
-    await saveIngestState(st);
-
-    logger.writeLine({ scope: 'kg', level: 'info', message: 'ingest complete', meta: { committedPrompts, projects: graphs.size, stopped: failed } });
+    logger.writeLine({ scope: 'kg', level: 'info', message: 'ingest complete', meta: { committedPrompts, projects: touched.size, stopped: failed } });
     broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: committedPrompts });
-    return { ok: true, added: committedPrompts, projects: graphs.size, stopped: failed };
+    return { ok: true, added: committedPrompts, projects: touched.size, stopped: failed };
   } catch (e) {
     logger.writeLine({ scope: 'kg', level: 'error', message: 'ingest error', meta: { error: e?.message } });
     broadcast('kg:ingest-progress', { phase: 'error', ingesting: false, error: e?.message });

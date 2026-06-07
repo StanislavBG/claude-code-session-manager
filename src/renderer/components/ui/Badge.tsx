@@ -10,7 +10,7 @@ export type BadgeTone = 'default' | 'accent' | 'warn' | 'dim'
 export const BADGE_TONE: Record<BadgeTone, string> = {
   default: 'bg-bg-hi text-fg-dim border-line',
   accent: 'bg-accent/15 text-accent border-accent/30',
-  warn: 'bg-yellow-950/30 text-yellow-500/80 border-yellow-900/40',
+  warn: 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30',
   dim: 'bg-bg-elev text-fg-faint border-line',
 }
 

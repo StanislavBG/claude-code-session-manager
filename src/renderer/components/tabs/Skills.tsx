@@ -13,7 +13,8 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { SkillsLibrary, ViewSwitcher } from './Library'
-import { useProjectSkills } from '../../state/projectSkills'
+import { readSkillDisabled, setSkillDisabled } from '../../lib/skillFrontmatter'
+import { toast } from '../../state/toast'
 
 type Kind = 'skills' | 'commands'
 
@@ -32,6 +33,8 @@ interface Item {
   path: string
   /** Absolute path of the skill directory (if applicable). */
   dir: string | null
+  /** Skills only: `disable-model-invocation: true` in frontmatter. */
+  disabled: boolean
 }
 
 export function Skills() {
@@ -74,6 +77,7 @@ export function Skills() {
             name: e.name,
             path: `${e.path}/SKILL.md`,
             dir: e.path,
+            disabled: readSkillDisabled(directSkill.text),
           })
         } else {
           // Namespace dir — scan one level deeper.
@@ -87,6 +91,7 @@ export function Skills() {
                 name: ne.name,
                 path: `${ne.path}/SKILL.md`,
                 dir: ne.path,
+                disabled: readSkillDisabled(nestedSkill.text),
               })
             }
           }
@@ -102,6 +107,7 @@ export function Skills() {
           name: e.name.replace(/\.md$/, ''),
           path: e.path,
           dir: null,
+          disabled: false,
         })
       }
       if (!cancelled) {
@@ -120,16 +126,6 @@ export function Skills() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, scopeRoots])
 
-  // Project-scoped skill enable/disable.
-  const loadProjectSkills = useProjectSkills((s) => s.load)
-  const setProjectSkillEnabled = useProjectSkills((s) => s.setEnabled)
-  const projectSkillMap = useProjectSkills((s) => (cwd ? s.byCwd[cwd] : undefined))
-
-  useEffect(() => {
-    if (scope === 'project' && cwd) loadProjectSkills(cwd)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, cwd])
-
   const files = useConfig((s) => s.files)
   const loadText = useConfig((s) => s.loadText)
   const setDraft = useConfig((s) => s.setDraft)
@@ -137,6 +133,24 @@ export function Skills() {
   const revert = useConfig((s) => s.revert)
   const watchFile = useConfig((s) => s.watchFile)
   const unwatchFile = useConfig((s) => s.unwatchFile)
+
+  // Enable/disable a skill by writing `disable-model-invocation` to its
+  // SKILL.md frontmatter — the canonical CLI flag. Reads fresh from disk so a
+  // stale in-memory copy never clobbers concurrent edits.
+  async function toggleSkillDisabled(item: Item, disabled: boolean) {
+    const cur = await window.api.config.readText(item.path)
+    if (!cur.exists) return
+    const next = setSkillDisabled(cur.text, disabled)
+    if (next === cur.text) return
+    const w = await window.api.config.writeText(item.path, next)
+    if (!w.ok) {
+      toast.error(w.error ?? 'failed to update skill')
+      return
+    }
+    setItems((prev) => prev.map((i) => (i.path === item.path ? { ...i, disabled } : i)))
+    // Refresh the editor if this skill is open so its frontmatter reflects disk.
+    if (files[item.path]) void loadText(item.path)
+  }
 
   useEffect(() => {
     if (!selectedPath) return
@@ -243,12 +257,8 @@ export function Skills() {
                     <div className="px-3 py-1 text-xs text-fg-faint italic">none</div>
                   ) : (
                     group.map((i) => {
-                      const showProjectToggle =
-                        scope === 'project' && cwd && i.kind === 'skills'
-                      const isEnabled =
-                        showProjectToggle && projectSkillMap
-                          ? projectSkillMap[i.name] !== false
-                          : true
+                      // Skills can be turned off via frontmatter; commands cannot.
+                      const showToggle = i.kind === 'skills'
                       return (
                         <div
                           key={i.path}
@@ -260,7 +270,10 @@ export function Skills() {
                         >
                           <button
                             onClick={() => setSelectedPath(i.path)}
-                            className="flex-1 min-w-0 text-left truncate"
+                            className={`flex-1 min-w-0 text-left truncate ${
+                              i.disabled ? 'line-through opacity-50' : ''
+                            }`}
+                            title={i.disabled ? 'Disabled — Claude will not auto-invoke this skill' : undefined}
                           >
                             {i.kind === 'commands' ? '/' : ''}
                             {i.name}
@@ -274,10 +287,10 @@ export function Skills() {
                             {files[i.path]?.dirty && (
                               <span className="w-1 h-1 rounded-full bg-accent" />
                             )}
-                            {showProjectToggle && cwd && (
+                            {showToggle && (
                               <Toggle
-                                checked={isEnabled}
-                                onChange={(v) => setProjectSkillEnabled(cwd, i.name, v)}
+                                checked={!i.disabled}
+                                onChange={(v) => void toggleSkillDisabled(i, !v)}
                               />
                             )}
                           </div>

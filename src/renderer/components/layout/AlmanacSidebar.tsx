@@ -67,6 +67,7 @@ const CONFIGURE: NavGroupItem[] = [
   { key: 'system-prompt', label: 'System Prompt',  icon: 'system-prompt',  hint: 'Personality and behavior' },
   { key: 'permissions',   label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },
   { key: 'settings',      label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window' },
+  { key: 'remote',        label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default' },
 ]
 
 interface ToolItem {

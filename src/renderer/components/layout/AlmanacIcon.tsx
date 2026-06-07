@@ -16,6 +16,7 @@ export type AlmanacIconName =
   | 'race' | 'background' | 'repoviz' | 'subagents' | 'system-prompt'
   | 'permissions' | 'agent-memory' | 'tool' | 'quick-open' | 'global-search'
   | 'knowledge-graph'
+  | 'remote'
 
 interface IconProps {
   name: AlmanacIconName
@@ -83,6 +84,7 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'permissions':  return <svg {...props}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /><circle cx="12" cy="15.5" r="1.2" fill="currentColor" stroke="none" /></svg>
     case 'tool':         return <svg {...props}><path d="M14 4a4 4 0 014 4l-7 7-4-4 7-7zM7 11l-3 3 6 6 3-3" /></svg>
     case 'quick-open':   return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 9h18M7 13h10M7 16h6" /></svg>
+    case 'remote':       return <svg {...props}><path d="M5 12.5a7 7 0 0114 0M1.5 9a11 11 0 0121 0M8.5 16a3.5 3.5 0 017 0" /><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none" /></svg>
     default: return null
   }
 }

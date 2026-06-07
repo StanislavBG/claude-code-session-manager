@@ -1034,14 +1034,32 @@ export interface SessionManagerAPI {
     onStateChanged: (handler: (ev: SuperAgentStateChangedEvent) => void) => () => void;
   };
   kg: {
-    /** Distilled knowledge graph + ingest status over the prompt log. */
-    get: () => Promise<KgState>;
-    /** Process new prompt-log lines into the graph (incremental). */
-    ingest: () => Promise<{ ok: boolean; added?: number; nodes?: number; edges?: number; error?: string; note?: string }>;
-    /** Ask a question answered from the graph + your real prompts via claude -p. */
-    ask: (question: string) => Promise<{ ok: boolean; answer?: string; cited?: { ts: string; prompt: string }[]; error?: string }>;
+    /** Distilled knowledge graph + ingest status for ONE project (`cwd`).
+     *  Omit `cwd` for the most-active project. */
+    get: (cwd?: string) => Promise<KgState>;
+    /** Projects seen in the prompt log, with per-project graph stats. */
+    projects: () => Promise<KgProject[]>;
+    /** Process new prompt-log lines into per-project graphs (incremental, global). */
+    ingest: () => Promise<{ ok: boolean; added?: number; projects?: number; stopped?: boolean; error?: string; note?: string }>;
+    /** Ask a question answered from ONE project's graph + prompts via claude -p. */
+    ask: (question: string, cwd?: string) => Promise<{ ok: boolean; answer?: string; cited?: { ts: string; prompt: string }[]; error?: string }>;
     onIngestProgress: (handler: (ev: KgIngestProgress) => void) => () => void;
   };
+}
+
+export interface KgProject {
+  cwd: string;
+  /** Last path segment of `cwd`, for display. */
+  label: string;
+  /** Prompts logged for this project (real prompts only). */
+  total: number;
+  /** Prompts already distilled into this project's graph. */
+  processed: number;
+  /** total - processed. */
+  pending: number;
+  nodes: number;
+  edges: number;
+  lastIngest: string | null;
 }
 
 export interface KgNode {
@@ -1062,6 +1080,10 @@ export interface KgEdge {
   lastTs: string | null;
 }
 export interface KgState {
+  /** The project this graph belongs to. */
+  cwd: string;
+  /** Last path segment of `cwd`, for display. */
+  label: string;
   nodes: KgNode[];
   edges: KgEdge[];
   status: {

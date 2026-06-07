@@ -3,11 +3,15 @@ import ForceGraph2D from 'react-force-graph-2d'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { toast } from '../../state/toast'
-import type { KgState, KgNode } from '../../../preload/api'
+import type { KgState, KgNode, KgProject } from '../../../preload/api'
 
 /**
  * KnowledgeGraph — distilled intelligence over your raw prompt LOG
  * (~/.claude/knowledge-log/prompts.jsonl), NOT curated facts (that's Memory).
+ *
+ * SEGREGATED PER PROJECT: pick a project from the toolbar selector and the
+ * graph, Q&A, and status all scope to that project's `cwd`. "Process now"
+ * ingests new log lines across ALL projects in one pass (single watermark).
  *
  * Three panes: a force-directed graph of entities the backend extracted from
  * your prompts (node size = how often you mention it, color = type), an
@@ -42,6 +46,8 @@ function useSize<T extends HTMLElement>() {
 
 export function KnowledgeGraph() {
   const [state, setState] = useState<KgState | null>(null)
+  const [projects, setProjects] = useState<KgProject[]>([])
+  const [cwd, setCwd] = useState<string | null>(null)
   const [ingesting, setIngesting] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [selected, setSelected] = useState<KgNode | null>(null)
@@ -51,42 +57,55 @@ export function KnowledgeGraph() {
   const [asking, setAsking] = useState(false)
   const [answer, setAnswer] = useState<{ text: string; cited: { ts: string; prompt: string }[] } | null>(null)
 
-  const reload = useCallback(async () => {
-    try { setState(await window.api.kg.get()) } catch (e) { toast.error(`Knowledge graph load failed: ${(e as Error).message}`) }
+  // Load the graph for a specific project (or the most-active one when cwd is null).
+  const reload = useCallback(async (forCwd?: string | null) => {
+    try { setState(await window.api.kg.get(forCwd ?? undefined)) }
+    catch (e) { toast.error(`Knowledge graph load failed: ${(e as Error).message}`) }
   }, [])
 
-  useEffect(() => { reload() }, [reload])
+  // Refresh the project list; on first load, default-select the most-active one.
+  const reloadProjects = useCallback(async () => {
+    try {
+      const list = await window.api.kg.projects()
+      setProjects(list)
+      setCwd((prev) => prev ?? (list[0]?.cwd ?? null))
+    } catch (e) { toast.error(`Projects load failed: ${(e as Error).message}`) }
+  }, [])
+
+  // Initial: list projects, then load the default project's graph.
+  useEffect(() => { (async () => { await reloadProjects() })() }, [reloadProjects])
+  useEffect(() => { reload(cwd) }, [cwd, reload])
 
   useEffect(() => {
     const off = window.api.kg.onIngestProgress((ev) => {
       setIngesting(ev.ingesting)
       if (ev.phase === 'extract') setProgress(`distilling batch ${ev.batch}/${ev.totalBatches}…`)
-      else if (ev.phase === 'done') { setProgress(null); reload() }
+      else if (ev.phase === 'done') { setProgress(null); reload(cwd); reloadProjects() }
       else if (ev.phase === 'error') { setProgress(null); toast.error(`Ingest failed: ${ev.error ?? 'unknown'}`) }
       else setProgress('reading prompt log…')
     })
     return off
-  }, [reload])
+  }, [reload, reloadProjects, cwd])
 
   const runIngest = useCallback(async () => {
     setIngesting(true)
     const r = await window.api.kg.ingest()
     if (!r.ok) { toast.error(`Ingest failed: ${r.error ?? 'unknown'}`); setIngesting(false); return }
-    if (r.added === 0) toast.info(r.note === 'no log yet' ? 'No prompts logged yet — the hook fills this as you work.' : 'Graph already up to date.')
-    else toast.info(`Distilled ${r.added} prompt${r.added === 1 ? '' : 's'} → ${r.nodes} entities, ${r.edges} relations.`)
-    reload()
-  }, [reload])
+    if (r.added === 0) toast.info(r.note === 'no log yet' ? 'No prompts logged yet — the hook fills this as you work.' : 'Graphs already up to date.')
+    else toast.info(`Distilled ${r.added} prompt${r.added === 1 ? '' : 's'} across ${r.projects ?? 1} project${(r.projects ?? 1) === 1 ? '' : 's'}.${r.stopped ? ' Stopped early (rate-limited) — run again to continue.' : ''}`)
+    reload(cwd); reloadProjects()
+  }, [reload, reloadProjects, cwd])
 
   const askQuestion = useCallback(async () => {
     const q = question.trim()
     if (!q || asking) return
     setAsking(true)
     setAnswer(null)
-    const r = await window.api.kg.ask(q)
+    const r = await window.api.kg.ask(q, cwd ?? undefined)
     setAsking(false)
     if (!r.ok) { toast.error(`Q&A failed: ${r.error ?? 'unknown'}`); return }
     setAnswer({ text: r.answer ?? '', cited: r.cited ?? [] })
-  }, [question, asking])
+  }, [question, asking, cwd])
 
   const graphData = useMemo(() => {
     if (!state) return { nodes: [], links: [] }
@@ -106,6 +125,20 @@ export function KnowledgeGraph() {
     <Panel
       toolbar={
         <>
+          {projects.length > 0 && (
+            <select
+              value={cwd ?? ''}
+              onChange={(e) => { setSelected(null); setAnswer(null); setCwd(e.target.value) }}
+              className="text-xs bg-bg border border-line rounded px-1.5 py-0.5 text-fg outline-none focus:border-fg-faint max-w-[220px]"
+              title={cwd ?? undefined}
+            >
+              {projects.map((p) => (
+                <option key={p.cwd} value={p.cwd}>
+                  {p.label} ({p.total}{p.pending > 0 ? ` · ${p.pending} new` : ''})
+                </option>
+              ))}
+            </select>
+          )}
           <span className="text-fg-faint">{state ? `${state.nodes.length} entities · ${state.edges.length} relations` : 'loading…'}</span>
           <div className="flex-1" />
           {status && status.pending > 0 && (

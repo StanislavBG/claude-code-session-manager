@@ -979,9 +979,10 @@ function pickNextBatch(allJobs, running, cap) {
   // groups (04, 05, 06...) from running and silently corrupting the project
   // state. The user can re-queue the failed job (pending) or archive it to
   // unblock the gate, but the default is to halt until the failure is
-  // acknowledged.
+  // acknowledged. (needs_review is NOT a blocker — it just means the job ran
+  // but the verifier flagged something for human review.)
   const blockingFailures = allJobs.filter((j) =>
-    (j.status === 'failed' || j.status === 'needs_review') &&
+    j.status === 'failed' &&
     (j.parallelGroup ?? 99) < lowestPendingGroup,
   );
   if (blockingFailures.length > 0) {

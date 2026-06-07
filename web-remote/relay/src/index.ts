@@ -2,7 +2,7 @@ import fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifySession from '@fastify/session';
 import fastifyCors from '@fastify/cors';
-import { registerAuthRoutes } from './auth';
+import { registerAuthRoutes, purgeAuthRateLimits } from './auth';
 import { createWsServer, handleUpgrade } from './router';
 import { purgeExpired } from './tokens';
 
@@ -60,8 +60,8 @@ async function main(): Promise<void> {
   // Attach WS server AFTER Fastify has bound the HTTP server
   app.server.on('upgrade', handleUpgrade);
 
-  // Periodic housekeeping: purge expired OTPs and WS tickets
-  setInterval(() => purgeExpired(), 5 * 60 * 1000);
+  // Periodic housekeeping: purge expired OTPs, WS tickets, and rate-limit stores
+  setInterval(() => { purgeExpired(); purgeAuthRateLimits(); }, 5 * 60 * 1000);
 
   app.log.info(`relay listening on ${HOST}:${PORT}`);
   // Log the ws server reference to satisfy the no-unused-variable check

@@ -10,10 +10,151 @@ interface PendingCmd {
   timer: ReturnType<typeof setTimeout>;
 }
 
+// E2E session state per device (browser-side P-256 ECDH + AES-256-GCM)
+interface E2ESession {
+  privateKey: CryptoKey;        // browser's ephemeral P-256 private key
+  browserPubKeyB64: string;     // browser's SPKI DER public key, base64url
+  devicePubKeyB64: string;      // agent's SPKI DER public key, base64url
+  sessionKey: CryptoKey | null; // derived AES-256-GCM key, null until e2e:ready
+}
+
 // Command response timeout
 const CMD_TIMEOUT_MS = 15_000;
 // Heartbeat interval
 const PING_INTERVAL_MS = 30_000;
+
+// ── WebCrypto E2E helpers ──────────────────────────────────────────────────
+
+function base64urlToUint8(b64: string): Uint8Array<ArrayBuffer> {
+  // Pad to multiple of 4, replace URL-safe chars
+  const padded = b64.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = (4 - (padded.length % 4)) % 4;
+  const padded2 = padded + '=='.slice(0, pad);
+  const binary = atob(padded2);
+  const ab = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(ab);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function uint8ToBase64url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function generateBrowserKeyPair(): Promise<{ privateKey: CryptoKey; publicKeyB64: string }> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false, // private key non-extractable — stays in WebCrypto context
+    ['deriveBits'],
+  );
+  const spkiDer = await crypto.subtle.exportKey('spki', keyPair.publicKey) as ArrayBuffer;
+  return {
+    privateKey: keyPair.privateKey,
+    publicKeyB64: uint8ToBase64url(new Uint8Array(spkiDer)),
+  };
+}
+
+/**
+ * Derive an AES-256-GCM session key via ECDH + HKDF-SHA256.
+ * Must match the agent's deriveSessionKey (webRemote.cjs):
+ *   salt = Buffer.from(deviceId, 'utf8')
+ *   info = Buffer.from('sm-e2e-v1', 'utf8')
+ */
+async function deriveE2ESessionKey(
+  myPrivateKey: CryptoKey,
+  peerPublicKeyB64: string,
+  deviceId: string,
+): Promise<CryptoKey> {
+  const peerKeyDer = base64urlToUint8(peerPublicKeyB64);
+  const peerPublicKey = await crypto.subtle.importKey(
+    'spki',
+    peerKeyDer,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    [],
+  );
+
+  // ECDH → 256 bits of shared secret (x-coordinate of shared point)
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: peerPublicKey },
+    myPrivateKey,
+    256,
+  );
+
+  // Import shared secret as HKDF key material
+  const hkdfMaterial = await crypto.subtle.importKey(
+    'raw',
+    sharedBits,
+    'HKDF',
+    false,
+    ['deriveKey'],
+  );
+
+  // HKDF-SHA256 → AES-256-GCM session key
+  const enc = new TextEncoder();
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: enc.encode(deviceId),   // matches agent: Buffer.from(deviceId, 'utf8')
+      info: enc.encode('sm-e2e-v1'), // matches agent: Buffer.from('sm-e2e-v1', 'utf8')
+    },
+    hkdfMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/**
+ * Encrypt plaintext JSON string → { nonce, ciphertext } (both base64url).
+ * WebCrypto AES-GCM appends the 16-byte auth tag to the output automatically.
+ * Compatible with the agent's encryptBox/decryptBox in webRemote.cjs.
+ */
+async function encryptBox(
+  plaintext: string,
+  sessionKey: CryptoKey,
+): Promise<{ nonce: string; ciphertext: string }> {
+  const enc = new TextEncoder();
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: nonce },
+    sessionKey,
+    enc.encode(plaintext),
+  );
+  return {
+    nonce: uint8ToBase64url(nonce),
+    ciphertext: uint8ToBase64url(new Uint8Array(encrypted)), // includes GCM auth tag
+  };
+}
+
+/**
+ * Decrypt an AES-256-GCM box. Returns null on auth failure or malformed input.
+ * The ciphertext includes the 16-byte GCM auth tag appended at the end
+ * (matching the agent's encryptBox format and WebCrypto's decrypt expectation).
+ */
+async function decryptBox(
+  nonceB64: string,
+  ciphertextB64: string,
+  sessionKey: CryptoKey,
+): Promise<string | null> {
+  try {
+    const nonce = base64urlToUint8(nonceB64);
+    const data = base64urlToUint8(ciphertextB64);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: nonce },
+      sessionKey,
+      data,
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch {
+    return null; // authentication tag mismatch or malformed input
+  }
+}
+
+// ── RelaySocket ────────────────────────────────────────────────────────────
 
 export class RelaySocket {
   private ws: WebSocket | null = null;
@@ -27,6 +168,9 @@ export class RelaySocket {
   private backoffMs = 1_000;
   private authFailures = 0;
   private static readonly MAX_AUTH_FAILURES = 3;
+
+  // E2E sessions: deviceId → session state
+  private e2eSessions = new Map<string, E2ESession>();
 
   constructor(private readonly onStatusChange?: (connected: boolean) => void) {}
 
@@ -63,7 +207,9 @@ export class RelaySocket {
         } catch {
           return;
         }
-        this.dispatch(msg);
+        this.dispatchAsync(msg).catch((e) => {
+          console.warn('[relay] dispatchAsync error', e);
+        });
       };
 
       socket.onclose = (evt) => {
@@ -83,13 +229,114 @@ export class RelaySocket {
     }
   }
 
-  private dispatch(msg: Envelope): void {
+  /**
+   * Initiate E2E key exchange with a specific device.
+   * Generates an ephemeral P-256 keypair, stores state, and sends e2e:hello
+   * if the WS is currently connected.
+   *
+   * Called by the app when navigating to a device view or when the device
+   * comes online (event:device:status). After a successful e2e:ready response,
+   * all commands sent via sendCommand to this deviceId are encrypted.
+   */
+  async initiateE2E(deviceId: string, devicePubKeyB64: string): Promise<void> {
+    if (!devicePubKeyB64) return;
+
+    // Re-use existing session if already established
+    const existing = this.e2eSessions.get(deviceId);
+    if (existing?.sessionKey) return;
+
+    try {
+      const { privateKey, publicKeyB64 } = await generateBrowserKeyPair();
+      const session: E2ESession = {
+        privateKey,
+        browserPubKeyB64: publicKeyB64,
+        devicePubKeyB64,
+        sessionKey: null,
+      };
+      this.e2eSessions.set(deviceId, session);
+
+      // Send hello immediately if connected; if not, auth:ok handler sends it
+      if (this.isConnected) {
+        this.sendRaw({
+          type: 'e2e:hello',
+          id: crypto.randomUUID(),
+          deviceId,
+          payload: { pubKey: publicKeyB64 },
+          ts: Date.now(),
+        });
+      }
+    } catch (e) {
+      console.warn('[relay] E2E init failed', e);
+    }
+  }
+
+  /** True if E2E session key is established for the given device. */
+  hasE2E(deviceId: string): boolean {
+    return this.e2eSessions.get(deviceId)?.sessionKey != null;
+  }
+
+  private async dispatchAsync(msg: Envelope): Promise<void> {
     const { type } = msg;
 
+    // ── E2E decryption ─────────────────────────────────────────────────────
+    // e2e:box: decrypt inner command/response and re-dispatch
+    if (type === 'e2e:box') {
+      const deviceId = msg.deviceId;
+      if (!deviceId) return;
+      const session = this.e2eSessions.get(deviceId);
+      if (!session?.sessionKey) return;
+      const p = msg.payload as { nonce?: string; ciphertext?: string } | undefined;
+      if (!p?.nonce || !p.ciphertext) return;
+      const plaintext = await decryptBox(p.nonce, p.ciphertext, session.sessionKey);
+      if (!plaintext) {
+        console.warn('[relay] e2e:box decryption failed (auth tag mismatch)');
+        return;
+      }
+      let inner: Envelope;
+      try { inner = JSON.parse(plaintext) as Envelope; } catch { return; }
+      await this.dispatchAsync(inner);
+      return;
+    }
+
+    // e2e:ready: derive session key using the device's stored public key
+    if (type === 'e2e:ready') {
+      const deviceId = msg.deviceId;
+      if (!deviceId) return;
+      const session = this.e2eSessions.get(deviceId);
+      if (!session || session.sessionKey) return;
+      try {
+        session.sessionKey = await deriveE2ESessionKey(
+          session.privateKey,
+          session.devicePubKeyB64,
+          deviceId,
+        );
+        this.emit('e2e:ready', { ...msg, deviceId });
+      } catch (e) {
+        console.warn('[relay] E2E session key derivation failed', e);
+        this.e2eSessions.delete(deviceId);
+      }
+      return;
+    }
+
+    // ── Standard dispatch ──────────────────────────────────────────────────
     if (type === 'auth:ok') {
       this.onStatusChange?.(true);
       this.startPing();
       this.emit('auth:ok', msg);
+
+      // Re-send e2e:hello for any pending sessions (device was online when
+      // we reconnected but we had to regenerate the ticket)
+      for (const [deviceId, session] of this.e2eSessions) {
+        if (!session.sessionKey) {
+          this.sendRaw({
+            type: 'e2e:hello',
+            id: crypto.randomUUID(),
+            deviceId,
+            payload: { pubKey: session.browserPubKeyB64 },
+            ts: Date.now(),
+          });
+        }
+      }
       return;
     }
 
@@ -141,13 +388,13 @@ export class RelaySocket {
     }
   }
 
-  sendCommand(
+  async sendCommand(
     type: string,
     deviceId: string,
     payload?: unknown,
   ): Promise<Envelope> {
     const id = crypto.randomUUID();
-    const envelope: Envelope = { type, id, deviceId, payload, ts: Date.now() };
+    const inner: Envelope = { type, id, deviceId, payload, ts: Date.now() };
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -157,10 +404,36 @@ export class RelaySocket {
 
       this.pending.set(id, { resolve, reject, timer });
 
-      if (!this.sendRaw(envelope)) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(new Error('not connected'));
+      const session = this.e2eSessions.get(deviceId);
+      if (session?.sessionKey) {
+        // Encrypt the inner command — relay sees only opaque bytes
+        encryptBox(JSON.stringify(inner), session.sessionKey)
+          .then(({ nonce, ciphertext }) => {
+            const sent = this.sendRaw({
+              type: 'e2e:box',
+              id,           // echoed so relay can correlate, outer id ≠ inner id
+              deviceId,
+              payload: { nonce, ciphertext },
+              ts: Date.now(),
+            });
+            if (!sent) {
+              clearTimeout(timer);
+              this.pending.delete(id);
+              reject(new Error('not connected'));
+            }
+          })
+          .catch((e) => {
+            clearTimeout(timer);
+            this.pending.delete(id);
+            reject(e);
+          });
+      } else {
+        // Plaintext fallback: no E2E session established yet
+        if (!this.sendRaw(inner)) {
+          clearTimeout(timer);
+          this.pending.delete(id);
+          reject(new Error('not connected'));
+        }
       }
     });
   }
@@ -214,6 +487,8 @@ export class RelaySocket {
       reject(new Error('socket destroyed'));
     }
     this.pending.clear();
+    this.e2eSessions.clear();
+    this.listeners.clear();
     this.ws?.close();
   }
 }

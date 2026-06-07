@@ -40,6 +40,14 @@ export default function App() {
         // relay sends status at the top level of the envelope, not in payload
         if (msg.deviceId && msg.status) {
           setDeviceOnline(msg.deviceId, msg.status === 'connected');
+          // Initiate E2E when device comes online — fetch pubKey from store
+          if (msg.status === 'connected') {
+            const { devices: currentDevices } = useStore.getState();
+            const dev = currentDevices.find((d) => d.deviceId === msg.deviceId);
+            if (dev?.devicePubKey) {
+              socket.initiateE2E(msg.deviceId, dev.devicePubKey).catch(console.warn);
+            }
+          }
         }
       },
     );
@@ -52,6 +60,18 @@ export default function App() {
   }, [me, setWsConnected, setDeviceOnline]);
 
   const socket = socketRef.current;
+  // Stable deviceId for the E2E effect — undefined when not in device view
+  const activeDeviceId = screen.kind === 'device' ? screen.deviceId : undefined;
+
+  // Initiate E2E when entering a device view (or when socket reconnects)
+  useEffect(() => {
+    if (!activeDeviceId || !socket) return;
+    const { devices: devs } = useStore.getState();
+    const dev = devs.find((d) => d.deviceId === activeDeviceId);
+    if (dev?.devicePubKey && dev.isOnline) {
+      socket.initiateE2E(activeDeviceId, dev.devicePubKey).catch(console.warn);
+    }
+  }, [activeDeviceId, socket]);
 
   if (screen.kind === 'login') {
     return <LoginPage />;

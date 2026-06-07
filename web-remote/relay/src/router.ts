@@ -18,6 +18,8 @@ const BROWSER_RATE_DRAIN_MS = 1000;
 // Device: 100 cmd/min → drain 1 per 600 ms
 const DEVICE_RATE_CAPACITY = 100;
 const DEVICE_RATE_DRAIN_MS = 600;
+// Max concurrent browser WS connections per user (prevents single-user DoS)
+const MAX_BROWSER_CONNS_PER_USER = 5;
 
 // ── Envelope schema ────────────────────────────────────────────────────────
 
@@ -206,6 +208,16 @@ function startHeartbeat(): void {
 // ── Connection registration ────────────────────────────────────────────────
 
 function registerBrowser(ws: WebSocket, ticketData: { userId: string; email: string }): void {
+  // Cap per-user concurrent browser WS connections to prevent relay-level DoS
+  let existingCount = 0;
+  for (const c of browserConns.values()) {
+    if (c.userId === ticketData.userId) existingCount++;
+  }
+  if (existingCount >= MAX_BROWSER_CONNS_PER_USER) {
+    ws.close(1008, 'too_many_connections');
+    return;
+  }
+
   const id = crypto.randomUUID();
   const conn: BrowserConn = {
     ws,

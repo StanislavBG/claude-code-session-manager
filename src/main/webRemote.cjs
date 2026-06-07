@@ -512,6 +512,14 @@ async function handleMessage(raw, device) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello missing pubKey' });
       return;
     }
+    // P-256 SPKI DER is 91 bytes → base64url ~122 chars; reject out-of-range blobs
+    // before they reach crypto.createPublicKey (malformed input throws and is caught,
+    // but repeated bad keys force plaintext fallback via the keep-e2e enforcement above).
+    const PUB_KEY_RE = /^[A-Za-z0-9+/=_-]+$/;
+    if (browserPubKey.length < 80 || browserPubKey.length > 256 || !PUB_KEY_RE.test(browserPubKey)) {
+      logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello invalid pubKey format' });
+      return;
+    }
     if (!device.e2ePrivateKey) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello but no device private key — skipping E2E' });
       return;
@@ -554,8 +562,14 @@ async function handleMessage(raw, device) {
     return;
   }
 
-  // Only dispatch cmd:* type messages (plaintext fallback when no E2E session)
+  // Only dispatch cmd:* type messages
   if (!type.startsWith('cmd:')) return;
+  // After E2E is established, reject plaintext commands — a malicious relay cannot
+  // silently downgrade the session by stripping e2e:hello (PENTEST.md §H1).
+  if (_e2eSessionKey) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'plaintext cmd rejected — e2e session active' });
+    return;
+  }
   await dispatchEnvelope(envelope, device);
 }
 
@@ -587,7 +601,7 @@ async function dispatchEnvelope(envelope, device) {
   } catch (e) {
     const code = e?.name === 'ZodError' ? 'schema_invalid' : 'dispatch_error';
     await auditLog(ts, type, device.deviceId, id, `error:${code}`);
-    result = { error: e?.message || 'dispatch failed' };
+    result = { error: code }; // never leak internal error messages to the remote caller
   }
 
   respond(id, result);
@@ -612,8 +626,7 @@ function respond(msgId, payload, typeOverride) {
       _ws.send(JSON.stringify({
         type: 'e2e:box',
         id: msgId,
-        nonce,
-        ciphertext,
+        payload: { nonce, ciphertext },
         ts: Date.now(),
       }));
     } else {
@@ -648,7 +661,11 @@ function getDispatchMap() {
       const parsed = schemas.ptySpawn.parse(payload);
       // Path safety — validatePath rejects anything outside home dir.
       validatePath(parsed.cwd);
-      return ptyManager.spawn(parsed);
+      // Strip startupCommand: it is ignored by pty.cjs today, but passing a
+      // remotely-controlled 8 KiB string to spawn is a landmine if pty.cjs
+      // ever uses it. Remote callers have no legitimate need for it.
+      const { startupCommand: _ignored, ...safePayload } = parsed;
+      return ptyManager.spawn(safePayload);
     },
 
     'cmd:pty:write': async (payload) => {
@@ -701,8 +718,8 @@ function getDispatchMap() {
     },
 
     'cmd:history:aggregate': async (payload) => {
-      const parsed = schemas.historyAggregate.safeParse(payload);
-      return histRemote.aggregate(parsed.success ? parsed.data : {});
+      const parsed = schemas.historyAggregate.parse(payload);
+      return histRemote.aggregate(parsed);
     },
 
     'cmd:app:version': async () =>

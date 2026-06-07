@@ -192,10 +192,32 @@ export function WebRemote() {
 
   const enabled = status?.enabled ?? false
   const connected = status?.connected ?? false
+  const e2eActive = status?.e2eActive ?? false
   const devices = status?.devices ?? []
 
   return (
     <div className="space-y-6 max-w-xl">
+
+      {/* Active-session banner — prominent warning when remote control is live */}
+      {enabled && connected && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-red-600/70 bg-red-950/40">
+          <span className="text-red-400 text-lg leading-none mt-0.5 animate-pulse">●</span>
+          <div className="text-sm text-red-200">
+            <strong>Remote control is ACTIVE.</strong> A web session can currently send commands to
+            this machine. Disable or revoke all devices below if unexpected.
+            {e2eActive && (
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-green-900/60 text-green-300 border border-green-700/50">
+                🔐 E2E encrypted
+              </span>
+            )}
+            {!e2eActive && (
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-amber-900/60 text-amber-300 border border-amber-700/50">
+                ⚠ Not yet E2E encrypted
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Kill switch banner — makes OFF state unmistakable */}
       {!enabled && (

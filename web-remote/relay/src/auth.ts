@@ -41,6 +41,27 @@ const PAIR_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 interface PairRateEntry { count: number; resetAt: number }
 const pairIpRateStore = new Map<string, PairRateEntry>();
 
+// ── /api/device-ticket per-token rate limiting ─────────────────────────────
+// Prevents a compromised device token from hammering the ticket endpoint.
+// A legitimate reconnect loop needs at most a few tickets per minute.
+
+const DEVICE_TICKET_RATE_MAX = 10;          // max requests per token per window
+const DEVICE_TICKET_RATE_WINDOW_MS = 60_000; // 1 minute
+
+interface DeviceTicketRateEntry { count: number; resetAt: number }
+const deviceTicketRateStore = new Map<string, DeviceTicketRateEntry>();
+
+function checkDeviceTicketRateLimit(tokenPrefix: string, now = Date.now()): boolean {
+  const entry = deviceTicketRateStore.get(tokenPrefix);
+  if (!entry || now >= entry.resetAt) {
+    deviceTicketRateStore.set(tokenPrefix, { count: 1, resetAt: now + DEVICE_TICKET_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= DEVICE_TICKET_RATE_MAX) return false;
+  entry.count++;
+  return true;
+}
+
 function getClientIp(req: FastifyRequest): string {
   // Take the LAST element of X-Forwarded-For: Render's load balancer appends the
   // real client IP, so the rightmost value is infrastructure-controlled and cannot
@@ -144,7 +165,9 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
     async (req, reply) => {
       const { code, state, error } = req.query;
       if (error) {
-        return reply.status(400).send({ error: 'oauth_error', detail: error });
+        // Do not reflect the raw OAuth error string — log it server-side only.
+        req.log.warn({ oauthError: error }, 'OAuth callback error');
+        return reply.status(400).send({ error: 'oauth_error' });
       }
       if (!code) {
         return reply.status(400).send({ error: 'missing_code' });
@@ -228,6 +251,15 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
       return reply.status(401).send({ error: 'missing_token' });
     }
     const rawToken = authHeader.slice(7);
+
+    // Rate-limit by a non-secret prefix of the token (first 16 chars, base64url).
+    // The prefix is meaningless without the rest of the token, so it's safe to
+    // use as a rate-limit key without leaking auth material.
+    const tokenPrefix = rawToken.slice(0, 16);
+    if (!checkDeviceTicketRateLimit(tokenPrefix)) {
+      return reply.status(429).send({ error: 'rate_limited' });
+    }
+
     const device = verifyDeviceToken(rawToken);
     if (!device) {
       return reply.status(401).send({ error: 'invalid_token' });
@@ -262,6 +294,11 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
       const { code, deviceId, devicePubKey } = req.body;
       if (!code || !deviceId) {
         return reply.status(400).send({ error: 'missing_fields' });
+      }
+      // Reject any code that doesn't match the OTP format before touching the store.
+      // This prevents oversized strings from being normalised and looked up.
+      if (typeof code !== 'string' || !/^[A-Za-z0-9]{8}$/.test(code)) {
+        return reply.status(400).send({ error: 'invalid_code_format' });
       }
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)) {
         return reply.status(400).send({ error: 'invalid_device_id' });
@@ -347,6 +384,16 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
 
     reply.send({ ok: true, revokedCount: revokedIds.length });
   });
+}
+
+/** Purge stale entries from the auth rate-limit stores. Call alongside purgeExpired(). */
+export function purgeAuthRateLimits(now = Date.now()): void {
+  for (const [ip, entry] of pairIpRateStore) {
+    if (now >= entry.resetAt) pairIpRateStore.delete(ip);
+  }
+  for (const [prefix, entry] of deviceTicketRateStore) {
+    if (now >= entry.resetAt) deviceTicketRateStore.delete(prefix);
+  }
 }
 
 // Export for tests

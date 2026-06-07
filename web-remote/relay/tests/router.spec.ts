@@ -124,52 +124,158 @@ describe('routing security invariant', () => {
   });
 });
 
-// ── E2E relay-blindness test ───────────────────────────────────────────────
+// ── E2E relay-blindness test (real crypto) ────────────────────────────────
 
-describe('E2E relay blindness', () => {
+import nodeCrypto from 'node:crypto';
+
+/**
+ * Derive an AES-256-GCM session key using Node.js crypto, mirroring the
+ * agent's deriveSessionKey in webRemote.cjs (P-256 ECDH + HKDF-SHA256).
+ */
+function deriveSessionKeyReal(
+  myPrivateKeyB64: string,
+  peerPublicKeyB64: string,
+  deviceId: string,
+): Buffer {
+  const myPrivKey = nodeCrypto.createPrivateKey({
+    key: Buffer.from(myPrivateKeyB64, 'base64url'),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const peerPubKey = nodeCrypto.createPublicKey({
+    key: Buffer.from(peerPublicKeyB64, 'base64url'),
+    format: 'der',
+    type: 'spki',
+  });
+  const sharedSecret = nodeCrypto.diffieHellman({ privateKey: myPrivKey, publicKey: peerPubKey });
+  const salt = Buffer.from(deviceId, 'utf8');
+  const info = Buffer.from('sm-e2e-v1', 'utf8');
+  return Buffer.from(nodeCrypto.hkdfSync('sha256', sharedSecret, salt, info, 32));
+}
+
+/** AES-256-GCM encrypt (matches agent's encryptBox). */
+function encryptBoxReal(plaintext: string, sessionKey: Buffer): { nonce: string; ciphertext: string } {
+  const nonce = nodeCrypto.randomBytes(12);
+  const cipher = nodeCrypto.createCipheriv('aes-256-gcm', sessionKey, nonce);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    nonce: nonce.toString('base64url'),
+    ciphertext: Buffer.concat([encrypted, tag]).toString('base64url'),
+  };
+}
+
+/** AES-256-GCM decrypt (matches agent's decryptBox). */
+function decryptBoxReal(nonceB64: string, ciphertextB64: string, sessionKey: Buffer): string | null {
+  try {
+    const nonce = Buffer.from(nonceB64, 'base64url');
+    const data = Buffer.from(ciphertextB64, 'base64url');
+    if (data.length < 16) return null;
+    const tag = data.subarray(data.length - 16);
+    const ciphertext = data.subarray(0, data.length - 16);
+    const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', sessionKey, nonce);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+describe('E2E relay blindness (real AES-256-GCM)', () => {
   /**
-   * When E2E encryption is active, the browser wraps inner commands in
-   * e2e:box envelopes. The relay routes these without being able to read the
-   * inner command type or payload. This test documents and verifies the
-   * invariant at the protocol level.
+   * SECURITY INVARIANT: The relay forwards e2e:box envelopes as opaque blobs.
+   * It cannot read the inner command type or payload without the session key
+   * (which never transits the relay). This test uses real AES-256-GCM to prove
+   * the invariant — not a mock ciphertext.
    */
-  it('e2e:box outer envelope reveals only opaque fields to a relay observer', () => {
-    // Simulate what the browser sends: an e2e:box wrapper around a hidden cmd.
-    const innerCommand = JSON.stringify({
+  it('relay sees only e2e:box with opaque ciphertext — not the inner command', () => {
+    // Set up a real P-256 ECDH keypair (simulating agent's stored keys)
+    const { privateKey: agentPrivDer, publicKey: agentPubDer } = nodeCrypto.generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      publicKeyEncoding: { type: 'spki', format: 'der' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+    });
+    const agentPrivB64 = agentPrivDer.toString('base64url');
+    const agentPubB64 = agentPubDer.toString('base64url');
+
+    // Browser generates its own ephemeral keypair
+    const { privateKey: browserPrivDer, publicKey: browserPubDer } = nodeCrypto.generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      publicKeyEncoding: { type: 'spki', format: 'der' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+    });
+    const browserPrivB64 = browserPrivDer.toString('base64url');
+    const browserPubB64 = browserPubDer.toString('base64url');
+
+    const deviceId = 'a1b2c3d4-0000-4000-8000-e5f6a7b8c9d0';
+
+    // Both sides derive the same session key (ECDH is commutative)
+    const agentKey = deriveSessionKeyReal(agentPrivB64, browserPubB64, deviceId);
+    const browserKey = deriveSessionKeyReal(browserPrivB64, agentPubB64, deviceId);
+    expect(agentKey.toString('hex')).toBe(browserKey.toString('hex'));
+
+    // Browser encrypts a command (secret terminal input the relay must not see)
+    const secretCommand = {
       type: 'cmd:pty:write',
       id: 'aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb',
-      deviceId: 'dev-uuid',
-      payload: { tabId: 'tab-1', data: 'secret terminal input' },
+      deviceId,
+      payload: { tabId: 'tab-1', data: 'export SECRET_KEY=hunter2; rm -rf /' },
       ts: 1_700_000_000_000,
-    });
-    // In a real E2E session, innerCommand would be AES-256-GCM encrypted.
-    // Here we simulate the ciphertext as opaque bytes (base64url).
-    const fakeCiphertext = Buffer.from(innerCommand).toString('base64url');
-    const fakeNonce = 'AAAAAAAAAAAAAAAAAA==';
+    };
+    const { nonce, ciphertext } = encryptBoxReal(JSON.stringify(secretCommand), browserKey);
 
+    // This is what the relay sees when forwarding the command:
     const relayVisibleEnvelope = {
       type: 'e2e:box',
       id: 'cccccccc-0000-4000-8000-dddddddddddd',
-      deviceId: 'dev-uuid',
-      payload: { nonce: fakeNonce, ciphertext: fakeCiphertext },
+      deviceId,
+      payload: { nonce, ciphertext },
       ts: 1_700_000_000_001,
     };
+    const relayJson = JSON.stringify(relayVisibleEnvelope);
 
-    // The relay ONLY sees these fields:
+    // The relay sees only 'e2e:box' — not the inner command type
     expect(relayVisibleEnvelope.type).toBe('e2e:box');
-    // The relay cannot determine the inner command type from the outer envelope.
-    expect(relayVisibleEnvelope.type).not.toContain('cmd:pty:write');
-    // payload.ciphertext is not parseable as a command by the relay (it's bytes).
-    // In production this would be AES-GCM output; here we verify the structure.
-    expect(typeof relayVisibleEnvelope.payload.ciphertext).toBe('string');
-    // The relay cannot read the secret terminal input from the outer envelope.
-    expect(JSON.stringify(relayVisibleEnvelope)).not.toContain('secret terminal input');
+    expect(relayJson).not.toContain('cmd:pty:write');
+    // The relay cannot read the secret payload
+    expect(relayJson).not.toContain('SECRET_KEY');
+    expect(relayJson).not.toContain('hunter2');
+    expect(relayJson).not.toContain('rm -rf');
+    // The ciphertext is genuinely opaque (not the plaintext base64-encoded)
+    expect(ciphertext).not.toBe(Buffer.from(JSON.stringify(secretCommand)).toString('base64url'));
 
-    // Relay-side observer cannot reconstruct the inner command without the session key.
-    // (This is enforced by AES-256-GCM in production; here we document the invariant.)
-    const relayObserverCanSee = Object.keys(relayVisibleEnvelope);
-    expect(relayObserverCanSee).not.toContain('cmd:pty:write');
-    expect(relayObserverCanSee.sort()).toEqual(['deviceId', 'id', 'payload', 'ts', 'type'].sort());
+    // The agent CAN decrypt it (proving the session key is shared correctly)
+    const decrypted = decryptBoxReal(nonce, ciphertext, agentKey);
+    expect(decrypted).not.toBeNull();
+    const inner = JSON.parse(decrypted!);
+    expect(inner.type).toBe('cmd:pty:write');
+    expect(inner.payload.data).toContain('SECRET_KEY');
+
+    // A relay-side observer with only the outer envelope cannot reconstruct the inner command
+    expect(Object.keys(relayVisibleEnvelope).sort()).toEqual(
+      ['deviceId', 'id', 'payload', 'ts', 'type'].sort(),
+    );
+  });
+
+  it('wrong session key produces auth-tag failure — relay cannot forge commands', () => {
+    const { privateKey: privDer, publicKey: pubDer } = nodeCrypto.generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      publicKeyEncoding: { type: 'spki', format: 'der' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+    });
+    const correctKey = deriveSessionKeyReal(
+      privDer.toString('base64url'),
+      pubDer.toString('base64url'),
+      'device-1',
+    );
+    const wrongKey = nodeCrypto.randomBytes(32); // random attacker key
+
+    const { nonce, ciphertext } = encryptBoxReal('{"type":"cmd:app:version"}', correctKey);
+
+    // Agent decrypts successfully with the correct key
+    expect(decryptBoxReal(nonce, ciphertext, correctKey)).not.toBeNull();
+    // Relay (or attacker) with wrong key fails GCM authentication
+    expect(decryptBoxReal(nonce, ciphertext, wrongKey)).toBeNull();
   });
 
   it('e2e:hello is the only plaintext key-exchange message; subsequent messages are opaque', () => {

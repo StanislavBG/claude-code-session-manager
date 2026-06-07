@@ -794,6 +794,7 @@ export interface WebRemoteDevice {
 export interface WebRemoteStatus {
   enabled: boolean;
   connected: boolean;
+  e2eActive: boolean;
   devices: WebRemoteDevice[];
 }
 

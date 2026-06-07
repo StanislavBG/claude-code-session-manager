@@ -10,6 +10,7 @@ export interface Device {
   email: string;
   issuedAt: number;
   isOnline: boolean;
+  devicePubKey?: string; // SPKI DER base64url — agent's E2E public key (P-256)
 }
 
 export interface DevicesResponse {

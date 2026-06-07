@@ -22,9 +22,9 @@ const DEVICE_RATE_DRAIN_MS = 600;
 // ── Envelope schema ────────────────────────────────────────────────────────
 
 const envelopeSchema = z.object({
-  type: z.string().min(1),
+  type: z.string().min(1).max(256),   // 256 chars is ample for any valid type string
   id: z.string().uuid(),
-  deviceId: z.string().optional(),
+  deviceId: z.string().max(128).optional(),
   payload: z.unknown().optional(),
   ts: z.number().int().positive(),
 });

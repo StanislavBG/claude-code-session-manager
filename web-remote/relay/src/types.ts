@@ -18,6 +18,7 @@ export interface OtpEntry {
   userId: string;
   email: string;
   expiresAt: number;  // unix ms
+  attempts: number;   // failed verification attempts; invalidated after 3
 }
 
 export interface DeviceTokenEntry {
@@ -26,7 +27,9 @@ export interface DeviceTokenEntry {
   userId: string;
   email: string;
   issuedAt: number;   // unix ms
+  expiresAt: number;  // unix ms — 90-day hard TTL (§4.1)
   revoked: boolean;
+  devicePubKey: string; // SPKI DER base64url — agent's E2E public key (P-256)
 }
 
 export interface WsTicketEntry {

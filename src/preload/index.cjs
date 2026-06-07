@@ -156,11 +156,6 @@ contextBridge.exposeInMainWorld('api', {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
     listConversations: () => ipcRenderer.invoke('history:list-conversations'),
   },
-  projectSkills: {
-    get: (cwd) => ipcRenderer.invoke('project-skills:get', { cwd }),
-    set: (cwd, skillId, enabled) =>
-      ipcRenderer.invoke('project-skills:set', { cwd, skillId, enabled }),
-  },
   files: {
     list: (path, showHidden) => ipcRenderer.invoke('files:list', { path, showHidden }),
     read: (path) => ipcRenderer.invoke('files:read', { path }),
@@ -279,6 +274,32 @@ contextBridge.exposeInMainWorld('api', {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('superagent:state-changed', listener);
       return () => ipcRenderer.removeListener('superagent:state-changed', listener);
+    },
+  },
+  webRemote: {
+    /** Current connection state (no token values). */
+    getStatus: () => ipcRenderer.invoke('webRemote:get-status'),
+    /** Turn remote control on. Initiates relay connection if a device is paired. */
+    enable: () => ipcRenderer.invoke('webRemote:enable'),
+    /** Turn remote control off. Immediately drops relay connection. */
+    disable: () => ipcRenderer.invoke('webRemote:disable'),
+    /** Pair a new device using the 8-character OTP shown in the web UI. */
+    pair: (otp) => ipcRenderer.invoke('webRemote:pair', { otp }),
+    /** Revoke a paired device by its deviceId. */
+    revokeDevice: (deviceId) => ipcRenderer.invoke('webRemote:revoke-device', { deviceId }),
+    /** Read the last N lines of today's audit log (default 50). */
+    auditTail: (lines) => ipcRenderer.invoke('webRemote:audit-tail', lines ? { lines } : {}),
+    /** Push event from main when connection status changes. */
+    onStatus: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('webRemote:status', listener);
+      return () => ipcRenderer.removeListener('webRemote:status', listener);
+    },
+    /** Push event when the relay revokes this device's token. */
+    onTokenRevoked: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('webRemote:token-revoked', listener);
+      return () => ipcRenderer.removeListener('webRemote:token-revoked', listener);
     },
   },
   kg: {

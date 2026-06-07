@@ -15,6 +15,7 @@ import {
   issueWsTicket,
   verifyDeviceToken,
   revokeDevice,
+  revokeAllDevicesForUser,
   getDevicesForUser,
 } from './tokens';
 
@@ -30,6 +31,34 @@ export function checkAllowlist(email: string, allowlistEnv: string): boolean {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   return allowed.includes(email.toLowerCase());
+}
+
+// ── /pair endpoint IP-based rate limiting ─────────────────────────────────
+
+const PAIR_RATE_MAX = 10;                // max attempts per IP per window
+const PAIR_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+interface PairRateEntry { count: number; resetAt: number }
+const pairIpRateStore = new Map<string, PairRateEntry>();
+
+function getClientIp(req: FastifyRequest): string {
+  // Respect X-Forwarded-For set by Render's proxy; fall back to direct address.
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0].trim();
+  }
+  return (req.socket?.remoteAddress) ?? 'unknown';
+}
+
+function checkPairRateLimit(ip: string, now = Date.now()): boolean {
+  const entry = pairIpRateStore.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    pairIpRateStore.set(ip, { count: 1, resetAt: now + PAIR_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= PAIR_RATE_MAX) return false;
+  entry.count++;
+  return true;
 }
 
 // ── OAuth2 client (module-level singleton) ─────────────────────────────────
@@ -217,16 +246,27 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
   });
 
   // ── POST /pair — agent exchanges OTP for device token ───────────────────
-  fastify.post<{ Body: { code?: string; deviceId?: string } }>(
+  // Accepts devicePubKey (SPKI DER base64url) for E2E encryption (PRD 10).
+  fastify.post<{ Body: { code?: string; deviceId?: string; devicePubKey?: string } }>(
     '/pair',
     { schema: { body: { type: 'object', required: ['code', 'deviceId'] } } },
     async (req, reply) => {
-      const { code, deviceId } = req.body;
+      // Per-IP rate limiting: max 10 /pair attempts per hour per source IP
+      const clientIp = getClientIp(req);
+      if (!checkPairRateLimit(clientIp)) {
+        return reply.status(429).send({ error: 'rate_limited' });
+      }
+
+      const { code, deviceId, devicePubKey } = req.body;
       if (!code || !deviceId) {
         return reply.status(400).send({ error: 'missing_fields' });
       }
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)) {
         return reply.status(400).send({ error: 'invalid_device_id' });
+      }
+      // devicePubKey is required for E2E (SPKI DER base64url, P-256, ~124 chars)
+      if (!devicePubKey || typeof devicePubKey !== 'string' || devicePubKey.length > 512) {
+        return reply.status(400).send({ error: 'missing_device_pub_key' });
       }
 
       const { verifyOtp, issueDeviceToken } = await import('./tokens');
@@ -235,7 +275,7 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
         return reply.status(result.status).send({ error: result.error });
       }
 
-      const deviceToken = issueDeviceToken(deviceId, result.userId, result.email);
+      const deviceToken = issueDeviceToken(deviceId, result.userId, result.email, devicePubKey);
       // Token returned to agent; NEVER logged
       reply.send({ deviceToken, deviceId });
     },
@@ -248,13 +288,19 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
 
     const { isDeviceOnline } = await import('./router');
     const devices = getDevicesForUser(auth.userId).map((d) => ({
-      ...d,
+      deviceId: d.deviceId,
+      email: d.email,
+      issuedAt: d.issuedAt,
+      expiresAt: d.expiresAt,
       isOnline: isDeviceOnline(d.deviceId),
+      // Expose the agent's E2E public key so the browser can do key agreement.
+      // Public keys are not secret; the relay seeing them is acceptable.
+      devicePubKey: d.devicePubKey,
     }));
     reply.send({ devices });
   });
 
-  // ── DELETE /api/devices/:deviceId — revoke a device token ───────────────
+  // ── DELETE /api/devices/:deviceId — revoke a single device token ─────────
   fastify.delete<{ Params: { deviceId: string } }>(
     '/api/devices/:deviceId',
     async (req, reply) => {
@@ -278,4 +324,25 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
       reply.send({ ok: true });
     },
   );
+
+  // ── DELETE /api/devices — panic: revoke ALL device tokens for this user ──
+  fastify.delete('/api/devices', async (req, reply) => {
+    const auth = requireBrowserSession(req, reply);
+    if (!auth) return;
+
+    const revokedIds = revokeAllDevicesForUser(auth.userId);
+
+    // Close all WS connections for revoked devices
+    const { notifyDeviceRevoked, closeSessionsForUser } = await import('./router');
+    for (const deviceId of revokedIds) {
+      notifyDeviceRevoked(deviceId);
+    }
+    // Also tear down all browser WS sessions so no stale commands can arrive
+    closeSessionsForUser(auth.userId);
+
+    reply.send({ ok: true, revokedCount: revokedIds.length });
+  });
 }
+
+// Export for tests
+export { checkPairRateLimit, pairIpRateStore };

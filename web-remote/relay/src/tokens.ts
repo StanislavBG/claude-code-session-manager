@@ -3,10 +3,12 @@ import type { OtpEntry, DeviceTokenEntry, WsTicketEntry } from './types';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const OTP_TTL_MS = 5 * 60 * 1000;           // 5 minutes
-const OTP_RATE_LIMIT_COUNT = 10;             // per user per hour
-const OTP_RATE_WINDOW_MS = 60 * 60 * 1000;  // 1 hour
-const WS_TICKET_TTL_MS = 30 * 1000;         // 30 seconds
+const OTP_TTL_MS = 5 * 60 * 1000;              // 5 minutes
+const OTP_MAX_ATTEMPTS = 3;                     // OTP invalidated after 3 failed verifications
+const OTP_RATE_LIMIT_COUNT = 10;                // per user per hour
+const OTP_RATE_WINDOW_MS = 60 * 60 * 1000;     // 1 hour
+const WS_TICKET_TTL_MS = 30 * 1000;            // 30 seconds
+const DEVICE_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90-day hard TTL (§4.1)
 
 // Unambiguous alphanumeric charset (excludes 0/O, 1/I, 8/B look-alikes)
 const OTP_CHARSET = 'ACDEFGHJKLMNPQRTUVWXY234679';
@@ -54,7 +56,7 @@ export function issueOtp(
   }
 
   const code = generateOtpCode();
-  otpStore.set(code, { code, userId, email, expiresAt: now + OTP_TTL_MS });
+  otpStore.set(code, { code, userId, email, expiresAt: now + OTP_TTL_MS, attempts: 0 });
   return { code };
 }
 
@@ -74,12 +76,35 @@ export function verifyOtp(
   return { userId: entry.userId, email: entry.email };
 }
 
+/**
+ * Record a failed pairing attempt against an OTP code.
+ * Returns true if the OTP was found and invalidated (3 strikes), false otherwise.
+ * Called by the /pair endpoint when it can't locate a matching OTP (wrong code)
+ * to protect against brute force across the entire OTP space.
+ */
+export function recordOtpFailure(userId: string, now = Date.now()): boolean {
+  // Find any live OTP for this user and increment its attempt counter.
+  // Invalidate if it hits OTP_MAX_ATTEMPTS.
+  for (const [code, entry] of otpStore) {
+    if (entry.userId === userId && now <= entry.expiresAt) {
+      entry.attempts++;
+      if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+        otpStore.delete(code);
+        return true; // OTP invalidated due to too many failures
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
 // ── Device tokens ──────────────────────────────────────────────────────────
 
 export function issueDeviceToken(
   deviceId: string,
   userId: string,
   email: string,
+  devicePubKey: string,
   now = Date.now(),
 ): string {
   // Revoke any existing token for this device (one token per device)
@@ -88,15 +113,26 @@ export function issueDeviceToken(
 
   // 256-bit random token (ARCHITECTURE.md §3.3)
   const token = crypto.randomBytes(32).toString('base64url');
-  const entry: DeviceTokenEntry = { token, deviceId, userId, email, issuedAt: now, revoked: false };
+  const entry: DeviceTokenEntry = {
+    token, deviceId, userId, email, issuedAt: now,
+    expiresAt: now + DEVICE_TOKEN_TTL_MS,
+    revoked: false,
+    devicePubKey,
+  };
   deviceTokenStore.set(token, entry);
   deviceByIdStore.set(deviceId, entry);
   return token;
 }
 
-export function verifyDeviceToken(token: string): DeviceTokenEntry | null {
+export function verifyDeviceToken(token: string, now = Date.now()): DeviceTokenEntry | null {
   const entry = deviceTokenStore.get(token);
   if (!entry || entry.revoked) return null;
+  if (now > entry.expiresAt) {
+    // Token expired — remove and treat as invalid
+    deviceTokenStore.delete(token);
+    deviceByIdStore.delete(entry.deviceId);
+    return null;
+  }
   return entry;
 }
 
@@ -109,14 +145,37 @@ export function revokeDevice(deviceId: string): boolean {
   return true;
 }
 
-export function getDevicesForUser(userId: string): Array<{ deviceId: string; email: string; issuedAt: number }> {
-  const result: Array<{ deviceId: string; email: string; issuedAt: number }> = [];
+export function getDevicesForUser(userId: string, now = Date.now()): Array<{ deviceId: string; email: string; issuedAt: number; expiresAt: number; devicePubKey: string }> {
+  const result: Array<{ deviceId: string; email: string; issuedAt: number; expiresAt: number; devicePubKey: string }> = [];
   for (const entry of deviceByIdStore.values()) {
-    if (entry.userId === userId && !entry.revoked) {
-      result.push({ deviceId: entry.deviceId, email: entry.email, issuedAt: entry.issuedAt });
+    if (entry.userId === userId && !entry.revoked && now <= entry.expiresAt) {
+      result.push({
+        deviceId: entry.deviceId,
+        email: entry.email,
+        issuedAt: entry.issuedAt,
+        expiresAt: entry.expiresAt,
+        devicePubKey: entry.devicePubKey,
+      });
     }
   }
   return result;
+}
+
+/**
+ * Revoke all device tokens for a given userId.
+ * Returns the list of revoked deviceIds.
+ */
+export function revokeAllDevicesForUser(userId: string): string[] {
+  const revoked: string[] = [];
+  for (const entry of Array.from(deviceByIdStore.values())) {
+    if (entry.userId === userId && !entry.revoked) {
+      entry.revoked = true;
+      deviceTokenStore.delete(entry.token);
+      deviceByIdStore.delete(entry.deviceId);
+      revoked.push(entry.deviceId);
+    }
+  }
+  return revoked;
 }
 
 // ── WS tickets (128-bit, 30 s TTL, single-use) ────────────────────────────
@@ -149,5 +208,12 @@ export function purgeExpired(now = Date.now()): void {
   }
   for (const [userId, rate] of otpRateStore) {
     if (now > rate.resetAt) otpRateStore.delete(userId);
+  }
+  // Purge expired device tokens
+  for (const [token, entry] of deviceTokenStore) {
+    if (now > entry.expiresAt) {
+      deviceTokenStore.delete(token);
+      deviceByIdStore.delete(entry.deviceId);
+    }
   }
 }

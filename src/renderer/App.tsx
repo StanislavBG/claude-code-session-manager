@@ -64,6 +64,7 @@ const SCREEN_KEYS = new Set<NavKey>([
   'system-prompt',
   'permissions',
   'settings',
+  'remote',
   // Tools (promoted from modal in v0.13.1)
   'voice',
   'dispatch',

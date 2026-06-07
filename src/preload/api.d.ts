@@ -452,10 +452,6 @@ export interface ListConversationsResult {
   scannedMs: number;
 }
 
-export interface ProjectSkillState {
-  skillId: string;
-  enabled: boolean;
-}
 
 export interface FileEntry {
   name: string;
@@ -786,6 +782,38 @@ export interface SuperAgentStateChangedEvent {
   state: SuperAgentRunState | null;
 }
 
+// ────────────────────────────────────────────── Web Remote (PRD 08)
+
+export interface WebRemoteDevice {
+  deviceId: string;
+  deviceName: string;
+  issuedAt: string;
+  lastConnectedAt: string | null;
+}
+
+export interface WebRemoteStatus {
+  enabled: boolean;
+  connected: boolean;
+  devices: WebRemoteDevice[];
+}
+
+export interface WebRemotePairResult {
+  ok: boolean;
+  deviceId?: string;
+  error?: string;
+}
+
+export interface WebRemoteMutationResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface WebRemoteAuditTailResult {
+  ok: boolean;
+  lines?: string[];
+  error?: string;
+}
+
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
@@ -893,10 +921,6 @@ export interface SessionManagerAPI {
     setConfig: (cfg: OtelConfig) => Promise<OtelSetConfigResult>;
     status: () => Promise<OtelStatus>;
     configPath: () => Promise<string>;
-  };
-  projectSkills: {
-    get: (cwd: string) => Promise<ProjectSkillState[]>;
-    set: (cwd: string, skillId: string, enabled: boolean) => Promise<{ ok: boolean }>;
   };
   files: {
     list: (path: string, showHidden?: boolean) => Promise<FilesListResult>;
@@ -1033,6 +1057,16 @@ export interface SessionManagerAPI {
     stop: (tabId: string) => Promise<{ ok: boolean }>;
     onStateChanged: (handler: (ev: SuperAgentStateChangedEvent) => void) => () => void;
   };
+  webRemote: {
+    getStatus: () => Promise<WebRemoteStatus>;
+    enable: () => Promise<WebRemoteMutationResult>;
+    disable: () => Promise<WebRemoteMutationResult>;
+    pair: (otp: string) => Promise<WebRemotePairResult>;
+    revokeDevice: (deviceId: string) => Promise<WebRemoteMutationResult>;
+    auditTail: (lines?: number) => Promise<WebRemoteAuditTailResult>;
+    onStatus: (handler: (status: WebRemoteStatus) => void) => () => void;
+    onTokenRevoked: (handler: (ev: { deviceId: string }) => void) => () => void;
+  };
   kg: {
     /** Distilled knowledge graph + ingest status for ONE project (`cwd`).
      *  Omit `cwd` for the most-active project. */
@@ -1096,11 +1130,13 @@ export interface KgState {
   };
 }
 export interface KgIngestProgress {
-  phase: 'start' | 'extract' | 'done' | 'error';
+  phase: 'start' | 'extract' | 'batch' | 'done' | 'error';
   ingesting: boolean;
   batch?: number;
   totalBatches?: number;
   added?: number;
+  /** Set on `batch`: the project cwd whose graph just committed. */
+  cwd?: string;
   error?: string;
 }
 

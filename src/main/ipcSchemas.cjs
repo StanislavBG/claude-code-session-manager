@@ -242,6 +242,23 @@ const agentMemoryDelete = z.object({
   entryId: z.string().regex(AGENT_MEMORY_ID_RE),
 }).strict();
 
+// ──────────────────────────────────────────── Web Remote
+// OTP is 8 uppercase alphanumeric chars (case-insensitive entry, normalised to upper in handler).
+const WEB_REMOTE_OTP_RE = /^[A-Z0-9]{8}$/i;
+const DEVICE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const webRemotePair = z.object({
+  otp: z.string().regex(WEB_REMOTE_OTP_RE),
+}).strict();
+
+const webRemoteRevokeDevice = z.object({
+  deviceId: z.string().regex(DEVICE_ID_RE),
+}).strict();
+
+const webRemoteAuditTail = z.object({
+  lines: z.number().int().min(1).max(500).optional(),
+}).strict();
+
 // ──────────────────────────────────────────── History
 const DATE_YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -371,6 +388,9 @@ module.exports = {
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
   schemas: {
+    webRemotePair,
+    webRemoteRevokeDevice,
+    webRemoteAuditTail,
     ptySpawn,
     ptyTabId,
     ptyWrite,

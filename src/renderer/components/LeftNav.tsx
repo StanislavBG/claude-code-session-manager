@@ -41,3 +41,4 @@ export type NavKey =
   | 'repoviz'
   | 'search'
   | 'prompts'
+  | 'remote'

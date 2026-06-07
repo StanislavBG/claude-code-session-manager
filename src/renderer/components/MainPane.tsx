@@ -29,6 +29,7 @@ import { Tasks } from './tabs/Tasks'
 import { Projects } from './tabs/Projects'
 import { DocEditor } from './tabs/DocEditor'
 import { Scheduler } from './tabs/Scheduler'
+import { WebRemote } from './tabs/WebRemote'
 import { SectionFrame } from './layout/SectionFrame'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
@@ -87,6 +88,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'system-prompt': { eyebrow: 'Configure',  title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'permissions':   { eyebrow: 'Configure',  title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
   'settings':      { eyebrow: 'Configure',  title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
+  'remote':        { eyebrow: 'Configure',  title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { eyebrow: 'Tools', title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
   'dispatch':         { eyebrow: 'Tools', title: 'Dispatch',            intro: 'Broadcast work to multiple agents: Boss (specialists on the active tab), Orchestrate (a sub-task per tab), Race (same prompt, pick a winner), or launch a pre-baked Hive template.' },
@@ -143,6 +145,7 @@ function renderScreen(active: NavKey, ctx: {
       case 'system-prompt': return <SystemPrompt />
       case 'permissions':   return <Permissions />
       case 'settings':      return <Settings />
+      case 'remote':        return <WebRemote />
       // Former-modal tools rendered with variant="page" so they paint inline
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.

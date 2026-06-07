@@ -3,9 +3,12 @@ import {
   generateOtpCode,
   issueOtp,
   verifyOtp,
+  recordOtpFailure,
   issueDeviceToken,
   verifyDeviceToken,
   revokeDevice,
+  revokeAllDevicesForUser,
+  getDevicesForUser,
   issueWsTicket,
   consumeWsTicket,
   otpStore,
@@ -14,6 +17,8 @@ import {
   wsTicketStore,
   otpRateStore,
 } from '../src/tokens';
+
+const FAKE_PUB_KEY = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfake=';
 
 // Reset all in-process stores before each test for isolation
 beforeEach(() => {
@@ -95,6 +100,14 @@ describe('issueOtp', () => {
     const r = issueOtp('user-b', 'b@example.com', now);
     expect('code' in r).toBe(true);
   });
+
+  it('OTP entry initialises with attempts = 0', () => {
+    const result = issueOtp('user-1', 'user1@example.com');
+    if ('code' in result) {
+      const entry = otpStore.get(result.code);
+      expect(entry?.attempts).toBe(0);
+    }
+  });
 });
 
 // ── verifyOtp ─────────────────────────────────────────────────────────────
@@ -155,34 +168,87 @@ describe('verifyOtp', () => {
   });
 });
 
+// ── recordOtpFailure (brute-force lockout) ────────────────────────────────
+
+describe('recordOtpFailure', () => {
+  it('increments attempt counter on each call', () => {
+    const now = Date.now();
+    const r = issueOtp('user-1', 'user1@example.com', now);
+    if (!('code' in r)) throw new Error('expected code');
+    recordOtpFailure('user-1', now);
+    const entry = otpStore.get(r.code);
+    expect(entry?.attempts).toBe(1);
+  });
+
+  it('invalidates the OTP after 3 failures', () => {
+    const now = Date.now();
+    const r = issueOtp('user-1', 'user1@example.com', now);
+    if (!('code' in r)) throw new Error('expected code');
+    recordOtpFailure('user-1', now); // attempt 1
+    recordOtpFailure('user-1', now); // attempt 2
+    const invalidated = recordOtpFailure('user-1', now); // attempt 3 → lockout
+    expect(invalidated).toBe(true);
+    // OTP must be gone from the store
+    expect(otpStore.has(r.code)).toBe(false);
+    // Correct code should now fail
+    const result = verifyOtp(r.code, now + 100);
+    expect('error' in result).toBe(true);
+  });
+
+  it('returns false when fewer than 3 failures', () => {
+    const now = Date.now();
+    issueOtp('user-1', 'user1@example.com', now);
+    expect(recordOtpFailure('user-1', now)).toBe(false);
+    expect(recordOtpFailure('user-1', now)).toBe(false);
+  });
+
+  it('returns false when no active OTP exists for the user', () => {
+    expect(recordOtpFailure('no-such-user')).toBe(false);
+  });
+});
+
 // ── issueDeviceToken ──────────────────────────────────────────────────────
 
 describe('issueDeviceToken', () => {
   it('returns a 256-bit base64url token (43 chars)', () => {
-    const token = issueDeviceToken('device-1', 'user-1', 'user1@example.com');
+    const token = issueDeviceToken('device-1', 'user-1', 'user1@example.com', FAKE_PUB_KEY);
     // base64url of 32 bytes = 43 chars
     expect(token).toHaveLength(43);
     expect(token).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
   it('stores the token in deviceTokenStore and deviceByIdStore', () => {
-    const token = issueDeviceToken('device-1', 'user-1', 'user1@example.com');
+    const token = issueDeviceToken('device-1', 'user-1', 'user1@example.com', FAKE_PUB_KEY);
     expect(deviceTokenStore.has(token)).toBe(true);
     expect(deviceByIdStore.has('device-1')).toBe(true);
   });
 
   it('replaces the old token when re-issuing for the same deviceId', () => {
-    const t1 = issueDeviceToken('device-1', 'user-1', 'u@e.com');
-    const t2 = issueDeviceToken('device-1', 'user-1', 'u@e.com');
+    const t1 = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
+    const t2 = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
     expect(deviceTokenStore.has(t1)).toBe(false);
     expect(deviceTokenStore.has(t2)).toBe(true);
   });
 
   it('generates unique tokens', () => {
     const tokens = new Set(
-      Array.from({ length: 50 }, (_, i) => issueDeviceToken(`device-${i}`, 'user-1', 'u@e.com')),
+      Array.from({ length: 50 }, (_, i) => issueDeviceToken(`device-${i}`, 'user-1', 'u@e.com', FAKE_PUB_KEY)),
     );
     expect(tokens.size).toBe(50);
+  });
+
+  it('stores the devicePubKey in the entry', () => {
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
+    const entry = deviceTokenStore.get(token);
+    expect(entry?.devicePubKey).toBe(FAKE_PUB_KEY);
+  });
+
+  it('sets a 90-day expiry on the token', () => {
+    const now = 1_000_000_000_000;
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY, now);
+    const entry = deviceTokenStore.get(token);
+    const expectedExpiry = now + 90 * 24 * 60 * 60 * 1000;
+    expect(entry?.expiresAt).toBe(expectedExpiry);
   });
 });
 
@@ -190,7 +256,7 @@ describe('issueDeviceToken', () => {
 
 describe('verifyDeviceToken', () => {
   it('returns entry for a valid token', () => {
-    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com');
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
     const entry = verifyDeviceToken(token);
     expect(entry).not.toBeNull();
     expect(entry?.deviceId).toBe('device-1');
@@ -202,9 +268,33 @@ describe('verifyDeviceToken', () => {
   });
 
   it('returns null after revocation', () => {
-    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com');
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
     revokeDevice('device-1');
     expect(verifyDeviceToken(token)).toBeNull();
+  });
+
+  it('returns null for an expired token', () => {
+    const now = 1_000_000_000_000;
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY, now);
+    // Check well after the 90-day TTL
+    const expired = now + 91 * 24 * 60 * 60 * 1000;
+    expect(verifyDeviceToken(token, expired)).toBeNull();
+  });
+
+  it('removes expired tokens from both stores', () => {
+    const now = 1_000_000_000_000;
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY, now);
+    const expired = now + 91 * 24 * 60 * 60 * 1000;
+    verifyDeviceToken(token, expired);
+    expect(deviceTokenStore.has(token)).toBe(false);
+    expect(deviceByIdStore.has('device-1')).toBe(false);
+  });
+
+  it('is still valid just before the 90-day boundary', () => {
+    const now = 1_000_000_000_000;
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY, now);
+    const almostExpired = now + 89 * 24 * 60 * 60 * 1000;
+    expect(verifyDeviceToken(token, almostExpired)).not.toBeNull();
   });
 });
 
@@ -212,7 +302,7 @@ describe('verifyDeviceToken', () => {
 
 describe('revokeDevice', () => {
   it('returns true when the device existed', () => {
-    issueDeviceToken('device-1', 'user-1', 'u@e.com');
+    issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
     expect(revokeDevice('device-1')).toBe(true);
   });
 
@@ -221,10 +311,58 @@ describe('revokeDevice', () => {
   });
 
   it('removes the token from both stores', () => {
-    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com');
+    const token = issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
     revokeDevice('device-1');
     expect(deviceTokenStore.has(token)).toBe(false);
     expect(deviceByIdStore.has('device-1')).toBe(false);
+  });
+});
+
+// ── revokeAllDevicesForUser ───────────────────────────────────────────────
+
+describe('revokeAllDevicesForUser', () => {
+  it('revokes all devices for the given user', () => {
+    issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
+    issueDeviceToken('device-2', 'user-1', 'u@e.com', FAKE_PUB_KEY);
+    const revoked = revokeAllDevicesForUser('user-1');
+    expect(revoked.sort()).toEqual(['device-1', 'device-2'].sort());
+    expect(deviceByIdStore.size).toBe(0);
+  });
+
+  it('does not revoke devices belonging to a different user', () => {
+    issueDeviceToken('device-1', 'user-1', 'u1@e.com', FAKE_PUB_KEY);
+    issueDeviceToken('device-2', 'user-2', 'u2@e.com', FAKE_PUB_KEY);
+    revokeAllDevicesForUser('user-1');
+    expect(deviceByIdStore.has('device-2')).toBe(true);
+  });
+
+  it('returns empty array when user has no devices', () => {
+    expect(revokeAllDevicesForUser('nobody')).toEqual([]);
+  });
+});
+
+// ── getDevicesForUser (includes devicePubKey + expiry filtering) ──────────
+
+describe('getDevicesForUser', () => {
+  it('returns devices with devicePubKey', () => {
+    issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
+    const devices = getDevicesForUser('user-1');
+    expect(devices).toHaveLength(1);
+    expect(devices[0].devicePubKey).toBe(FAKE_PUB_KEY);
+  });
+
+  it('excludes expired devices', () => {
+    const now = 1_000_000_000_000;
+    issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY, now);
+    const expired = now + 91 * 24 * 60 * 60 * 1000;
+    const devices = getDevicesForUser('user-1', expired);
+    expect(devices).toHaveLength(0);
+  });
+
+  it('excludes revoked devices', () => {
+    issueDeviceToken('device-1', 'user-1', 'u@e.com', FAKE_PUB_KEY);
+    revokeDevice('device-1');
+    expect(getDevicesForUser('user-1')).toHaveLength(0);
   });
 });
 

@@ -1934,4 +1934,85 @@ async function init() {
   }
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL };
+// remote — callable from webRemote.cjs without going through IPC.
+const remote = {
+  async getState() {
+    const state = await readQueue();
+    await reconcile(state);
+    await writeQueue(state);
+    return buildScheduleStatePayload(state, { withPaths: true });
+  },
+
+  async readPrd(slug) {
+    const filePath = safeSlugPath(slug);
+    if (!filePath) return { ok: false, error: 'invalid slug' };
+    try {
+      const text = await fsp.readFile(filePath, 'utf8');
+      return { ok: true, text };
+    } catch (e) {
+      return { ok: false, error: e?.message };
+    }
+  },
+
+  async readLog(slug, runId) {
+    const logPath = path.resolve(path.join(RUNS_DIR, runId, `${slug}.log`));
+    if (!logPath.startsWith(RUNS_DIR + path.sep)) {
+      return { ok: false, error: 'invalid slug or runId' };
+    }
+    try {
+      const text = await fsp.readFile(logPath, 'utf8');
+      return { ok: true, text };
+    } catch (e) {
+      return { ok: false, error: e?.message };
+    }
+  },
+
+  async writePrd(slug, body) {
+    const resolved = safeSlugPath(slug);
+    if (!resolved) return { ok: false, error: 'invalid slug' };
+    try {
+      await config.writeTextAtomic(resolved, body);
+      const stat = await fsp.stat(resolved);
+      return { ok: true, bytesWritten: stat.size };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? 'write failed' };
+    }
+  },
+
+  async resetJob(slug) {
+    if (!safeSlugPath(slug)) return { ok: false, error: 'invalid slug' };
+    const found = await mutate((state) => {
+      const idx = state.jobs.findIndex((j) => j.slug === slug);
+      if (idx < 0) return false;
+      resetJobFields(state.jobs[idx]);
+      return true;
+    });
+    if (!found) return { ok: false, error: 'not found' };
+    await broadcast();
+    return { ok: true };
+  },
+
+  async runNow() {
+    await clearPause('run-now');
+    runDueJobs().catch((e) => logs.writeLine({
+      level: 'error', scope: 'scheduler',
+      message: 'runDueJobs error (remote:run-now)', meta: { error: e?.message },
+    }));
+    return { ok: true };
+  },
+
+  async setConfig(partial) {
+    const cfg = await mutate((state) => {
+      const { supervisor: supPartial, ...rest } = partial;
+      state.config = { ...state.config, ...rest };
+      if (supPartial !== undefined) {
+        state.config.supervisor = { ...(state.config.supervisor ?? {}), ...supPartial };
+      }
+      return state.config;
+    });
+    await rescheduleTimer();
+    return { ok: true, config: cfg };
+  },
+};
+
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote };

@@ -35,11 +35,11 @@ const { registerDocEditorHandlers } = require('./docEditor.cjs');
 const git = require('./git.cjs');
 const superagent = require('./superagent.cjs');
 const kg = require('./kg.cjs');
-const { registerProjectSkillsHandlers } = require('./projectSkills.cjs');
 const filesIpc = require('./files.cjs');
 const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
+const webRemote = require('./webRemote.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
@@ -626,11 +626,11 @@ agentMemory.registerAgentMemoryHandlers();
 registerDocEditorHandlers();
 git.register(ipcMain);
 superagent.registerSuperAgentHandlers();
-registerProjectSkillsHandlers();
 filesIpc.registerFilesHandlers();
 searchIpc.registerSearchHandlers();
 repoAnalyzer.register(ipcMain);
 hivesIpc.registerHiveHandlers();
+webRemote.registerRemoteHandlers();
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());
@@ -918,8 +918,12 @@ app.whenReady().then(async () => {
   pluginInstall.attachWindow(mainWindow);
   superagent.attachWindow(mainWindow);
   kg.attachWindow(mainWindow);
+  webRemote.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
+  });
+  webRemote.init().catch((e) => {
+    logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
   // Knowledge Graph: watch the prompt log + register kg:* IPC. Best-effort.
   try { kg.init({ logger: logs }); } catch (e) {
@@ -964,6 +968,7 @@ let teardownDone = false;
 function runShutdownCleanup() {
   if (teardownDone) return;          // idempotent — will-quit may still fire after an app.exit path
   teardownDone = true;
+  webRemote.destroy();
   // Mark a clean exit so the next boot can distinguish a graceful quit from an
   // OOM-kill / native crash (which leaves the sentinel `open`).
   crashDiagnostics.markCleanShutdown();

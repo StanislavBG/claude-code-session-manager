@@ -71,7 +71,8 @@ interface PageConfig {
 
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'skills':        { eyebrow: 'Workspace',  title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
-  'subagents':     { eyebrow: 'Workspace',  title: 'The hive',                  intro: 'Sub-agents working in parallel on the active session. Each row shows what it was asked to do and where it landed.' },
+  // 'subagents' intentionally omitted: Subagents owns its own full-bleed editorial header
+  // ("The hive" h1 + eyebrow + blurb). Adding it here would double-render the heading.
   'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { eyebrow: 'Workspace',  title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
   'knowledge-graph': { eyebrow: 'Workspace', title: 'Knowledge Graph',          intro: 'Distilled intelligence over your raw prompt log — entities and relations extracted from what you actually typed, with grounded Q&A over your own history. Distinct from Memory (curated facts Claude reads back); this is derived analytics you never hand-edit.' },

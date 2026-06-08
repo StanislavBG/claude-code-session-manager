@@ -32,6 +32,11 @@ export default {
         },
         sage: '#6f7d52',
         butter: '#e4b85a',
+        // Hive accent palette — three extra low-chroma tones to supplement
+        // accent/sage/butter for the 6-slot hive card rotation.
+        'hive-slate': '#5f6f86',
+        'hive-plum': '#8a5a6e',
+        'hive-teal': '#4f7d72',
       },
       fontFamily: {
         // Almanac trio: Geist for UI, Newsreader for editorial serif display

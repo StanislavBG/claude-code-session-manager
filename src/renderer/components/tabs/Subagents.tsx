@@ -19,6 +19,7 @@ import {
 } from '../../lib/agentFrontmatter'
 import { CANONICAL_TOOLS, isCanonicalTool } from '../../data/canonicalTools'
 import { toast } from '../../state/toast'
+import { HiveSubTabs, LaunchView } from './subagents/hive-primitives'
 
 const MODEL_OPTIONS = ['inherit', 'opus', 'sonnet', 'haiku'] as const
 const EFFORT_OPTIONS = ['', 'low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -45,7 +46,7 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
   const [scope, setScope] = useState<Scope>('user')
   const [agents, setAgents] = useState<AgentDef[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [mode, setMode] = useState<'configured' | 'live' | 'library'>('configured')
+  const [mode, setMode] = useState<'launch' | 'live' | 'configured' | 'library'>('launch')
   const [filter, setFilter] = useState('')
 
   const dir = useMemo(() => (home ? agentsDir(home, cwd, scope) : null), [home, cwd, scope])
@@ -111,135 +112,149 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
   const selectedAgent = selectedPath ? agents.find((a) => a.path === selectedPath) ?? null : null
 
   return (
-    <Panel
-      toolbar={
-        <>
-          <div className="inline-flex rounded border border-line overflow-hidden">
-            {(['configured', 'live', 'library'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`px-2.5 py-1 text-xs ${
-                  mode === m ? 'bg-bg-hi text-fg' : 'bg-bg-elev text-fg-dim hover:text-fg hover:bg-bg-hi'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* ── Editorial header + sub-tab bar ── */}
+      <div className="shrink-0 px-9 pt-7 pb-5 border-b border-line bg-bg">
+        <div className="text-xs font-bold tracking-[0.8px] uppercase text-fg-faint mb-1">
+          Workspace · Subagents
+        </div>
+        <div className="flex items-baseline gap-4 flex-wrap mb-5">
+          <h1 className="m-0 font-serif text-4xl font-semibold leading-none tracking-tight text-fg shrink-0">
+            The hive
+          </h1>
+          <p className="m-0 flex-1 text-[14.5px] text-fg-dim leading-relaxed max-w-xl">
+            Fire a bundle of focused subagents at a task. Each works in its own context and hands back one digest — your main session never drowns in their output.
+          </p>
+        </div>
+        <HiveSubTabs value={mode} onChange={setMode} />
+      </div>
+
+      {/* ── Content area — each sub-view manages its own overflow ── */}
+      <div className="flex-1 min-h-0">
+        {/* Launch — scrollable, sticky right panel */}
+        {mode === 'launch' && (
+          <div className="h-full overflow-auto">
+            <LaunchView
+              onLaunchHive={onLaunchHive}
+              onSwitchToLive={() => setMode('live')}
+            />
           </div>
-          {mode === 'configured' && (
-            <>
-              <div className="ml-2">
-                <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
-              </div>
-              <span className="ml-3 text-fg-faint">{agents.length} agents</span>
-              {selectedAgent && (
-                <ProvenanceBadge
-                  scope={selectedAgent.scope}
-                  input={{ type: 'subagent', name: selectedAgent.name }}
-                  className="ml-3"
-                />
-              )}
-            </>
-          )}
-          <div className="flex-1" />
-          {/* This tab only MONITORS sub-agents; the launcher lives in
-              Dispatch → Hives. Surface a direct jump so the two aren't
-              orphaned from each other. */}
-          {onLaunchHive && (
-            <button
-              onClick={onLaunchHive}
-              title="Open Dispatch → Hives to launch a pre-baked swarm"
-              className="px-2.5 py-1 text-xs text-accent border border-accent/40 rounded hover:bg-accent/10 transition-colors"
-            >
-              Launch a hive →
-            </button>
-          )}
-        </>
-      }
-      footer={
-        mode === 'configured' && selectedPath && file ? (
-          <SaveBar
-            dirty={file.dirty}
-            busy={file.busy}
-            parseError={saveError}
-            lastSavedAt={file.lastSavedAt}
-            onSave={async () => {
-              setSaveError(null)
-              const r = await saveText(selectedPath)
-              if (!r.ok) setSaveError(r.error ?? 'save failed')
-            }}
-            onRevert={() => {
-              setSaveError(null)
-              revert(selectedPath)
-            }}
-          />
-        ) : null
-      }
-    >
-      {mode === 'library' ? (
-        <AgentsLibrary />
-      ) : mode === 'configured' ? (
-        scope === 'project' && !cwd ? (
-          <EmptyState title="no active project" />
-        ) : (
-          <ListDetail
-            sidebar={
-              <div className="py-2">
-                <div className="px-2 pb-1">
-                  <input
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                    placeholder="filter…"
-                    className="w-full bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
-                  />
+        )}
+
+        {/* Library */}
+        {mode === 'library' && (
+          <Panel>
+            <AgentsLibrary />
+          </Panel>
+        )}
+
+        {/* Configured — editor with scope switcher toolbar + save footer */}
+        {mode === 'configured' && (
+          <Panel
+            toolbar={
+              <>
+                <div className="ml-0">
+                  <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
                 </div>
-                {agents.length === 0 ? (
-                  <div className="px-3 py-1 text-xs text-fg-faint italic">no agents defined</div>
-                ) : (
-                  agents.filter((a) => !filter || a.name.toLowerCase().includes(filter.toLowerCase())).map((a) => (
-                    <button
-                      key={a.path}
-                      onClick={() => setSelectedPath(a.path)}
-                      className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between gap-2 ${
-                        selectedPath === a.path
-                          ? 'bg-bg-hi text-fg'
-                          : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                      }`}
-                    >
-                      <span className="truncate">{a.name}</span>
-                      <ProvenanceBadge
-                        interactive={false}
-                        scope={a.scope}
-                        input={{ type: 'subagent', name: a.name }}
-                      />
-                    </button>
-                  ))
+                <span className="ml-3 text-fg-faint">{agents.length} agents</span>
+                {selectedAgent && (
+                  <ProvenanceBadge
+                    scope={selectedAgent.scope}
+                    input={{ type: 'subagent', name: selectedAgent.name }}
+                    className="ml-3"
+                  />
                 )}
-              </div>
+              </>
             }
-            detail={
+            footer={
               selectedPath && file ? (
-                <AgentEditor
-                  path={selectedPath}
-                  text={file.draftRaw}
-                  onChange={(v) => {
+                <SaveBar
+                  dirty={file.dirty}
+                  busy={file.busy}
+                  parseError={saveError}
+                  lastSavedAt={file.lastSavedAt}
+                  onSave={async () => {
                     setSaveError(null)
-                    setDraft(selectedPath, v)
+                    const r = await saveText(selectedPath)
+                    if (!r.ok) setSaveError(r.error ?? 'save failed')
+                  }}
+                  onRevert={() => {
+                    setSaveError(null)
+                    revert(selectedPath)
                   }}
                 />
-              ) : (
-                <EmptyState title="select an agent" />
-              )
+              ) : null
             }
-          />
-        )
-      ) : !activeTab ? (
-        <EmptyState title="no active session" hint="open a terminal tab to watch live subagents" />
-      ) : (
-        <LiveAgentsPanel tabId={activeTab.id} live={live} />
-      )}
-    </Panel>
+          >
+            {scope === 'project' && !cwd ? (
+              <EmptyState title="no active project" />
+            ) : (
+              <ListDetail
+                sidebar={
+                  <div className="py-2">
+                    <div className="px-2 pb-1">
+                      <input
+                        value={filter}
+                        onChange={(e) => setFilter(e.target.value)}
+                        placeholder="filter…"
+                        className="w-full bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
+                      />
+                    </div>
+                    {agents.length === 0 ? (
+                      <div className="px-3 py-1 text-xs text-fg-faint italic">no agents defined</div>
+                    ) : (
+                      agents.filter((a) => !filter || a.name.toLowerCase().includes(filter.toLowerCase())).map((a) => (
+                        <button
+                          key={a.path}
+                          onClick={() => setSelectedPath(a.path)}
+                          className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between gap-2 ${
+                            selectedPath === a.path
+                              ? 'bg-bg-hi text-fg'
+                              : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                          }`}
+                        >
+                          <span className="truncate">{a.name}</span>
+                          <ProvenanceBadge
+                            interactive={false}
+                            scope={a.scope}
+                            input={{ type: 'subagent', name: a.name }}
+                          />
+                        </button>
+                      ))
+                    )}
+                  </div>
+                }
+                detail={
+                  selectedPath && file ? (
+                    <AgentEditor
+                      path={selectedPath}
+                      text={file.draftRaw}
+                      onChange={(v) => {
+                        setSaveError(null)
+                        setDraft(selectedPath, v)
+                      }}
+                    />
+                  ) : (
+                    <EmptyState title="select an agent" />
+                  )
+                }
+              />
+            )}
+          </Panel>
+        )}
+
+        {/* Live */}
+        {mode === 'live' && (
+          <Panel>
+            {!activeTab ? (
+              <EmptyState title="no active session" hint="open a terminal tab to watch live subagents" />
+            ) : (
+              <LiveAgentsPanel tabId={activeTab.id} live={live} />
+            )}
+          </Panel>
+        )}
+      </div>
+    </div>
   )
 }
 

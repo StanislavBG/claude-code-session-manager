@@ -60,7 +60,13 @@ function AppInner() {
       if (m.deviceId && m.status) {
         const online = m.status === 'connected';
         setDeviceOnline(m.deviceId, online);
-        if (online) setActiveDevice(m.deviceId);
+        if (online) {
+          setActiveDevice(m.deviceId);
+          // Negotiate E2E (P-256 ECDH → AES-256-GCM) so the relay only ever sees
+          // ciphertext. Idempotent — initiateE2E no-ops if the session exists.
+          const dev = useStore.getState().devices.find((d) => d.deviceId === m.deviceId);
+          if (dev?.devicePubKey) socket.initiateE2E(m.deviceId, dev.devicePubKey).catch(console.warn);
+        }
       }
     });
     const offList = socket.on('event:session:list', (m: Envelope) => {
@@ -99,6 +105,16 @@ function AppInner() {
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;
+
+  // Fallback: negotiate E2E for the active device once its pubKey is known —
+  // covers the case where event:device:status arrived before getDevices resolved.
+  // initiateE2E is idempotent (no-ops if a session is already established).
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (socket && online && device?.devicePubKey && device.deviceId) {
+      socket.initiateE2E(device.deviceId, device.devicePubKey).catch(() => {});
+    }
+  }, [online, device?.deviceId, device?.devicePubKey]);
 
   if (online) {
     return <Cockpit socket={socketRef.current} deviceId={activeDeviceId!} />;

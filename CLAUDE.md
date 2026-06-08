@@ -1,6 +1,6 @@
 # Claude Code Session Manager
 
-Electron desktop app — local cockpit for Claude Code CLI. Terminal + 17 config/observability tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, Usage, Subagents, History, Scheduler, etc.).
+Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, Usage, Subagents, History, Scheduler, Knowledge Graph, Web Remote, Memory, Permissions, etc.). Mobile web cockpit at bilko.run (v2: same-origin relay + session state/summary protocol).
 
 ## Stack
 
@@ -20,27 +20,49 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `index.cjs` — BrowserWindow + IPC registration. Navigation locked: `setWindowOpenHandler` denies, `will-navigate` allows only the dev URL.
 - `config.cjs` — fs layer. **All paths go through `validatePath` (allowedRoots = home dir)**. Atomic writes via tmp + rename. Chokidar watchers refcounted per absolute path.
 - `transcripts.cjs` — tails `~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl`, classifies events, ring-buffers per tab, broadcasts `transcript:event:<tabId>`.
-- `scheduler.cjs` — runs PRDs from `~/.claude/session-manager/scheduled-plans/prds/` as `claude -p` jobs. Modes: `manual` / `on-reset` / `when-available` (default; polls billing usage every 10 min — `POLL_INTERVAL_MS` in `lib/schedulerConfig.cjs`). Auto-pause on rate-limit, auto-resume at next 5h reset.
+- `kg.cjs` — knowledge graph extraction. Tails transcripts, filters automated prompts (role-play patterns, long machine-generated data), calls `claude -p` with extraction prompt + EXTRACTION_SYSTEM role. Per-project vocab + per-run caps (MAX_EXTRACTIONS_PER_RUN=30, MAX_TAIL_BYTES=8MB).
+- `scheduler.cjs` — runs PRDs from `~/.claude/session-manager/scheduled-plans/prds/` as `claude -p` jobs. Modes: `manual` / `on-reset` / `when-available` (default; polls billing usage every 10 min — `POLL_INTERVAL_MS` in `lib/schedulerConfig.cjs`). Auto-pause on rate-limit, auto-resume at next 5h reset. **Boot reconciliation**: on startup, reaps orphaned jobs (PIDs no longer alive) and logs outcome (success/timeout/error). **Dead-process reaper**: background process check + PID-alive validation, run-outcome classifier to detect hangs. Both reduce manual cleanup of stuck PRD jobs.
 - `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by SM_SUPERVISOR_DISABLE.
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
 - `teams.cjs` — enumerates `~/.claude/teams/<name>/config.json`; gates the AppStatusBar team pill behind `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
 - `queueOps.cjs` — scheduler PRD queue linter (unbounded-loop + post-AC overrun detection) + archive + retag.
 - `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9\-/]+$/`, 5 min kill ceiling, single in-flight per slug.
-- `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool (NEW cycle 3).
+- `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool.
+- `webRemoteServer.cjs` — same-origin relay server for web-remote mobile cockpit. Ping/auth/session state/summary RPC endpoints. Rate limits + audit log.
 
 **Renderer** (`src/renderer/`):
-- `state/config.ts` — per-path FileState with dirty tracking.
-- `state/live.ts` — per-tab derived state (todos, plans, agents, usage) fed by transcript events.
+- `state/config.ts` — per-path FileState with dirty tracking. Backed by config.cjs IPC.
+- `state/live.ts` — per-tab derived state (todos, plans, agents, usage) fed by transcript events. Subscribed to `transcript:event:<tabId>` from main process.
 - `state/voice.ts` — voice store + auto-submit timer + idle-stop timer + drain watchdog.
+- `state/hives.ts` — subagent hive definitions (Configured/Library views), EditingRole, ToolChip tone + paletted rendering (HIVE_PALETTE).
+- `state/orchestrator.ts` — per-running hive session state (roles, tools, lifecycle). Ephemeral, cleared on hive stop.
+- `state/scheduleState.ts` — scheduler queue state (jobs, history, filter state, per-project group ordering). Subscribed to schedule IPC events.
+- `state/toast.ts` — toast message queue. Consumed by components via `useToast()`.
 - `components/tabs/Settings.tsx` — canonical "scoped editor" shape (ScopeSwitcher + SaveBar + JsonEditor). Other scoped tabs follow it.
 - `components/tabs/Skills.tsx` — canonical "list+detail" shape. Other list tabs (Subagents, Hooks, McpServers, Plugins) follow it.
+- `components/tabs/Scheduler.tsx` — Scheduler cockpit (Almanac design). Renders Queue/PRDs/History via SchedulePanel + scheduleState.
+- `components/tabs/Subagents.tsx` — Hive cockpit (Launch-first editorial shell). Conductor for Configured/Library/Live sub-tabs. Reads hives.ts + live.ts.
+- `components/tabs/KnowledgeGraph.tsx` — Graph visualization + search. Renders entities/relations from `~/.claude/projects/<cwd>/knowledge-graph/`.
+- `components/tabs/WebRemote.tsx` — web-remote cockpit: relay URL, session state, device list, tunnel status.
+- `components/SchedulePanel.tsx` — modular pane (Queue/PRDs/History tabs). Extracted 2026-06 to be reusable by Scheduler tab + web-remote. Owns filter state.
+- `components/tabs/scheduler/sched-primitives.tsx` — Almanac design shared: SchBadge (status color/mark), ProjectTag, DetailBlock/Line (project dots hashed-color palette).
+- `components/tabs/subagents/hive-primitives.tsx` — Hive design shared: ToolChip (read/write tone), StatusPill, HiveCell, HIVE_PALETTE (6 accents), hiveEstimate cost/time.
 - `components/ui/` — shared primitives (Panel, ScopeSwitcher, SaveBar, JsonEditor, KVTable, ListDetail, Toggle, EmptyState).
 - `components/AppStatusBar.tsx` — global model / effort / team / voice / 5h-usage chip strip. Pills navigate to Settings / Voice / Usage on click.
 - `components/CommandPalette.tsx` — Cmd-K palette with fuzzy filter + emit-only dispatch. Suppressed inside Monaco / text inputs.
-- `components/ui/Toast.tsx` + `state/toast.ts` — non-fatal error surfacing. `info / warn / error`. Mounted above modals, below RecordingStatus.
+- `components/ui/Toast.tsx` — non-fatal error surfacing. `info / warn / error`. Mounted above modals, below RecordingStatus.
 - `lib/agentFrontmatter.ts` + `lib/prdFrontmatter.ts` — round-trip YAML preservation for Subagents and SchedulerPrdsView.
 - `components/tabs/agent/SchedulerDock.tsx` — per-running-job mini-bot strip rendered in AgentView.
+
+## Renderer data flow
+
+The renderer uses isolated zustand stores (no cross-store subscription). Data flows: **main process → IPC broadcast → store subscription → selector → component hook**.
+
+1. **Main process** publishes events (config changes, transcript events, schedule updates, etc.) as IPC broadcasts: `config:changed`, `transcript:event:<tabId>`, `schedule:snapshot-changed`, etc.
+2. **Zustand stores** subscribe to IPC broadcasts and update their state. Each store is independent; components cannot trigger store-to-store updates.
+3. **Components** consume stores via hooks (`useConfig()`, `useLiveTab()`, `useScheduleState()`, etc.). For multi-store queries, compose selectors in the component or use memoized helpers.
+4. **Panes** (SchedulePanel, History views) own local UI state (filters, collapsed sections) separate from global stores. Panes are stateless containers that accept props for the data they display.
 
 ## Conventions
 
@@ -60,12 +82,30 @@ Before writing a new PRD for `~/.claude/session-manager/scheduled-plans/prds/`, 
 
 Published as `claude-code-session-manager` on npm. Run via `npx claude-code-session-manager@latest`. `bin/cli.cjs` spawns the bundled Electron binary. `postinstall` runs `electron-rebuild` to recompile `node-pty` for the user's Electron ABI. Linux + darwin only.
 
+## Web-remote v2 mobile cockpit
+
+Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). React Native web frontend talks to relay server (`webRemoteServer.cjs`) over WebSocket. Session state protocol: ping/auth → list-sessions → select → stream state/summary updates. Desktop session-manager is the SoR; mobile is a read-mostly mirror. Rate limits (auth: 5/min, api: 50/min). Audit log to `~/.claude/web-remote-audit.log`.
+
+## Conventions (extensions for v0.20+)
+
+- **Almanac design** (Scheduler): SchBadge status colors + project-dot palette. Single source of truth in `sched-primitives.tsx`.
+- **Hive design** (Subagents): 6-color palette (accent/sage/butter/hive-slate/hive-plum/hive-teal), ToolChip read/write tone, hiveEstimate. Single source of truth in `hive-primitives.tsx`.
+- **Launch-first editorial shell** (Subagents): Configured / Library / Live sub-tabs. Subagents.tsx is the conductor; Live feeds AgentView monitor rows + results digest.
+- **Knowledge graph data pipeline**: Ingest → filter (automated patterns, length caps) → extract (with EXTRACTION_SYSTEM role to prevent prompt-injection refusals) → persist. Per-project entity vocab + rate-limiting.
+- **Renderer state stores** (zustand): separate concerns: `config.ts` (file-backed, dirty-tracked), `live.ts` (per-tab derived from transcripts), `voice.ts` (voice UI), `hives.ts` (subagent definitions), `orchestrator.ts` (running hive state), `scheduleState.ts` (queue + history), `toast.ts` (toast messages). Stores do NOT cross-subscribe; use composed selectors in components for multi-store queries.
+- **Modular pane pattern**: extracted panes (SchedulePanel: Queue/PRDs/History tabs) are reusable by multiple parent tabs (Scheduler, web-remote). Panes own local filter state + filtering logic; parents own scope/context state.
+- **Design primitive extraction**: when a design system (Almanac, Hive) is shared across components, extract `*-primitives.tsx` with explicit exports (SchBadge, ToolChip, etc.). Import primitives explicitly by name, not as wildcard — prevents cross-system pollution.
+
 ## Avoid
 
 - Adding `shell: true` to `child_process.spawn` calls — only `watchers.cjs` and `app:test-fire-hook` legitimately need it (user-supplied shell strings are part of those features). Anywhere else, pass argv arrays.
 - Reading remote URLs in production — `createWindow` hard-fails if `dist/index.html` is missing rather than falling back to `localhost:5173`.
 - Re-implementing the tmp+rename atomic-write pattern. Use `config.cjs`'s `writeJson` / `writeTextAtomic`.
+- Reusing primitives across Almanac and Hive designs without coordination — they use different color palettes and visual conventions (SchBadge vs ToolChip). Keep them in separate files + import explicitly.
+- Cross-subscribing between renderer state stores — e.g., don't read `live.ts` from `config.ts` or vice versa. Each store is an island; components compose them via hooks. Complex queries go in components or memoized selectors, not in store initialization.
+- Adding pane-specific state to parent tabs — if a SchedulePanel needs filter persistence, keep it in the pane, not the tab. Panes own their UI concerns; tabs own layout + navigation.
+- Importing design primitives via wildcard (`import * as SchElements from ...`) — requires explicit named imports to prevent accidental cross-system usage.
 
-## Future: Files API + Memory tool
+## Future: Files API
 
-Anthropic ships two platform-API features that the renderer doesn't surface yet: the **Files API** (`anthropic-beta: files-api-2025-04-14`; upload, reference by `file_id` in `{ type: "document", source: { type: "file", file_id } }`, 500 MB/file cap, ZDR-ineligible) and the **Memory tool** (`memory_20250818`; server-decided tool with client-side `/memories` store, ZDR-eligible). Cycle 2 added a documented stub at `src/main/filesApi.cjs.todo` and `src/main/memoryTool.cjs.todo` for cycle 3 to pick up — each needs a new IPC namespace, key resolution (Files API needs an Anthropic API key separate from the OAuth credentials billing reads), and CSP changes for `api.anthropic.com` uploads. Distinct from Claude Code's `autoMemoryDirectory` (filesystem convention, already in our schema).
+The **Files API** (`anthropic-beta: files-api-2025-04-14`; upload, reference by `file_id` in `{ type: "document", source: { type: "file", file_id } }`, 500 MB/file cap, ZDR-ineligible) is not yet surfaced. Needs: new IPC namespace, key resolution (separate Anthropic API key from OAuth credentials), CSP changes for `api.anthropic.com` uploads.

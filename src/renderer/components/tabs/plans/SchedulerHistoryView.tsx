@@ -1,22 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ScheduleJob } from '../../../../preload/api'
 import { EmptyState } from '../../ui/EmptyState'
-import { StatusBadge } from '../../ui/StatusBadge'
-import type { JobStatus } from '../../ui/StatusBadge'
 import { formatTimingLabel } from '../../../lib/formatTime'
 import { RunLogViewer } from './RunLogViewer'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine } from '../scheduler/sched-primitives'
 
 interface HistoryResult {
   ok: boolean
   jobs: ScheduleJob[]
   error?: string
-}
-
-/** Map cwd to the last path segment for compact display. */
-function projectName(cwd: string | null | undefined): string {
-  if (!cwd) return '—'
-  const segs = cwd.replace(/\/+$/, '').split('/')
-  return segs[segs.length - 1] || cwd
 }
 
 /** Format a date string as YYYY-MM-DD for comparison with date inputs. */
@@ -25,13 +17,20 @@ function toDateStr(iso: string | null | undefined): string {
   return iso.slice(0, 10)
 }
 
+const STATUS_OPTIONS = [
+  { value: 'all',       label: 'All' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed',    label: 'Failed' },
+] as const
+type StatusFilter = typeof STATUS_OPTIONS[number]['value']
+
 export function SchedulerHistoryView() {
   const [result, setResult] = useState<HistoryResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [projectFilter, setProjectFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'failed'>('all')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
   useEffect(() => {
     setLoading(true)
@@ -46,8 +45,8 @@ export function SchedulerHistoryView() {
     if (!result?.jobs) return []
     const seen = new Set<string>()
     for (const j of result.jobs) {
-      const name = projectName(j.cwd)
-      if (name !== '—') seen.add(name)
+      const name = j.cwd ? (j.cwd.replace(/\/+$/, '').split('/').pop() ?? '') : ''
+      if (name) seen.add(name)
     }
     return [...seen].sort()
   }, [result])
@@ -56,7 +55,10 @@ export function SchedulerHistoryView() {
     if (!result?.jobs) return []
     return result.jobs.filter((j) => {
       if (statusFilter !== 'all' && j.status !== statusFilter) return false
-      if (projectFilter && projectName(j.cwd) !== projectFilter) return false
+      if (projectFilter) {
+        const name = j.cwd ? (j.cwd.replace(/\/+$/, '').split('/').pop() ?? '') : ''
+        if (name !== projectFilter) return false
+      }
       if (fromDate && toDateStr(j.finishedAt) < fromDate) return false
       if (toDate && toDateStr(j.finishedAt) > toDate) return false
       return true
@@ -77,90 +79,96 @@ export function SchedulerHistoryView() {
     return <EmptyState title="No history yet" hint="Completed and failed jobs appear here." />
   }
 
+  const hasFilters = statusFilter !== 'all' || !!projectFilter || !!fromDate || !!toDate
+
   return (
     <div className="h-full flex flex-col">
       {/* Filter bar */}
-      <div className="shrink-0 flex items-center gap-3 px-3 py-2 border-b border-line flex-wrap">
-        <div className="flex items-center gap-1 text-[10px] text-fg-faint">
-          <span>status:</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-            className="bg-bg border border-line rounded px-1 py-0.5 text-fg-dim"
-          >
-            <option value="all">all</option>
-            <option value="completed">completed</option>
-            <option value="failed">failed</option>
-          </select>
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-line flex-wrap">
+        {/* Status chips */}
+        <div className="flex gap-1.5 flex-wrap">
+          {STATUS_OPTIONS.map(({ value, label }) => {
+            const on = value === statusFilter
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStatusFilter(value)}
+                className={`rounded-full px-3 py-1 text-[12.5px] border transition-colors ${
+                  on
+                    ? 'bg-accent text-white border-accent font-semibold'
+                    : 'bg-bg-hi text-fg-dim border-line hover:border-fg-faint font-medium'
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
+
+        <span className="w-px h-4 bg-line mx-1" aria-hidden="true" />
+
         {projects.length > 0 && (
-          <div className="flex items-center gap-1 text-[10px] text-fg-faint">
-            <span>project:</span>
-            <select
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-              className="bg-bg border border-line rounded px-1 py-0.5 text-fg-dim max-w-[12rem]"
-            >
-              <option value="">all</option>
-              {projects.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="bg-bg-hi border border-line rounded-lg px-2 py-1 text-[12.5px] text-fg-dim max-w-[12rem] font-medium"
+          >
+            <option value="">All projects</option>
+            {projects.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
         )}
-        <div className="flex items-center gap-1 text-[10px] text-fg-faint">
-          <span>from:</span>
+
+        <div className="flex items-center gap-1.5 text-[12px] text-fg-faint">
+          <span>from</span>
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            className="bg-bg border border-line rounded px-1 py-0.5 text-fg-dim font-mono"
+            className="bg-bg-hi border border-line rounded-lg px-2 py-1 text-fg-dim font-mono text-[12px]"
           />
         </div>
-        <div className="flex items-center gap-1 text-[10px] text-fg-faint">
-          <span>to:</span>
+        <div className="flex items-center gap-1.5 text-[12px] text-fg-faint">
+          <span>to</span>
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            className="bg-bg border border-line rounded px-1 py-0.5 text-fg-dim font-mono"
+            className="bg-bg-hi border border-line rounded-lg px-2 py-1 text-fg-dim font-mono text-[12px]"
           />
         </div>
-        <span className="text-[10px] text-fg-faint ml-auto font-mono">
-          {filtered.length} of {result.jobs.length}
+
+        <span className="text-[12px] text-fg-faint ml-auto font-mono">
+          {filtered.length} / {result.jobs.length}
         </span>
-        {(statusFilter !== 'all' || projectFilter || fromDate || toDate) && (
+        {hasFilters && (
           <button
             type="button"
             onClick={() => { setStatusFilter('all'); setProjectFilter(''); setFromDate(''); setToDate('') }}
-            className="text-[10px] text-fg-faint hover:text-fg-dim underline"
+            className="text-[12px] text-fg-faint hover:text-fg-dim underline"
           >
-            clear filters
+            clear
           </button>
         )}
       </div>
 
-      {/* Table */}
+      {/* Job list */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {filtered.length === 0 ? (
           <EmptyState title="No matches" hint="Try adjusting the filters." />
         ) : (
-          <table className="w-full text-[11px] border-collapse">
-            <thead className="sticky top-0 bg-bg-elev border-b border-line">
-              <tr>
-                <th className="text-left px-3 py-1.5 text-fg-faint font-normal text-[10px] uppercase tracking-wider w-28">Status</th>
-                <th className="text-left px-3 py-1.5 text-fg-faint font-normal text-[10px] uppercase tracking-wider">Title</th>
-                <th className="text-left px-3 py-1.5 text-fg-faint font-normal text-[10px] uppercase tracking-wider w-28">Project</th>
-                <th className="text-left px-3 py-1.5 text-fg-faint font-normal text-[10px] uppercase tracking-wider w-20">Duration</th>
-                <th className="text-left px-3 py-1.5 text-fg-faint font-normal text-[10px] uppercase tracking-wider w-36">Finished</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((j) => (
-                <HistoryRow key={`${j.slug}-${j.finishedAt ?? ''}`} job={j} />
-              ))}
-            </tbody>
-          </table>
+          <div className="mx-4 my-3 bg-bg-hi border border-line rounded-[14px] overflow-hidden">
+            <div className="flex items-center px-[18px] py-3 bg-bg-elev">
+              <span className="font-serif text-base font-semibold text-fg">
+                {filtered.length} job{filtered.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {filtered.map((j) => (
+              <HistoryRow key={`${j.slug}-${j.finishedAt ?? ''}`} job={j} />
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -170,78 +178,94 @@ export function SchedulerHistoryView() {
 function HistoryRow({ job }: { job: ScheduleJob }) {
   const [expanded, setExpanded] = useState(false)
   const [showLog, setShowLog] = useState(false)
+
   const duration = job.startedAt && job.finishedAt
     ? Date.parse(job.finishedAt) - Date.parse(job.startedAt)
     : null
-  const finishedAt = job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '—'
-  const isFailed = job.status === 'failed'
+  const startedStr  = job.startedAt  ? new Date(job.startedAt).toLocaleString()  : '—'
+  const finishedStr = job.finishedAt ? new Date(job.finishedAt).toLocaleString() : '—'
+  const durationStr = duration !== null ? formatTimingLabel(duration) : '—'
+  const exitStr     = job.exitCode !== null ? String(job.exitCode) : '—'
 
   return (
-    <>
-      <tr
-        className={`border-b border-line/40 hover:bg-bg-hi cursor-pointer ${isFailed ? 'bg-red-950/10' : ''}`}
+    <div className="border-t border-line/60">
+      <button
+        type="button"
+        className={`w-full text-left grid items-center gap-4 px-[18px] py-3.5 cursor-pointer transition-colors hover:bg-bg-elev ${expanded ? 'bg-bg-elev' : 'bg-transparent'}`}
+        style={{ gridTemplateColumns: '116px 1fr auto auto' }}
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <td className="px-3 py-2">
-          <StatusBadge status={job.status as JobStatus} />
-        </td>
-        <td className="px-3 py-2 text-fg-dim truncate max-w-0 w-full">
-          <span className="truncate block">{job.title}</span>
-          {isFailed && job.error && !expanded && (
-            <span className="text-red-300/70 text-[10px] truncate block">{job.error.slice(0, 80)}</span>
+        <SchBadge status={job.status} />
+        <div className="min-w-0">
+          <div className="text-[14.5px] font-medium text-fg leading-snug text-pretty">{job.title}</div>
+          {job.error && !expanded && (job.status === 'failed' || job.status === 'needs_review') && (
+            <div className="text-[12.5px] mt-0.5 text-accent/80 truncate">{job.error}</div>
           )}
-        </td>
-        <td className="px-3 py-2 text-fg-faint font-mono text-[10px] truncate">
-          {projectName(job.cwd)}
-        </td>
-        <td className="px-3 py-2 text-fg-faint font-mono text-[10px]">
-          {duration !== null ? formatTimingLabel(duration) : '—'}
-        </td>
-        <td className="px-3 py-2 text-fg-faint text-[10px]">{finishedAt}</td>
-      </tr>
+        </div>
+        <ProjectTag cwd={job.cwd} />
+        <span className="inline-flex items-center gap-2.5 font-mono text-xs text-fg-faint whitespace-nowrap">
+          {durationStr}
+          <span
+            className="inline-flex transition-transform duration-150"
+            style={{ transform: expanded ? 'rotate(90deg)' : 'none' }}
+            aria-hidden="true"
+          >
+            ›
+          </span>
+        </span>
+      </button>
+
       {expanded && (
-        <tr className="border-b border-line/40">
-          <td colSpan={5} className="px-4 py-2 bg-bg/60 text-[10px] text-fg-faint">
-            <div className="space-y-1 max-w-3xl">
-              <div className="font-mono text-fg-faint/60">slug: {job.slug}</div>
-              {job.cwd && <div className="font-mono truncate" title={job.cwd}>cwd: {job.cwd}</div>}
-              {job.startedAt && <div>started: {new Date(job.startedAt).toLocaleString()}</div>}
-              {job.exitCode !== null && (
-                <div className={job.exitCode === 0 ? 'text-green-400' : 'text-red-400'}>
-                  exit code: {job.exitCode}
-                </div>
+        <div
+          className="grid gap-5 px-[18px] pt-1 pb-5 bg-bg-elev"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}
+        >
+          <DetailBlock label="Status">
+            <DetailLine k="result" v={exitStr} />
+            <DetailLine k="state" v={job.status.replace('_', ' ')} />
+            {job.verifierVerdict && <DetailLine k="verifier" v={job.verifierVerdict} />}
+          </DetailBlock>
+          <DetailBlock label="Timing">
+            <DetailLine k="started" v={startedStr} />
+            <DetailLine k="finished" v={finishedStr} />
+            <DetailLine k="duration" v={durationStr} />
+          </DetailBlock>
+          <DetailBlock label="Location">
+            <DetailLine k="group" v={job.parallelGroup != null ? String(job.parallelGroup) : '—'} />
+            <DetailLine k="slug" v={job.slug} />
+            {job.cwd && <DetailLine k="cwd" v={job.cwd} wrap />}
+          </DetailBlock>
+          <DetailBlock label="Actions">
+            <div className="flex flex-col gap-2 items-start">
+              {job.runId && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowLog(true) }}
+                  className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 p-0 cursor-pointer"
+                >
+                  view log →
+                </button>
+              )}
+              {job.status !== 'pending' && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); void window.api.schedule.resetJob(job.slug) }}
+                  className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 p-0 cursor-pointer"
+                >
+                  reset to pending →
+                </button>
               )}
               {job.error && (
-                <div className="text-red-300/90 break-words whitespace-pre-wrap">{job.error}</div>
+                <p className="text-[12px] text-accent/90 mt-1 break-words whitespace-pre-wrap max-w-sm m-0">
+                  {job.error}
+                </p>
               )}
-              {job.verifierVerdict && (
-                <div className="text-orange-400 font-mono">verifier: {job.verifierVerdict}</div>
-              )}
-              <div className="flex gap-3 pt-1">
-                {job.status !== 'pending' && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); window.api.schedule.resetJob(job.slug) }}
-                    className="text-fg-dim hover:text-fg underline"
-                  >
-                    reset to pending
-                  </button>
-                )}
-                {job.runId && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setShowLog(true) }}
-                    className="text-fg-dim hover:text-fg underline"
-                  >
-                    view log
-                  </button>
-                )}
-              </div>
             </div>
-          </td>
-        </tr>
+          </DetailBlock>
+        </div>
       )}
+
       {showLog && job.runId && (
         <RunLogViewer
           runId={job.runId}
@@ -250,6 +274,6 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
           onClose={() => setShowLog(false)}
         />
       )}
-    </>
+    </div>
   )
 }

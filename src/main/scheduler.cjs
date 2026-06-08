@@ -153,6 +153,22 @@ function uncommittedChanges(cwd) {
   });
 }
 
+// Return the current HEAD commit sha in cwd, or null on any error. Used by the
+// commit-guard to detect whether the job self-committed during its run (HEAD
+// moved) — in which case leftover working-tree dirt is presumptively from a
+// concurrent external writer, not the job's unsaved deliverable. Never throws.
+function gitHead(cwd) {
+  return new Promise((resolve) => {
+    if (!cwd) { resolve(null); return; }
+    execFile(
+      'git',
+      ['-C', cwd, 'rev-parse', 'HEAD'],
+      { timeout: 10_000, windowsHide: true },
+      (err, stdout) => { resolve(err ? null : String(stdout || '').trim() || null); },
+    );
+  });
+}
+
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
 const RUNS_DIR = path.join(ROOT, 'runs');
@@ -1137,6 +1153,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // post-run check flags only paths THIS job left dirty, not pre-existing WIP.
     const guardCwd = job.cwd || defaultCwd;
     const guardBaseline = await uncommittedChanges(guardCwd);
+    const guardHeadBefore = await gitHead(guardCwd);
 
     const res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
       await mutate((s) => {
@@ -1189,6 +1206,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     //     pre-existing user WIP is excluded; and
     //   - sibling skip: if another job is concurrently writing the same repo,
     //     working-tree dirt can't be attributed to this job, so skip the guard.
+    //   - self-commit skip: if HEAD moved during the run, the job committed its
+    //     deliverable; leftover dirt is presumptively a concurrent external edit
+    //     (e.g. an interactive session editing the same repo), not the job's
+    //     unsaved work — so skip rather than false-flag a completed job.
     // Non-git cwds resolve to null and are skipped (the guard is best-effort).
     if (res.exitCode === 0 && !res.rateLimited && (!verifyResult || verifyResult.verdict === 'clean')) {
       const after = await uncommittedChanges(guardCwd);
@@ -1199,7 +1220,9 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         const siblingRunning = (guardState.jobs || []).some(
           (j) => j.slug !== job.slug && j.status === 'running' && (j.cwd || defaultCwd) === guardCwd,
         );
-        if (newlyDirty.length > 0 && !siblingRunning) {
+        const guardHeadAfter = await gitHead(guardCwd);
+        const jobSelfCommitted = guardHeadBefore && guardHeadAfter && guardHeadAfter !== guardHeadBefore;
+        if (newlyDirty.length > 0 && !siblingRunning && !jobSelfCommitted) {
           const sample = newlyDirty.slice(0, 3).join(', ');
           verifyResult = {
             verdict: 'uncommitted_changes',

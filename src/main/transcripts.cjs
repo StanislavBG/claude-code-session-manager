@@ -247,4 +247,5 @@ module.exports = {
   closeAll,
   encodeCwd,
   transcriptPath,
+  classifyLine,
 };

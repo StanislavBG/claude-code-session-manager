@@ -20,6 +20,14 @@ const ptySpawn = z.object({
 
 const ptyTabId = z.object({ tabId: z.string().min(1).max(128) });
 
+// v2 mobile: subscribe to a session's live state + summary. cwd is needed to
+// locate the transcript JSONL (transcriptPath); validated against home-dir boundary
+// in webRemote before any fs access.
+const sessionSubscribe = z.object({
+  tabId: z.string().min(1).max(128),
+  cwd: z.string().min(1).max(4096),
+});
+
 // 64 KiB cap per pty:write — typewriter input is bounded; a renderer firing
 // megabytes per call is either a bug or an attack. Block it at the boundary.
 const PTY_WRITE_MAX_BYTES = 64 * 1024;
@@ -402,6 +410,9 @@ const ALLOWED_COMMANDS = new Set([
   'cmd:schedule:set-config',
   'cmd:history:aggregate',
   'cmd:app:version',
+  // v2 mobile: per-session live state + summary push (ARCHITECTURE-V2-MOBILE.md §3)
+  'cmd:session:subscribe',
+  'cmd:session:unsubscribe',
 ]);
 
 module.exports = {
@@ -418,6 +429,7 @@ module.exports = {
     ptyTabId,
     ptyWrite,
     ptyResize,
+    sessionSubscribe,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

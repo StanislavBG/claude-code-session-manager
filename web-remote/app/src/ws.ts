@@ -1,4 +1,4 @@
-import { getWsTicket, WSS_URL } from './api';
+import { getWsTicket, RELAY_WSS_URL } from './api';
 import type { Envelope } from './types';
 
 type EventHandler = (envelope: Envelope) => void;
@@ -192,7 +192,7 @@ export class RelaySocket {
         }
         throw e;
       }
-      const url = `${WSS_URL}/ws?ticket=${encodeURIComponent(ticket)}`;
+      const url = `${RELAY_WSS_URL}?ticket=${encodeURIComponent(ticket)}`;
       const socket = new WebSocket(url);
       this.ws = socket;
 

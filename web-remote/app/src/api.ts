@@ -5,54 +5,45 @@ import type {
   WsTicketResponse,
 } from './types';
 
-// Hard-coded relay base, configurable at build time via VITE_RELAY_URL (v1).
-export const RELAY_BASE =
-  (import.meta.env.VITE_RELAY_URL as string | undefined) ??
-  'https://relay.session-manager.bilko.run';
+// v2: relay is same-origin on bilko.run. REST under /api/sm-relay; WS at
+// /projects/session-manager/relay. Auth is the host Clerk session (Bearer token),
+// not a cookie — App.tsx injects a token getter from Clerk's useAuth().getToken.
+export const RELAY_API_BASE = '/api/sm-relay';
+export const RELAY_WSS_URL =
+  (typeof window !== 'undefined' ? `wss://${window.location.host}` : 'wss://bilko.run') +
+  '/projects/session-manager/relay';
 
-// Map http→ws and https→wss explicitly; never silently downgrade in production.
-export const WSS_URL = RELAY_BASE.startsWith('http://')
-  ? RELAY_BASE.replace('http://', 'ws://')
-  : RELAY_BASE.replace('https://', 'wss://');
+let _getToken: (() => Promise<string | null>) | null = null;
+/** App wires Clerk's getToken here so every relay call carries the session JWT. */
+export function setTokenGetter(fn: () => Promise<string | null>): void {
+  _getToken = fn;
+}
 
 class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly body: unknown,
-  ) {
+  constructor(public readonly status: number, public readonly body: unknown) {
     super(`API ${status}: ${JSON.stringify(body)}`);
   }
 }
 
-async function apiFetch<T>(
-  path: string,
-  options?: RequestInit,
-): Promise<T> {
-  const res = await fetch(`${RELAY_BASE}${path}`, {
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = _getToken ? await _getToken() : null;
+  const res = await fetch(`${RELAY_API_BASE}${path}`, {
     ...options,
-    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers ?? {}),
     },
   });
   let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    body = null;
-  }
+  try { body = await res.json(); } catch { body = null; }
   if (!res.ok) throw new ApiError(res.status, body);
   return body as T;
 }
 
-export function redirectToLogin(): void {
-  window.location.href = `${RELAY_BASE}/auth/google`;
-}
-
 export async function getMe(): Promise<MeResponse | null> {
   try {
-    return await apiFetch<MeResponse>('/api/me');
+    return await apiFetch<MeResponse>('/me');
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return null;
     throw e;
@@ -60,24 +51,19 @@ export async function getMe(): Promise<MeResponse | null> {
 }
 
 export async function getDevices(): Promise<DevicesResponse> {
-  return apiFetch<DevicesResponse>('/api/devices');
+  return apiFetch<DevicesResponse>('/devices');
 }
 
 export async function requestOtp(): Promise<OtpResponse> {
-  return apiFetch<OtpResponse>('/api/otp', { method: 'POST' });
+  return apiFetch<OtpResponse>('/otp', { method: 'POST' });
 }
 
 export async function getWsTicket(): Promise<WsTicketResponse> {
-  return apiFetch<WsTicketResponse>('/api/ws-ticket', { method: 'POST' });
+  return apiFetch<WsTicketResponse>('/ws-ticket', { method: 'POST' });
 }
 
 export async function revokeDevice(deviceId: string): Promise<void> {
-  await apiFetch<unknown>(`/api/devices/${encodeURIComponent(deviceId)}`, {
-    method: 'DELETE',
-  });
+  await apiFetch<unknown>(`/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
 }
 
-export async function signOut(): Promise<void> {
-  await apiFetch<unknown>('/api/logout', { method: 'POST' }).catch(() => {});
-  window.location.href = '/';
-}
+export { ApiError };

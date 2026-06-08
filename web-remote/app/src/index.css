@@ -33,11 +33,19 @@
   }
 }
 
-/* xterm.js overrides — ensure full-height inside the terminal pane */
-.xterm {
-  height: 100%;
-  width: 100%;
+/* Session-state animations (StatePane / StateDot / mic). Minimal, GPU-cheap. */
+@keyframes sm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
-.xterm-viewport {
-  overflow-y: auto !important;
+@keyframes sm-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.25; }
+}
+.sm-pulse { animation: sm-pulse 1.4s ease-in-out infinite; }
+.sm-blink { animation: sm-blink 1s step-start infinite; }
+
+/* a11y: honor reduced-motion — drop the animations, keep the colors. */
+@media (prefers-reduced-motion: reduce) {
+  .sm-pulse, .sm-blink { animation: none; }
 }

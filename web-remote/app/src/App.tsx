@@ -1,101 +1,107 @@
 import { useEffect, useRef } from 'react';
+import {
+  ClerkProvider, SignedIn, SignedOut, SignIn, useAuth,
+} from '@clerk/clerk-react';
 import { useStore } from './store';
-import { getMe, getDevices } from './api';
+import { getMe, getDevices, setTokenGetter } from './api';
 import { RelaySocket } from './ws';
-import LoginPage from './components/LoginPage';
-import DeviceList from './components/DeviceList';
-import PairingModal from './components/PairingModal';
-import DeviceView from './components/DeviceView';
-import type { Envelope } from './types';
+import Cockpit from './components/Cockpit';
+import ConnectScreen from './components/ConnectScreen';
+import type { Envelope, SessionMeta, SessionSummary, SessionState } from './types';
+
+// Same Clerk instance as bilko.run (clerk.bilko.run) so the static sibling shares
+// the host session. Publishable keys are public; overridable at build time.
+const CLERK_KEY =
+  (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined) ||
+  'pk_live_Y2xlcmsuYmlsa28ucnVuJA';
 
 export default function App() {
-  const { me, screen, setMe, setDevices, setDeviceOnline, setWsConnected, setScreen } = useStore();
+  return (
+    <ClerkProvider publishableKey={CLERK_KEY} afterSignOutUrl="/projects/session-manager/">
+      <SignedOut>
+        <div className="flex items-center justify-center min-h-dvh bg-bg p-4">
+          <SignIn routing="hash" />
+        </div>
+      </SignedOut>
+      <SignedIn>
+        <AppInner />
+      </SignedIn>
+    </ClerkProvider>
+  );
+}
+
+function AppInner() {
+  const { getToken } = useAuth();
+  const {
+    activeDeviceId, selectedTabId, sessions,
+    setMe, setDevices, setDeviceOnline, setActiveDevice,
+    setWsConnected, setSessions, setTabState, setTabSummary, reset,
+  } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
 
-  // Bootstrap: check session, load devices
+  // Wire Clerk token into the relay API client, then bootstrap.
   useEffect(() => {
-    getMe().then((user) => {
-      setMe(user);
-      if (user) {
-        setScreen({ kind: 'devices' });
-        return getDevices().then((r) => setDevices(r.devices));
-      } else {
-        setScreen({ kind: 'login' });
-      }
-    }).catch(console.error);
-  }, [setMe, setDevices, setScreen]);
+    setTokenGetter(() => getToken());
+    getMe()
+      .then((user) => {
+        setMe(user);
+        if (user) return getDevices().then((r) => setDevices(r.devices));
+      })
+      .catch(console.error);
+  }, [getToken, setMe, setDevices]);
 
-  // Connect WebSocket once authenticated
+  // Connect the relay socket once.
   useEffect(() => {
-    if (!me) return;
-    const socket = new RelaySocket((connected) => {
-      setWsConnected(connected);
-    });
+    const socket = new RelaySocket((connected) => setWsConnected(connected));
     socketRef.current = socket;
     socket.connect().catch(console.error);
 
-    const unsubDeviceStatus = socket.on(
-      'event:device:status',
-      (msg: Envelope) => {
-        // relay sends status at the top level of the envelope, not in payload
-        if (msg.deviceId && msg.status) {
-          setDeviceOnline(msg.deviceId, msg.status === 'connected');
-          // Initiate E2E when device comes online — fetch pubKey from store
-          if (msg.status === 'connected') {
-            const { devices: currentDevices } = useStore.getState();
-            const dev = currentDevices.find((d) => d.deviceId === msg.deviceId);
-            if (dev?.devicePubKey) {
-              socket.initiateE2E(msg.deviceId, dev.devicePubKey).catch(console.warn);
-            }
-          }
-        }
-      },
-    );
+    const offStatus = socket.on('event:device:status', (m: Envelope) => {
+      if (m.deviceId && m.status) {
+        const online = m.status === 'connected';
+        setDeviceOnline(m.deviceId, online);
+        if (online) setActiveDevice(m.deviceId);
+      }
+    });
+    const offList = socket.on('event:session:list', (m: Envelope) => {
+      const p = m.payload as { sessions?: SessionMeta[] } | undefined;
+      if (p?.sessions) setSessions(p.sessions);
+    });
+    const offState = socket.on('event:session:state', (m: Envelope) => {
+      const p = m.payload as { tabId?: string; state?: SessionState } | undefined;
+      if (p?.tabId && p.state) setTabState(p.tabId, p.state);
+    });
+    const offSummary = socket.on('event:session:summary', (m: Envelope) => {
+      const p = m.payload as SessionSummary | undefined;
+      if (p?.tabId) setTabSummary(p);
+    });
 
     return () => {
-      unsubDeviceStatus();
+      offStatus(); offList(); offState(); offSummary();
       socket.destroy();
       socketRef.current = null;
+      reset();
     };
-  }, [me, setWsConnected, setDeviceOnline]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setSessions, setTabState, setTabSummary, reset]);
 
-  const socket = socketRef.current;
-  // Stable deviceId for the E2E effect — undefined when not in device view
-  const activeDeviceId = screen.kind === 'device' ? screen.deviceId : undefined;
-
-  // Initiate E2E when entering a device view (or when socket reconnects)
+  // Subscribe to the selected session's live state + summary; unsubscribe on change.
   useEffect(() => {
-    if (!activeDeviceId || !socket) return;
-    const { devices: devs } = useStore.getState();
-    const dev = devs.find((d) => d.deviceId === activeDeviceId);
-    if (dev?.devicePubKey && dev.isOnline) {
-      socket.initiateE2E(activeDeviceId, dev.devicePubKey).catch(console.warn);
-    }
-  }, [activeDeviceId, socket]);
+    const socket = socketRef.current;
+    if (!socket || !activeDeviceId || !selectedTabId) return;
+    const sess = sessions.find((s) => s.tabId === selectedTabId);
+    if (!sess?.cwd) return;
+    socket.sendCommand('cmd:session:subscribe', activeDeviceId, { tabId: selectedTabId, cwd: sess.cwd })
+      .catch(() => {});
+    return () => {
+      socket.sendCommand('cmd:session:unsubscribe', activeDeviceId, { tabId: selectedTabId }).catch(() => {});
+    };
+  }, [activeDeviceId, selectedTabId, sessions]);
 
-  if (screen.kind === 'login') {
-    return <LoginPage />;
+  const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
+  const online = !!device?.isOnline;
+
+  if (online) {
+    return <Cockpit socket={socketRef.current} deviceId={activeDeviceId!} />;
   }
-
-  if (screen.kind === 'pairing') {
-    return (
-      <>
-        <DeviceList socket={socket} />
-        <PairingModal onClose={() => setScreen({ kind: 'devices' })} />
-      </>
-    );
-  }
-
-  if (screen.kind === 'device') {
-    return (
-      <DeviceView
-        deviceId={screen.deviceId}
-        tab={screen.tab}
-        socket={socket}
-      />
-    );
-  }
-
-  // Default: devices
-  return <DeviceList socket={socket} />;
+  return <ConnectScreen socket={socketRef.current} />;
 }

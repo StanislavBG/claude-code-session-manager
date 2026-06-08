@@ -32,8 +32,12 @@ const { schemas } = require('./ipcSchemas.cjs');
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 // Hard-coded wss:// — no configuration allows plaintext downgrade (ADR §5.1).
-const RELAY_HTTPS_BASE = 'https://relay.session-manager.bilko.run';
-const RELAY_WSS_ORIGIN = 'wss://relay.session-manager.bilko.run';
+// v2: relay is same-origin on bilko.run (ARCHITECTURE-V2-MOBILE.md §1). REST under
+// /api/sm-relay; WS upgrade at /projects/session-manager/relay (covered by host CSP
+// connect-src 'self').
+const RELAY_HTTPS_BASE = 'https://bilko.run';
+const RELAY_API_BASE = `${RELAY_HTTPS_BASE}/api/sm-relay`;
+const RELAY_WSS_URL = 'wss://bilko.run/projects/session-manager/relay';
 
 const CONFIG_PATH = path.join(
   os.homedir(), '.claude', 'session-manager', 'web-remote.json'
@@ -273,7 +277,7 @@ function httpsPost(url, body, headers = {}) {
 // POST /api/device-ticket to exchange device-token for a one-time WS ticket.
 async function getDeviceTicket(deviceToken) {
   const result = await httpsPost(
-    `${RELAY_HTTPS_BASE}/api/device-ticket`,
+    `${RELAY_API_BASE}/device-ticket`,
     '{}',
     { Authorization: `Bearer ${deviceToken}` }
   );
@@ -392,7 +396,7 @@ async function connect() {
   // Step 2: open WSS connection with the ticket.
   let ws;
   try {
-    ws = new WebSocket(`${RELAY_WSS_ORIGIN}/ws?ticket=${encodeURIComponent(ticket)}`, {
+    ws = new WebSocket(`${RELAY_WSS_URL}?ticket=${encodeURIComponent(ticket)}`, {
       rejectUnauthorized: true, // verify relay TLS cert
     });
   } catch (e) {
@@ -421,6 +425,8 @@ async function connect() {
       broadcastStatus();
     }).catch(() => {});
     broadcastStatus();
+    // v2: begin pushing the live session list once connected.
+    startSessionListPush();
   });
 
   ws.on('message', (raw) => {
@@ -435,6 +441,7 @@ async function connect() {
 
   ws.on('close', (code) => {
     stopHeartbeat();
+    stopAllSessionWatches();
     _e2eSessionKey = null;
     if (_ws === ws) _ws = null;
     logs.writeLine({ scope: 'webRemote', level: 'info', message: 'ws closed', meta: { code } });
@@ -461,6 +468,288 @@ async function handleTokenRevoked(deviceId) {
   await saveConfig({ ...cfg, remoteEnabled: false, devices });
   broadcastStatus();
   sendIfAlive(_window, 'webRemote:token-revoked', { deviceId });
+}
+
+// ─── v2 mobile: session live state + summary push ────────────────────────────
+//
+// For each subscribed tab the agent tails its transcript JSONL (reusing the
+// canonical classifyLine + transcriptPath from transcripts.cjs — single source of
+// truth), derives a coarse state, and pushes event:session:state on change.
+// The last completed assistant turn drives the Haiku summary (see maybeSummarize).
+
+const SESSION_POLL_MS = 1500;
+const SESSION_LIST_PUSH_MS = 5000;
+const SESSION_INIT_TAIL_BYTES = 512 * 1024; // bound the initial read
+
+const _sessionWatchers = new Map(); // tabId → watcher
+let _sessionListTimer = null;
+
+/** Push an unsolicited event to the browser(s). Encrypts when an E2E key is active. */
+function pushEvent(type, payload) {
+  if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
+  const inner = { type, id: crypto.randomUUID(), payload, ts: Date.now() };
+  try {
+    if (_e2eSessionKey) {
+      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2eSessionKey);
+      _ws.send(JSON.stringify({ type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() }));
+    } else {
+      _ws.send(JSON.stringify(inner));
+    }
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushEvent failed', meta: { type, error: e?.message } });
+  }
+}
+
+/** Extract concatenated text from an assistant transcript line, or '' if none. */
+function extractAssistantText(raw) {
+  const msg = raw?.message || raw;
+  const content = msg?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n').trim();
+}
+
+/** Map a classified transcript event to a coarse session state. */
+function deriveState(ev, raw) {
+  // API/usage errors surface as a flagged message line.
+  if (raw?.isApiErrorMessage || raw?.level === 'error') return 'error';
+  switch (ev.kind) {
+    case 'tool_use':
+    case 'agent_spawn':
+      return 'running';        // model invoked a tool, awaiting result
+    case 'tool_result':
+      return 'thinking';       // tool finished, model resuming
+    case 'user':
+      return 'thinking';       // input submitted, model will respond
+    case 'assistant':
+      return 'idle';           // assistant text turn complete → user's turn
+    default:
+      return null;             // usage/todo/plan/etc. — no state change
+  }
+}
+
+async function tailLines(filePath, fromOffset) {
+  const stat = await fsp.stat(filePath).catch(() => null);
+  if (!stat) return { lines: [], size: 0, inode: undefined };
+  let start = fromOffset;
+  if (start == null || start > stat.size) start = Math.max(0, stat.size - SESSION_INIT_TAIL_BYTES);
+  if (stat.size <= start) return { lines: [], size: stat.size, inode: stat.ino };
+  const fd = await fsp.open(filePath, 'r');
+  try {
+    const len = stat.size - start;
+    const buf = Buffer.alloc(len);
+    await fd.read(buf, 0, len, start);
+    const parts = buf.toString('utf8').split('\n').filter(Boolean);
+    // If we started mid-file, the first fragment may be a partial line — drop it.
+    if (start > 0 && parts.length) parts.shift();
+    return { lines: parts, size: stat.size, inode: stat.ino };
+  } finally {
+    await fd.close();
+  }
+}
+
+async function pollSessionWatcher(w) {
+  let res;
+  try {
+    res = await tailLines(w.filePath, w.offset);
+  } catch { return; }
+  // Inode change = file replaced; restart from a bounded tail.
+  if (w.inode !== undefined && res.inode !== undefined && res.inode !== w.inode) {
+    w.offset = Math.max(0, res.size - SESSION_INIT_TAIL_BYTES);
+    w.inode = res.inode;
+    return;
+  }
+  w.offset = res.size;
+  w.inode = res.inode;
+
+  let nextState = null;
+  let newAssistantText = null;
+  let newMsgId = null;
+  for (const line of res.lines) {
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    const ev = require('./transcripts.cjs').classifyLine(obj);
+    if (!ev) continue;
+    const s = deriveState(ev, obj);
+    if (s) nextState = s;
+    if (ev.kind === 'assistant') {
+      const text = extractAssistantText(obj);
+      if (text) { newAssistantText = text; newMsgId = obj.uuid || obj.message?.id || `${w.tabId}:${res.size}`; }
+    }
+  }
+
+  if (nextState && nextState !== w.state) {
+    w.state = nextState;
+    pushEvent('event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
+  }
+  if (newAssistantText && newMsgId !== w.lastMsgId) {
+    w.lastAssistantText = newAssistantText;
+    w.lastMsgId = newMsgId;
+  }
+  // Summarize only a COMPLETED turn (state idle) — not assistant text mid-turn that
+  // is followed by a tool call. Cache by msgId so re-subscribe doesn't re-bill.
+  if (w.state === 'idle' && w.lastAssistantText && w.lastMsgId !== w.summarizedMsgId) {
+    w.summarizedMsgId = w.lastMsgId;
+    maybeSummarize(w).catch(() => {});
+  }
+}
+
+function startSessionWatch(tabId, cwd) {
+  if (_sessionWatchers.has(tabId)) return;
+  const filePath = require('./transcripts.cjs').transcriptPath(cwd, tabId);
+  const w = {
+    tabId, cwd, filePath,
+    offset: null,       // null → first poll reads a bounded tail then tracks EOF
+    inode: undefined,
+    state: 'idle',
+    lastAssistantText: null,
+    lastMsgId: null,
+    summarizedMsgId: null,
+    timer: null,
+  };
+  _sessionWatchers.set(tabId, w);
+  // Prime once immediately (captures current state + last assistant turn), then poll.
+  pollSessionWatcher(w).catch(() => {});
+  w.timer = setInterval(() => pollSessionWatcher(w).catch(() => {}), SESSION_POLL_MS);
+  if (typeof w.timer.unref === 'function') w.timer.unref();
+}
+
+function stopSessionWatch(tabId) {
+  const w = _sessionWatchers.get(tabId);
+  if (!w) return;
+  if (w.timer) clearInterval(w.timer);
+  _sessionWatchers.delete(tabId);
+}
+
+function stopAllSessionWatches() {
+  for (const tabId of Array.from(_sessionWatchers.keys())) stopSessionWatch(tabId);
+  if (_sessionListTimer) { clearInterval(_sessionListTimer); _sessionListTimer = null; }
+}
+
+/** Push the current session list (reuses sessionsStore — the canonical source). */
+async function pushSessionList() {
+  try {
+    const sessionsStore = require('./sessionsStore.cjs');
+    const data = await sessionsStore.load();
+    // Normalize persisted tabs → SessionMeta. tabId === claudeSessionId so it
+    // matches the transcript JSONL name used by cmd:session:subscribe.
+    const sessions = (data?.tabs ?? []).map((t) => ({
+      tabId: t.claudeSessionId,
+      cwd: t.cwd,
+      title: t.label || t.cwd,
+      state: _sessionWatchers.get(t.claudeSessionId)?.state ?? null,
+    }));
+    pushEvent('event:session:list', { sessions, activeTabId: data?.activeTabId ?? null });
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushSessionList failed', meta: { error: e?.message } });
+  }
+}
+
+function startSessionListPush() {
+  if (_sessionListTimer) return;
+  pushSessionList().catch(() => {});
+  _sessionListTimer = setInterval(() => pushSessionList().catch(() => {}), SESSION_LIST_PUSH_MS);
+  if (typeof _sessionListTimer.unref === 'function') _sessionListTimer.unref();
+}
+
+// ─── SM-V2-03: mobile summary via Claude Haiku 4.5 ───────────────────────────
+
+const SUMMARY_MIN_CHARS = 280;       // below this, push raw — not worth an API call
+const SUMMARY_MODEL = 'claude-haiku-4-5';
+const SUMMARY_MAX_INPUT_CHARS = 24_000; // cap the turn text sent to Haiku (~6k tokens)
+const SUMMARY_SYSTEM =
+  'Summarize this Claude Code assistant turn for a phone screen in 2 sentences max, ' +
+  'followed by an optional list of up to 3 short action items. Plain text only — no ' +
+  'markdown headers, no code blocks. Lead with what was done or decided.';
+
+let _anthropicKeyCache; // undefined = unresolved, null = absent, string = key
+
+/** Resolve the Anthropic API key: env → web-remote.json → null (degrade to raw). */
+async function resolveAnthropicKey() {
+  if (_anthropicKeyCache !== undefined) return _anthropicKeyCache;
+  const fromEnv = process.env.ANTHROPIC_API_KEY;
+  if (fromEnv && fromEnv.trim()) { _anthropicKeyCache = fromEnv.trim(); return _anthropicKeyCache; }
+  try {
+    const cfg = await loadConfig();
+    const k = cfg.anthropicApiKey;
+    _anthropicKeyCache = (typeof k === 'string' && k.trim()) ? k.trim() : null;
+  } catch {
+    _anthropicKeyCache = null;
+  }
+  return _anthropicKeyCache;
+}
+
+/** POST to the Anthropic Messages API. Returns the first text block, or throws. */
+function anthropicSummarize(apiKey, text) {
+  const body = JSON.stringify({
+    model: SUMMARY_MODEL,
+    max_tokens: 320,
+    system: SUMMARY_SYSTEM,
+    messages: [{ role: 'user', content: text.slice(0, SUMMARY_MAX_INPUT_CHARS) }],
+  });
+  return new Promise((resolve, reject) => {
+    const req = https.request('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-length': Buffer.byteLength(body),
+      },
+      timeout: 20_000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`anthropic HTTP ${res.statusCode}`));
+        }
+        try {
+          const json = JSON.parse(data);
+          const block = Array.isArray(json.content) ? json.content.find((b) => b.type === 'text') : null;
+          if (!block?.text) return reject(new Error('no text in response'));
+          resolve(block.text.trim());
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('anthropic request timed out')));
+    req.end(body);
+  });
+}
+
+/**
+ * Produce a mobile summary of the watcher's last completed assistant turn and push it.
+ * Short turns are pushed raw (no API call). If no API key is configured, degrades to
+ * the raw message so core remote control is never blocked. Cost: Haiku in+out per
+ * completed turn per subscribed tab (~$1/$5 per 1M tokens).
+ */
+async function maybeSummarize(w) {
+  const text = w.lastAssistantText;
+  if (!text) return;
+  const ofMessageId = w.lastMsgId;
+
+  if (text.length < SUMMARY_MIN_CHARS) {
+    pushEvent('event:session:summary', { tabId: w.tabId, summary: text, ofMessageId, model: 'raw', ts: Date.now() });
+    return;
+  }
+
+  const apiKey = await resolveAnthropicKey();
+  if (!apiKey) {
+    // Degrade gracefully: push a trimmed raw message + a hint flag the app can surface.
+    pushEvent('event:session:summary', {
+      tabId: w.tabId, summary: text.slice(0, 600), ofMessageId, model: 'raw', degraded: 'no_api_key', ts: Date.now(),
+    });
+    return;
+  }
+
+  try {
+    const summary = await anthropicSummarize(apiKey, text);
+    pushEvent('event:session:summary', { tabId: w.tabId, summary, ofMessageId, model: SUMMARY_MODEL, ts: Date.now() });
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'summary failed; pushing raw', meta: { error: e?.message } });
+    pushEvent('event:session:summary', { tabId: w.tabId, summary: text.slice(0, 600), ofMessageId, model: 'raw', degraded: 'api_error', ts: Date.now() });
+  }
 }
 
 // ─── Message handling & command dispatch ─────────────────────────────────────
@@ -724,6 +1013,20 @@ function getDispatchMap() {
 
     'cmd:app:version': async () =>
       app.getVersion(),
+
+    // v2 mobile: start/stop pushing live state + summary for a session.
+    'cmd:session:subscribe': async (payload) => {
+      const parsed = schemas.sessionSubscribe.parse(payload);
+      validatePath(parsed.cwd); // home-dir boundary before any fs access
+      startSessionWatch(parsed.tabId, parsed.cwd);
+      return { ok: true };
+    },
+
+    'cmd:session:unsubscribe': async (payload) => {
+      const parsed = schemas.ptyTabId.parse(payload);
+      stopSessionWatch(parsed.tabId);
+      return { ok: true };
+    },
   };
 
   return _dispatchMap;
@@ -753,7 +1056,7 @@ async function pair(otp) {
 
   let response;
   try {
-    response = await httpsPost(`${RELAY_HTTPS_BASE}/pair`, body);
+    response = await httpsPost(`${RELAY_API_BASE}/pair`, body);
   } catch (e) {
     return { ok: false, error: e?.message || 'pairing request failed' };
   }

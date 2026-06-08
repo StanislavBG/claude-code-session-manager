@@ -10,7 +10,7 @@ export interface Device {
   email: string;
   issuedAt: number;
   isOnline: boolean;
-  devicePubKey?: string; // SPKI DER base64url — agent's E2E public key (P-256)
+  devicePubKey?: string;
 }
 
 export interface DevicesResponse {
@@ -25,12 +25,7 @@ export interface WsTicketResponse {
   ticket: string;
 }
 
-export interface PairResponse {
-  deviceToken: string;
-  deviceId: string;
-}
-
-// ── WebSocket envelope (ARCHITECTURE.md §2.1) ─────────────────────────────────
+// ── WebSocket envelope ────────────────────────────────────────────────────────
 
 export interface Envelope {
   type: string;
@@ -39,39 +34,38 @@ export interface Envelope {
   payload?: unknown;
   ts: number;
   relay_ts?: number;
-  // Extra top-level fields used by specific event types (e.g. event:device:status)
   status?: string;
 }
 
-// ── Scheduler types ───────────────────────────────────────────────────────────
+// ── Session model (v2 mobile) ─────────────────────────────────────────────────
 
-export interface PrdMeta {
-  slug: string;
+export type SessionState =
+  | 'idle'
+  | 'thinking'
+  | 'running'
+  | 'awaiting-input'
+  | 'error'
+  | 'unknown';
+
+export interface SessionMeta {
+  tabId: string;           // === claudeSessionId (transcript lookup key)
+  cwd?: string;
   title?: string;
-  status?: string;
-  cwd?: string;
-  estimateMinutes?: number;
+  state?: SessionState | null;
 }
 
-export interface SchedulerState {
-  mode: 'manual' | 'on-reset' | 'when-available';
-  running: boolean;
-  queue: PrdMeta[];
-  activeJob?: PrdMeta;
-}
-
-// ── Session types ─────────────────────────────────────────────────────────────
-
-export interface SessionRecord {
+export interface SessionSummary {
   tabId: string;
-  cwd?: string;
-  startedAt?: number;
+  summary: string;
+  ofMessageId?: string;
+  model?: string;          // 'claude-haiku-4-5' | 'raw'
+  degraded?: string;       // 'no_api_key' | 'api_error'
+  ts: number;
 }
 
 // ── App navigation state ──────────────────────────────────────────────────────
 
 export type Screen =
   | { kind: 'login' }
-  | { kind: 'devices' }
-  | { kind: 'pairing' }
-  | { kind: 'device'; deviceId: string; tab: 'terminal' | 'scheduler' | 'sessions' };
+  | { kind: 'connect' }    // signed in, choosing/pairing a device
+  | { kind: 'cockpit' };   // paired device online — session cockpit

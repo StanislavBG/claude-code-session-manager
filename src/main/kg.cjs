@@ -69,19 +69,27 @@ function isInternalPrompt(text) {
 // "You are a…/return JSON" instructions trip Claude's prompt-injection resistance
 // so extraction refuses. Drop them at ingest. Conservative enough to keep real,
 // hand-typed dev prompts (which are short and don't set agent roles).
-const AUTOMATED_MARKERS = [
-  /^you are (a|an|the)\b/i,
+// An agent role-setting preamble is a strong STANDALONE signal — a real dev
+// rarely opens a Claude Code prompt with "You are a …". (Anchored to start.)
+const AUTOMATED_ROLE_RE = /^\s*you are (a|an|the)\b/i;
+// Strict machine-output-format demands. These are corroborating, not standalone:
+// they only mark a prompt as automated when it is ALSO long, so a human prompt
+// that happens to mention JSON isn't dropped. (Deliberately NOT matching a bare
+// ```json fence or "for each … classify" — both are common in real dev prompts.)
+const AUTOMATED_FORMAT_MARKERS = [
   /return only\b[\s\S]{0,80}\bjson/i,
   /respond with only\b/i,
-  /\bfor each\b[\s\S]{0,120}\b(identify|extract|tag|classify|return)\b/i,
   /do not (include|add|output|return) any (other|additional|extra) (text|prose|commentary)/i,
-  /<output_format>|```json/i,
+  /<output_format>/i,
 ];
-const AUTOMATED_MAX_LEN = 4000;   // human dev prompts are rarely this long
+// Length alone is NOT enough — developers paste long specs, diffs, and stack
+// traces. Long is only suspicious when paired with a strict-format demand.
+const AUTOMATED_LONG_LEN = 2000;
 function isAutomatedPrompt(text) {
   const t = String(text || '').trim();
-  if (t.length > AUTOMATED_MAX_LEN) return true;
-  return AUTOMATED_MARKERS.some((re) => re.test(t));
+  if (AUTOMATED_ROLE_RE.test(t)) return true;
+  if (t.length > AUTOMATED_LONG_LEN && AUTOMATED_FORMAT_MARKERS.some((re) => re.test(t))) return true;
+  return false;
 }
 /** Any prompt the graph should ignore: our own calls + other agents' machine prompts. */
 function isNoise(text) { return isInternalPrompt(text) || isAutomatedPrompt(text); }
@@ -347,7 +355,22 @@ async function ingest() {
     await fd.close();
 
     const units = planUnits(buf.toString('utf8'));
-    if (!units) { broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: 0 }); return { ok: true, added: 0 }; }
+    if (!units) {
+      // No complete line in the window. If the window was FULL and more bytes
+      // remain, a single line exceeds MAX_TAIL_BYTES — advance past this chunk so
+      // an oversized line can't permanently freeze ingest (head-of-line guard),
+      // and re-arm to keep draining. Otherwise we're just waiting on a partial
+      // trailing line — leave the watermark.
+      if (len >= MAX_TAIL_BYTES && stat.size > st.lastOffset + len) {
+        st.lastOffset += len;
+        st.updatedAt = new Date().toISOString();
+        await saveIngestState(st);
+        setTimeout(() => { ingest().catch(() => {}); }, 3_000);
+        logger.writeLine({ scope: 'kg', level: 'warn', message: 'oversized log line (>8MB); advanced past chunk', meta: { offset: st.lastOffset } });
+      }
+      broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: 0 });
+      return { ok: true, added: 0 };
+    }
 
     const graphs = new Map();   // encodedCwd -> graph (lazy-loaded; persisted per batch)
     async function graphFor(cwd) {

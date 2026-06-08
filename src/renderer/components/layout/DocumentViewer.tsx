@@ -136,7 +136,7 @@ export function DocumentViewer({ filePath, onClose }: DocumentViewerProps) {
         {!loading && !error && !isImage && isMarkdown && (
           <div
             className="p-6 prose prose-invert max-w-3xl mx-auto text-fg text-sm leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderMarkdown(text)) }}
           />
         )}
         {!loading && !error && !isImage && !isMarkdown && (

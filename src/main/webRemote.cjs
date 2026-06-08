@@ -597,6 +597,10 @@ async function pollSessionWatcher(w) {
 function startSessionWatch(tabId, cwd) {
   if (_sessionWatchers.has(tabId)) return;
   const filePath = require('./transcripts.cjs').transcriptPath(cwd, tabId);
+  // Defense in depth: the schema restricts tabId charset, but re-validate the
+  // FINAL joined path against the home-dir boundary (validatePath resolves
+  // symlinks + rejects escapes) before any fs read. Throws → dispatch drops it.
+  validatePath(filePath);
   const w = {
     tabId, cwd, filePath,
     offset: null,       // null → first poll reads a bounded tail then tracks EOF
@@ -629,6 +633,11 @@ function stopAllSessionWatches() {
 /** Push the current session list (reuses sessionsStore — the canonical source). */
 async function pushSessionList() {
   try {
+    // Honor the kill switch: when remote is disabled, push nothing (the project
+    // list = cwds/titles is sensitive). dispatchEnvelope already blocks cmd:*;
+    // this stops the unsolicited background push too.
+    const cfg = await loadConfig();
+    if (!cfg.remoteEnabled) return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
     // Normalize persisted tabs → SessionMeta. tabId === claudeSessionId so it
@@ -662,21 +671,21 @@ const SUMMARY_SYSTEM =
   'followed by an optional list of up to 3 short action items. Plain text only — no ' +
   'markdown headers, no code blocks. Lead with what was done or decided.';
 
-let _anthropicKeyCache; // undefined = unresolved, null = absent, string = key
+let _anthropicKeyCache = null; // memoized found key only (string); null = re-resolve
 
-/** Resolve the Anthropic API key: env → web-remote.json → null (degrade to raw). */
+/** Resolve the Anthropic API key: env → web-remote.json → null (degrade to raw).
+ *  Only a FOUND key is cached — if absent we re-resolve each call (cheap, loadConfig
+ *  is TTL-cached) so adding the key to web-remote.json later takes effect without a restart. */
 async function resolveAnthropicKey() {
-  if (_anthropicKeyCache !== undefined) return _anthropicKeyCache;
+  if (_anthropicKeyCache) return _anthropicKeyCache;
   const fromEnv = process.env.ANTHROPIC_API_KEY;
   if (fromEnv && fromEnv.trim()) { _anthropicKeyCache = fromEnv.trim(); return _anthropicKeyCache; }
   try {
     const cfg = await loadConfig();
     const k = cfg.anthropicApiKey;
-    _anthropicKeyCache = (typeof k === 'string' && k.trim()) ? k.trim() : null;
-  } catch {
-    _anthropicKeyCache = null;
-  }
-  return _anthropicKeyCache;
+    if (typeof k === 'string' && k.trim()) { _anthropicKeyCache = k.trim(); return _anthropicKeyCache; }
+  } catch { /* fall through to null → re-resolve next time */ }
+  return null;
 }
 
 /** POST to the Anthropic Messages API. Returns the first text block, or throws. */

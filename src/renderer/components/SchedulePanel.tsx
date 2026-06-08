@@ -4,9 +4,9 @@ import { toast } from '../state/toast'
 import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
 import { useScheduleState } from '../state/scheduleState'
 import { getLintQueueCached } from '../lib/lintQueueCache'
-import { StatusBadge } from './ui/StatusBadge'
-import type { JobStatus } from './ui/StatusBadge'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
+import { AlmanacIcon } from './layout/AlmanacIcon'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine } from './tabs/scheduler/sched-primitives'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -20,10 +20,10 @@ const HIDDEN_KEY = 'sm.scheduler.hiddenCompletedSlugs'
 const FOCUSED_IDX_KEY = 'sm.scheduler.focusedJobIndex'
 const LS_FILTER_KEY = 'sm.scheduler.queueFilter'
 
-type FilterStatus = 'all' | 'running' | 'pending' | 'completed' | 'failed'
+type FilterStatus = 'all' | 'running' | 'pending' | 'completed' | 'needs_review' | 'failed'
 interface QueueFilter { text: string; status: FilterStatus }
 
-const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'pending', 'completed', 'failed']
+const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'pending', 'completed', 'needs_review', 'failed']
 
 function loadFilter(): QueueFilter {
   try {
@@ -89,20 +89,10 @@ function projectTag(cwd: string | null | undefined): string | null {
 }
 
 /**
- * SchedulePanel — sits in the LeftNav. Always shows what will happen next:
- *   ▶ Running k/n · 1m12s         (a job is executing)
- *   ⏸ Paused — tokens · resumes 4:21 PM (~2h 14m)   (auto-paused on rate-limit)
- *   ⏰ Auto · ~5m (util 42%)      (when-available, will fire soon)
- *   ⏰ Auto · waiting on tokens (util 94%)          (when-available, throttled)
- *   ✋ Manual — click Run now      (firePolicy=manual)
- *
- * State is owned by the main process (queue.json). We hydrate via
- * `schedule.state()` and listen for `schedule:state` broadcasts.
+ * SchedulePanel — Queue sub-view of the Scheduler tab. Shows policy controls,
+ * filter chips, and an expandable job list wired to the live queue snapshot.
  */
 export function SchedulePanel() {
-  // Snapshot is owned by the singleton poller in state/scheduleState.ts
-  // (started once in App.tsx). Health is panel-local — periodic refresh
-  // best-effort, logger-only on failure.
   const snap = useScheduleState((s) => s.snapshot)
   const [health, setHealth] = useState<ScheduleHealthSnapshot | null>(null)
   const [showHealth, setShowHealth] = useState(false)
@@ -113,13 +103,11 @@ export function SchedulePanel() {
   const [meterBannerDismissed, setMeterBannerDismissed] = useState(false)
   const [panelView, setPanelView] = useState<'queue' | 'supervisor'>('queue')
 
-  // Keyboard navigation state for the job list
   const jobListRef = useRef<HTMLDivElement>(null)
   const [focusedJobIdx, setFocusedJobIdx] = useState(() => {
     try { return Number(localStorage.getItem(FOCUSED_IDX_KEY)) || 0 } catch { return 0 }
   })
 
-  // Screen-reader live region — updated whenever a job status changes
   const [announcement, setAnnouncement] = useState('')
 
   useEffect(() => {
@@ -135,7 +123,6 @@ export function SchedulePanel() {
     return () => clearInterval(id)
   }, [])
 
-  // Rolling avg job duration from completed jobs (used for ETA estimates).
   const avgDurationMs = useMemo(() => {
     if (!snap) return 150_000
     const durs: number[] = []
@@ -149,7 +136,6 @@ export function SchedulePanel() {
     return durs.reduce((a, b) => a + b, 0) / durs.length
   }, [snap])
 
-  // Announce status changes for screen readers
   const prevJobStatuses = useRef<Map<string, string>>(new Map())
   useEffect(() => {
     if (!snap) return
@@ -177,33 +163,21 @@ export function SchedulePanel() {
   }
 
   const { config, jobs, paused, lastRunAt, nextReset } = snap
-  const counts = { pending: 0, running: 0, completed: 0, failed: 0 }
+  const counts = { pending: 0, running: 0, completed: 0, needs_review: 0, failed: 0 }
   for (const j of jobs) {
-    if (j.status === 'pending' || j.status === 'running' || j.status === 'completed' || j.status === 'failed') {
-      counts[j.status]++
-    }
+    if (j.status in counts) counts[j.status as keyof typeof counts]++
   }
 
   const runningJobs = jobs.filter((j) => j.status === 'running')
   const status = computeStatus({ snap, now, avgDurationMs, runningJobs })
 
-  // Apply text + status filter before partitioning so the "+N more" count
-  // reflects the filtered set (PRD requirement).
   const filteredJobs = applyFilter(jobs, filter)
 
-  // Pre-compute "ahead" cumulative counts per job in (group, slug) order so
-  // etaForJob is O(1) instead of O(N) per call. Done once per render.
   const aheadCount = computeAheadCounts(filteredJobs)
 
-  // Partition: inline visible jobs vs. completed-collapsed-into-rollup.
   const { inline, collapsedCount } = partitionJobs(filteredJobs, hiddenSlugs, now, showAllCompleted)
 
   const onClearCompleted = () => {
-    // Hide both completed AND failed rows. Pre-2026-05-22 this only handled
-    // completed, which meant a failed/red row had NO UI affordance to dismiss
-    // (e.g. a stale auto-investigation fix-PRD whose file was archived but the
-    // queue entry lingered). Failed jobs are still "done" from the user's
-    // perspective; hiding them is no different from hiding green.
     const next = new Set(hiddenSlugs)
     for (const j of jobs) if (j.status === 'completed' || j.status === 'failed') next.add(j.slug)
     setHiddenSlugs(next)
@@ -226,7 +200,6 @@ export function SchedulePanel() {
   }
   const hasInlineCompleted = inline.some((j) => j.status === 'completed')
 
-  // Keyboard navigation for the job list
   const handleJobListKeyDown = useCallback((e: React.KeyboardEvent) => {
     const rows = jobListRef.current?.querySelectorAll<HTMLButtonElement>('[data-job-row]')
     if (!rows || rows.length === 0) return
@@ -246,142 +219,125 @@ export function SchedulePanel() {
   }, [focusedJobIdx])
 
   return (
-    <div className="bg-bg-elev/60">
-      {/* Screen-reader live region for status change announcements */}
-      <div
-        aria-live="polite"
-        aria-atomic="true"
-        className="sr-only"
-      >
-        {announcement}
-      </div>
+    <div className="overflow-y-auto h-full">
+      {/* Screen-reader live region */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</div>
 
-      {/* Status banner — always visible, always actionable */}
-      <div className={`px-3 py-2 ${statusBannerClass(status.kind)}`} title={status.tooltip}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+      <div className="px-9 py-6 max-w-[1100px] mx-auto space-y-4">
+
+        {/* Status banner */}
+        <div
+          className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border ${statusBannerClassAlmanac(status.kind)}`}
+          title={status.tooltip}
+        >
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <StatusIcon kind={status.kind} />
-            <div className="text-[11px] font-medium truncate">{status.line1}</div>
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-fg truncate">{status.line1}</div>
+              {status.line2 && (
+                <div className="text-[11.5px] text-fg-faint font-mono mt-0.5 truncate">{status.line2}</div>
+              )}
+            </div>
           </div>
           {status.action && (
             <button
               type="button"
               onClick={status.action.onClick}
-              className="text-[10px] px-1.5 py-0.5 border border-line hover:border-fg-faint rounded shrink-0 hover:bg-bg"
+              className="text-[12px] px-3 py-1.5 border border-line hover:border-fg-faint rounded-lg shrink-0 hover:bg-bg-hi text-fg-dim hover:text-fg"
               title={status.action.title}
             >
               {status.action.label}
             </button>
           )}
         </div>
-        {status.line2 && (
-          <div className="text-[10px] text-fg-faint mt-0.5 truncate font-mono">{status.line2}</div>
+
+        {/* Meter rate-limited banner */}
+        {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl">
+            <span className="text-[12.5px] text-amber-400 font-medium">Meter rate-limited — firing on heuristic</span>
+            <button
+              type="button"
+              onClick={() => setMeterBannerDismissed(true)}
+              className="text-[12px] text-amber-400/70 hover:text-amber-400 shrink-0"
+              title="Dismiss this banner. The scheduler continues firing normally."
+            >
+              Dismiss
+            </button>
+          </div>
         )}
-      </div>
 
-      {/* Meter rate-limited banner — shown when billing API is consistently 429-ing but queue is still firing */}
-      {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
-        <div className="px-3 py-1.5 bg-amber-400/15 border-t border-amber-400/30 flex items-center justify-between gap-2">
-          <span className="text-[10px] text-amber-400 font-medium">Meter rate-limited — firing on heuristic</span>
-          <button
-            type="button"
-            onClick={() => setMeterBannerDismissed(true)}
-            className="text-[10px] text-amber-400/70 hover:text-amber-400 shrink-0"
-            title="Dismiss this banner. The scheduler continues firing normally."
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      <div className="px-3 pb-3 pt-2 space-y-2 border-t border-line">
-        {/* fire policy + concurrency */}
-        <div className="flex items-center gap-2 text-[10px] text-fg-faint">
-          <label className="flex items-center gap-1">
-            <span>policy</span>
+        {/* PolicyBar */}
+        <div className="flex items-center gap-[18px] flex-wrap bg-bg-elev border border-line rounded-xl px-4 py-3">
+          {/* Start jobs */}
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-fg-dim">Start jobs</span>
             <select
               value={config.firePolicy ?? 'when-available'}
               onChange={(e) => window.api.schedule.setConfig({ firePolicy: e.target.value as ScheduleFirePolicy })}
-              className="bg-bg border border-line rounded px-1 py-0.5"
+              className="appearance-none border border-line bg-bg-hi rounded-lg px-2.5 py-1.5 font-sans text-[13px] text-fg font-medium"
               title="when-available: poll usage and fire when tokens are below threshold. on-reset: fire after each 5h reset. manual: only on Run now."
             >
               <option value="when-available">when available</option>
-              <option value="on-reset">on reset</option>
-              <option value="manual">manual</option>
+              <option value="on-reset">only on reset</option>
+              <option value="manual">manually</option>
             </select>
-          </label>
-          <label className="flex items-center gap-1" title="Max simultaneous jobs within a parallel group">
-            <span>parallel</span>
+          </div>
+
+          {/* Concurrency cap */}
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-fg-dim">Up to</span>
             <input
               type="number"
               min={1}
               max={20}
               value={config.concurrencyCap}
               onChange={(e) => window.api.schedule.setConfig({ concurrencyCap: Number(e.target.value) })}
-              className="w-10 bg-bg border border-line rounded px-1 py-0.5 font-mono"
+              className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg"
+              title="Max simultaneous jobs within a parallel group"
             />
-          </label>
-          {config.firePolicy === 'when-available' && (
-            <label className="flex items-center gap-1" title="Fire only when 5h utilization is below this percent">
-              <span>util&lt;</span>
+            <span className="text-[13px] text-fg-dim">at once</span>
+          </div>
+
+          {/* Utilization threshold — only relevant for when-available policy */}
+          {(config.firePolicy ?? 'when-available') === 'when-available' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] text-fg-dim">Pause above</span>
               <input
                 type="number"
                 min={0}
                 max={100}
                 value={config.utilizationThreshold ?? 90}
                 onChange={(e) => window.api.schedule.setConfig({ utilizationThreshold: Number(e.target.value) })}
-                className="w-10 bg-bg border border-line rounded px-1 py-0.5 font-mono"
+                className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg"
+                title="Fire only when 5h utilization is below this percent"
               />
-              <span>%</span>
-            </label>
+              <span className="text-[13px] text-fg-dim">% of window</span>
+            </div>
           )}
-        </div>
 
-        {/* manual run + queue counts */}
-        <div className="flex items-center gap-2 text-[10px] text-fg-faint">
-          <button
-            type="button"
-            onClick={() => window.api.schedule.forceTick()}
-            disabled={counts.pending === 0 && counts.running === 0}
-            className="px-2 py-0.5 text-fg-dim hover:text-fg border border-line hover:border-fg-faint rounded disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress."
-          >
-            Fire next batch now
-          </button>
-          <button
-            type="button"
-            onClick={() => window.api.schedule.rescan()}
-            className="px-1.5 py-0.5 text-fg-dim hover:text-fg border border-line hover:border-fg-faint rounded"
-            title="Re-scan the prds/ folder. Use when you've added or edited PRDs on disk and want the queue to reflect them immediately."
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={onClearQueue}
-            disabled={jobs.every((j) => j.status === 'running')}
-            className="px-1.5 py-0.5 text-fg-dim hover:text-red-400 border border-line hover:border-red-400/60 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
-          >
-            Clear
-          </button>
-          <div className="flex-1 text-right font-mono">
-            {counts.pending}p · {counts.running}r · {counts.completed}d
-            {counts.failed > 0 && <span className="text-red-400"> · {counts.failed}f</span>}
-          </div>
-          {hasInlineCompleted && (
+          {/* Actions */}
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              onClick={onClearCompleted}
-              className="px-1.5 py-0.5 text-fg-faint hover:text-fg-dim hover:border-fg-faint border border-line rounded"
-              title="Hide completed jobs from this view (queue.json unchanged — they remain in history)"
+              onClick={() => window.api.schedule.forceTick()}
+              disabled={counts.pending === 0 && counts.running === 0}
+              className="bg-accent text-white rounded-lg px-4 py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
+              title="Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress."
             >
-              Clear done
+              Fire next batch now
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => window.api.schedule.rescan()}
+              className="bg-bg-hi border border-line text-fg-dim hover:text-fg rounded-lg px-3.5 py-2 text-[13px] font-medium"
+              title="Re-scan the prds/ folder. Use when you've added or edited PRDs on disk and want the queue to reflect them immediately."
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
-        {/* concurrency badge + group-backfill hint */}
+        {/* Running concurrency badge */}
         {runningJobs.length > 0 && (() => {
           const cap = config.concurrencyCap ?? 4
           const currentGroup = runningJobs[0]?.parallelGroup
@@ -389,20 +345,18 @@ export function SchedulePanel() {
             (j) => j.status === 'pending' && j.parallelGroup === currentGroup
           ).length
           return (
-            <div className="flex items-center gap-2 text-[10px] font-mono">
-              <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-400 shrink-0">
+            <div className="flex items-center gap-2 text-[12px] font-mono">
+              <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-400 shrink-0">
                 {runningJobs.length}/{cap} running
               </span>
               {groupPending > 0 && (
-                <span className="text-fg-faint">
-                  +{groupPending} ready in this group
-                </span>
+                <span className="text-fg-faint">+{groupPending} ready in this group</span>
               )}
             </div>
           )
         })()}
 
-        {/* Filter bar — hidden when the queue is empty */}
+        {/* Filter bar */}
         {jobs.length > 0 && (
           <FilterBar
             filter={filter}
@@ -410,16 +364,43 @@ export function SchedulePanel() {
           />
         )}
 
-        {/* job list — show pending first (with ETA), then running, then recent completed */}
-        <div
-          ref={jobListRef}
-          role="list"
-          aria-label="Job queue"
-          className="space-y-0.5 max-h-72 overflow-y-auto"
-          onKeyDown={handleJobListKeyDown}
-        >
+        {/* Job table */}
+        <div className="bg-bg-hi border border-line rounded-2xl overflow-hidden">
+          {/* Table header */}
+          <div className="flex items-center justify-between px-[18px] py-3 bg-bg-elev">
+            <span className="font-serif text-base font-semibold text-fg">
+              {filteredJobs.length} job{filteredJobs.length !== 1 ? 's' : ''}
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[12px] text-fg-faint">
+                {counts.pending}p · {counts.running}r · {counts.completed}d
+                {counts.failed > 0 && <span className="text-accent"> · {counts.failed}f</span>}
+              </span>
+              {hasInlineCompleted && (
+                <button
+                  type="button"
+                  onClick={onClearCompleted}
+                  className="text-[12.5px] text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer font-medium"
+                  title="Hide completed jobs from this view (queue.json unchanged — they remain in history)"
+                >
+                  Clear completed
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClearQueue}
+                disabled={jobs.every((j) => j.status === 'running')}
+                className="text-[12.5px] text-fg-dim hover:text-accent bg-transparent border-0 cursor-pointer font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
+              >
+                Clear queue
+              </button>
+            </div>
+          </div>
+
+          {/* Empty state */}
           {jobs.length === 0 && (
-            <div className="text-[10px] text-fg-faint italic">
+            <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">
               No PRDs queued. Drop .md files in:
               <button
                 type="button"
@@ -430,28 +411,44 @@ export function SchedulePanel() {
               </button>
             </div>
           )}
+
           {jobs.length > 0 && inline.length === 0 && collapsedCount === 0 && (
-            <div className="text-[10px] text-fg-faint italic px-1.5 py-1">no matching jobs</div>
+            <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">no matching jobs</div>
           )}
-          {inline.map((j, idx) => (
-            <JobRow
-              key={j.slug}
-              job={j}
-              eta={etaForJob(j, jobs, aheadCount.get(j.slug) ?? 0, avgDurationMs, status.kind, now)}
-              now={now}
-              listIndex={idx}
-            />
-          ))}
+
+          {/* Job rows */}
+          <div
+            ref={jobListRef}
+            role="list"
+            aria-label="Job queue"
+            onKeyDown={handleJobListKeyDown}
+          >
+            {inline.map((j, idx) => (
+              <JobRow
+                key={j.slug}
+                job={j}
+                eta={etaForJob(j, jobs, aheadCount.get(j.slug) ?? 0, avgDurationMs, status.kind, now)}
+                now={now}
+                avgDurationMs={avgDurationMs}
+                listIndex={idx}
+              />
+            ))}
+          </div>
+
+          {/* Collapse toggle */}
           {collapsedCount > 0 && (
             <button
               type="button"
               onClick={() => setShowAllCompleted((v) => !v)}
-              className="w-full text-left text-[10px] text-fg-faint hover:text-fg-dim px-1.5 py-1"
+              className="w-full text-left text-[12px] text-fg-faint hover:text-fg-dim px-[18px] py-3 border-t border-line"
               title={showAllCompleted ? 'Re-collapse old/cleared completed' : 'Show all completed (incl. cleared and >24h)'}
             >
               {showAllCompleted ? '▾' : '▸'} {collapsedCount} more completed
               {hiddenSlugs.size > 0 && (
-                <span className="ml-2 underline" onClick={(e) => { e.stopPropagation(); onUnhideAll() }}>
+                <span
+                  className="ml-2 underline"
+                  onClick={(e) => { e.stopPropagation(); onUnhideAll() }}
+                >
                   un-hide
                 </span>
               )}
@@ -462,16 +459,16 @@ export function SchedulePanel() {
         {/* Bundle D — queue-health linter widget */}
         <QueueHealthSection snap={snap} />
 
-        {/* scheduler health disclosure */}
+        {/* Scheduler health disclosure */}
         <SchedulerHealthSection health={health} now={now} showHealth={showHealth} setShowHealth={setShowHealth} />
 
-        {/* footer: links */}
-        <div className="flex items-center justify-between text-[9px] text-fg-faint pt-1 border-t border-line">
+        {/* Footer */}
+        <div className="flex items-center justify-between text-[12px] text-fg-faint pt-1 border-t border-line">
           <span>
             {nextReset && <span title={`next 5h reset: ${nextReset}`}>reset {formatRelative(Date.parse(nextReset) - now)}</span>}
             {lastRunAt && <span className="ml-2" title={lastRunAt}>last run {formatRelative(now - Date.parse(lastRunAt))} ago</span>}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setPanelView('supervisor')}
@@ -662,9 +659,6 @@ function partitionJobs(
   const inline: ScheduleJob[] = []
   let collapsedCount = 0
   for (const j of jobs) {
-    // Failed jobs are normally always inline (actionable), BUT if the user
-    // explicitly hid one via "Clear done" we honor that intent. Use the
-    // disclosure-all toggle to see them again.
     if (j.status === 'failed' && hiddenSlugs.has(j.slug)) { collapsedCount++; continue }
     if (j.status !== 'completed') { inline.push(j); continue }
     if (keepCompleted.has(j.slug)) inline.push(j)
@@ -674,19 +668,19 @@ function partitionJobs(
 }
 
 function StatusIcon({ kind }: { kind: StatusKind }) {
-  if (kind === 'running') return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-  if (kind === 'paused') return <span className="text-[11px] shrink-0" title="paused">⏸</span>
-  if (kind === 'manual') return <span className="text-[11px] shrink-0" title="manual">✋</span>
-  if (kind === 'on-reset' || kind === 'auto-soon') return <span className="text-[11px] shrink-0" title="auto">⏰</span>
-  if (kind === 'auto-throttled') return <span className="text-[11px] shrink-0" title="throttled">⏳</span>
-  return <span className="w-1.5 h-1.5 rounded-full bg-fg-faint/40 shrink-0" />
+  if (kind === 'running') return <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+  if (kind === 'paused') return <span className="text-[13px] shrink-0" title="paused">⏸</span>
+  if (kind === 'manual') return <span className="text-[13px] shrink-0" title="manual">✋</span>
+  if (kind === 'on-reset' || kind === 'auto-soon') return <span className="text-[13px] shrink-0" title="auto">⏰</span>
+  if (kind === 'auto-throttled') return <span className="text-[13px] shrink-0" title="throttled">⏳</span>
+  return <span className="w-2 h-2 rounded-full bg-fg-faint/40 shrink-0" />
 }
 
-function statusBannerClass(kind: StatusKind): string {
-  if (kind === 'running') return 'bg-amber-400/10'
-  if (kind === 'paused') return 'bg-amber-500/10'
-  if (kind === 'auto-throttled') return 'bg-amber-500/5'
-  return ''
+function statusBannerClassAlmanac(kind: StatusKind): string {
+  if (kind === 'running') return 'bg-amber-400/10 border-amber-400/25'
+  if (kind === 'paused') return 'bg-amber-500/10 border-amber-500/25'
+  if (kind === 'auto-throttled') return 'bg-amber-500/5 border-amber-500/15'
+  return 'bg-bg-elev border-line'
 }
 
 /** Per-job ETA. O(1) given pre-computed `aheadIndex` from computeAheadCounts.
@@ -713,14 +707,21 @@ function etaForJob(
   return `~${formatTimingLabel(estMs)}`
 }
 
-function JobRow({ job, eta, now, listIndex }: { job: ScheduleJob; eta: string | null; now: number; listIndex: number }) {
+function JobRow({ job, eta, now, avgDurationMs, listIndex }: {
+  job: ScheduleJob
+  eta: string | null
+  now: number
+  avgDurationMs: number
+  listIndex: number
+}) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
 
+  const isRunning = job.status === 'running'
   const isFailed = job.status === 'failed'
 
   let trailingLabel: string | null = null
-  if (job.status === 'running' && job.startedAt) {
+  if (isRunning && job.startedAt) {
     trailingLabel = `${formatDuration(now - Date.parse(job.startedAt))} elapsed`
   } else if (job.status === 'completed' && job.startedAt && job.finishedAt) {
     trailingLabel = `took ${formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))}`
@@ -728,132 +729,130 @@ function JobRow({ job, eta, now, listIndex }: { job: ScheduleJob; eta: string | 
     trailingLabel = eta
   }
 
+  // Note shown in collapsed row below the title
   const errorText = job.error ?? null
+  const note = isFailed && errorText
+    ? errorText.split('\n')[0]
+    : job.status === 'needs_review' && job.verifierVerdict
+      ? (VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict)
+      : null
 
-  const tag = projectTag(job.cwd)
+  // Progress fraction for running jobs (capped at 0.99 so it never "completes")
+  const progressPct = isRunning && job.startedAt
+    ? Math.min(0.99, (now - Date.parse(job.startedAt)) / avgDurationMs)
+    : 0
 
   return (
     <div
       role="listitem"
-      className={`text-[11px] rounded ${isFailed ? 'bg-red-950/20 border-l-2 border-red-600/60' : ''}`}
+      className="border-t border-line"
     >
       <button
         type="button"
         data-job-row
         data-job-index={listIndex}
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-1.5 py-1 hover:bg-bg-hi rounded text-left focus:outline-none focus:ring-1 focus:ring-accent"
+        className={`w-full text-left grid grid-cols-[116px_1fr_auto_auto] items-center gap-4 px-[18px] py-3.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${open ? 'bg-bg-elev/40' : ''}`}
         aria-expanded={open}
         aria-label={`${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
         title={job.title}
       >
-        <StatusBadge status={job.status as JobStatus} className="shrink-0" />
-        <span className="truncate flex-1 text-fg-dim">{job.title}</span>
-        {tag && (
+        <SchBadge status={job.status} />
+        <div className="min-w-0">
+          <div className="text-[14.5px] font-medium text-fg leading-snug">{job.title}</div>
+          {note && (
+            <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
+              {note}
+            </div>
+          )}
+        </div>
+        <ProjectTag cwd={job.cwd} />
+        <span className="inline-flex items-center gap-2.5 font-mono text-xs text-fg-faint shrink-0">
+          {trailingLabel}
           <span
-            className="font-mono text-[10px] text-accent shrink-0 px-1.5 py-0.5 rounded border border-accent/30 bg-accent/10"
-            title={`Project: ${job.cwd}`}
+            className={`text-fg-faint inline-flex transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+            aria-hidden="true"
           >
-            {tag}
+            <AlmanacIcon name="chevron" size={14} />
           </span>
-        )}
-        {trailingLabel && (
-          <span className="font-mono text-[9px] text-fg-faint shrink-0">{trailingLabel}</span>
-        )}
+        </span>
       </button>
 
-      {/* 1-line inline error summary for failed rows */}
-      {isFailed && !open && (errorText || job.exitCode !== null) && (
-        <div className="px-3 pb-1.5 text-[10px] text-red-300/90 truncate overflow-hidden text-ellipsis">
-          {errorText ? errorText.split('\n')[0] : `exit ${job.exitCode}`}
-        </div>
-      )}
-      {/* 1-line inline verdict summary for needs_review rows */}
-      {job.status === 'needs_review' && job.verifierVerdict && !open && (
-        <div className="px-3 pb-1.5 text-[10px] text-orange-300/80 truncate overflow-hidden text-ellipsis">
-          verifier: {VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict}
+      {/* Thin progress bar for running jobs (only when collapsed) */}
+      {isRunning && !open && (
+        <div className="h-1 bg-line mx-[18px] mb-3 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-accent transition-all duration-1000"
+            style={{ width: `${Math.max(4, progressPct * 100)}%` }}
+          />
         </div>
       )}
 
+      {/* Expanded detail panel */}
       {open && (
-        <div className="px-3 py-2 space-y-3 bg-bg/50 rounded text-[10px] text-fg-faint">
-          {/* Status section */}
-          <section>
-            <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Status</div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <StatusBadge status={job.status as JobStatus} />
-              {job.exitCode !== null && (
-                <span className={`font-mono ${job.exitCode === 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  exit {job.exitCode}
-                </span>
-              )}
-              {job.verifierVerdict && (
-                <span className="font-mono text-orange-300/90">
-                  {VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict}
-                </span>
-              )}
-            </div>
-            {errorText && (
-              <div className="mt-1.5 text-red-300/90 break-words">{errorText}</div>
+        <div className="px-[18px] py-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-5 bg-bg-elev/50 border-t border-line">
+          <DetailBlock label="Status">
+            <DetailLine k="result" v={job.exitCode !== null ? `exit ${job.exitCode}` : '—'} />
+            <DetailLine k="state" v={job.status.replace(/_/g, ' ')} />
+            {job.verifierVerdict && (
+              <DetailLine k="verdict" v={VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict} />
             )}
-          </section>
+            {errorText && (
+              <DetailLine k="error" v={errorText.split('\n')[0]} wrap />
+            )}
+          </DetailBlock>
 
-          {/* Timing section */}
-          {(job.startedAt || job.finishedAt) && (
-            <section>
-              <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Timing</div>
-              <div className="font-mono space-y-0.5">
-                {job.startedAt && (
-                  <div>started: {formatClock(Date.parse(job.startedAt))}</div>
-                )}
-                {job.finishedAt && (
-                  <div>finished: {formatClock(Date.parse(job.finishedAt))} · {formatAgo(Date.parse(job.finishedAt), now)}</div>
-                )}
-                {job.startedAt && job.finishedAt && (
-                  <div>duration: took {formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))}</div>
-                )}
-                {job.status === 'running' && job.startedAt && (
-                  <div>elapsed: {formatDuration(now - Date.parse(job.startedAt))}</div>
-                )}
-              </div>
-            </section>
-          )}
+          <DetailBlock label="Timing">
+            <DetailLine
+              k="started"
+              v={job.startedAt ? formatClock(Date.parse(job.startedAt)) : '—'}
+            />
+            <DetailLine
+              k="finished"
+              v={job.finishedAt ? formatClock(Date.parse(job.finishedAt)) : '—'}
+            />
+            <DetailLine
+              k="duration"
+              v={
+                job.startedAt && job.finishedAt
+                  ? formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))
+                  : isRunning && job.startedAt
+                    ? formatDuration(now - Date.parse(job.startedAt))
+                    : '—'
+              }
+            />
+          </DetailBlock>
 
-          {/* Location section */}
-          <section>
-            <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Location</div>
-            <div className="font-mono space-y-0.5">
-              <div>group {job.parallelGroup} · {job.slug}</div>
-              {job.cwd && <div className="truncate" title={job.cwd}>cwd: {job.cwd}</div>}
-            </div>
-          </section>
+          <DetailBlock label="Location">
+            <DetailLine k="group" v={`${job.parallelGroup} · ${job.slug}`} />
+            <DetailLine k="cwd" v={job.cwd ?? '—'} wrap />
+          </DetailBlock>
 
-          {/* Actions section */}
-          <section>
-            <div className="text-[9px] uppercase tracking-wider text-fg-faint/60 mb-1.5">Actions</div>
-            <div className="flex gap-3 flex-wrap">
-              {job.status !== 'pending' && (
-                <button
-                  type="button"
-                  onClick={() => window.api.schedule.resetJob(job.slug)}
-                  className="text-fg-dim hover:text-fg underline"
-                >
-                  reset to pending
-                </button>
-              )}
+          <DetailBlock label="Actions">
+            <div className="flex flex-col gap-1.5 items-start">
               {job.runId && (
                 <button
                   type="button"
                   onClick={() => setShowLog(true)}
-                  className="text-fg-dim hover:text-fg underline"
+                  className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer p-0"
                 >
-                  view log
+                  view log →
+                </button>
+              )}
+              {job.status !== 'pending' && (
+                <button
+                  type="button"
+                  onClick={() => window.api.schedule.resetJob(job.slug)}
+                  className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer p-0"
+                >
+                  reset to pending →
                 </button>
               )}
             </div>
-          </section>
+          </DetailBlock>
         </div>
       )}
+
       {showLog && job.runId && (
         <RunLogViewer
           runId={job.runId}
@@ -874,33 +873,45 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
     { label: 'Running', value: 'running' },
     { label: 'Pending', value: 'pending' },
     { label: 'Completed', value: 'completed' },
+    { label: 'Needs review', value: 'needs_review' },
     { label: 'Failed', value: 'failed' },
   ]
   return (
-    <div className="space-y-1">
-      <input
-        type="text"
-        value={filter.text}
-        onChange={(e) => onChange({ ...filter, text: e.target.value })}
-        placeholder="filter jobs…"
-        className="w-full bg-bg border border-line rounded px-2 py-0.5 text-[10px] text-fg-dim placeholder:text-fg-faint focus:outline-none focus:border-fg-faint"
-        aria-label="Filter jobs by title, slug, or project"
-      />
-      <div className="flex items-center gap-1 flex-wrap">
-        {chips.map((c) => (
-          <button
-            key={c.value}
-            type="button"
-            onClick={() => onChange({ ...filter, status: c.value })}
-            className={`px-1.5 py-0.5 text-[9px] rounded border ${
-              filter.status === c.value
-                ? 'bg-accent/20 text-accent border-accent/40'
-                : 'text-fg-faint border-line hover:border-fg-faint hover:text-fg-dim'
-            }`}
-          >
-            {c.label}
-          </button>
-        ))}
+    <div className="flex items-center gap-3 flex-wrap">
+      {/* Text filter */}
+      <div className="relative flex-1 min-w-[200px] max-w-[320px]">
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint inline-flex" aria-hidden="true">
+          <AlmanacIcon name="search" size={15} />
+        </span>
+        <input
+          type="text"
+          value={filter.text}
+          onChange={(e) => onChange({ ...filter, text: e.target.value })}
+          placeholder="filter jobs…"
+          className="w-full bg-bg-hi border border-line rounded-xl py-2 pl-9 pr-3 text-[13.5px] text-fg placeholder:text-fg-faint focus:outline-none focus:border-fg-faint"
+          aria-label="Filter jobs by title, slug, or project"
+        />
+      </div>
+
+      {/* Status chips */}
+      <div className="flex gap-1.5 flex-wrap">
+        {chips.map((c) => {
+          const on = filter.status === c.value
+          return (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => onChange({ ...filter, status: c.value })}
+              className={`rounded-full px-3 py-1.5 text-[12.5px] border transition-colors ${
+                on
+                  ? 'bg-accent text-white border-accent font-semibold'
+                  : 'bg-bg-hi text-fg-dim border-line hover:border-fg-faint font-medium'
+              }`}
+            >
+              {c.label}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -1121,7 +1132,6 @@ function SchedulerHealthSection({
 function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
   const [report, setReport] = useState<LintQueueResult | null>(null)
   const [loading, setLoading] = useState(false)
-  // Auto-expand when there are errors; user can collapse manually.
   const [open, setOpen] = useState(false)
 
   const signal = `${snap.jobs.length}:${snap.lastRunAt ?? ''}`
@@ -1132,7 +1142,6 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
       .then((r) => {
         if (!alive) return
         setReport(r)
-        // Auto-expand if errors found — make issues visible without manual drill-down
         const hasErrors = r.reports.some((rep) => rep.findings.some((f) => f.severity === 'error'))
         if (hasErrors) setOpen(true)
       })
@@ -1164,23 +1173,24 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
 
   return (
     <div className="text-[9px] text-fg-faint border-t border-line pt-1">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 hover:text-fg-dim w-full text-left ${summaryClass}`}
-        title="Static lint of queued PRDs for unbounded loops, missing frontmatter, etc."
-        aria-expanded={open}
-      >
-        <span>{open ? '▾' : '▸'}</span>
-        <span>
-          {clean
-            ? `queue health · all clear (${report.reports.length} scanned)`
-            : `queue health · ${errors} error${errors === 1 ? '' : 's'}${warns > 0 ? `, ${warns} warn${warns === 1 ? '' : 's'}` : ''}`}
-        </span>
+      <div className={`flex items-center gap-1 w-full ${summaryClass}`}>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1 hover:text-fg-dim flex-1 text-left"
+          title="Static lint of queued PRDs for unbounded loops, missing frontmatter, etc."
+          aria-expanded={open}
+        >
+          <span>{open ? '▾' : '▸'}</span>
+          <span>
+            {clean
+              ? `queue health · all clear (${report.reports.length} scanned)`
+              : `queue health · ${errors} error${errors === 1 ? '' : 's'}${warns > 0 ? `, ${warns} warn${warns === 1 ? '' : 's'}` : ''}`}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             setLoading(true)
             getLintQueueCached({ fresh: true })
               .then(setReport)
@@ -1192,7 +1202,7 @@ function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
         >
           {loading ? '…' : 'rerun'}
         </button>
-      </button>
+      </div>
       {open && !clean && (
         <div className="mt-1 space-y-1 max-h-48 overflow-y-auto pl-2">
           {flaggedPrds.map((r) => (

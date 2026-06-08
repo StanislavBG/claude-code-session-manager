@@ -9,7 +9,7 @@ import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
-import { useLiveTab, type LiveTab } from '../../state/live'
+import { useLiveTab, type LiveTab, type AgentSpawnEntry } from '../../state/live'
 import type { Scope } from '../../lib/scopes'
 import { AgentsLibrary } from './Library'
 import {
@@ -19,7 +19,7 @@ import {
 } from '../../lib/agentFrontmatter'
 import { CANONICAL_TOOLS, isCanonicalTool } from '../../data/canonicalTools'
 import { toast } from '../../state/toast'
-import { HiveSubTabs, LaunchView } from './subagents/hive-primitives'
+import { HiveSubTabs, LaunchView, HiveCell, StatusPill } from './subagents/hive-primitives'
 
 const MODEL_OPTIONS = ['inherit', 'opus', 'sonnet', 'haiku'] as const
 const EFFORT_OPTIONS = ['', 'low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -258,6 +258,109 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
   )
 }
 
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rs = s % 60
+  return `${m}m ${String(rs).padStart(2, '0')}s`
+}
+
+function AgentMonitorRow({ agent, now }: { agent: AgentSpawnEntry; now: number }) {
+  const isRunning = agent.lastActivityAt === agent.at
+  const elapsedMs = isRunning ? now - agent.at : agent.lastActivityAt - agent.at
+  const state: 'running' | 'done' = isRunning ? 'running' : 'done'
+
+  return (
+    <div
+      className={`rounded-xl border p-4 transition-shadow ${
+        isRunning
+          ? 'border-accent/50 bg-bg-hi ring-1 ring-accent/20'
+          : 'border-line bg-bg-hi'
+      }`}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className={`shrink-0 ${isRunning ? 'text-accent' : 'text-sage'}`}>
+          <HiveCell size={15} />
+        </span>
+        <span className="font-mono text-[13.5px] font-semibold text-fg truncate">
+          {agent.subagentType ?? 'general-purpose'}
+        </span>
+        <span className="ml-auto shrink-0">
+          <StatusPill state={state} />
+        </span>
+      </div>
+
+      {agent.description && (
+        <div className="mt-2 text-[12.5px] text-fg-dim leading-[1.45] ml-6 line-clamp-2">
+          {agent.description}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 mt-3 font-mono text-[11px] text-fg-faint ml-6">
+        <span>
+          {isRunning ? 'working… ' : ''}
+          {formatElapsed(elapsedMs)}
+        </span>
+        <span>
+          started{' '}
+          {new Date(agent.at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function ResultsDigest({ completedAgents }: { completedAgents: AgentSpawnEntry[] }) {
+  return (
+    <div className="rounded-2xl border border-line bg-bg-hi overflow-hidden">
+      <div className="px-4 py-3.5 border-b border-rule flex items-center gap-2.5">
+        <span className="font-serif text-[17px] font-semibold text-fg">Results digest</span>
+        {completedAgents.length > 0 && (
+          <span className="ml-auto font-mono text-[12px] text-fg-faint">
+            {completedAgents.length} so far
+          </span>
+        )}
+      </div>
+
+      {completedAgents.length === 0 ? (
+        <div className="px-4 py-10 text-center">
+          <div className="text-sm text-fg-dim">Digests appear as agents finish.</div>
+          <div className="mt-1 text-xs text-fg-faint leading-relaxed max-w-[220px] mx-auto">
+            Agent output reaches your main session as a single summary.
+          </div>
+        </div>
+      ) : (
+        <div className="py-1.5">
+          {completedAgents.map((a, i) => (
+            <div
+              key={a.id ?? i}
+              className={`px-4 py-3 ${i > 0 ? 'border-t border-rule' : ''}`}
+            >
+              <div className="font-mono text-[11px] text-fg-faint mb-1">
+                {a.subagentType ?? 'general-purpose'}
+              </div>
+              <div className="text-[13px] text-fg leading-[1.45]">
+                Finished in {formatElapsed(a.lastActivityAt - a.at)}.
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="px-4 py-3.5 border-t border-rule bg-bg">
+        <div className="text-[12px] text-fg-dim leading-[1.5]">
+          Intermediate output stays in each agent&apos;s context — only the summary reaches your main session.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LiveAgentsPanel({
   tabId,
   live,
@@ -265,26 +368,51 @@ function LiveAgentsPanel({
   tabId: string
   live: LiveTab | undefined
 }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  const agents = live?.agents ?? []
+  const runningCount = agents.filter((a) => a.lastActivityAt === a.at).length
+
+  useEffect(() => {
+    if (runningCount === 0) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [runningCount])
+
   if (!live) return <EmptyState title={`waiting for transcript (tab ${tabId.slice(0, 8)})`} />
   if (live.agents.length === 0)
     return <EmptyState title="no subagent spawns observed yet" hint="this updates in real-time" />
+
+  const doneCount = agents.filter((a) => a.lastActivityAt > a.at).length
+  const completedAgents = agents.filter((a) => a.lastActivityAt > a.at)
+
   return (
-    <div className="p-4 space-y-2 max-w-3xl">
-      {live.agents.map((a, i) => (
-        <div key={i} className="border border-line rounded p-3 bg-bg-elev">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium text-fg">
-              {a.subagentType ?? 'general-purpose'}
-            </span>
-            <span className="text-xs text-fg-faint">
-              {new Date(a.at).toLocaleTimeString()}
+    <div className="h-full overflow-auto">
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_340px] gap-6 p-6 xl:p-9 items-start">
+        {/* Agent monitor rows */}
+        <div>
+          {/* Banner */}
+          <div className="rounded-xl border border-line bg-bg-hi p-4 mb-4 flex items-center gap-2">
+            {runningCount > 0 && (
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse shrink-0" />
+            )}
+            <span className="font-mono text-[12.5px] text-fg font-semibold">
+              {doneCount} done · {runningCount} running
             </span>
           </div>
-          {a.description && (
-            <div className="text-xs text-fg-dim">{a.description}</div>
-          )}
+
+          <div className="flex flex-col gap-3">
+            {agents.map((agent, i) => (
+              <AgentMonitorRow key={agent.id ?? i} agent={agent} now={now} />
+            ))}
+          </div>
         </div>
-      ))}
+
+        {/* Results digest (sticky on xl) */}
+        <div className="xl:sticky xl:top-6">
+          <ResultsDigest completedAgents={completedAgents} />
+        </div>
+      </div>
     </div>
   )
 }

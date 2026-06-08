@@ -54,11 +54,28 @@ function roleReturnsHint(label: string): string {
 
 // Hexagonal hive-cell SVG. Uses currentColor so the wrapping element's
 // text-{color} class drives the fill.
-function HiveCell({ size = 16 }: { size?: number }) {
+export function HiveCell({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className="block shrink-0" aria-hidden>
       <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="currentColor" />
     </svg>
+  )
+}
+
+// Status pill for agent rows: running (accent + pulse dot) or done (sage).
+export function StatusPill({ state }: { state: 'running' | 'done' }) {
+  if (state === 'running') {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent text-white text-[11.5px] font-semibold font-sans">
+        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse shrink-0" />
+        running
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11.5px] font-semibold font-sans text-sage border border-sage/40 bg-bg">
+      done
+    </span>
   )
 }
 

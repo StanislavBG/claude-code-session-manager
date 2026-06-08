@@ -307,10 +307,12 @@ export const useLive = create<LiveState>((set, get) => ({
         break
       }
       case 'tool_result': {
-        if (!opts?.replay) {
-          const d = ev.data as { toolUseId?: string }
-          next.agents = touchAgent(cur.agents, d?.toolUseId, now)
-        }
+        // Apply touchAgent even during replay: the intent of the replay guard
+        // was to preserve lastEventAt (handled at the top of ingest already),
+        // not to skip agent settlement. Without this, replayed completed agents
+        // are never marked done and the isRunning heuristic breaks on re-mount.
+        const d = ev.data as { toolUseId?: string }
+        next.agents = touchAgent(cur.agents, d?.toolUseId, now)
         break
       }
       default:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
-import { ListDetail } from '../../ui/ListDetail'
+import { STATUS_TONE, ProjectTag } from '../scheduler/sched-primitives'
 import { EmptyState } from '../../ui/EmptyState'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
@@ -167,6 +167,14 @@ function FmRow({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+function relativeTime(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
 export function SchedulerPrdsView() {
   const [prds, setPrds] = useState<PrdMeta[]>([])
   const [queueState, setQueueState] = useState<ScheduleStateSnapshot | null>(null)
@@ -184,6 +192,7 @@ export function SchedulerPrdsView() {
   const [formBody, setFormBody] = useState('')
   const [showCustomFields, setShowCustomFields] = useState(false)
   const [lintFindings, setLintFindings] = useState<LintFinding[]>([])
+  const pendingEditRef = useRef(false)
 
   // Real-time lint: derive the current "live text" from whichever edit mode is active
   const liveEditText = editing
@@ -261,10 +270,15 @@ export function SchedulerPrdsView() {
         setEditMode('structured')
         setShowCustomFields(false)
         setLintFindings([])
-        setEditing(false)
         setSaveError(null)
         setLogText(null)
         setShowLog(false)
+        if (pendingEditRef.current) {
+          pendingEditRef.current = false
+          setEditing(true)
+        } else {
+          setEditing(false)
+        }
         if (!res.ok) {
           const msg = res.error ?? 'PRD read returned not-ok'
           toast.error(`Could not load PRD "${selectedSlug}": ${msg}`)
@@ -437,350 +451,35 @@ export function SchedulerPrdsView() {
     }
   }
 
-  const sidebar = (
-    <div className="py-2">
-      {sortedPrds.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-fg-faint">no PRDs found</div>
-      ) : (
-        <>
-          {/* Select-all header */}
-          <label
-            className="flex items-center gap-2 px-3 py-1 border-b border-line text-[10px] text-fg-faint"
-            title="Select all visible PRDs"
-          >
-            <input
-              type="checkbox"
-              checked={allVisibleChecked}
-              ref={(el) => { if (el) el.indeterminate = someVisibleChecked }}
-              onChange={toggleAllVisible}
-              className="cursor-pointer"
-            />
-            <span>{checked.size > 0 ? `${checked.size} selected` : `${sortedPrds.length} PRDs`}</span>
-            {checked.size > 0 && (
-              <button
-                type="button"
-                onClick={clearChecked}
-                className="ml-auto text-fg-faint hover:text-fg-dim underline"
-              >
-                clear
-              </button>
-            )}
-          </label>
-          {sortedPrds.map((p) => {
-            const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
-            const s: PrdStatus = j == null ? 'unqueued' : (j.status as PrdStatus)
-            const sel = p.slug === selectedSlug
-            const isChecked = checked.has(p.slug)
-            return (
-              <div
-                key={p.slug}
-                className={`flex items-stretch w-full border-l-2 ${
-                  sel ? 'bg-bg-hi border-accent' : 'border-transparent hover:bg-bg-hi'
-                }`}
-              >
-                <label
-                  className="flex items-center px-2 cursor-pointer"
-                  onClick={(e) => e.stopPropagation()}
-                  title="Select for bulk action"
-                >
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => toggleChecked(p.slug)}
-                    className="cursor-pointer"
-                  />
-                </label>
-                <button
-                  onClick={() => selectSlug(p.slug)}
-                  className="flex-1 text-left px-1 py-2 min-w-0"
-                >
-                  <div className="font-mono text-[11px] text-fg truncate">{p.slug}</div>
-                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                    <StatusBadge status={s} />
-                    {projectTag(p.cwd) && (
-                      <span
-                        className="font-mono text-[10px] text-accent shrink-0 px-1.5 py-0.5 rounded border border-accent/30 bg-accent/10"
-                        title={`Project: ${p.cwd}`}
-                      >
-                        {projectTag(p.cwd)}
-                      </span>
-                    )}
-                    {p.estimateMinutes != null && (
-                      <span className="text-[10px] text-fg-faint">{p.estimateMinutes}m</span>
-                    )}
-                    <span className="text-[10px] text-fg-faint">g{p.parallelGroup}</span>
-                  </div>
-                </button>
-              </div>
-            )
-          })}
-        </>
-      )}
-    </div>
-  )
-
-  // Bulk action bar — rendered above the detail pane when there's a selection.
-  const bulkBar = checked.size > 0 ? (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-bg-elev/60 flex-wrap">
-      <span className="text-[10px] text-fg-faint font-mono">{checked.size} selected</span>
-      <TBtn
-        label="Reset to pending"
-        tip="Reset each selected job to pending status (idempotent)"
-        onClick={bulkReset}
-        disabled={bulkBusy}
-      />
-      <TBtn
-        label="Archive…"
-        tip="Move selected PRD files to prds-archived/<timestamp>/ (never deletes)"
-        onClick={() => setArchiveOpen(true)}
-        disabled={bulkBusy}
-      />
-      <TBtn
-        label="Retag…"
-        tip="Rewrite parallelGroup and/or estimateMinutes frontmatter"
-        onClick={() => setRetagOpen(true)}
-        disabled={bulkBusy}
-      />
-      <button
-        type="button"
-        onClick={clearChecked}
-        className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg-dim ml-auto"
-        title="Clear selection"
-      >
-        clear
-      </button>
-      {bulkError && (
-        <div className="w-full text-[10px] text-red-300 mt-1">{bulkError}</div>
-      )}
-    </div>
-  ) : null
-
-  const detail =
-    selectedSlug == null ? (
-      <div>
-        {bulkBar}
-        <EmptyState title="select a PRD" />
-      </div>
-    ) : (
-      <div>
-        {bulkBar}
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-line flex-wrap">
-          <StatusBadge status={status} />
-          <div className="flex-1" />
-          {editing ? (
-            <>
-              <TBtn
-                label={editMode === 'structured' ? 'View raw' : 'View structured'}
-                tip={
-                  editMode === 'structured'
-                    ? 'Switch to raw Monaco editor (in-flight work preserved)'
-                    : 'Switch back to structured form (in-flight work preserved)'
-                }
-                onClick={editMode === 'structured' ? switchToRaw : switchToStructured}
-              />
-              <TBtn label="Save" tip="Save PRD to disk" onClick={handleSave} primary />
-              <TBtn
-                label="Cancel"
-                tip="Discard edits"
-                onClick={() => {
-                  setDraft(body)
-                  const parsed = parsePrdFile(body)
-                  setFormFm(parsed.frontmatter)
-                  setFormBody(parsed.body)
-                  setEditing(false)
-                  setSaveError(null)
-                }}
-              />
-            </>
-          ) : (
-            <TBtn label="Edit" tip="Edit this PRD" onClick={beginEdit} />
-          )}
-          <TBtn
-            label="Reset"
-            tip="Reset failed job to pending"
-            onClick={() => {
-              window.api.schedule.resetJob(selectedSlug)
-            }}
-            disabled={status !== 'failed'}
-          />
-          {status === 'needs_review' && (
-            <TBtn
-              label="Re-fire"
-              tip="Reset to pending and re-queue for next scheduler run"
-              onClick={() => {
-                window.api.schedule.resetJob(selectedSlug)
-              }}
-              primary
-            />
-          )}
-          <TBtn
-            label="Run now"
-            tip="Run all pending jobs immediately"
-            onClick={() => {
-              window.api.schedule.runNow()
-            }}
-          />
-          <TBtn
-            label="Open folder"
-            tip="Open PRDs folder in file manager"
-            onClick={() => {
-              window.api.schedule.openFolder()
-            }}
-          />
-          <TBtn
-            label={showLog ? 'Hide log' : 'Last run log'}
-            tip="Toggle most recent run log"
-            onClick={handleShowLog}
-          />
-        </div>
-
-        {/* Save error banner */}
-        {saveError && (
-          <div className="px-3 py-2 text-xs text-red-300 bg-red-900/20 border-b border-red-400/30">
-            {saveError}
-          </div>
-        )}
-
-        {/* Content */}
-        {editing ? (
-          <>
-            {editMode === 'raw' ? (
-              <div style={{ height: '600px' }}>
-                <MarkdownEditor
-                  value={draft}
-                  onChange={setDraft}
-                  path={`/scheduler/prds/${selectedSlug}.md`}
-                />
-              </div>
-            ) : (
-              <StructuredPrdEditor
-                fm={formFm}
-                body={formBody}
-                onFmChange={setFormFm}
-                onBodyChange={setFormBody}
-                onPickCwd={pickCwd}
-                slug={selectedSlug}
-                showCustomFields={showCustomFields}
-                onToggleCustomFields={() => setShowCustomFields((v) => !v)}
-              />
-            )}
-            <LintPanel findings={realtimeLintFindings} />
-          </>
-        ) : (
-          <div className="p-4 max-w-3xl space-y-4">
-            {/* Frontmatter card */}
-            <div className="p-3 rounded border border-line bg-bg-elev text-xs space-y-1">
-              <FmRow label="title">{fm.title || '—'}</FmRow>
-              <FmRow label="project">
-                {projectTag(fm.cwd) ? (
-                  <span
-                    className="font-mono text-accent px-2 py-1 rounded border border-accent/30 bg-accent/10 inline-block"
-                    title={`Project: ${fm.cwd}`}
-                  >
-                    {projectTag(fm.cwd)}
-                  </span>
-                ) : (
-                  <span className="text-fg-faint italic">—</span>
-                )}
-              </FmRow>
-              <FmRow label="cwd">
-                <span className="font-mono">{fm.cwd || '—'}</span>
-              </FmRow>
-              {fm.estimateMinutes != null && (
-                <FmRow label="estimateMinutes">{fm.estimateMinutes}</FmRow>
-              )}
-              {fm.parallelGroup != null && (
-                <FmRow label="parallelGroup">{fm.parallelGroup}</FmRow>
-              )}
-              <FmRow label="queued status">{status}</FmRow>
-              {job?.finishedAt && (
-                <FmRow label="last run">{new Date(job.finishedAt).toLocaleString()}</FmRow>
-              )}
-              {job?.verifierVerdict && (
-                <FmRow label="verifier verdict">
-                  <span className="font-mono text-orange-400">{job.verifierVerdict}</span>
-                </FmRow>
-              )}
-              {job?.verifierVerdict && job?.error && (
-                <FmRow label="verdict reason">
-                  <span className="font-mono text-[10px] text-fg-faint break-words">{job.error.slice(0, 160)}</span>
-                </FmRow>
-              )}
-              {customFieldKeys.length > 0 && (
-                <div className="pt-1 mt-1 border-t border-line/60">
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomFields((v) => !v)}
-                    className="text-[10px] text-fg-faint hover:text-fg-dim"
-                  >
-                    {showCustomFields ? '▾' : '▸'} custom fields ({customFieldKeys.length})
-                  </button>
-                  {showCustomFields && (
-                    <pre className="mt-1 text-[11px] text-fg-dim whitespace-pre-wrap font-mono leading-5">
-                      {customFieldKeys
-                        .map((k) => (fm.extras?.[k]?.lines ?? []).join('\n'))
-                        .join('\n')}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Body — raw markdown (MarkdownEditor is Monaco, not a renderer) */}
-            <div>
-              <span className="text-[9px] text-fg-faint uppercase tracking-wide">raw</span>
-              <pre className="mt-1 text-xs text-fg-dim whitespace-pre-wrap font-mono leading-5">
-                {mdBody || <span className="italic">empty body</span>}
-              </pre>
-            </div>
-
-            {/* Inline lint findings for THIS slug — populated after save. */}
-            {lintFindings.length > 0 && (
-              <div className="p-3 rounded border border-amber-400/40 bg-amber-900/10 text-xs space-y-1">
-                <div className="text-[10px] uppercase tracking-wide text-amber-300">
-                  lint findings ({lintFindings.length})
-                </div>
-                {lintFindings.map((f, idx) => (
-                  <div key={idx} className="font-mono text-[11px]">
-                    <span
-                      className={
-                        f.severity === 'error' ? 'text-red-300' : 'text-amber-300'
-                      }
-                    >
-                      [{f.severity}]
-                    </span>{' '}
-                    <span className="text-fg-faint">L{f.line}</span>{' '}
-                    <span className="text-fg-dim">{f.rule}</span>
-                    <div className="ml-6 text-fg-faint truncate">{f.snippet}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Log panel */}
-        {showLog && logText !== null && (
-          <div className="border-t border-line max-h-64 overflow-auto bg-bg-elev">
-            <div className="px-3 py-1.5 flex items-center gap-2 border-b border-line sticky top-0 bg-bg-elev">
-              <span className="text-[10px] text-fg-faint font-mono">
-                run log{job?.runId ? ` — ${job.runId}` : ''}
-              </span>
-              <button
-                onClick={() => setShowLog(false)}
-                className="ml-auto text-[10px] text-fg-faint hover:text-fg"
-              >
-                close
-              </button>
-            </div>
-            <pre className="p-3 text-[11px] font-mono text-fg-dim whitespace-pre-wrap">
-              {logText}
-            </pre>
-          </div>
-        )}
-      </div>
+  async function handleNewPrd() {
+    const slug = `new-prd-${Date.now()}`
+    const template = serializePrdFile(
+      { title: 'New PRD', cwd: '', estimateMinutes: 60, parallelGroup: 99 },
+      '## Task\n\nDescribe the task here.\n',
     )
+    try {
+      const res = await window.api.schedule.writePrd(slug, template)
+      if (!res.ok) {
+        toast.error(`Failed to create PRD: ${res.error}`)
+        return
+      }
+      const list = await window.api.schedule.listPrds()
+      setPrds(list)
+      pendingEditRef.current = true
+      selectSlug(slug)
+    } catch (e: unknown) {
+      toast.error(`Failed to create PRD: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  function handleCardEdit(slug: string) {
+    if (slug === selectedSlug) {
+      beginEdit()
+    } else {
+      pendingEditRef.current = true
+      selectSlug(slug)
+    }
+  }
 
   async function confirmArchive() {
     setBulkBusy(true)
@@ -839,7 +538,184 @@ export function SchedulerPrdsView() {
 
   return (
     <>
-      <ListDetail sidebar={sidebar} detail={detail} sidebarWidth="16rem" />
+      {editing && selectedSlug ? (
+        // ── Editor view ──────────────────────────────────────────────────────
+        <div className="h-full flex flex-col min-h-0">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-line flex-wrap shrink-0">
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setSaveError(null) }}
+              className="text-[11px] text-fg-faint hover:text-fg"
+            >
+              ← PRDs
+            </button>
+            <span className="font-mono text-xs text-fg-dim truncate">{selectedSlug}</span>
+            <StatusBadge status={status} />
+            <div className="flex-1" />
+            <TBtn
+              label={editMode === 'structured' ? 'View raw' : 'View structured'}
+              tip={
+                editMode === 'structured'
+                  ? 'Switch to raw Monaco editor (in-flight work preserved)'
+                  : 'Switch back to structured form (in-flight work preserved)'
+              }
+              onClick={editMode === 'structured' ? switchToRaw : switchToStructured}
+            />
+            <TBtn label="Save" tip="Save PRD to disk" onClick={handleSave} primary />
+            <TBtn
+              label="Cancel"
+              tip="Discard edits"
+              onClick={() => {
+                setDraft(body)
+                const parsed = parsePrdFile(body)
+                setFormFm(parsed.frontmatter)
+                setFormBody(parsed.body)
+                setEditing(false)
+                setSaveError(null)
+              }}
+            />
+            <TBtn
+              label="Reset"
+              tip="Reset failed job to pending"
+              onClick={() => { window.api.schedule.resetJob(selectedSlug) }}
+              disabled={status !== 'failed'}
+            />
+            <TBtn
+              label="Run now"
+              tip="Run all pending jobs immediately"
+              onClick={() => { window.api.schedule.runNow() }}
+            />
+            <TBtn
+              label={showLog ? 'Hide log' : 'Last run log'}
+              tip="Toggle most recent run log"
+              onClick={handleShowLog}
+            />
+          </div>
+
+          {saveError && (
+            <div className="px-3 py-2 text-xs text-red-300 bg-red-900/20 border-b border-red-400/30">
+              {saveError}
+            </div>
+          )}
+
+          {editMode === 'raw' ? (
+            <div style={{ height: '600px' }}>
+              <MarkdownEditor
+                value={draft}
+                onChange={setDraft}
+                path={`/scheduler/prds/${selectedSlug}.md`}
+              />
+            </div>
+          ) : (
+            <StructuredPrdEditor
+              fm={formFm}
+              body={formBody}
+              onFmChange={setFormFm}
+              onBodyChange={setFormBody}
+              onPickCwd={pickCwd}
+              slug={selectedSlug}
+              showCustomFields={showCustomFields}
+              onToggleCustomFields={() => setShowCustomFields((v) => !v)}
+            />
+          )}
+          <LintPanel findings={realtimeLintFindings} />
+
+          {showLog && logText !== null && (
+            <div className="border-t border-line max-h-64 overflow-auto bg-bg-elev">
+              <div className="px-3 py-1.5 flex items-center gap-2 border-b border-line sticky top-0 bg-bg-elev">
+                <span className="text-[10px] text-fg-faint font-mono">
+                  run log{job?.runId ? ` — ${job.runId}` : ''}
+                </span>
+                <button
+                  onClick={() => setShowLog(false)}
+                  className="ml-auto text-[10px] text-fg-faint hover:text-fg"
+                >
+                  close
+                </button>
+              </div>
+              <pre className="p-3 text-[11px] font-mono text-fg-dim whitespace-pre-wrap">
+                {logText}
+              </pre>
+            </div>
+          )}
+        </div>
+      ) : (
+        // ── Card list ────────────────────────────────────────────────────────
+        <div className="px-6 py-5 overflow-auto">
+          <div className="flex items-start justify-between mb-5 gap-4">
+            <p className="text-[14px] text-fg-dim leading-relaxed max-w-[560px]">
+              PRDs are the source the scheduler runs from. Each one becomes a{' '}
+              <code className="font-mono text-[13px]">claude -p</code> job when you queue it.
+            </p>
+            <button
+              type="button"
+              onClick={handleNewPrd}
+              className="shrink-0 bg-accent text-white rounded-[9px] px-4 py-[9px] text-[13.5px] font-semibold leading-none"
+            >
+              + New PRD
+            </button>
+          </div>
+
+          {sortedPrds.length === 0 ? (
+            <EmptyState title="no PRDs found" />
+          ) : (
+            <div className="grid gap-3">
+              {sortedPrds.map((p) => {
+                const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
+                const prdStatus =
+                  j?.status === 'running' ? 'running'
+                  : j?.status === 'pending' ? 'queued'
+                  : 'ready'
+                const tone = STATUS_TONE[prdStatus]
+                const isRunning = j?.status === 'running'
+                return (
+                  <div
+                    key={p.slug}
+                    className="bg-bg-elev border border-line rounded-[13px] px-[18px] py-4 grid grid-cols-[1fr_auto] gap-4 items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2.5 mb-[5px] flex-wrap">
+                        <span className="font-serif text-[18px] font-semibold text-fg leading-tight">
+                          {p.title || p.slug}
+                        </span>
+                        <span
+                          className={`text-[11.5px] font-semibold px-[9px] py-0.5 rounded-full ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ''}`}
+                        >
+                          {tone.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 font-mono text-xs text-fg-faint flex-wrap">
+                        <ProjectTag cwd={p.cwd} />
+                        {p.estimateMinutes != null && <span>{p.estimateMinutes}m</span>}
+                        <span>g{p.parallelGroup}</span>
+                        <span>edited {relativeTime(p.mtimeMs)}</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 items-stretch">
+                      <button
+                        type="button"
+                        onClick={() => window.api.schedule.runNow()}
+                        disabled={isRunning}
+                        className="bg-fg text-bg rounded-[9px] px-[18px] py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-50"
+                      >
+                        {isRunning ? 'Running…' : 'Queue job'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCardEdit(p.slug)}
+                        className="bg-transparent border border-line text-fg-dim rounded-[9px] px-[18px] py-2 text-[13px] font-medium hover:text-fg hover:bg-bg-hi"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       <ArchiveConfirmModal
         open={archiveOpen}
         count={checked.size}

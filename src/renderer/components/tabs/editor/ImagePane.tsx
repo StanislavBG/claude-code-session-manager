@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { extOf, smfileUrl } from '../../../state/editor'
 
 interface Props {
@@ -37,7 +38,7 @@ export function ImagePane({ path, name }: Props) {
   return (
     <div className="h-full overflow-auto p-6 flex items-center justify-center bg-bg">
       {isSvg ? (
-        svg != null && <div dangerouslySetInnerHTML={{ __html: svg }} />
+        svg != null && <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(svg) }} />
       ) : (
         <img src={smfileUrl(path)} alt={name} className="max-w-full max-h-full object-contain" draggable={false} />
       )}

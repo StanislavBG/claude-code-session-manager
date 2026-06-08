@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import DOMPurify from 'dompurify'
 
 interface DocumentViewerProps {
   filePath: string
@@ -120,7 +121,7 @@ export function DocumentViewer({ filePath, onClose }: DocumentViewerProps) {
           <div className="p-6 text-xs text-red-400">{error}</div>
         )}
         {!loading && !error && isImage && ext === 'svg' && (
-          <div className="p-6" dangerouslySetInnerHTML={{ __html: text }} />
+          <div className="p-6" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(text) }} />
         )}
         {!loading && !error && isImage && ext !== 'svg' && imageUrl && (
           <div className="p-6 flex items-center justify-center">

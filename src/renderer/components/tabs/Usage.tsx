@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { UsageMeters } from './usage/UsageMeters'
+import { tierTone } from './usage/usage-primitives'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useBilling, refreshBilling, getBillingData } from '../../state/billing'
 import { useUsageMatrix, useStartUsageMatrix } from '../../state/usageMatrix'
@@ -9,6 +10,7 @@ import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { TopologyHeader } from './usage/TopologyHeader'
 import { SessionMatrix } from './usage/SessionMatrix'
 import { AlertsStrip } from './usage/AlertsStrip'
+import { AlmanacIcon } from '../layout/AlmanacIcon'
 import type { BillingFetchResult, UsageWindow } from '../../../preload/api'
 
 /**
@@ -30,6 +32,7 @@ export function Usage() {
   const data = getBillingData(billing)
   useStartUsageMatrix()
   const matrix = useUsageMatrix((s) => s.snapshot)
+  const [topologyOpen, setTopologyOpen] = useState(true)
 
   if (!activeTab) {
     return (
@@ -74,16 +77,15 @@ export function Usage() {
         </p>
       </div>
 
-      {/* 5h-window burn-rate alert (sticky) — projects whether the session
-          window will exhaust before reset. */}
-      <BurnRate billing={billing} />
-
-      <div className="p-6 max-w-2xl space-y-4">
+      <div className="px-6 pb-6 max-w-2xl space-y-4">
         {billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale' && (
           <BillingStatusOverlay result={billing} onRetry={refreshBilling} />
         )}
 
         {!billing && <div className="text-xs text-fg-faint">loading usage…</div>}
+
+        {/* 5h-window burn-rate projection — Almanac light card. */}
+        <BurnRate billing={billing} />
 
         {/* The /usage core: subscription window consumption. */}
         {data && <UsageMeters data={data} updatedAt={data.fetchedAt} />}
@@ -92,14 +94,32 @@ export function Usage() {
       {/* Secondary — live session topology across all open tabs (not part of
           /usage; the cross-session analytics layer). */}
       {matrix && (
-        <details className="px-6 pb-6 max-w-3xl" open>
-          <summary className="text-xs uppercase tracking-wider text-fg-faint cursor-pointer mb-2">
-            Session topology
-          </summary>
-          <TopologyHeader snap={matrix} />
-          <SessionMatrix snap={matrix} />
-          <AlertsStrip snap={matrix} />
-        </details>
+        <div className="px-6 pb-6 max-w-3xl">
+          <button
+            onClick={() => setTopologyOpen((o) => !o)}
+            aria-expanded={topologyOpen}
+            className="flex items-center gap-2.5 mb-3.5 cursor-pointer appearance-none border-0 bg-transparent p-0 w-full text-left"
+          >
+            <span
+              className={`text-fg-faint inline-flex transition-transform duration-150 ${topologyOpen ? 'rotate-90' : ''}`}
+              aria-hidden="true"
+            >
+              <AlmanacIcon name="chevron" size={15} />
+            </span>
+            <span className="font-serif text-[19px] font-semibold text-fg">Session topology</span>
+            <span className="text-[12.5px] text-fg-faint">
+              · live across open tabs · not part of /usage
+            </span>
+          </button>
+
+          {topologyOpen && (
+            <div className="bg-bg-hi border border-line rounded-2xl overflow-hidden">
+              <TopologyHeader snap={matrix} />
+              <SessionMatrix snap={matrix} />
+              <AlertsStrip snap={matrix} />
+            </div>
+          )}
+        </div>
       )}
     </Panel>
   )
@@ -108,12 +128,6 @@ export function Usage() {
 type BurnLevel = 'ok' | 'warn' | 'critical'
 
 const BURN_LEVEL_ORDER: Record<BurnLevel, number> = { ok: 0, warn: 1, critical: 2 }
-
-const BURN_LEVEL_CLASS: Record<BurnLevel, string> = {
-  ok: 'bg-emerald-950/30 border-emerald-900/40 text-emerald-200',
-  warn: 'bg-yellow-950/30 border-yellow-900/40 text-yellow-200',
-  critical: 'bg-red-950/30 border-red-900/40 text-red-200',
-}
 
 function formatPT(ms: number): string {
   return new Date(ms).toLocaleTimeString('en-US', {
@@ -184,38 +198,124 @@ function BurnRate({ billing }: BurnRateProps) {
     if (exhaustMs <= resetsAtMs) exhaustLabel = `${formatPT(exhaustMs)} PT`
   }
 
+  // Trajectory bar widths (0–100, clamped)
+  const curPct = Math.min(utilization, 100)
+  const projPct = Math.max(0, Math.min(projected, 100) - curPct)
+
+  // Projected tone for the readout label — only meaningful when projectable.
+  // Without a projection, the dash placeholder must not inherit a caution/alert color.
+  const projTone = projectable ? tierTone(projected) : null
+
+  const onTrack = level === 'ok'
+  const pillLabel = onTrack ? 'On track' : 'Trending over'
+  const pillClasses = onTrack
+    ? 'bg-sage/10 border-sage/30 text-sage'
+    : 'bg-accent/10 border-accent/30 text-accent'
+  const pillDotClass = onTrack ? 'bg-sage' : 'bg-accent'
+
   return (
-    <div className={`sticky top-0 z-10 border-b px-6 py-3 ${BURN_LEVEL_CLASS[level]}`}>
-      {isStale && (
-        <div className="text-xs opacity-60 mb-1">
-          stale data ·{' '}
-          <button onClick={refreshBilling} className="underline hover:no-underline">
-            Retry
-          </button>
+    <div className="bg-bg-hi border border-line rounded-2xl px-6 py-5">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-[18px] gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="text-sage inline-flex">
+            <AlmanacIcon name="usage" size={17} />
+          </span>
+          <span className="font-serif text-[19px] font-semibold text-fg">Burn rate</span>
+          <span className="text-[13px] text-fg-faint">· this 5-hour session</span>
         </div>
-      )}
-      <div className="flex items-baseline justify-between mb-2">
-        <h3 className="text-xs uppercase tracking-wider">Burn rate</h3>
-        <div className="text-xs opacity-75">elapsed {elapsedLabel} of 5h</div>
+        <div className="flex items-center gap-2 shrink-0">
+          {isStale && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-honey/10 border border-honey/30 text-honey-dark px-2.5 py-1 rounded-full">
+              stale ·{' '}
+              <button onClick={refreshBilling} className="underline hover:no-underline">
+                Retry
+              </button>
+            </span>
+          )}
+          <span
+            className={`inline-flex items-center gap-1.5 text-[12.5px] font-semibold border px-3 py-1 rounded-full ${pillClasses}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${pillDotClass}`} />
+            {pillLabel}
+          </span>
+        </div>
       </div>
-      <div className="grid grid-cols-3 gap-4 text-xs">
-        <BurnStat label="current" value={`${utilization.toFixed(0)}%`} />
+
+      {/* Three big readouts */}
+      <div className="grid grid-cols-3 gap-2 mb-5">
+        <BurnStat label="Current" value={`${utilization.toFixed(0)}%`} />
         <BurnStat
-          label="projected at reset"
+          label="Projected at reset"
           value={projectable ? `${projected.toFixed(0)}%` : '—'}
+          tone={projTone?.text}
         />
-        <BurnStat label="exhaust by" value={exhaustLabel ?? '—'} />
+        <BurnStat
+          label="Exhaust by"
+          value={exhaustLabel ?? '—'}
+          tone={exhaustLabel ? 'text-accent' : 'text-fg-faint'}
+          hint={exhaustLabel ? 'estimated' : 'not on track to exhaust'}
+        />
+      </div>
+
+      {/* Trajectory bar: solid current + striped projected addition */}
+      <div className="relative h-3.5 bg-sage/15 rounded-full overflow-hidden">
+        <div
+          className="absolute left-0 top-0 bottom-0 bg-sage rounded-full"
+          style={{ width: `${curPct}%` }}
+        />
+        <div
+          className="absolute top-0 bottom-0 burn-proj-stripe"
+          style={{ left: `${curPct}%`, width: `${projPct}%` }}
+        />
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between mt-2.5">
+        <span className="text-[12.5px] text-fg-dim">
+          elapsed <strong className="text-fg font-semibold">{elapsedLabel}</strong> of 5h
+        </span>
+        <span className="inline-flex items-center gap-3.5 text-xs text-fg-faint">
+          <SwatchLabel label="used now" />
+          <SwatchLabel striped label="projected" />
+        </span>
       </div>
     </div>
   )
 }
 
-function BurnStat({ label, value }: { label: string; value: string }) {
+function BurnStat({
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  label: string
+  value: string
+  tone?: string
+  hint?: string
+}) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider opacity-75 mb-0.5">{label}</div>
-      <div className="text-lg font-mono tabular-nums">{value}</div>
+      <div className="text-[11px] font-bold tracking-[0.6px] uppercase text-fg-faint mb-1.5">
+        {label}
+      </div>
+      <div className={`font-mono text-[30px] font-semibold leading-none tracking-tight ${tone ?? 'text-fg'}`}>
+        {value}
+      </div>
+      {hint && <div className="text-[11.5px] text-fg-faint mt-1">{hint}</div>}
     </div>
+  )
+}
+
+function SwatchLabel({ striped, label }: { striped?: boolean; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={`w-3.5 h-2 rounded-sm inline-block ${striped ? 'burn-proj-stripe' : 'bg-sage'}`}
+      />
+      {label}
+    </span>
   )
 }
 

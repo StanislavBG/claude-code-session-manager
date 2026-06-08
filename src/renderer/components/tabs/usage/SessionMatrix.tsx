@@ -9,27 +9,27 @@ export function SessionMatrix({ snap }: { snap: UsageMatrixSnapshot | null }) {
   const rows = snap?.tabs ?? []
   if (rows.length === 0) {
     return (
-      <div className="px-6 py-3 text-xs text-fg-faint border-b border-line">
+      <div className="px-[22px] py-3 text-[13px] text-fg-faint">
         No active sessions tracked yet — start a Claude tab to populate the matrix.
       </div>
     )
   }
   return (
-    <div className="px-6 py-3 border-b border-line">
-      <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-2">
-        Active session matrix
+    <div className="px-[22px] py-4">
+      <div className="text-[11px] font-bold tracking-[0.7px] uppercase text-fg-faint mb-2">
+        Active sessions
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs tabular-nums">
           <thead>
-            <tr className="text-left text-fg-faint">
-              <th className="font-normal pr-3 pb-1">workspace</th>
-              <th className="font-normal pr-3 pb-1">state</th>
-              <th className="font-normal pr-3 pb-1 text-right">turns</th>
-              <th className="font-normal pr-3 pb-1 text-right">avg/turn</th>
-              <th className="font-normal pr-3 pb-1 text-right">tokens/min</th>
-              <th className="font-normal pr-3 pb-1">cache</th>
-              <th className="font-normal pr-3 pb-1 text-right">subagents</th>
+            <tr className="text-left border-b border-line">
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5">workspace</th>
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5 w-[110px]">state</th>
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5 text-right">turns</th>
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5 text-right">avg/turn</th>
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5 text-right">tok/min</th>
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5">cache</th>
+              <th className="font-semibold text-fg-faint pr-3 pb-1.5 text-right">subagents</th>
             </tr>
           </thead>
           <tbody>
@@ -45,32 +45,34 @@ export function SessionMatrix({ snap }: { snap: UsageMatrixSnapshot | null }) {
 
 function Row({ r }: { r: UsageMatrixTab }) {
   return (
-    <tr className="border-t border-line/50">
-      <td
-        className="pr-3 py-1.5 text-fg truncate max-w-[16ch]"
-        title={r.cwd}
-      >
-        {r.workspace}
+    <tr className="border-t border-line">
+      <td className="pr-3 py-2.5 max-w-[16ch]" title={r.cwd}>
+        <span className="flex items-center gap-2 text-[13.5px] font-semibold text-fg">
+          <span className="w-1.5 h-1.5 rounded-full bg-sage shrink-0" />
+          <span className="truncate">{r.workspace}</span>
+        </span>
       </td>
-      <td className="pr-3 py-1.5">
+      <td className="pr-3 py-2.5">
         <StatePill state={r.state} />
       </td>
-      <td className="pr-3 py-1.5 text-right">
+      <td className="pr-3 py-2.5 text-right font-mono text-[13px] text-fg">
         {r.turns}
         {r.geometricGrowth && (
-          <span className="ml-1 text-yellow-300" title="Geometric context growth detected">
+          <span className="ml-1 text-honey-dark" title="Geometric context growth detected">
             ↗
           </span>
         )}
       </td>
-      <td className="pr-3 py-1.5 text-right text-fg-dim">{formatK(r.avgTokensPerTurn)}</td>
-      <td className={`pr-3 py-1.5 text-right ${intensityColor(r.intensity)}`}>
+      <td className="pr-3 py-2.5 text-right font-mono text-[13px] text-fg-dim">
+        {formatK(r.avgTokensPerTurn)}
+      </td>
+      <td className={`pr-3 py-2.5 text-right font-mono text-[13px] ${intensityColor(r.intensity)}`}>
         {r.tokensPerMin > 0 ? formatK(r.tokensPerMin) : '—'}
       </td>
-      <td className="pr-3 py-1.5">
+      <td className="pr-3 py-2.5">
         <CachePill state={r.cacheState} ageMs={r.cacheAgeMs} />
       </td>
-      <td className="pr-3 py-1.5 text-right text-fg-dim">
+      <td className="pr-3 py-2.5 text-right font-mono text-[13px] text-fg-dim">
         {r.subagentsActive > 0
           ? `${r.subagentsActive} / ${r.subagentsSpawned}`
           : r.subagentsSpawned > 0
@@ -83,35 +85,45 @@ function Row({ r }: { r: UsageMatrixTab }) {
 
 function StatePill({ state }: { state: UsageMatrixTab['state'] }) {
   const cls = {
-    idle: 'bg-bg-elev text-fg-faint border-line',
-    executing: 'bg-emerald-950/40 border-emerald-900/40 text-emerald-200',
-    plan: 'bg-blue-950/40 border-blue-900/40 text-blue-200',
-    background: 'bg-purple-950/40 border-purple-900/40 text-purple-200',
+    idle: 'bg-bg-elev border-line text-fg-faint',
+    executing: 'bg-sage/10 border-sage/30 text-sage',
+    plan: 'bg-fg/5 border-line text-fg-dim',
+    background: 'bg-fg/5 border-line text-fg-dim',
   }[state]
+  const isPulse = state === 'executing'
   return (
-    <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] uppercase tracking-wider ${cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11.5px] font-semibold ${cls}`}
+    >
+      {isPulse && <span className="w-1.5 h-1.5 rounded-full bg-sage animate-pulse" />}
       {state}
     </span>
   )
 }
 
-function CachePill({ state, ageMs }: { state: UsageMatrixTab['cacheState']; ageMs: number | null }) {
-  if (ageMs == null) return <span className="text-fg-faint">—</span>
+function CachePill({
+  state,
+  ageMs,
+}: {
+  state: UsageMatrixTab['cacheState']
+  ageMs: number | null
+}) {
+  if (ageMs == null) return <span className="text-fg-faint font-mono text-[13px]">—</span>
   const label = formatAge(ageMs)
   const cls = {
-    warm: 'text-emerald-200',
-    expiring: 'text-yellow-200',
-    cold: 'text-red-200',
+    warm: 'text-sage',
+    expiring: 'text-honey-dark',
+    cold: 'text-accent',
   }[state]
-  return <span className={cls}>{label}</span>
+  return <span className={`font-mono text-[13px] ${cls}`}>{label}</span>
 }
 
 function intensityColor(i: UsageMatrixTab['intensity']): string {
   return {
     idle: 'text-fg-faint',
     low: 'text-fg-dim',
-    medium: 'text-yellow-200',
-    critical: 'text-red-200',
+    medium: 'text-honey-dark',
+    critical: 'text-accent',
   }[i]
 }
 

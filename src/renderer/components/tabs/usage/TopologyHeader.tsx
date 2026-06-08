@@ -1,38 +1,55 @@
 import type { UsageMatrixSnapshot } from '../../../../preload/api'
 
 /**
- * Macro overview strip — sits above the 5h burn-rate banner. Shows
- * cross-workspace totals derived from the per-tab matrix in main.
+ * Macro overview strip — renders as the top stat row inside the Almanac
+ * topology card. Shows cross-workspace totals from the per-tab matrix.
  */
 export function TopologyHeader({ snap }: { snap: UsageMatrixSnapshot | null }) {
   const t = snap?.totals
   if (!t || t.activeSessions === 0) return null
 
   return (
-    <div className="px-6 py-2 border-b border-line bg-bg-elev/50 text-xs grid grid-cols-4 gap-4">
-      <Stat label="active sessions" value={String(t.activeSessions)} />
-      <Stat
-        label="subagents"
+    <div className="grid grid-cols-4 border-b border-line">
+      <TopStat label="Active sessions" value={String(t.activeSessions)} />
+      <TopStat
+        label="Subagents"
         value={
           t.subagentsActive > 0
             ? `${t.subagentsActive} active · ${t.subagentsSpawned} total`
             : `${t.subagentsSpawned} total`
         }
       />
-      <Stat
-        label="combined burn"
+      <TopStat
+        label="Combined burn"
         value={t.combinedTokensPerMin > 0 ? `${formatRate(t.combinedTokensPerMin)}/min` : '—'}
+        mono
       />
-      <Stat label="tokens today" value={formatTokens(t.tokensTotal)} />
+      <TopStat label="Tokens today" value={formatTokens(t.tokensTotal)} mono last />
     </div>
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function TopStat({
+  label,
+  value,
+  mono,
+  last,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  last?: boolean
+}) {
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-0.5">{label}</div>
-      <div className="font-mono tabular-nums text-fg">{value}</div>
+    <div className={`px-5 py-4 ${!last ? 'border-r border-line' : ''}`}>
+      <div className="text-[11px] font-bold tracking-[0.6px] uppercase text-fg-faint mb-1.5">
+        {label}
+      </div>
+      <div
+        className={`text-xl font-semibold text-fg ${mono ? 'font-mono tabular-nums tracking-tight' : ''}`}
+      >
+        {value}
+      </div>
     </div>
   )
 }

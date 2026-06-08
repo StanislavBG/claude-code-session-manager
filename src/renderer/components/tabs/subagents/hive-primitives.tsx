@@ -5,6 +5,27 @@ import { useOrchestrator } from '../../../state/orchestrator'
 import { useActiveTab } from '../../../lib/useActiveTab'
 import { toast } from '../../../state/toast'
 
+// Named-tool chip used in agent editor and library cards.
+export function ToolChip({
+  tone,
+  children,
+}: {
+  tone: 'readonly' | 'write'
+  children: ReactNode
+}) {
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-medium rounded border ${
+        tone === 'write'
+          ? 'border-butter/60 bg-butter/20 text-fg-dim'
+          : 'border-sage/60 bg-sage/10 text-sage'
+      }`}
+    >
+      {children}
+    </span>
+  )
+}
+
 // Six muted Almanac-family accents cycling per hive index. Class names are
 // written as full literals so Tailwind's content scanner includes them all.
 const HIVE_PALETTE = [
@@ -19,7 +40,7 @@ const HIVE_PALETTE = [
 type PaletteEntry = (typeof HIVE_PALETTE)[number]
 
 // Callers always pass i >= 0 (array index or 0-guarded literal).
-function paletteAt(i: number): PaletteEntry {
+export function paletteAt(i: number): PaletteEntry {
   return HIVE_PALETTE[i % HIVE_PALETTE.length]
 }
 
@@ -80,7 +101,7 @@ export function StatusPill({ state }: { state: 'running' | 'done' }) {
 }
 
 // Read-only / can-edit chip shown in the "What will happen" role list.
-function ToolChip({ readOnly }: { readOnly: boolean }) {
+function EditTypeChip({ readOnly }: { readOnly: boolean }) {
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-medium rounded border ${
       readOnly ? 'border-sage text-sage bg-bg' : 'border-butter text-fg-dim bg-bg'
@@ -414,7 +435,7 @@ export function LaunchView({
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-[12.5px] font-semibold text-fg">{role.label}</span>
-                        <ToolChip readOnly={readOnly} />
+                        <EditTypeChip readOnly={readOnly} />
                       </div>
                       <div className="text-xs text-fg-dim mt-0.5 leading-[1.4]">
                         Returns {returns}.

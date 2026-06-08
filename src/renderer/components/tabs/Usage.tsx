@@ -58,6 +58,22 @@ export function Usage() {
         </>
       }
     >
+      {/* Almanac header */}
+      <div className="px-6 pt-7 pb-5 max-w-2xl">
+        <div className="text-xs font-bold text-fg-faint uppercase tracking-widest mb-1">
+          Workspace
+        </div>
+        <h1 className="font-serif text-4xl font-semibold leading-none tracking-tight text-fg m-0">
+          Usage &amp; limits
+        </h1>
+        <p className="mt-2.5 text-[14.5px] text-fg-dim leading-relaxed max-w-xl m-0">
+          Your subscription's rolling-window limits — the same data as{' '}
+          <code className="font-mono text-[13.5px]">claude /usage</code>, pulled live from the
+          billing API. Answers one question:{' '}
+          <em className="italic text-fg">am I about to hit a limit?</em>
+        </p>
+      </div>
+
       {/* 5h-window burn-rate alert (sticky) — projects whether the session
           window will exhaust before reset. */}
       <BurnRate billing={billing} />

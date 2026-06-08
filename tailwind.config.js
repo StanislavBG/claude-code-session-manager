@@ -32,6 +32,10 @@ export default {
         },
         sage: '#6f7d52',
         butter: '#e4b85a',
+        // Usage tier tones — caution (≥70%) band. honey = bar/dot color,
+        // honey-dark = readable text shade on the card background.
+        honey: '#d3a23c',
+        'honey-dark': '#9a6c12',
         // Hive accent palette — three extra low-chroma tones to supplement
         // accent/sage/butter for the 6-slot hive card rotation.
         'hive-slate': '#5f6f86',

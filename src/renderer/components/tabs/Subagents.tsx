@@ -16,6 +16,7 @@ import {
 import { CANONICAL_TOOLS, isCanonicalTool } from '../../data/canonicalTools'
 import { CATALOG_AGENTS, type CatalogAgent } from '../../data/catalog'
 import { toast } from '../../state/toast'
+import { formatDuration } from '../../lib/formatTime'
 import {
   HiveSubTabs,
   LaunchView,
@@ -375,13 +376,6 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
   )
 }
 
-function formatElapsed(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rs = s % 60
-  return `${m}m ${String(rs).padStart(2, '0')}s`
-}
 
 function AgentMonitorRow({ agent, now }: { agent: AgentSpawnEntry; now: number }) {
   const isRunning = agent.lastActivityAt === agent.at
@@ -417,7 +411,7 @@ function AgentMonitorRow({ agent, now }: { agent: AgentSpawnEntry; now: number }
       <div className="flex items-center gap-3 mt-3 font-mono text-[11px] text-fg-faint ml-6">
         <span>
           {isRunning ? 'working… ' : ''}
-          {formatElapsed(elapsedMs)}
+          {formatDuration(elapsedMs)}
         </span>
         <span>
           started{' '}
@@ -462,7 +456,7 @@ function ResultsDigest({ completedAgents }: { completedAgents: AgentSpawnEntry[]
                 {a.subagentType ?? 'general-purpose'}
               </div>
               <div className="text-[13px] text-fg leading-[1.45]">
-                Finished in {formatElapsed(a.lastActivityAt - a.at)}.
+                Finished in {formatDuration(a.lastActivityAt - a.at)}.
               </div>
             </div>
           ))}

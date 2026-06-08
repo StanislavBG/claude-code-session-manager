@@ -107,8 +107,11 @@ export function LegendItem({ dotClass, n, label }: { dotClass: string; n: number
 // ─── STATUS_TONE — PRD status pill styling ───────────────────────────────────
 // Consumed by SchedulerPrdsView restyle (PRD 20-scheduler-prds).
 export const STATUS_TONE: Record<string, { bg: string; text: string; border: boolean; label: string }> = {
-  running: { bg: 'bg-butter/30', text: 'text-fg-dim',   border: false, label: 'running' },
-  queued:  { bg: 'bg-sage/25',   text: 'text-sage',     border: false, label: 'queued' },
-  ready:   { bg: 'bg-bg',        text: 'text-fg-dim',   border: true,  label: 'ready to run' },
-  draft:   { bg: 'bg-bg',        text: 'text-fg-faint', border: true,  label: 'draft' },
+  running:      { bg: 'bg-butter/30', text: 'text-fg-dim',   border: false, label: 'running' },
+  queued:       { bg: 'bg-sage/25',   text: 'text-sage',     border: false, label: 'queued' },
+  ready:        { bg: 'bg-bg',        text: 'text-fg-dim',   border: true,  label: 'ready to run' },
+  draft:        { bg: 'bg-bg',        text: 'text-fg-faint', border: true,  label: 'draft' },
+  completed:    { bg: 'bg-sage/20',   text: 'text-sage',     border: false, label: 'completed' },
+  failed:       { bg: 'bg-accent/15', text: 'text-accent',   border: false, label: 'failed' },
+  needs_review: { bg: 'bg-butter/25', text: 'text-fg-dim',   border: false, label: 'needs review' },
 }

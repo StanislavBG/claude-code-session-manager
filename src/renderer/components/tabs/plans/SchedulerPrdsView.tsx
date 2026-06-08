@@ -7,6 +7,7 @@ import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
 import { Tooltip } from '../../ui/Tooltip'
 import { parsePrdFile, serializePrdFile, type PrdFrontmatter } from '../../../lib/prdFrontmatter'
+import { formatAgo } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
 import { getLintQueueCached } from '../../../lib/lintQueueCache'
@@ -167,13 +168,6 @@ function FmRow({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function relativeTime(ms: number): string {
-  const diff = Date.now() - ms
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  return `${Math.floor(diff / 86_400_000)}d ago`
-}
 
 export function SchedulerPrdsView() {
   const [prds, setPrds] = useState<PrdMeta[]>([])
@@ -662,10 +656,7 @@ export function SchedulerPrdsView() {
             <div className="grid gap-3">
               {sortedPrds.map((p) => {
                 const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
-                const prdStatus =
-                  j?.status === 'running' ? 'running'
-                  : j?.status === 'pending' ? 'queued'
-                  : 'ready'
+                const prdStatus = !j ? 'ready' : j.status === 'pending' ? 'queued' : j.status
                 const tone = STATUS_TONE[prdStatus]
                 const isRunning = j?.status === 'running'
                 return (
@@ -688,7 +679,7 @@ export function SchedulerPrdsView() {
                         <ProjectTag cwd={p.cwd} />
                         {p.estimateMinutes != null && <span>{p.estimateMinutes}m</span>}
                         <span>g{p.parallelGroup}</span>
-                        <span>edited {relativeTime(p.mtimeMs)}</span>
+                        <span>edited {formatAgo(p.mtimeMs, Date.now())}</span>
                       </div>
                     </div>
                     <div className="flex flex-col gap-2 items-stretch">

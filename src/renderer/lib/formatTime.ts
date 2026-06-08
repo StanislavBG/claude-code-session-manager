@@ -16,7 +16,7 @@ export function formatDuration(ms: number): string {
   return `${h}h${(m % 60).toString().padStart(2, '0')}m`
 }
 
-/** Short "Xs / Xm / XhYm" — for "X ago" or "in X" displays. */
+/** Short "Xs / Xm / XhYm / Xd" — for "X ago" or "in X" displays. */
 export function formatRelative(ms: number): string {
   if (ms < 0) ms = 0
   const s = Math.floor(ms / 1000)
@@ -24,7 +24,9 @@ export function formatRelative(ms: number): string {
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m`
   const h = Math.floor(m / 60)
-  return `${h}h${m % 60 ? ` ${m % 60}m` : ''}`
+  if (h < 24) return `${h}h${m % 60 ? ` ${m % 60}m` : ''}`
+  const d = Math.floor(h / 24)
+  return `${d}d`
 }
 
 /** Wall-clock time with timezone abbreviation. */

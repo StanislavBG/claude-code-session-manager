@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+interface GraphNode extends KgNode { val: number; [k: string]: unknown }
+interface GraphLink { source: string; target: string; relation: string; weight: number; lastTs: string | null; [k: string]: unknown }
 import ForceGraph2D from 'react-force-graph-2d'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
@@ -76,22 +79,30 @@ export function KnowledgeGraph() {
   useEffect(() => { (async () => { await reloadProjects() })() }, [reloadProjects])
   useEffect(() => { reload(cwd) }, [cwd, reload])
 
+  const batchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     const off = window.api.kg.onIngestProgress((ev) => {
       setIngesting(ev.ingesting)
       if (ev.phase === 'extract') setProgress(`distilling batch ${ev.batch}/${ev.totalBatches}…`)
       else if (ev.phase === 'batch') {
-        // A batch just committed to disk — grow the graph live. Only reload when
-        // the committed batch belongs to the project we're viewing (or unknown).
         setProgress(`distilled batch ${ev.batch}/${ev.totalBatches}`)
-        if (!ev.cwd || ev.cwd === cwd) reload(cwd)
-        reloadProjects()
+        // Coalesce rapid per-batch events into a single trailing reload (500 ms).
+        if (batchDebounceRef.current) clearTimeout(batchDebounceRef.current)
+        batchDebounceRef.current = setTimeout(() => {
+          batchDebounceRef.current = null
+          if (!ev.cwd || ev.cwd === cwd) reload(cwd)
+          reloadProjects()
+        }, 500)
       }
-      else if (ev.phase === 'done') { setProgress(null); reload(cwd); reloadProjects() }
+      else if (ev.phase === 'done') {
+        if (batchDebounceRef.current) { clearTimeout(batchDebounceRef.current); batchDebounceRef.current = null }
+        setProgress(null); reload(cwd); reloadProjects()
+      }
       else if (ev.phase === 'error') { setProgress(null); toast.error(`Ingest failed: ${ev.error ?? 'unknown'}`) }
       else setProgress('reading prompt log…')
     })
-    return off
+    return () => { off(); if (batchDebounceRef.current) { clearTimeout(batchDebounceRef.current); batchDebounceRef.current = null } }
   }, [reload, reloadProjects, cwd])
 
   const runIngest = useCallback(async () => {
@@ -114,15 +125,46 @@ export function KnowledgeGraph() {
     setAnswer({ text: r.answer ?? '', cited: r.cited ?? [] })
   }, [question, asking, cwd])
 
+  // Stable node/link identity — reuse existing objects so react-force-graph-2d
+  // preserves simulation x/y positions across reloads instead of re-heating.
+  const nodeMapRef = useRef<Map<string, GraphNode>>(new Map())
+  const linkMapRef = useRef<Map<string, GraphLink>>(new Map())
+
   const graphData = useMemo(() => {
-    if (!state) return { nodes: [], links: [] }
+    if (!state) return { nodes: [] as GraphNode[], links: [] as GraphLink[] }
     const ids = new Set(state.nodes.map((n) => n.id))
-    return {
-      nodes: state.nodes.map((n) => ({ ...n, val: Math.max(1, n.count) })),
-      links: state.edges
-        .filter((e) => ids.has(e.src) && ids.has(e.dst))
-        .map((e) => ({ source: e.src, target: e.dst, relation: e.relation, weight: e.weight })),
-    }
+
+    const nodes = state.nodes.map((n) => {
+      const val = Math.max(1, n.count)
+      const existing = nodeMapRef.current.get(n.id)
+      if (existing) {
+        existing.key = n.key; existing.name = n.name; existing.type = n.type
+        existing.description = n.description; existing.count = n.count; existing.val = val
+        existing.firstTs = n.firstTs; existing.lastTs = n.lastTs
+        return existing
+      }
+      const obj: GraphNode = { ...n, val }
+      nodeMapRef.current.set(n.id, obj)
+      return obj
+    })
+
+    const links = state.edges
+      .filter((e) => ids.has(e.src) && ids.has(e.dst))
+      .map((e) => {
+        const k = `${e.src}\x00${e.relation}\x00${e.dst}`
+        const existing = linkMapRef.current.get(k)
+        if (existing) { existing.weight = e.weight; existing.lastTs = e.lastTs; return existing }
+        const obj: GraphLink = { source: e.src, target: e.dst, relation: e.relation, weight: e.weight, lastTs: e.lastTs }
+        linkMapRef.current.set(k, obj)
+        return obj
+      })
+
+    // Prune stale entries to avoid unbounded map growth.
+    for (const id of nodeMapRef.current.keys()) { if (!ids.has(id)) nodeMapRef.current.delete(id) }
+    const liveKeys = new Set(links.map((l) => `${l.source as string}\x00${l.relation}\x00${l.target as string}`))
+    for (const k of linkMapRef.current.keys()) { if (!liveKeys.has(k)) linkMapRef.current.delete(k) }
+
+    return { nodes, links }
   }, [state])
 
   const { ref: graphRef, w, h } = useSize<HTMLDivElement>()

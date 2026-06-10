@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
@@ -6,7 +6,6 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { useSessions } from '../../state/sessions'
 import { shellQuote } from '../../lib/presets'
 import { HistoryDashboard } from './HistoryDashboard'
-import type { DirEntry } from '../../../preload/api'
 
 interface SessionRow {
   sessionId: string
@@ -31,12 +30,26 @@ function thirtyDaysAgoLocal(): string {
   return d.toLocaleDateString('en-CA')
 }
 
+const PAGE_SIZE = 200
+
 export function History() {
   const home = useHomeDir()
   const [rows, setRows] = useState<SessionRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [filterInput, setFilterInput] = useState('')
   const [logFilter, setLogFilter] = useState('')
+  const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addTab = useSessions((s) => s.addTab)
+
+  const handleFilterChange = (val: string) => {
+    setFilterInput(val)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setLogFilter(val)
+      setDisplayLimit(PAGE_SIZE)
+    }, 150)
+  }
 
   const [view, setView] = useState<View>(() =>
     (localStorage.getItem('sm.historyTab.view') as View) ?? 'dashboard'
@@ -56,26 +69,8 @@ export function History() {
     ;(async () => {
       setLoading(true)
       try {
-        const projects = await window.api.config.listDir(`${home}/.claude/projects`, {
-          dirsOnly: true,
-        })
-        const all: SessionRow[] = []
-        for (const proj of projects.entries as DirEntry[]) {
-          if (cancelled) return
-          const files = await window.api.config.listDir(proj.path, { filesOnly: true })
-          for (const f of files.entries as DirEntry[]) {
-            if (!f.name.endsWith('.jsonl')) continue
-            all.push({
-              sessionId: f.name.replace(/\.jsonl$/, ''),
-              projectEncoded: proj.name,
-              path: f.path,
-              mtimeMs: f.mtimeMs,
-              sizeBytes: f.size,
-            })
-          }
-        }
-        all.sort((a, b) => b.mtimeMs - a.mtimeMs)
-        if (!cancelled) setRows(all)
+        const { sessions } = await window.api.history.scanProjects()
+        if (!cancelled) setRows(sessions)
       } catch (e) {
         console.error('[History] scan failed:', e)
       } finally {
@@ -96,6 +91,8 @@ export function History() {
         r.projectEncoded.toLowerCase().includes(q)
     )
   }, [rows, logFilter])
+
+  const visibleRows = filtered.slice(0, displayLimit)
 
   const resume = async (row: SessionRow) => {
     const picked = await window.api.app.pickDirectory()
@@ -197,8 +194,8 @@ export function History() {
   const logToolbar = (
     <>
       <input
-        value={logFilter}
-        onChange={(e) => setLogFilter(e.target.value)}
+        value={filterInput}
+        onChange={(e) => handleFilterChange(e.target.value)}
         placeholder="filter by id or project"
         className="bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg placeholder-fg-faint w-64"
       />
@@ -220,16 +217,28 @@ export function History() {
           onProjectClick={(cwd) => setProjectFilter(cwd)}
         />
       ) : (
-        <div data-testid="history-log" className="h-full">
+        <div data-testid="history-log" className="h-full overflow-auto">
           {loading ? (
             <EmptyState title="scanning transcripts…" />
           ) : (
-            <KVTable
-              columns={columns}
-              rows={filtered}
-              getKey={(r) => r.path}
-              empty="no session transcripts found"
-            />
+            <>
+              <KVTable
+                columns={columns}
+                rows={visibleRows}
+                getKey={(r) => r.path}
+                empty="no session transcripts found"
+              />
+              {filtered.length > displayLimit && (
+                <div className="p-3 text-center">
+                  <button
+                    onClick={() => setDisplayLimit((n) => n + PAGE_SIZE)}
+                    className="text-xs text-fg-faint hover:text-fg"
+                  >
+                    show {Math.min(PAGE_SIZE, filtered.length - displayLimit)} more ({filtered.length - displayLimit} remaining)
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

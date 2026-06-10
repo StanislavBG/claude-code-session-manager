@@ -7,6 +7,7 @@ import { ViewTabs } from '../ui/ViewTabs'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { formatBytes } from '../../lib/formatBytes'
+import { formatMtime } from '../../lib/formatMtime'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import type { MemoryEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
@@ -55,15 +56,6 @@ export function Memory() {
   )
 }
 
-
-function formatMtime(ms: number): string {
-  if (!ms) return ''
-  const diff = Date.now() - ms
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  return `${Math.floor(diff / 86_400_000)}d ago`
-}
 
 function WorkspaceMemoryView() {
   const home = useHomeDir()

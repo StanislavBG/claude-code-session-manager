@@ -5,6 +5,7 @@ import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDurati
 import { useScheduleState } from '../state/scheduleState'
 import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
+import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { SchBadge, ProjectTag, DetailBlock, DetailLine } from './tabs/scheduler/sched-primitives'
 
@@ -894,25 +895,7 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
       </div>
 
       {/* Status chips */}
-      <div className="flex gap-1.5 flex-wrap">
-        {chips.map((c) => {
-          const on = filter.status === c.value
-          return (
-            <button
-              key={c.value}
-              type="button"
-              onClick={() => onChange({ ...filter, status: c.value })}
-              className={`rounded-full px-3 py-1.5 text-[12.5px] border transition-colors ${
-                on
-                  ? 'bg-accent text-white border-accent font-semibold'
-                  : 'bg-bg-hi text-fg-dim border-line hover:border-fg-faint font-medium'
-              }`}
-            >
-              {c.label}
-            </button>
-          )
-        })}
-      </div>
+      <FilterPills options={chips} value={filter.status} onChange={(s) => onChange({ ...filter, status: s })} />
     </div>
   )
 }

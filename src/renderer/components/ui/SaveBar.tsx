@@ -1,3 +1,5 @@
+import { formatTimeSince } from '../../lib/formatTime'
+
 interface Props {
   dirty: boolean
   busy: boolean
@@ -7,14 +9,6 @@ interface Props {
   onRevert: () => void
   /** Shown left of the buttons — usually the path. */
   leading?: React.ReactNode
-}
-
-function timeAgo(ts: number | null | undefined): string {
-  if (!ts) return ''
-  const delta = Math.max(0, Date.now() - ts)
-  if (delta < 60_000) return `saved ${Math.round(delta / 1000)}s ago`
-  if (delta < 3_600_000) return `saved ${Math.round(delta / 60_000)}m ago`
-  return `saved ${Math.round(delta / 3_600_000)}h ago`
 }
 
 export function SaveBar({ dirty, busy, parseError, lastSavedAt, onSave, onRevert, leading }: Props) {
@@ -28,7 +22,7 @@ export function SaveBar({ dirty, busy, parseError, lastSavedAt, onSave, onRevert
         </span>
       )}
       {!dirty && !parseError && lastSavedAt && (
-        <span className="text-fg-faint">{timeAgo(lastSavedAt)}</span>
+        <span className="text-fg-faint">{formatTimeSince(lastSavedAt)}</span>
       )}
       {dirty && !parseError && <span className="text-accent">unsaved</span>}
       <button

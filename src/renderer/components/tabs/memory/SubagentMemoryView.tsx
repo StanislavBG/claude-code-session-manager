@@ -22,6 +22,7 @@ import { useActiveTab } from '../../../lib/useActiveTab'
 import { useHomeDir } from '../../../lib/useHomeDir'
 import { useAgentMemory } from '../../../state/agentMemory'
 import { formatBytes } from '../../../lib/formatBytes'
+import { formatMtime } from '../../../lib/formatMtime'
 import { toast } from '../../../state/toast'
 import type { AgentMemoryCategory, AgentMemoryEntry } from '../../../../preload/api'
 
@@ -40,15 +41,6 @@ const CATEGORY_LABELS: Record<AgentMemoryCategory, string> = {
   workflow: 'Workflow',
 }
 const CATEGORY_KEYS: AgentMemoryCategory[] = ['command', 'preference', 'pattern', 'failure', 'workflow']
-
-function formatMtime(ms: number): string {
-  if (!ms) return ''
-  const diff = Date.now() - ms
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  return `${Math.floor(diff / 86_400_000)}d ago`
-}
 
 /** Scan ~/.claude/agents/ and <cwd>/.claude/agents/ for .md subagent files.
  *  Mirrors what Subagents.tsx does internally — kept inline so this modal is

@@ -206,8 +206,15 @@ export const useLive = create<LiveState>((set, get) => ({
       }
       case 'tool_use': {
         const d = ev.data as { name: string; input: unknown; id?: string }
+        // Store only the fields extractToolTarget() reads — not the full input
+        // body (Write/Edit inputs can be hundreds of KB of file content).
+        const raw = d.input as Record<string, unknown> | null | undefined
+        const inputPreview: Record<string, unknown> = {}
+        for (const key of ['command', 'file_path', 'pattern', 'url', 'query', 'subagent_type', 'description']) {
+          if (raw && key in raw) inputPreview[key] = raw[key]
+        }
         next.lastToolUses = [
-          { id: d.id, name: d.name, input: d.input, at: now },
+          { id: d.id, name: d.name, input: inputPreview, at: now },
           ...cur.lastToolUses,
         ].slice(0, 50)
         if (!opts?.replay) {

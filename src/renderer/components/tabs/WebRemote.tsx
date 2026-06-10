@@ -52,6 +52,7 @@ export function WebRemote() {
   const [status, setStatus] = useState<WebRemoteStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState(false)
+  const [togglingControl, setTogglingControl] = useState(false)
   const [pairingStep, setPairingStep] = useState<PairingStep>('idle')
   const [otp, setOtp] = useState('')
   const [revokingId, setRevokingId] = useState<string | null>(null)
@@ -113,6 +114,24 @@ export function WebRemote() {
       toast.error(`Failed: ${(e as Error)?.message || String(e)}`)
     } finally {
       setToggling(false)
+    }
+  }
+
+  const handleControlToggle = async () => {
+    if (!status) return
+    setTogglingControl(true)
+    try {
+      if (status.remoteControlEnabled) {
+        await window.api.webRemote.disableControl()
+      } else {
+        await window.api.webRemote.enableControl()
+      }
+      const updated = await window.api.webRemote.getStatus()
+      setStatus(updated)
+    } catch (e) {
+      toast.error(`Failed: ${(e as Error)?.message || String(e)}`)
+    } finally {
+      setTogglingControl(false)
     }
   }
 
@@ -191,12 +210,45 @@ export function WebRemote() {
   }
 
   const enabled = status?.enabled ?? false
+  const remoteControlEnabled = status?.remoteControlEnabled ?? false
   const connected = status?.connected ?? false
   const e2eActive = status?.e2eActive ?? false
+  const e2eAuthenticated = status?.e2eAuthenticated ?? false
+  const pendingSas = status?.pendingSas ?? null
   const devices = status?.devices ?? []
+
+  const handleConfirmSas = async () => {
+    try {
+      await window.api.webRemote.confirmSas()
+    } catch (e) {
+      toast.error(`SAS confirm failed: ${(e as Error)?.message || String(e)}`)
+    }
+  }
 
   return (
     <div className="space-y-6 max-w-xl">
+
+      {/* SAS verification banner — shown when a new E2E session needs authentication */}
+      {pendingSas && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-indigo-500/70 bg-indigo-950/40">
+          <span className="text-indigo-300 text-lg leading-none mt-0.5">🔑</span>
+          <div className="flex-1 text-sm text-indigo-100">
+            <strong>Verify E2E session.</strong> Compare this code with the browser — they must match.
+            <div className="mt-2 mb-3 text-3xl font-mono tracking-[0.3em] text-center text-indigo-300 select-all">
+              {pendingSas}
+            </div>
+            <p className="text-xs text-indigo-400 mb-3">
+              If the codes match, confirm below. Mutating commands are blocked until confirmed.
+            </p>
+            <button
+              onClick={handleConfirmSas}
+              className="px-3 py-1.5 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+            >
+              Codes match — confirm
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Active-session banner — prominent warning when remote control is live */}
       {enabled && connected && (
@@ -205,14 +257,19 @@ export function WebRemote() {
           <div className="text-sm text-red-200">
             <strong>Remote control is ACTIVE.</strong> A web session can currently send commands to
             this machine. Disable or revoke all devices below if unexpected.
-            {e2eActive && (
+            {e2eActive && e2eAuthenticated && (
               <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-green-900/60 text-green-300 border border-green-700/50">
-                🔐 E2E encrypted
+                E2E authenticated
+              </span>
+            )}
+            {e2eActive && !e2eAuthenticated && (
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-amber-900/60 text-amber-300 border border-amber-700/50">
+                E2E encrypted · awaiting SAS confirmation
               </span>
             )}
             {!e2eActive && (
               <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-amber-900/60 text-amber-300 border border-amber-700/50">
-                ⚠ Not yet E2E encrypted
+                Not yet E2E encrypted
               </span>
             )}
           </div>
@@ -264,6 +321,43 @@ export function WebRemote() {
               />
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Allow remote control toggle */}
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+          Remote Control Permissions
+        </h2>
+        <div className="flex items-start justify-between px-3 py-3 bg-zinc-800/60 rounded border border-zinc-700">
+          <div className="min-w-0 mr-4">
+            <p className="text-sm font-medium text-zinc-100">Allow remote control (pty + scheduler writes)</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {remoteControlEnabled
+                ? 'ON — paired devices can spawn shells and trigger scheduler jobs'
+                : 'OFF — paired devices are read-only mirrors (default)'}
+            </p>
+            {remoteControlEnabled && (
+              <p className="text-xs text-amber-400 mt-1">
+                ⚠ Enabled: a paired device can execute arbitrary commands on this machine.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleControlToggle}
+            disabled={togglingControl}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+              remoteControlEnabled ? 'bg-amber-600' : 'bg-zinc-600'
+            }`}
+            aria-pressed={remoteControlEnabled}
+            aria-label="Toggle remote control permissions"
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                remoteControlEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
         </div>
       </section>
 

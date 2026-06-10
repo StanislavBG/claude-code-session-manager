@@ -38,6 +38,30 @@ function isToday(isoStr: string, nowMs: number): boolean {
 
 // ─── Window status strip ─────────────────────────────────────────────────────
 
+function pauseMessage(reason: string, resumeAt: string | null, now: number): string {
+  if (reason === 'auth') {
+    return 'Scheduler paused: Claude sign-in expired or invalid. Restart the app or re-run `claude login`, then Resume.'
+  }
+  if (reason === 'rate_limit') {
+    if (resumeAt) {
+      const ms = new Date(resumeAt).getTime()
+      const remaining = ms - now
+      if (remaining > 0) {
+        return `Paused for rate limit — resumes in ${formatRelative(remaining)}`
+      }
+      return 'Paused for rate limit — resume pending'
+    }
+    return 'Paused for rate limit'
+  }
+  if (reason === 'network') {
+    return 'Paused: billing endpoint unreachable for 30+ min.'
+  }
+  if (reason === 'manual') {
+    return 'Scheduler paused manually. Click Resume to restart.'
+  }
+  return `Scheduler paused (${reason})`
+}
+
 function WindowStrip() {
   const { snapshot } = useScheduleState()
   const [now, setNow] = useState(() => Date.now())
@@ -64,37 +88,72 @@ function WindowStrip() {
     now,
   )
 
+  const paused = snapshot.paused
+  const pollHealth = snapshot.pollHealth
+  const pollStale = pollHealth != null && !pollHealth.lastPollOk
+
+  const isErrorPause = paused?.reason === 'auth' || paused?.reason === 'network'
+  const pauseBannerClass = isErrorPause
+    ? 'bg-red-950/60 border-red-700/50 text-red-200'
+    : 'bg-amber-950/60 border-amber-700/50 text-amber-200'
+
   return (
-    <div className="flex items-center gap-5 flex-wrap bg-bg-hi border border-line rounded-xl px-4 py-3">
-      {/* Reset countdown */}
-      <span className="inline-flex items-center gap-2 text-[13.5px] text-fg font-semibold whitespace-nowrap">
-        <span className="text-sage" aria-hidden="true">
-          <AlmanacIcon name="clock" size={15} />
-        </span>
-        Window resets in {resetsIn}
-      </span>
-
-      <span className="w-px h-[18px] bg-rule shrink-0" aria-hidden="true" />
-
-      {/* Job legend */}
-      <LegendItem dotClass="bg-fg-faint" n={pending}   label="pending" />
-      <LegendItem dotClass="bg-accent"   n={running}   label="running" />
-      <LegendItem dotClass="bg-sage"     n={completed} label="completed today" />
-
-      {/* Utilization */}
-      {snapshot.utilization !== null && snapshot.utilization !== undefined && (
-        <>
-          <span className="w-px h-[18px] bg-rule shrink-0" aria-hidden="true" />
-          <span className="font-mono text-[12.5px] text-fg-faint">
-            {Math.round(snapshot.utilization)}% of window used
+    <div className="flex flex-col gap-2">
+      {/* Pause banner — only when paused */}
+      {paused && (
+        <div className={`flex items-center gap-3 border rounded-xl px-4 py-2.5 text-[13px] ${pauseBannerClass}`}>
+          <span className="flex-1 leading-snug">
+            {pauseMessage(paused.reason, paused.resumeAt, now)}
           </span>
-        </>
+          <button
+            type="button"
+            onClick={() => window.api.schedule.resume()}
+            className="shrink-0 px-2.5 py-1 rounded border border-current/40 hover:bg-white/10 transition-colors text-[12px] font-medium"
+          >
+            Resume
+          </button>
+        </div>
       )}
 
-      {/* Last batch — right-aligned */}
-      <span className="ml-auto font-mono text-[12.5px] text-fg-faint whitespace-nowrap">
-        last batch {lastBatch}
-      </span>
+      {/* Stats row */}
+      <div className="flex items-center gap-5 flex-wrap bg-bg-hi border border-line rounded-xl px-4 py-3">
+        {/* Reset countdown */}
+        <span className="inline-flex items-center gap-2 text-[13.5px] text-fg font-semibold whitespace-nowrap">
+          <span className="text-sage" aria-hidden="true">
+            <AlmanacIcon name="clock" size={15} />
+          </span>
+          Window resets in {resetsIn}
+        </span>
+
+        <span className="w-px h-[18px] bg-rule shrink-0" aria-hidden="true" />
+
+        {/* Job legend */}
+        <LegendItem dotClass="bg-fg-faint" n={pending}   label="pending" />
+        <LegendItem dotClass="bg-accent"   n={running}   label="running" />
+        <LegendItem dotClass="bg-sage"     n={completed} label="completed today" />
+
+        {/* Utilization — stale indicator when polls are failing */}
+        {snapshot.utilization !== null && snapshot.utilization !== undefined && (
+          <>
+            <span className="w-px h-[18px] bg-rule shrink-0" aria-hidden="true" />
+            {pollStale ? (
+              <span className="font-mono text-[12.5px] text-amber-400/70" title="Billing poll failing — this reading may be outdated">
+                {Math.round(snapshot.utilization)}% of window used · last good reading{' '}
+                {formatAgo(pollHealth!.lastPollAt, now)}
+              </span>
+            ) : (
+              <span className="font-mono text-[12.5px] text-fg-faint">
+                {Math.round(snapshot.utilization)}% of window used
+              </span>
+            )}
+          </>
+        )}
+
+        {/* Last batch — right-aligned */}
+        <span className="ml-auto font-mono text-[12.5px] text-fg-faint whitespace-nowrap">
+          last batch {lastBatch}
+        </span>
+      </div>
     </div>
   )
 }

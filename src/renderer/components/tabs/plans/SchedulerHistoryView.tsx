@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ScheduleJob } from '../../../../preload/api'
 import { EmptyState } from '../../ui/EmptyState'
 import { formatTimingLabel } from '../../../lib/formatTime'
+import { FilterPills } from '../../ui/FilterPills'
 import { RunLogViewer } from './RunLogViewer'
 import { SchBadge, ProjectTag, DetailBlock, DetailLine } from '../scheduler/sched-primitives'
 
@@ -86,25 +87,7 @@ export function SchedulerHistoryView() {
       {/* Filter bar */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-line flex-wrap">
         {/* Status chips */}
-        <div className="flex gap-1.5 flex-wrap">
-          {STATUS_OPTIONS.map(({ value, label }) => {
-            const on = value === statusFilter
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setStatusFilter(value)}
-                className={`rounded-full px-3 py-1 text-[12.5px] border transition-colors ${
-                  on
-                    ? 'bg-accent text-white border-accent font-semibold'
-                    : 'bg-bg-hi text-fg-dim border-line hover:border-fg-faint font-medium'
-                }`}
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
+        <FilterPills options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} pillPadding="px-3 py-1" />
 
         <span className="w-px h-4 bg-line mx-1" aria-hidden="true" />
 

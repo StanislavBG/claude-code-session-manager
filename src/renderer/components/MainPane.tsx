@@ -78,7 +78,8 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'knowledge-graph': { eyebrow: 'Workspace', title: 'Knowledge Graph',          intro: 'Distilled intelligence over your raw prompt log — entities and relations extracted from what you actually typed, with grounded Q&A over your own history. Distinct from Memory (curated facts Claude reads back); this is derived analytics you never hand-edit.' },
   'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
   'tasks':         { eyebrow: 'Workspace',  title: 'Tasks across sessions',     intro: 'Active to-dos pulled from every running Claude session. Use this to see what is in flight without tab-hopping.' },
-  'scheduler':     { eyebrow: 'Workspace',  title: 'Scheduler',                 intro: 'Author PRDs and run them as claude -p jobs against your 5-hour window. Jobs auto-pause on rate-limit and resume on the next reset.' },
+  // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
+  // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'plugins':       { eyebrow: 'Configure',  title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
   'mcp':           { eyebrow: 'Configure',  title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
   'hooks':         { eyebrow: 'Configure',  title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },

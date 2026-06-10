@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),
     unsubscribe: (tabId) => ipcRenderer.invoke('transcript:unsubscribe', { tabId }),
+    closeTab: (tabId) => ipcRenderer.invoke('transcript:close', { tabId }),
     buffer: (tabId) => ipcRenderer.invoke('transcript:buffer', { tabId }),
     pathFor: (cwd, sessionUuid) =>
       ipcRenderer.invoke('transcript:path', { cwd, sessionUuid }),
@@ -155,6 +156,7 @@ contextBridge.exposeInMainWorld('api', {
   history: {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
     listConversations: () => ipcRenderer.invoke('history:list-conversations'),
+    scanProjects: () => ipcRenderer.invoke('history:scan-projects'),
   },
   files: {
     list: (path, showHidden) => ipcRenderer.invoke('files:list', { path, showHidden }),
@@ -283,6 +285,10 @@ contextBridge.exposeInMainWorld('api', {
     enable: () => ipcRenderer.invoke('webRemote:enable'),
     /** Turn remote control off. Immediately drops relay connection. */
     disable: () => ipcRenderer.invoke('webRemote:disable'),
+    /** Allow MUTATE-tier commands (pty spawn/write, scheduler writes). Default off. */
+    enableControl: () => ipcRenderer.invoke('webRemote:enable-control'),
+    /** Block MUTATE-tier commands — mobile becomes read-only mirror. */
+    disableControl: () => ipcRenderer.invoke('webRemote:disable-control'),
     /** Pair a new device using the 8-character OTP shown in the web UI. */
     pair: (otp) => ipcRenderer.invoke('webRemote:pair', { otp }),
     /** Revoke a paired device by its deviceId. */
@@ -303,6 +309,7 @@ contextBridge.exposeInMainWorld('api', {
     },
     /** Revoke ALL paired devices and tear down every session immediately. */
     revokeAll: () => ipcRenderer.invoke('webRemote:revoke-all'),
+    confirmSas: () => ipcRenderer.invoke('webRemote:confirm-sas'),
     /** Push event when revokeAll completes (main broadcasts webRemote:revoked-all). */
     onRevokedAll: (handler) => {
       const listener = (_e, payload) => handler(payload);

@@ -393,6 +393,13 @@ export interface SupervisorLogEntry {
   costUsd: number | null;
 }
 
+export interface SchedulePollHealth {
+  lastPollAt: number | null;
+  lastPollOk: boolean;
+  consecutiveFailures: number;
+  lastFailureKind: string | null;
+}
+
 export interface ScheduleStateSnapshot {
   config: ScheduleConfig & { supervisor?: SupervisorConfig };
   jobs: ScheduleJob[];
@@ -403,6 +410,8 @@ export interface ScheduleStateSnapshot {
   paused: SchedulePauseInfo | null;
   /** Latest five_hour utilization percent (0–100) cached from billing.fetchUsage. null if unknown. */
   utilization: number | null;
+  /** Poll health — last billing poll result; used to detect stale utilization. */
+  pollHealth?: SchedulePollHealth;
   /** Returned only by the initial state() call, not the broadcast event. */
   paths?: SchedulePaths;
 }
@@ -449,6 +458,19 @@ export interface ConversationSummary {
 
 export interface ListConversationsResult {
   conversations: ConversationSummary[];
+  scannedMs: number;
+}
+
+export interface SessionScanEntry {
+  sessionId: string;
+  projectEncoded: string;
+  path: string;
+  mtimeMs: number;
+  sizeBytes: number;
+}
+
+export interface SessionScanResult {
+  sessions: SessionScanEntry[];
   scannedMs: number;
 }
 
@@ -793,8 +815,13 @@ export interface WebRemoteDevice {
 
 export interface WebRemoteStatus {
   enabled: boolean;
+  remoteControlEnabled: boolean;
   connected: boolean;
   e2eActive: boolean;
+  /** True once the user has confirmed the SAS on the desktop. */
+  e2eAuthenticated: boolean;
+  /** 6-digit Short Authentication String pending user confirmation, or null. */
+  pendingSas: string | null;
   devices: WebRemoteDevice[];
 }
 
@@ -858,7 +885,10 @@ export interface SessionManagerAPI {
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;
+    /** Release the sub back to the LRU cache (view-switch). Does not destroy the watcher. */
     unsubscribe: (tabId: string) => Promise<{ ok: boolean }>;
+    /** Permanently destroy the sub (genuine tab close). */
+    closeTab: (tabId: string) => Promise<{ ok: boolean }>;
     buffer: (tabId: string) => Promise<TranscriptEvent[]>;
     pathFor: (cwd: string, sessionUuid: string) => Promise<string>;
     onEvent: (tabId: string, handler: (ev: TranscriptEvent) => void) => () => void;
@@ -949,6 +979,7 @@ export interface SessionManagerAPI {
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
     listConversations: () => Promise<ListConversationsResult>;
+    scanProjects: () => Promise<SessionScanResult>;
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;
@@ -1062,6 +1093,10 @@ export interface SessionManagerAPI {
     getStatus: () => Promise<WebRemoteStatus>;
     enable: () => Promise<WebRemoteMutationResult>;
     disable: () => Promise<WebRemoteMutationResult>;
+    /** Allow MUTATE-tier commands (pty spawn/write, scheduler writes). Default off. */
+    enableControl: () => Promise<WebRemoteMutationResult>;
+    /** Block MUTATE-tier commands — mobile becomes read-only mirror. */
+    disableControl: () => Promise<WebRemoteMutationResult>;
     pair: (otp: string) => Promise<WebRemotePairResult>;
     revokeDevice: (deviceId: string) => Promise<WebRemoteMutationResult>;
     auditTail: (lines?: number) => Promise<WebRemoteAuditTailResult>;
@@ -1071,6 +1106,9 @@ export interface SessionManagerAPI {
     revokeAll: () => Promise<WebRemoteMutationResult>;
     /** Subscribe to the completion event broadcast after revokeAll. */
     onRevokedAll: (handler: (ev: { revokedCount: number }) => void) => () => void;
+    /** Confirm that the SAS shown on the desktop matches the browser — marks the
+     *  E2E session as authenticated and unblocks MUTATE-tier commands. */
+    confirmSas: () => Promise<WebRemoteMutationResult>;
   };
   kg: {
     /** Distilled knowledge graph + ingest status for ONE project (`cwd`).

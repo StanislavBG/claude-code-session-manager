@@ -84,6 +84,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
   closeTab: (id) => {
     window.api.pty.kill(id)
     window.api.watchers.killTab(id).catch(() => {})
+    window.api.transcripts.closeTab(id).catch(() => {})
     const remaining = get().tabs.filter((t) => t.id !== id)
     const activeTabId =
       get().activeTabId === id ? (remaining[remaining.length - 1]?.id ?? null) : get().activeTabId

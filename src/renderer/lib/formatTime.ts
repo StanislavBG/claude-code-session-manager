@@ -55,6 +55,15 @@ export function formatAgo(ms: number | null, now: number): string {
   return `${formatRelative(diff)} ago`
 }
 
+/** "saved Xs ago" / "saved Xm ago" / "saved Xh ago" — used by SaveBar. */
+export function formatTimeSince(ts: number | null | undefined): string {
+  if (!ts) return ''
+  const delta = Math.max(0, Date.now() - ts)
+  if (delta < 60_000) return `saved ${Math.round(delta / 1000)}s ago`
+  if (delta < 3_600_000) return `saved ${Math.round(delta / 60_000)}m ago`
+  return `saved ${Math.round(delta / 3_600_000)}h ago`
+}
+
 /** Human-readable label for job durations: "2h 15m", "45m", "30s".
  *  Unlike formatDuration (compact "XhYYm") this uses spaces and drops
  *  sub-minute precision for large values, making it easier to scan. */

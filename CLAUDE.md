@@ -98,6 +98,7 @@ Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). 
 
 ## Avoid
 
+- Running more than **3 concurrent `claude -p` jobs** on this machine (scheduler cap, manual runners, anything that shells out to claude). Each is a node process that can exceed 1 GB; 5 in parallel OOM-killed Electron on 2026-06-10. `queue.json` concurrencyCap is 3 — keep it there.
 - Adding `shell: true` to `child_process.spawn` calls — only `watchers.cjs` and `app:test-fire-hook` legitimately need it (user-supplied shell strings are part of those features). Anywhere else, pass argv arrays.
 - Reading remote URLs in production — `createWindow` hard-fails if `dist/index.html` is missing rather than falling back to `localhost:5173`.
 - Re-implementing the tmp+rename atomic-write pattern. Use `config.cjs`'s `writeJson` / `writeTextAtomic`.

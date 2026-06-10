@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { ensureMonaco } from '../../lib/monaco'
 
 interface Props {
   value: string
@@ -67,7 +68,7 @@ let monacoLoaded = false
 
 export async function installMonacoSchemas(regs: SchemaRegistration[]) {
   if (monacoLoaded) return
-  const monaco = await import('monaco-editor')
+  const monaco = await ensureMonaco()
   const schemas = await Promise.all(
     regs.map(async (r) => {
       let schema = r.schema

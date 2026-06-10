@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab } from '../../state/live'
 import { useBilling, getBillingData } from '../../state/billing'
+import { useScheduleState } from '../../state/scheduleState'
 import type { NavKey } from '../LeftNav'
 
 interface AlmanacFooterProps {
@@ -24,6 +25,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const live = useLiveTab(tab)
   const lastEventAt = live?.lastEventAt ?? 0
   const billing = useBilling((s) => s.data)
+  const schedPaused = useScheduleState((s) => s.snapshot?.paused ?? null)
   const [branch, setBranch] = useState<string | null>(null)
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)
@@ -69,6 +71,21 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       >
         {util != null ? `${util}% of 5h window used` : '5h —'}
       </button>
+
+      {schedPaused && (
+        <button
+          onClick={() => onNavigate?.('scheduler')}
+          title="Scheduler is paused — click to open Scheduler"
+          className={`flex items-center gap-1 px-1.5 py-0.5 rounded border font-mono text-[10.5px] transition-colors ${
+            schedPaused.reason === 'auth' || schedPaused.reason === 'network'
+              ? 'border-red-700/60 text-red-300 hover:bg-red-900/20'
+              : 'border-amber-700/60 text-amber-300 hover:bg-amber-900/20'
+          }`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+          Scheduler paused · {schedPaused.reason}
+        </button>
+      )}
 
       {tab && (
         <span className="text-fg-faint" title={tab.cwd}>

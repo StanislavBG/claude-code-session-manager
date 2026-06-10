@@ -820,6 +820,8 @@ export interface WebRemoteStatus {
   e2eActive: boolean;
   /** True once the user has confirmed the SAS on the desktop. */
   e2eAuthenticated: boolean;
+  /** Explicit E2E session state for UI rendering. */
+  e2eState: 'idle' | 'pending_sas' | 'authenticated' | 'failed';
   /** 6-digit Short Authentication String pending user confirmation, or null. */
   pendingSas: string | null;
   devices: WebRemoteDevice[];

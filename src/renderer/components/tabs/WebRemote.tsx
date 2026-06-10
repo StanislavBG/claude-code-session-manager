@@ -214,12 +214,16 @@ export function WebRemote() {
   const connected = status?.connected ?? false
   const e2eActive = status?.e2eActive ?? false
   const e2eAuthenticated = status?.e2eAuthenticated ?? false
+  const e2eState = status?.e2eState ?? 'idle'
   const pendingSas = status?.pendingSas ?? null
   const devices = status?.devices ?? []
 
   const handleConfirmSas = async () => {
     try {
-      await window.api.webRemote.confirmSas()
+      const result = await window.api.webRemote.confirmSas()
+      if (!result?.ok) {
+        toast.error(`SAS confirm failed: ${result?.error ?? 'unexpected state — reconnect the mobile app'}`)
+      }
     } catch (e) {
       toast.error(`SAS confirm failed: ${(e as Error)?.message || String(e)}`)
     }
@@ -246,6 +250,17 @@ export function WebRemote() {
             >
               Codes match — confirm
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* E2E failed banner — shown when key exchange failed and session must be retried */}
+      {e2eState === 'failed' && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-red-500/70 bg-red-950/40">
+          <span className="text-red-300 text-lg leading-none mt-0.5">⚠</span>
+          <div className="text-sm text-red-200">
+            <strong>E2E key exchange failed.</strong> The session key could not be established.
+            Reconnect the mobile app to retry.
           </div>
         </div>
       )}

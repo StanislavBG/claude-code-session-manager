@@ -7,7 +7,7 @@
  *   - Outbound-only: opens a WS TO the relay, never listens.
  *   - OFF by default: remoteEnabled must be explicitly true in web-remote.json.
  *   - Kill switch: synchronous — drops socket + refuses all commands instantly.
- *   - Strict allowlist: 15 enumerated command types; unknown → silent drop.
+ *   - Strict allowlist: enumerated command types; unknown → opaque rejected response.
  *   - Zod validation: every payload parsed before any dispatch.
  *   - Path safety: cwd/path fields go through validatePath (home-dir boundary).
  *   - Token at rest: web-remote.json written at 0600 via writeTextAtomic.
@@ -28,6 +28,7 @@ const { writeTextAtomic, validatePath } = require('./config.cjs');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
+const { makeState, confirmSas: confirmSasLogic } = require('./lib/e2eStateMachine.cjs');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -185,9 +186,8 @@ let _configCacheAt = 0;
 let _destroyed = false; // set at app shutdown to stop reconnect loops
 
 // E2E session state — reset on each new WS connection.
-let _e2eSessionKey = null;    // Buffer | null
-let _e2eAuthenticated = false; // true once user confirms SAS on the desktop
-let _pendingSas = null;        // string | null — 6-digit SAS pending user confirmation
+// .state: 'idle' | 'pending_sas' | 'authenticated' | 'failed'
+let _e2e = makeState();
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
@@ -312,6 +312,12 @@ async function getDeviceTicket(deviceToken) {
   return result.ticket;
 }
 
+// ─── E2E state helpers ────────────────────────────────────────────────────────
+
+function resetE2e(state = 'idle') {
+  _e2e = makeState(state);
+}
+
 // ─── WebSocket lifecycle ──────────────────────────────────────────────────────
 
 function broadcastStatus() {
@@ -322,9 +328,10 @@ function broadcastStatus() {
     enabled: cfg.remoteEnabled,
     remoteControlEnabled: cfg.remoteControlEnabled ?? false,
     connected,
-    e2eActive: connected && _e2eSessionKey !== null,
-    e2eAuthenticated: connected && _e2eAuthenticated,
-    pendingSas: connected && _pendingSas ? _pendingSas : null,
+    e2eActive: connected && _e2e.sessionKey !== null,
+    e2eAuthenticated: connected && _e2e.state === 'authenticated',
+    e2eState: connected ? _e2e.state : 'idle',
+    pendingSas: connected && _e2e.state === 'pending_sas' ? _e2e.pendingSas : null,
     devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
       deviceId, deviceName, issuedAt, lastConnectedAt,
     })),
@@ -388,9 +395,7 @@ function scheduleReconnect() {
 async function disconnect() {
   cancelReconnect();
   stopHeartbeat();
-  _e2eSessionKey = null;
-  _e2eAuthenticated = false;
-  _pendingSas = null;
+  resetE2e();
   if (_ws) {
     const ws = _ws;
     _ws = null;
@@ -439,7 +444,7 @@ async function connect() {
 
   _ws = ws;
   _missedPongs = 0;
-  _e2eSessionKey = null; // reset session key on new connection
+  resetE2e(); // reset E2E state on new connection
 
   ws.on('open', () => {
     logs.writeLine({ scope: 'webRemote', level: 'info', message: 'connected to relay' });
@@ -476,7 +481,7 @@ async function connect() {
   ws.on('close', (code) => {
     stopHeartbeat();
     stopAllSessionWatches();
-    _e2eSessionKey = null;
+    resetE2e();
     if (_ws === ws) _ws = null;
     logs.writeLine({ scope: 'webRemote', level: 'info', message: 'ws closed', meta: { code } });
     broadcastStatus();
@@ -524,8 +529,8 @@ function pushEvent(type, payload) {
   if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
   const inner = { type, id: crypto.randomUUID(), payload, ts: Date.now() };
   try {
-    if (_e2eSessionKey) {
-      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2eSessionKey);
+    if (_e2e.sessionKey) {
+      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2e.sessionKey);
       _ws.send(JSON.stringify({ type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() }));
     } else {
       _ws.send(JSON.stringify(inner));
@@ -616,7 +621,7 @@ async function pollSessionWatcher(w) {
   if (nextState && nextState !== w.state) {
     w.state = nextState;
     // Guard: don't push state if SAS not yet confirmed (watcher may outlive an auth reset).
-    if (_e2eAuthenticated) {
+    if (_e2e.state === 'authenticated') {
       pushEvent('event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
     }
   }
@@ -680,7 +685,7 @@ async function pushSessionList() {
     // A relay that completes e2e:hello before the user confirms the SAS would otherwise
     // receive the full session list immediately (same threat SAS_GATED_READS blocks for
     // cmd:sessions:load). Guard here so _lastSessionListJson is not poisoned either.
-    if (!_e2eAuthenticated) return;
+    if (_e2e.state !== 'authenticated') return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
     // Normalize persisted tabs → SessionMeta. tabId === claudeSessionId so it
@@ -782,7 +787,7 @@ function anthropicSummarize(apiKey, text) {
  */
 async function maybeSummarize(w) {
   // Guard: don't push summaries (session transcript content) before SAS confirmed.
-  if (!_e2eAuthenticated) return;
+  if (_e2e.state !== 'authenticated') return;
   const text = w.lastAssistantText;
   if (!text) return;
   const ofMessageId = w.lastMsgId;
@@ -895,29 +900,31 @@ async function handleMessage(raw, device) {
     } catch (e) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello peer key validation failed — session dropped', meta: { error: e?.message } });
       await auditLog(new Date().toISOString(), 'e2e:hello', device.deviceId, undefined, 'error:invalid_peer_key');
-      _e2eSessionKey = null;
-      _e2eAuthenticated = false;
-      _pendingSas = null;
-      broadcastStatus(); // clear stale "SAS pending"/"E2E active" UI state
+      resetE2e('failed'); // surface key-validation failure to UI — user must reconnect
+      broadcastStatus();
       return;
     }
     try {
-      _e2eSessionKey = deriveSessionKey(device.e2ePrivateKey, browserPubKey, device.deviceId);
-      _e2eAuthenticated = false;
+      const sessionKey = deriveSessionKey(device.e2ePrivateKey, browserPubKey, device.deviceId);
+      let pendingSas;
       try {
-        _pendingSas = deriveSas(device.e2ePrivateKey, browserPubKey, device.deviceId);
-      } catch {
-        _pendingSas = null;
+        pendingSas = deriveSas(device.e2ePrivateKey, browserPubKey, device.deviceId);
+      } catch (sasErr) {
+        // SAS derivation failed — session cannot be verified by the user.
+        // Mark failed so confirm-sas returns ok:false and the UI prompts retry.
+        resetE2e('failed');
+        logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'E2E SAS derivation failed — session marked failed', meta: { error: sasErr?.message } });
+        broadcastStatus();
+        return;
       }
-      logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session key established — SAS pending confirmation', meta: { hasSas: _pendingSas !== null } });
+      _e2e = makeState('pending_sas', sessionKey, pendingSas);
+      logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session key established — SAS pending confirmation' });
       broadcastStatus();
       // Acknowledge with e2e:ready (unencrypted — session just started)
       respond(id, undefined, 'e2e:ready');
     } catch (e) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'E2E key derivation failed', meta: { error: e?.message } });
-      _e2eSessionKey = null;
-      _e2eAuthenticated = false;
-      _pendingSas = null;
+      resetE2e('failed');
       broadcastStatus();
     }
     return;
@@ -925,13 +932,13 @@ async function handleMessage(raw, device) {
 
   // ── Decrypt e2e:box messages ──────────────────────────────────────────────
   if (type === 'e2e:box') {
-    if (!_e2eSessionKey) {
+    if (!_e2e.sessionKey) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:box received but no session key — dropping' });
       return;
     }
     const { nonce, ciphertext } = payload || {};
     if (!nonce || !ciphertext) return;
-    const plaintext = decryptBox(nonce, ciphertext, _e2eSessionKey);
+    const plaintext = decryptBox(nonce, ciphertext, _e2e.sessionKey);
     if (!plaintext) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:box decryption failed (auth tag mismatch)' });
       return;
@@ -952,7 +959,7 @@ async function handleMessage(raw, device) {
   if (!type.startsWith('cmd:')) return;
   // After E2E is established, reject plaintext commands — a malicious relay cannot
   // silently downgrade the session by stripping e2e:hello (PENTEST.md §H1).
-  if (_e2eSessionKey) {
+  if (_e2e.sessionKey) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'plaintext cmd rejected — e2e session active' });
     return;
   }
@@ -969,20 +976,21 @@ async function dispatchEnvelope(envelope, device) {
   const cfg = await loadConfig();
   if (!cfg.remoteEnabled) {
     await auditLog(ts, type, device.deviceId, id, 'error:disabled');
-    respond(id, { error: 'disabled' });
+    respond(id, { error: 'rejected' }); // opaque — reason stays in audit log only
     return;
   }
 
-  // Allowlist check — unknown types are dropped without error feedback (ADR §6.2)
+  // Allowlist check — reject unknown cmd:* types with opaque error (oracle prevention)
   if (!ALLOWED_COMMANDS.has(type)) {
     await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
+    respond(id, { error: 'rejected' });
     return;
   }
 
   // MUTATE tier gate — write/exec commands require remoteControlEnabled=true (default false)
   if (MUTATE_COMMANDS.has(type) && !cfg.remoteControlEnabled) {
     await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
-    respond(id, { error: 'not_allowed' });
+    respond(id, { error: 'rejected' }); // opaque — reason stays in audit log only
     return;
   }
 
@@ -990,9 +998,9 @@ async function dispatchEnvelope(envelope, device) {
   // user confirms the SAS on the desktop. This prevents a compromised relay
   // from exfiltrating session lists, PRDs, run logs, or transcript summaries
   // by completing the ECDH handshake without the user's knowledge.
-  if ((MUTATE_COMMANDS.has(type) || SAS_GATED_READS.has(type)) && !_e2eAuthenticated) {
+  if ((MUTATE_COMMANDS.has(type) || SAS_GATED_READS.has(type)) && _e2e.state !== 'authenticated') {
     await auditLog(ts, type, device.deviceId, id, 'error:e2e_not_authenticated');
-    respond(id, { error: 'e2e_not_authenticated' });
+    respond(id, { error: 'rejected' }); // opaque — reason stays in audit log only
     return;
   }
 
@@ -1004,7 +1012,7 @@ async function dispatchEnvelope(envelope, device) {
   } catch (e) {
     const code = e?.name === 'ZodError' ? 'schema_invalid' : 'dispatch_error';
     await auditLog(ts, type, device.deviceId, id, `error:${code}`);
-    result = { error: code }; // never leak internal error messages to the remote caller
+    result = { error: 'rejected' }; // opaque on-wire — reason stays in audit log only
   }
 
   respond(id, result);
@@ -1024,8 +1032,8 @@ function respond(msgId, payload, typeOverride) {
 
   try {
     // Encrypt the response if a session key is active.
-    if (_e2eSessionKey && !typeOverride) {
-      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2eSessionKey);
+    if (_e2e.sessionKey && !typeOverride) {
+      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2e.sessionKey);
       _ws.send(JSON.stringify({
         type: 'e2e:box',
         id: msgId,
@@ -1249,9 +1257,10 @@ function registerRemoteHandlers() {
       enabled: cfg.remoteEnabled,
       remoteControlEnabled: cfg.remoteControlEnabled ?? false,
       connected,
-      e2eActive: connected && _e2eSessionKey !== null,
-      e2eAuthenticated: connected && _e2eAuthenticated,
-      pendingSas: connected && _pendingSas ? _pendingSas : null,
+      e2eActive: connected && _e2e.sessionKey !== null,
+      e2eAuthenticated: connected && _e2e.state === 'authenticated',
+      e2eState: connected ? _e2e.state : 'idle',
+      pendingSas: connected && _e2e.state === 'pending_sas' ? _e2e.pendingSas : null,
       devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
         deviceId, deviceName, issuedAt, lastConnectedAt,
       })),
@@ -1259,20 +1268,22 @@ function registerRemoteHandlers() {
   });
 
   // User confirmed that the SAS shown on both desktop and browser match.
-  // This clears the pending SAS and marks the E2E session as authenticated,
-  // allowing MUTATE-tier commands to proceed.
+  // Returns ok:false if the session is not in the pending_sas state (e.g. key
+  // missing, already failed, already authenticated, or reconnected).
   ipcMain.handle('webRemote:confirm-sas', async () => {
-    if (_e2eSessionKey && _pendingSas) {
-      _e2eAuthenticated = true;
-      _pendingSas = null;
-      logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session authenticated — SAS confirmed by user' });
-      broadcastStatus();
-      // Flush the session list immediately — the push loop was suppressed while
-      // _e2eAuthenticated was false, so the mobile app would otherwise wait up to
-      // SESSION_LIST_PUSH_MS for the first useful data.
-      _lastSessionListJson = null;
-      pushSessionList().catch(() => {});
+    const { ok, error, next } = confirmSasLogic(_e2e);
+    if (!ok) {
+      logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'confirm-sas rejected — wrong state', meta: { state: _e2e.state, error } });
+      return { ok: false, error };
     }
+    _e2e = next;
+    logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session authenticated — SAS confirmed by user' });
+    broadcastStatus();
+    // Flush the session list immediately — the push loop was suppressed while
+    // state !== 'authenticated', so the mobile app would otherwise wait up to
+    // SESSION_LIST_PUSH_MS for the first useful data.
+    _lastSessionListJson = null;
+    pushSessionList().catch(() => {});
     return { ok: true };
   });
 
@@ -1353,7 +1364,7 @@ async function init() {
 function destroy() {
   _destroyed = true;
   cancelReconnect();
-  _e2eSessionKey = null;
+  resetE2e();
   if (_ws) {
     try { _ws.terminate(); } catch { /* */ }
     _ws = null;

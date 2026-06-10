@@ -49,6 +49,12 @@ const BATCH = 20;                 // prompts per extraction call (also a per-pro
 const KNOWN_VOCAB = 200;          // top node names pre-seeded for dedup-at-extraction
 const MAX_TAIL_BYTES = 8 * 1024 * 1024;   // bound bytes scanned per ingest run
 const MAX_EXTRACTIONS_PER_RUN = 30;       // bound claude calls per run (cost/time)
+// Coalescing window before an auto-ingest after new prompts land. Units never
+// mix projects, and a project switch in the log closes the current batch — so
+// with concurrent sessions a short window yields 1-2-prompt batches and one
+// claude spawn each (~1.2K extraction runs in one 48h period). A long window
+// lets prompts accumulate into fuller batches; the KG tab tolerates the lag.
+const WATCH_COALESCE_MS = 5 * 60_000;
 
 const ENTITY_TYPES = ['project', 'feature', 'tool', 'tech', 'concept', 'goal', 'person'];
 
@@ -584,8 +590,14 @@ function init(opts = {}) {
     fs.mkdirSync(KG_DIR, { recursive: true });
     fs.watch(KG_DIR, (_evt, file) => {
       if (file && file !== 'prompts.jsonl') return;
-      if (watchTimer) clearTimeout(watchTimer);
-      watchTimer = setTimeout(() => { ingest().catch(() => {}); }, 8_000);
+      // Leading-edge coalesce: first new prompt arms the timer; later prompts
+      // ride along instead of resetting it, so busy periods can't starve
+      // ingest and every run sees a full window's worth of prompts.
+      if (watchTimer) return;
+      watchTimer = setTimeout(() => {
+        watchTimer = null;
+        ingest().catch(() => {});
+      }, WATCH_COALESCE_MS);
     });
   } catch { /* watch is best-effort */ }
 }

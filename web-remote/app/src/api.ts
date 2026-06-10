@@ -27,10 +27,14 @@ class ApiError extends Error {
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = _getToken ? await _getToken() : null;
+  // Only declare a JSON content-type when we actually send a body. Bodyless
+  // POSTs (/otp, /ws-ticket) with Content-Type: application/json make the relay
+  // run JSON.parse('') on the empty body → 500 "Unexpected end of JSON input".
+  const hasBody = options?.body != null;
   const res = await fetch(`${RELAY_API_BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers ?? {}),
     },

@@ -34,13 +34,17 @@ class LRUCache {
 
 /**
  * Cache for parseJSONL results.
- * Entry shape: { mtimeMs: number, size: number, result: AggrResult }
+ * Entry shape: { mtimeMs: number, size: number, readOffset: number, inode: number, result: AggrResult }
+ * `size` mirrors stat.size (used for exact-hit comparison).
+ * `readOffset` is the byte position of the end of the last complete line
+ * (≤ size) — the start position for the next tail-read so we never start
+ * mid-line.
  */
 const aggrCache = new LRUCache(CACHE_MAX);
 
 /**
  * Cache for parseConversationMeta results.
- * Entry shape: { mtimeMs: number, size: number, result: MetaResult }
+ * Entry shape: { mtimeMs: number, size: number, readOffset: number, inode: number, result: MetaResult }
  */
 const metaCache = new LRUCache(CACHE_MAX);
 
@@ -200,36 +204,48 @@ async function parseJSONL(filePath, stat) {
     }
 
     if (stat.size > cached.size) {
-      // Append-only tail parse: read only the new bytes.
-      // If cached.size lands mid-line, the partial tail fails JSON.parse and is
-      // silently skipped — no explicit shift() needed.
-      try {
-        const tail = await readSlice(filePath, cached.size, stat.size);
-        const delta = emptyAcc();
-        scanAggrLines(tail.split('\n'), delta, false);
-        const prev = cached.result;
-        const merged = {
-          promptCount: prev.promptCount + delta.promptCount,
-          inputTokens: prev.inputTokens + delta.inputTokens,
-          outputTokens: prev.outputTokens + delta.outputTokens,
-          cacheReadTokens: prev.cacheReadTokens + delta.cacheReadTokens,
-          cacheCreationTokens: prev.cacheCreationTokens + delta.cacheCreationTokens,
-          toolCallCount: prev.toolCallCount + delta.toolCallCount,
-          toolBreakdown: { ...prev.toolBreakdown },
-          errorCount: prev.errorCount + delta.errorCount,
-          sessionDate: prev.sessionDate, // firstTs doesn't change on appends
-          skipped: false,
-        };
-        for (const [k, v] of Object.entries(delta.toolBreakdown)) {
-          merged.toolBreakdown[k] = (merged.toolBreakdown[k] ?? 0) + v;
-        }
-        aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, result: merged });
-        return { result: merged, cacheHit: false };
-      } catch {
+      // Inode change means the file was replaced (e.g. claude --resume
+      // compaction). Don't tail-parse a stale byte range into new content.
+      if (cached.inode !== undefined && cached.inode !== stat.ino) {
         // fall through to full parse
+      } else {
+        // Append-only tail parse: read only the new bytes. Use cached.readOffset
+        // (the end of the last complete line) as the start so we never begin
+        // mid-line. Falls back to cached.size for pre-fix cache entries.
+        try {
+          const readFrom = cached.readOffset ?? cached.size;
+          const tail = await readSlice(filePath, readFrom, stat.size);
+          const delta = emptyAcc();
+          scanAggrLines(tail.split('\n'), delta, false);
+          const prev = cached.result;
+          const merged = {
+            promptCount: prev.promptCount + delta.promptCount,
+            inputTokens: prev.inputTokens + delta.inputTokens,
+            outputTokens: prev.outputTokens + delta.outputTokens,
+            cacheReadTokens: prev.cacheReadTokens + delta.cacheReadTokens,
+            cacheCreationTokens: prev.cacheCreationTokens + delta.cacheCreationTokens,
+            toolCallCount: prev.toolCallCount + delta.toolCallCount,
+            toolBreakdown: { ...prev.toolBreakdown },
+            errorCount: prev.errorCount + delta.errorCount,
+            sessionDate: prev.sessionDate, // firstTs doesn't change on appends
+            skipped: false,
+          };
+          for (const [k, v] of Object.entries(delta.toolBreakdown)) {
+            merged.toolBreakdown[k] = (merged.toolBreakdown[k] ?? 0) + v;
+          }
+          // readOffset advances to the last complete newline so the next tail
+          // always starts at a line boundary. size stays at stat.size so the
+          // exact-hit check works correctly on the next call.
+          const lastNl = tail.lastIndexOf('\n');
+          const readOffset = lastNl >= 0 ? readFrom + lastNl + 1 : readFrom;
+          aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset, inode: stat.ino, result: merged });
+          return { result: merged, cacheHit: false };
+        } catch {
+          // fall through to full parse
+        }
       }
     }
-    // size shrank or mtime changed → file was replaced; full reparse below
+    // size shrank, inode changed, or mtime changed → file was replaced; full reparse below
   }
 
   // Full parse
@@ -249,7 +265,9 @@ async function parseJSONL(filePath, stat) {
     acc.sessionDate = localDate(new Date(stat.mtimeMs));
   }
 
-  aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, result: acc });
+  const lastNlFull = text.lastIndexOf('\n');
+  const readOffsetFull = lastNlFull >= 0 ? lastNlFull + 1 : 0;
+  aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset: readOffsetFull, inode: stat.ino, result: acc });
   return { result: acc, cacheHit: false };
 }
 
@@ -277,22 +295,29 @@ async function parseConversationMeta(filePath, stat) {
     }
 
     if (stat.size > cached.size) {
-      try {
-        const tail = await readSlice(filePath, cached.size, stat.size);
-        const delta = emptyMeta();
-        scanMetaLines(tail.split('\n'), delta, false);
-        const prev = cached.result;
-        const merged = {
-          firstTs: prev.firstTs, // first timestamp never changes on appends
-          lastTs: delta.lastTs ?? prev.lastTs,
-          inputTokens: prev.inputTokens + delta.inputTokens,
-          outputTokens: prev.outputTokens + delta.outputTokens,
-          skipped: false,
-        };
-        metaCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, result: merged });
-        return { result: merged, cacheHit: false };
-      } catch {
-        // fall through to full parse
+      if (cached.inode !== undefined && cached.inode !== stat.ino) {
+        // inode changed → file replaced; fall through to full parse
+      } else {
+        try {
+          const readFrom = cached.readOffset ?? cached.size;
+          const tail = await readSlice(filePath, readFrom, stat.size);
+          const delta = emptyMeta();
+          scanMetaLines(tail.split('\n'), delta, false);
+          const prev = cached.result;
+          const merged = {
+            firstTs: prev.firstTs, // first timestamp never changes on appends
+            lastTs: delta.lastTs ?? prev.lastTs,
+            inputTokens: prev.inputTokens + delta.inputTokens,
+            outputTokens: prev.outputTokens + delta.outputTokens,
+            skipped: false,
+          };
+          const lastNl = tail.lastIndexOf('\n');
+          const readOffset = lastNl >= 0 ? readFrom + lastNl + 1 : readFrom;
+          metaCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset, inode: stat.ino, result: merged });
+          return { result: merged, cacheHit: false };
+        } catch {
+          // fall through to full parse
+        }
       }
     }
   }
@@ -305,7 +330,9 @@ async function parseConversationMeta(filePath, stat) {
 
   const meta = emptyMeta();
   scanMetaLines(text.split('\n'), meta, true);
-  metaCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, result: meta });
+  const lastNlMeta = text.lastIndexOf('\n');
+  const readOffsetMeta = lastNlMeta >= 0 ? lastNlMeta + 1 : 0;
+  metaCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset: readOffsetMeta, inode: stat.ino, result: meta });
   return { result: meta, cacheHit: false };
 }
 

@@ -576,12 +576,21 @@ async function tailLines(filePath, fromOffset) {
   if (stat.size <= start) return { lines: [], size: stat.size, inode: stat.ino };
   const fd = await fsp.open(filePath, 'r');
   try {
+    // Drop the first fragment only when offset genuinely landed mid-line —
+    // i.e. the byte immediately before `start` is not '\n'. When `start`
+    // sits right on a newline boundary (previous poll ended at a complete
+    // line) the first split-part is already a full line and must be kept.
+    let dropFirst = false;
+    if (start > 0) {
+      const prev = Buffer.alloc(1);
+      await fd.read(prev, 0, 1, start - 1);
+      dropFirst = prev[0] !== 0x0a; // 0x0a = '\n'
+    }
     const len = stat.size - start;
     const buf = Buffer.alloc(len);
     await fd.read(buf, 0, len, start);
     const parts = buf.toString('utf8').split('\n').filter(Boolean);
-    // If we started mid-file, the first fragment may be a partial line — drop it.
-    if (start > 0 && parts.length) parts.shift();
+    if (dropFirst && parts.length) parts.shift();
     return { lines: parts, size: stat.size, inode: stat.ino };
   } finally {
     await fd.close();

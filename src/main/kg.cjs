@@ -447,11 +447,15 @@ async function ingest() {
         st.lastOffset += u.bytes;
         st.lastTs = u.entries[u.entries.length - 1].ts || st.lastTs;
         st.updatedAt = new Date().toISOString();
-        await saveIngestState(st);
+        // Write index before advancing watermark: if we crash between these two
+        // writes, the watermark hasn't moved so the batch will be re-processed
+        // (the index count may be slightly high) rather than advanced past a
+        // batch whose index entry was never written.
         if (!promptIdx[u.enc]) promptIdx[u.enc] = { count: 0, cwd: u.cwd };
         promptIdx[u.enc].count += u.entries.length;
         promptIdx[u.enc].cwd = u.cwd;
         await savePromptIndex(promptIdx);
+        await saveIngestState(st);
         if (extractions >= MAX_EXTRACTIONS_PER_RUN) { capped = true; break; }
         continue;
       }
@@ -469,11 +473,14 @@ async function ingest() {
       st.promptCount += u.entries.length;
       st.lastTs = batchTs;
       st.updatedAt = new Date().toISOString();
-      await saveIngestState(st);
+      // Write index before advancing watermark so a crash between the two
+      // leaves the watermark un-advanced (re-processable) rather than
+      // advancing past a batch whose index entry was never committed.
       if (!promptIdx[u.enc]) promptIdx[u.enc] = { count: 0, cwd: u.cwd };
       promptIdx[u.enc].count += u.entries.length;
       promptIdx[u.enc].cwd = u.cwd;
       await savePromptIndex(promptIdx);
+      await saveIngestState(st);
 
       committedPrompts += u.entries.length;
       touched.add(encodeCwd(u.cwd));

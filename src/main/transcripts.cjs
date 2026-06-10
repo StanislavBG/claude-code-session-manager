@@ -270,6 +270,14 @@ async function subscribe({ tabId, cwd, sessionUuid }) {
     return { ok: true, path: subs.get(tabId).filePath };
   }
   if (subs.size >= MAX_TRANSCRIPT_SUBS) {
+    // Before rejecting a genuinely new subscription, evict an idle LRU-cached
+    // entry — it occupies a slot but has no active consumer. Only reject if no
+    // idle entries are available to free.
+    if (lruReleased.length > 0) {
+      _closeSub(lruReleased[0]);
+    }
+  }
+  if (subs.size >= MAX_TRANSCRIPT_SUBS) {
     logs.writeLine({
       level: 'warn',
       scope: 'transcripts',

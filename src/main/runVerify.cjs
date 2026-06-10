@@ -58,20 +58,24 @@ function detectPattern(content) {
     return { verdict: 'transcript_errors', pattern: 'FAIL/FATAL at line start' };
   }
 
-  // (2) Python Traceback + Error line within next 10 lines.
+  // (2) Python Traceback + exception line within next 10 lines. Both anchored
+  // to line starts: reviewer prose quoting "will crash with ImportError" or
+  // embedding "...Error:" mid-sentence must not match (feedback 2026-06-10-01).
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('Traceback (most recent call last):')) {
+    if (/^\s*Traceback \(most recent call last\):/.test(lines[i])) {
       for (let j = i + 1; j < Math.min(i + 11, lines.length); j++) {
-        if (lines[j].includes('Error:')) {
+        if (/^\s*[A-Za-z_][\w.]*(?:Error|Exception)\s*:/.test(lines[j])) {
           return { verdict: 'transcript_errors', pattern: 'Traceback + Error within 10 lines' };
         }
       }
     }
   }
 
-  // (3) Import / module errors (verification was skipped).
-  if (content.includes('ModuleNotFoundError') || content.includes('ImportError')) {
+  // (3) Import / module errors (verification was skipped). Line-anchored:
+  // real interpreter output starts the line with the exception name
+  // ("ModuleNotFoundError: No module named 'x'"); prose never does.
+  if (/^\s*(?:ModuleNotFoundError|ImportError)\s*(?::|$)/m.test(content)) {
     return { verdict: 'verify_unavailable', pattern: 'ModuleNotFoundError/ImportError' };
   }
 
@@ -191,6 +195,18 @@ function toolUseDesc(events, toolUseId) {
   if (!toolUseId) return '';
   for (const ev of events) {
     if (ev.kind === 'tool_use' && ev.toolUseId === toolUseId) return ev.description ?? '';
+  }
+  return '';
+}
+
+/**
+ * Return the tool name of the tool_use that produced a given tool_result.
+ * Returns '' if not found.
+ */
+function toolUseName(events, toolUseId) {
+  if (!toolUseId) return '';
+  for (const ev of events) {
+    if (ev.kind === 'tool_use' && ev.toolUseId === toolUseId) return ev.toolName ?? '';
   }
   return '';
 }
@@ -471,6 +487,12 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
 
       if (!ev.content) continue;
 
+      // Subagent (Task) results are structured prose — review findings that
+      // *describe* exceptions ("will crash with ImportError") are the dominant
+      // false-positive source (feedback 2026-06-10-01). Real runtime errors
+      // surface through Bash/test tool_results, which are still scanned.
+      if (toolUseName(events, ev.toolUseId) === 'Task') continue;
+
       const hit = detectPattern(ev.content);
       if (!hit) continue;
 
@@ -520,6 +542,7 @@ module.exports = {
   verifyRun,
   // Exposed for unit tests.
   detectPattern,
+  toolUseName,
   extractSoakFromBody,
   parsePrdBodyDepFragments,
   checkDeps,

@@ -386,3 +386,104 @@ test('FAIL recovered within 30 events → clean', async () => {
     rmdir(tmp);
   }
 });
+
+// ─── fixtures: feedback 2026-06-10-01 — quoted-error false positives ─────────
+
+/** Build a one-Bash-call log: tool_use → tool_result(content) → success result. */
+function bashRunEvents(content, { toolName = 'Bash' } = {}) {
+  return [
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: 'toolu_fb_001',
+          name: toolName,
+          input: { command: 'run something', description: 'Run checks' },
+        }],
+      },
+    },
+    {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_fb_001',
+          content,
+          is_error: false,
+        }],
+      },
+    },
+    { type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' },
+  ];
+}
+
+test('feedback 01: reviewer prose mentioning ImportError mid-sentence → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '25-self-pipeline-driver-hardening';
+    const prose = [
+      '{"finding": "the script will crash with ImportError rather than a clean RESULT: failed line",',
+      ' "note": "a missing dep would fail with an ImportError that is captured only in cron.log"}',
+    ].join('\n');
+    writeLog(tmp, slug, bashRunEvents(prose));
+    const prdPath = writePrd(tmp, slug, '# Hardening');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'clean', `prose mention must not flag, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});
+
+test('feedback 01: real line-anchored ModuleNotFoundError, no recovery → verify_unavailable', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '25-real-import-error';
+    const out = [
+      '$ python run_checks.py',
+      'Traceback (most recent call last):',
+      '  File "run_checks.py", line 2, in <module>',
+      '    from playwright.sync_api import sync_playwright',
+      "ModuleNotFoundError: No module named 'playwright'",
+    ].join('\n');
+    writeLog(tmp, slug, bashRunEvents(out));
+    const prdPath = writePrd(tmp, slug, '# Real failure');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    // Traceback detector outranks (priority 2 > 1) but either way it must NOT be clean.
+    assert.notEqual(verdict.verdict, 'clean', 'real interpreter error must still flag');
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally { rmdir(tmp); }
+});
+
+test('feedback 01: error-shaped text inside a Task (subagent) result → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '25-subagent-quoting-error';
+    const reviewFinding = [
+      'Finding 3 (high): startup crash path:',
+      'Traceback (most recent call last):',
+      "ImportError: cannot import name 'foo'",
+      'This is what WOULD happen if the guard is removed.',
+    ].join('\n');
+    writeLog(tmp, slug, bashRunEvents(reviewFinding, { toolName: 'Task' }));
+    const prdPath = writePrd(tmp, slug, '# Review-heavy PRD');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'clean', `Task results must be exempt from pattern scan, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});
+
+test('feedback 01: quoted "Traceback..." line (leading quote) → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '25-quoted-traceback';
+    const prose = [
+      'The log format doc says:',
+      '  "Traceback (most recent call last):" appears first, then',
+      '  "SomeError: message" on a later line.',
+    ].join('\n');
+    writeLog(tmp, slug, bashRunEvents(prose));
+    const prdPath = writePrd(tmp, slug, '# Docs PRD');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'clean', `quoted traceback prose must not flag, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});

@@ -22,7 +22,7 @@ import { useActiveTab } from '../../../lib/useActiveTab'
 import { useHomeDir } from '../../../lib/useHomeDir'
 import { useAgentMemory } from '../../../state/agentMemory'
 import { formatBytes } from '../../../lib/formatBytes'
-import { formatMtime } from '../../../lib/formatMtime'
+import { formatMtimeMs } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import type { AgentMemoryCategory, AgentMemoryEntry } from '../../../../preload/api'
 
@@ -312,7 +312,7 @@ export function SubagentMemoryView() {
                 >
                   <span className="truncate">{e.id}</span>
                   <span className="ml-2 text-fg-faint shrink-0 text-[10px]">
-                    {formatBytes(e.bytes)} · {formatMtime(e.updatedAt)}
+                    {formatBytes(e.bytes)} · {formatMtimeMs(e.updatedAt)}
                   </span>
                 </button>
               ))
@@ -336,7 +336,7 @@ export function SubagentMemoryView() {
               <div className="shrink-0 px-3 py-2 border-b border-line text-xs">
                 <div className="text-fg truncate">{selectedEntry.id}</div>
                 <div className="text-fg-faint truncate">
-                  {formatBytes(selectedEntry.bytes)} · modified {formatMtime(selectedEntry.updatedAt)}
+                  {formatBytes(selectedEntry.bytes)} · modified {formatMtimeMs(selectedEntry.updatedAt)}
                   {selectedEntry.category ? ` · ${CATEGORY_LABELS[selectedEntry.category]}` : ''}
                 </div>
               </div>

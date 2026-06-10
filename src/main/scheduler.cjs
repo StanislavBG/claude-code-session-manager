@@ -1414,6 +1414,10 @@ function tickQueue() {
     if (gatedBatch.length < batch.length) {
       console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length}`);
       lastMemGate = { availableMb, threshold: MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length), deferred: false, clamped: true, at: new Date().toISOString() };
+    } else {
+      // Ungated full batch: clear stale gate snapshot so status doesn't show
+      // a stale deferral from a previous tick.
+      lastMemGate = null;
     }
 
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });

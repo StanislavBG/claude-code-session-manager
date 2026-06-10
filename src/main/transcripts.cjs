@@ -45,16 +45,22 @@ function transcriptPath(cwd, sessionUuid) {
 
 const MAX_RAW_STR = 4096;
 
+// Block types whose text/content fields are parsed structurally by
+// orchestrator.ts / race.ts — truncating them produces mid-token "…" and
+// unparseable JSON, so they are exempt from the size cap.
+const EXEMPT_TYPES = new Set(['tool_result', 'tool_use']);
+
 /**
- * Cap string fields in a content block array so that assistant text and
- * tool_result bodies don't bloat the ring buffer. Only the fields that
- * race.ts / orchestrator.ts actually read (message.content[].text) are
- * preserved; everything else is kept but truncated.
+ * Cap string fields in a content block array so arbitrary tool output doesn't
+ * bloat the ring buffer. Blocks whose type is in EXEMPT_TYPES are passed
+ * through intact so that structured result payloads survive to the digest
+ * parsers in race.ts / orchestrator.ts.
  */
 function trimContentArray(content) {
   if (!Array.isArray(content)) return content;
   return content.map((block) => {
     if (!block || typeof block !== 'object') return block;
+    if (EXEMPT_TYPES.has(block.type)) return block;
     const b = { ...block };
     if (typeof b.text === 'string' && b.text.length > MAX_RAW_STR) {
       b.text = b.text.slice(0, MAX_RAW_STR) + '…';

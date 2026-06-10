@@ -64,6 +64,18 @@ export function formatTimeSince(ts: number | null | undefined): string {
   return `saved ${Math.round(delta / 3_600_000)}h ago`
 }
 
+/**
+ * Relative "X ago" label for a file mtime (milliseconds since epoch).
+ * Returns '' when ms is falsy (0 / null / undefined) — callers treat that
+ * as "never shown yet". Replaces the deleted formatMtime.ts duplicate.
+ */
+export function formatMtimeMs(ms: number | null | undefined): string {
+  if (!ms) return ''
+  const diff = Date.now() - ms
+  if (diff < 5_000) return 'just now'
+  return `${formatRelative(diff)} ago`
+}
+
 /** Human-readable label for job durations: "2h 15m", "45m", "30s".
  *  Unlike formatDuration (compact "XhYYm") this uses spaces and drops
  *  sub-minute precision for large values, making it easier to scan. */

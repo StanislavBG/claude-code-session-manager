@@ -7,7 +7,7 @@ import { ViewTabs } from '../ui/ViewTabs'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { formatBytes } from '../../lib/formatBytes'
-import { formatMtime } from '../../lib/formatMtime'
+import { formatMtimeMs } from '../../lib/formatTime'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import type { MemoryEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
@@ -258,7 +258,7 @@ function WorkspaceMemoryView() {
                 >
                   <span className="truncate">{e.name.replace(/\.md$/, '')}</span>
                   <span className="ml-2 text-fg-faint shrink-0 text-[10px]">
-                    {formatBytes(e.bytes)} · {formatMtime(e.mtimeMs)}
+                    {formatBytes(e.bytes)} · {formatMtimeMs(e.mtimeMs)}
                   </span>
                 </button>
               ))
@@ -281,7 +281,7 @@ function WorkspaceMemoryView() {
               <div className="shrink-0 px-3 py-2 border-b border-line text-xs">
                 <div className="text-fg truncate">{selectedEntry.name}</div>
                 <div className="text-fg-faint truncate">
-                  {formatBytes(selectedEntry.bytes)} · modified {formatMtime(selectedEntry.mtimeMs)}
+                  {formatBytes(selectedEntry.bytes)} · modified {formatMtimeMs(selectedEntry.mtimeMs)}
                 </div>
               </div>
               <div className="flex-1 min-h-0">

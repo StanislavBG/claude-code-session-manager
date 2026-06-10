@@ -39,6 +39,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
+const { writeJson } = require('./config.cjs');
 
 const HOME = os.homedir();
 const KG_DIR = path.join(HOME, '.claude', 'knowledge-log');
@@ -144,11 +145,7 @@ async function loadGraphFor(cwd) {
 }
 
 async function saveGraph(g) {
-  await fsp.mkdir(GRAPHS_DIR, { recursive: true });
-  const p = graphPath(g.cwd);
-  const tmp = `${p}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(g, null, 2));
-  await fsp.rename(tmp, p);   // atomic
+  await writeJson(graphPath(g.cwd), g);
 }
 
 async function loadIngestState() {
@@ -159,10 +156,7 @@ async function loadIngestState() {
 }
 
 async function saveIngestState(s) {
-  await fsp.mkdir(KG_DIR, { recursive: true });
-  const tmp = `${INGEST_STATE_PATH}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(s, null, 2));
-  await fsp.rename(tmp, INGEST_STATE_PATH);
+  await writeJson(INGEST_STATE_PATH, s);
 }
 
 /**
@@ -175,10 +169,7 @@ async function readPromptIndex() {
 }
 
 async function savePromptIndex(idx) {
-  await fsp.mkdir(KG_DIR, { recursive: true });
-  const tmp = `${PROMPT_INDEX_PATH}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(idx, null, 2));
-  await fsp.rename(tmp, PROMPT_INDEX_PATH);
+  await writeJson(PROMPT_INDEX_PATH, idx);
 }
 
 /** Canonical dedup key: lowercase, strip leading article, collapse whitespace. */

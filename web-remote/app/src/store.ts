@@ -17,6 +17,12 @@ interface AppState {
   summaryByTab: Record<string, SessionSummary>;
   navOpen: boolean;
 
+  // E2E security state
+  /** SAS pending user confirmation: { deviceId, sas } or null. */
+  pendingSas: { deviceId: string; sas: string } | null;
+  /** Device IDs whose relay-served pubKey diverged from the pinned value (TOFU). */
+  keyMismatchDeviceIds: string[];
+
   setMe: (me: MeResponse | null) => void;
   setDevices: (devices: Device[]) => void;
   setDeviceOnline: (deviceId: string, isOnline: boolean) => void;
@@ -30,6 +36,10 @@ interface AppState {
   setTabSummary: (s: SessionSummary) => void;
   setNavOpen: (v: boolean) => void;
   reset: () => void;
+
+  setPendingSas: (v: { deviceId: string; sas: string } | null) => void;
+  clearPendingSas: () => void;
+  addKeyMismatch: (deviceId: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -44,6 +54,9 @@ export const useStore = create<AppState>((set) => ({
   stateByTab: {},
   summaryByTab: {},
   navOpen: false,
+
+  pendingSas: null,
+  keyMismatchDeviceIds: [],
 
   setMe: (me) => set({ me }),
   setDevices: (devices) => set({ devices }),
@@ -70,4 +83,13 @@ export const useStore = create<AppState>((set) => ({
     sessions: [], selectedTabId: null, stateByTab: {}, summaryByTab: {},
     activeDeviceId: null, navOpen: false,
   }),
+
+  setPendingSas: (pendingSas) => set({ pendingSas }),
+  clearPendingSas: () => set({ pendingSas: null }),
+  addKeyMismatch: (deviceId) =>
+    set((s) => ({
+      keyMismatchDeviceIds: s.keyMismatchDeviceIds.includes(deviceId)
+        ? s.keyMismatchDeviceIds
+        : [...s.keyMismatchDeviceIds, deviceId],
+    })),
 }));

@@ -60,15 +60,45 @@ export function issueOtp(
   return { code };
 }
 
+// Global brute-force budget for /pair. verifyOtp() is a global lookup keyed
+// only by the 8-char code, and /pair is unauthenticated, so on a wrong guess
+// there is no userId to attribute a per-OTP strike to (recordOtpFailure can
+// only be driven once a user is known). This relay-wide counter bounds the
+// TOTAL number of failed guesses per window regardless of source IP, which is
+// the control that actually defeats IP-rotation brute force. Legitimate users
+// paste the code and effectively never fail, so the ceiling is generous.
+const OTP_GLOBAL_FAIL_MAX = 100;
+const OTP_GLOBAL_FAIL_WINDOW_MS = 5 * 60 * 1000;
+const otpGlobalFail = { count: 0, resetAt: 0 };
+
+/** Test-only: reset the global brute-force budget between specs. */
+export function _resetOtpGlobalFail(): void {
+  otpGlobalFail.count = 0;
+  otpGlobalFail.resetAt = 0;
+}
+
 export function verifyOtp(
   code: string,
   now = Date.now(),
 ): { userId: string; email: string } | { error: string; status: number } {
+  // Roll the global failure window.
+  if (now >= otpGlobalFail.resetAt) {
+    otpGlobalFail.count = 0;
+    otpGlobalFail.resetAt = now + OTP_GLOBAL_FAIL_WINDOW_MS;
+  }
+  if (otpGlobalFail.count >= OTP_GLOBAL_FAIL_MAX) {
+    return { error: 'rate_limited', status: 429 };
+  }
+
   const normalized = code.toUpperCase().trim();
   const entry = otpStore.get(normalized);
-  if (!entry) return { error: 'invalid_code', status: 400 };
+  if (!entry) {
+    otpGlobalFail.count++;
+    return { error: 'invalid_code', status: 400 };
+  }
   if (now > entry.expiresAt) {
     otpStore.delete(normalized);
+    otpGlobalFail.count++;
     return { error: 'code_expired', status: 400 };
   }
   // Single-use: delete on first successful verification

@@ -57,6 +57,45 @@ async function generateBrowserKeyPair(): Promise<{ privateKey: CryptoKey; public
 }
 
 /**
+ * Derive a 6-digit Short Authentication String via HKDF with a separate info label.
+ * Must produce the same value as deriveSas() in webRemote.cjs when given the same
+ * ECDH inputs. User manually compares both ends; mismatch = MITM detected.
+ */
+async function deriveE2ESas(
+  myPrivateKey: CryptoKey,
+  peerPublicKeyB64: string,
+  deviceId: string,
+): Promise<string> {
+  const peerKeyDer = base64urlToUint8(peerPublicKeyB64);
+  const peerPublicKey = await crypto.subtle.importKey(
+    'spki',
+    peerKeyDer,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    [],
+  );
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: peerPublicKey },
+    myPrivateKey,
+    256,
+  );
+  const hkdfMaterial = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveBits']);
+  const enc = new TextEncoder();
+  const sasBytes = new Uint8Array(await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: enc.encode(deviceId),
+      info: enc.encode('sm-sas-v1'),
+    },
+    hkdfMaterial,
+    24, // 3 bytes → up to 16 777 215; take mod 1 000 000 for 6-digit display
+  ));
+  const sasNum = ((sasBytes[0] << 16) | (sasBytes[1] << 8) | sasBytes[2]) % 1_000_000;
+  return sasNum.toString().padStart(6, '0');
+}
+
+/**
  * Derive an AES-256-GCM session key via ECDH + HKDF-SHA256.
  * Must match the agent's deriveSessionKey (webRemote.cjs):
  *   salt = Buffer.from(deviceId, 'utf8')
@@ -298,7 +337,7 @@ export class RelaySocket {
       return;
     }
 
-    // e2e:ready: derive session key using the device's stored public key
+    // e2e:ready: derive session key and SAS using the device's stored public key
     if (type === 'e2e:ready') {
       const deviceId = msg.deviceId;
       if (!deviceId) return;
@@ -311,6 +350,20 @@ export class RelaySocket {
           deviceId,
         );
         this.emit('e2e:ready', { ...msg, deviceId });
+        // Compute SAS for user verification — emitted as an internal event so
+        // App.tsx can display it alongside the desktop's SAS for manual comparison.
+        try {
+          const sas = await deriveE2ESas(session.privateKey, session.devicePubKeyB64, deviceId);
+          this.emit('sas:pending', {
+            type: 'sas:pending',
+            id: '',
+            deviceId,
+            payload: { sas },
+            ts: Date.now(),
+          });
+        } catch (e) {
+          console.warn('[relay] SAS derivation failed', e);
+        }
       } catch (e) {
         console.warn('[relay] E2E session key derivation failed', e);
         this.e2eSessions.delete(deviceId);

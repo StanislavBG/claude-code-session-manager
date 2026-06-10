@@ -30,12 +30,15 @@ export default function App() {
   );
 }
 
+const PIN_PREFIX = 'sm-e2e-pin-v1-';
+
 function AppInner() {
   const { getToken } = useAuth();
   const {
     activeDeviceId, selectedTabId, sessions,
     setMe, setDevices, setDeviceOnline, setActiveDevice,
     setWsConnected, setSessions, setTabState, setTabSummary, reset,
+    setPendingSas, addKeyMismatch,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
 
@@ -45,10 +48,33 @@ function AppInner() {
     getMe()
       .then((user) => {
         setMe(user);
-        if (user) return getDevices().then((r) => setDevices(r.devices));
+        if (!user) return;
+        return getDevices().then((r) => {
+          // TOFU key pinning: pin devicePubKey at first encounter per deviceId.
+          // On subsequent loads, a changed key for the same deviceId raises a
+          // visible alarm and the mismatched device is excluded from E2E.
+          const mismatchIds: string[] = [];
+          const safeDevices = r.devices.map((d) => {
+            if (!d.devicePubKey) return d;
+            const storageKey = `${PIN_PREFIX}${d.deviceId}`;
+            const pinned = localStorage.getItem(storageKey);
+            if (!pinned) {
+              localStorage.setItem(storageKey, d.devicePubKey);
+              return d;
+            }
+            if (pinned !== d.devicePubKey) {
+              // Relay-served key diverged from pinned value — possible substitution.
+              mismatchIds.push(d.deviceId);
+              return { ...d, devicePubKey: undefined }; // exclude from E2E
+            }
+            return d;
+          });
+          setDevices(safeDevices);
+          mismatchIds.forEach(addKeyMismatch);
+        });
       })
       .catch(console.error);
-  }, [getToken, setMe, setDevices]);
+  }, [getToken, setMe, setDevices, addKeyMismatch]);
 
   // Connect the relay socket once.
   useEffect(() => {
@@ -81,14 +107,19 @@ function AppInner() {
       const p = m.payload as SessionSummary | undefined;
       if (p?.tabId) setTabSummary(p);
     });
+    // Internal event: SAS computed after e2e:ready; show to user for manual comparison.
+    const offSas = socket.on('sas:pending', (m: Envelope) => {
+      const p = m.payload as { sas?: string } | undefined;
+      if (m.deviceId && p?.sas) setPendingSas({ deviceId: m.deviceId, sas: p.sas });
+    });
 
     return () => {
-      offStatus(); offList(); offState(); offSummary();
+      offStatus(); offList(); offState(); offSummary(); offSas();
       socket.destroy();
       socketRef.current = null;
       reset();
     };
-  }, [setWsConnected, setDeviceOnline, setActiveDevice, setSessions, setTabState, setTabSummary, reset]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setSessions, setTabState, setTabSummary, reset, setPendingSas]);
 
   // Subscribe to the selected session's live state + summary; unsubscribe on change.
   useEffect(() => {
@@ -105,6 +136,9 @@ function AppInner() {
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;
+  const pendingSas = useStore((s) => s.pendingSas);
+  const keyMismatchDeviceIds = useStore((s) => s.keyMismatchDeviceIds);
+  const clearPendingSas = useStore((s) => s.clearPendingSas);
 
   // Fallback: negotiate E2E for the active device once its pubKey is known —
   // covers the case where event:device:status arrived before getDevices resolved.
@@ -116,8 +150,41 @@ function AppInner() {
     }
   }, [online, device?.deviceId, device?.devicePubKey]);
 
+  const banners = (
+    <>
+      {keyMismatchDeviceIds.length > 0 && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-red-900 border-b border-red-600 px-4 py-3 text-sm text-red-100">
+          <strong>Key substitution detected.</strong> The desktop public key for{' '}
+          {keyMismatchDeviceIds.length === 1
+            ? `device ${keyMismatchDeviceIds[0].slice(0, 8)}…`
+            : `${keyMismatchDeviceIds.length} device(s)`}{' '}
+          does not match the pinned value. This may indicate a relay MITM. Revoke and re-pair.
+        </div>
+      )}
+      {pendingSas && (
+        <div className="fixed bottom-0 inset-x-0 z-50 bg-indigo-900 border-t border-indigo-600 px-4 py-4 text-sm text-indigo-100">
+          <div className="max-w-sm mx-auto text-center">
+            <p className="font-semibold mb-2">Verify E2E session</p>
+            <p className="text-indigo-300 mb-2 text-xs">
+              Confirm the desktop (Web Remote tab) shows the same 6-digit code:
+            </p>
+            <div className="text-3xl font-mono tracking-[0.3em] text-indigo-200 mb-3 select-all">
+              {pendingSas.sas}
+            </div>
+            <button
+              onClick={clearPendingSas}
+              className="px-4 py-1.5 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
+            >
+              Codes match — dismiss
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   if (online) {
-    return <Cockpit socket={socketRef.current} deviceId={activeDeviceId!} />;
+    return <>{banners}<Cockpit socket={socketRef.current} deviceId={activeDeviceId!} /></>;
   }
-  return <ConnectScreen socket={socketRef.current} />;
+  return <>{banners}<ConnectScreen socket={socketRef.current} /></>;
 }

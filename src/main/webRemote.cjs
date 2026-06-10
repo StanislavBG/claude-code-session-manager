@@ -66,7 +66,7 @@ const MSG_MAX_BYTES = 256 * 1024;
 
 // Single source of truth lives in ipcSchemas.cjs — imported here so the test
 // can verify the same Set without depending on Electron-linked modules.
-const { ALLOWED_COMMANDS } = require('./ipcSchemas.cjs');
+const { ALLOWED_COMMANDS, MUTATE_COMMANDS } = require('./ipcSchemas.cjs');
 
 // ─── E2E encryption helpers (P-256 ECDH + AES-256-GCM, ADR §5.2) ────────────
 
@@ -109,6 +109,30 @@ function deriveSessionKey(myPrivateKeyB64, peerPublicKeyB64, deviceId) {
   const salt = Buffer.from(deviceId, 'utf8');
   const info = Buffer.from('sm-e2e-v1', 'utf8');
   return Buffer.from(crypto.hkdfSync('sha256', sharedSecret, salt, info, 32));
+}
+
+/**
+ * Derive a 6-digit Short Authentication String from the ECDH shared secret.
+ * Uses a separate HKDF info label ('sm-sas-v1') so the SAS is independent of
+ * the session key. Both sides compute the same value; user confirms they match.
+ */
+function deriveSas(myPrivateKeyB64, peerPublicKeyB64, deviceId) {
+  const myPrivKey = crypto.createPrivateKey({
+    key: Buffer.from(myPrivateKeyB64, 'base64url'),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const peerPubKey = crypto.createPublicKey({
+    key: Buffer.from(peerPublicKeyB64, 'base64url'),
+    format: 'der',
+    type: 'spki',
+  });
+  const sharedSecret = crypto.diffieHellman({ privateKey: myPrivKey, publicKey: peerPubKey });
+  const salt = Buffer.from(deviceId, 'utf8');
+  const info = Buffer.from('sm-sas-v1', 'utf8');
+  const sasBytes = Buffer.from(crypto.hkdfSync('sha256', sharedSecret, salt, info, 3));
+  const sasNum = ((sasBytes[0] << 16) | (sasBytes[1] << 8) | sasBytes[2]) % 1_000_000;
+  return sasNum.toString().padStart(6, '0');
 }
 
 /**
@@ -161,12 +185,14 @@ let _configCacheAt = 0;
 let _destroyed = false; // set at app shutdown to stop reconnect loops
 
 // E2E session state — reset on each new WS connection.
-let _e2eSessionKey = null; // Buffer | null
+let _e2eSessionKey = null;    // Buffer | null
+let _e2eAuthenticated = false; // true once user confirms SAS on the desktop
+let _pendingSas = null;        // string | null — 6-digit SAS pending user confirmation
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
 function defaultConfig() {
-  return { remoteEnabled: false, devices: [] };
+  return { remoteEnabled: false, remoteControlEnabled: false, devices: [] };
 }
 
 function loadConfigSync() {
@@ -219,7 +245,8 @@ async function auditLog(ts, type, deviceId, msgId, result) {
   try {
     const ymd = ts.slice(0, 10);
     const logPath = path.join(AUDIT_LOG_DIR, `remote-audit-${ymd}.log`);
-    const line = `${ts}  ${type}  deviceId=${deviceId || '-'}  msgId=${msgId || '-'}  result=${result}\n`;
+    const clean = (s) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 200);
+    const line = `${ts}  ${clean(type)}  deviceId=${clean(deviceId) || '-'}  msgId=${clean(msgId) || '-'}  result=${result}\n`;
     const handle = await fsp.open(logPath, 'a', 0o600);
     try {
       await handle.write(line);
@@ -293,8 +320,11 @@ function broadcastStatus() {
   const connected = _ws !== null && _ws.readyState === WebSocket.OPEN;
   sendIfAlive(_window, 'webRemote:status', {
     enabled: cfg.remoteEnabled,
+    remoteControlEnabled: cfg.remoteControlEnabled ?? false,
     connected,
     e2eActive: connected && _e2eSessionKey !== null,
+    e2eAuthenticated: connected && _e2eAuthenticated,
+    pendingSas: connected && _pendingSas ? _pendingSas : null,
     devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
       deviceId, deviceName, issuedAt, lastConnectedAt,
     })),
@@ -359,6 +389,8 @@ async function disconnect() {
   cancelReconnect();
   stopHeartbeat();
   _e2eSessionKey = null;
+  _e2eAuthenticated = false;
+  _pendingSas = null;
   if (_ws) {
     const ws = _ws;
     _ws = null;
@@ -426,6 +458,8 @@ async function connect() {
     }).catch(() => {});
     broadcastStatus();
     // v2: begin pushing the live session list once connected.
+    // Reset diff-guard so the new client always receives a full session-list push.
+    _lastSessionListJson = null;
     startSessionListPush();
   });
 
@@ -483,6 +517,7 @@ const SESSION_INIT_TAIL_BYTES = 512 * 1024; // bound the initial read
 
 const _sessionWatchers = new Map(); // tabId → watcher
 let _sessionListTimer = null;
+let _lastSessionListJson = null; // diff-guard: skip push when snapshot unchanged
 
 /** Push an unsolicited event to the browser(s). Encrypts when an E2E key is active. */
 function pushEvent(type, payload) {
@@ -648,7 +683,11 @@ async function pushSessionList() {
       title: t.label || t.cwd,
       state: _sessionWatchers.get(t.claudeSessionId)?.state ?? null,
     }));
-    pushEvent('event:session:list', { sessions, activeTabId: data?.activeTabId ?? null });
+    const payload = { sessions, activeTabId: data?.activeTabId ?? null };
+    const json = JSON.stringify(payload);
+    if (json === _lastSessionListJson) return;
+    _lastSessionListJson = json;
+    pushEvent('event:session:list', payload);
   } catch (e) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushSessionList failed', meta: { error: e?.message } });
   }
@@ -824,13 +863,21 @@ async function handleMessage(raw, device) {
     }
     try {
       _e2eSessionKey = deriveSessionKey(device.e2ePrivateKey, browserPubKey, device.deviceId);
-      logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session key established' });
+      _e2eAuthenticated = false;
+      try {
+        _pendingSas = deriveSas(device.e2ePrivateKey, browserPubKey, device.deviceId);
+      } catch {
+        _pendingSas = null;
+      }
+      logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session key established — SAS pending confirmation', meta: { hasSas: _pendingSas !== null } });
       broadcastStatus();
       // Acknowledge with e2e:ready (unencrypted — session just started)
       respond(id, undefined, 'e2e:ready');
     } catch (e) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'E2E key derivation failed', meta: { error: e?.message } });
       _e2eSessionKey = null;
+      _e2eAuthenticated = false;
+      _pendingSas = null;
     }
     return;
   }
@@ -888,6 +935,21 @@ async function dispatchEnvelope(envelope, device) {
   // Allowlist check — unknown types are dropped without error feedback (ADR §6.2)
   if (!ALLOWED_COMMANDS.has(type)) {
     await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
+    return;
+  }
+
+  // MUTATE tier gate — write/exec commands require remoteControlEnabled=true (default false)
+  if (MUTATE_COMMANDS.has(type) && !cfg.remoteControlEnabled) {
+    await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
+    respond(id, { error: 'not_allowed' });
+    return;
+  }
+
+  // E2E auth gate — MUTATE commands are blocked until the user confirms the SAS,
+  // preventing a MITM relay from injecting commands into an unauthenticated session.
+  if (MUTATE_COMMANDS.has(type) && !_e2eAuthenticated) {
+    await auditLog(ts, type, device.deviceId, id, 'error:e2e_not_authenticated');
+    respond(id, { error: 'e2e_not_authenticated' });
     return;
   }
 
@@ -1139,14 +1201,31 @@ function registerRemoteHandlers() {
   // Returns current status without tokens — safe to expose to renderer.
   ipcMain.handle('webRemote:get-status', async () => {
     const cfg = await loadConfig();
+    const connected = _ws !== null && _ws.readyState === WebSocket.OPEN;
     return {
       enabled: cfg.remoteEnabled,
-      connected: _ws !== null && _ws.readyState === WebSocket.OPEN,
-      e2eActive: _ws !== null && _ws.readyState === WebSocket.OPEN && _e2eSessionKey !== null,
+      remoteControlEnabled: cfg.remoteControlEnabled ?? false,
+      connected,
+      e2eActive: connected && _e2eSessionKey !== null,
+      e2eAuthenticated: connected && _e2eAuthenticated,
+      pendingSas: connected && _pendingSas ? _pendingSas : null,
       devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
         deviceId, deviceName, issuedAt, lastConnectedAt,
       })),
     };
+  });
+
+  // User confirmed that the SAS shown on both desktop and browser match.
+  // This clears the pending SAS and marks the E2E session as authenticated,
+  // allowing MUTATE-tier commands to proceed.
+  ipcMain.handle('webRemote:confirm-sas', async () => {
+    if (_e2eSessionKey && _pendingSas) {
+      _e2eAuthenticated = true;
+      _pendingSas = null;
+      logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session authenticated — SAS confirmed by user' });
+      broadcastStatus();
+    }
+    return { ok: true };
   });
 
   ipcMain.handle('webRemote:enable', async () => {
@@ -1161,6 +1240,20 @@ function registerRemoteHandlers() {
     const cfg = await loadConfig();
     await saveConfig({ ...cfg, remoteEnabled: false });
     await disconnect();
+    broadcastStatus();
+    return { ok: true };
+  });
+
+  ipcMain.handle('webRemote:enable-control', async () => {
+    const cfg = await loadConfig();
+    await saveConfig({ ...cfg, remoteControlEnabled: true });
+    broadcastStatus();
+    return { ok: true };
+  });
+
+  ipcMain.handle('webRemote:disable-control', async () => {
+    const cfg = await loadConfig();
+    await saveConfig({ ...cfg, remoteControlEnabled: false });
     broadcastStatus();
     return { ok: true };
   });

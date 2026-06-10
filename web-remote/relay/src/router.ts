@@ -379,6 +379,20 @@ export function handleUpgrade(
     return;
   }
 
+  // Origin allowlist for browser upgrades (defence-in-depth on top of the
+  // one-time ws-ticket): a ticket exfiltrated to a foreign origin is unusable
+  // because the browser stamps Origin on the WS handshake and cannot forge it.
+  // Agent (device) connections come from the desktop Node process, which sends
+  // no Origin header, so the check applies to the browser role only.
+  if (ticketData.role === 'browser') {
+    const allowedOrigin = process.env.ALLOWED_ORIGIN ?? 'https://session-manager.bilko.run';
+    if (req.headers.origin !== allowedOrigin) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+  }
+
   wss.handleUpgrade(req, socket as import('node:net').Socket, head, (ws) => {
     if (ticketData.role === 'browser') {
       registerBrowser(ws, ticketData);

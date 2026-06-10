@@ -6,7 +6,8 @@
  *   2. Schema-invalid payloads throw ZodError before any handler runs.
  *   3. Path-bearing commands (cmd:pty:spawn) pass cwd through validatePath.
  *   4. Kill-switch: commands are refused when remoteEnabled = false.
- *   5. All 15 allowlisted command types are present in the set.
+ *   5. All 17 allowlisted command types are present in the set.
+ *   6. Destructive pty commands live in the MUTATE tier, not READ.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -15,17 +16,34 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 
 // Load the allowlist + schemas directly from ipcSchemas — no Electron dep.
-const { schemas, ALLOWED_COMMANDS } = require('../../src/main/ipcSchemas.cjs') as {
+const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, MUTATE_COMMANDS } = require('../../src/main/ipcSchemas.cjs') as {
   schemas: Record<string, { safeParse: (v: unknown) => { success: boolean; error?: unknown }; parse: (v: unknown) => unknown }>
   ALLOWED_COMMANDS: Set<string>
+  READ_COMMANDS: Set<string>
+  MUTATE_COMMANDS: Set<string>
 }
 
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 
 describe('ALLOWED_COMMANDS set', () => {
-  it('contains exactly 15 entries', () => {
-    expect(ALLOWED_COMMANDS.size).toBe(15)
+  it('contains exactly 17 entries', () => {
+    expect(ALLOWED_COMMANDS.size).toBe(17)
   })
+
+  it('is the exact union of READ and MUTATE tiers (no overlap, no orphans)', () => {
+    expect(READ_COMMANDS.size + MUTATE_COMMANDS.size).toBe(ALLOWED_COMMANDS.size)
+    for (const c of READ_COMMANDS) expect(MUTATE_COMMANDS.has(c)).toBe(false)
+  })
+
+  // Destructive/stateful commands must require the remoteControlEnabled + SAS
+  // gate, which only applies to MUTATE_COMMANDS. A read-only mirror that could
+  // kill or resize the desktop PTY would be a control-bypass (sec review S2/S7).
+  for (const c of ['cmd:pty:kill', 'cmd:pty:resize', 'cmd:pty:spawn', 'cmd:pty:write', 'cmd:schedule:write-prd', 'cmd:schedule:run-now']) {
+    it(`gates "${c}" behind the MUTATE tier`, () => {
+      expect(MUTATE_COMMANDS.has(c)).toBe(true)
+      expect(READ_COMMANDS.has(c)).toBe(false)
+    })
+  }
 
   const forbidden = [
     'app:test-fire-hook',

@@ -394,23 +394,16 @@ function validated(schema, handler) {
 }
 
 // ──────────────────────────────────────────── Web Remote command allowlist
-// Single source of truth — imported by webRemote.cjs and by the unit test.
-// Only these type strings will ever reach a handler; all others are silently
-// dropped without leaking error details back to the relay (ADR §6.2).
-const ALLOWED_COMMANDS = new Set([
+// Commands are split into two tiers:
+//   READ_COMMANDS  — only return data; always allowed when remoteEnabled=true.
+//   MUTATE_COMMANDS — write files, spawn processes, or mutate persisted state;
+//                     additionally gated behind remoteControlEnabled=true.
+// ALLOWED_COMMANDS is the union, kept for existing import compatibility.
+const READ_COMMANDS = new Set([
   'cmd:sessions:load',
-  'cmd:sessions:save',
-  'cmd:pty:spawn',
-  'cmd:pty:write',
-  'cmd:pty:resize',
-  'cmd:pty:kill',
   'cmd:schedule:state',
   'cmd:schedule:read-prd',
   'cmd:schedule:read-log',
-  'cmd:schedule:write-prd',
-  'cmd:schedule:reset-job',
-  'cmd:schedule:run-now',
-  'cmd:schedule:set-config',
   'cmd:history:aggregate',
   'cmd:app:version',
   // v2 mobile: per-session live state + summary push (ARCHITECTURE-V2-MOBILE.md §3)
@@ -418,11 +411,31 @@ const ALLOWED_COMMANDS = new Set([
   'cmd:session:unsubscribe',
 ]);
 
+const MUTATE_COMMANDS = new Set([
+  'cmd:sessions:save',
+  'cmd:pty:spawn',
+  'cmd:pty:write',
+  // pty:kill terminates a live session; pty:resize drives the geometry of the
+  // user's interactive PTY — both write live process state, so they are gated
+  // behind remoteControlEnabled + SAS like every other mutation. A read-only
+  // mobile mirror has no business killing or resizing the desktop's session.
+  'cmd:pty:kill',
+  'cmd:pty:resize',
+  'cmd:schedule:write-prd',
+  'cmd:schedule:reset-job',
+  'cmd:schedule:run-now',
+  'cmd:schedule:set-config',
+]);
+
+const ALLOWED_COMMANDS = new Set([...READ_COMMANDS, ...MUTATE_COMMANDS]);
+
 module.exports = {
   // Centralized slug regex — used by scheduler.cjs and queueOps.cjs for
   // direct test()/match() containment checks alongside the zod parses.
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
+  READ_COMMANDS,
+  MUTATE_COMMANDS,
   ALLOWED_COMMANDS,
   schemas: {
     webRemotePair,

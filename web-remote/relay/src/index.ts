@@ -5,6 +5,7 @@ import fastifyCors from '@fastify/cors';
 import { registerAuthRoutes, purgeAuthRateLimits } from './auth';
 import { createWsServer, handleUpgrade } from './router';
 import { purgeExpired } from './tokens';
+import { safeParseJsonBody } from './bodyParser';
 
 const PORT = parseInt(process.env.PORT ?? '3010', 10);
 const HOST = '0.0.0.0';
@@ -27,6 +28,16 @@ async function main(): Promise<void> {
       // from appearing in Render access logs.
       redact: ['req.headers.authorization', 'req.headers.cookie'],
     },
+    // Render terminates TLS at a single proxy hop in front of this process.
+    // trustProxy=1 makes req.ip the real client (the leftmost XFF entry added
+    // by Render), so per-IP rate limits cannot be defeated by a client-supplied
+    // X-Forwarded-For. Without this the manual XFF parse was spoofable, which
+    // was the only network throttle on OTP brute force.
+    trustProxy: 1,
+    // Legitimate bodies are tiny (OTP code + UUID + ~124-char pubkey). Cap at
+    // 16 KiB so unauthenticated /pair, /api/otp, /api/ws-ticket cannot be used
+    // for memory-amplification DoS via large JSON parsed on the single thread.
+    bodyLimit: 16 * 1024,
   });
 
   await app.register(fastifyCookie);
@@ -45,6 +56,17 @@ async function main(): Promise<void> {
   });
 
   const allowedOrigin = process.env.ALLOWED_ORIGIN ?? 'https://session-manager.bilko.run';
+  // Override the default JSON parser so an empty body with Content-Type: application/json
+  // yields {} rather than FST_ERR_CTP_EMPTY_JSON_BODY. Routes that don't use the body
+  // (e.g. /api/otp, /api/ws-ticket) proceed to their auth checks and return 401, not 500.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    try {
+      done(null, safeParseJsonBody(body as string));
+    } catch (err) {
+      done(err as Error);
+    }
+  });
+
   await app.register(fastifyCors, {
     origin: allowedOrigin,
     credentials: true,

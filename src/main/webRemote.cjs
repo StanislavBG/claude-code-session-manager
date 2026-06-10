@@ -66,7 +66,7 @@ const MSG_MAX_BYTES = 256 * 1024;
 
 // Single source of truth lives in ipcSchemas.cjs — imported here so the test
 // can verify the same Set without depending on Electron-linked modules.
-const { ALLOWED_COMMANDS, MUTATE_COMMANDS } = require('./ipcSchemas.cjs');
+const { ALLOWED_COMMANDS, MUTATE_COMMANDS, SAS_GATED_READS } = require('./ipcSchemas.cjs');
 
 // ─── E2E encryption helpers (P-256 ECDH + AES-256-GCM, ADR §5.2) ────────────
 
@@ -615,7 +615,10 @@ async function pollSessionWatcher(w) {
 
   if (nextState && nextState !== w.state) {
     w.state = nextState;
-    pushEvent('event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
+    // Guard: don't push state if SAS not yet confirmed (watcher may outlive an auth reset).
+    if (_e2eAuthenticated) {
+      pushEvent('event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
+    }
   }
   if (newAssistantText && newMsgId !== w.lastMsgId) {
     w.lastAssistantText = newAssistantText;
@@ -673,6 +676,11 @@ async function pushSessionList() {
     // this stops the unsolicited background push too.
     const cfg = await loadConfig();
     if (!cfg.remoteEnabled) return;
+    // Don't push before SAS is confirmed — session cwds/titles are sensitive user data.
+    // A relay that completes e2e:hello before the user confirms the SAS would otherwise
+    // receive the full session list immediately (same threat SAS_GATED_READS blocks for
+    // cmd:sessions:load). Guard here so _lastSessionListJson is not poisoned either.
+    if (!_e2eAuthenticated) return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
     // Normalize persisted tabs → SessionMeta. tabId === claudeSessionId so it
@@ -773,6 +781,8 @@ function anthropicSummarize(apiKey, text) {
  * completed turn per subscribed tab (~$1/$5 per 1M tokens).
  */
 async function maybeSummarize(w) {
+  // Guard: don't push summaries (session transcript content) before SAS confirmed.
+  if (!_e2eAuthenticated) return;
   const text = w.lastAssistantText;
   if (!text) return;
   const ofMessageId = w.lastMsgId;
@@ -861,6 +871,36 @@ async function handleMessage(raw, device) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello but no device private key — skipping E2E' });
       return;
     }
+    // Explicit P-256 curve validation — do not rely on Node's implicit throw.
+    // Rejects wrong-curve keys (e.g. P-384), malformed DER, and the all-zero
+    // identity point. Must happen before deriveSessionKey so a bad key drops
+    // the session here, not silently in a crypto catch-all below.
+    try {
+      const derBytes = Buffer.from(browserPubKey, 'base64url');
+      const importedPub = crypto.createPublicKey({ key: derBytes, format: 'der', type: 'spki' });
+      if (importedPub.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
+        throw new Error(`wrong curve: ${importedPub.asymmetricKeyDetails?.namedCurve}`);
+      }
+      // P-256 SPKI DER is always 91 bytes; raw EC point (04 || x || y) starts at offset 26.
+      // Defense-in-depth: reject the identity point (x=0, y=0) explicitly even though
+      // Node's ECDH would also reject it — P-256 is a prime-order group, so the identity
+      // is the only low-order point.
+      if (derBytes.length === 91) {
+        const x = derBytes.subarray(27, 59);
+        const y = derBytes.subarray(59, 91);
+        if (x.every((b) => b === 0) && y.every((b) => b === 0)) {
+          throw new Error('identity point rejected');
+        }
+      }
+    } catch (e) {
+      logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello peer key validation failed — session dropped', meta: { error: e?.message } });
+      await auditLog(new Date().toISOString(), 'e2e:hello', device.deviceId, undefined, 'error:invalid_peer_key');
+      _e2eSessionKey = null;
+      _e2eAuthenticated = false;
+      _pendingSas = null;
+      broadcastStatus(); // clear stale "SAS pending"/"E2E active" UI state
+      return;
+    }
     try {
       _e2eSessionKey = deriveSessionKey(device.e2ePrivateKey, browserPubKey, device.deviceId);
       _e2eAuthenticated = false;
@@ -878,6 +918,7 @@ async function handleMessage(raw, device) {
       _e2eSessionKey = null;
       _e2eAuthenticated = false;
       _pendingSas = null;
+      broadcastStatus();
     }
     return;
   }
@@ -945,9 +986,11 @@ async function dispatchEnvelope(envelope, device) {
     return;
   }
 
-  // E2E auth gate — MUTATE commands are blocked until the user confirms the SAS,
-  // preventing a MITM relay from injecting commands into an unauthenticated session.
-  if (MUTATE_COMMANDS.has(type) && !_e2eAuthenticated) {
+  // E2E auth gate — MUTATE and sensitive READ commands are blocked until the
+  // user confirms the SAS on the desktop. This prevents a compromised relay
+  // from exfiltrating session lists, PRDs, run logs, or transcript summaries
+  // by completing the ECDH handshake without the user's knowledge.
+  if ((MUTATE_COMMANDS.has(type) || SAS_GATED_READS.has(type)) && !_e2eAuthenticated) {
     await auditLog(ts, type, device.deviceId, id, 'error:e2e_not_authenticated');
     respond(id, { error: 'e2e_not_authenticated' });
     return;
@@ -1224,6 +1267,11 @@ function registerRemoteHandlers() {
       _pendingSas = null;
       logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session authenticated — SAS confirmed by user' });
       broadcastStatus();
+      // Flush the session list immediately — the push loop was suppressed while
+      // _e2eAuthenticated was false, so the mobile app would otherwise wait up to
+      // SESSION_LIST_PUSH_MS for the first useful data.
+      _lastSessionListJson = null;
+      pushSessionList().catch(() => {});
     }
     return { ok: true };
   });

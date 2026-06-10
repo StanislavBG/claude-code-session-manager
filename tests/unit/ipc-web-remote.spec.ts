@@ -8,6 +8,7 @@
  *   4. Kill-switch: commands are refused when remoteEnabled = false.
  *   5. All 17 allowlisted command types are present in the set.
  *   6. Destructive pty commands live in the MUTATE tier, not READ.
+ *   7. Sensitive READ commands (SAS_GATED_READS) are not in the plain READ tier.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -16,10 +17,11 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 
 // Load the allowlist + schemas directly from ipcSchemas — no Electron dep.
-const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, MUTATE_COMMANDS } = require('../../src/main/ipcSchemas.cjs') as {
+const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, SAS_GATED_READS, MUTATE_COMMANDS } = require('../../src/main/ipcSchemas.cjs') as {
   schemas: Record<string, { safeParse: (v: unknown) => { success: boolean; error?: unknown }; parse: (v: unknown) => unknown }>
   ALLOWED_COMMANDS: Set<string>
   READ_COMMANDS: Set<string>
+  SAS_GATED_READS: Set<string>
   MUTATE_COMMANDS: Set<string>
 }
 
@@ -30,9 +32,13 @@ describe('ALLOWED_COMMANDS set', () => {
     expect(ALLOWED_COMMANDS.size).toBe(17)
   })
 
-  it('is the exact union of READ and MUTATE tiers (no overlap, no orphans)', () => {
-    expect(READ_COMMANDS.size + MUTATE_COMMANDS.size).toBe(ALLOWED_COMMANDS.size)
-    for (const c of READ_COMMANDS) expect(MUTATE_COMMANDS.has(c)).toBe(false)
+  it('is the exact union of READ, SAS_GATED_READS, and MUTATE tiers (no overlap, no orphans)', () => {
+    expect(READ_COMMANDS.size + SAS_GATED_READS.size + MUTATE_COMMANDS.size).toBe(ALLOWED_COMMANDS.size)
+    for (const c of READ_COMMANDS) {
+      expect(MUTATE_COMMANDS.has(c)).toBe(false)
+      expect(SAS_GATED_READS.has(c)).toBe(false)
+    }
+    for (const c of SAS_GATED_READS) expect(MUTATE_COMMANDS.has(c)).toBe(false)
   })
 
   // Destructive/stateful commands must require the remoteControlEnabled + SAS

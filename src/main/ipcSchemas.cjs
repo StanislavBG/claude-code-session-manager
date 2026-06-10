@@ -394,21 +394,36 @@ function validated(schema, handler) {
 }
 
 // ──────────────────────────────────────────── Web Remote command allowlist
-// Commands are split into two tiers:
-//   READ_COMMANDS  — only return data; always allowed when remoteEnabled=true.
-//   MUTATE_COMMANDS — write files, spawn processes, or mutate persisted state;
-//                     additionally gated behind remoteControlEnabled=true.
+// Commands are split into three tiers:
+//   READ_COMMANDS      — return data; allowed when remoteEnabled=true.
+//   SAS_GATED_READS    — return sensitive user data (sessions, PRDs, logs,
+//                        transcript summaries); additionally require
+//                        _e2eAuthenticated=true (SAS confirmed by user).
+//                        A compromised relay cannot exfiltrate this data from
+//                        a session that has not been SAS-confirmed.
+//   MUTATE_COMMANDS    — write files, spawn processes, or mutate persisted
+//                        state; gated behind remoteControlEnabled=true AND
+//                        _e2eAuthenticated=true.
 // ALLOWED_COMMANDS is the union, kept for existing import compatibility.
+//
+// Ungated READ_COMMANDS (justify each):
+//   cmd:app:version      — exposes only the app semver string; no user data.
+//   cmd:session:unsubscribe — teardown lifecycle; returns nothing sensitive.
 const READ_COMMANDS = new Set([
+  'cmd:app:version',
+  // v2 mobile: unsubscribe is a teardown lifecycle call with no data payload.
+  'cmd:session:unsubscribe',
+]);
+
+// Sensitive reads — return user data; require SAS confirmation same as MUTATE.
+const SAS_GATED_READS = new Set([
   'cmd:sessions:load',
   'cmd:schedule:state',
   'cmd:schedule:read-prd',
   'cmd:schedule:read-log',
   'cmd:history:aggregate',
-  'cmd:app:version',
-  // v2 mobile: per-session live state + summary push (ARCHITECTURE-V2-MOBILE.md §3)
+  // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',
-  'cmd:session:unsubscribe',
 ]);
 
 const MUTATE_COMMANDS = new Set([
@@ -427,7 +442,7 @@ const MUTATE_COMMANDS = new Set([
   'cmd:schedule:set-config',
 ]);
 
-const ALLOWED_COMMANDS = new Set([...READ_COMMANDS, ...MUTATE_COMMANDS]);
+const ALLOWED_COMMANDS = new Set([...READ_COMMANDS, ...SAS_GATED_READS, ...MUTATE_COMMANDS]);
 
 module.exports = {
   // Centralized slug regex — used by scheduler.cjs and queueOps.cjs for
@@ -435,6 +450,7 @@ module.exports = {
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
   READ_COMMANDS,
+  SAS_GATED_READS,
   MUTATE_COMMANDS,
   ALLOWED_COMMANDS,
   schemas: {

@@ -26,6 +26,8 @@ const { expandHome } = require('./lib/expandHome.cjs');
 
 /** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
 const watchers = new Map();
+/** Map<senderId, Map<absPath, count>> — per-sender watch contributions for reload teardown. */
+const senderWatches = new Map();
 let window = null;
 
 function attachWindow(w) {
@@ -266,10 +268,15 @@ function normalizePathKey(p) {
  * Unwatch decrements; when refcount hits zero the underlying watcher is closed.
  * Fires IPC event `config:changed` with {path, mtimeMs, kind} on any change.
  */
-function watch(paths) {
+function watch(paths, senderId) {
   for (const rawPath of paths) {
     validatePath(expandHome(rawPath)); // security check — throws if out of bounds
     const key = normalizePathKey(rawPath);
+    if (senderId != null) {
+      if (!senderWatches.has(senderId)) senderWatches.set(senderId, new Map());
+      const sm = senderWatches.get(senderId);
+      sm.set(key, (sm.get(key) || 0) + 1);
+    }
     const existing = watchers.get(key);
     if (existing) {
       existing.refCount++;
@@ -300,12 +307,36 @@ function watch(paths) {
   }
 }
 
-function unwatch(paths) {
+function unwatch(paths, senderId) {
   for (const rawPath of paths) {
     const key = normalizePathKey(rawPath);
+    if (senderId != null) {
+      const sm = senderWatches.get(senderId);
+      if (sm) {
+        const c = (sm.get(key) || 0) - 1;
+        if (c <= 0) sm.delete(key);
+        else sm.set(key, c);
+        if (sm.size === 0) senderWatches.delete(senderId);
+      }
+    }
     const entry = watchers.get(key);
     if (!entry) continue;
     entry.refCount--;
+    if (entry.refCount <= 0) {
+      entry.watcher.close().catch(() => {});
+      watchers.delete(key);
+    }
+  }
+}
+
+function releaseWatchesForSender(senderId) {
+  const sm = senderWatches.get(senderId);
+  if (!sm) return;
+  senderWatches.delete(senderId);
+  for (const [key, count] of sm) {
+    const entry = watchers.get(key);
+    if (!entry) continue;
+    entry.refCount -= count;
     if (entry.refCount <= 0) {
       entry.watcher.close().catch(() => {});
       watchers.delete(key);
@@ -328,14 +359,15 @@ function registerConfigHandlers() {
   ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text }) => writeTextAtomic(p, text)));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
-  ipcMain.on('config:watch', (_e, { paths }) => { try { s.configWatch.parse(paths); watch(paths); } catch (e) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch schema reject', meta: { error: e?.message } }); } });
-  ipcMain.on('config:unwatch', (_e, { paths }) => { try { s.configWatch.parse(paths); unwatch(paths); } catch (e) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:unwatch schema reject', meta: { error: e?.message } }); } });
+  ipcMain.on('config:watch', (e, { paths }) => { try { s.configWatch.parse(paths); watch(paths, e.sender.id); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch schema reject', meta: { error: err?.message } }); } });
+  ipcMain.on('config:unwatch', (e, { paths }) => { try { s.configWatch.parse(paths); unwatch(paths, e.sender.id); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:unwatch schema reject', meta: { error: err?.message } }); } });
 }
 
 module.exports = {
   attachWindow,
   registerConfigHandlers,
   closeAllWatchers,
+  releaseWatchesForSender,
   // exported for tests / direct use
   readJson,
   readText,

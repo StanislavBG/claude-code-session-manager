@@ -6,6 +6,11 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
+if (process.platform !== 'linux' && process.platform !== 'darwin') {
+  console.error('[claude-code-session-manager] Windows is not supported yet.');
+  process.exit(1);
+}
+
 let electronBin;
 try {
   electronBin = require('electron');

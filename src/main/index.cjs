@@ -319,6 +319,14 @@ function createWindow() {
   // (and Monaco, and Tiptap) all participate in via the standard DOM
   // selection API, so this single block covers Terminal + Doc Editor + plain
   // text inputs without per-component wiring.
+  // Release any stale chokidar watchers that were opened by the previous
+  // renderer frame. Fires on Ctrl+R and HMR full-page reloads — the fresh
+  // renderer will re-register its own watches, so the old sender's contribution
+  // must be unwound first to avoid refcount ratcheting.
+  mainWindow.webContents.on('did-start-navigation', () => {
+    configMgr.releaseWatchesForSender(mainWindow.webContents.id);
+  });
+
   mainWindow.webContents.on('context-menu', (_e, params) => {
     const items = [];
     if (params.editFlags.canCopy) items.push({ label: 'Copy', role: 'copy' });

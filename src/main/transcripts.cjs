@@ -43,6 +43,38 @@ function transcriptPath(cwd, sessionUuid) {
   return path.join(os.homedir(), '.claude', 'projects', encodeCwd(cwd), `${sessionUuid}.jsonl`);
 }
 
+const MAX_RAW_STR = 4096;
+
+/**
+ * Cap string fields in a content block array so that assistant text and
+ * tool_result bodies don't bloat the ring buffer. Only the fields that
+ * race.ts / orchestrator.ts actually read (message.content[].text) are
+ * preserved; everything else is kept but truncated.
+ */
+function trimContentArray(content) {
+  if (!Array.isArray(content)) return content;
+  return content.map((block) => {
+    if (!block || typeof block !== 'object') return block;
+    const b = { ...block };
+    if (typeof b.text === 'string' && b.text.length > MAX_RAW_STR) {
+      b.text = b.text.slice(0, MAX_RAW_STR) + '…';
+    }
+    if (typeof b.content === 'string' && b.content.length > MAX_RAW_STR) {
+      b.content = b.content.slice(0, MAX_RAW_STR) + '…';
+    }
+    if (Array.isArray(b.content)) {
+      b.content = trimContentArray(b.content);
+    }
+    return b;
+  });
+}
+
+/** Build the slim raw projection used by race.ts and orchestrator.ts. */
+function makeRaw(obj) {
+  const msgContent = obj?.message?.content;
+  return { message: { content: trimContentArray(msgContent) } };
+}
+
 /**
  * Parse one JSONL line defensively. Real schema drifts, so we pass through
  * anything that parses and tag a coarse `kind`.
@@ -56,7 +88,7 @@ function classifyLine(obj) {
 
   // Usage rollups arrive as summary events.
   if (obj.usage || msg?.usage) {
-    return { kind: 'usage', data: obj.usage || msg.usage, raw: obj };
+    return { kind: 'usage', data: obj.usage || msg.usage, raw: makeRaw(obj) };
   }
 
   // Tool uses: scan content array for tool_use blocks.
@@ -64,31 +96,31 @@ function classifyLine(obj) {
     for (const block of content) {
       if (block?.type === 'tool_use') {
         if (block.name === 'TodoWrite') {
-          return { kind: 'todo_write', data: block.input?.todos || block.input || [], raw: obj };
+          return { kind: 'todo_write', data: block.input?.todos || block.input || [], raw: makeRaw(obj) };
         }
         if (block.name === 'ExitPlanMode' || block.name === 'EnterPlanMode') {
-          return { kind: 'plan', data: block.input, raw: obj };
+          return { kind: 'plan', data: block.input, raw: makeRaw(obj) };
         }
         if (block.name === 'Agent' || block.name === 'Task') {
           // Include block.id as toolUseId so the live store can match the
           // corresponding tool_result and update per-agent lastActivityAt.
-          return { kind: 'agent_spawn', data: { ...block.input, toolUseId: block.id }, raw: obj };
+          return { kind: 'agent_spawn', data: { ...block.input, toolUseId: block.id }, raw: makeRaw(obj) };
         }
         return {
           kind: 'tool_use',
           data: { name: block.name, input: block.input, id: block.id },
-          raw: obj,
+          raw: makeRaw(obj),
         };
       }
       // tool_result carries the tool_use_id of the completed Task/Agent call.
       // The live store uses this to update the agent's lastActivityAt bookend.
       if (block?.type === 'tool_result' && block.tool_use_id) {
-        return { kind: 'tool_result', data: { toolUseId: block.tool_use_id }, raw: obj };
+        return { kind: 'tool_result', data: { toolUseId: block.tool_use_id }, raw: makeRaw(obj) };
       }
     }
   }
 
-  return { kind: type || 'message', data: obj, raw: obj };
+  return { kind: type || 'message', data: obj, raw: makeRaw(obj) };
 }
 
 /**
@@ -129,7 +161,7 @@ async function readDelta(sub) {
   }
 }
 
-async function flush(sub, { emit = true } = {}) {
+async function doFlush(sub, { emit = true, replay = false } = {}) {
   const lines = await readDelta(sub);
   for (const line of lines) {
     let obj;
@@ -150,6 +182,7 @@ async function flush(sub, { emit = true } = {}) {
       cwd: sub.cwd,
       sessionUuid: sub.sessionUuid,
       ev,
+      replay,
     });
     if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
     // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
@@ -164,10 +197,78 @@ async function flush(sub, { emit = true } = {}) {
   }
 }
 
+// Serialised flush scheduler — at most one readDelta per sub in flight at a
+// time. Uses a dirty flag for trailing-edge re-run: if a chokidar event fires
+// while a flush is in progress, dirty stays true and the loop runs one more
+// time after the current read completes, guaranteeing no event is dropped.
+function scheduleFlush(sub) {
+  sub.dirty = true;
+  if (sub.flushing) return sub.flushing;
+  sub.flushing = (async () => {
+    while (sub.dirty) {
+      sub.dirty = false;
+      await doFlush(sub);
+    }
+  })()
+    .catch((e) => {
+      logs.writeLine({ level: 'warn', scope: 'transcripts', message: 'flush error', meta: { error: e?.message } });
+    })
+    .finally(() => {
+      sub.flushing = null;
+    });
+  return sub.flushing;
+}
+
 const MAX_TRANSCRIPT_SUBS = 20;
 
+/**
+ * LRU pool of released-but-cached subscriptions. When a renderer consumer
+ * calls release(), the sub stays alive (offset + buffer preserved) so a
+ * subsequent tab-switch back resumes from the current offset instead of
+ * re-reading the entire transcript from byte 0. Oldest entries are evicted
+ * once the pool exceeds LRU_CAP.
+ */
+const LRU_CAP = 6;
+const lruReleased = []; // tabIds with no active consumer, ordered oldest→newest
+
+function _closeSub(tabId) {
+  const sub = subs.get(tabId);
+  if (!sub) return;
+  sub.watcher?.close().catch(() => {});
+  subs.delete(tabId);
+  usageMatrix.removeTab(tabId);
+  const i = lruReleased.indexOf(tabId);
+  if (i !== -1) lruReleased.splice(i, 1);
+}
+
+/**
+ * release(tabId) — called when the renderer's last consumer unmounts (view
+ * switch). Keeps the sub alive in the LRU cache so a quick revisit resumes
+ * from the persisted offset. Evicts the oldest cached sub if over LRU_CAP.
+ */
+function release(tabId) {
+  if (!subs.has(tabId)) return;
+  if (!lruReleased.includes(tabId)) {
+    lruReleased.push(tabId);
+  }
+  while (lruReleased.length > LRU_CAP) {
+    const oldest = lruReleased.shift();
+    _closeSub(oldest);
+  }
+}
+
+/** closeTab(tabId) — genuine tab close; always destroys the sub immediately. */
+function closeTab(tabId) {
+  _closeSub(tabId);
+}
+
 async function subscribe({ tabId, cwd, sessionUuid }) {
-  if (subs.has(tabId)) return { ok: true, path: subs.get(tabId).filePath };
+  if (subs.has(tabId)) {
+    // Tab is in the LRU cache — promote it back to active.
+    const i = lruReleased.indexOf(tabId);
+    if (i !== -1) lruReleased.splice(i, 1);
+    return { ok: true, path: subs.get(tabId).filePath };
+  }
   if (subs.size >= MAX_TRANSCRIPT_SUBS) {
     logs.writeLine({
       level: 'warn',
@@ -189,34 +290,33 @@ async function subscribe({ tabId, cwd, sessionUuid }) {
     pending: '',
     buffer: [],
     watcher: null,
+    flushing: null,
+    dirty: false,
   };
   // If the file already exists, read current content as replay. Do not emit
   // during this initial drain — the renderer drains sub.buffer via
   // `transcript:buffer` after `transcript:subscribe` resolves. Emitting here
   // would race the renderer's onEvent listener registration and drop events.
+  // replay:true prevents historical usage events from entering the 5-min window.
   if (fs.existsSync(filePath)) {
-    await flush(sub, { emit: false });
+    await doFlush(sub, { emit: false, replay: true });
   }
   const watcher = chokidar.watch(filePath, {
     ignoreInitial: false,
     persistent: true,
     awaitWriteFinish: { stabilityThreshold: 30, pollInterval: 20 },
   });
-  watcher.on('add', () => flush(sub).catch(() => {}));
-  watcher.on('change', () => flush(sub).catch(() => {}));
+  watcher.on('add', () => scheduleFlush(sub));
+  watcher.on('change', () => scheduleFlush(sub));
   watcher.on('error', (err) => logs.writeLine({ level: 'warn', scope: 'transcripts', message: 'chokidar watcher error', meta: { error: err?.message } }));
   sub.watcher = watcher;
   subs.set(tabId, sub);
   return { ok: true, path: filePath };
 }
 
+/** @deprecated Use release() for view-switch, closeTab() for genuine close. */
 function unsubscribe(tabId) {
-  const sub = subs.get(tabId);
-  if (!sub) return;
-  sub.watcher?.close().catch(() => {});
-  subs.delete(tabId);
-  // Drop the tab from the AgOps matrix — "active sessions" only.
-  usageMatrix.removeTab(tabId);
+  release(tabId);
 }
 
 function getBuffer(tabId) {
@@ -233,8 +333,14 @@ function closeAll() {
 function registerTranscriptHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('transcript:subscribe', v(s.transcriptSubscribe, (payload) => subscribe(payload)));
+  // transcript:unsubscribe is now an alias for release (view-switch, not close).
   ipcMain.handle('transcript:unsubscribe', v(s.transcriptTabId, ({ tabId }) => {
-    unsubscribe(tabId);
+    release(tabId);
+    return { ok: true };
+  }));
+  // transcript:close is the genuine close used when a tab is removed.
+  ipcMain.handle('transcript:close', v(s.transcriptTabId, ({ tabId }) => {
+    closeTab(tabId);
     return { ok: true };
   }));
   ipcMain.handle('transcript:buffer', v(s.transcriptTabId, ({ tabId }) => getBuffer(tabId)));
@@ -245,6 +351,8 @@ module.exports = {
   attachWindow,
   registerTranscriptHandlers,
   closeAll,
+  release,
+  closeTab,
   encodeCwd,
   transcriptPath,
   classifyLine,

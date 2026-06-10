@@ -168,6 +168,13 @@ async function refreshIfNeeded(forceRefresh = false) {
   }
 
   if (alreadyExpired) {
+    // Re-read from disk in case credentials were externally refreshed (e.g. via
+    // `claude login`) between our initial read and the failed OAuth attempt.
+    const recheckCr = await readCredentials();
+    if (recheckCr.kind === 'ok' && !isExpired(recheckCr.creds)) {
+      appendRefreshLog({ event: 'externally_refreshed_ok', recheckExpiresAt: recheckCr.creds.expiresAt ?? null });
+      return { kind: 'ok', creds: recheckCr.creds };
+    }
     const ms = expiresAtMs(creds);
     appendRefreshLog({ event: 'auth_failed_expired', expiredAtMs: ms });
     return {

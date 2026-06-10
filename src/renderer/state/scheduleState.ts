@@ -27,6 +27,8 @@ export const useScheduleState = create<ScheduleState>(() => ({ snapshot: null, l
 let started = false
 let offSubscription: (() => void) | null = null
 let toastedFailure = false
+// undefined = not yet seeded; null = no pause; string = pause reason
+let prevPauseReason: string | null | undefined = undefined
 
 export async function startSchedulePolling(): Promise<void> {
   if (started) return
@@ -38,17 +40,34 @@ export async function startSchedulePolling(): Promise<void> {
       'schedule.state',
     )
     useScheduleState.setState({ snapshot: snap, loaded: true })
+    // Seed without toasting — we don't fire on pre-existing pause at boot.
+    prevPauseReason = snap.paused?.reason ?? null
   } catch (e) {
     if (!toastedFailure) {
       toastedFailure = true
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(`Scheduler state hydrate failed: ${msg}`)
     }
+    prevPauseReason = null
   }
   // Install the live subscription regardless of whether the initial hydrate
   // succeeded — if the first state() timed out, broadcasts will still drive
   // useScheduleState once main starts responding.
   offSubscription = window.api.schedule.onState((s) => {
+    const incoming = s.paused?.reason ?? null
+    if (prevPauseReason !== undefined && incoming !== prevPauseReason) {
+      if (incoming === 'auth') {
+        toast.error(
+          'Scheduler paused: Claude sign-in expired or invalid. Restart the app or re-run `claude login`, then Resume.',
+        )
+      } else if (incoming === 'network') {
+        toast.error(
+          'Scheduler paused: billing endpoint unreachable. Will auto-resume in 30 minutes.',
+        )
+      }
+      // rate_limit is normal designed behavior — no error toast
+    }
+    prevPauseReason = incoming
     useScheduleState.setState({ snapshot: s, loaded: true })
   })
 }
@@ -59,4 +78,5 @@ export function stopSchedulePolling(): void {
     offSubscription = null
   }
   started = false
+  prevPauseReason = undefined
 }

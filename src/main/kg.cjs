@@ -45,6 +45,7 @@ const KG_DIR = path.join(HOME, '.claude', 'knowledge-log');
 const LOG_PATH = path.join(KG_DIR, 'prompts.jsonl');
 const GRAPHS_DIR = path.join(KG_DIR, 'graphs');
 const INGEST_STATE_PATH = path.join(KG_DIR, 'ingest-state.json');
+const PROMPT_INDEX_PATH = path.join(KG_DIR, 'prompt-index.json');
 const BATCH = 20;                 // prompts per extraction call (also a per-project cap)
 const KNOWN_VOCAB = 200;          // top node names pre-seeded for dedup-at-extraction
 const MAX_TAIL_BYTES = 8 * 1024 * 1024;   // bound bytes scanned per ingest run
@@ -162,6 +163,22 @@ async function saveIngestState(s) {
   const tmp = `${INGEST_STATE_PATH}.tmp`;
   await fsp.writeFile(tmp, JSON.stringify(s, null, 2));
   await fsp.rename(tmp, INGEST_STATE_PATH);
+}
+
+/**
+ * Per-project prompt-count sidecar: { [encodedCwd]: { count: number, cwd: string } }
+ * Returns null when the file does not yet exist (triggers a one-time migration scan).
+ */
+async function readPromptIndex() {
+  try { return JSON.parse(await fsp.readFile(PROMPT_INDEX_PATH, 'utf8')); }
+  catch { return null; }
+}
+
+async function savePromptIndex(idx) {
+  await fsp.mkdir(KG_DIR, { recursive: true });
+  const tmp = `${PROMPT_INDEX_PATH}.tmp`;
+  await fsp.writeFile(tmp, JSON.stringify(idx, null, 2));
+  await fsp.rename(tmp, PROMPT_INDEX_PATH);
 }
 
 /** Canonical dedup key: lowercase, strip leading article, collapse whitespace. */
@@ -343,6 +360,7 @@ async function ingest() {
   broadcast('kg:ingest-progress', { phase: 'start', ingesting: true });
   try {
     const st = await loadIngestState();
+    const promptIdx = await readPromptIndex() ?? {};
     let stat;
     try { stat = await fsp.stat(LOG_PATH); }
     catch { broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: 0 }); return { ok: true, added: 0, note: 'no log yet' }; }
@@ -430,6 +448,10 @@ async function ingest() {
         st.lastTs = u.entries[u.entries.length - 1].ts || st.lastTs;
         st.updatedAt = new Date().toISOString();
         await saveIngestState(st);
+        if (!promptIdx[u.enc]) promptIdx[u.enc] = { count: 0, cwd: u.cwd };
+        promptIdx[u.enc].count += u.entries.length;
+        promptIdx[u.enc].cwd = u.cwd;
+        await savePromptIndex(promptIdx);
         if (extractions >= MAX_EXTRACTIONS_PER_RUN) { capped = true; break; }
         continue;
       }
@@ -441,13 +463,17 @@ async function ingest() {
       g.updatedAt = new Date().toISOString();
 
       // Commit this batch: graph first (so a crash can't advance the watermark
-      // past unsaved work), then the watermark.
+      // past unsaved work), then the watermark + sidecar index.
       await saveGraph(g);
       st.lastOffset += u.bytes;
       st.promptCount += u.entries.length;
       st.lastTs = batchTs;
       st.updatedAt = new Date().toISOString();
       await saveIngestState(st);
+      if (!promptIdx[u.enc]) promptIdx[u.enc] = { count: 0, cwd: u.cwd };
+      promptIdx[u.enc].count += u.entries.length;
+      promptIdx[u.enc].cwd = u.cwd;
+      await savePromptIndex(promptIdx);
 
       committedPrompts += u.entries.length;
       touched.add(encodeCwd(u.cwd));
@@ -479,25 +505,29 @@ async function ingest() {
 
 /** Enumerate projects seen in the log, enriched with per-project graph stats. */
 async function listProjects() {
-  const prompts = await readAllPrompts();
-  const byEnc = new Map();
-  for (const p of prompts) {
-    if (!p.cwd) continue;
-    const enc = encodeCwd(p.cwd);
-    let e = byEnc.get(enc);
-    if (!e) { e = { cwd: p.cwd, enc, total: 0 }; byEnc.set(enc, e); }
-    e.total++;
-    e.cwd = p.cwd; // keep most recent spelling
+  let idx = await readPromptIndex();
+  if (idx === null) {
+    // One-time migration: build sidecar from the full log.
+    idx = {};
+    const prompts = await readAllPrompts();
+    for (const p of prompts) {
+      if (!p.cwd) continue;
+      const enc = encodeCwd(p.cwd);
+      if (!idx[enc]) idx[enc] = { count: 0, cwd: p.cwd };
+      idx[enc].count++;
+      idx[enc].cwd = p.cwd;
+    }
+    await savePromptIndex(idx).catch(() => {});
   }
   const out = [];
-  for (const e of byEnc.values()) {
-    const g = await loadGraphFor(e.cwd);
+  for (const [enc, entry] of Object.entries(idx)) {
+    const g = await loadGraphFor(entry.cwd);
     out.push({
-      cwd: e.cwd,
-      label: shortLabel(e.cwd),
-      total: e.total,
+      cwd: entry.cwd,
+      label: shortLabel(entry.cwd),
+      total: entry.count,
       processed: g.promptCount || 0,
-      pending: Math.max(0, e.total - (g.promptCount || 0)),
+      pending: Math.max(0, entry.count - (g.promptCount || 0)),
       nodes: g.nodes.length,
       edges: g.edges.length,
       lastIngest: g.updatedAt,
@@ -516,7 +546,24 @@ async function getState(cwd) {
   const target = cwd || await defaultCwd();
   const enc = encodeCwd(target);
   const g = await loadGraphFor(target);
-  const prompts = (await readAllPrompts()).filter((p) => encodeCwd(p.cwd) === enc);
+  let idx = await readPromptIndex();
+  let totalPrompts;
+  if (idx === null) {
+    // One-time migration fallback — build from full log.
+    idx = {};
+    const prompts = await readAllPrompts();
+    for (const p of prompts) {
+      if (!p.cwd) continue;
+      const e2 = encodeCwd(p.cwd);
+      if (!idx[e2]) idx[e2] = { count: 0, cwd: p.cwd };
+      idx[e2].count++;
+      idx[e2].cwd = p.cwd;
+    }
+    await savePromptIndex(idx).catch(() => {});
+    totalPrompts = idx[enc]?.count ?? 0;
+  } else {
+    totalPrompts = idx[enc]?.count ?? 0;
+  }
   return {
     cwd: target,
     label: shortLabel(target),
@@ -524,8 +571,8 @@ async function getState(cwd) {
     edges: g.edges,
     status: {
       promptCount: g.promptCount || 0,
-      totalPrompts: prompts.length,
-      pending: Math.max(0, prompts.length - (g.promptCount || 0)),
+      totalPrompts,
+      pending: Math.max(0, totalPrompts - (g.promptCount || 0)),
       lastIngest: g.updatedAt,
       ingesting,
       logPath: LOG_PATH,

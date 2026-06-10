@@ -180,12 +180,16 @@ const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 // DEFAULT_PROJECT_CWD imported from lib/schedulerBatch.cjs (single source of truth).
 
 const ENV_CAP = process.env.SM_SCHEDULER_MAX_CONCURRENCY
-  ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 4))
+  ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 3))
   : null;
+
+// Each headless claude -p process can grow past 1 GB; require 1.5 GB headroom
+// per running+pending slot to avoid OOM (incident 2026-06-10).
+const MIN_FREE_MB_PER_JOB = 1500;
 
 const DEFAULT_CONFIG = {
   offsetMinutes: 15,
-  concurrencyCap: ENV_CAP ?? 4,
+  concurrencyCap: ENV_CAP ?? 3,
   defaultCwd: DEFAULT_PROJECT_CWD,
   // 'when-available' = poll usage and fire whenever utilization < threshold.
   // 'on-reset'        = fire offsetMinutes after the next 5h reset (legacy).
@@ -201,6 +205,39 @@ const DEFAULT_CONFIG = {
     probeStaleThresholdMinutes: 10,
   },
 };
+
+// ---------- memory gate ----------
+
+/**
+ * Returns available system memory in MB.  Reads /proc/meminfo on Linux; fails
+ * open (returns Infinity) on darwin or on any parse/read error so the gate
+ * never blocks scheduling on unsupported platforms.
+ */
+function getAvailableMemMb() {
+  if (process.platform !== 'linux') return Infinity;
+  try {
+    const raw = fs.readFileSync('/proc/meminfo', 'utf8');
+    const m = raw.match(/^MemAvailable:\s+(\d+)\s+kB/m);
+    if (!m) return Infinity;
+    return Math.floor(parseInt(m[1], 10) / 1024);
+  } catch {
+    return Infinity;
+  }
+}
+
+/**
+ * Pure helper: clamp a batch down so launching `toLaunch` more jobs doesn't
+ * drop available memory below MIN_FREE_MB_PER_JOB per active slot.
+ * Exported for unit tests.
+ */
+function memoryLimitedBatchSize(availableMb, minPerJob, runningCount, batchLen) {
+  if (availableMb === Infinity) return batchLen;
+  let allowed = batchLen;
+  while (allowed > 0 && availableMb < minPerJob * (runningCount + allowed)) {
+    allowed--;
+  }
+  return allowed;
+}
 
 // ---------- fs helpers ----------
 
@@ -539,6 +576,8 @@ let heartbeatInterval = null;
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
 let cancelToken = { cancelled: false };
+// Last memory-gate observation; included in snapshot for renderer visibility.
+let lastMemGate = null;
 
 function attachWindow(w) { mainWindow = w; }
 
@@ -557,6 +596,13 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
     nextReset: getNextResetCached(),
     paused: state.paused,
     utilization: cachedUtilization,
+    pollHealth: {
+      lastPollAt,
+      lastPollOk,
+      consecutiveFailures,
+      lastFailureKind,
+    },
+    memGate: lastMemGate,
   };
   if (withPaths) {
     payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: QUEUE_PATH };
@@ -743,7 +789,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   // before handing it to the child process.
   try { fs.accessSync(cwd, fs.constants.X_OK); }
   catch {
-    const errMsg = `cwd no longer exists: ${cwd}`;
+    const errMsg = `cwd does not exist on this machine: ${cwd}`;
     safeLog(`[scheduler] ${errMsg}\n`);
     closeFd();
     // Sync write: this is an early-exit error path inside an async function,
@@ -1356,11 +1402,25 @@ function tickQueue() {
     const batch = pickNextBatch(state.jobs, runningSet, cap);
     if (batch.length === 0) return;
 
+    const availableMb = getAvailableMemMb();
+    const allowed = memoryLimitedBatchSize(availableMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length);
+    if (allowed === 0) {
+      const threshold = MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
+      console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB — deferring ${batch.length} job(s)`);
+      lastMemGate = { availableMb, threshold, deferred: true, at: new Date().toISOString() };
+      return;
+    }
+    const gatedBatch = batch.slice(0, allowed);
+    if (gatedBatch.length < batch.length) {
+      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length}`);
+      lastMemGate = { availableMb, threshold: MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length), deferred: false, clamped: true, at: new Date().toISOString() };
+    }
+
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
     await broadcast();
 
     const { runId, dir: runDir } = pickRunDir();
-    for (const job of batch) {
+    for (const job of gatedBatch) {
       if (cancelToken.cancelled) break;
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
       spawnJob(job, runId, runDir, state.config.defaultCwd).catch(() => {});
@@ -1450,6 +1510,18 @@ async function reapDeadRunningJobs() {
 
 // ---------- poll loop with exponential backoff ----------
 
+/**
+ * Pure: given the current pause reason and whether a reset timestamp is cached,
+ * return which clearPause source to pass after a successful billing poll, or null.
+ * Exported for unit testing.
+ */
+function pollRecoveryClearSource(pauseReason, hasCachedReset) {
+  if (pauseReason === 'network') return 'network-recovered';
+  if (pauseReason === 'auth') return 'auth-recovered';
+  if (pauseReason === 'reset_failure' && hasCachedReset) return 'reset-recovered';
+  return null;
+}
+
 async function pollLoop() {
   try {
     await reapDeadRunningJobs().catch(() => {});
@@ -1468,15 +1540,10 @@ async function pollLoop() {
       lastPollOk = true;
       persistSchedulerState();
 
-      // If a 'network' pause resolved, clear it now that we have a good reading.
+      // Clear any pause that was waiting for a successful billing read.
       const cur = await readQueue();
-      if (cur.paused?.reason === 'network') {
-        await clearPause('network-recovered');
-      }
-      // If 'reset_failure' was set and we now have a valid reset, clear it.
-      if (cur.paused?.reason === 'reset_failure' && cachedNextReset) {
-        await clearPause('reset-recovered');
-      }
+      const clearSrc = pollRecoveryClearSource(cur.paused?.reason ?? null, !!cachedNextReset);
+      if (clearSrc) await clearPause(clearSrc);
 
       await maybeLaunchWhenAvailable(cur);
       await broadcast();
@@ -1961,6 +2028,19 @@ const remote = {
     const resolved = safeSlugPath(slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
+      // Symlink defense, matching readPrd/readLog: safeSlugPath is lexical and
+      // does NOT resolve symlinks, so a rogue job could plant prds/x.md → an
+      // arbitrary $HOME path and have writeTextAtomic clobber it. Resolve the
+      // real parent dir (the file itself may not exist yet) and re-assert
+      // containment; also reject the target if it is already a symlink.
+      const realParent = await fsp.realpath(path.dirname(resolved));
+      if (realParent !== PRDS_DIR && !realParent.startsWith(PRDS_DIR + path.sep)) {
+        return { ok: false, error: 'invalid slug' };
+      }
+      const existing = await fsp.lstat(resolved).catch(() => null);
+      if (existing && existing.isSymbolicLink()) {
+        return { ok: false, error: 'invalid slug' };
+      }
       await config.writeTextAtomic(resolved, body);
       const stat = await fsp.stat(resolved);
       return { ok: true, bytesWritten: stat.size };
@@ -2005,4 +2085,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize };

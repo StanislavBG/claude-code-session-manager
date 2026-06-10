@@ -15,8 +15,23 @@
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+
+/**
+ * Expand a PRD `cwd` value to an absolute path.
+ * - `~/...` or `~` alone → absolute under os.homedir()
+ * - Already-absolute paths pass through unchanged.
+ * - Bare relative paths → joined onto os.homedir().
+ * null/empty returns null (caller falls back to defaultCwd).
+ */
+function expandCwd(cwd) {
+  if (!cwd) return null;
+  if (cwd === '~' || cwd.startsWith('~/')) return path.join(os.homedir(), cwd.slice(1));
+  if (path.isAbsolute(cwd)) return cwd;
+  return path.join(os.homedir(), cwd);
+}
 
 // Hard cap to keep one malformed PRD (e.g. a binary blob accidentally renamed
 // .md) from wedging the main thread. PRDs are PRDs, not media files; 1 MB is
@@ -46,7 +61,7 @@ async function parsePrdRaw(filePath) {
     slug: base,
     path: filePath,
     title: fm.title || base,
-    cwd: fm.cwd || null,
+    cwd: expandCwd(fm.cwd || null),
     estimateMinutes: fm.estimateMinutes ? Number(fm.estimateMinutes) || null : null,
     parallelGroup: (fm.parallelGroup ? Number(fm.parallelGroup) || null : null) ?? groupFromName ?? 99,
     body: body.trim(),

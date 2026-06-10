@@ -85,7 +85,7 @@ function ensureTab(tabId, cwd, sessionUuid) {
  * Feed one classified transcript event into the per-tab aggregator. Called
  * from transcripts.cjs for every event, both during replay and live.
  */
-function recordEvent({ tabId, cwd, sessionUuid, ev }) {
+function recordEvent({ tabId, cwd, sessionUuid, ev, replay = false }) {
   if (!tabId || !ev) return;
   const t = ensureTab(tabId, cwd, sessionUuid);
   const now = Date.now();
@@ -109,8 +109,12 @@ function recordEvent({ tabId, cwd, sessionUuid, ev }) {
       t.perTurnInputTokens.push(inTok);
       if (t.perTurnInputTokens.length > TURN_RING) t.perTurnInputTokens.shift();
 
-      t.tokenWindow.push({ ts: now, tokens: inTok + outTok });
-      pruneWindow(t.tokenWindow, now);
+      // Historical events must not enter the 5-min sliding window — doing so
+      // would make tokensPerMin spike to "critical" on every tab switch.
+      if (!replay) {
+        t.tokenWindow.push({ ts: now, tokens: inTok + outTok });
+        pruneWindow(t.tokenWindow, now);
+      }
       dirty = true;
       break;
     }

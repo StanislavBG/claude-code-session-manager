@@ -50,6 +50,19 @@ const VERDICTS_SCHEMA_VERSION = 1;
  *   2. Traceback + Error within 10 lines (Python exception)
  *   3. ModuleNotFoundError / ImportError (missing venv / broken deps)
  */
+/**
+ * True when a tool_result content is a Claude Code harness tool error rather
+ * than task output — emitted when the model calls a tool that doesn't exist or
+ * isn't allowed (e.g. `<tool_use_error>Error: No such tool available: bash`).
+ * The harness rejects the call; the model recovers by retrying with a valid
+ * tool. Never a task failure, so the verifier must not downgrade on it.
+ */
+function isHarnessToolError(content) {
+  if (typeof content !== 'string' || !content) return false;
+  return content.includes('<tool_use_error>')
+    || /\bNo such tool available\b/.test(content);
+}
+
 function detectPattern(content) {
   if (typeof content !== 'string' || !content) return null;
 
@@ -472,6 +485,15 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
       const ev = events[i];
       if (ev.kind !== 'tool_result') continue;
 
+      // Harness tool errors (`<tool_use_error>…`) are emitted when the model
+      // requests a tool that isn't available — e.g. a wrong-case name like
+      // "bash" instead of "Bash", or a tool outside the allowlist. The harness
+      // rejects the call and the model retries with a valid tool; the task is
+      // unaffected. These are never task failures, so they are exempt from both
+      // the is_error scan and the content pattern scan (false-positive class
+      // seen in 58-web-remote-correctness-batch, 2026-06-10).
+      if (isHarnessToolError(ev.content)) continue;
+
       // is_error:true in the final 20% of the transcript.
       if (ev.isError && i >= last20pctStart) {
         const desc = toolUseDesc(events, ev.toolUseId);
@@ -542,6 +564,7 @@ module.exports = {
   verifyRun,
   // Exposed for unit tests.
   detectPattern,
+  isHarnessToolError,
   toolUseName,
   extractSoakFromBody,
   parsePrdBodyDepFragments,

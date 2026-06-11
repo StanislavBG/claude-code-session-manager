@@ -487,3 +487,40 @@ test('feedback 01: quoted "Traceback..." line (leading quote) → clean', async 
     assert.equal(verdict.verdict, 'clean', `quoted traceback prose must not flag, got ${verdict.verdict}: ${verdict.reason}`);
   } finally { rmdir(tmp); }
 });
+
+// ─── harness tool errors (feedback follow-up 2026-06-10) ─────────────────────
+
+test('harness tool error (<tool_use_error>) in final 20% → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '58-harness-tool-error';
+    // Pad with benign events so the error lands in the final 20%, then a
+    // successful result — mirrors the real 58-web-remote-correctness-batch run.
+    const events = [];
+    for (let k = 0; k < 8; k++) {
+      events.push({ type: 'assistant', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: `t${k}`, name: 'Read', input: { description: `read ${k}` } }] } });
+      events.push({ type: 'user', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: `t${k}`, content: 'ok', is_error: false }] } });
+    }
+    events.push({ type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'tool_use', id: 'tbad', name: 'bash', input: { description: 'run tests' } }] } });
+    events.push({ type: 'user', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tbad',
+        content: '<tool_use_error>Error: No such tool available: bash</tool_use_error>', is_error: true }] } });
+    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' });
+
+    writeLog(tmp, slug, events);
+    const prdPath = writePrd(tmp, slug, '# Correctness batch');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'clean', `harness tool error must not flag, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});
+
+test('isHarnessToolError detects wrapper and "No such tool available"', () => {
+  const { isHarnessToolError } = require('../runVerify.cjs');
+  assert.equal(isHarnessToolError('<tool_use_error>Error: No such tool available: bash</tool_use_error>'), true);
+  assert.equal(isHarnessToolError('No such tool available: Foo'), true);
+  assert.equal(isHarnessToolError('ModuleNotFoundError: No module named x'), false);
+  assert.equal(isHarnessToolError(''), false);
+});

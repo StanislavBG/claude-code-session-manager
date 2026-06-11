@@ -1629,6 +1629,66 @@ function selectHistoryJobs(jobs, limit) {
     .slice(0, cap);
 }
 
+// Transcript-scan verdicts that re-running verifyRun can re-evaluate. NOT
+// 'uncommitted_changes' — that comes from the git commit-guard, which verifyRun
+// does not inspect, so re-scanning it would always return 'clean' and wrongly
+// heal a genuinely-unfinished job.
+const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable']);
+
+/**
+ * Pure predicate: is this job eligible for the boot re-verify self-heal? Only
+ * needs_review jobs with a run log AND a transcript-scan verdict. Crucially
+ * EXCLUDES 'uncommitted_changes' (git commit-guard) — verifyRun can't see git,
+ * so re-scanning it would falsely heal an unfinished job. Exported for tests.
+ */
+function isRescanCandidate(job) {
+  return !!job
+    && job.status === 'needs_review'
+    && !!job.runId
+    && RESCANNABLE_VERDICTS.has(job.verifierVerdict);
+}
+
+/**
+ * Self-healing pass over needs_review jobs. The verifier runs in-process, so a
+ * fix to runVerify.cjs only takes effect for jobs verified AFTER an app
+ * restart — jobs flagged by the old (buggy) verifier stay stuck in needs_review
+ * forever. On boot we re-run the CURRENT verifier over every transcript-scan
+ * needs_review job and auto-complete the ones that now pass clean, so verifier
+ * improvements retroactively clear their own false positives (2026-06-10:
+ * anchored ImportError detectors + harness-tool-error exemption healed 8 jobs).
+ *
+ * @returns {Promise<{rescanned:number, healed:string[]}>}
+ */
+async function reverifyNeedsReview() {
+  const snap = await readQueue();
+  const candidates = snap.jobs.filter(isRescanCandidate);
+  const healed = [];
+  for (const job of candidates) {
+    const runDir = path.join(RUNS_DIR, job.runId);
+    const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+    let v = null;
+    try {
+      v = await verifyRun({ runDir, prdPath, queueEntry: job, allJobs: snap.jobs });
+    } catch { continue; } // unreadable log etc. — leave for human review
+    if (v && v.verdict === 'clean') healed.push(job.slug);
+  }
+  if (healed.length) {
+    const healSet = new Set(healed);
+    await mutate((s) => {
+      for (const j of s.jobs) {
+        if (j.status === 'needs_review' && healSet.has(j.slug)) {
+          j.status = 'completed';
+          j.error = null;
+          delete j.verifierVerdict;
+        }
+      }
+    });
+    console.log(`[scheduler] boot reverify: healed ${healed.length} stale needs_review → completed (${healed.join(', ')})`);
+    await broadcast();
+  }
+  return { rescanned: candidates.length, healed };
+}
+
 function registerScheduleHandlers() {
   ensureDirs();
   supervisor.registerHandlers();
@@ -1664,6 +1724,13 @@ function registerScheduleHandlers() {
       pauseReason: state.paused?.reason ?? null,
       runningJobs,
     };
+  });
+
+  ipcMain.handle('schedule:reverify-needs-review', async () => {
+    // Manual trigger for the boot self-heal pass — re-scan needs_review jobs
+    // with the current verifier and auto-complete the ones that now pass clean.
+    const result = await reverifyNeedsReview();
+    return { ok: true, ...result };
   });
 
   ipcMain.handle('schedule:force-tick', async () => {
@@ -1921,6 +1988,13 @@ async function init() {
     await setPaused(boot.paused.reason, boot.paused.resumeAt);
   }
 
+  // Self-heal stale needs_review flags using the current verifier (see
+  // reverifyNeedsReview). Runs once on boot so a shipped verifier fix clears
+  // its own historical false positives without manual retagging.
+  await reverifyNeedsReview().catch((e) => {
+    console.error(`[scheduler] boot reverify failed: ${e?.message ?? e}`);
+  });
+
   await rescheduleTimer();
   // Refresh next-reset every 10 minutes — billing window can shift if usage
   // resets early or the auth token rotates. Tracked so re-init doesn't leak.
@@ -2089,4 +2163,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, reverifyNeedsReview, isRescanCandidate };

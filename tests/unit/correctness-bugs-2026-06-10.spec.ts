@@ -39,9 +39,9 @@ async function tailLines(filePath: string, fromOffset: number | null) {
     const len = stat.size - start
     const buf = Buffer.alloc(len)
     await fd.read(buf, 0, len, start)
-    const parts = buf.toString('utf8').split('\n').filter(Boolean)
+    const parts = buf.toString('utf8').split('\n')
     if (dropFirst && parts.length) parts.shift()
-    return { lines: parts, size: stat.size }
+    return { lines: parts.filter(Boolean), size: stat.size }
   } finally {
     await fd.close()
   }
@@ -97,6 +97,26 @@ describe('Bug 1: tailLines off-by-one', () => {
     const res = await tailLines(tmpFile, 4)
     // The partial fragment ("al{\"broken\"}") is dropped; {"ok":true} survives
     expect(res.lines).toEqual(['{"ok":true}'])
+  })
+
+  it('does not drop first valid line when offset is one byte before a newline (empty fragment)', async () => {
+    // Scenario: previous read ended at the last content byte before '\n',
+    // so the new buffer starts with '\n'. The fragment is "" (empty).
+    // filter(Boolean) must happen AFTER shift() or the empty fragment vanishes
+    // and shift() incorrectly removes the first real line.
+    const line1 = '{"a":1}'   // 7 bytes, no trailing newline yet
+    await fsp.writeFile(tmpFile, line1)
+
+    // Poll 1: read up to byte 7 (past the last char, but file has no \n yet)
+    // Simulate that start = 6 (byte index of '1' — the last byte before \n).
+    // byte[5] = '}' != '\n' → dropFirst = true.
+    // Then the writer appends "\n{\"a\":2}\n"
+    await fsp.appendFile(tmpFile, '\n{"a":2}\n')
+
+    // start = 6: byte[5] = '}' → dropFirst = true; buffer = "\n{\"a\":2}\n"
+    const res = await tailLines(tmpFile, 6)
+    // Only the fragment (empty after split) is dropped; {"a":2} must survive.
+    expect(res.lines).toEqual(['{"a":2}'])
   })
 })
 

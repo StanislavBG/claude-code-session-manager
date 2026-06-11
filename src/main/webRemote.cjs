@@ -589,9 +589,13 @@ async function tailLines(filePath, fromOffset) {
     const len = stat.size - start;
     const buf = Buffer.alloc(len);
     await fd.read(buf, 0, len, start);
-    const parts = buf.toString('utf8').split('\n').filter(Boolean);
+    // Shift before filter: the fragment may be an empty string (when the
+    // buffer starts with '\n', completing the previous partial line). If we
+    // filter(Boolean) first, the empty fragment disappears and shift() would
+    // remove the first valid line instead.
+    const parts = buf.toString('utf8').split('\n');
     if (dropFirst && parts.length) parts.shift();
-    return { lines: parts, size: stat.size, inode: stat.ino };
+    return { lines: parts.filter(Boolean), size: stat.size, inode: stat.ino };
   } finally {
     await fd.close();
   }

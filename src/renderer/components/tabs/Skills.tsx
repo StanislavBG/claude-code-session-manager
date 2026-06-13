@@ -152,6 +152,30 @@ export function Skills() {
     if (files[item.path]) void loadText(item.path)
   }
 
+  // Uninstall a skill by deleting its directory. Trash-backed (recoverable) and
+  // reinstallable from the Library, so this is a "remove from Installed", not a
+  // destructive wipe. Disable (toggle) only stops auto-invocation; Remove takes
+  // the skill out of the active set entirely.
+  async function removeSkill(item: Item) {
+    if (!item.dir) return
+    if (!window.confirm(
+      `Remove skill "${item.name}"?\n\nIts folder moves to the trash (recoverable); reinstall any time from the Library.`
+    )) return
+    const r = await window.api.files.delete(item.dir)
+    if (!r.ok) {
+      toast.error(r.error ?? 'failed to remove skill')
+      return
+    }
+    toast.info(`Removed "${item.name}" — moved to trash`)
+    unwatchFile(item.path)
+    setItems((prev) => prev.filter((i) => i.path !== item.path))
+    setSelectedPath((cur) => {
+      if (cur !== item.path) return cur
+      const remaining = items.filter((i) => i.path !== item.path)
+      return remaining[0]?.path ?? null
+    })
+  }
+
   useEffect(() => {
     if (!selectedPath) return
     if (!files[selectedPath]) loadText(selectedPath)
@@ -292,6 +316,16 @@ export function Skills() {
                                 checked={!i.disabled}
                                 onChange={(v) => void toggleSkillDisabled(i, !v)}
                               />
+                            )}
+                            {i.kind === 'skills' && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); void removeSkill(i) }}
+                                title="Remove skill — moves the folder to trash; reinstall from the Library"
+                                aria-label={`Remove ${i.name}`}
+                                className="text-fg-faint hover:text-red-400 leading-none px-0.5"
+                              >
+                                ✕
+                              </button>
                             )}
                           </div>
                         </div>

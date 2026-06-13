@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest'
 import { createRequire } from 'node:module'
 import * as fs from 'node:fs'
 import * as fsp from 'node:fs/promises'
@@ -26,6 +26,15 @@ const requireCjs = createRequire(import.meta.url)
 describe('atomic write contract (config.cjs writeTextAtomic + scheduler.cjs atomicWriteJsonSync)', () => {
   let workdir: string
   let homeBackup: string | undefined
+
+  // Warm the transitive module tree (electron + chokidar, both heavy native
+  // deps) once, untimed. beforeEach only clears config.cjs's own cache entry,
+  // so the first timed test would otherwise pay the entire cold-load cost on
+  // top of its fs ops and flake past vitest's 5s default on a loaded runner.
+  beforeAll(() => {
+    requireCjs('../../src/main/config.cjs')
+    delete requireCjs.cache?.[requireCjs.resolve('../../src/main/config.cjs')]
+  })
 
   beforeEach(async () => {
     workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-atomic-write-'))

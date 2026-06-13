@@ -26,7 +26,6 @@ export type NavKey =
   | 'history'
   | 'keybindings'
   | 'usage'
-  | 'agent-view'
   | 'doc-editor'
   | 'scheduler'
   | 'knowledge-graph'

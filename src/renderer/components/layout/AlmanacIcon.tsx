@@ -8,7 +8,7 @@
  * with the rest of the set.
  */
 export type AlmanacIconName =
-  | 'home' | 'terminal' | 'agents' | 'agent-view' | 'skills' | 'history' | 'usage'
+  | 'home' | 'terminal' | 'agents' | 'skills' | 'history' | 'usage'
   | 'hive' | 'plugins' | 'mcp' | 'hooks' | 'keys' | 'plans' | 'tasks' | 'projects'
   | 'docs' | 'memory' | 'search' | 'chevron' | 'caret' | 'dot' | 'plus'
   | 'folder' | 'file' | 'play' | 'pause' | 'sparkle' | 'book' | 'compass'
@@ -42,7 +42,6 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'terminal':     return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 10l3 2-3 2" /><path d="M13 14h4" /></svg>
     case 'agents':
     case 'subagents':    return <svg {...props}><circle cx="7" cy="9" r="2.5" /><circle cx="17" cy="9" r="2.5" /><circle cx="12" cy="17" r="2.5" /><path d="M8.6 11l2.8 4M15.4 11l-2.8 4M9.5 9h5" /></svg>
-    case 'agent-view':   return <svg {...props}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /><path d="M3 12h2M19 12h2M12 3v2M12 19v2" /></svg>
     case 'skills':       return <svg {...props}><path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z" /></svg>
     case 'history':      return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /><path d="M4 6l2 2" /></svg>
     case 'usage':        return <svg {...props}><path d="M4 19V8M10 19V5M16 19v-7M22 19H2" /></svg>

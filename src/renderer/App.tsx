@@ -44,7 +44,6 @@ const SCREEN_KEYS = new Set<NavKey>([
   // Workspace
   'overview',
   'terminal',
-  'agent-view',
   'subagents',
   'scheduler',
   'prompts',
@@ -95,8 +94,9 @@ export function App() {
     }
   }, [])
 
-  // Jump to the Dispatch surface pre-set to a given mode (e.g. the Subagents
-  // monitor's "Launch a hive →" → Dispatch/Hives). Mirrors searchMode threading.
+  // Jump to the Dispatch surface pre-set to a given mode (e.g. Subagents'
+  // "Launch the Hive" → Dispatch/Orchestrate, where launchHive()'s
+  // pendingRoles are consumed). Mirrors searchMode threading.
   const goToDispatch = useCallback((mode: DispatchMode) => {
     setDispatchMode(mode)
     navigate('dispatch')
@@ -606,7 +606,7 @@ export function App() {
           onOpenScheduler={() => navigate('scheduler')}
           searchMode={searchMode}
           dispatchMode={dispatchMode}
-          onLaunchHive={() => goToDispatch('hives')}
+          onLaunchHive={() => goToDispatch('orchestrate')}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}

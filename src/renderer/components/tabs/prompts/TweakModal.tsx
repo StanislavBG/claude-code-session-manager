@@ -22,17 +22,10 @@ interface TweakModalProps {
 }
 
 export function TweakModal({ prompt, open, activeTabId, onClose }: TweakModalProps) {
+  // Parent remounts this modal per prompt (key={prompt.id}), so initial
+  // state is always in sync with the prompt being tweaked.
   const [draft, setDraft] = useState(prompt.body)
   const [sendMode, setSendMode] = useState<SendMode>(prompt.sendMode)
-
-  // Reset local state whenever the parent swaps the prompt.
-  // (using key on the modal caller is cleaner, but this works too)
-  const [lastId, setLastId] = useState(prompt.id)
-  if (prompt.id !== lastId) {
-    setLastId(prompt.id)
-    setDraft(prompt.body)
-    setSendMode(prompt.sendMode)
-  }
 
   function handleSend() {
     if (!activeTabId) return

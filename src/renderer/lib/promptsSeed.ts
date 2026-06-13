@@ -18,14 +18,7 @@ const raw = import.meta.glob('../../seed/prompts/**/*.md', {
   eager: true,
 }) as Record<string, string>
 
-function buildSeedPrompts(): ReadonlyArray<Prompt> {
-  const out: Prompt[] = []
-  for (const [, content] of Object.entries(raw)) {
-    const p = parsePromptMarkdown(content)
-    if (p) out.push(p)
-  }
-  return out
-}
-
-/** All 46 bundled seed prompts, parsed at module load time. */
-export const seedPrompts: ReadonlyArray<Prompt> = buildSeedPrompts()
+/** All bundled seed prompts, parsed at module load time. */
+export const seedPrompts: ReadonlyArray<Prompt> = Object.values(raw)
+  .map(parsePromptMarkdown)
+  .filter((p): p is Prompt => p !== null)

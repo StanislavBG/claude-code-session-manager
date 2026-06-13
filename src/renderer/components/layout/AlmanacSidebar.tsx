@@ -38,14 +38,13 @@ interface NavGroupItem {
   key: NavKey
   label: string
   icon: AlmanacIconName
-  liveKind?: 'subagents' | 'tasks' | 'agentView' | 'scheduler'
+  liveKind?: 'subagents' | 'tasks' | 'scheduler'
   hint?: string
 }
 
 const WORKSPACE: NavGroupItem[] = [
   { key: 'overview',   label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
   { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
-  { key: 'agent-view', label: 'Agent-View', icon: 'agent-view',   liveKind: 'agentView', hint: 'Workshop scene of the active session' },
   { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
   { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
@@ -144,7 +143,6 @@ function useLiveIndicators() {
   return {
     subagents: list.some((t) => t.agents.some((a) => now - a.at < 60_000)),
     tasks: list.some((t) => t.todos.some((todo) => todo.status === 'in_progress')),
-    agentView: list.some((t) => t.lastEventAt > 0 && now - t.lastEventAt < 5_000),
     scheduler: schedulerRunning,
   }
 }

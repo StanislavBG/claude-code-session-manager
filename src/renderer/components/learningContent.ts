@@ -475,24 +475,24 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   },
 
   'keybindings': {
-    headline: 'Customise the keyboard shortcuts the Claude Code CLI responds to',
+    headline: 'Rebind the Claude Code CLI like a game controls screen',
     intro:
-      'The CLI ships with sensible defaults (Ctrl+C interrupts, Esc cancels input, etc.) but you can override or add chord bindings via ~/.claude/keybindings.json. This tab is a JSON editor for that file with autocomplete from the schemastore schema. Bindings apply to every claude session — including the ones running inside Session Manager terminal tabs.',
+      'The CLI ships with sensible defaults, but every shortcut can be rebound via ~/.claude/keybindings.json. The Controls view works like a game settings menu: pick a context, click "+ bind" next to an action, press the keys. Presets (Claude defaults / Vim motion / Emacs flow) apply a whole layout in one click. The JSON view edits the same draft directly for chords and command: bindings.',
     sections: [
       {
-        title: 'File shape',
+        title: 'How it maps to the file',
         items: [
-          { term: '$schema', body: 'Optional but recommended — points at the schemastore JSON schema so Monaco can autocomplete and validate as you type.' },
-          { term: 'bindings', body: 'Array of { keys, command, when? } objects. Each entry maps a key combo to a command Claude knows about.' },
-          { term: 'keys', body: 'Standard accelerator syntax: "Ctrl+S", "Cmd+Shift+P", multi-step chords ("Ctrl+K Ctrl+S").' },
-          { term: 'command', body: 'Built-in command name (submit, cancel, history-up, toggle-plan-mode, etc.). Unknown commands are ignored at runtime.' },
-          { term: 'when (optional)', body: 'Context predicate: only fires when the predicate is true ("inputFocused", "planMode", etc.).' },
+          { term: 'Contexts', body: 'Bindings are scoped to where you are in the CLI — Global, Chat, Select pickers, Scroll mode, Confirmation dialogs, etc. Global applies everywhere.' },
+          { term: 'Keycaps', body: 'Each chip is one keystroke pattern ("ctrl+shift+k"). Removing a chip reverts that key to the Claude Code default.' },
+          { term: 'Disabled keys', body: 'Binding a key to null turns its default off — the "Disable a key" capture writes that for you.' },
+          { term: 'command: bindings', body: 'A key can fire a slash command as if typed ("command:commit"). Visible in Controls, edited in the JSON view.' },
+          { term: 'Reserved', body: 'ctrl+c, ctrl+d and ctrl+m cannot be rebound; the capture rejects them.' },
         ],
       },
     ],
     tips: [
-      'Defaults stay in effect for any binding you don\'t override — you don\'t need to redeclare them.',
-      'After saving, restart any open sessions so the CLI picks up the new bindings.',
+      'Presets replace the whole file — Save commits, Revert restores what was on disk.',
+      'Defaults stay in effect for any key you don\'t override; after saving, restart open sessions so the CLI picks up changes.',
     ],
   },
 
@@ -547,28 +547,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     tips: [
       'It only sees prompts logged AFTER you enabled the hook — open /hooks once to activate it for the current session.',
       'Roadmap: local MiniLM embeddings + SQLite vector search + community-summary themes are the v2 upgrade path.',
-    ],
-  },
-
-  'agent-view': {
-    headline: 'A single-glance live status of what the active session is doing',
-    intro:
-      'Agent-View is a minimal observability panel derived live from the active session\'s transcript. Status, current tool, counters, 5h usage, and a short list of recent activity — nothing else. Use it to glance at long runs without scrolling the terminal.',
-    sections: [
-      {
-        title: 'What you see',
-        items: [
-          { term: 'Status pill', body: 'working when transcript events are recent (<3s), idle when quiet for longer, offline when no claude process is attached.' },
-          { term: 'Now line', body: 'Latest tool call (name + target — file, command, URL hostname). Hidden after 30s of no activity.' },
-          { term: 'Counters', body: 'Todos as pending/in-progress/done, tool calls in the last 60s, subagent spawns, plan revisions.' },
-          { term: '5h usage bar', body: 'Same source as `claude /usage` and the 5h pill in the sidebar footer.' },
-          { term: 'Lists', body: 'Running scheduler jobs, active subagents (touched in last 5m), and the eight most recent tool calls.' },
-        ],
-      },
-    ],
-    tips: [
-      'Pin this to a second monitor during long sessions — gives you "is it stuck?" awareness without scrolling logs.',
-      'No interaction here, just observation. To act, switch back to Terminal.',
     ],
   },
 

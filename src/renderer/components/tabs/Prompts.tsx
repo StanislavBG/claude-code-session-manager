@@ -1,5 +1,5 @@
 /**
- * Prompts — Workspace tab for the 46 seed prompts.
+ * Prompts — Workspace tab for the bundled seed prompts.
  *
  * Layout: list+detail (mirrors Skills.tsx).
  *   Left sidebar  — prompts grouped by category, filter input at top.
@@ -13,7 +13,7 @@
  * via promptsStore.ts. Seed files under src/seed/prompts/ are never modified.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -23,9 +23,11 @@ import { loadEffective, saveOverride, resetToDefault } from '../../lib/promptsSt
 import type { Prompt, SendMode } from '../../lib/promptFrontmatter'
 import { TweakModal } from './prompts/TweakModal'
 import { useSessions } from '../../state/sessions'
+import { toast } from '../../state/toast'
 
-// Fixed display order for category groups.
-const CATEGORY_ORDER = [
+// Fixed display order for category groups. Categories found in the seed set
+// but missing here are appended after, so new seed categories never vanish.
+const CATEGORY_ORDER: string[] = [
   'Security',
   'QA',
   'Performance',
@@ -34,7 +36,12 @@ const CATEGORY_ORDER = [
   'Refactoring',
   'Documentation',
   'Git / PR',
-] as const
+]
+
+const ALL_CATEGORIES: string[] = [
+  ...CATEGORY_ORDER,
+  ...[...new Set(seedPrompts.map((p) => p.category))].filter((c) => !CATEGORY_ORDER.includes(c)),
+]
 
 // Category → colour chip classes (accent tints for visual differentiation).
 const CATEGORY_CHIP: Record<string, string> = {
@@ -65,13 +72,17 @@ export function Prompts() {
   const [effective, setEffective] = useState<Prompt | null>(null)
   const [loadingEffective, setLoadingEffective] = useState(false)
 
-  // Edit draft for "Edit root template" mode.
+  // Edit draft for "Edit root template" mode. Dirty is derived: the draft
+  // diverged from the effective body.
   const [editDraft, setEditDraft] = useState('')
-  const [editDirty, setEditDirty] = useState(false)
   const [editBusy, setEditBusy] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
   const activeTabId = useSessions((s) => s.activeTabId)
+
+  // Latest selection — lets in-flight async work detect a stale selection.
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
 
   // Load effective prompt whenever selection changes.
   useEffect(() => {
@@ -94,10 +105,11 @@ export function Prompts() {
   useEffect(() => {
     if (editMode && effective) {
       setEditDraft(effective.body)
-      setEditDirty(false)
       setEditError(null)
     }
   }, [editMode, effective])
+
+  const editDirty = editMode && effective !== null && editDraft !== effective.body
 
   // Is the effective body different from the seed? Show "Reset to default" if so.
   const seedBody = useMemo(
@@ -109,7 +121,7 @@ export function Prompts() {
   // Filtered + grouped prompts for the sidebar.
   const grouped = useMemo(() => {
     const needle = filter.toLowerCase()
-    return CATEGORY_ORDER.map((cat) => ({
+    return ALL_CATEGORIES.map((cat) => ({
       category: cat,
       items: seedPrompts.filter(
         (p) =>
@@ -125,52 +137,39 @@ export function Prompts() {
     if (id === selectedId) return
     setSelectedId(id)
     setEditMode(false)
-    setEditDirty(false)
     setEditError(null)
   }, [selectedId])
 
-  async function handleSave() {
+  // Shared shell for save/reset: run the mutation, reload the effective
+  // prompt so the detail panel reflects it, and leave edit mode.
+  async function mutate(action: (id: string) => Promise<void>, failLabel: string) {
     if (!selectedId) return
+    const id = selectedId
     setEditBusy(true)
     setEditError(null)
     try {
-      await saveOverride(selectedId, editDraft)
-      // Reload effective so the detail panel reflects the save.
-      const updated = await loadEffective(selectedId)
-      setEffective(updated)
-      setEditDirty(false)
+      await action(id)
+      const next = await loadEffective(id)
+      if (selectedIdRef.current !== id) return // selection changed mid-flight
+      setEffective(next)
       setEditMode(false)
     } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'save failed')
+      const msg = e instanceof Error ? e.message : failLabel
+      toast.error(msg)
+      if (selectedIdRef.current === id) setEditError(msg)
     } finally {
       setEditBusy(false)
     }
   }
 
-  async function handleReset() {
-    if (!selectedId) return
-    setEditBusy(true)
-    setEditError(null)
-    try {
-      await resetToDefault(selectedId)
-      const updated = await loadEffective(selectedId)
-      setEffective(updated)
-      setEditMode(false)
-      setEditDirty(false)
-    } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'reset failed')
-    } finally {
-      setEditBusy(false)
-    }
-  }
-
-  const seed = selectedId ? seedPrompts.find((p) => p.id === selectedId) ?? null : null
+  const handleSave = () => mutate((id) => saveOverride(id, editDraft), 'save failed')
+  const handleReset = () => mutate(resetToDefault, 'reset failed')
 
   return (
     <Panel
       toolbar={
         <span className="text-fg-faint">
-          {seedPrompts.length} prompts across {CATEGORY_ORDER.length} categories
+          {seedPrompts.length} prompts across {ALL_CATEGORIES.length} categories
         </span>
       }
       footer={
@@ -182,8 +181,7 @@ export function Prompts() {
             lastSavedAt={null}
             onSave={handleSave}
             onRevert={() => {
-              setEditDraft(effective?.body ?? seed?.body ?? '')
-              setEditDirty(false)
+              setEditDraft(effective?.body ?? '')
               setEditError(null)
             }}
           />
@@ -230,18 +228,17 @@ export function Prompts() {
           </div>
         }
         detail={
-          loadingEffective || !effective || !seed ? (
+          loadingEffective || !effective ? (
             <EmptyState title={loadingEffective ? 'loading…' : 'select a prompt'} />
           ) : editMode ? (
             <EditPane
               draft={editDraft}
-              onChange={(v) => { setEditDraft(v); setEditDirty(true) }}
-              onCancel={() => { setEditMode(false); setEditDirty(false) }}
+              onChange={setEditDraft}
+              onCancel={() => setEditMode(false)}
             />
           ) : (
             <DetailPane
               effective={effective}
-              seed={seed}
               isCustomized={isCustomized}
               activeTabId={activeTabId}
               onUsePrompt={() => setTweakOpen(true)}
@@ -269,7 +266,6 @@ export function Prompts() {
 
 interface DetailPaneProps {
   effective: Prompt
-  seed: Prompt
   isCustomized: boolean
   activeTabId: string | null
   onUsePrompt: () => void

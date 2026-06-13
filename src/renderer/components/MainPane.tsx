@@ -9,7 +9,6 @@ import { Skills } from './tabs/Skills'
 import { Subagents } from './tabs/Subagents'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
-import { AgentView } from './tabs/AgentView'
 import { EditorView } from './tabs/EditorView'
 import { DispatchModal, type DispatchMode } from './modals/DispatchModal'
 import { KnowledgeGraph } from './tabs/KnowledgeGraph'
@@ -45,7 +44,7 @@ import { LiveTranscript } from './LiveTranscript'
  * treatment so the PTY-backed xterm doesn't churn on every nav switch.
  *
  * Promoted screens are wrapped in <SectionFrame> by default. A screen can
- * opt out (e.g. Terminal, AgentView, Home) when it draws its own chrome.
+ * opt out (e.g. Terminal, Home) when it draws its own chrome.
  */
 
 interface MainPaneProps {
@@ -120,8 +119,6 @@ function renderScreen(active: NavKey, ctx: {
           onOpenScheduler={ctx.onOpenScheduler}
         />
       )
-    case 'agent-view':
-      return <AgentView />
     case 'editor':
       return <EditorView />
   }

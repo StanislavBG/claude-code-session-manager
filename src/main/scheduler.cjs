@@ -1257,7 +1257,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     //     (e.g. an interactive session editing the same repo), not the job's
     //     unsaved work — so skip rather than false-flag a completed job.
     // Non-git cwds resolve to null and are skipped (the guard is best-effort).
-    if (res.exitCode === 0 && !res.rateLimited && (!verifyResult || verifyResult.verdict === 'clean')) {
+    //
+    // Runs even when a transcript-pattern verdict already fired: the commit-guard
+    // is a MATERIALLY-CHECKABLE signal (real git state) and outranks pattern hits.
+    // Skipped only when the job is about to re-fire (HALT / deps_unmet → pending),
+    // where working-tree state is irrelevant. When both fire, the uncommitted
+    // verdict owns the needs_review reason and the pattern hit is demoted to an
+    // annotation, so a real "finish protocol incomplete" is distinguishable from
+    // transcript noise in the queue (feedback 2026-06-10 addendum).
+    const guardWillRefire = verifyResult && verifyResult.downgradeTo === 'pending';
+    if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire) {
       const after = await uncommittedChanges(guardCwd);
       if (after && after.length > 0) {
         const baseSet = new Set(guardBaseline || []);
@@ -1270,10 +1279,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         const jobSelfCommitted = guardHeadBefore && guardHeadAfter && guardHeadAfter !== guardHeadBefore;
         if (newlyDirty.length > 0 && !siblingRunning && !jobSelfCommitted) {
           const sample = newlyDirty.slice(0, 3).join(', ');
+          // Carry any prior transcript verdict + its annotations forward as notes.
+          const carried = [...(verifyResult?.annotations ?? [])];
+          if (verifyResult && verifyResult.verdict !== 'clean') {
+            carried.push({ verdict: verifyResult.verdict, reason: verifyResult.reason });
+          }
           verifyResult = {
             verdict: 'uncommitted_changes',
             reason: `finish protocol incomplete: ${newlyDirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
             downgradeTo: 'needs_review',
+            annotations: carried.length ? carried : undefined,
           };
           console.log(`[scheduler] commit-guard: ${job.slug} left ${newlyDirty.length} files uncommitted → needs_review`);
         }
@@ -1315,6 +1330,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             s.jobs[i2].verifierVerdict = verifyResult.verdict;
           } else {
             delete s.jobs[i2].verifierVerdict;
+          }
+          // Non-blocking notes (e.g. a recovered missing-dependency probe, or a
+          // pattern hit demoted because a materially-checkable verdict outranked
+          // it) — surfaced even on completed jobs so the signal isn't lost.
+          if (verifyResult?.annotations && verifyResult.annotations.length) {
+            s.jobs[i2].verifierAnnotations = verifyResult.annotations.map(
+              (a) => `${a.verdict}: ${a.reason}`,
+            );
+          } else {
+            delete s.jobs[i2].verifierAnnotations;
           }
           delete s.jobs[i2].runtime;
 

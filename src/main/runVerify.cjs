@@ -74,11 +74,25 @@ function detectPattern(content) {
   // (2) Python Traceback + exception line within next 10 lines. Both anchored
   // to line starts: reviewer prose quoting "will crash with ImportError" or
   // embedding "...Error:" mid-sentence must not match (feedback 2026-06-10-01).
+  //
+  // The TERMINATING exception decides the class: a Traceback ending in
+  // ModuleNotFoundError/ImportError is the missing-dependency class ("the
+  // verification couldn't run", same as detector 3), NOT a logic failure — so
+  // it routes through the weaker verify_unavailable path (env-recovery escape
+  // hatch + success demotion). A Traceback ending in any other exception
+  // (KeyError, AssertionError, …) stays transcript_errors — that is the real
+  // false-PASS class the verifier exists to catch (2026-05-23 incident).
+  // (feedback 2026-06-10 addendum: interpreter-search setup probes that ended
+  // in ModuleNotFoundError were 3/3 false positives.)
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (/^\s*Traceback \(most recent call last\):/.test(lines[i])) {
       for (let j = i + 1; j < Math.min(i + 11, lines.length); j++) {
-        if (/^\s*[A-Za-z_][\w.]*(?:Error|Exception)\s*:/.test(lines[j])) {
+        const m = lines[j].match(/^\s*([A-Za-z_][\w.]*(?:Error|Exception))\s*:/);
+        if (m) {
+          if (m[1] === 'ModuleNotFoundError' || m[1] === 'ImportError') {
+            return { verdict: 'verify_unavailable', pattern: `Traceback → ${m[1]}` };
+          }
           return { verdict: 'transcript_errors', pattern: 'Traceback + Error within 10 lines' };
         }
       }
@@ -430,7 +444,7 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
       ...(extras ?? {}),
     };
     try { fs.writeFileSync(verdictsPath, JSON.stringify(record, null, 2)); } catch { /* best-effort */ }
-    return { verdict, reason, downgradeTo };
+    return { verdict, reason, downgradeTo, ...(extras ?? {}) };
   }
 
   try {
@@ -480,6 +494,10 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
     const total = events.length;
     const last20pctStart = Math.floor(total * 0.8);
     const issues = [];
+    // Non-blocking notes: signals worth recording but not strong enough to
+    // downgrade (e.g. a missing-dependency probe in a run that still succeeded).
+    const annotations = [];
+    const runSucceeded = !!resultEvent && resultEvent.subtype === 'success';
 
     for (let i = 0; i < events.length; i++) {
       const ev = events[i];
@@ -524,11 +542,19 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
         // ModuleNotFoundError/ImportError: first check for pip/uv install in
         // the next ≤5 tool_use calls (the agent may have self-healed).
         if (!hasInstallRecovery(events, ev.seq) && !isSelfRecovered(events, ev.seq, desc)) {
-          issues.push({
-            verdict: 'verify_unavailable',
-            reason: `${hit.pattern} at event ${i}, no install recovery found`,
-            priority: 1,
-          });
+          const note = `${hit.pattern} at event ${i}, no install recovery found`;
+          if (runSucceeded) {
+            // "Verification couldn't run" is the weakest signal. When the run
+            // still reached a genuine result:success, the agent resolved its
+            // environment (often an interpreter/venv search the recovery
+            // heuristics above don't model) and finished — record it as an
+            // annotation, do NOT downgrade. transcript_errors (real logic/test
+            // failures) are never demoted this way, so the false-PASS guard is
+            // intact. (feedback 2026-06-10 addendum.)
+            annotations.push({ verdict: 'verify_unavailable', reason: note });
+          } else {
+            issues.push({ verdict: 'verify_unavailable', reason: note, priority: 1 });
+          }
         }
       } else {
         // transcript_errors (FAIL/FATAL/Traceback): self-recovery escape hatch.
@@ -542,14 +568,19 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
       }
     }
 
+    const extras = annotations.length ? { annotations } : undefined;
+
     if (issues.length === 0) {
-      return conclude('clean', 'no issues detected', null);
+      const reason = annotations.length
+        ? `no blocking issues (${annotations.length} annotation(s): ${annotations.map((a) => a.reason).join('; ')})`
+        : 'no issues detected';
+      return conclude('clean', reason, null, extras);
     }
 
     // Pick highest-priority issue (transcript_errors > verify_unavailable).
     issues.sort((a, b) => b.priority - a.priority);
     const top = issues[0];
-    return conclude(top.verdict, top.reason, 'needs_review');
+    return conclude(top.verdict, top.reason, 'needs_review', extras);
 
   } catch (e) {
     return conclude(

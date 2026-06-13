@@ -389,8 +389,8 @@ test('FAIL recovered within 30 events → clean', async () => {
 
 // ─── fixtures: feedback 2026-06-10-01 — quoted-error false positives ─────────
 
-/** Build a one-Bash-call log: tool_use → tool_result(content) → success result. */
-function bashRunEvents(content, { toolName = 'Bash' } = {}) {
+/** Build a one-Bash-call log: tool_use → tool_result(content) → result event. */
+function bashRunEvents(content, { toolName = 'Bash', resultSubtype = 'success' } = {}) {
   return [
     {
       type: 'assistant',
@@ -416,7 +416,7 @@ function bashRunEvents(content, { toolName = 'Bash' } = {}) {
         }],
       },
     },
-    { type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' },
+    { type: 'result', subtype: resultSubtype, result: 'All acceptance criteria verified.' },
   ];
 }
 
@@ -435,7 +435,7 @@ test('feedback 01: reviewer prose mentioning ImportError mid-sentence → clean'
   } finally { rmdir(tmp); }
 });
 
-test('feedback 01: real line-anchored ModuleNotFoundError, no recovery → verify_unavailable', async () => {
+test('feedback 01: real line-anchored ModuleNotFoundError in a FAILED run → verify_unavailable/needs_review', async () => {
   const tmp = makeTmpDir();
   try {
     const slug = '25-real-import-error';
@@ -446,11 +446,71 @@ test('feedback 01: real line-anchored ModuleNotFoundError, no recovery → verif
       '    from playwright.sync_api import sync_playwright',
       "ModuleNotFoundError: No module named 'playwright'",
     ].join('\n');
-    writeLog(tmp, slug, bashRunEvents(out));
+    // Run did NOT succeed: the missing dependency was never resolved, so the
+    // "couldn't verify" signal must still escalate to a human.
+    writeLog(tmp, slug, bashRunEvents(out, { resultSubtype: 'error_during_execution' }));
     const prdPath = writePrd(tmp, slug, '# Real failure');
     const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
-    // Traceback detector outranks (priority 2 > 1) but either way it must NOT be clean.
-    assert.notEqual(verdict.verdict, 'clean', 'real interpreter error must still flag');
+    assert.equal(verdict.verdict, 'verify_unavailable', `unresolved missing-dep must flag, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally { rmdir(tmp); }
+});
+
+// ─── feedback 2026-06-10 addendum — recovered env-probe false positives ──────
+//
+// Setup probes (interpreter/venv search) that surface ModuleNotFoundError but
+// the run still reaches result:success are the missing-dependency class, not a
+// real failure. They must NOT downgrade — only annotate. But a Traceback ending
+// in a real logic exception (KeyError/AssertionError) still hard-flags, even on
+// "success", preserving the 2026-05-23 false-PASS guard.
+
+test('addendum: Traceback→ModuleNotFoundError in a SUCCEEDED run → clean (annotated, not downgraded)', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '26-self-billbot-shared-lib';
+    const probe = [
+      'Exit code 1',
+      'Traceback (most recent call last):',
+      '  File "/home/bilko/Self/.claude/skills/snopud-bill/download_bill.py", line 42, in <module>',
+      '    from playwright.sync_api import TimeoutError as PWTimeout',
+      "ModuleNotFoundError: No module named 'playwright'",
+    ].join('\n');
+    writeLog(tmp, slug, bashRunEvents(probe)); // resultSubtype defaults to success
+    const prdPath = writePrd(tmp, slug, '# Shared lib');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'clean', `recovered env probe must not downgrade, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+    assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length === 1, 'should record one annotation');
+    assert.equal(verdict.annotations[0].verdict, 'verify_unavailable');
+  } finally { rmdir(tmp); }
+});
+
+test('addendum: bare Import/ModuleNotFound probe (no traceback) in SUCCEEDED run → clean/annotated', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '26-self-parser-tests';
+    writeLog(tmp, slug, bashRunEvents("ModuleNotFoundError: No module named 'conftest'"));
+    const prdPath = writePrd(tmp, slug, '# Parser tests');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'clean', `got ${verdict.verdict}: ${verdict.reason}`);
+    assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length === 1);
+  } finally { rmdir(tmp); }
+});
+
+test('addendum: Traceback→KeyError (real logic failure) on "success" → still transcript_errors/needs_review', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '26-real-logic-failure';
+    const out = [
+      '=== contract.json panels.sentiment ===',
+      'Traceback (most recent call last):',
+      '  File "<string>", line 1, in <module>',
+      "KeyError: 'panels.sentiment'",
+    ].join('\n');
+    writeLog(tmp, slug, bashRunEvents(out)); // success result — must NOT rescue a real failure
+    const prdPath = writePrd(tmp, slug, '# Logic failure');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    assert.equal(verdict.verdict, 'transcript_errors', `real logic Traceback must still flag, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, 'needs_review');
   } finally { rmdir(tmp); }
 });

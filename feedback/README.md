@@ -70,12 +70,16 @@ take a different route if the codebase conventions say so.
 | Item | Status | Outcome |
 |---|---|---|
 | 2026-06-10-01-verdict-scanner-false-positive-importerror | ✅ | Asks 1/2/4 shipped (anchored detectors + Task-result exemption, 4 regression tests); ask 3 (success-veto) declined — would neuter true-positive detection. Two Self jobs retagged completed. |
+| 2026-06-10-02-verdict-recovered-env-probes-and-precedence | ✅ | Shipped: `Traceback→ModuleNotFoundError` reclassified as `verify_unavailable`; that class success-gated (recovered env probes annotate, don't downgrade) while real `transcript_errors` still hard-flag; commit-guard now always runs + materially-checkable verdict outranks pattern hits (carried as annotations). 4 tests, live re-scan of all 3 cited logs → clean. Stuck jobs auto-heal on boot reverify. AC-exit-code half deferred (no PRD-AC spec). |
 
 ## Lessons for submitters (kept current)
 
 - **The gold standard so far**: `2026-06-10-01` — exact file:line of the offending code, two on-disk run logs as reproducible fixtures, a proposed acceptance test ("re-run scanner on these logs → clean; synthetic real error → still flags"). It was processed in one pass with zero diagnosis round-trips. Imitate it.
 - **Propose asks separably.** Item 01 bundled 4 asks; 3 shipped, 1 was declined. That worked because each ask was independently actionable — keep doing that rather than one monolithic "redesign X".
 - **Use the frontmatter.** Item 01 used an ad-hoc header instead of the YAML frontmatter above; it was rich enough to process anyway, but machine-readable `type`/`severity` is what future triage sorts by.
+- **A follow-on is a NEW file, not a re-used name.** Item `-02` was filed by overwriting item 01's exact filename with an "## Addendum". That collided with the already-processed copy and nearly got lost. New observations after an item is closed → a fresh `<date>-NN-<slug>.md`; reference the prior item in the body instead.
+- **What made `-02` close in one pass**: it named the real run-log dirs (still on disk under `~/.claude/session-manager/scheduled-plans/runs/`) AND the masked-vs-noise distinction (commit-guard = material, traceback = pattern). Re-scanning the cited logs live was the whole proof. When a verdict/verifier bug is reported, cite the exact `runs/<ISO>/<slug>.log` so the implementer can re-scan before/after — that is this queue's gold-standard reproducer.
+- **Distinguish "verification failed" from "verification couldn't run".** A `ModuleNotFoundError`/`ImportError` (even inside a Traceback) is the latter — an environment probe, not a logic failure. Don't file those as `severity: high` failures; they downgrade only when the run *also* failed to reach success.
 
 ## Conventions the implementer will hold your suggestion to
 

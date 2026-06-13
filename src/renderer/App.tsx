@@ -5,7 +5,6 @@ import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { MainPane } from './components/MainPane'
 import { type SearchMode } from './components/modals/SearchModal'
-import { type DispatchMode } from './components/modals/DispatchModal'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
@@ -66,7 +65,6 @@ const SCREEN_KEYS = new Set<NavKey>([
   'remote',
   // Tools (promoted from modal in v0.13.1)
   'voice',
-  'dispatch',
   'repoviz',
   'search',
   // In-app file editor (Files sidebar / terminal links route here).
@@ -82,7 +80,6 @@ export function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('overview')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [searchMode, setSearchMode] = useState<SearchMode>('files')
-  const [dispatchMode, setDispatchMode] = useState<DispatchMode>('boss')
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
 
@@ -93,14 +90,6 @@ export function App() {
       setActiveNav(k)
     }
   }, [])
-
-  // Jump to the Dispatch surface pre-set to a given mode (e.g. Subagents'
-  // "Launch the Hive" → Dispatch/Orchestrate, where launchHive()'s
-  // pendingRoles are consumed). Mirrors searchMode threading.
-  const goToDispatch = useCallback((mode: DispatchMode) => {
-    setDispatchMode(mode)
-    navigate('dispatch')
-  }, [navigate])
 
   // Open a file in the main-space Editor scene and route there. Used by the
   // Files sidebar; terminal file-links reach the same place via the
@@ -123,8 +112,8 @@ export function App() {
   // ONLY on a pure switch between already-open tabs: the active tab changed, the
   // tab SET did not (no open/close), the newly-active tab already existed, and
   // the previously-active tab still exists. Opening/closing a tab also reassigns
-  // activeTabId, but their initiators set the nav themselves (e.g. "Launch a
-  // hive →" routes to Dispatch), so those must not be hijacked to terminal.
+  // activeTabId, but their initiators set the nav themselves, so those must
+  // not be hijacked to terminal.
   // Tracking the id SET — refreshed on every tab change, not a count sampled
   // only when activeTabId moves — keeps the discriminator correct even when a
   // background tab open/close doesn't move the active tab.
@@ -605,8 +594,6 @@ export function App() {
           onOpenVoice={() => navigate('voice')}
           onOpenScheduler={() => navigate('scheduler')}
           searchMode={searchMode}
-          dispatchMode={dispatchMode}
-          onLaunchHive={() => goToDispatch('orchestrate')}
           broadcastOpen={broadcastOpen}
           watchersOpen={watchersOpen}
           onCloseBroadcast={() => setBroadcastOpen(false)}

@@ -29,7 +29,7 @@ import { VoiceButton } from '../VoiceButton'
 // group below Configure so users see them as workflow surfaces (not
 // configuration). Same NavKey type as Workspace/Configure rows.
 type ToolKey = Extract<NavKey,
-  | 'voice' | 'dispatch' | 'repoviz' | 'search'
+  | 'voice' | 'repoviz' | 'search'
 >
 void useBilling; void useMemo // (kept for future signal additions)
 
@@ -45,7 +45,7 @@ interface NavGroupItem {
 const WORKSPACE: NavGroupItem[] = [
   { key: 'overview',   label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
   { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
-  { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Sub-agents working in parallel' },
+  { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Fan out work: Hive · Orchestrate · Race · Boss' },
   { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
   { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
@@ -78,7 +78,6 @@ interface ToolItem {
 
 const TOOLS: ToolItem[] = [
   { key: 'voice',             label: 'Voice',             icon: 'mic',           hint: 'Whisper transcription + push-to-talk' },
-  { key: 'dispatch',          label: 'Dispatch',          icon: 'orchestrator',  hint: 'Boss · Orchestrate · Race · Hives' },
   { key: 'repoviz',           label: 'Repo Viz',          icon: 'repoviz',       hint: 'Language + directory map' },
   { key: 'search',            label: 'Search',            icon: 'global-search', hint: '⌘P file · ⌘⇧F content' },
 ]

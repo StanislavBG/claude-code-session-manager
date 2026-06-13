@@ -328,10 +328,11 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'A subagent is a separate Claude instance with its own system prompt, model, and tool restrictions. When the main Claude needs to delegate something focused — code review, security audit, large search — it spawns a subagent, which works in isolation and returns a single summary. Subagents protect the main context window from drowning in intermediate output and let you specialise prompts per task type.',
     sections: [
       {
-        title: 'Three views',
+        title: 'Four views',
         items: [
+          { term: 'Launch', body: 'The single place to fan work out. Type one brief, then pick a topology: Hive (a preset bundle of subagents in parallel), Orchestrate (a different sub-task per tab), Race (the same brief to N tabs, pick a winner), or Boss (one boss + N specialists on the active tab). The brief is shared — switching topology keeps what you typed.' },
+          { term: 'Live', body: 'Active cross-tab runs (Orchestrate / Race) plus the per-tab Task-tool subagents that have spawned in the last 60 seconds. Shows status and the prompt each was given.' },
           { term: 'Configured', body: 'Edit the subagents you have defined. Each one is a markdown file in ~/.claude/agents/ (User) or .claude/agents/ (Project), same as skills.' },
-          { term: 'Live', body: 'Subagents that have spawned in any of your active terminal tabs in the last 60 seconds. Shows status and the prompt they were given.' },
           { term: 'Library', body: 'Browse community subagent definitions and install them.' },
         ],
       },
@@ -600,7 +601,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   // already provides the editorial header so LearningPanel only needs to add
   // the "how to use" facts that aren't obvious from the UI itself.
   'voice':            { headline: 'Voice & microphone',  intro: 'Whisper transcription + push-to-talk hotkey. The model loads on first use; the wizard runs once per schema bump to confirm your mic works.', sections: [], tips: ['Default hotkey is F1. Tap on/off, or hold-to-talk — both modes configurable.'] },
-  'dispatch':         { headline: 'Dispatch',            intro: 'One surface for broadcasting work to multiple agents, by topology. Boss dispatches a specialist subagent on the active tab. Orchestrate assigns a different sub-task to each of N tabs in parallel. Race sends the same prompt to N tabs and grades them against a rubric. Hives are pre-baked swarm templates whose Launch button seeds Orchestrate with a coordinated brief.', sections: [], tips: ['Race and Orchestrate need at least two running tabs; auto-spawn isn\'t wired yet.', 'Runs keep going when you switch modes or navigate away — the status bar tracks them.'] },
   'repoviz':          { headline: 'Repo visualization',  intro: 'Language + directory breakdown of the active project. Computed locally; no telemetry leaves your machine.', sections: [], tips: [] },
   'search':           { headline: 'Search',              intro: 'One surface, two modes. Files (⌘P) fuzzy-finds any file in the current cwd — recently-opened surface first. Content (⌘⇧F) ripgreps across every file under the active cwd, with fs-walk fallback if rg isn\'t installed. The chosen path is inserted into the active terminal.', sections: [], tips: ['Toggle Files / Content at the top, or jump straight in with ⌘P / ⌘⇧F.', 'In Content mode, use the case toggle for case-sensitive matches.'] },
   'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the Files sidebar or a file link in the terminal. Edit text with Monaco (Cmd-S saves), read Markdown rendered, and run HTML as a sandboxed visualization layer. URLs still open in your browser.', sections: [], tips: ['Toggle Edit/Preview for .md and .html files.', 'HTML previews are sandboxed — page scripts run in an isolated origin.'] },

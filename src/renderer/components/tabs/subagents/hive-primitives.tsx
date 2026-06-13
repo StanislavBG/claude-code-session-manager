@@ -2,8 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { Hive } from '../../../../preload/api'
 import { useHives } from '../../../state/hives'
 import { useOrchestrator } from '../../../state/orchestrator'
+import { useDispatch } from '../../../state/dispatch'
 import { useActiveTab } from '../../../lib/useActiveTab'
 import { toast } from '../../../state/toast'
+import { HiveManagerModal } from '../../modals/HiveManagerModal'
 
 // Named-tool chip used in agent editor and library cards.
 export function ToolChip({
@@ -162,17 +164,20 @@ function ScopeChip({ children }: { children: ReactNode }) {
   )
 }
 
-// Numbered step header used in the Launch view.
-function StepHeader({ n, title, hint }: { n: string; title: string; hint: string }) {
+// Step header used in the Launch view. `n` is optional — when omitted the
+// numbered badge is dropped (used now that the shared brief lives outside).
+export function StepHeader({ n, title, hint }: { n?: string; title: string; hint: string }) {
   return (
     <div className="mb-3">
       <div className="flex items-center gap-2.5">
-        <span className="w-[22px] h-[22px] rounded-[7px] bg-accent text-white grid place-items-center font-mono text-xs font-bold shrink-0">
-          {n}
-        </span>
+        {n && (
+          <span className="w-[22px] h-[22px] rounded-[7px] bg-accent text-white grid place-items-center font-mono text-xs font-bold shrink-0">
+            {n}
+          </span>
+        )}
         <span className="font-serif text-[22px] font-semibold text-fg leading-tight">{title}</span>
       </div>
-      <p className="mt-1.5 mb-0 ml-8 text-xs text-fg-dim leading-[1.45] max-w-[560px]">{hint}</p>
+      <p className={`mt-1.5 mb-0 text-xs text-fg-dim leading-[1.45] max-w-[560px] ${n ? 'ml-8' : ''}`}>{hint}</p>
     </div>
   )
 }
@@ -278,19 +283,18 @@ function RecipeCard({
 
 // The full Launch sub-view: recipe picker + target textarea + "What will happen" panel.
 export function LaunchView({
-  onLaunchHive,
   onSwitchToLive,
 }: {
-  onLaunchHive?: () => void
   onSwitchToLive: () => void
 }) {
   const list = useHives((s) => s.list)
   const loadHives = useHives((s) => s.load)
   const launchHive = useOrchestrator((s) => s.launchHive)
+  const brief = useDispatch((s) => s.brief)
   const activeTab = useActiveTab()
 
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
-  const [target, setTarget] = useState('')
+  const [managerOpen, setManagerOpen] = useState(false)
 
   // Load hives if the list is empty (mirrors HiveManagerModal behaviour).
   useEffect(() => {
@@ -320,82 +324,62 @@ export function LaunchView({
       toast.warn('This hive has no roles to launch.')
       return
     }
-    // Pass the user's target brief as the plan so every role receives it
-    // via the orchestrator's plan box (the only brief field in the API).
+    // Pass the shared brief as the plan so every role receives it via the
+    // orchestrator's plan box (the only brief field in the API).
     launchHive({
       name: selectedHive.name,
-      defaultPlan: target.trim() || selectedHive.defaultPlan,
+      defaultPlan: brief.trim() || selectedHive.defaultPlan,
       roles: selectedHive.roles.map((r) => ({ label: r.label, prompt: r.prompt })),
     })
-    // When onLaunchHive navigates away from Subagents, calling onSwitchToLive
-    // would set state on an unmounted component (no-op in React 18 but wasteful).
-    // Only switch the sub-tab when there is no navigation callback.
-    if (onLaunchHive) {
-      onLaunchHive()
-    } else {
-      onSwitchToLive()
-    }
+    onSwitchToLive()
   }
 
   const allReadOnly =
     !!selectedHive && selectedHive.roles.length > 0 && selectedHive.roles.every((r) => roleIsReadOnly(r.prompt))
 
   return (
-    <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-6 p-6 xl:p-9 items-start">
-      {/* ── LEFT: build the hive ── */}
+    <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
+      <HiveManagerModal open={managerOpen} onClose={() => setManagerOpen(false)} variant="overlay" />
+      {/* ── LEFT: pick a recipe ── */}
       <div>
-        {/* Step 1: pick a recipe */}
-        <div className="mb-7">
+        <div className="flex items-start justify-between gap-3">
           <StepHeader
-            n="1"
             title="Pick a recipe"
-            hint="A preset bundle of subagents. Fire it at a target and each one works in parallel, in isolation."
+            hint="A preset bundle of subagents. Each works in parallel, in isolation, on the brief above."
           />
-          <div className="flex flex-col gap-2.5">
-            {list.length === 0 && (
-              <div className="text-sm text-fg-faint italic py-4 text-center">Loading hives…</div>
-            )}
-            {list.map((hive, i) => (
-              <RecipeCard
-                key={hive.slug}
-                hive={hive}
-                paletteIndex={i}
-                active={hive.slug === selectedSlug}
-                onClick={() => setSelectedSlug(hive.slug)}
-              />
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setManagerOpen(true)}
+            className="shrink-0 text-xs text-fg-dim hover:text-fg px-2.5 py-1 rounded-lg border border-line hover:bg-hi transition-colors"
+          >
+            Manage recipes
+          </button>
         </div>
-
-        {/* Step 2: aim it */}
-        <div>
-          <StepHeader
-            n="2"
-            title="Aim it at a target"
-            hint="What should the hive look at? Be specific — each agent gets this as its brief."
-          />
-          <div className="bg-hi border border-line rounded-xl p-1 mb-3">
-            <textarea
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              spellCheck={false}
-              placeholder="Describe what the hive should focus on…"
-              rows={3}
-              className="w-full resize-y border-0 outline-none bg-transparent px-3.5 py-3 text-fg text-sm leading-relaxed placeholder:text-fg-faint"
+        <div className="flex flex-col gap-2.5">
+          {list.length === 0 && (
+            <div className="text-sm text-fg-faint italic py-4 text-center">Loading hives…</div>
+          )}
+          {list.map((hive, i) => (
+            <RecipeCard
+              key={hive.slug}
+              hive={hive}
+              paletteIndex={i}
+              active={hive.slug === selectedSlug}
+              onClick={() => setSelectedSlug(hive.slug)}
             />
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-fg-faint">Scope</span>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap mt-4">
+          <span className="text-xs text-fg-faint">Scope</span>
+          <ScopeChip>
+            <span className="text-fg-faint" aria-hidden>⬡</span>
+            {projectLabel}
+          </ScopeChip>
+          {activeTab?.cwd && (
             <ScopeChip>
-              <span className="text-fg-faint" aria-hidden>⬡</span>
-              {projectLabel}
+              <span className="font-mono text-[10px]">{activeTab.cwd.replace(/^\/home\/[^/]+/, '~')}</span>
             </ScopeChip>
-            {activeTab?.cwd && (
-              <ScopeChip>
-                <span className="font-mono text-[10px]">{activeTab.cwd.replace(/^\/home\/[^/]+/, '~')}</span>
-              </ScopeChip>
-            )}
-          </div>
+          )}
         </div>
       </div>
 

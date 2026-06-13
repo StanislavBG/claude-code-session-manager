@@ -10,7 +10,6 @@ import { Subagents } from './tabs/Subagents'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { EditorView } from './tabs/EditorView'
-import { DispatchModal, type DispatchMode } from './modals/DispatchModal'
 import { KnowledgeGraph } from './tabs/KnowledgeGraph'
 import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
 import { SearchModal, type SearchMode } from './modals/SearchModal'
@@ -54,8 +53,6 @@ interface MainPaneProps {
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
   searchMode?: SearchMode
-  dispatchMode?: DispatchMode
-  onLaunchHive?: () => void
   broadcastOpen: boolean
   watchersOpen: boolean
   onCloseBroadcast: () => void
@@ -92,7 +89,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'remote':        { eyebrow: 'Configure',  title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { eyebrow: 'Tools', title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
-  'dispatch':         { eyebrow: 'Tools', title: 'Dispatch',            intro: 'Broadcast work to multiple agents: Boss (specialists on the active tab), Orchestrate (a sub-task per tab), Race (same prompt, pick a winner), or launch a pre-baked Hive template.' },
   'repoviz':          { eyebrow: 'Tools', title: 'Repo visualization',  intro: 'Language + directory map of the current project, computed locally.' },
   'search':           { eyebrow: 'Tools', title: 'Search',              intro: 'Find by filename (⌘P) or by content (⌘⇧F) across the active cwd. The chosen path is inserted into the active terminal.' },
 }
@@ -105,8 +101,6 @@ function renderScreen(active: NavKey, ctx: {
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
   searchMode?: SearchMode
-  dispatchMode?: DispatchMode
-  onLaunchHive?: () => void
 }): React.ReactNode {
   // Screens that draw their own chrome — render bare.
   switch (active) {
@@ -127,7 +121,7 @@ function renderScreen(active: NavKey, ctx: {
   const body = (() => {
     switch (active) {
       case 'skills':        return <Skills />
-      case 'subagents':     return <Subagents onLaunchHive={ctx.onLaunchHive} />
+      case 'subagents':     return <Subagents />
       case 'knowledge-graph': return <KnowledgeGraph />
       case 'history':       return <History />
       case 'usage':         return <Usage />
@@ -149,7 +143,6 @@ function renderScreen(active: NavKey, ctx: {
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.
       case 'voice':             return <VoiceModal open={true} onClose={noop} variant="page" />
-      case 'dispatch':          return <DispatchModal open={true} onClose={noop} variant="page" initialMode={ctx.dispatchMode ?? 'boss'} />
       case 'repoviz':           return <RepoVisualizationModal open={true} onClose={noop} variant="page" />
       case 'search':            return <SearchModal open={true} onClose={noop} variant="page" initialMode={ctx.searchMode ?? 'files'} />
       default: return null
@@ -168,8 +161,6 @@ export function MainPane({
   onOpenVoice,
   onOpenScheduler,
   searchMode,
-  dispatchMode,
-  onLaunchHive,
   broadcastOpen,
   watchersOpen,
   onCloseBroadcast,
@@ -259,7 +250,7 @@ export function MainPane({
         {active !== 'terminal' && (
           <div className="absolute inset-0 bg-bg overflow-auto">
             <ErrorBoundary>
-              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler, searchMode, dispatchMode, onLaunchHive })}
+              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler, searchMode })}
             </ErrorBoundary>
           </div>
         )}

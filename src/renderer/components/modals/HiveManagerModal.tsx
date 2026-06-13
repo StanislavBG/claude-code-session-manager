@@ -325,9 +325,11 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
                       </Button>
                     </>
                   )}
-                  <Button variant="primary" onClick={handleLaunch}>
-                    Launch hive →
-                  </Button>
+                  {onLaunch && (
+                    <Button variant="primary" onClick={handleLaunch}>
+                      Launch hive →
+                    </Button>
+                  )}
                 </div>
               </div>
 

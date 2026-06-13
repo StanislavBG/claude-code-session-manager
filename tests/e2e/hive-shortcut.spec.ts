@@ -1,24 +1,32 @@
 /**
- * The Subagents/"hive" tab is a monitor, not a launcher. It carries a
- * "Launch a hive →" affordance that jumps to Dispatch pre-set to the Hives
- * mode (where the actual HiveManagerModal launcher lives). This guards that
- * cross-link so the monitor and launcher don't drift apart again.
+ * The Subagents tab is now the single launcher for all fan-out topologies
+ * (Hive · Orchestrate · Race · Boss). They share ONE brief — typed once,
+ * reused as you switch topology — instead of each owning a private prompt box.
+ * This guards that consolidation: the brief survives a topology switch, and
+ * the separate "Dispatch" route is gone.
  */
 import { test, expect } from '@playwright/test'
 import { launchApp, navigateToTab } from './_helpers/launchApp'
 
-test('Subagents "Launch a hive →" jumps to Dispatch on the Hives mode', async () => {
+test('Subagents Launch shares one brief across topologies', async () => {
   const { app, win } = await launchApp()
   try {
     await navigateToTab(win, 'subagents')
 
-    const launch = win.locator('button', { hasText: /launch a hive/i })
-    await expect(launch).toBeVisible({ timeout: 10_000 })
-    await launch.click({ force: true })   // force: LeftNav badge poller shifts layout
+    // The shared brief box and the topology selector are both present.
+    const brief = win.getByTestId('dispatch-brief')
+    await expect(brief).toBeVisible({ timeout: 10_000 })
+    await expect(win.locator('button', { hasText: /^Hive$/ })).toBeVisible()
+    await expect(win.locator('button', { hasText: /^Race$/ })).toBeVisible()
 
-    // Should land on Dispatch with the Hives sub-tab active — the Hive Manager
-    // surfaces its "Launch hive →" control and the hive-template chrome.
-    await expect(win.locator('button', { hasText: /launch hive/i }).first())
+    // Type a brief, switch topology, and confirm the text persists (shared).
+    await brief.fill('investigate the auth flow')
+    await win.locator('button', { hasText: /^Race$/ }).click({ force: true })
+    await expect(win.getByTestId('dispatch-brief')).toHaveValue('investigate the auth flow')
+
+    // Hive topology still offers its launch control.
+    await win.locator('button', { hasText: /^Hive$/ }).click({ force: true })
+    await expect(win.locator('button', { hasText: /launch the hive/i }))
       .toBeVisible({ timeout: 10_000 })
   } finally {
     await app.close()

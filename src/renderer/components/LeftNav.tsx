@@ -36,7 +36,6 @@ export type NavKey =
   // also gets a NavKey + MainPane screen. Screens render the same modal
   // components with variant="page" so the body content is unchanged.
   | 'voice'
-  | 'dispatch'
   | 'repoviz'
   | 'search'
   | 'prompts'

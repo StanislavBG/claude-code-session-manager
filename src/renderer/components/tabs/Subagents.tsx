@@ -19,12 +19,15 @@ import { toast } from '../../state/toast'
 import { formatDuration } from '../../lib/formatTime'
 import {
   HiveSubTabs,
-  LaunchView,
   HiveCell,
   StatusPill,
   ToolChip,
   paletteAt,
 } from './subagents/hive-primitives'
+import { DispatchLaunch } from './subagents/DispatchLaunch'
+import { DispatchLive } from './subagents/DispatchLive'
+import { useOrchestrator } from '../../state/orchestrator'
+import { useRace } from '../../state/race'
 
 const MODEL_OPTIONS = ['inherit', 'opus', 'sonnet', 'haiku'] as const
 const EFFORT_OPTIONS = ['', 'low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -44,7 +47,7 @@ function agentsDir(home: string, cwd: string | null, scope: Scope): string | nul
   return `${cwd}/.claude/agents`
 }
 
-export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) {
+export function Subagents() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -135,6 +138,12 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
   // user is actually looking at the live panel.
   const live = useLiveTab(mode === 'live' ? activeTab : null)
 
+  // Surface active cross-tab dispatch runs in the Live sub-tab.
+  const orchStatus = useOrchestrator((s) => s.status)
+  const raceStatus = useRace((s) => s.status)
+  const orchActive = orchStatus === 'running' || orchStatus === 'paused'
+  const raceActive = raceStatus === 'running' || raceStatus === 'finished'
+
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const filteredAgents = useMemo(
@@ -195,10 +204,7 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
         {/* Launch — scrollable, sticky right panel */}
         {mode === 'launch' && (
           <div className="h-full overflow-auto">
-            <LaunchView
-              onLaunchHive={onLaunchHive}
-              onSwitchToLive={() => setMode('live')}
-            />
+            <DispatchLaunch onSwitchToLive={() => setMode('live')} />
           </div>
         )}
 
@@ -364,6 +370,13 @@ export function Subagents({ onLaunchHive }: { onLaunchHive?: () => void } = {}) 
         {/* Live */}
         {mode === 'live' && (
           <div className="h-full overflow-auto">
+            {/* Cross-tab dispatch runs (Orchestrate / Race), when active. */}
+            {(orchActive || raceActive) && (
+              <div className="p-6 xl:p-9 pb-0">
+                <DispatchLive />
+              </div>
+            )}
+            {/* Per-tab Task-tool subagents for the active session. */}
             {!activeTab ? (
               <EmptyState title="no active session" hint="open a terminal tab to watch live subagents" />
             ) : (

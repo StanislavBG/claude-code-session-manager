@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Map · session-manager — the local-development chain</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+    --fg:#e6edf3; --dim:#9da7b3; --faint:#6e7681;
+    --blue:#60a5fa; --green:#34d399; --amber:#fbbf24; --violet:#a78bfa;
+    --pink:#f472b6; --red:#f87171; --cyan:#22d3ee;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--fg);font:15px/1.6 ui-sans-serif,system-ui,sans-serif;padding:0 20px 90px}
+  .wrap{max-width:980px;margin:0 auto}
+  a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);margin:0 -20px;padding:10px 20px}
+  nav.toc .row{max-width:980px;margin:0 auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  nav.toc a{font-size:13px;padding:4px 14px;border-radius:99px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  nav.toc a:hover{color:var(--fg);border-color:var(--faint);text-decoration:none}
+  nav.toc a.home{border-color:transparent;color:var(--faint)}
+
+  .hero{margin:40px 0 6px}
+  h1{font-size:32px;letter-spacing:-.6px}
+  .sub{color:var(--dim);margin:12px 0 4px;max-width:820px}
+  h2{font-size:22px;margin:52px 0 6px;padding-top:16px;border-top:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p{margin:8px 0;color:var(--dim)} p strong{color:var(--fg)}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg);white-space:nowrap}
+  .path{font-family:var(--mono);font-size:11px;color:var(--cyan)}
+
+  /* role badge */
+  .role{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;padding:1px 8px;border-radius:99px;border:1px solid;white-space:nowrap}
+  .role.intake{color:var(--amber);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.07)}
+  .role.pipe{color:var(--green);border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.07)}
+  .role.auth{color:var(--cyan);border-color:rgba(34,211,238,.4);background:rgba(34,211,238,.07)}
+  .role.gate{color:var(--blue);border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.07)}
+  .role.out{color:var(--pink);border-color:rgba(244,114,182,.4);background:rgba(244,114,182,.07)}
+  .role.inter{color:var(--violet);border-color:rgba(167,139,250,.4);background:rgba(167,139,250,.07)}
+  .role.docs{color:var(--faint);border-color:var(--line)}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0;font-size:12px;color:var(--dim)}
+  .legend span{display:flex;align-items:center;gap:6px}
+
+  /* the chain diagram */
+  .chain{margin:26px 0 8px;display:flex;flex-direction:column;align-items:center;gap:0}
+  .lane{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;width:100%}
+  .node{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:230px;max-width:300px;flex:1 1 230px}
+  .node .nt{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;margin-bottom:4px}
+  .node .nd{font-size:12.5px;color:var(--dim)}
+  .node .nf{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px;word-break:break-all}
+  .node.tall{min-width:100%;max-width:680px}
+  .node.intake{border-top:3px solid var(--amber)}
+  .node.pipe{border-top:3px solid var(--green)}
+  .node.gate{border-top:3px solid var(--blue)}
+  .node.out{border-top:3px solid var(--pink)}
+  .node.engine{border-top:3px solid var(--violet)}
+  .down{color:var(--faint);font-size:22px;line-height:1;margin:8px 0}
+  .merge{color:var(--faint);font-size:13px;margin:6px 0 2px}
+
+  /* "reads" side references attached to /develop */
+  .reads{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:10px 0 2px}
+  .refchip{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px dashed var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px;color:var(--dim)}
+  .refchip strong{color:var(--fg)}
+
+  .callout{border-left:3px solid var(--amber);background:rgba(251,191,36,.06);border-radius:0 8px 8px 0;padding:12px 16px;margin:16px 0;font-size:14px;color:var(--dim)}
+  .callout.ok{border-color:var(--green);background:rgba(52,211,153,.06)}
+  .callout strong{color:var(--fg)}
+
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+  th,td{text-align:left;padding:7px 11px;border:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  td{background:var(--panel);color:var(--dim)} td code{white-space:nowrap}
+  td .never{color:var(--red)}
+
+  ol.seq{margin:10px 0 0 20px;color:var(--dim);font-size:13.5px} ol.seq li{margin:6px 0}
+  footer{margin-top:70px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--faint)}
+  @media(max-width:760px){.node{min-width:100%}}
+</style>
+</head>
+<body>
+
+<nav class="toc"><div class="row">
+  <a class="home" href="index.html">📖 HUMAN_LEARN</a>
+  <a href="#chain">The chain</a>
+  <a href="#roles">Role contracts</a>
+  <a href="#walk">Two walkthroughs</a>
+  <a href="index.html#scheduler">📅 Scheduler engine ↗</a>
+</div></nav>
+
+<div class="wrap" id="top">
+  <div class="hero">
+    <h1>⛓ Skill Map — the local-development chain</h1>
+    <p class="sub">
+      How a request becomes shipped code on this machine. Two entry points feed <strong>one</strong> pipeline:
+      an interactive <strong>human prompt</strong>, and an <strong>agent feedback file</strong> dropped in by another
+      project. They differ only in intake shape — everything from <code>/develop</code> onward is identical. Each skill
+      lives at <span class="path">~/.claude/skills/&lt;name&gt;/SKILL.md</span> (or <span class="path">~/.claude/commands/</span>),
+      carries an explicit <em>Role</em> and <em>Never</em>, and references — never forks — the others.
+    </p>
+    <div class="legend">
+      <span><span class="role intake">intake</span> turns a request into pipeline input</span>
+      <span><span class="role pipe">pipeline</span> decompose · queue · track</span>
+      <span><span class="role auth">authority</span> single source of a rule set</span>
+      <span><span class="role engine">engine</span> the runtime that executes</span>
+      <span><span class="role gate">gate</span> definition-of-done</span>
+      <span><span class="role out">outbound</span> request into another project</span>
+      <span><span class="role inter">interactive</span> in-session craft skills</span>
+    </div>
+  </div>
+
+  <!-- ════════════ THE CHAIN ════════════ -->
+  <h2 id="chain">The chain</h2>
+  <p>Read top to bottom. The two intakes converge on <code>/develop</code>; <code>/develop</code> <em>reads</em> the two
+  authorities (it never restates them), queues onto the <a href="index.html#scheduler">scheduler engine</a>, then its own
+  Phase 2 watches the run and gates it before reporting done.</p>
+
+  <div class="chain">
+    <!-- intakes -->
+    <div class="lane">
+      <div class="node intake">
+        <div class="nt">⌨️ Human prompt <span class="role intake">intake</span></div>
+        <div class="nd">An interactive line like “build me X / implement Y”. Scope is clarified live, then handed straight to the pipeline.</div>
+        <div class="nf">→ /develop</div>
+      </div>
+      <div class="node intake">
+        <div class="nt">🤖 /process-feedback <span class="role intake">intake</span></div>
+        <div class="nd">Reads another project’s feedback file, evaluates it against real code, classifies <em>do / decline / forward</em>, and dispatches the “do” items. Owns the status-log + archive bookkeeping.</div>
+        <div class="nf">~/.claude/skills/process-feedback/SKILL.md · never implements inline</div>
+      </div>
+    </div>
+    <div class="merge">▼ both converge ▼</div>
+
+    <!-- develop -->
+    <div class="node pipe tall">
+      <div class="nt">🛠 /develop — the pipeline owner <span class="role pipe">pipeline</span></div>
+      <div class="nd"><strong>Phase 1</strong>: clarify → explore repo → decompose into small bounded PRDs → emit each + inline <code>standards.md</code> verbatim → queue.
+      <strong>Phase 2</strong>: watch the scheduler every ~30 min → escalate on stuck/<code>needs_review</code>/timeout → verify live against AC → report. Reused by <code>/process-feedback</code>.</div>
+      <div class="nf">~/.claude/skills/develop/SKILL.md · never hand-implements; never restates /prd or standards</div>
+    </div>
+
+    <!-- reads -->
+    <div class="reads">
+      <div class="refchip">📄 <strong>/prd</strong> <span class="role auth">authority</span> — one PRD’s structure · location · scope sizing &nbsp;<span class="path">~/.claude/commands/prd.md</span></div>
+      <div class="refchip">📐 <strong>standards.md</strong> <span class="role auth">authority</span> — engineering + execution discipline, inlined into every PRD &nbsp;<span class="path">~/.claude/skills/develop/standards.md</span></div>
+    </div>
+    <div class="down">↓ queues PRD files onto</div>
+
+    <!-- engine -->
+    <div class="node engine tall">
+      <div class="nt">📅 Scheduler engine <span class="role engine">engine</span></div>
+      <div class="nd">Runs each PRD headlessly as <code>claude -p</code> around the 5-hour billing window: lint → fire policy → execute with four watchdogs → verify + self-heal. The full mechanics are documented separately.</div>
+      <div class="nf"><a href="index.html#scheduler">HUMAN_LEARN › Scheduler ↗</a> · scheduler.cjs · supervisor.cjs</div>
+    </div>
+    <div class="down">↓ on success, Phase 2 gates</div>
+
+    <!-- gate -->
+    <div class="node gate tall">
+      <div class="nt">✅ Definition-of-done gate <span class="role gate">gate</span></div>
+      <div class="nd">Live-verify against each PRD’s acceptance criteria; for a major/risky change, dispatch <code>requesting-code-review</code>; then report what landed + refs. Same gate for both entry points.</div>
+      <div class="nf">requesting-code-review · (interactive verify) → report back</div>
+    </div>
+  </div>
+
+  <h3>Off to the side</h3>
+  <div class="lane">
+    <div class="node out">
+      <div class="nt">📤 /my-feedback <span class="role out">outbound</span></div>
+      <div class="nd">When the root cause belongs to <em>another</em> project, file an auditable request into its intake — where its own <code>/process-feedback</code> picks it up. The send side of the agent↔agent channel.</div>
+      <div class="nf">~/.claude/skills/my-feedback/SKILL.md · never crosses the boundary to fix</div>
+    </div>
+    <div class="node inter">
+      <div class="nt">🧪 Interactive craft skills <span class="role inter">interactive</span></div>
+      <div class="nd"><code>test-driven-development</code> + <code>systematic-debugging</code> — applied during in-session work. Headless PRDs can’t load them, so their load-bearing core is distilled into <code>standards.md</code> instead.</div>
+      <div class="nf">~/.claude/skills/{test-driven-development,systematic-debugging}/</div>
+    </div>
+  </div>
+
+  <!-- ════════════ ROLES ════════════ -->
+  <h2 id="roles">Role contracts — who does what, and what each must never do</h2>
+  <table>
+    <tr><th>Skill</th><th>Role</th><th>Owns</th><th>Never</th></tr>
+    <tr>
+      <td><code>/process-feedback</code></td><td><span class="role intake">intake</span></td>
+      <td>Agent-side intake: triage feedback → dispatch codeable parts to <code>/develop</code> → status log, RESOLUTION, archive, README self-improve.</td>
+      <td class="never">implement inline; re-specify how PRDs are tracked; mark a queued item ✅ before it lands.</td>
+    </tr>
+    <tr>
+      <td>Human prompt → <code>/develop</code></td><td><span class="role intake">intake</span></td>
+      <td>Human-side intake: clarify scope conversationally, then enter the same pipeline.</td>
+      <td class="never">— (the human is present to decide).</td>
+    </tr>
+    <tr>
+      <td><code>/develop</code></td><td><span class="role pipe">pipeline</span></td>
+      <td>Decompose → queue → <strong>track to completion</strong> (Phase 2). The convergence point for both entries.</td>
+      <td class="never">hand-implement in chat; restate <code>/prd</code> or <code>standards.md</code> rules.</td>
+    </tr>
+    <tr>
+      <td><code>/prd</code></td><td><span class="role auth">authority</span></td>
+      <td>One PRD’s structure, canonical location, filename rules, and scope sizing.</td>
+      <td class="never">own engineering rules; decompose a large ask into many PRDs.</td>
+    </tr>
+    <tr>
+      <td><code>standards.md</code></td><td><span class="role auth">authority</span></td>
+      <td>Engineering standards + the executor-facing <em>Execution discipline</em>, inlined verbatim into every PRD.</td>
+      <td class="never">be paraphrased elsewhere (one copy, referenced).</td>
+    </tr>
+    <tr>
+      <td>Scheduler</td><td><span class="role engine">engine</span></td>
+      <td>Headless execution of queued PRDs with watchdogs, verify, and self-heal.</td>
+      <td class="never">run unbounded commands (the linter + watchdogs enforce this).</td>
+    </tr>
+    <tr>
+      <td><code>requesting-code-review</code></td><td><span class="role gate">gate</span></td>
+      <td>Dispatch a reviewer subagent before merge / on major features.</td>
+      <td class="never">be skipped because “it’s simple”; proceed past unfixed Critical/Important findings.</td>
+    </tr>
+    <tr>
+      <td><code>/my-feedback</code></td><td><span class="role out">outbound</span></td>
+      <td>File one auditable request into another project’s intake folder.</td>
+      <td class="never">cross the service boundary to fix the other project’s code.</td>
+    </tr>
+    <tr>
+      <td><code>test-driven-development</code> · <code>systematic-debugging</code></td><td><span class="role inter">interactive</span></td>
+      <td>Red-green-refactor and hypothesis-driven debugging in live sessions.</td>
+      <td class="never">— (their core is distilled into <code>standards.md</code> for headless runs).</td>
+    </tr>
+    <tr>
+      <td><code>/explain-to-me</code></td><td><span class="role docs">docs</span></td>
+      <td>This knowledge base: the combined <a href="index.html">HUMAN_LEARN page</a> + this Skill Map.</td>
+      <td class="never">invent a path/constant; write into Claude’s Memory store.</td>
+    </tr>
+  </table>
+
+  <div class="callout ok">
+    <strong>The principle: intake may differ, the pipeline is identical.</strong> A human line and an agent feedback
+    file are two doors into the same room. Only triage + bookkeeping differ (interactive clarification vs feedback file +
+    README log); decompose → queue → track → verify → report is one implementation with two callers.
+  </div>
+
+  <!-- ════════════ WALKTHROUGHS ════════════ -->
+  <h2 id="walk">Two walkthroughs</h2>
+
+  <h3>Human → CODE</h3>
+  <ol class="seq">
+    <li>You type <code>build me X</code>. <code>/develop</code> clarifies any genuine ambiguity, explores the repo.</li>
+    <li>It decomposes X into small PRDs (sizing per <code>/prd</code>), appends <code>standards.md</code>, writes them to the queue.</li>
+    <li>It confirms each PRD (filename, group, cwd, ETA), then enters Phase 2.</li>
+    <li>Every ~30 min it checks the scheduler; if a PRD stalls or trips <code>needs_review</code>, it surfaces that to you.</li>
+    <li>On success it verifies live against the AC, optionally runs <code>requesting-code-review</code>, and reports what landed.</li>
+  </ol>
+
+  <h3>Agent → CODE</h3>
+  <ol class="seq">
+    <li>Another project drops a file in <code>feedback/</code>. <code>/process-feedback</code> reads it, verifies the claims against real code.</li>
+    <li>It classifies: <em>ours-do-it</em> → <code>/develop</code>; <em>ours-decline</em> → documented decline; <em>theirs</em> → <code>/my-feedback</code> upstream.</li>
+    <li>For the “do” items it hands <code>/develop</code> a complete brief (goal + the feedback’s own AC + cwd + reuse notes); the item is marked 🛠 <em>queued</em>, not ✅.</li>
+    <li><code>/develop</code> Phase 2 tracks + verifies (same as above) and reports — <code>/process-feedback</code> consumes the outcome.</li>
+    <li>Once landed + verified, the feedback flips 🛠 → ✅, gets a final RESOLUTION, and is <code>git mv</code>’d to <code>processed/</code>; the intake README folds in the lesson.</li>
+  </ol>
+
+  <footer>
+    HUMAN_LEARN · session-manager · Skill Map · generated 2026-06-13 from
+    <code>~/.claude/skills/{develop,process-feedback,my-feedback,test-driven-development,systematic-debugging,requesting-code-review,explain-to-me}/SKILL.md</code>,
+    <code>~/.claude/skills/develop/standards.md</code>, <code>~/.claude/commands/prd.md</code>.
+    Runtime engine documented at <a href="index.html#scheduler">HUMAN_LEARN › Scheduler</a>. Maintained by <code>/explain-to-me</code>.
+  </footer>
+</div>
+</body>
+</html>

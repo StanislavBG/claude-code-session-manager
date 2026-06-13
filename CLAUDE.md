@@ -20,7 +20,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `index.cjs` — BrowserWindow + IPC registration. Navigation locked: `setWindowOpenHandler` denies, `will-navigate` allows only the dev URL.
 - `config.cjs` — fs layer. **All paths go through `validatePath` (allowedRoots = home dir)**. Atomic writes via tmp + rename. Chokidar watchers refcounted per absolute path.
 - `transcripts.cjs` — tails `~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl`, classifies events, ring-buffers per tab, broadcasts `transcript:event:<tabId>`.
-- `kg.cjs` — knowledge graph extraction. Tails transcripts, filters automated prompts (role-play patterns, long machine-generated data), calls `claude -p` with extraction prompt + EXTRACTION_SYSTEM role. Per-project vocab + per-run caps (MAX_EXTRACTIONS_PER_RUN=30, MAX_TAIL_BYTES=8MB).
+- `kg.cjs` — knowledge graph extraction. Tails `~/.claude/knowledge-log/prompts.jsonl` (written by the UserPromptSubmit logging hook), filters automated prompts (role-play patterns, long machine-generated data), calls `claude -p` with extraction prompt + EXTRACTION_SYSTEM role. Per-project vocab + per-run caps (MAX_EXTRACTIONS_PER_RUN=30, MAX_TAIL_BYTES=8MB).
 - `scheduler.cjs` — runs PRDs from `~/.claude/session-manager/scheduled-plans/prds/` as `claude -p` jobs. Modes: `manual` / `on-reset` / `when-available` (default; polls billing usage every 10 min — `POLL_INTERVAL_MS` in `lib/schedulerConfig.cjs`). Auto-pause on rate-limit, auto-resume at next 5h reset. **Boot reconciliation**: on startup, reaps orphaned jobs (PIDs no longer alive) and logs outcome (success/timeout/error). **Dead-process reaper**: background process check + PID-alive validation, run-outcome classifier to detect hangs. Both reduce manual cleanup of stuck PRD jobs.
 - `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by SM_SUPERVISOR_DISABLE.
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
@@ -43,7 +43,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `components/tabs/Skills.tsx` — canonical "list+detail" shape. Other list tabs (Subagents, Hooks, McpServers, Plugins) follow it.
 - `components/tabs/Scheduler.tsx` — Scheduler cockpit (Almanac design). Renders Queue/PRDs/History via SchedulePanel + scheduleState.
 - `components/tabs/Subagents.tsx` — Hive cockpit (Launch-first editorial shell). Conductor for Configured/Library/Live sub-tabs. Reads hives.ts + live.ts.
-- `components/tabs/KnowledgeGraph.tsx` — Graph visualization + search. Renders entities/relations from `~/.claude/projects/<cwd>/knowledge-graph/`.
+- `components/tabs/KnowledgeGraph.tsx` — Graph visualization + search. Renders entities/relations from `~/.claude/knowledge-log/graphs/<encodedCwd>.json` (one graph per project cwd). See `HUMAN_LEARN/index.html#knowledge-graph` for the full pipeline.
 - `components/tabs/WebRemote.tsx` — web-remote cockpit: relay URL, session state, device list, tunnel status.
 - `components/SchedulePanel.tsx` — modular pane (Queue/PRDs/History tabs). Extracted 2026-06 to be reusable by Scheduler tab + web-remote. Owns filter state.
 - `components/tabs/scheduler/sched-primitives.tsx` — Almanac design shared: SchBadge (status color/mark), ProjectTag, DetailBlock/Line (project dots hashed-color palette).

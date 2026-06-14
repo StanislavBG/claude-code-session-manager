@@ -498,6 +498,14 @@ async function connect() {
   ws.on('error', (e) => {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'ws error', meta: { error: e?.message } });
   });
+
+  // Belt-and-suspenders liveness: the relay also runs its own protocol-level
+  // ws.ping() heartbeat, independent of our app-level JSON ping/pong. Receiving
+  // that frame is proof the link is alive, so reset the missed-pong counter on it
+  // too. This keeps the session up even if the relay ever stops answering the
+  // app-level pings (the exact failure that silently dropped sessions every ~100s
+  // before the relay learned to pong). node 'ws' auto-replies to the ping itself.
+  ws.on('ping', () => { _missedPongs = 0; });
 }
 
 async function handleTokenRevoked(deviceId) {

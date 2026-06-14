@@ -33,7 +33,7 @@ export default {
       },
       fontFamily: {
         serif: ['Newsreader', 'Georgia', 'serif'],
-        sans: ['Geist', 'system-ui', 'sans-serif'],
+        sans: ['"Geist Sans"', 'system-ui', 'sans-serif'],
         mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
       },
       minHeight: { touch: '44px' },

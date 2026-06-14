@@ -14,7 +14,7 @@
     background: radial-gradient(120% 90% at 50% 0%, #efe7d8 0%, #e3dac9 55%, #d8ceba 100%);
     background-attachment: fixed;
     color: #2a221a;
-    font-family: 'Geist', system-ui, sans-serif;
+    font-family: 'Geist Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
     /* Prevent iOS bounce on the body — scrolling is per-pane */

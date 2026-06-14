@@ -414,6 +414,37 @@ function checkDeps(queueEntry, allJobs, prdBody) {
   return { ok: true };
 }
 
+// ─── sentinel scanner ─────────────────────────────────────────────────────────
+
+/**
+ * Scan for a `SCHEDULER_VERDICT: PASS|FAIL` sentinel line in the run output.
+ *
+ * Checks `resultEvent.resultText` first (the agent's final message), then the
+ * last tool_result content. Anchored to line-start so prose mentioning the
+ * string in mid-sentence does not match.
+ *
+ * Returns 'pass', 'fail', or null.
+ */
+function scanSentinel(resultEvent, events) {
+  const RE = /^SCHEDULER_VERDICT:\s*(PASS|FAIL)\b/m;
+
+  if (resultEvent) {
+    const m = resultEvent.resultText.match(RE);
+    if (m) return m[1].toLowerCase();
+  }
+
+  let lastToolResult = null;
+  for (const ev of events) {
+    if (ev.kind === 'tool_result') lastToolResult = ev;
+  }
+  if (lastToolResult && lastToolResult.content) {
+    const m = lastToolResult.content.match(RE);
+    if (m) return m[1].toLowerCase();
+  }
+
+  return null;
+}
+
 // ─── main verifier ────────────────────────────────────────────────────────────
 
 /**
@@ -422,13 +453,16 @@ function checkDeps(queueEntry, allJobs, prdBody) {
  * escalate to 'needs_review'.
  *
  * @param {object}   params
- * @param {string}   params.runDir      Absolute path to the run directory.
- * @param {string}   params.prdPath     Absolute path to the PRD .md file.
- * @param {object}   params.queueEntry  The queue.json entry for this job.
- * @param {object[]} [params.allJobs]   All entries from queue.json (dep checks).
+ * @param {string}   params.runDir            Absolute path to the run directory.
+ * @param {string}   params.prdPath           Absolute path to the PRD .md file.
+ * @param {object}   params.queueEntry        The queue.json entry for this job.
+ * @param {object[]} [params.allJobs]         All entries from queue.json (dep checks).
+ * @param {boolean}  [params.committedDuringRun] True when HEAD moved during the run,
+ *                                            confirming the job's commit landed.
+ *                                            Default false for back-compat.
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
-async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
+async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false }) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
   const verdictsPath = path.join(runDir, `${slug}.verdicts.json`);
@@ -568,7 +602,12 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
       }
     }
 
-    const extras = annotations.length ? { annotations } : undefined;
+    // Scan for the SCHEDULER_VERDICT sentinel emitted by the finish protocol.
+    const sentinel = scanSentinel(resultEvent, events);
+    const sentinelFields = sentinel ? { sentinel } : {};
+    const extras = (annotations.length || sentinel)
+      ? { ...(annotations.length ? { annotations } : {}), ...sentinelFields }
+      : undefined;
 
     if (issues.length === 0) {
       const reason = annotations.length
@@ -580,6 +619,24 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [] }) {
     // Pick highest-priority issue (transcript_errors > verify_unavailable).
     issues.sort((a, b) => b.priority - a.priority);
     const top = issues[0];
+
+    // Sentinel override: SCHEDULER_VERDICT: PASS + a commit that landed during
+    // the run is authoritative evidence the job succeeded. Suppresses incidental
+    // transcript noise (grep results with "Error", TDD red-phase reproductions,
+    // Traceback in debug output) for the two weakest verdict classes.
+    // MUST NOT apply to halt or deps_unmet — those keep their existing semantics.
+    if (
+      sentinel === 'pass'
+      && committedDuringRun
+      && (top.verdict === 'transcript_errors' || top.verdict === 'verify_unavailable')
+    ) {
+      return conclude('clean',
+        `SCHEDULER_VERDICT: PASS + commit landed overrides ${top.verdict}`,
+        null,
+        { ...(annotations.length ? { annotations } : {}), sentinel, sentinelOverride: top.verdict },
+      );
+    }
+
     return conclude(top.verdict, top.reason, 'needs_review', extras);
 
   } catch (e) {
@@ -601,4 +658,5 @@ module.exports = {
   parsePrdBodyDepFragments,
   checkDeps,
   parseLog,
+  scanSentinel,
 };

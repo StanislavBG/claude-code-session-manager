@@ -116,6 +116,17 @@ sequence. Do not stop before the commit lands; committing is part of the job.
    pass. Do not assume npm; use whatever the target project uses.
 4. COMMIT — stage and commit ALL changes with a clear conventional message:
    \`git add -A && git commit -m "<type>(<scope>): <summary>"\`.
+5. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
+   one of these two lines (no trailing text after it):
+     SCHEDULER_VERDICT: PASS
+     SCHEDULER_VERDICT: FAIL <one-line reason>
+   Print PASS only when the AC gate is green AND the commit from step 4 landed.
+   Print FAIL (and exit 1) if the AC gate was red or the commit could not land.
+   NEVER print PASS on a red AC gate — a lying PASS turns the verifier from a
+   false-failure catcher into a silent-failure shipper. A truthful PASS + a
+   landed commit lets the verifier override incidental transcript noise (grep
+   results containing "Error", a TDD red-test run early in the session, debug
+   Tracebacks) so those do not false-trip a needs_review downgrade.
 
 A job that exits with uncommitted changes is treated as INCOMPLETE and flagged
 for review. Do NOT add work beyond the acceptance criteria — this protocol is the
@@ -1224,6 +1235,12 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // Called outside mutate() so the queue lock is not held during I/O.
     let verifyResult = null;
     if (res.exitCode === 0 && !res.rateLimited) {
+      // Detect whether the job self-committed by comparing HEAD before/after.
+      // Used by the sentinel override: SCHEDULER_VERDICT: PASS + a landed
+      // commit together override incidental transcript noise verdicts.
+      const headAtExit = await gitHead(guardCwd);
+      const committedDuringRun = !!(guardHeadBefore && headAtExit && guardHeadBefore !== headAtExit);
+
       const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
       const stateForDeps = await readQueue();
       verifyResult = await verifyRun({
@@ -1231,6 +1248,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         prdPath,
         queueEntry: job,
         allJobs: stateForDeps.jobs,
+        committedDuringRun,
       }).catch((e) => ({
         verdict: 'verify_unavailable',
         reason: `verifier threw: ${e?.message ?? String(e)}`,

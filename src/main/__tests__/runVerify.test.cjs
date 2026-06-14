@@ -584,3 +584,186 @@ test('isHarnessToolError detects wrapper and "No such tool available"', () => {
   assert.equal(isHarnessToolError('ModuleNotFoundError: No module named x'), false);
   assert.equal(isHarnessToolError(''), false);
 });
+
+// ─── SCHEDULER_VERDICT sentinel override tests ────────────────────────────────
+
+/** Build a log where a tool_result contains a Traceback+KeyError and the
+ *  result event optionally contains the sentinel line. */
+function tracebackRunEvents(sentinelLine) {
+  const resultText = sentinelLine
+    ? `All work done.\n${sentinelLine}`
+    : 'All work done.';
+  return [
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: 'toolu_tv_001',
+          name: 'Bash',
+          input: { command: 'pytest', description: 'Run acceptance tests' },
+        }],
+      },
+    },
+    {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_tv_001',
+          content: [
+            '=== TDD red phase ===',
+            'Traceback (most recent call last):',
+            '  File "test_foo.py", line 5, in test_bar',
+            "KeyError: 'missing_key'",
+          ].join('\n'),
+          is_error: false,
+        }],
+      },
+    },
+    { type: 'result', subtype: 'success', result: resultText },
+  ];
+}
+
+// (a) sentinel PASS + committedDuringRun:true + Traceback+Error → clean
+test('sentinel PASS + committedDuringRun:true + Traceback → clean (override)', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '77-sentinel-override-pass';
+    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Sentinel override test');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'clean', `expected clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+    assert.ok(verdict.reason.includes('SCHEDULER_VERDICT: PASS'), `reason should mention sentinel: ${verdict.reason}`);
+    // Sidecar should record the sentinel and override
+    const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${slug}.verdicts.json`), 'utf8'));
+    assert.equal(sidecar.sentinel, 'pass');
+    assert.ok(sidecar.sentinelOverride, 'sidecar should record sentinelOverride');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (b) no sentinel + Traceback+Error → transcript_errors (unchanged baseline)
+test('no sentinel + Traceback+Error + committedDuringRun:true → transcript_errors (no override)', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '77-no-sentinel-baseline';
+    writeLog(tmp, slug, tracebackRunEvents(null));
+    const prdPath = writePrd(tmp, slug, '# No sentinel baseline');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors without sentinel, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (c) sentinel PASS + committedDuringRun:false → stays transcript_errors (commit not confirmed)
+test('sentinel PASS + committedDuringRun:false → transcript_errors (commit unconfirmed)', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '77-sentinel-no-commit';
+    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Sentinel without commit');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'transcript_errors', `PASS without commit must not override, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (d) sentinel FAIL → never clean (even with committedDuringRun:true)
+test('sentinel FAIL + committedDuringRun:true → transcript_errors (FAIL never overrides)', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '77-sentinel-fail';
+    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: FAIL AC gate was red'));
+    const prdPath = writePrd(tmp, slug, '# Sentinel FAIL');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'transcript_errors', `FAIL sentinel must not override to clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (e) halt + sentinel PASS → still halt (override must not apply to halt)
+test('halt result + sentinel PASS + committedDuringRun:true → still halt', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '77-halt-sentinel-pass';
+    const logEvents = [
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_halt_001',
+            name: 'Bash',
+            input: { command: 'check deps', description: 'Check prerequisites' },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'toolu_halt_001',
+            content: 'dep not ready',
+            is_error: false,
+          }],
+        },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        result: 'HALT: prerequisite not met\nSCHEDULER_VERDICT: PASS',
+      },
+    ];
+    writeLog(tmp, slug, logEvents);
+    const prdPath = writePrd(tmp, slug, '# Halt with sentinel');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'halt', `halt must survive even with PASS sentinel, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'pending');
+  } finally {
+    rmdir(tmp);
+  }
+});

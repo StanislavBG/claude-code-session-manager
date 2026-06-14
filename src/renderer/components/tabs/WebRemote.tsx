@@ -1,44 +1,117 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '../../state/toast'
+import { Toggle } from '../ui/Toggle'
+import { Badge } from '../ui/Badge'
+import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
 import type { WebRemoteDevice, WebRemoteStatus } from '../../../preload/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PairingStep = 'idle' | 'enter-otp' | 'pairing'
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Almanac sub-primitives (local to the Remote tab) ──────────────────────────
 
-function StatusDot({ connected }: { connected: boolean }) {
+/** Small uppercase section label with an optional right-aligned slot. */
+function SectionLabel({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
-    <span className={`inline-block w-2 h-2 rounded-full mr-2 ${connected ? 'bg-green-400' : 'bg-zinc-500'}`} />
+    <div className="flex items-baseline justify-between mb-2.5">
+      <span className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-fg-faint">{children}</span>
+      {right}
+    </div>
   )
 }
 
+/** A labelled toggle row used inside the permission card. */
+function ToggleRow({
+  label, hint, on, onChange, warn, disabled, first,
+}: {
+  label: string
+  hint: string
+  on: boolean
+  onChange: (v: boolean) => void
+  warn?: boolean
+  disabled?: boolean
+  first?: boolean
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-4 px-[18px] py-[15px] ${
+        first ? '' : 'border-t border-rule'
+      } ${disabled ? 'opacity-50' : ''}`}
+    >
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-fg mb-0.5">{label}</div>
+        <div className={`text-[12.5px] leading-snug flex items-center gap-1.5 ${warn ? 'text-honey-dark' : 'text-fg-faint'}`}>
+          {warn && <span aria-hidden>⚠</span>}{hint}
+        </div>
+      </div>
+      <Toggle checked={on} onChange={disabled ? () => {} : onChange} disabled={disabled} />
+    </div>
+  )
+}
+
+/** Soft / ghost pill button matching the Almanac config kit. */
+function PillButton({
+  kind = 'soft', icon, children, onClick, disabled,
+}: {
+  kind?: 'soft' | 'ghost'
+  icon?: AlmanacIconName
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`shrink-0 inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-semibold transition-colors disabled:opacity-50 ${
+        kind === 'soft'
+          ? 'bg-bg-hi border border-line text-fg hover:bg-bg'
+          : 'text-fg-dim hover:text-fg'
+      }`}
+    >
+      {icon && <AlmanacIcon name={icon} size={15} />}
+      {children}
+    </button>
+  )
+}
+
+function CountChip({ children }: { children: ReactNode }) {
+  return <span className="text-[11.5px] text-fg-faint">{children}</span>
+}
+
+// ─── Paired-device row ─────────────────────────────────────────────────────────
+
 function DeviceCard({
-  device,
-  onRevoke,
-  revoking,
+  device, online, onRevoke, revoking,
 }: {
   device: WebRemoteDevice
+  online: boolean
   onRevoke: (id: string) => void
   revoking: boolean
 }) {
+  const lastSeen = device.lastConnectedAt
+    ? new Date(device.lastConnectedAt).toLocaleString()
+    : `paired ${new Date(device.issuedAt).toLocaleDateString()}`
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-zinc-800 rounded border border-zinc-700">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-zinc-100 truncate">{device.deviceName}</p>
-        <p className="text-xs text-zinc-500 font-mono mt-0.5">{device.deviceId}</p>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          Paired {new Date(device.issuedAt).toLocaleDateString()}
-          {device.lastConnectedAt && (
-            <> · Last seen {new Date(device.lastConnectedAt).toLocaleString()}</>
-          )}
-        </p>
+    <div className="flex items-center gap-3.5 bg-bg-hi border border-line rounded-xl px-[18px] py-3.5">
+      <span className="w-[34px] h-[34px] rounded-lg bg-bg border border-line grid place-items-center text-fg-dim shrink-0">
+        <AlmanacIcon name="remote" size={17} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2.5 mb-0.5">
+          <span className="text-sm font-semibold text-fg truncate">{device.deviceName}</span>
+          {online && <Badge tone="default" className="!text-sage !border-sage/40">online</Badge>}
+        </div>
+        <div className="font-mono text-[11.5px] text-fg-faint truncate">
+          {device.deviceId} · last seen {lastSeen}
+        </div>
       </div>
       <button
         onClick={() => onRevoke(device.deviceId)}
         disabled={revoking}
-        className="ml-4 shrink-0 px-2.5 py-1 text-xs rounded border border-red-700 text-red-400 hover:bg-red-900/30 disabled:opacity-50 transition-colors"
+        className="shrink-0 rounded-lg border border-line bg-bg text-accent px-3.5 py-1.5 text-[12.5px] font-semibold hover:bg-bg-hi disabled:opacity-50 transition-colors"
       >
         Revoke
       </button>
@@ -47,6 +120,10 @@ function DeviceCard({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+// Visual reskin to the Almanac design language (design bundle: variants/remote.jsx).
+// The page title/eyebrow/intro is rendered by MainPane's SectionFrame — this
+// component must NOT add its own heading. All IPC/pairing/SAS/audit behavior is
+// preserved exactly from the prior version.
 
 export function WebRemote() {
   const [status, setStatus] = useState<WebRemoteStatus | null>(null)
@@ -206,7 +283,7 @@ export function WebRemote() {
   }
 
   if (loading) {
-    return <div className="p-6 text-zinc-500 text-sm">Loading…</div>
+    return <div className="p-6 text-fg-faint text-sm">Loading…</div>
   }
 
   const enabled = status?.enabled ?? false
@@ -217,6 +294,17 @@ export function WebRemote() {
   const e2eState = status?.e2eState ?? 'idle'
   const pendingSas = status?.pendingSas ?? null
   const devices = status?.devices ?? []
+
+  // "active" = the relay is on AND a device is currently connected.
+  const active = enabled && connected
+  // The currently-live device (most recently connected) gets the online badge.
+  const liveDeviceId = connected
+    ? devices.reduce<WebRemoteDevice | null>((best, d) => {
+        if (!d.lastConnectedAt) return best
+        if (!best || (best.lastConnectedAt ?? '') < d.lastConnectedAt) return d
+        return best
+      }, null)?.deviceId ?? null
+    : null
 
   const handleConfirmSas = async () => {
     try {
@@ -230,23 +318,23 @@ export function WebRemote() {
   }
 
   return (
-    <div className="space-y-6 max-w-xl">
+    <div className="max-w-[760px] mx-auto space-y-[22px]">
 
-      {/* SAS verification banner — shown when a new E2E session needs authentication */}
+      {/* SAS verification banner — a new E2E session needs authentication */}
       {pendingSas && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-indigo-500/70 bg-indigo-950/40">
-          <span className="text-indigo-300 text-lg leading-none mt-0.5">🔑</span>
-          <div className="flex-1 text-sm text-indigo-100">
-            <strong>Verify E2E session.</strong> Compare this code with the browser — they must match.
-            <div className="mt-2 mb-3 text-3xl font-mono tracking-[0.3em] text-center text-indigo-300 select-all">
-              {pendingSas}
-            </div>
-            <p className="text-xs text-indigo-400 mb-3">
+        <div className="flex items-start gap-3.5 px-5 py-4 rounded-2xl border border-accent/40 bg-accent/[0.06]">
+          <span className="w-[38px] h-[38px] rounded-[11px] shrink-0 grid place-items-center bg-bg-hi text-accent">
+            <AlmanacIcon name="shield" size={20} />
+          </span>
+          <div className="flex-1 min-w-0 text-sm text-fg">
+            <strong className="font-semibold">Verify E2E session.</strong> Compare this code with the browser — they must match.
+            <div className="my-2 text-3xl font-mono tracking-[0.3em] text-center text-accent select-all">{pendingSas}</div>
+            <p className="text-[12.5px] text-fg-faint mb-3">
               If the codes match, confirm below. Mutating commands are blocked until confirmed.
             </p>
             <button
               onClick={handleConfirmSas}
-              className="px-3 py-1.5 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+              className="rounded-lg bg-accent text-white px-4 py-2 text-[13px] font-semibold hover:opacity-90 transition-opacity"
             >
               Codes match — confirm
             </button>
@@ -254,258 +342,181 @@ export function WebRemote() {
         </div>
       )}
 
-      {/* E2E failed banner — shown when key exchange failed and session must be retried */}
+      {/* E2E failed banner */}
       {e2eState === 'failed' && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-red-500/70 bg-red-950/40">
-          <span className="text-red-300 text-lg leading-none mt-0.5">⚠</span>
-          <div className="text-sm text-red-200">
-            <strong>E2E key exchange failed.</strong> The session key could not be established.
-            Reconnect the mobile app to retry.
+        <div className="flex items-center gap-3.5 px-5 py-4 rounded-2xl border border-[#eccdbe] bg-[#f8e8e0]">
+          <span className="w-4 h-4 rounded-full bg-accent text-white grid place-items-center text-[11px] font-bold shrink-0">!</span>
+          <div className="text-[13px] text-[#9a3f1f]">
+            <strong className="font-semibold">E2E key exchange failed.</strong>{' '}
+            <span className="text-fg-dim">The session key could not be established. Reconnect the mobile app to retry.</span>
           </div>
         </div>
       )}
 
-      {/* Active-session banner — prominent warning when remote control is live */}
-      {enabled && connected && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-red-600/70 bg-red-950/40">
-          <span className="text-red-400 text-lg leading-none mt-0.5 animate-pulse">●</span>
-          <div className="text-sm text-red-200">
-            <strong>Remote control is ACTIVE.</strong> A web session can currently send commands to
-            this machine. Disable or revoke all devices below if unexpected.
-            {e2eActive && e2eAuthenticated && (
-              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-green-900/60 text-green-300 border border-green-700/50">
-                E2E authenticated
-              </span>
-            )}
-            {e2eActive && !e2eAuthenticated && (
-              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-amber-900/60 text-amber-300 border border-amber-700/50">
-                E2E encrypted · awaiting SAS confirmation
-              </span>
-            )}
-            {!e2eActive && (
-              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-amber-900/60 text-amber-300 border border-amber-700/50">
-                Not yet E2E encrypted
-              </span>
-            )}
+      {/* Status banner — one calm banner; color tells the truth */}
+      <div className={`flex items-center gap-3.5 px-5 py-4 rounded-2xl border ${active ? 'border-[#e8cdb9] bg-[#f5e9df]' : 'border-line bg-bg-hi'}`}>
+        <span className={`w-[38px] h-[38px] rounded-[11px] shrink-0 grid place-items-center ${active ? 'bg-[#f0d9c8] text-accent' : 'bg-[#e4ebd6] text-sage'}`}>
+          <AlmanacIcon name={active ? 'wifi' : 'shield'} size={20} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[14.5px] font-semibold text-fg mb-0.5">
+            {active ? 'Remote control is active' : enabled ? 'Remote control is idle' : 'Remote control is off'}
+          </div>
+          <div className="text-[13px] text-fg-dim leading-snug">
+            {active
+              ? 'A web session can send commands to this machine. Revoke below if unexpected.'
+              : enabled
+                ? 'The relay is on but no device is connected. Pair a device to begin.'
+                : 'The relay connection is closed — no remote commands are accepted. Enable it below only when you need it.'}
           </div>
         </div>
-      )}
+        {e2eActive && e2eAuthenticated
+          ? <Badge tone="default" className="!text-sage !border-sage/40">E2E authenticated</Badge>
+          : e2eActive
+            ? <Badge tone="warn">E2E · awaiting SAS</Badge>
+            : <Badge tone="dim">relay only · not E2E yet</Badge>}
+      </div>
 
-      {/* Kill switch banner — makes OFF state unmistakable */}
-      {!enabled && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-amber-700/60 bg-amber-950/30">
-          <span className="text-amber-400 text-lg leading-none mt-0.5">⚠</span>
-          <div className="text-sm text-amber-300">
-            <strong>Remote control is OFF.</strong> The relay connection is closed and no remote
-            commands will be accepted. Enable it below only when you need it.
-          </div>
+      {/* Permission toggles */}
+      <div>
+        <SectionLabel>Remote control</SectionLabel>
+        <div className="bg-bg-hi border border-line rounded-2xl overflow-hidden">
+          <ToggleRow
+            first
+            label="Allow remote control from the web"
+            hint="Master switch. When off, the relay refuses every connection."
+            on={enabled}
+            onChange={() => { if (!toggling) handleToggle() }}
+          />
+          <ToggleRow
+            label="Allow command writes (pty + scheduler)"
+            hint={remoteControlEnabled
+              ? 'A paired device can run shell commands and queue jobs on this machine.'
+              : 'Paired devices can watch session output but cannot send commands.'}
+            warn={remoteControlEnabled}
+            disabled={!enabled || togglingControl}
+            on={remoteControlEnabled && enabled}
+            onChange={() => { if (enabled && !togglingControl) handleControlToggle() }}
+          />
         </div>
-      )}
+      </div>
 
-      {/* Enable / disable */}
-      <section className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-          Remote Control
-        </h2>
-        <div className="flex items-center justify-between px-3 py-3 bg-zinc-800/60 rounded border border-zinc-700">
-          <div>
-            <p className="text-sm font-medium text-zinc-100">Allow remote control from the web</p>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              {enabled
-                ? connected
-                  ? 'Connected to relay · receiving commands'
-                  : 'Enabled · connecting to relay…'
-                : 'Disabled · no inbound traffic · off by default'}
-            </p>
+      {/* Pair a device */}
+      <div>
+        <SectionLabel>Pair a device</SectionLabel>
+        {pairingStep === 'idle' ? (
+          <div className="flex items-center justify-between gap-4 bg-bg-hi border border-line rounded-2xl px-5 py-[18px]">
+            <div className="text-[13.5px] text-fg-dim leading-relaxed max-w-[420px]">
+              Open the <strong className="text-fg font-semibold">web app</strong> on your phone and tap{' '}
+              <strong className="text-fg font-semibold">Add Device</strong> to get an 8-character code, then enter it here.
+            </div>
+            <PillButton kind="soft" icon="link" onClick={() => setPairingStep('enter-otp')}>Pair Device…</PillButton>
           </div>
-          <div className="flex items-center gap-2">
-            <StatusDot connected={connected && enabled} />
-            <button
-              onClick={handleToggle}
-              disabled={toggling}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
-                enabled ? 'bg-blue-600' : 'bg-zinc-600'
-              }`}
-              aria-pressed={enabled}
-              aria-label="Toggle remote control"
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  enabled ? 'translate-x-6' : 'translate-x-1'
-                }`}
+        ) : (
+          <div className="flex items-center gap-5 bg-bg-hi border border-accent/40 rounded-2xl px-6 py-[22px] shadow-[0_0_0_1px_rgba(184,92,52,0.25)]">
+            <span className="w-[52px] h-[52px] rounded-xl bg-bg border border-line grid place-items-center text-accent shrink-0">
+              <AlmanacIcon name="link" size={24} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-fg-faint mb-2">Enter the code from your phone</div>
+              <input
+                ref={otpRef}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                onKeyDown={(e) => { if (e.key === 'Enter') handlePair() }}
+                maxLength={8}
+                placeholder="XXXXXXXX"
+                disabled={pairingStep === 'pairing'}
+                className="w-full bg-transparent border-0 outline-none font-mono text-[30px] font-semibold tracking-[6px] text-fg placeholder:text-fg-faint/40 disabled:opacity-50"
               />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Allow remote control toggle */}
-      <section className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-          Remote Control Permissions
-        </h2>
-        <div className="flex items-start justify-between px-3 py-3 bg-zinc-800/60 rounded border border-zinc-700">
-          <div className="min-w-0 mr-4">
-            <p className="text-sm font-medium text-zinc-100">Allow remote control (pty + scheduler writes)</p>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              {remoteControlEnabled
-                ? 'ON — paired devices can spawn shells and trigger scheduler jobs'
-                : 'OFF — paired devices are read-only mirrors (default)'}
-            </p>
-            {remoteControlEnabled && (
-              <p className="text-xs text-amber-400 mt-1">
-                ⚠ Enabled: a paired device can execute arbitrary commands on this machine.
-              </p>
-            )}
-          </div>
-          <button
-            onClick={handleControlToggle}
-            disabled={togglingControl}
-            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
-              remoteControlEnabled ? 'bg-amber-600' : 'bg-zinc-600'
-            }`}
-            aria-pressed={remoteControlEnabled}
-            aria-label="Toggle remote control permissions"
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                remoteControlEnabled ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
-          </button>
-        </div>
-      </section>
-
-      {/* Pairing */}
-      <section className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-          Pair a Device
-        </h2>
-        <p className="text-sm text-zinc-400">
-          Open the web app and click "Add Device" to get an 8-character code, then enter it here.
-        </p>
-
-        {pairingStep === 'idle' && (
-          <button
-            onClick={() => setPairingStep('enter-otp')}
-            className="px-4 py-2 text-sm rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100 transition-colors"
-          >
-            Pair Device…
-          </button>
-        )}
-
-        {(pairingStep === 'enter-otp' || pairingStep === 'pairing') && (
-          <div className="flex items-center gap-2">
-            <input
-              ref={otpRef}
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-              onKeyDown={(e) => { if (e.key === 'Enter') handlePair() }}
-              maxLength={8}
-              placeholder="XXXXXXXX"
-              disabled={pairingStep === 'pairing'}
-              className="w-36 px-3 py-1.5 text-sm font-mono rounded border border-zinc-600 bg-zinc-800 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 disabled:opacity-50"
-            />
-            <button
-              onClick={handlePair}
-              disabled={pairingStep === 'pairing' || otp.length < 8}
-              className="px-3 py-1.5 text-sm rounded bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 transition-colors"
-            >
-              {pairingStep === 'pairing' ? 'Pairing…' : 'Confirm'}
-            </button>
-            <button
-              onClick={() => { setPairingStep('idle'); setOtp('') }}
-              disabled={pairingStep === 'pairing'}
-              className="px-3 py-1.5 text-sm rounded border border-zinc-600 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors"
-            >
-              Cancel
-            </button>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <PillButton
+                kind="soft"
+                onClick={handlePair}
+                disabled={pairingStep === 'pairing' || otp.length < 8}
+              >
+                {pairingStep === 'pairing' ? 'Pairing…' : 'Confirm'}
+              </PillButton>
+              <PillButton kind="ghost" onClick={() => { setPairingStep('idle'); setOtp('') }} disabled={pairingStep === 'pairing'}>
+                cancel
+              </PillButton>
+            </div>
           </div>
         )}
-      </section>
+      </div>
 
       {/* Paired devices */}
-      <section className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-          Paired Devices
-          {devices.length > 0 && (
-            <span className="ml-2 text-zinc-600 normal-case font-normal">
-              ({devices.length})
-            </span>
-          )}
-        </h2>
-
+      <div>
+        <SectionLabel right={devices.length > 0 ? <CountChip>{devices.length} paired</CountChip> : undefined}>
+          Paired devices
+        </SectionLabel>
         {devices.length === 0 ? (
-          <p className="text-sm text-zinc-500">No devices paired yet.</p>
+          <div className="bg-bg-hi border border-line rounded-xl p-5 text-center text-[13.5px] text-fg-faint italic font-serif">
+            No devices paired yet.
+          </div>
         ) : (
           <div className="space-y-2">
             {devices.map((d) => (
               <DeviceCard
                 key={d.deviceId}
                 device={d}
+                online={d.deviceId === liveDeviceId}
                 onRevoke={handleRevoke}
                 revoking={revokingId === d.deviceId}
               />
             ))}
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Audit log tail */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Audit Log
-          </h2>
-          <button
-            onClick={handleAuditToggle}
-            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-          >
-            {showAudit ? 'Hide' : 'Show last 100 entries'}
+      {/* Audit log */}
+      <div>
+        <SectionLabel right={
+          <button onClick={handleAuditToggle} className="text-[12px] text-fg-faint hover:text-fg-dim transition-colors">
+            {showAudit ? 'Hide' : 'Show last 100 · 0600, stays on this machine'}
           </button>
-        </div>
-
+        }>
+          Audit log
+        </SectionLabel>
         {showAudit && (
-          <div className="rounded border border-zinc-700 bg-zinc-900 overflow-auto max-h-64">
+          <div className="bg-bg-hi border border-line rounded-xl overflow-auto max-h-64 mb-2">
             {auditLines.length === 0 ? (
-              <p className="p-3 text-xs text-zinc-500">No entries today.</p>
+              <p className="p-4 text-[12.5px] text-fg-faint">No entries today.</p>
             ) : (
-              <pre className="p-3 text-xs text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed">
+              <pre className="p-4 text-[12px] text-fg-dim font-mono whitespace-pre-wrap leading-relaxed">
                 {auditLines.join('\n')}
               </pre>
             )}
           </div>
         )}
-
-        <p className="text-xs text-zinc-600">
+        <p className="text-[12px] text-fg-faint">
           Full log at{' '}
-          <code className="text-zinc-500">~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log</code>
+          <code className="font-mono text-fg-faint">~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log</code>
           {' '}(0600, never leaves this machine)
         </p>
-      </section>
+      </div>
 
-      {/* Panic — revoke all devices */}
-      <section className="space-y-3 border-t border-zinc-800 pt-6">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-red-500">
-          Danger Zone
-        </h2>
-        <div className="flex items-start justify-between gap-4 px-4 py-3 rounded-lg border border-red-900/60 bg-red-950/20">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-red-300">Panic — disconnect &amp; revoke all devices</p>
-            <p className="text-xs text-zinc-500 mt-1">
-              Immediately tears down every active session and invalidates all paired-device tokens.
-              Devices must re-pair to reconnect. Use if you suspect compromise.
-            </p>
+      {/* Danger zone — panic */}
+      <div className="flex items-center justify-between gap-4 bg-[#f8e8e0] border border-[#eccdbe] rounded-2xl px-5 py-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-4 h-4 rounded-full bg-accent text-white grid place-items-center text-[11px] font-bold shrink-0">!</span>
+            <span className="text-sm font-semibold text-[#9a3f1f]">Panic — disconnect &amp; revoke everything</span>
           </div>
-          <button
-            onClick={handleRevokeAll}
-            disabled={revokingAll}
-            className="shrink-0 px-3 py-1.5 text-sm rounded border border-red-700 text-red-400 hover:bg-red-900/40 disabled:opacity-50 transition-colors"
-          >
-            {revokingAll ? 'Revoking…' : 'Revoke All'}
-          </button>
+          <div className="text-[12.5px] text-fg-dim leading-snug max-w-[440px]">
+            Tears down every active session and invalidates all paired-device tokens. Devices must re-pair.
+            Use if you suspect compromise.
+          </div>
         </div>
-      </section>
+        <button
+          onClick={handleRevokeAll}
+          disabled={revokingAll}
+          className="shrink-0 rounded-lg bg-accent text-white px-[18px] py-2 text-[13px] font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {revokingAll ? 'Revoking…' : 'Revoke all'}
+        </button>
+      </div>
     </div>
   )
 }

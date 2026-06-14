@@ -16,7 +16,7 @@ export type AlmanacIconName =
   | 'race' | 'background' | 'repoviz' | 'subagents' | 'system-prompt'
   | 'permissions' | 'agent-memory' | 'tool' | 'quick-open' | 'global-search'
   | 'knowledge-graph'
-  | 'remote'
+  | 'remote' | 'wifi' | 'shield' | 'link' | 'copy'
 
 interface IconProps {
   name: AlmanacIconName
@@ -84,6 +84,10 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'tool':         return <svg {...props}><path d="M14 4a4 4 0 014 4l-7 7-4-4 7-7zM7 11l-3 3 6 6 3-3" /></svg>
     case 'quick-open':   return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 9h18M7 13h10M7 16h6" /></svg>
     case 'remote':       return <svg {...props}><path d="M5 12.5a7 7 0 0114 0M1.5 9a11 11 0 0121 0M8.5 16a3.5 3.5 0 017 0" /><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none" /></svg>
+    case 'wifi':         return <svg {...props}><path d="M5 12.5a10 10 0 0114 0M8 15.5a6 6 0 018 0M12 18.5h.01" /></svg>
+    case 'shield':       return <svg {...props}><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></svg>
+    case 'link':         return <svg {...props}><path d="M9 12h6" /><path d="M10 8H7a4 4 0 000 8h3M14 8h3a4 4 0 010 8h-3" /></svg>
+    case 'copy':         return <svg {...props}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 012-2h8" /></svg>
     default: return null
   }
 }

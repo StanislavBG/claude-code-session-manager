@@ -19,7 +19,7 @@ export default function App() {
   return (
     <ClerkProvider publishableKey={CLERK_KEY} afterSignOutUrl="/projects/session-manager/">
       <SignedOut>
-        <div className="flex items-center justify-center min-h-dvh bg-bg p-4">
+        <div className="flex items-center justify-center min-h-dvh p-4">
           <SignIn routing="hash" />
         </div>
       </SignedOut>
@@ -153,8 +153,8 @@ function AppInner() {
   const banners = (
     <>
       {keyMismatchDeviceIds.length > 0 && (
-        <div className="fixed top-0 inset-x-0 z-50 bg-red-900 border-b border-red-600 px-4 py-3 text-sm text-red-100">
-          <strong>Key substitution detected.</strong> The desktop public key for{' '}
+        <div className="fixed top-0 inset-x-0 z-50 safe-top bg-[#f8e8e0] border-b border-[#eccdbe] px-4 py-3 text-sm text-[#9a3f1f]">
+          <strong className="font-semibold">Key substitution detected.</strong> The desktop public key for{' '}
           {keyMismatchDeviceIds.length === 1
             ? `device ${keyMismatchDeviceIds[0].slice(0, 8)}…`
             : `${keyMismatchDeviceIds.length} device(s)`}{' '}
@@ -162,18 +162,18 @@ function AppInner() {
         </div>
       )}
       {pendingSas && (
-        <div className="fixed bottom-0 inset-x-0 z-50 bg-indigo-900 border-t border-indigo-600 px-4 py-4 text-sm text-indigo-100">
+        <div className="fixed bottom-0 inset-x-0 z-50 safe-bottom bg-paper border-t border-edge px-4 py-5 shadow-[0_-10px_40px_rgba(120,80,40,0.18)]">
           <div className="max-w-sm mx-auto text-center">
-            <p className="font-semibold mb-2">Verify E2E session</p>
-            <p className="text-indigo-300 mb-2 text-xs">
-              Confirm the desktop (Web Remote tab) shows the same 6-digit code:
+            <p className="font-serif text-xl font-semibold text-ink mb-1">Verify E2E session</p>
+            <p className="text-ink-mute mb-3 text-xs">
+              Confirm the desktop (Remote tab) shows the same 6-digit code:
             </p>
-            <div className="text-3xl font-mono tracking-[0.3em] text-indigo-200 mb-3 select-all">
+            <div className="text-3xl font-mono tracking-[0.3em] text-accent mb-4 select-all">
               {pendingSas.sas}
             </div>
             <button
               onClick={clearPendingSas}
-              className="px-4 py-1.5 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-500 active:bg-indigo-400 transition-colors"
+              className="px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:opacity-90 active:opacity-80 transition-opacity"
             >
               Codes match — dismiss
             </button>

@@ -411,7 +411,12 @@ async function connect() {
   if (!cfg.remoteEnabled) return;
 
   const devices = cfg.devices || [];
-  const device = devices.find((d) => d.deviceToken);
+  // Use the most recently paired credential. The relay's device-token store is
+  // in-memory and wiped on every relay redeploy, so an older credential can hold a
+  // dead token that 401s forever; picking the newest lets a fresh re-pair recover.
+  const device = devices
+    .filter((d) => d.deviceToken)
+    .sort((a, b) => String(b.issuedAt || '').localeCompare(String(a.issuedAt || '')))[0];
   if (!device) {
     logs.writeLine({ scope: 'webRemote', level: 'info', message: 'no paired device; not connecting' });
     return;
@@ -1209,8 +1214,11 @@ async function pair(otp) {
   }
 
   const cfg = await loadConfig();
-  const devices = cfg.devices || [];
-  devices.push({
+  // A desktop only ever connects to the relay as ONE device; all of the user's
+  // browsers route to it (the relay isolates by email, not per-credential). So keep
+  // only the newly paired credential — accumulating stale entries is pure cruft that
+  // would otherwise shadow this one and trap reconnection on a dead token.
+  const devices = [{
     deviceId: response.deviceId,
     deviceToken: response.deviceToken, // stored only on disk at 0600
     // Private key stored at 0600 — same security model as device token.
@@ -1219,7 +1227,7 @@ async function pair(otp) {
     deviceName: `Device (paired ${new Date().toISOString().slice(0, 10)})`,
     issuedAt: new Date().toISOString(),
     lastConnectedAt: null,
-  });
+  }];
 
   await saveConfig({ ...cfg, devices });
 

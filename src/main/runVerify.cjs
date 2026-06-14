@@ -460,9 +460,16 @@ function scanSentinel(resultEvent, events) {
  * @param {boolean}  [params.committedDuringRun] True when HEAD moved during the run,
  *                                            confirming the job's commit landed.
  *                                            Default false for back-compat.
+ * @param {boolean}  [params.allowPreSentinelHeal] When true, a commit-in-window
+ *                                            with no SCHEDULER_VERDICT: FAIL is
+ *                                            sufficient to override weak verdicts
+ *                                            (transcript_errors/verify_unavailable)
+ *                                            even without a PASS sentinel. Only
+ *                                            set by the boot reverify self-heal
+ *                                            pass for pre-sentinel legacy runs.
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
-async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false }) {
+async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false }) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
   const verdictsPath = path.join(runDir, `${slug}.verdicts.json`);
@@ -634,6 +641,24 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
         `SCHEDULER_VERDICT: PASS + commit landed overrides ${top.verdict}`,
         null,
         { ...(annotations.length ? { annotations } : {}), sentinel, sentinelOverride: top.verdict },
+      );
+    }
+
+    // Pre-sentinel heal: job predates SCHEDULER_VERDICT emission. A commit in
+    // the run window with no explicit FAIL sentinel is weak but sufficient to
+    // override the two weakest verdict classes during the self-heal pass.
+    // Only applies when the caller opts in (allowPreSentinelHeal=true) — live
+    // runs never set this, so only the boot reverify self-heal uses it.
+    if (
+      allowPreSentinelHeal
+      && committedDuringRun
+      && sentinel !== 'fail'
+      && (top.verdict === 'transcript_errors' || top.verdict === 'verify_unavailable')
+    ) {
+      return conclude('clean',
+        `pre-sentinel heal: committed in run window, no SCHEDULER_VERDICT: FAIL, overrides ${top.verdict}`,
+        null,
+        { ...(annotations.length ? { annotations } : {}), preSentinelHeal: top.verdict },
       );
     }
 

@@ -180,6 +180,25 @@ function gitHead(cwd) {
   });
 }
 
+// Returns true if ≥1 commit landed in cwd between startedAt and finishedAt
+// (with 60s slack). Used by the self-heal pass to derive committedDuringRun
+// from the recorded run window — the live commit-guard uses gitHead() instead.
+// Never throws; git-unavailable → false (no override, job stays as-is).
+function committedInWindow(cwd, startedAt, finishedAt) {
+  return new Promise((resolve) => {
+    if (!cwd || !startedAt) { resolve(false); return; }
+    const until = finishedAt
+      ? new Date(Date.parse(finishedAt) + 60_000).toISOString()
+      : new Date().toISOString();
+    execFile(
+      'git',
+      ['-C', cwd, 'log', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
+      { timeout: 10_000, windowsHide: true },
+      (err, stdout) => { resolve(!err && String(stdout || '').trim().length > 0); },
+    );
+  });
+}
+
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
 const RUNS_DIR = path.join(ROOT, 'runs');
@@ -1706,14 +1725,30 @@ async function reverifyNeedsReview() {
   const snap = await readQueue();
   const candidates = snap.jobs.filter(isRescanCandidate);
   const healed = [];
+  const leftForReview = [];
   for (const job of candidates) {
     const runDir = path.join(RUNS_DIR, job.runId);
     const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+    // Derive committedDuringRun from the recorded run window. The live
+    // commit-guard uses gitHead() (before/after HEAD diff); here the run is
+    // already over so we query git log filtered to [startedAt, finishedAt+60s].
+    const committedDuringRun = await committedInWindow(job.cwd, job.startedAt, job.finishedAt);
     let v = null;
     try {
-      v = await verifyRun({ runDir, prdPath, queueEntry: job, allJobs: snap.jobs });
-    } catch { continue; } // unreadable log etc. — leave for human review
-    if (v && v.verdict === 'clean') healed.push(job.slug);
+      v = await verifyRun({
+        runDir,
+        prdPath,
+        queueEntry: job,
+        allJobs: snap.jobs,
+        committedDuringRun,
+        allowPreSentinelHeal: true,
+      });
+    } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
+    if (v && v.verdict === 'clean') {
+      healed.push(job.slug);
+    } else {
+      leftForReview.push({ slug: job.slug, reason: v ? `${v.verdict}: ${v.reason}` : 'null verdict' });
+    }
   }
   if (healed.length) {
     const healSet = new Set(healed);
@@ -1729,7 +1764,11 @@ async function reverifyNeedsReview() {
     console.log(`[scheduler] boot reverify: healed ${healed.length} stale needs_review → completed (${healed.join(', ')})`);
     await broadcast();
   }
-  return { rescanned: candidates.length, healed };
+  if (leftForReview.length) {
+    const detail = leftForReview.map((e) => `${e.slug} (${e.reason})`).join(', ');
+    console.log(`[scheduler] boot reverify: left for review: ${detail}`);
+  }
+  return { rescanned: candidates.length, healed, leftForReview };
 }
 
 function registerScheduleHandlers() {

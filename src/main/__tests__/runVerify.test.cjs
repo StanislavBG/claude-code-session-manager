@@ -716,6 +716,99 @@ test('sentinel FAIL + committedDuringRun:true → transcript_errors (FAIL never 
   }
 });
 
+// ─── pre-sentinel heal (allowPreSentinelHeal) ─────────────────────────────────
+
+// (f) allowPreSentinelHeal=true + committed + no sentinel → clean
+test('pre-sentinel heal: committed + no sentinel + allowPreSentinelHeal → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '86-pre-sentinel-heal-pass';
+    writeLog(tmp, slug, tracebackRunEvents(null)); // no SCHEDULER_VERDICT line
+    const prdPath = writePrd(tmp, slug, '# Pre-sentinel heal');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'needs_review' },
+      allJobs: [],
+      committedDuringRun: true,
+      allowPreSentinelHeal: true,
+    });
+    assert.equal(verdict.verdict, 'clean', `expected clean via pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+    assert.ok(verdict.reason.includes('pre-sentinel heal'), `reason should mention pre-sentinel heal: ${verdict.reason}`);
+    const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${slug}.verdicts.json`), 'utf8'));
+    assert.ok(sidecar.preSentinelHeal, 'sidecar should record preSentinelHeal');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (g) allowPreSentinelHeal=true + committed + FAIL sentinel → stays transcript_errors
+test('pre-sentinel heal: committed + SCHEDULER_VERDICT: FAIL + allowPreSentinelHeal → transcript_errors', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '86-pre-sentinel-heal-fail';
+    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: FAIL AC gate was red'));
+    const prdPath = writePrd(tmp, slug, '# Pre-sentinel heal blocked by FAIL');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'needs_review' },
+      allJobs: [],
+      committedDuringRun: true,
+      allowPreSentinelHeal: true,
+    });
+    assert.equal(verdict.verdict, 'transcript_errors', `FAIL sentinel must block pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (h) allowPreSentinelHeal=true + NOT committed + no sentinel → stays transcript_errors
+test('pre-sentinel heal: not committed + no sentinel + allowPreSentinelHeal → transcript_errors', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '86-pre-sentinel-heal-uncommitted';
+    writeLog(tmp, slug, tracebackRunEvents(null));
+    const prdPath = writePrd(tmp, slug, '# Pre-sentinel heal blocked by no commit');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'needs_review' },
+      allJobs: [],
+      committedDuringRun: false,
+      allowPreSentinelHeal: true,
+    });
+    assert.equal(verdict.verdict, 'transcript_errors', `no commit must block pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (i) allowPreSentinelHeal=false (default) + committed + no sentinel → baseline unchanged
+test('no sentinel + committed + allowPreSentinelHeal=false (default) → transcript_errors', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '86-pre-sentinel-heal-disabled';
+    writeLog(tmp, slug, tracebackRunEvents(null));
+    const prdPath = writePrd(tmp, slug, '# allowPreSentinelHeal disabled by default');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'needs_review' },
+      allJobs: [],
+      committedDuringRun: true,
+      // allowPreSentinelHeal defaults to false
+    });
+    assert.equal(verdict.verdict, 'transcript_errors', `must not heal without allowPreSentinelHeal, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
 // (e) halt + sentinel PASS → still halt (override must not apply to halt)
 test('halt result + sentinel PASS + committedDuringRun:true → still halt', async () => {
   const tmp = makeTmpDir();

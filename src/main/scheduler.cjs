@@ -91,6 +91,13 @@ const RESULT_TAIL_BYTES = 8 * 1024;
 const IDLE_OUTPUT_KILL_MS = 20 * 60_000;
 const IDLE_CHECK_INTERVAL_MS = 60_000;
 
+// Boot reconciliation: a job left 'running' by an app restart/crash whose log
+// shows neither success nor a real failure result was merely interrupted — the
+// host died, the PRD didn't. Re-queue it up to this many times before giving up
+// and marking it failed, so a restart self-recovers instead of needing a manual
+// flip + a wasted fix-plan investigation.
+const ORPHAN_REQUEUE_CAP = 2;
+
 // Appended to every scheduled job prompt so the queue can be RELIED ON to finish
 // work to a consistent bar: review → security-review → verify → commit. Enforced
 // centrally here (not per-PRD) so it applies to every current and future PRD.
@@ -2038,24 +2045,52 @@ async function init() {
   }
   await mutate((state) => {
     for (const j of state.jobs) {
-      if (j.status === 'running') {
-        const pid = j.runtime?.pid;
-        let killNote = '';
-        if (pid) {
-          const result = killOrphanClaudePid(pid);
-          killNote = ` (orphan pid=${pid}: ${result})`;
-          if (result === 'killed') {
-            console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${j.slug}`);
-          }
+      if (j.status !== 'running') continue;
+      const pid = j.runtime?.pid;
+      let killNote = '';
+      if (pid) {
+        const result = killOrphanClaudePid(pid);
+        killNote = ` (orphan pid=${pid}: ${result})`;
+        if (result === 'killed') {
+          console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${j.slug}`);
         }
-        const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
-        const success = outcome === 'success';
-        j.status = success ? 'completed' : 'failed';
-        j.exitCode = success ? 0 : (j.exitCode ?? 1);
-        j.error = success ? null : `orphaned: app restarted while running${killNote}`;
+      }
+      const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
+      if (outcome === 'success') {
+        // Job finished cleanly before the crash — keep the win.
+        j.status = 'completed';
+        j.exitCode = 0;
+        j.error = null;
         j.finishedAt = new Date().toISOString();
         delete j.runtime;
-        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → ${j.status}`);
+        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=success → completed`);
+      } else if (outcome === 'failed') {
+        // The log carries a real failure result event — a genuine failure, keep it.
+        j.status = 'failed';
+        j.exitCode = j.exitCode ?? 1;
+        j.error = `orphaned: app restarted while running${killNote}`;
+        j.finishedAt = new Date().toISOString();
+        delete j.runtime;
+        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=failed → failed`);
+      } else {
+        // no_result / unknown: the run was interrupted (host died / app restarted)
+        // with NO evidence it failed on its own merits. Punishing the PRD here is
+        // the wrong call — it demands a manual flip and burns an Opus fix-plan on a
+        // job that never actually failed. Re-queue it (bounded) so an app restart
+        // self-recovers. Mirrors the transient-kill auto-retry on the live path.
+        const tries = j.orphanRetries ?? 0;
+        if (tries < ORPHAN_REQUEUE_CAP) {
+          resetJobFields(j, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`);
+          j.orphanRetries = tries + 1;
+          console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → re-queued (${tries + 1}/${ORPHAN_REQUEUE_CAP})`);
+        } else {
+          j.status = 'failed';
+          j.exitCode = j.exitCode ?? 1;
+          j.error = `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`;
+          j.finishedAt = new Date().toISOString();
+          delete j.runtime;
+          console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → failed (orphan retries exhausted)`);
+        }
       }
     }
   });
@@ -2081,7 +2116,17 @@ async function init() {
   // Refresh next-reset every 10 minutes — billing window can shift if usage
   // resets early or the auth token rotates. Tracked so re-init doesn't leak.
   if (rescheduleInterval) clearInterval(rescheduleInterval);
-  rescheduleInterval = setInterval(() => { rescheduleTimer().catch(() => {}); }, 10 * 60_000);
+  rescheduleInterval = setInterval(() => {
+    rescheduleTimer().catch(() => {});
+    // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
+    // job whose work actually landed (committed in-window, no FAIL sentinel)
+    // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded — the
+    // log scan only runs when something is actually flagged.
+    const s = readQueueSync();
+    if (s.jobs.some((j) => j.status === 'needs_review')) {
+      reverifyNeedsReview().catch(() => {});
+    }
+  }, 10 * 60_000);
 
   // Self-rescheduling poll loop with exponential backoff. Replaces the
   // old fixed-interval pollTimer + initialPollTimeout.

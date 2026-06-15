@@ -57,6 +57,9 @@ let powerBlockerId = -1;
 // `systemd-inhibit` child, which talks straight to logind and is
 // desktop-agnostic. Handle to the child so we can release it on quit.
 let systemdInhibitChild = null;
+// Belt-and-suspenders: re-assert the inhibitor on a slow cadence so it can never
+// stay dead (idempotent — startSystemdInhibit no-ops if a live holder exists).
+let inhibitReassertTimer = null;
 
 function startSystemdInhibit() {
   if (process.platform !== 'linux') return;
@@ -70,7 +73,11 @@ function startSystemdInhibit() {
     // this the child reparents to init on a hard kill and the inhibitor leaks
     // forever (one stranded lock per crash). 5s tick = worst-case 5s of stale
     // lock after death, which errs toward "stay awake" — the safe direction.
-    const child = spawn('systemd-inhibit', [
+    // Absolute path — a GUI/desktop-launched Electron can boot with a minimal
+    // PATH that lacks /usr/bin, so a bare `systemd-inhibit` would ENOENT.
+    const inhibitBin = require('node:fs').existsSync('/usr/bin/systemd-inhibit')
+      ? '/usr/bin/systemd-inhibit' : 'systemd-inhibit';
+    const child = spawn(inhibitBin, [
       '--what=sleep:idle',
       '--who=Claude Session Manager',
       '--why=Scheduler polling and claude -p jobs must survive idle',
@@ -79,6 +86,17 @@ function startSystemdInhibit() {
     ], { stdio: 'ignore', detached: false });
     child.on('error', (e) => {
       logs.writeLine({ scope: 'main', level: 'warn', message: 'systemd-inhibit spawn failed', meta: { error: e?.message } });
+    });
+    // Self-heal: if the holder ever dies while the app is alive (a missed
+    // suspend, an external kill, a transient spawn that didn't hold), revive it.
+    // Without this the lock is held exactly once at boot and never recovers —
+    // the machine then idle-suspends with the app open (the reported bug).
+    child.on('exit', (code, signal) => {
+      logs.writeLine({ scope: 'main', level: 'warn', message: 'systemd-inhibit holder exited', meta: { code, signal } });
+      if (!teardownDone && systemdInhibitChild === child) {
+        systemdInhibitChild = null;
+        setTimeout(() => { if (!teardownDone) startSystemdInhibit(); }, 2000);
+      }
     });
     if (child.pid) {
       systemdInhibitChild = child;
@@ -952,6 +970,12 @@ app.whenReady().then(async () => {
   }
   // Linux backstop — Electron's blocker no-ops under COSMIC (see above).
   startSystemdInhibit();
+  // Re-assert every 60s so a dead holder self-revives even if its exit handler
+  // was missed. Idempotent; unref'd so it never holds the loop open at quit.
+  if (process.platform === 'linux' && !inhibitReassertTimer) {
+    inhibitReassertTimer = setInterval(() => { if (!teardownDone) startSystemdInhibit(); }, 60_000);
+    if (inhibitReassertTimer.unref) inhibitReassertTimer.unref();
+  }
 
   // OTEL: load persisted config and start the exporter only if `enabled`.
   // Failures are non-fatal — the app must keep working without telemetry.
@@ -987,6 +1011,7 @@ function runShutdownCleanup() {
     try { powerSaveBlocker.stop(powerBlockerId); } catch { /* */ }
     powerBlockerId = -1;
   }
+  if (inhibitReassertTimer) { clearInterval(inhibitReassertTimer); inhibitReassertTimer = null; }
   stopSystemdInhibit();
 }
 

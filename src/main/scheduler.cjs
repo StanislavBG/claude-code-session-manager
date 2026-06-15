@@ -65,6 +65,7 @@ const {
   MAX_JOB_DURATION_MS,
 } = require('./lib/schedulerConfig.cjs');
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
+const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -1469,7 +1470,14 @@ function tickQueue() {
     await reconcile(state);
     const cap = ENV_CAP ?? state.config.concurrencyCap;
     const batch = pickNextBatch(state.jobs, runningSet, cap);
-    if (batch.length === 0) return;
+    if (batch.length === 0) {
+      // Queue drained — run the definition-of-done gate fire-and-forget.
+      // Non-blocking: does not hold the mutate lock; errors are logged, not thrown.
+      runDefinitionOfDoneOnDrain(state, { cancelToken }).catch((err) => {
+        console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
+      });
+      return;
+    }
 
     const availableMb = getAvailableMemMb();
     const allowed = memoryLimitedBatchSize(availableMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length);

@@ -1414,19 +1414,22 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     await broadcast();
 
     if (actuallyFailed && failedJobSnapshot) {
-      // Transient-failure detector: SIGTERM/SIGKILL within 45s = almost
-      // always external kill (user-initiated app restart, OOM-kill, manual
-      // process kill, Electron HMR). The PRD itself didn't fail; the run was
-      // interrupted before it could do meaningful work. Spawning an Opus
-      // investigator on these is wasted tokens AND pollutes the queue with
-      // redundant fix-PRDs (real example 2026-05-21: 07-agent-view-... got
-      // SIGTERMed at 10s by an app restart, the rename had already been done
-      // anyway). The 45s cutoff (was 30s) catches Electron-HMR borderline
-      // cases like PRD 26 SIGTERM'd at 33s — that was 3s over the old cutoff
-      // and fell through to a fix-PRD that just acknowledged the work was
-      // already done. Auto-retry up to 2x before falling through to investigation.
+      // Transient-failure detector. A 143/137 exit is ALWAYS a signal kill — the
+      // agent never self-exits with those — so the only question is WHO killed it.
+      // The scheduler's own intentional kills before the idle watchdog are the
+      // result-tail post-success kill (which maps back to exit 0, so it never
+      // reaches here) and the rare supervisor kill-agent. The idle-output
+      // watchdog only fires at IDLE_OUTPUT_KILL_MS (20 min) of stalled output,
+      // and the deadman at 4 h. THEREFORE any 143/137 with a run shorter than the
+      // idle threshold is an EXTERNAL/transient kill — an app restart (incl. our
+      // own self-restart on publish/HMR — see feedback 2026-06-15-01), an
+      // OOM-kill, or a manual kill — not a real failure. Re-queue it (bounded)
+      // instead of marking it failed + spawning a spurious fix-plan. (Was 45 s,
+      // which wrongly hard-failed externally-killed jobs like 115 SIGTERM'd at
+      // 67 s.) Genuine watchdog kills (idle ≥20 min, deadman 4 h) run longer than
+      // the threshold and still fall through to investigation.
       const ec = failedJobSnapshot.exitCode;
-      const transient = (ec === 143 || ec === 137) && res.durationMs < 45_000;
+      const transient = (ec === 143 || ec === 137) && res.durationMs < IDLE_OUTPUT_KILL_MS;
       const retries = failedJobSnapshot.transientRetries ?? 0;
       if (transient && retries < 2) {
         console.log(`[scheduler] transient failure (exit=${ec} dur=${res.durationMs}ms) — auto-retry ${retries + 1}/2 for ${job.slug}`);

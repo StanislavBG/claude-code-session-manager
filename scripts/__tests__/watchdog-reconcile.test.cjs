@@ -25,9 +25,9 @@ function makeQueue(base, jobs) {
   return queuePath;
 }
 
-function makeHeartbeat(base, tsMs) {
+function makeHeartbeat(base, tsMs, extra = {}) {
   const hbPath = path.join(base, 'heartbeat.log');
-  fs.writeFileSync(hbPath, JSON.stringify({ ts: tsMs }) + '\n');
+  fs.writeFileSync(hbPath, JSON.stringify({ ts: tsMs, ...extra }) + '\n');
   return hbPath;
 }
 
@@ -252,6 +252,116 @@ test('stale + alive PID → SIGTERM attempt, then outcome classification', () =>
     // Should still be re-queued since outcome is no_result
     assert.equal(j.status, 'pending');
     assert.equal(j.orphanRetries, 1);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── PID liveness guard: stale heartbeat + live app pid → NO reap ─────────────
+test('stale heartbeat + live app pid → reconcileQueueOffline is a no-op (no SIGTERM of job pid)', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
+  try {
+    const job = {
+      slug: 'test-job', status: 'running', runId: 'run-live-app',
+      runtime: { pid: 9999999 }, orphanRetries: 0,
+      startedAt: new Date().toISOString(), finishedAt: null,
+      exitCode: null, error: null,
+    };
+    makeRunDir(base, 'run-live-app', 'test-job', '');
+    const queuePath = makeQueue(base, [job]);
+    const beforeBytes = fs.readFileSync(queuePath);
+
+    // Stale heartbeat (10 min old) but stamped with OUR OWN pid — guaranteed alive.
+    const hbPath = makeHeartbeat(base, Date.now() - 10 * 60 * 1000, { pid: process.pid });
+
+    // reaperHelpers stub is irrelevant here — the PID guard fires before we reach it.
+    withFakeReaper({ pidAlive: true, outcome: 'no_result' }, WATCHDOG_HELPERS, (helpers) => {
+      const result = helpers.reconcileQueueOffline({
+        heartbeatPath: hbPath,
+        maxAgeMs: 180_000,
+        queuePath,
+        runsDir: path.join(base, 'runs'),
+      });
+      assert.equal(result.reconciled, false, 'should be a no-op');
+      assert.equal(result.reapedCount, 0, 'reapedCount must be 0');
+    });
+
+    // queue.json must be byte-identical — job PID must NOT have been SIGTERMed via fake reaper
+    const afterBytes = fs.readFileSync(queuePath);
+    assert.deepEqual(beforeBytes, afterBytes, 'queue.json must be byte-identical — no reap occurred');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── PID liveness guard: stale heartbeat + dead app pid → reap proceeds ───────
+test('stale heartbeat + dead app pid → reconcileQueueOffline reaps normally', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
+  try {
+    // Use a pid that is guaranteed not running — PID 1 is init/systemd, not a claude process.
+    // We need a pid that process.kill(pid, 0) will throw ESRCH for.
+    // Use a very large non-existent pid.
+    const deadAppPid = 9999998;
+    const job = {
+      slug: 'test-job', status: 'running', runId: 'run-dead-app',
+      runtime: { pid: 9999997 }, orphanRetries: 0,
+      startedAt: new Date().toISOString(), finishedAt: null,
+      exitCode: null, error: null,
+    };
+    makeRunDir(base, 'run-dead-app', 'test-job',
+      '{"type":"result","subtype":"success","is_error":false}\n');
+    const queuePath = makeQueue(base, [job]);
+
+    // Stale heartbeat with a dead app pid.
+    const hbPath = makeHeartbeat(base, Date.now() - 10 * 60 * 1000, { pid: deadAppPid });
+
+    withFakeReaper({ pidAlive: false, outcome: 'success' }, WATCHDOG_HELPERS, (helpers) => {
+      const result = helpers.reconcileQueueOffline({
+        heartbeatPath: hbPath,
+        maxAgeMs: 180_000,
+        queuePath,
+        runsDir: path.join(base, 'runs'),
+      });
+      assert.equal(result.reconciled, true, 'should have reconciled');
+      assert.equal(result.reapedCount, 1, 'reapedCount must be 1');
+    });
+
+    const q = readQueue(base);
+    assert.equal(q.jobs[0].status, 'completed', 'job should be marked completed');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── PID liveness guard: stale heartbeat + no pid field → legacy fallback ─────
+test('stale heartbeat + no pid field → legacy age-only behavior (reaps)', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
+  try {
+    const job = {
+      slug: 'test-job', status: 'running', runId: 'run-legacy',
+      runtime: { pid: 9999999 }, orphanRetries: 0,
+      startedAt: new Date().toISOString(), finishedAt: null,
+      exitCode: null, error: null,
+    };
+    makeRunDir(base, 'run-legacy', 'test-job', '');
+    const queuePath = makeQueue(base, [job]);
+
+    // Stale heartbeat with NO pid field (legacy format).
+    const hbPath = makeHeartbeat(base, Date.now() - 10 * 60 * 1000); // no extra
+
+    withFakeReaper({ pidAlive: false, outcome: 'no_result' }, WATCHDOG_HELPERS, (helpers) => {
+      const result = helpers.reconcileQueueOffline({
+        heartbeatPath: hbPath,
+        maxAgeMs: 180_000,
+        queuePath,
+        runsDir: path.join(base, 'runs'),
+      });
+      assert.equal(result.reconciled, true, 'should reconcile (legacy fallback)');
+      assert.equal(result.reapedCount, 1, 'reapedCount must be 1');
+    });
+
+    const q = readQueue(base);
+    assert.equal(q.jobs[0].status, 'pending', 'job should be re-queued (no_result → pending)');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

@@ -30,16 +30,16 @@ const DEFAULT_MAX_AGE_MS = 180_000;
 const TAIL_BYTES = 4096;
 
 /**
- * readLastHeartbeatTs(heartbeatPath?) → number | null
+ * readLastHeartbeat(heartbeatPath?) → object | null
  *
  * Reads the last ~4 KB of the heartbeat log, reverse-scans for the last
- * non-empty line, parses its `ts` field (epoch ms), and returns it.
- * Returns null on missing / empty / unparseable file or missing ts field.
+ * non-empty line, and returns the full parsed JSON object.
+ * Returns null on missing / empty / unparseable file.
  *
  * Single source of truth for the file-read + reverse-scan logic; used by
- * both heartbeatFresh() and the watchdog entry script's log annotation.
+ * readLastHeartbeatTs(), heartbeatFresh(), and reconcileQueueOffline().
  */
-function readLastHeartbeatTs(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
+function readLastHeartbeat(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
   let buf;
   try {
     const stat = fs.statSync(heartbeatPath);
@@ -64,13 +64,23 @@ function readLastHeartbeatTs(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
     const line = lines[i].trim();
     if (!line) continue;
     try {
-      const parsed = JSON.parse(line);
-      return typeof parsed.ts === 'number' ? parsed.ts : null;
+      return JSON.parse(line);
     } catch {
       return null;
     }
   }
   return null;
+}
+
+/**
+ * readLastHeartbeatTs(heartbeatPath?) → number | null
+ *
+ * Returns the `ts` field (epoch ms) from the last heartbeat entry.
+ * Returns null on missing / empty / unparseable file or missing ts field.
+ */
+function readLastHeartbeatTs(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
+  const entry = readLastHeartbeat(heartbeatPath);
+  return (entry !== null && typeof entry.ts === 'number') ? entry.ts : null;
 }
 
 /**
@@ -130,6 +140,21 @@ function reconcileQueueOffline({
   // Safety guard: never touch queue.json while the app is alive.
   if (heartbeatFresh(heartbeatPath, maxAgeMs)) {
     return { reconciled: false, reapedCount: 0, errors: [] };
+  }
+
+  // Second guard: stale heartbeat may just mean the app is under load.
+  // If the heartbeat carries a pid and that process is still alive, the app
+  // is running — do not reap. Backward-compat: if no pid field, fall through
+  // to the classic age-only behavior so pre-existing orphan cleanup still works.
+  const lastHeartbeat = readLastHeartbeat(heartbeatPath);
+  if (lastHeartbeat !== null && typeof lastHeartbeat.pid === 'number') {
+    try {
+      process.kill(lastHeartbeat.pid, 0); // liveness check only — no signal
+      // pid is alive → app is running; abort reap.
+      return { reconciled: false, reapedCount: 0, errors: [] };
+    } catch {
+      // ESRCH → process is gone; proceed with reap.
+    }
   }
 
   let state;
@@ -463,6 +488,7 @@ function sweep({
 }
 
 module.exports = {
+  readLastHeartbeat,
   readLastHeartbeatTs,
   heartbeatFresh,
   reconcileQueueOffline,

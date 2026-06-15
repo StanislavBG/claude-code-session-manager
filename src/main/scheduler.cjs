@@ -2161,6 +2161,7 @@ async function init() {
     for (const j of s.jobs) counts[j.status] = (counts[j.status] || 0) + 1;
     appendHeartbeat({
       ts: Date.now(),
+      pid: process.pid,
       counts,
       paused: s.paused ? { reason: s.paused.reason, resumeAt: s.paused.resumeAt } : null,
       nextReset: cachedNextReset,

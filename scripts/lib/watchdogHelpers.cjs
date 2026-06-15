@@ -7,6 +7,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { activeProjectCwds } = require('./activeSessions.cjs');
+
 // Relative path into src/main/lib/ — the watchdog is external to the app, so
 // we re-use the helpers without importing any Electron code.
 // (Same claudePidAlive + classifyRunOutcome used by scheduler.cjs boot reconciliation.)
@@ -89,6 +91,15 @@ const DEFAULT_QUEUE_PATH = path.join(
 );
 const DEFAULT_RUNS_DIR = path.join(
   os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'runs',
+);
+const DEFAULT_PRDS_DIR = path.join(
+  os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds',
+);
+const DEFAULT_SKILL_PATH = path.join(
+  os.homedir(), '.claude', 'skills', 'process-feedback', 'SKILL.md',
+);
+const DEFAULT_STANDARDS_PATH = path.join(
+  os.homedir(), '.claude', 'skills', 'develop', 'standards.md',
 );
 
 /**
@@ -203,18 +214,260 @@ function reconcileQueueOffline({
   return { reconciled: true, reapedCount, errors };
 }
 
+// ── slugify ──────────────────────────────────────────────────────────────────
+
+/** Lowercase, non-alphanumeric runs → single `-`, strip leading/trailing `-`. */
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+// ── YAML frontmatter stripper ─────────────────────────────────────────────────
+
 /**
- * sweep() — stub; PRD 102 fills in the real feedback-sweep implementation.
- * Returns a structured result so the entry wiring and callers compile correctly.
+ * Strip leading YAML frontmatter block (---\n…\n---) from skill/standards files
+ * so they can be inlined cleanly into a PRD body.
  */
-function sweep() {
-  return { swept: false, stub: true };
+function stripFrontmatter(content) {
+  if (!content.startsWith('---')) return content;
+  const end = content.indexOf('\n---', 3);
+  if (end === -1) return content;
+  return content.slice(end + 4).replace(/^\n/, '');
+}
+
+/**
+ * Strip a leading H1 line (`# …\n`) — used to drop the `# Engineering standards`
+ * heading from standards.md before adding our own `## Engineering standards` heading.
+ */
+function stripLeadingH1(content) {
+  return content.replace(/^# [^\n]*\n/, '');
+}
+
+// ── hasOpenFeedback ───────────────────────────────────────────────────────────
+
+/**
+ * hasOpenFeedback(cwd) → boolean
+ *
+ * Returns true iff `<cwd>/feedback/` or `<cwd>/external-feedback/` exists AND
+ * contains at least one *.md file directly in its root (i.e. NOT inside
+ * `processed/` or any subdirectory). Pure filesystem check — no LLM call.
+ *
+ * Mirrors process-feedback skill step 0 (cheap quick-exit signal).
+ * Complexity: O(F) where F ≤ entries in the feedback folder root.
+ */
+function hasOpenFeedback(cwd) {
+  for (const folderName of ['feedback', 'external-feedback']) {
+    const folderPath = path.join(cwd, folderName);
+    let entries;
+    try {
+      entries = fs.readdirSync(folderPath);
+    } catch {
+      continue; // folder does not exist
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith('.md')) continue;
+      try {
+        const st = fs.statSync(path.join(folderPath, entry));
+        if (st.isFile()) return true;
+      } catch { continue; }
+    }
+  }
+  return false;
+}
+
+// ── emitFeedbackPRD ──────────────────────────────────────────────────────────
+
+/**
+ * emitFeedbackPRD(cwd, opts?) → { emitted: boolean, slug?: string, prdPath?: string, reason?: string }
+ *
+ * De-dups against queue.json (pending/running jobs whose slug matches
+ * `^\d+-feedback-<project>$`). If a match exists, returns { emitted: false, reason: 'duplicate' }.
+ *
+ * Otherwise picks the next free NN by scanning prdsDir, writes a self-contained
+ * PRD file with the inlined process-feedback procedure + engineering standards,
+ * and returns { emitted: true, slug, prdPath }.
+ *
+ * Never writes to queue.json — the app's reconcile picks up new PRD files.
+ * Atomic write: tmp → rename (mirrors config.cjs writeJsonSync pattern).
+ *
+ * Complexity: O(P) over PRD files in prdsDir + O(J) over queue jobs.
+ */
+function emitFeedbackPRD(cwd, {
+  prdsDir = DEFAULT_PRDS_DIR,
+  queuePath = DEFAULT_QUEUE_PATH,
+  skillPath = DEFAULT_SKILL_PATH,
+  standardsPath = DEFAULT_STANDARDS_PATH,
+} = {}) {
+  const project = slugify(path.basename(cwd));
+
+  // De-dup: check queue.json for pending/running feedback job for this project.
+  let queueState = { jobs: [] };
+  try {
+    queueState = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+  } catch { /* queue.json may not exist */ }
+
+  // project only contains [a-z0-9-] after slugify — no regex metachar escaping needed.
+  const dupRe = new RegExp(`^\\d+-feedback-${project}$`);
+  const isDuplicate = (queueState.jobs ?? []).some(
+    (j) => (j.status === 'pending' || j.status === 'running') && dupRe.test(j.slug),
+  );
+  if (isDuplicate) {
+    return { emitted: false, reason: 'duplicate' };
+  }
+
+  // Pick next NN: max existing NN prefix + 1. O(P) scan.
+  let maxNN = 0;
+  try {
+    for (const f of fs.readdirSync(prdsDir)) {
+      const m = f.match(/^(\d+)-/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxNN) maxNN = n;
+      }
+    }
+  } catch { /* prdsDir may not exist yet */ }
+  const nn = String(maxNN + 1).padStart(2, '0');
+  const slug = `${nn}-feedback-${project}`;
+  const prdPath = path.join(prdsDir, `${slug}.md`);
+
+  // Read and inline skill content.
+  let rawSkill = '';
+  try {
+    rawSkill = fs.readFileSync(skillPath, 'utf8');
+  } catch {
+    process.stderr.write(`[emitFeedbackPRD] warning: skill file not readable: ${skillPath}\n`);
+  }
+  const skillBody = stripFrontmatter(rawSkill).trim();
+
+  // Read and inline standards — strip H1 so our ## heading is the section anchor.
+  let rawStandards = '';
+  try {
+    rawStandards = fs.readFileSync(standardsPath, 'utf8');
+  } catch {
+    process.stderr.write(`[emitFeedbackPRD] warning: standards file not readable: ${standardsPath}\n`);
+  }
+  const standardsBody = stripLeadingH1(stripFrontmatter(rawStandards)).trim();
+
+  const projectName = path.basename(cwd);
+  const body = [
+    '---',
+    `title: Process feedback for ${projectName}`,
+    `cwd: ${cwd}`,
+    'estimateMinutes: 15',
+    '---',
+    '',
+    '# Goal',
+    '',
+    `Process the inbound feedback folder for ${projectName}. The quick-exit (step 0 below)`,
+    'means this run bails in milliseconds if no open items exist — safe to execute even if',
+    'feedback was already cleared between scheduling and execution.',
+    '',
+    '# Acceptance criteria',
+    '',
+    '- [ ] All open feedback items evaluated and either queued via /develop, declined with RESOLUTION, or forwarded upstream.',
+    '- [ ] Processed items archived to feedback/processed/ (or external-feedback/processed/) with RESOLUTION notes.',
+    '- [ ] feedback/README.md self-improved with lessons from this pass.',
+    '- [ ] timeout 60 git diff --exit-code runs clean (no uncommitted inline work).',
+    '',
+    '# Implementation notes',
+    '',
+    'Follow the inlined process-feedback procedure below exactly. No skills are loaded in',
+    'headless execution — the procedure is fully self-contained. Use /develop for any work',
+    'that belongs to this project; never implement feedback inline.',
+    '',
+    '# Out of scope',
+    '',
+    '- Implementing feedback items directly (that is /develop → scheduler).',
+    '- Cross-project feedback beyond filing upstream items.',
+    '',
+    skillBody,
+    '',
+    '## Engineering standards',
+    '',
+    standardsBody,
+  ].join('\n');
+
+  // Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync).
+  const tmpPath = `${prdPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fs.mkdirSync(prdsDir, { recursive: true });
+    fs.writeFileSync(tmpPath, body + '\n', 'utf8');
+    fs.renameSync(tmpPath, prdPath);
+  } catch (e) {
+    try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
+    throw e;
+  }
+
+  return { emitted: true, slug, prdPath };
+}
+
+// ── sweep ─────────────────────────────────────────────────────────────────────
+
+/**
+ * sweep(opts?) → { scanned: number, emitted: number, skipped: number }
+ *
+ * For each active-session cwd (from activeProjectCwds), cheaply checks for open
+ * feedback. Projects without open feedback cost a readdir per folder name — no LLM.
+ * Projects with open feedback get a PRD emitted into prdsDir (de-duped against queue).
+ *
+ * Never mutates queue.json — only adds PRD files, so it is safe to run while the
+ * in-app scheduler is alive.
+ *
+ * Complexity: O(C × F) where C = active cwds (≤50) and F = root entries per
+ * feedback folder (typically small).
+ *
+ * opts:
+ *   logPath, projectsDir  — forwarded to activeProjectCwds for testing
+ *   prdsDir, queuePath, skillPath, standardsPath — forwarded to emitFeedbackPRD
+ */
+function sweep({
+  logPath,
+  projectsDir,
+  prdsDir = DEFAULT_PRDS_DIR,
+  queuePath = DEFAULT_QUEUE_PATH,
+  skillPath = DEFAULT_SKILL_PATH,
+  standardsPath = DEFAULT_STANDARDS_PATH,
+} = {}) {
+  const activeOpts = {};
+  if (logPath !== undefined) activeOpts.logPath = logPath;
+  if (projectsDir !== undefined) activeOpts.projectsDir = projectsDir;
+
+  const cwds = activeProjectCwds(90, activeOpts);
+
+  let scanned = 0;
+  let emitted = 0;
+  let skipped = 0;
+
+  for (const cwd of cwds) {
+    scanned++;
+    if (!hasOpenFeedback(cwd)) continue;
+
+    let result;
+    try {
+      result = emitFeedbackPRD(cwd, { prdsDir, queuePath, skillPath, standardsPath });
+    } catch (e) {
+      process.stderr.write(`[sweep] error emitting PRD for ${cwd}: ${e?.message}\n`);
+      continue;
+    }
+
+    if (result.emitted) {
+      emitted++;
+      process.stderr.write(`[sweep] emitted ${result.slug} for ${cwd}\n`);
+    } else {
+      skipped++;
+      process.stderr.write(`[sweep] skipped ${cwd} (${result.reason})\n`);
+    }
+  }
+
+  process.stderr.write(`[sweep] scanned=${scanned} emitted=${emitted} skipped=${skipped}\n`);
+  return { scanned, emitted, skipped };
 }
 
 module.exports = {
   readLastHeartbeatTs,
   heartbeatFresh,
   reconcileQueueOffline,
+  hasOpenFeedback,
+  emitFeedbackPRD,
   sweep,
   DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,

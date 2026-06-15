@@ -71,6 +71,7 @@ take a different route if the codebase conventions say so.
 |---|---|---|
 | 2026-06-10-01-verdict-scanner-false-positive-importerror | ✅ | Asks 1/2/4 shipped (anchored detectors + Task-result exemption, 4 regression tests); ask 3 (success-veto) declined — would neuter true-positive detection. Two Self jobs retagged completed. |
 | 2026-06-10-02-verdict-recovered-env-probes-and-precedence | ✅ | Shipped: `Traceback→ModuleNotFoundError` reclassified as `verify_unavailable`; that class success-gated (recovered env probes annotate, don't downgrade) while real `transcript_errors` still hard-flag; commit-guard now always runs + materially-checkable verdict outranks pattern hits (carried as annotations). 4 tests, live re-scan of all 3 cited logs → clean. Stuck jobs auto-heal on boot reverify. AC-exit-code half deferred (no PRD-AC spec). |
+| 2026-06-14-01-definition-of-done-on-queue-drain | 🆕 open | Auto-run a definition-of-done gate (per-PRD AC re-verify + batch code-review + report) at queue-drain (`scheduler.cjs:1472` empty-batch branch), so "completed exit 0" becomes "verified+reviewed". From social-signals-trader; incident: 81–85 money-path batch drained green but ungated until a human asked. |
 
 ## Lessons for submitters (kept current)
 

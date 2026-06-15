@@ -19,7 +19,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { launchApp, navigateToTab } from './_helpers/launchApp'
 
-const PRDS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds')
+const ROOT_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans')
+const PRDS_DIR = path.join(ROOT_DIR, 'prds')
+const QUEUE_PATH = path.join(ROOT_DIR, 'queue.json')
 const TEST_SLUG_A = 'test-a11y-pending-a'
 const TEST_SLUG_B = 'test-a11y-pending-b'
 
@@ -34,15 +36,48 @@ A11y test fixture. Safe to delete.
 `
 }
 
+function readQueue() {
+  try { return JSON.parse(fs.readFileSync(QUEUE_PATH, 'utf8')) } catch { return { jobs: [] } }
+}
+
+function writeQueue(state: { jobs: unknown[] }) {
+  fs.mkdirSync(ROOT_DIR, { recursive: true })
+  const tmp = QUEUE_PATH + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2))
+  fs.renameSync(tmp, QUEUE_PATH)
+}
+
 function seed() {
   fs.mkdirSync(PRDS_DIR, { recursive: true })
   fs.writeFileSync(path.join(PRDS_DIR, `${TEST_SLUG_A}.md`), prdBody('A11y test job A'))
   fs.writeFileSync(path.join(PRDS_DIR, `${TEST_SLUG_B}.md`), prdBody('A11y test job B'))
+  // Inject pending queue entries at the front so they are the first visible rows.
+  const q = readQueue()
+  const withoutTest = (q.jobs ?? []).filter(
+    (j: { slug: string }) => j.slug !== TEST_SLUG_A && j.slug !== TEST_SLUG_B,
+  )
+  writeQueue({
+    ...q,
+    jobs: [
+      { slug: TEST_SLUG_A, title: 'A11y test job A', cwd: '/tmp', parallelGroup: 99, estimateMinutes: 1, bodyPreview: 'A11y test fixture.', status: 'pending', runId: null, startedAt: null, finishedAt: null, exitCode: null, error: null },
+      { slug: TEST_SLUG_B, title: 'A11y test job B', cwd: '/tmp', parallelGroup: 99, estimateMinutes: 1, bodyPreview: 'A11y test fixture.', status: 'pending', runId: null, startedAt: null, finishedAt: null, exitCode: null, error: null },
+      ...withoutTest,
+    ],
+  })
 }
 
 function cleanup() {
   try { fs.unlinkSync(path.join(PRDS_DIR, `${TEST_SLUG_A}.md`)) } catch { /* */ }
   try { fs.unlinkSync(path.join(PRDS_DIR, `${TEST_SLUG_B}.md`)) } catch { /* */ }
+  try {
+    const q = readQueue()
+    writeQueue({
+      ...q,
+      jobs: (q.jobs ?? []).filter(
+        (j: { slug: string }) => j.slug !== TEST_SLUG_A && j.slug !== TEST_SLUG_B,
+      ),
+    })
+  } catch { /* */ }
 }
 
 test.beforeAll(seed)
@@ -53,7 +88,9 @@ test.describe('Scheduler a11y — ARIA structure', () => {
     const { app, win } = await launchApp()
 
     try {
-      await navigateToTab(win, 'Scheduler')
+      // Ensure Queue subview (not PRDs) is active regardless of localStorage state from other tests.
+      await win.evaluate(() => localStorage.removeItem('sm.schedulerTab.subView'))
+      await navigateToTab(win, 'scheduler')
 
       // Queue tab should be visible by default
       await win.waitForSelector('[role="list"][aria-label="Job queue"]', { timeout: 10_000 })
@@ -64,12 +101,17 @@ test.describe('Scheduler a11y — ARIA structure', () => {
       // At least the two seeded PRDs should appear
       expect(count).toBeGreaterThanOrEqual(2)
 
-      const firstRow = rows.first()
-      await expect(firstRow).toHaveAttribute('aria-expanded', 'false')
-      await expect(firstRow).toHaveAttribute('aria-label')
+      // The scheduler reconciles and re-sorts jobs alphabetically on startup,
+      // so the seeded pending jobs ("test-a11y-*") sort after numbered completed
+      // jobs and are never `rows.first()`. Find a seeded pending row by its
+      // known aria-label instead of by index.
+      const pendingRow = win.locator('[data-job-row][aria-label*="A11y test job A, pending"]').first()
+      await expect(pendingRow).toBeVisible({ timeout: 10_000 })
+      await expect(pendingRow).toHaveAttribute('aria-expanded', 'false')
+      await expect(pendingRow).toHaveAttribute('aria-label')
 
       // aria-label should mention the job title and status
-      const label = await firstRow.getAttribute('aria-label')
+      const label = await pendingRow.getAttribute('aria-label')
       expect(label).toBeTruthy()
       expect(label).toMatch(/pending/i)
     } finally {
@@ -81,7 +123,8 @@ test.describe('Scheduler a11y — ARIA structure', () => {
     const { app, win } = await launchApp()
 
     try {
-      await navigateToTab(win, 'Scheduler')
+      await win.evaluate(() => localStorage.removeItem('sm.schedulerTab.subView'))
+      await navigateToTab(win, 'scheduler')
       await win.waitForSelector('[role="list"][aria-label="Job queue"]', { timeout: 10_000 })
 
       // StatusBadge elements in the job list
@@ -102,7 +145,8 @@ test.describe('Scheduler a11y — ARIA structure', () => {
     const { app, win } = await launchApp()
 
     try {
-      await navigateToTab(win, 'Scheduler')
+      await win.evaluate(() => localStorage.removeItem('sm.schedulerTab.subView'))
+      await navigateToTab(win, 'scheduler')
       // The aria-live polite region should exist even before any status changes
       const liveRegion = win.locator('[aria-live="polite"]')
       await expect(liveRegion).toBeAttached()
@@ -115,7 +159,8 @@ test.describe('Scheduler a11y — ARIA structure', () => {
     const { app, win } = await launchApp()
 
     try {
-      await navigateToTab(win, 'Scheduler')
+      await win.evaluate(() => localStorage.removeItem('sm.schedulerTab.subView'))
+      await navigateToTab(win, 'scheduler')
       await win.waitForSelector('[role="list"][aria-label="Job queue"]', { timeout: 10_000 })
 
       // The queue health disclosure button
@@ -132,7 +177,8 @@ test.describe('Scheduler a11y — keyboard navigation', () => {
     const { app, win } = await launchApp()
 
     try {
-      await navigateToTab(win, 'Scheduler')
+      await win.evaluate(() => localStorage.removeItem('sm.schedulerTab.subView'))
+      await navigateToTab(win, 'scheduler')
       await win.waitForSelector('[role="list"][aria-label="Job queue"]', { timeout: 10_000 })
 
       const rows = win.locator('[data-job-row]')
@@ -166,7 +212,8 @@ test.describe('Scheduler a11y — keyboard navigation', () => {
     const { app, win } = await launchApp()
 
     try {
-      await navigateToTab(win, 'Scheduler')
+      await win.evaluate(() => localStorage.removeItem('sm.schedulerTab.subView'))
+      await navigateToTab(win, 'scheduler')
       await win.waitForSelector('[role="list"][aria-label="Job queue"]', { timeout: 10_000 })
 
       const firstRow = win.locator('[data-job-row]').first()

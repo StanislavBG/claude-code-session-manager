@@ -650,6 +650,34 @@ export function SchedulerPrdsView() {
             </button>
           </div>
 
+          {checked.size > 0 && (
+            <div className="mb-4 px-4 py-2 bg-bg border border-line rounded-lg flex items-center gap-2">
+              <span className="text-xs text-fg-dim">{checked.size} selected</span>
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={() => setArchiveOpen(true)}
+                className="text-xs px-3 py-1.5 rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
+              >
+                Archive…
+              </button>
+              <button
+                type="button"
+                onClick={() => setRetagOpen(true)}
+                className="text-xs px-3 py-1.5 rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
+              >
+                Retag…
+              </button>
+              <button
+                type="button"
+                onClick={clearChecked}
+                className="text-xs px-3 py-1.5 rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
           {sortedPrds.length === 0 ? (
             <EmptyState title="no PRDs found" />
           ) : (
@@ -659,12 +687,23 @@ export function SchedulerPrdsView() {
                 const prdStatus = !j ? 'ready' : j.status === 'pending' ? 'queued' : j.status
                 const tone = STATUS_TONE[prdStatus]
                 const isRunning = j?.status === 'running'
+                const isNeedsReview = j?.status === 'needs_review'
                 return (
                   <div
                     key={p.slug}
-                    className="bg-bg-elev border border-line rounded-[13px] px-[18px] py-4 grid grid-cols-[1fr_auto] gap-4 items-center"
+                    className="flex items-stretch bg-bg-elev border border-line rounded-[13px] overflow-hidden"
                   >
-                    <div className="min-w-0">
+                    {/* Checkbox for bulk select */}
+                    <label className="flex items-center px-3 cursor-pointer hover:bg-bg-hi">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(p.slug)}
+                        onChange={() => toggleChecked(p.slug)}
+                        className="accent-accent w-3.5 h-3.5"
+                      />
+                    </label>
+                    {/* Main card content */}
+                    <div className="flex-1 min-w-0 py-4 pr-2">
                       <div className="flex items-center gap-2.5 mb-[5px] flex-wrap">
                         <span className="font-serif text-[18px] font-semibold text-fg leading-tight">
                           {p.title || p.slug}
@@ -674,6 +713,8 @@ export function SchedulerPrdsView() {
                         >
                           {tone.label}
                         </span>
+                        {/* Hidden raw status for screen readers and testability */}
+                        {j?.status && <span className="sr-only">{j.status}</span>}
                       </div>
                       <div className="flex items-center gap-4 font-mono text-xs text-fg-faint flex-wrap">
                         <ProjectTag cwd={p.cwd} />
@@ -681,8 +722,34 @@ export function SchedulerPrdsView() {
                         <span>g{p.parallelGroup}</span>
                         <span>edited {formatAgo(p.mtimeMs, Date.now())}</span>
                       </div>
+                      {/* Slug as clickable monospace label */}
+                      <button
+                        type="button"
+                        onClick={() => selectSlug(p.slug)}
+                        className="mt-1.5 font-mono text-[11px] text-fg-faint hover:text-fg-dim leading-none"
+                      >
+                        {p.slug}
+                      </button>
+                      {/* needs_review inline details: verifier verdict + Re-fire */}
+                      {isNeedsReview && (
+                        <div className="mt-3 space-y-2">
+                          {j?.verifierVerdict && (
+                            <div className="text-xs text-fg-faint">
+                              verdict: <span className="font-mono">{j.verifierVerdict}</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => window.api.schedule.resetJob(p.slug)}
+                            className="text-xs px-2.5 py-1 rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
+                          >
+                            Re-fire
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-col gap-2 items-stretch">
+                    {/* Action buttons */}
+                    <div className="flex flex-col gap-2 items-stretch px-[18px] py-4">
                       <button
                         type="button"
                         onClick={() => window.api.schedule.runNow()}

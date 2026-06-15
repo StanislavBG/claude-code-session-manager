@@ -432,6 +432,10 @@ export function SchedulePanel() {
                 now={now}
                 avgDurationMs={avgDurationMs}
                 listIndex={idx}
+                onFocused={(i) => {
+                  setFocusedJobIdx(i)
+                  try { localStorage.setItem(FOCUSED_IDX_KEY, String(i)) } catch { /* */ }
+                }}
               />
             ))}
           </div>
@@ -708,12 +712,13 @@ function etaForJob(
   return `~${formatTimingLabel(estMs)}`
 }
 
-function JobRow({ job, eta, now, avgDurationMs, listIndex }: {
+function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
   job: ScheduleJob
   eta: string | null
   now: number
   avgDurationMs: number
   listIndex: number
+  onFocused: (index: number) => void
 }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
@@ -753,6 +758,7 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex }: {
         data-job-row
         data-job-index={listIndex}
         onClick={() => setOpen((v) => !v)}
+        onFocus={() => onFocused(listIndex)}
         className={`w-full text-left grid grid-cols-[116px_1fr_auto_auto] items-center gap-4 px-[18px] py-3.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${open ? 'bg-bg-elev/40' : ''}`}
         aria-expanded={open}
         aria-label={`${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}

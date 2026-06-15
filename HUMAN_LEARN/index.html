@@ -119,6 +119,7 @@
   <a class="home" href="#top">📖 HUMAN_LEARN</a>
   <a href="#terminal">🖥 Terminal</a>
   <a href="#scheduler">📅 Scheduler</a>
+  <a href="#scheduler-watchdog">🐕 Watchdog</a>
   <a href="#knowledge-graph">🕸 Knowledge Graph</a>
   <a href="#memory">🧠 Memory</a>
   <a href="#webremote">📱 Web Remote</a>
@@ -318,6 +319,48 @@
       <tr><td>heartbeat + supervisor log rotation</td><td>1 MB each</td><td><span class="loc">scheduler.cjs:179 · supervisor.cjs:23</span></td></tr>
     </table>
     </details>
+  </section>
+
+  <!-- ════════════════════════ SCHEDULER WATCHDOG ══════════════════════ -->
+  <section class="comp" id="scheduler-watchdog">
+    <div class="comp-head">
+      <span class="icon">🐕</span>
+      <h2>Scheduler Watchdog — external heartbeat outside Electron</h2>
+      <span class="files">scripts/scheduler-watchdog.cjs · scripts/scheduler-watchdog.sh · scripts/install-scheduler-watchdog.sh</span>
+    </div>
+    <p>The in-process scheduler (scheduler.cjs) only runs while Electron is open. The <strong>external watchdog</strong>
+    is a separate check-and-exit process invoked every 2–3 min by a systemd user timer (or cron fallback),
+    so the queue stays healthy even when the desktop app is closed.</p>
+
+    <div class="flow">
+      <div class="box b-amber"><div class="bt">1 · Timer fires</div><div class="bd">systemd user timer or <code>*/3 cron</code></div><div class="where">scheduler-watchdog.timer · OnUnitActiveSec=2min</div></div>
+      <div class="arr">→</div>
+      <div class="box b-blue"><div class="bt">2 · flock -n</div><div class="bd">overlapping ticks skip cleanly</div><div class="where">scheduler-watchdog.sh</div></div>
+      <div class="arr">→</div>
+      <div class="box b-green"><div class="bt">3 · reconcileQueueOffline()</div><div class="bd">reap orphaned PIDs, classify outcomes</div><div class="where">scheduler-watchdog.cjs</div></div>
+      <div class="arr">→</div>
+      <div class="box b-violet"><div class="bt">4 · sweep()</div><div class="bd">feedback scan → emit auto-PRDs</div><div class="where">scheduler-watchdog.cjs</div></div>
+    </div>
+
+    <h3>What it does</h3>
+    <ul>
+      <li><strong>Heartbeat-gated reconcile</strong> — <code>reconcileQueueOffline()</code> reads the queue's heartbeat file; if Electron's in-process scheduler is running it skips to avoid double-writes. When Electron is absent it reaps orphaned PIDs and promotes jobs from <code>running</code> to <code>success</code>/<code>timeout</code>/<code>error</code> based on the run log — same logic as the in-process boot reconciler.</li>
+      <li><strong>Active-session detection</strong> — <code>activeProjectCwds()</code> enumerates live Claude Code terminal sessions by scanning <code>~/.claude/projects/</code> JSONL files for recent mtime activity; used by <code>sweep()</code> to gate feedback ingestion only when a session is open.</li>
+      <li><strong>Feedback sweep + auto-PRD emitter</strong> — <code>sweep()</code> scans <code>~/.claude/session-manager/feedback/</code> for open items, cheap-reads them, and emits PRDs into the scheduler queue so the next available billing window picks them up automatically.</li>
+    </ul>
+
+    <h3>Install</h3>
+    <p>Run once per machine. Idempotent — safe to re-run.</p>
+    <pre>bash scripts/install-scheduler-watchdog.sh</pre>
+    <p>To preview without activating a live timer:</p>
+    <pre>SM_WATCHDOG_DRYRUN=1 bash scripts/install-scheduler-watchdog.sh</pre>
+    <p>The installer prints the exact <code>loginctl enable-linger "$USER"</code> command needed to keep the timer alive after logout (for headless servers or suspended laptops).</p>
+
+    <h3>Fallback priority</h3>
+    <ol>
+      <li><strong>systemd user timer</strong> (preferred) — <code>~/.config/systemd/user/scheduler-watchdog.{service,timer}</code>; <code>OnUnitActiveSec=2min</code>, <code>Persistent=true</code>.</li>
+      <li><strong>cron</strong> (fallback when <code>systemctl --user</code> is unavailable) — <code>*/3 * * * *</code> with <code>flock -n</code> overlap protection and <code>grep -qF</code> idempotency guard.</li>
+    </ol>
   </section>
 
   <!-- ════════════════════════ KNOWLEDGE GRAPH ════════════════════════ -->

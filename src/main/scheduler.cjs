@@ -221,9 +221,27 @@ const ENV_CAP = process.env.SM_SCHEDULER_MAX_CONCURRENCY
   ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 3))
   : null;
 
-// Each headless claude -p process can grow past 1 GB; require 1.5 GB headroom
-// per running+pending slot to avoid OOM (incident 2026-06-10).
-const MIN_FREE_MB_PER_JOB = 1500;
+// Each headless claude -p job can shell out to tsc/vite/pytest and grow well
+// past 1 GB at peak; reserve 2.5 GB per running+pending slot. Raised from 1.5 GB
+// after the 2026-06-16 OOM: 3 concurrent cross-project jobs + their build
+// subprocesses pushed a 24 GB host ~10 GB into swap and the OOM killer took
+// Electron — every pty got SIGHUP (code=0 signal=1).
+const MIN_FREE_MB_PER_JOB = 2500;
+
+// Absolute headroom kept free for the Electron host (main + renderer + GPU) and
+// the OS — NEVER lent to jobs. Without it the gate green-lights a job whenever
+// MemAvailable is just above per-job need, starving the very process that owns
+// the ptys; that's the one the OOM killer then reaps. Subtracted from
+// MemAvailable before the per-job gate runs. See availableForJobs().
+const RESERVED_HOST_MB = 3000;
+
+// oom_score_adj applied to each spawned claude -p job (range -1000..1000;
+// Electron inherits the default 0). A positive bias makes the kernel OOM killer
+// prefer a disposable, restartable job over Electron — whose death SIGHUPs every
+// pty and drops the sleep inhibitor. The job's build subprocesses (tsc/vite)
+// inherit it, so the actual memory hogs are the preferred victims. The gate caps
+// how many START; this decides who dies if a spike slips through anyway.
+const OOM_SCORE_ADJ_JOB = 500;
 
 const DEFAULT_CONFIG = {
   offsetMinutes: 15,
@@ -275,6 +293,33 @@ function memoryLimitedBatchSize(availableMb, minPerJob, runningCount, batchLen) 
     allowed--;
   }
   return allowed;
+}
+
+/**
+ * Memory available to LAUNCH jobs with: MemAvailable minus the host reserve,
+ * floored at 0. Keeping the host reserve out of the job budget is what stops the
+ * gate from green-lighting a job into an OOM that kills Electron. Fails open
+ * (Infinity) on non-Linux where MemAvailable is unknown. Exported for tests.
+ */
+function availableForJobs(availableMb, reservedHostMb) {
+  if (availableMb === Infinity) return Infinity;
+  return Math.max(0, availableMb - reservedHostMb);
+}
+
+/**
+ * Bias a spawned job's oom_score_adj up so the kernel OOM killer sacrifices the
+ * (restartable) job before Electron. Raising a child's OWN score is privilege-
+ * free; lowering Electron's would need CAP_SYS_RESOURCE. Linux-only, best-effort
+ * — the job may have already exited (write ENOENTs), which is fine. See the
+ * 2026-06-16 OOM-kills-Electron incident.
+ */
+function biasJobOomScore(pid) {
+  if (process.platform !== 'linux' || !pid) return;
+  try {
+    fs.writeFileSync(`/proc/${pid}/oom_score_adj`, String(OOM_SCORE_ADJ_JOB));
+  } catch {
+    /* job already exited, or /proc unavailable — best-effort hardening only */
+  }
 }
 
 // ---------- fs helpers ----------
@@ -1038,6 +1083,8 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
 
     if (child) {
       safeLog(`[scheduler] spawned pid=${child.pid} sessionId=${sessionId} (process group)\n\n`);
+      // Make this job the OOM killer's preferred victim over Electron.
+      biasJobOomScore(child.pid);
       // Fire-and-forget pid persistence — best effort.
       if (onPid) onPid(child.pid, sessionId, cwd).catch(() => {});
     }
@@ -1483,17 +1530,21 @@ function tickQueue() {
     }
 
     const availableMb = getAvailableMemMb();
-    const allowed = memoryLimitedBatchSize(availableMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length);
+    // Reserve a fixed slice for the Electron host before the per-job gate, so a
+    // job is never started into the host's own headroom (that path OOM-kills
+    // Electron and SIGHUPs every pty — 2026-06-16 incident).
+    const jobBudgetMb = availableForJobs(availableMb, RESERVED_HOST_MB);
+    const allowed = memoryLimitedBatchSize(jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length);
     if (allowed === 0) {
-      const threshold = MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
-      console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB — deferring ${batch.length} job(s)`);
+      const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
+      console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1}) — deferring ${batch.length} job(s)`);
       lastMemGate = { availableMb, threshold, deferred: true, at: new Date().toISOString() };
       return;
     }
     const gatedBatch = batch.slice(0, allowed);
     if (gatedBatch.length < batch.length) {
-      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length}`);
-      lastMemGate = { availableMb, threshold: MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length), deferred: false, clamped: true, at: new Date().toISOString() };
+      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length} (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job)`);
+      lastMemGate = { availableMb, threshold: RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length), deferred: false, clamped: true, at: new Date().toISOString() };
     } else {
       // Ungated full batch: clear stale gate snapshot so status doesn't show
       // a stale deferral from a previous tick.
@@ -2302,4 +2353,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, reverifyNeedsReview, isRescanCandidate };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate };

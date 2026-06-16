@@ -92,6 +92,17 @@ function loadWidth(): number {
   return WIDTH_DEFAULT
 }
 
+// Rail (collapsed) sidebar — fixed icon-only width, persisted across launches.
+const RAIL_WIDTH = 52
+const SIDEBAR_COLLAPSED_KEY = 'sm.almanac.sidebarCollapsed'
+
+function loadCollapsedRail(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch { /* ignore */ }
+  return false
+}
+
 // Collapsible nav groups. Each section header (Workspace / Configure / Tools)
 // can be folded away independently; the set of collapsed group names is
 // persisted as a JSON array.
@@ -149,6 +160,16 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
     })
   }, [])
 
+  // Rail collapse — whole-sidebar icon-only mode, orthogonal to per-group fold.
+  const [rail, setRail] = useState<boolean>(() => loadCollapsedRail())
+  const toggleRail = useCallback(() => {
+    setRail((prev) => {
+      const next = !prev
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
@@ -188,87 +209,143 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
 
   return (
     <aside
-      className="shrink-0 bg-bg-elev border-r border-line flex flex-col relative"
-      style={{ width }}
+      className="shrink-0 bg-bg-elev border-r border-line flex flex-col relative transition-[width] duration-150"
+      style={{ width: rail ? RAIL_WIDTH : width }}
       data-testid="tour-leftnav"
       aria-label="Primary navigation"
     >
-      <ProjectCaption tab={activeTab} onNewSession={onNewSession} />
+      <ProjectCaption tab={activeTab} onNewSession={onNewSession} rail={rail} onToggleRail={toggleRail} />
 
-      <div className="flex-1 min-h-0 overflow-auto px-2 pb-3">
+      <div className="flex-1 min-h-0 overflow-auto pb-3" style={{ paddingInline: rail ? '4px' : '8px' }}>
         <>
-          <NavGroupHeader
-            label="Workspace"
-            collapsed={collapsed.has('Workspace')}
-            count={WORKSPACE.length}
-            onToggle={() => toggleGroup('Workspace')}
-          />
-          {!collapsed.has('Workspace') && WORKSPACE.map((item) => (
+          {!rail && (
+            <NavGroupHeader
+              label="Workspace"
+              collapsed={collapsed.has('Workspace')}
+              count={WORKSPACE.length}
+              onToggle={() => toggleGroup('Workspace')}
+            />
+          )}
+          {(rail || !collapsed.has('Workspace')) && WORKSPACE.map((item) => (
             <NavRow
               key={item.key}
               item={item}
               active={active === item.key}
               live={item.liveKind ? indicators[item.liveKind] : false}
               onClick={() => onNavigate(item.key)}
+              rail={rail}
             />
           ))}
 
-          <NavGroupHeader
-            label="Configure"
-            collapsed={collapsed.has('Configure')}
-            count={CONFIGURE.length}
-            onToggle={() => toggleGroup('Configure')}
-          />
-          {!collapsed.has('Configure') && CONFIGURE.map((item) => (
+          {!rail && (
+            <NavGroupHeader
+              label="Configure"
+              collapsed={collapsed.has('Configure')}
+              count={CONFIGURE.length}
+              onToggle={() => toggleGroup('Configure')}
+            />
+          )}
+          {(rail || !collapsed.has('Configure')) && CONFIGURE.map((item) => (
             <NavRow
               key={item.key}
               item={item}
               active={active === item.key}
               live={false}
               onClick={() => onNavigate(item.key)}
+              rail={rail}
             />
           ))}
 
-          <NavGroupHeader
-            label="Tools"
-            collapsed={collapsed.has('Tools')}
-            count={TOOLS.length}
-            onToggle={() => toggleGroup('Tools')}
-          />
-          {!collapsed.has('Tools') && TOOLS.map((tool) => (
+          {!rail && (
+            <NavGroupHeader
+              label="Tools"
+              collapsed={collapsed.has('Tools')}
+              count={TOOLS.length}
+              onToggle={() => toggleGroup('Tools')}
+            />
+          )}
+          {(rail || !collapsed.has('Tools')) && TOOLS.map((tool) => (
             <ToolRow
               key={tool.key}
               tool={tool}
               active={active === tool.key}
               onClick={() => onNavigate(tool.key)}
+              rail={rail}
             />
           ))}
         </>
       </div>
 
-      <SidebarFooter />
+      <SidebarFooter rail={rail} />
 
-      {/* Drag-to-resize handle, straddling the right border. Double-click resets. */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        title="Drag to resize · double-click to reset"
-        onPointerDown={startResize}
-        onDoubleClick={resetWidth}
-        className="absolute top-0 right-0 h-full w-1.5 translate-x-1/2 z-10 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
-      />
+      {/* Drag-to-resize handle — hidden in rail mode since width is fixed. */}
+      {!rail && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={startResize}
+          onDoubleClick={resetWidth}
+          className="absolute top-0 right-0 h-full w-1.5 translate-x-1/2 z-10 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
+        />
+      )}
     </aside>
   )
 }
 
-function ProjectCaption({ tab, onNewSession }: { tab: { cwd: string; label: string } | null; onNewSession: () => void }) {
+function ProjectCaption({
+  tab, onNewSession, rail, onToggleRail,
+}: {
+  tab: { cwd: string; label: string } | null
+  onNewSession: () => void
+  rail: boolean
+  onToggleRail: () => void
+}) {
   const name = tab?.label ?? 'no session'
   const branch = useBranch(tab?.cwd ?? null)
+
+  if (rail) {
+    return (
+      <div className="flex flex-col items-center gap-1.5 pt-2 pb-2 border-b border-rule">
+        <button
+          onClick={onNewSession}
+          data-testid="tour-new-session"
+          title="New session"
+          className="w-9 h-9 rounded-md bg-bg-hi border border-line text-fg hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center"
+        >
+          <AlmanacIcon name="plus" size={15} stroke={1.8} />
+        </button>
+        <button
+          onClick={onToggleRail}
+          title="Expand sidebar"
+          data-testid="sidebar-rail-toggle"
+          className="w-9 h-9 rounded-md text-fg-faint hover:text-fg hover:bg-bg-hi/50 transition-colors flex items-center justify-center"
+        >
+          <span style={{ display: 'inline-flex', transform: 'rotate(0deg)' }}>
+            <AlmanacIcon name="chevron" size={15} stroke={1.8} />
+          </span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="px-[18px] pt-[14px] pb-[10px] border-b border-rule">
-      <div className="text-[11px] font-semibold tracking-[0.06em] text-fg-faint uppercase">
-        Project
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold tracking-[0.06em] text-fg-faint uppercase">
+          Project
+        </div>
+        <button
+          onClick={onToggleRail}
+          title="Collapse sidebar"
+          data-testid="sidebar-rail-toggle"
+          className="w-6 h-6 rounded-md text-fg-faint hover:text-fg hover:bg-bg-hi/50 transition-colors flex items-center justify-center"
+        >
+          <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
+            <AlmanacIcon name="chevron" size={13} stroke={1.8} />
+          </span>
+        </button>
       </div>
       <div className="flex items-baseline gap-2 mt-1">
         <span className="self-center w-2 h-2 rounded-full bg-sage" />
@@ -355,13 +432,15 @@ function NavGroupHeader({
 }
 
 function NavRow({
-  item, active, live, onClick,
-}: { item: NavGroupItem; active: boolean; live: boolean; onClick: () => void }) {
+  item, active, live, onClick, rail,
+}: { item: NavGroupItem; active: boolean; live: boolean; onClick: () => void; rail: boolean }) {
   return (
     <button
       onClick={onClick}
       title={item.hint}
-      className={`relative w-full flex items-center gap-3 px-3.5 py-[9px] rounded-[10px] text-left text-[14px] mb-0.5 transition-colors ${
+      className={`relative w-full flex items-center rounded-[10px] text-left mb-0.5 transition-colors ${
+        rail ? 'justify-center px-0 py-[9px]' : 'gap-3 px-3.5 py-[9px] text-[14px]'
+      } ${
         active
           ? 'bg-bg-hi text-fg font-semibold border border-line'
           : 'text-fg-dim hover:bg-bg-hi/50 hover:text-fg border border-transparent'
@@ -370,26 +449,31 @@ function NavRow({
       {active && (
         <span
           aria-hidden
-          className="absolute -left-[10px] top-3 bottom-3 w-[3px] rounded-sm bg-accent"
+          className={`absolute top-3 bottom-3 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
         />
       )}
       <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
         <AlmanacIcon name={item.icon} size={17} stroke={1.6} />
       </span>
-      <span className="flex-1 truncate">{item.label}</span>
-      {live && (
+      {!rail && <span className="flex-1 truncate">{item.label}</span>}
+      {!rail && live && (
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="live activity" />
+      )}
+      {rail && live && (
+        <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="live activity" />
       )}
     </button>
   )
 }
 
-function ToolRow({ tool, active, onClick }: { tool: ToolItem; active: boolean; onClick: () => void }) {
+function ToolRow({ tool, active, onClick, rail }: { tool: ToolItem; active: boolean; onClick: () => void; rail: boolean }) {
   return (
     <button
       onClick={onClick}
       title={tool.hint}
-      className={`relative w-full flex items-center gap-3 px-3.5 py-[7px] rounded-[10px] text-left text-[13px] mb-0.5 transition-colors ${
+      className={`relative w-full flex items-center rounded-[10px] text-left mb-0.5 transition-colors ${
+        rail ? 'justify-center px-0 py-[7px]' : 'gap-3 px-3.5 py-[7px] text-[13px]'
+      } ${
         active
           ? 'bg-bg-hi text-fg font-semibold border border-line'
           : 'text-fg-dim hover:bg-bg-hi/50 hover:text-fg border border-transparent'
@@ -398,18 +482,18 @@ function ToolRow({ tool, active, onClick }: { tool: ToolItem; active: boolean; o
       {active && (
         <span
           aria-hidden
-          className="absolute -left-[10px] top-2 bottom-2 w-[3px] rounded-sm bg-accent"
+          className={`absolute top-2 bottom-2 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
         />
       )}
       <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
         <AlmanacIcon name={tool.icon} size={15} stroke={1.6} />
       </span>
-      <span className="flex-1 truncate">{tool.label}</span>
+      {!rail && <span className="flex-1 truncate">{tool.label}</span>}
     </button>
   )
 }
 
-function SidebarFooter() {
+function SidebarFooter({ rail }: { rail: boolean }) {
   const isRecording = useVoice((s) => s.isRecording)
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
@@ -423,6 +507,17 @@ function SidebarFooter() {
       .catch(() => { if (!cancelled) setModel(null) })
     return () => { cancelled = true }
   }, [activeTab?.presetId])
+
+  if (rail) {
+    return (
+      <div className="py-2.5 border-t border-rule flex justify-center">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-sage'}`}
+          title={isRecording ? 'recording' : 'idle'}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="px-3.5 py-2.5 border-t border-rule flex items-center gap-2 text-[11.5px] text-fg-dim font-mono">

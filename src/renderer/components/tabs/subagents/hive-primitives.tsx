@@ -1,9 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Recipe } from '../../../../preload/api'
 import { useHives } from '../../../state/hives'
+import { referencedAgentNames } from '../../../state/hives'
 import { useOrchestrator } from '../../../state/orchestrator'
 import { useDispatch } from '../../../state/dispatch'
 import { useActiveTab } from '../../../lib/useActiveTab'
+import { useAgentNames } from '../../../lib/useAgentNames'
+import { resolveRecipeRoles } from '../../../lib/resolveRecipeRoles'
 import { toast } from '../../../state/toast'
 import { HiveManagerModal } from '../../modals/HiveManagerModal'
 
@@ -263,6 +266,21 @@ export function LaunchView({
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const [managerOpen, setManagerOpen] = useState(false)
 
+  // Collect installed agents from both scopes to validate recipe steps.
+  const { agents: userAgents } = useAgentNames('user')
+  const { agents: projectAgents } = useAgentNames('project')
+  const allAgents = useMemo(
+    () => {
+      const seen = new Set<string>()
+      const merged = []
+      for (const a of [...userAgents, ...projectAgents]) {
+        if (!seen.has(a.name)) { seen.add(a.name); merged.push(a) }
+      }
+      return merged
+    },
+    [userAgents, projectAgents],
+  )
+
   // Load hives if the list is empty (mirrors HiveManagerModal behaviour).
   useEffect(() => {
     if (list.length === 0) void loadHives()
@@ -285,22 +303,48 @@ export function LaunchView({
   const cwdParts = activeTab?.cwd?.split('/').filter(Boolean) ?? []
   const projectLabel = cwdParts[cwdParts.length - 1] ?? 'no active project'
 
-  const handleLaunch = () => {
+  // Compute which agent names referenced by the selected recipe are not installed.
+  const missingAgents = useMemo(() => {
+    if (!selectedHive) return []
+    const needed = referencedAgentNames(selectedHive)
+    const byName = new Set(allAgents.map((a) => a.name))
+    return needed.filter((n) => !byName.has(n))
+  }, [selectedHive, allAgents])
+
+  const handleLaunch = async () => {
     if (!selectedHive) return
     if (selectedHive.steps.length === 0) {
       toast.warn('This recipe has no steps to launch.')
       return
     }
-    // PRD 126 bridge: pass agentName as label; step note or shared brief as prompt.
-    // Full resolution (agentName → .md content → prompt) lands in PRD 126.
+    if (missingAgents.length > 0) {
+      toast.warn(`Cannot launch: missing agents — ${missingAgents.join(', ')}`)
+      return
+    }
+
     const sharedBrief = brief.trim() || selectedHive.brief || ''
+
+    const readBody = async (path: string): Promise<string | null> => {
+      const r = await window.api.config.readText(path)
+      return r.exists && !r.error ? r.text : null
+    }
+
+    // Merge the shared brief into the recipe so the resolver can append it.
+    const recipeWithBrief: Recipe = sharedBrief
+      ? { ...selectedHive, brief: sharedBrief }
+      : selectedHive
+
+    const { roles, missing } = await resolveRecipeRoles(recipeWithBrief, allAgents, readBody)
+
+    if (missing.length > 0) {
+      toast.error(`Cannot launch: could not read agents — ${missing.join(', ')}`)
+      return
+    }
+
     launchHive({
       name: selectedHive.name,
       defaultPlan: sharedBrief || undefined,
-      roles: selectedHive.steps.map((s) => ({
-        label: s.agentName,
-        prompt: s.note ? `${sharedBrief}\n\n${s.note}`.trim() : sharedBrief || s.agentName,
-      })),
+      roles,
     })
     onSwitchToLive()
   }
@@ -401,10 +445,10 @@ export function LaunchView({
           {/* Launch CTA */}
           <div className="px-4 pb-4 pt-1">
             <button
-              onClick={handleLaunch}
-              disabled={!selectedHive || stepCount === 0}
+              onClick={() => void handleLaunch()}
+              disabled={!selectedHive || stepCount === 0 || missingAgents.length > 0}
               className={`w-full flex items-center justify-center gap-2.5 rounded-xl py-3 px-4 text-[15px] font-semibold text-white transition-opacity ${
-                selectedHive && stepCount > 0
+                selectedHive && stepCount > 0 && missingAgents.length === 0
                   ? 'bg-accent hover:opacity-90 cursor-pointer shadow-[0_2px_0_rgba(0,0,0,0.18)]'
                   : 'bg-fg-faint cursor-not-allowed opacity-50'
               }`}
@@ -414,6 +458,11 @@ export function LaunchView({
               </span>
               Launch the hive
             </button>
+            {missingAgents.length > 0 && (
+              <div className="mt-2 text-[11px] text-red-400 text-center leading-tight">
+                {missingAgents.length} step{missingAgents.length !== 1 ? 's reference' : ' references'} agent{missingAgents.length !== 1 ? 's' : ''} that aren't installed: {missingAgents.join(', ')}
+              </div>
+            )}
             <div className="text-center mt-2 text-[11px] text-fg-faint">
               Auto-pauses on rate-limit · resumes on the next window reset
             </div>

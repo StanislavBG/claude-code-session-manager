@@ -1,25 +1,18 @@
 /**
- * HiveManagerModal — manage pre-baked subagent swarm templates ("Hives").
+ * HiveManagerModal — manage pre-baked subagent swarm recipes.
  *
  * Two-pane layout:
- *   Left  — list of hives. Defaults appear first with a "(default)" tag,
- *           user-saved hives follow. Selecting one populates the right pane.
- *   Right — editor for the selected hive: name, description, defaultPlan,
- *           and a roles list (label + prompt per role). Defaults are
- *           read-only; click "Clone to edit" to copy into a writable user hive.
+ *   Left  — list of recipes. Defaults appear first with a "(default)" tag.
+ *   Right — editor: name, description, brief, and a steps list
+ *           (agentName dropdown + optional note per step).
+ *           Defaults are read-only; click "Clone to edit" to copy.
  *
- * Header buttons:
- *   "+ New hive"  — creates a blank user hive locally and selects it.
- *   "Launch hive" (active panel only) — pre-fills the Orchestrator with the
- *                  selected hive's roles + defaultPlan, opens OrchestratorModal,
- *                  and closes this one.
+ * Steps reference agents by name only — no prompt stored here.
+ * Full resolution (agentName → .md content) is PRD 126.
  *
- * The Launch handoff goes through `useOrchestrator.launchHive(hive)` which
- * writes the roles into the orchestrator store's `pendingRoles` mailbox.
- * OrchestratorModal reads it on mount and seeds its local row form.
- *
- * Storage is renderer-local (zustand `useHives`) until the user clicks Save —
- * then it goes through IPC `hives:save` → `~/.claude/session-manager/hives/*.json`.
+ * Missing-step handling:
+ *   - agentName not installed + matches a CATALOG_AGENTS id → inline "Install" button
+ *   - agentName not installed + not in catalog → "missing — pick another agent" label
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -27,19 +20,21 @@ import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { useHives, generateHiveSlug } from '../../state/hives'
 import { useOrchestrator } from '../../state/orchestrator'
+import { useAgentNames } from '../../lib/useAgentNames'
+import { useHomeDir } from '../../lib/useHomeDir'
 import { isDefaultHive } from '../../lib/defaultHives'
 import { toast } from '../../state/toast'
-import type { Recipe } from '../../../preload/api'
+import { CATALOG_AGENTS } from '../../data/catalog'
+import type { Recipe, RecipeStep } from '../../../preload/api'
 
-// TODO(PRD-124): remove when HiveManagerModal is rewritten for Recipe shape
-type _LegacyHive = Recipe & { roles: _LegacyHiveRole[]; defaultPlan?: string }
-type _LegacyHiveRole = { label: string; prompt: string }
+const MAX_NOTE_LEN = 2048
+const MAX_BRIEF_LEN = 8192
+const MAX_STEPS = 32
 
 interface HiveManagerModalProps {
   open: boolean
   onClose: () => void
-  /** Called after the user clicks Launch, so the parent (App.tsx) can switch
-   *  the open modal from 'hives' to 'orchestrator'. */
+  /** Called after the user clicks Launch, so the parent can switch modals. */
   onLaunch?: () => void
   variant?: 'overlay' | 'page'
 }
@@ -54,19 +49,21 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   const deleteHive = useHives((s) => s.delete)
   const launchHiveOrch = useOrchestrator((s) => s.launchHive)
 
-  const [draft, setDraft] = useState<_LegacyHive | null>(null)
+  const home = useHomeDir()
+  const { agents, reload: reloadAgents } = useAgentNames('user')
+  const installedNames = useMemo(() => new Set(agents.map((a) => a.name)), [agents])
+
+  const [draft, setDraft] = useState<Recipe | null>(null)
   const [dirty, setDirty] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [installBusy, setInstallBusy] = useState<string | null>(null)
 
-  // Hydrate the user-saved list whenever the modal opens.
   useEffect(() => {
     if (!open) return
     void load()
   }, [open, load])
 
-  // Auto-select the first hive when the list becomes available and nothing is
-  // selected. Saves a click on first open.
   useEffect(() => {
     if (!open) return
     if (selectedSlug) return
@@ -74,14 +71,11 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
     select(list[0].slug)
   }, [open, list, selectedSlug, select])
 
-  // TODO(PRD-124): cast removed when modal is rewritten for Recipe shape
   const selectedHive = useMemo(
-    () => (list.find((h) => h.slug === selectedSlug) ?? null) as unknown as _LegacyHive | null,
+    () => list.find((h) => h.slug === selectedSlug) ?? null,
     [list, selectedSlug],
   )
 
-  // Sync the editor draft whenever the selection changes, dropping any unsaved
-  // edits. The "dirty" flag exists so we can highlight the Save button.
   useEffect(() => {
     if (!selectedHive) {
       setDraft(null)
@@ -97,41 +91,31 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
 
   const handleNewHive = useCallback(() => {
     let slug = generateHiveSlug('hive')
-    // Astronomically unlikely collision, but guard anyway.
     const taken = new Set(list.map((h) => h.slug))
     let guard = 0
     while (taken.has(slug) && guard++ < 8) slug = generateHiveSlug('hive')
-    const blank: _LegacyHive = {
+    const blank: Recipe = {
       slug,
-      name: 'New hive',
+      name: 'New recipe',
       description: '',
-      steps: [],
-      // The IPC save schema requires a non-empty prompt per role. Seed with a
-      // placeholder so the first save succeeds; the user can rewrite it.
-      roles: [{ label: 'Role 1', prompt: 'Describe what this subagent should do.' }],
-      defaultPlan: '',
+      steps: [{ agentName: '' }],
     }
-    // Optimistic local insert — Save persists to disk.
-    const ok = saveHive(blank as unknown as Recipe)
-    void ok.then((res) => {
-      if (res.ok) {
-        select(slug)
-      }
+    void saveHive(blank).then((res) => {
+      if (res.ok) select(slug)
     })
   }, [list, saveHive, select])
 
   const handleClone = useCallback(() => {
     if (!selectedHive) return
     const slug = generateHiveSlug(selectedHive.name)
-    const clone: _LegacyHive = {
+    const clone: Recipe = {
       slug,
       name: `${selectedHive.name} (copy)`,
       description: selectedHive.description,
-      steps: selectedHive.steps ?? [],
-      roles: selectedHive.roles.map((r) => ({ ...r })),
-      defaultPlan: selectedHive.defaultPlan,
+      brief: selectedHive.brief,
+      steps: selectedHive.steps.map((s) => ({ ...s })),
     }
-    void saveHive(clone as unknown as Recipe).then((res) => {
+    void saveHive(clone).then((res) => {
       if (res.ok) {
         select(slug)
         toast.info(`Cloned "${selectedHive.name}" → editable copy`)
@@ -141,26 +125,23 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
 
   const handleSave = useCallback(async () => {
     if (!draft || !canEdit) return
-    // Drop empty roles before save; backend requires roles.length >= 1.
-    const cleaned: _LegacyHive = {
+    const cleaned: Recipe = {
       ...draft,
-      roles: draft.roles
-        .map((r) => ({ label: r.label.trim(), prompt: r.prompt.trim() }))
-        .filter((r) => r.label.length > 0 && r.prompt.length > 0),
+      name: draft.name.trim() || 'Untitled recipe',
       description: draft.description.trim(),
-      defaultPlan: draft.defaultPlan?.trim() || undefined,
-      name: draft.name.trim() || 'Untitled hive',
+      brief: draft.brief?.trim() || undefined,
+      steps: draft.steps.filter((s) => s.agentName.trim().length > 0),
     }
-    if (cleaned.roles.length === 0) {
-      toast.warn('Hive needs at least one role with a non-empty prompt.')
+    if (cleaned.steps.length === 0) {
+      toast.warn('Recipe needs at least one step with a non-empty agent name.')
       return
     }
     setSaving(true)
-    const res = await saveHive(cleaned as unknown as Recipe)
+    const res = await saveHive(cleaned)
     setSaving(false)
     if (res.ok) {
       setDirty(false)
-      toast.info(`Saved hive "${cleaned.name}"`)
+      toast.info(`Saved recipe "${cleaned.name}"`)
     }
   }, [draft, canEdit, saveHive])
 
@@ -168,28 +149,32 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
     if (!selectedHive || isDefault) return
     const res = await deleteHive(selectedHive.slug)
     if (res.ok) {
-      toast.info(`Deleted hive "${selectedHive.name}"`)
+      toast.info(`Deleted recipe "${selectedHive.name}"`)
       setConfirmDelete(null)
     }
   }, [selectedHive, isDefault, deleteHive])
 
   const handleLaunch = useCallback(() => {
     if (!selectedHive) return
-    if (selectedHive.roles.length === 0) {
-      toast.warn('This hive has no roles to launch.')
+    if (selectedHive.steps.length === 0) {
+      toast.warn('This recipe has no steps to launch.')
       return
     }
+    // PRD 126 bridge: agentName as label, brief+note as placeholder prompt.
     launchHiveOrch({
       name: selectedHive.name,
-      defaultPlan: selectedHive.defaultPlan,
-      roles: selectedHive.roles.map((r) => ({ label: r.label, prompt: r.prompt })),
+      defaultPlan: selectedHive.brief || undefined,
+      roles: selectedHive.steps.map((s) => ({
+        label: s.agentName,
+        prompt: s.note ? `${selectedHive.brief ?? ''}\n\n${s.note}`.trim() : selectedHive.brief ?? s.agentName,
+      })),
     })
     onLaunch?.()
     onClose()
   }, [selectedHive, launchHiveOrch, onLaunch, onClose])
 
   const patchDraft = useCallback(
-    (patch: Partial<Omit<_LegacyHive, 'slug'>>) => {
+    (patch: Partial<Omit<Recipe, 'slug' | 'steps'>>) => {
       if (!draft) return
       setDraft({ ...draft, ...patch })
       setDirty(true)
@@ -197,34 +182,66 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
     [draft],
   )
 
-  const patchRole = useCallback(
-    (i: number, role: Partial<_LegacyHiveRole>) => {
+  const patchStep = useCallback(
+    (i: number, patch: Partial<RecipeStep>) => {
       if (!draft) return
-      const next = draft.roles.slice()
-      next[i] = { ...next[i], ...role }
-      setDraft({ ...draft, roles: next })
+      const next = draft.steps.slice()
+      next[i] = { ...next[i], ...patch }
+      setDraft({ ...draft, steps: next })
       setDirty(true)
     },
     [draft],
   )
 
-  const addRole = useCallback(() => {
+  const addStep = useCallback(() => {
     if (!draft) return
-    setDraft({
-      ...draft,
-      roles: [...draft.roles, { label: `Role ${draft.roles.length + 1}`, prompt: '' }],
-    })
+    if (draft.steps.length >= MAX_STEPS) {
+      toast.warn(`Recipes support at most ${MAX_STEPS} steps.`)
+      return
+    }
+    setDraft({ ...draft, steps: [...draft.steps, { agentName: '' }] })
     setDirty(true)
   }, [draft])
 
-  const removeRole = useCallback(
+  const removeStep = useCallback(
     (i: number) => {
       if (!draft) return
-      const next = draft.roles.filter((_, idx) => idx !== i)
-      setDraft({ ...draft, roles: next })
+      setDraft({ ...draft, steps: draft.steps.filter((_, idx) => idx !== i) })
       setDirty(true)
     },
     [draft],
+  )
+
+  const moveStep = useCallback(
+    (i: number, dir: 'up' | 'down') => {
+      if (!draft) return
+      const next = draft.steps.slice()
+      const target = dir === 'up' ? i - 1 : i + 1
+      if (target < 0 || target >= next.length) return
+      ;[next[i], next[target]] = [next[target], next[i]]
+      setDraft({ ...draft, steps: next })
+      setDirty(true)
+    },
+    [draft],
+  )
+
+  const installAgent = useCallback(
+    async (agentId: string) => {
+      if (!home) return
+      const catalogEntry = CATALOG_AGENTS.find((a) => a.id === agentId)
+      if (!catalogEntry) return
+      setInstallBusy(agentId)
+      const path = `${home}/.claude/agents/${agentId}.md`
+      const r = await window.api.config.writeText(path, catalogEntry.content)
+      setInstallBusy(null)
+      if (!r.ok) {
+        toast.error(`Install failed: ${r.error ?? 'write error'}`)
+        return
+      }
+      toast.info(`Installed ${agentId}`)
+      await reloadAgents()
+    },
+    [home, reloadAgents],
   )
 
   return (
@@ -233,11 +250,11 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
         <div className="flex items-center gap-2">
           <span className="text-base">⛓</span>
           <h2 className="text-xs uppercase tracking-wider text-fg-dim">
-            Hives — pre-baked subagent swarms
+            Recipes — pre-baked subagent swarms
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="default" onClick={handleNewHive}>+ New hive</Button>
+          <Button variant="default" onClick={handleNewHive}>+ New recipe</Button>
           <button
             type="button"
             onClick={onClose}
@@ -250,18 +267,17 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        {/* Left pane — hive list */}
+        {/* Left pane — recipe list */}
         <div className="w-64 shrink-0 border-r border-line overflow-auto">
           {loading && list.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-fg-faint">Loading hives…</div>
+            <div className="px-3 py-2 text-xs text-fg-faint">Loading recipes…</div>
           ) : list.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-fg-faint">No hives yet.</div>
+            <div className="px-3 py-2 text-xs text-fg-faint">No recipes yet.</div>
           ) : (
             <ul role="listbox" className="py-1">
               {list.map((h) => {
                 const isSel = h.slug === selectedSlug
                 const def = isDefaultHive(h.slug)
-                const legacy = h as unknown as _LegacyHive
                 return (
                   <li key={h.slug}>
                     <button
@@ -284,7 +300,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
                         )}
                       </div>
                       <div className="text-[10px] text-fg-faint truncate">
-                        {(legacy.roles?.length ?? h.steps.length)} role{(legacy.roles?.length ?? h.steps.length) !== 1 ? 's' : ''}
+                        {h.steps.length} step{h.steps.length !== 1 ? 's' : ''}
                       </div>
                     </button>
                   </li>
@@ -297,15 +313,13 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
         {/* Right pane — editor */}
         <div className="flex-1 min-w-0 overflow-auto p-4">
           {!draft ? (
-            <div className="text-xs text-fg-faint">Select a hive on the left.</div>
+            <div className="text-xs text-fg-faint">Select a recipe on the left.</div>
           ) : (
             <div className="space-y-4">
               {/* Editor toolbar */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-fg-faint">
-                    {draft.slug}
-                  </span>
+                  <span className="text-[10px] font-mono text-fg-faint">{draft.slug}</span>
                   {isDefault && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg border border-line text-fg-faint">
                       default · read-only
@@ -349,7 +363,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
                     value={draft.name}
                     onChange={(e) => patchDraft({ name: e.target.value })}
                     readOnly={!canEdit}
-                    className="w-full bg-bg border border-line rounded px-3 py-1.5 text-sm text-fg focus:outline-none focus:border-accent disabled:opacity-60"
+                    className="w-full bg-bg border border-line rounded px-3 py-1.5 text-sm text-fg focus:outline-none focus:border-accent"
                   />
                 </Field>
                 <Field label="Description">
@@ -361,68 +375,48 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
                     className="w-full bg-bg border border-line rounded px-3 py-1.5 text-xs text-fg focus:outline-none focus:border-accent resize-none"
                   />
                 </Field>
-                <Field label="Default plan (optional — pre-fills the Orchestrator plan box)">
+                <Field label={`Brief (optional — shared goal sent to every step, max ${MAX_BRIEF_LEN} chars)`}>
                   <textarea
-                    value={draft.defaultPlan ?? ''}
-                    onChange={(e) => patchDraft({ defaultPlan: e.target.value })}
+                    value={draft.brief ?? ''}
+                    onChange={(e) => patchDraft({ brief: e.target.value.slice(0, MAX_BRIEF_LEN) || undefined })}
                     readOnly={!canEdit}
-                    rows={2}
+                    rows={3}
                     className="w-full bg-bg border border-line rounded px-3 py-1.5 text-xs text-fg focus:outline-none focus:border-accent resize-none font-mono"
+                    placeholder="What should the swarm accomplish? Each agent receives this as context."
                   />
                 </Field>
               </div>
 
-              {/* Roles */}
+              {/* Steps */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[10px] uppercase tracking-wider text-fg-faint">
-                    Roles — one prompt per subagent
+                    Steps — one agent per step
                   </label>
                   <span className="text-[10px] text-fg-faint">
-                    {draft.roles.length} role{draft.roles.length !== 1 ? 's' : ''}
+                    {draft.steps.length}/{MAX_STEPS}
                   </span>
                 </div>
                 <div className="space-y-2">
-                  {draft.roles.map((role, i) => (
-                    <div
+                  {draft.steps.map((step, i) => (
+                    <StepRow
                       key={i}
-                      className="border border-line rounded p-2 bg-bg space-y-2"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-accent font-mono shrink-0">
-                          R{i + 1}
-                        </span>
-                        <input
-                          type="text"
-                          value={role.label}
-                          onChange={(e) => patchRole(i, { label: e.target.value })}
-                          readOnly={!canEdit}
-                          placeholder="Role label"
-                          className="flex-1 bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent"
-                        />
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => removeRole(i)}
-                            aria-label={`Remove ${role.label || `role ${i + 1}`}`}
-                            className="text-fg-faint hover:text-red-400 px-1.5 py-0.5 text-sm"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                      <textarea
-                        value={role.prompt}
-                        onChange={(e) => patchRole(i, { prompt: e.target.value })}
-                        readOnly={!canEdit}
-                        rows={4}
-                        placeholder="What this subagent should do…"
-                        className="w-full bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:border-accent resize-none font-mono"
-                      />
-                    </div>
+                      index={i}
+                      step={step}
+                      total={draft.steps.length}
+                      installedNames={installedNames}
+                      canEdit={canEdit}
+                      installBusy={installBusy}
+                      onChange={(patch) => patchStep(i, patch)}
+                      onRemove={() => removeStep(i)}
+                      onMove={(dir) => moveStep(i, dir)}
+                      onInstall={installAgent}
+                    />
                   ))}
                   {canEdit && (
-                    <Button variant="default" onClick={addRole}>+ Add role</Button>
+                    <Button variant="default" onClick={addStep} disabled={draft.steps.length >= MAX_STEPS}>
+                      + Add step
+                    </Button>
                   )}
                 </div>
               </div>
@@ -436,16 +430,12 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
           <div className="bg-bg-elev border border-line rounded p-4 max-w-sm space-y-3">
             <div className="text-sm text-fg">
-              Delete hive <span className="font-mono text-accent">{confirmDelete}</span>?
+              Delete recipe <span className="font-mono text-accent">{confirmDelete}</span>?
               This cannot be undone.
             </div>
             <div className="flex items-center justify-end gap-2">
-              <Button variant="default" onClick={() => setConfirmDelete(null)}>
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={handleDelete}>
-                Delete
-              </Button>
+              <Button variant="default" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleDelete}>Delete</Button>
             </div>
           </div>
         </div>
@@ -454,12 +444,152 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   )
 }
 
+function StepRow({
+  index,
+  step,
+  total,
+  installedNames,
+  canEdit,
+  installBusy,
+  onChange,
+  onRemove,
+  onMove,
+  onInstall,
+}: {
+  index: number
+  step: RecipeStep
+  total: number
+  installedNames: Set<string>
+  canEdit: boolean
+  installBusy: string | null
+  onChange: (patch: Partial<RecipeStep>) => void
+  onRemove: () => void
+  onMove: (dir: 'up' | 'down') => void
+  onInstall: (id: string) => Promise<void>
+}) {
+  const installed = !step.agentName || installedNames.has(step.agentName)
+  const catalogEntry = !installed ? CATALOG_AGENTS.find((a) => a.id === step.agentName) : null
+  const isMissing = step.agentName.length > 0 && !installed
+
+  return (
+    <div className={`border rounded p-2 bg-bg space-y-1.5 ${isMissing ? 'border-yellow-600/50' : 'border-line'}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-accent font-mono shrink-0">S{index + 1}</span>
+
+        {/* Agent name: dropdown if agents exist, otherwise free-text input */}
+        {canEdit ? (
+          <AgentNameSelect
+            value={step.agentName}
+            installedNames={installedNames}
+            onChange={(v) => onChange({ agentName: v })}
+          />
+        ) : (
+          <span className="flex-1 font-mono text-xs text-fg px-2 py-1">{step.agentName || '(none)'}</span>
+        )}
+
+        {canEdit && (
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onMove('up')}
+              disabled={index === 0}
+              className="px-1 py-0.5 text-fg-faint hover:text-fg disabled:opacity-30 text-xs"
+              aria-label="Move step up"
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              onClick={() => onMove('down')}
+              disabled={index === total - 1}
+              className="px-1 py-0.5 text-fg-faint hover:text-fg disabled:opacity-30 text-xs"
+              aria-label="Move step down"
+            >
+              ▼
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={`Remove step ${index + 1}`}
+              className="text-fg-faint hover:text-red-400 px-1.5 py-0.5 text-sm"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Note */}
+      {canEdit && (
+        <input
+          type="text"
+          value={step.note ?? ''}
+          onChange={(e) => onChange({ note: e.target.value.slice(0, MAX_NOTE_LEN) || undefined })}
+          placeholder="Optional step note (specific focus for this agent)…"
+          className="w-full bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:border-accent font-mono"
+        />
+      )}
+      {!canEdit && step.note && (
+        <div className="text-xs text-fg-dim font-mono px-1">{step.note}</div>
+      )}
+
+      {/* Missing-step indicator */}
+      {isMissing && (
+        <div className="flex items-center gap-2 px-1 pt-0.5">
+          <span className="text-[11px] text-yellow-400">
+            {catalogEntry ? `⚠ not installed` : `⚠ missing — pick another agent`}
+          </span>
+          {catalogEntry && (
+            <button
+              type="button"
+              disabled={installBusy === step.agentName}
+              onClick={() => void onInstall(step.agentName)}
+              className="text-[11px] font-semibold text-accent hover:underline disabled:opacity-50"
+            >
+              {installBusy === step.agentName ? 'Installing…' : `Install ${step.agentName}`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentNameSelect({
+  value,
+  installedNames,
+  onChange,
+}: {
+  value: string
+  installedNames: Set<string>
+  onChange: (v: string) => void
+}) {
+  const sortedNames = useMemo(() => Array.from(installedNames).sort(), [installedNames])
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="flex-1 bg-bg-elev border border-line rounded px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent font-mono"
+    >
+      <option value="">(pick an agent)</option>
+      {sortedNames.map((name) => (
+        <option key={name} value={name}>
+          {name}
+        </option>
+      ))}
+      {/* Preserve a currently-selected value that is no longer installed */}
+      {value && !installedNames.has(value) && (
+        <option value={value}>{value} (missing)</option>
+      )}
+    </select>
+  )
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="text-[10px] uppercase tracking-wider text-fg-faint mb-1 block">
-        {label}
-      </label>
+      <label className="text-[10px] uppercase tracking-wider text-fg-faint mb-1 block">{label}</label>
       {children}
     </div>
   )

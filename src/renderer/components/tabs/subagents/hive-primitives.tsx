@@ -1,8 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Recipe } from '../../../../preload/api'
-
-// TODO(PRD-124): remove when hive-primitives is rewritten for Recipe shape
-type _LegacyHive = Recipe & { roles: Array<{ label: string; prompt: string }>; defaultPlan?: string }
 import { useHives } from '../../../state/hives'
 import { useOrchestrator } from '../../../state/orchestrator'
 import { useDispatch } from '../../../state/dispatch'
@@ -57,27 +54,6 @@ function hiveEstimate(roleCount: number) {
   }
 }
 
-// A role is read-only if its prompt contains no explicit write-intent keywords.
-function roleIsReadOnly(prompt: string): boolean {
-  return !/\b(edit|write|create|modify|patch|implement|fix|update|save|delete|refactor|rename|generate|apply|add|replace|rewrite|scaffold|migrate)\b/i.test(
-    prompt,
-  )
-}
-
-function roleReturnsHint(label: string): string {
-  const l = label.toLowerCase()
-  if (l.includes('review')) return 'a prioritised list of findings'
-  if (l.includes('test')) return 'a test suite'
-  if (l.includes('plan')) return 'a design plan'
-  if (l.includes('fix')) return 'a patched diff'
-  if (l.includes('diagnos')) return 'a root-cause analysis'
-  if (l.includes('repro')) return 'a minimal reproduction'
-  if (l.includes('impl')) return 'production code'
-  if (l.includes('securi')) return 'findings ranked by severity'
-  if (l.includes('perf')) return 'a short hot-path report'
-  return 'a findings digest'
-}
-
 // Hexagonal hive-cell SVG. Uses currentColor so the wrapping element's
 // text-{color} class drives the fill.
 export function HiveCell({ size = 16 }: { size?: number }) {
@@ -105,32 +81,20 @@ export function StatusPill({ state }: { state: 'running' | 'done' }) {
   )
 }
 
-// Read-only / can-edit chip shown in the "What will happen" role list.
-function EditTypeChip({ readOnly }: { readOnly: boolean }) {
-  return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-medium rounded border ${
-      readOnly ? 'border-sage text-sage bg-bg' : 'border-butter text-fg-dim bg-bg'
-    }`}>
-      {readOnly ? 'read-only' : 'can edit'}
-    </span>
-  )
-}
-
 // Stable tab definitions hoisted to module level to avoid re-allocation per render.
-const HIVE_TABS: { id: 'launch' | 'live' | 'configured' | 'library'; label: string }[] = [
+const HIVE_TABS: { id: 'launch' | 'live' | 'agents'; label: string }[] = [
   { id: 'launch', label: 'Launch' },
   { id: 'live', label: 'Live' },
-  { id: 'configured', label: 'Configured' },
-  { id: 'library', label: 'Library' },
+  { id: 'agents', label: 'Agents' },
 ]
 
-// Sub-tab bar: Launch | Live | Configured | Library.
+// Sub-tab bar: Launch | Live | Agents.
 export function HiveSubTabs({
   value,
   onChange,
 }: {
-  value: 'launch' | 'live' | 'configured' | 'library'
-  onChange: (v: 'launch' | 'live' | 'configured' | 'library') => void
+  value: 'launch' | 'live' | 'agents'
+  onChange: (v: 'launch' | 'live' | 'agents') => void
 }) {
   const tabs = HIVE_TABS
   return (
@@ -185,8 +149,8 @@ export function StepHeader({ n, title, hint }: { n?: string; title: string; hint
   )
 }
 
-// Fan-out diagram: main session → N role cells → single digest.
-function FanoutDiagram({ hive, pal }: { hive: _LegacyHive; pal: PaletteEntry }) {
+// Fan-out diagram: main session → N agent cells → single digest.
+function FanoutDiagram({ hive, pal }: { hive: Recipe; pal: PaletteEntry }) {
   return (
     <div className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-xl border border-line bg-bg p-3">
       {/* Main session node */}
@@ -199,16 +163,16 @@ function FanoutDiagram({ hive, pal }: { hive: _LegacyHive; pal: PaletteEntry }) 
         </span>
       </div>
 
-      {/* Fan of roles */}
+      {/* Fan of steps */}
       <div className="flex flex-col gap-1.5 min-w-0">
-        {hive.roles.map((role, i) => (
+        {hive.steps.map((step, i) => (
           <div key={i} className="flex items-center gap-2">
             <div className="w-8 border-t border-rule shrink-0" />
             <div className="flex items-center gap-2 bg-hi border border-line rounded-lg px-2.5 py-1 flex-1 min-w-0">
               <span className={`shrink-0 ${pal.text}`}>
                 <HiveCell size={11} />
               </span>
-              <span className="font-mono text-[11.5px] text-fg font-medium truncate">{role.label}</span>
+              <span className="font-mono text-[11.5px] text-fg font-medium truncate">{step.agentName}</span>
               <span className="ml-auto text-[10px] text-fg-faint whitespace-nowrap shrink-0">isolated ctx</span>
             </div>
           </div>
@@ -235,13 +199,13 @@ function RecipeCard({
   active,
   onClick,
 }: {
-  hive: _LegacyHive
+  hive: Recipe
   paletteIndex: number
   active: boolean
   onClick: () => void
 }) {
   const pal = paletteAt(paletteIndex)
-  const { estMin, estCost } = hiveEstimate(hive.roles.length)
+  const { estMin, estCost } = hiveEstimate(hive.steps.length)
 
   return (
     <button
@@ -265,7 +229,7 @@ function RecipeCard({
       </div>
       <p className="text-[13px] text-fg-dim leading-[1.45] mb-2.5">{hive.description}</p>
       <div className="flex items-center gap-1.5 flex-wrap">
-        {hive.roles.map((role, i) => (
+        {hive.steps.map((step, i) => (
           <span
             key={i}
             className="inline-flex items-center gap-1 bg-elev border border-line rounded-[7px] px-2 py-0.5"
@@ -273,7 +237,7 @@ function RecipeCard({
             <span className={pal.text}>
               <HiveCell size={10} />
             </span>
-            <span className="font-mono text-[11px] text-fg-dim">{role.label}</span>
+            <span className="font-mono text-[11px] text-fg-dim">{step.agentName}</span>
           </span>
         ))}
         <span className="ml-auto font-mono text-[11px] text-fg-faint whitespace-nowrap">
@@ -311,12 +275,11 @@ export function LaunchView({
   }, [list, selectedSlug])
 
   const selectedIndex = list.findIndex((h) => h.slug === selectedSlug)
-  // TODO(PRD-124): cast removed when LaunchView is rewritten for Recipe shape
-  const selectedHive = selectedIndex >= 0 ? list[selectedIndex] as unknown as _LegacyHive : null
+  const selectedHive: Recipe | null = selectedIndex >= 0 ? list[selectedIndex] : null
   const pal = paletteAt(selectedIndex >= 0 ? selectedIndex : 0)
 
-  const roleCount = selectedHive?.roles.length ?? 0
-  const { estMin, estCost } = hiveEstimate(roleCount)
+  const stepCount = selectedHive?.steps.length ?? 0
+  const { estMin, estCost } = hiveEstimate(stepCount)
 
   // Derive the project label from the active tab's working directory.
   const cwdParts = activeTab?.cwd?.split('/').filter(Boolean) ?? []
@@ -324,22 +287,23 @@ export function LaunchView({
 
   const handleLaunch = () => {
     if (!selectedHive) return
-    if (selectedHive.roles.length === 0) {
-      toast.warn('This hive has no roles to launch.')
+    if (selectedHive.steps.length === 0) {
+      toast.warn('This recipe has no steps to launch.')
       return
     }
-    // Pass the shared brief as the plan so every role receives it via the
-    // orchestrator's plan box (the only brief field in the API).
+    // PRD 126 bridge: pass agentName as label; step note or shared brief as prompt.
+    // Full resolution (agentName → .md content → prompt) lands in PRD 126.
+    const sharedBrief = brief.trim() || selectedHive.brief || ''
     launchHive({
       name: selectedHive.name,
-      defaultPlan: brief.trim() || selectedHive.defaultPlan,
-      roles: selectedHive.roles.map((r) => ({ label: r.label, prompt: r.prompt })),
+      defaultPlan: sharedBrief || undefined,
+      roles: selectedHive.steps.map((s) => ({
+        label: s.agentName,
+        prompt: s.note ? `${sharedBrief}\n\n${s.note}`.trim() : sharedBrief || s.agentName,
+      })),
     })
     onSwitchToLive()
   }
-
-  const allReadOnly =
-    !!selectedHive && selectedHive.roles.length > 0 && selectedHive.roles.every((r) => roleIsReadOnly(r.prompt))
 
   return (
     <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
@@ -366,7 +330,7 @@ export function LaunchView({
           {list.map((hive, i) => (
             <RecipeCard
               key={hive.slug}
-              hive={hive as unknown as _LegacyHive}
+              hive={hive}
               paletteIndex={i}
               active={hive.slug === selectedSlug}
               onClick={() => setSelectedSlug(hive.slug)}
@@ -396,9 +360,8 @@ export function LaunchView({
               What will happen
             </div>
             <p className="m-0 font-serif text-lg leading-[1.4] text-fg">
-              <strong className={pal.text}>{roleCount} agent{roleCount !== 1 ? 's' : ''}</strong>
-              {' '}read your code in parallel — each in its own context — and hand back a single digest.
-              {allReadOnly && <> Nothing is written without your say-so.</>}
+              <strong className={pal.text}>{stepCount} agent{stepCount !== 1 ? 's' : ''}</strong>
+              {' '}run in parallel — each in its own context — and hand back a single digest.
             </p>
           </div>
 
@@ -409,29 +372,22 @@ export function LaunchView({
             </div>
           )}
 
-          {/* Per-role clarity */}
-          {selectedHive && selectedHive.roles.length > 0 && (
+          {/* Per-step list */}
+          {selectedHive && selectedHive.steps.length > 0 && (
             <div className="px-4 py-3 border-b border-rule flex flex-col gap-2.5">
-              {selectedHive.roles.map((role, i) => {
-                const readOnly = roleIsReadOnly(role.prompt)
-                const returns = roleReturnsHint(role.label)
-                return (
-                  <div key={i} className="flex items-start gap-2.5">
-                    <span className={`mt-0.5 shrink-0 ${pal.text}`}>
-                      <HiveCell size={13} />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-[12.5px] font-semibold text-fg">{role.label}</span>
-                        <EditTypeChip readOnly={readOnly} />
-                      </div>
-                      <div className="text-xs text-fg-dim mt-0.5 leading-[1.4]">
-                        Returns {returns}.
-                      </div>
-                    </div>
+              {selectedHive.steps.map((step, i) => (
+                <div key={i} className="flex items-start gap-2.5">
+                  <span className={`mt-0.5 shrink-0 ${pal.text}`}>
+                    <HiveCell size={13} />
+                  </span>
+                  <div className="min-w-0">
+                    <span className="font-mono text-[12.5px] font-semibold text-fg">{step.agentName}</span>
+                    {step.note && (
+                      <div className="text-xs text-fg-dim mt-0.5 leading-[1.4]">{step.note}</div>
+                    )}
                   </div>
-                )
-              })}
+                </div>
+              ))}
             </div>
           )}
 
@@ -446,9 +402,9 @@ export function LaunchView({
           <div className="px-4 pb-4 pt-1">
             <button
               onClick={handleLaunch}
-              disabled={!selectedHive || roleCount === 0}
+              disabled={!selectedHive || stepCount === 0}
               className={`w-full flex items-center justify-center gap-2.5 rounded-xl py-3 px-4 text-[15px] font-semibold text-white transition-opacity ${
-                selectedHive && roleCount > 0
+                selectedHive && stepCount > 0
                   ? 'bg-accent hover:opacity-90 cursor-pointer shadow-[0_2px_0_rgba(0,0,0,0.18)]'
                   : 'bg-fg-faint cursor-not-allowed opacity-50'
               }`}

@@ -41,7 +41,7 @@ export function Subagents() {
   const cwd = activeTab?.cwd ?? null
   const [scope, setScope] = useState<Scope>('user')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [mode, setMode] = useState<'launch' | 'live' | 'configured' | 'library'>('launch')
+  const [mode, setMode] = useState<'launch' | 'live' | 'agents'>('launch')
   const [filter, setFilter] = useState('')
   const [newAgentOpen, setNewAgentOpen] = useState(false)
   const [newAgentName, setNewAgentName] = useState('')
@@ -148,15 +148,8 @@ export function Subagents() {
           </div>
         )}
 
-        {/* Library */}
-        {mode === 'library' && (
-          <div className="h-full overflow-auto">
-            <AgentsLibraryHive />
-          </div>
-        )}
-
-        {/* Configured — two-pane roster + editor */}
-        {mode === 'configured' && (
+        {/* Agents — two-pane roster + editor */}
+        {mode === 'agents' && (
           <div className="h-full flex flex-col">
             {/* Scope toolbar */}
             <div className="shrink-0 px-4 py-2.5 border-b border-line bg-bg flex items-center gap-3">
@@ -263,6 +256,13 @@ export function Subagents() {
                       <span className="text-base leading-none">+</span> New agent
                     </button>
                   )}
+
+                  {/* Install a starter */}
+                  <StarterInstallSection
+                    home={home}
+                    installedNames={new Set(agents.map((a) => a.name))}
+                    onInstalled={reload}
+                  />
                 </div>
 
                 {/* Editor: keyed on path so all local state (deleteConfirm, showAdvanced) resets on agent switch */}
@@ -934,184 +934,85 @@ function FmField({
   )
 }
 
-/* ─────────────────────────── Library card grid (Hive design) ─────────────── */
+/* ─────────────────────────── Install a starter (inline in Agents pane) ───── */
 
-type LibraryFilter = 'All' | 'Agents'
-
-function AgentsLibraryHive() {
-  const home = useHomeDir()
-  const [installed, setInstalled] = useState<Set<string>>(new Set())
-  const [busy, setBusy] = useState<string | null>(null)
-  const [flash, setFlash] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const [libFilter, setLibFilter] = useState<LibraryFilter>('All')
-  void libFilter // all catalog entries are agents; All/Agents show the same content
-
-  const refresh = async () => {
-    if (!home) return
-    try {
-      const r = await window.api.config.listDir(`${home}/.claude/agents`, { filesOnly: true })
-      const names = new Set<string>()
-      for (const e of r.entries) {
-        if (e.name.endsWith('.md')) names.add(e.name.replace(/\.md$/, ''))
-      }
-      setInstalled(names)
-    } catch {
-      /* agents dir may not exist yet */
-    }
-  }
-
-  useEffect(() => {
-    void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [home])
-
-  const items = useMemo(
-    () =>
-      CATALOG_AGENTS.filter(
-        (a) =>
-          !query.trim() ||
-          a.name.toLowerCase().includes(query.toLowerCase()) ||
-          a.description.toLowerCase().includes(query.toLowerCase()),
-      ),
-    [query],
+function StarterInstallSection({
+  home,
+  installedNames,
+  onInstalled,
+}: {
+  home: string
+  installedNames: Set<string>
+  onInstalled: () => Promise<unknown>
+}) {
+  const uninstalled = useMemo(
+    () => CATALOG_AGENTS.filter((a) => !installedNames.has(a.id)),
+    [installedNames],
   )
+  const [busy, setBusy] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+
+  if (uninstalled.length === 0) return null
 
   const install = async (a: CatalogAgent) => {
-    if (!home) return
     setBusy(a.id)
-    setError(null)
     const path = `${home}/.claude/agents/${a.id}.md`
     const r = await window.api.config.writeText(path, a.content)
     setBusy(null)
-    if (!r.ok) {
-      setError(r.error ?? 'write failed')
-      return
-    }
-    setFlash(`installed ${a.id}`)
-    setTimeout(() => setFlash(null), 2500)
-    void refresh()
+    if (!r.ok) return
+    await onInstalled()
   }
 
-  const FILTER_TABS: LibraryFilter[] = ['All', 'Agents']
-
   return (
-    <div className="p-6">
-      {/* Search + filter bar */}
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="search the library…"
-          className="flex-1 max-w-[360px] bg-bg border border-line rounded-[9px] px-3 py-2 text-sm text-fg"
-        />
-        <div className="flex gap-1 bg-bg-elev p-0.5 rounded-[9px] ring-1 ring-line">
-          {FILTER_TABS.map((f) => {
-            const active = libFilter === f
+    <div className="shrink-0 border-t border-rule">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-4 py-2.5 flex items-center gap-2 text-[12px] font-semibold text-fg-dim hover:bg-bg-hi text-left"
+      >
+        <span className="text-xs leading-none">{expanded ? '▾' : '▸'}</span>
+        Install a starter ({uninstalled.length})
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 space-y-1.5">
+          {uninstalled.map((a, i) => {
+            const pal = paletteAt(i)
+            const tools = a.tools ? a.tools.split(',').map((t) => t.trim()).filter(Boolean) : []
             return (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setLibFilter(f)}
-                className={`px-3 py-1 rounded-[7px] text-[12.5px] transition-colors ${
-                  active
-                    ? 'bg-bg-hi ring-1 ring-line font-semibold text-fg shadow-sm'
-                    : 'font-medium text-fg-dim hover:text-fg'
-                }`}
+              <div
+                key={a.id}
+                className="border border-line rounded-[9px] bg-bg p-2.5 flex flex-col gap-1.5"
               >
-                {f}
-              </button>
+                <div className="flex items-center gap-2">
+                  <span className={`shrink-0 ${pal.text}`}>
+                    <HiveCell size={12} />
+                  </span>
+                  <span className="font-mono text-[12px] font-semibold text-fg truncate flex-1">
+                    {a.name}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy === a.id}
+                    onClick={() => void install(a)}
+                    className="shrink-0 px-2.5 py-1 text-[11px] font-semibold bg-accent text-white rounded-[7px] disabled:opacity-50"
+                  >
+                    {busy === a.id ? '…' : '+ Install'}
+                  </button>
+                </div>
+                <div className="text-[11.5px] text-fg-faint leading-[1.4] ml-5">{a.description}</div>
+                {tools.length > 0 && (
+                  <div className="flex flex-wrap gap-1 ml-5">
+                    {tools.map((t) => (
+                      <ToolChip key={t} tone={WRITE_TOOLS.has(t) ? 'write' : 'readonly'}>
+                        {t}
+                      </ToolChip>
+                    ))}
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>
-      </div>
-
-      {(flash || error) && (
-        <div
-          className={`mb-4 px-4 py-2.5 rounded-[9px] text-sm ${
-            error
-              ? 'text-red-500 bg-red-950/10 border border-red-500/20'
-              : 'text-accent bg-bg-elev border border-line'
-          }`}
-        >
-          {error ?? flash}
-        </div>
-      )}
-
-      {/* Card grid */}
-      <div
-        className="grid gap-3.5"
-        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}
-      >
-        {items.map((a, i) => {
-          const pal = paletteAt(i)
-          const on = installed.has(a.id)
-          const tools = a.tools
-            ? a.tools.split(',').map((t) => t.trim()).filter(Boolean)
-            : []
-          return (
-            <div
-              key={a.id}
-              className="bg-bg-hi border border-line rounded-[13px] p-4 flex flex-col"
-            >
-              {/* Card header */}
-              <div className="flex items-center gap-2.5 mb-2">
-                <span
-                  className={`w-[30px] h-[30px] rounded-[8px] border border-line bg-bg flex items-center justify-center shrink-0 ${pal.text}`}
-                >
-                  <HiveCell size={15} />
-                </span>
-                <div className="min-w-0">
-                  <div className="font-mono text-[13.5px] font-semibold text-fg truncate">
-                    {a.name}
-                  </div>
-                  <div className="text-[11.5px] text-fg-faint">
-                    agent · @official
-                  </div>
-                </div>
-                {on && (
-                  <span className="ml-auto text-[11px] font-semibold text-sage shrink-0">
-                    installed
-                  </span>
-                )}
-              </div>
-
-              {/* Description */}
-              <div className="text-[13px] text-fg-dim leading-[1.45] mb-3 flex-1">
-                {a.description}
-              </div>
-
-              {/* Tool chips */}
-              {tools.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-3">
-                  {tools.map((t) => (
-                    <ToolChip
-                      key={t}
-                      tone={WRITE_TOOLS.has(t) ? 'write' : 'readonly'}
-                    >
-                      {t}
-                    </ToolChip>
-                  ))}
-                </div>
-              )}
-
-              {/* Install button */}
-              <button
-                type="button"
-                disabled={busy === a.id}
-                onClick={() => void install(a)}
-                className="w-full flex items-center justify-center gap-2 border border-line bg-bg rounded-[9px] py-2 px-4 text-[13px] font-semibold text-fg hover:bg-bg-elev transition-colors"
-              >
-                {busy === a.id ? '…' : on ? '↻ Overwrite' : '+ Install'}
-              </button>
-            </div>
-          )
-        })}
-      </div>
-
-      {items.length === 0 && (
-        <div className="text-center py-12 text-fg-faint text-sm">no matches</div>
       )}
     </div>
   )

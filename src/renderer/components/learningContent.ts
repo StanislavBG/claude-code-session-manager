@@ -379,32 +379,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     ],
   },
 
-  'tasks': {
-    headline: 'Live view of Claude\'s in-session to-do list',
-    intro:
-      'When Claude tackles a complex request, it usually breaks it into tasks via TodoWrite, marking them pending → in_progress → completed as it works. This tab shows that list in real time for the active session, so you can see what Claude has decided to do, what it\'s currently on, and what it has finished — without scrolling the terminal.',
-    sections: [
-      {
-        title: 'How to read it',
-        items: [
-          { term: 'pending', body: 'Claude has identified the task but hasn\'t started yet. Order matters — usually executed top to bottom.' },
-          { term: 'in_progress', body: 'Currently being worked on. Should normally be exactly one at a time; multiple usually means something stalled.' },
-          { term: 'completed', body: 'Finished. Claude marks tasks done as it goes; if a task stays in_progress for a long time, Claude is likely stuck.' },
-        ],
-      },
-      {
-        title: 'Behaviors',
-        items: [
-          { body: 'Read-only — you can\'t edit Claude\'s tasks from here. To change direction, message Claude in the terminal ("skip task 3", "add a step for X").' },
-          { body: 'Updates stream from the same transcript file Claude writes to (~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl).' },
-        ],
-      },
-    ],
-    tips: [
-      'A task list with one giant "fix everything" item suggests Claude didn\'t actually plan — interrupt and ask it to break the work down.',
-    ],
-  },
-
   'memory': {
     headline: 'Memories Claude can read and write across sessions — by project or by subagent',
     intro:

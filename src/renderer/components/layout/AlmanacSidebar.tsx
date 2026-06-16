@@ -34,17 +34,17 @@ interface NavGroupItem {
   key: NavKey
   label: string
   icon: AlmanacIconName
-  liveKind?: 'subagents' | 'tasks' | 'scheduler'
+  liveKind?: 'subagents' | 'scheduler'
   hint?: string
 }
 
 const WORKSPACE: NavGroupItem[] = [
   { key: 'overview',   label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
   { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
+  { key: 'projects',   label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
   { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Fan out work: Hive · Orchestrate · Race · Boss' },
   { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
-  { key: 'tasks',      label: 'Tasks',      icon: 'tasks',        liveKind: 'tasks', hint: 'Active to-dos across sessions' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
   { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
   { key: 'knowledge-graph', label: 'Knowledge Graph', icon: 'knowledge-graph', hint: 'Distilled graph + Q&A over your prompt log' },
@@ -58,7 +58,6 @@ const CONFIGURE: NavGroupItem[] = [
   { key: 'keybindings',   label: 'Keybindings',    icon: 'keys',           hint: 'Shortcuts you can override' },
   { key: 'doc-editor',    label: 'Doc Editor',     icon: 'docs',           hint: 'Edit CLAUDE.md and friends' },
   { key: 'memory',        label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store' },
-  { key: 'projects',      label: 'Projects',       icon: 'projects',       hint: 'All known project folders' },
   { key: 'system-prompt', label: 'System Prompt',  icon: 'system-prompt',  hint: 'Personality and behavior' },
   { key: 'permissions',   label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },
   { key: 'settings',      label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window' },
@@ -137,7 +136,6 @@ function useLiveIndicators() {
   const list = Object.values(tabs)
   return {
     subagents: list.some((t) => t.agents.some((a) => now - a.at < 60_000)),
-    tasks: list.some((t) => t.todos.some((todo) => todo.status === 'in_progress')),
     scheduler: schedulerRunning,
   }
 }

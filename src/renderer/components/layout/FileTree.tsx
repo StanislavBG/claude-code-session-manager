@@ -424,7 +424,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
   const projectName = cwd?.split('/').filter(Boolean).pop() || 'project'
 
   return (
-    <div className="w-60 h-full flex flex-col bg-bg-elev border-r border-line text-fg">
+    <div className="w-full h-full flex flex-col bg-bg-elev text-fg">
       {/* Header */}
       <div className="p-3 border-b border-line shrink-0">
         <div className="flex items-center gap-2 mb-2 min-w-0">

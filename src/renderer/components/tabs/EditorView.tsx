@@ -195,7 +195,7 @@ export function EditorView() {
       <div className="h-full flex items-center justify-center text-fg-faint text-xs">
         <div className="text-center">
           <div className="mb-2">no file open</div>
-          <div>open the <span className="text-fg-dim">Projects</span> tab and click a file in the explorer to edit it here</div>
+          <div>open the <span className="text-fg-dim">File Explorer</span> tab and click a file to edit it here</div>
         </div>
       </div>
     )

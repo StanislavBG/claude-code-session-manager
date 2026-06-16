@@ -7,9 +7,10 @@
  * (informational), connected dot opens Settings.
  */
 
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useRef, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab } from '../../state/live'
+import type { TodoItem } from '../../state/live'
 import { useBilling, getBillingData } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import type { NavKey } from '../LeftNav'
@@ -42,6 +43,21 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       .catch(() => { if (!cancelled) setBranch(null) })
     return () => { cancelled = true }
   }, [tab?.cwd])
+
+  const todos = live?.todos ?? []
+  const [todosOpen, setTodosOpen] = useState(false)
+  const todoRef = useRef<HTMLDivElement>(null)
+  // Close todos popover on outside click.
+  useEffect(() => {
+    if (!todosOpen) return
+    const handler = (e: MouseEvent) => {
+      if (todoRef.current && !todoRef.current.contains(e.target as Node)) setTodosOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [todosOpen])
+  // Collapse the popover when there's nothing to show (e.g. session switch).
+  useEffect(() => { if (todos.length === 0) setTodosOpen(false) }, [todos.length])
 
   const data = getBillingData(billing)
   const fiveHour = data?.usage.five_hour ?? null
@@ -96,11 +112,79 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
 
       <span className="text-fg-faint">last activity: <span className="text-fg-dim">{lastTxt}</span></span>
 
+      {todos.length > 0 && (
+        <TodoChip
+          ref={todoRef}
+          todos={todos}
+          open={todosOpen}
+          onToggle={() => setTodosOpen((v) => !v)}
+        />
+      )}
+
       <span className="flex-1" />
 
       <span className="text-fg-faint">v{__APP_VERSION__}</span>
     </div>
   )
+}
+
+/**
+ * TodoChip — the live TodoWrite checklist for the active session, surfaced in
+ * the footer (replaces the standalone Tasks tab). Shows a done/active/pending
+ * count; click to expand the full list in a popover anchored above the footer.
+ */
+const TodoChip = forwardRef<HTMLDivElement, {
+  todos: TodoItem[]
+  open: boolean
+  onToggle: () => void
+}>(function TodoChip({ todos, open, onToggle }, ref) {
+  const counts = {
+    completed: todos.filter((t) => t.status === 'completed').length,
+    in_progress: todos.filter((t) => t.status === 'in_progress').length,
+    pending: todos.filter((t) => t.status === 'pending').length,
+  }
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1.5 hover:text-fg transition-colors"
+        title="Live to-dos for this session"
+        data-testid="footer-todos"
+      >
+        <span className="text-green-400">✓{counts.completed}</span>
+        <span className="text-accent">●{counts.in_progress}</span>
+        <span className="text-fg-dim">○{counts.pending}</span>
+        <span className="text-fg-faint">todos {open ? '▾' : '▴'}</span>
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full left-0 mb-1.5 w-80 max-h-72 overflow-auto bg-bg-elev border border-line rounded shadow-xl p-2 z-50"
+          data-testid="footer-todos-popover"
+        >
+          <ul className="space-y-0.5">
+            {todos.map((t, i) => (
+              <li key={i} className={`flex items-start gap-2 py-1 px-1.5 rounded ${t.status === 'in_progress' ? 'bg-bg-hi' : ''}`}>
+                <StatusGlyph status={t.status} />
+                <span className={
+                  t.status === 'completed' ? 'text-fg-faint line-through'
+                    : t.status === 'in_progress' ? 'text-fg'
+                    : 'text-fg-dim'
+                }>
+                  {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+})
+
+function StatusGlyph({ status }: { status: TodoItem['status'] }) {
+  if (status === 'completed') return <span className="text-green-400 w-3 shrink-0">✓</span>
+  if (status === 'in_progress') return <span className="w-3 shrink-0"><span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" /></span>
+  return <span className="text-fg-faint w-3 shrink-0">○</span>
 }
 
 function relSeconds(ms: number): string {

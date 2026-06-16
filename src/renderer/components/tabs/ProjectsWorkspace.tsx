@@ -13,6 +13,9 @@ const SPLIT_DEFAULT = 33
 const SPLIT_MIN = 20
 const SPLIT_MAX = 60
 
+const COLLAPSED_KEY = 'sm.projects.fileTreeCollapsed'
+const RAIL_WIDTH = 32
+
 function loadSplitPct(): number {
   try {
     const v = parseFloat(localStorage.getItem(SPLIT_KEY) ?? '')
@@ -21,12 +24,17 @@ function loadSplitPct(): number {
   return SPLIT_DEFAULT
 }
 
+function loadCollapsed(): boolean {
+  try { return localStorage.getItem(COLLAPSED_KEY) === '1' } catch { return false }
+}
+
 export function ProjectsWorkspace() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
 
   const [pct, setPct] = useState<number>(() => loadSplitPct())
+  const [collapsed, setCollapsed] = useState<boolean>(() => loadCollapsed())
   const [launcherOpen, setLauncherOpen] = useState(false)
   const pctRef = useRef(pct)
   pctRef.current = pct
@@ -86,6 +94,35 @@ export function ProjectsWorkspace() {
     try { localStorage.setItem(SPLIT_KEY, String(SPLIT_DEFAULT)) } catch { /* ignore */ }
   }, [])
 
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((v) => {
+      const next = !v
+      try { localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+
+  if (collapsed) {
+    return (
+      <div ref={containerRef} className="flex h-full w-full" data-testid="projects-workspace">
+        {/* Collapsed rail — click to restore the file explorer */}
+        <button
+          onClick={toggleCollapsed}
+          data-testid="projects-file-tree-rail-toggle"
+          title="Show file explorer"
+          className="shrink-0 flex flex-col items-center gap-2 py-2 border-r border-line text-fg-faint hover:text-fg hover:bg-surface-raised transition-colors"
+          style={{ width: RAIL_WIDTH }}
+        >
+          <span className="text-[11px]">▸</span>
+          <span className="text-[10px] tracking-wide [writing-mode:vertical-rl]">Files</span>
+        </button>
+        <div className="flex-1 min-w-0" data-testid="projects-editor-pane">
+          <EditorView />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div ref={containerRef} className="flex h-full w-full" data-testid="projects-workspace">
       {/* Left pane — file tree */}
@@ -95,16 +132,24 @@ export function ProjectsWorkspace() {
         data-testid="projects-file-tree-pane"
       >
         {/* Compact project launcher — always visible */}
-        <div ref={launcherRef} className="relative shrink-0">
+        <div ref={launcherRef} className="relative shrink-0 flex items-stretch border-b border-line">
           <button
             data-testid="projects-launcher-trigger"
             onClick={() => setLauncherOpen((v) => !v)}
-            className="w-full px-3 py-1.5 border-b border-line text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-surface-raised transition-colors"
+            className="flex-1 min-w-0 px-3 py-1.5 text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-surface-raised transition-colors"
           >
             <span className="flex-1 truncate text-left">
               {activeTab ? compactPath(activeTab.cwd) : 'Projects'}
             </span>
             <span className="text-fg-faint shrink-0 text-[10px]">{launcherOpen ? '▲' : '▼'}</span>
+          </button>
+          <button
+            onClick={toggleCollapsed}
+            data-testid="projects-file-tree-collapse"
+            title="Hide file explorer"
+            className="shrink-0 px-2 border-l border-line text-fg-faint hover:text-fg hover:bg-surface-raised transition-colors text-[11px]"
+          >
+            ◂
           </button>
           {launcherOpen && (
             <div

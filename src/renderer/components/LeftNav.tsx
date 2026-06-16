@@ -20,7 +20,6 @@ export type NavKey =
   | 'mcp'
   | 'hooks'
   | 'subagents'
-  | 'tasks'
   | 'memory'
   | 'projects'
   | 'history'

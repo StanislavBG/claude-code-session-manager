@@ -23,7 +23,6 @@ import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
 import { Prompts } from './tabs/Prompts'
-import { Tasks } from './tabs/Tasks'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
 import { DocEditor } from './tabs/DocEditor'
 import { Scheduler } from './tabs/Scheduler'
@@ -73,7 +72,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'usage':         { eyebrow: 'Workspace',  title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
   'knowledge-graph': { eyebrow: 'Workspace', title: 'Knowledge Graph',          intro: 'Distilled intelligence over your raw prompt log — entities and relations extracted from what you actually typed, with grounded Q&A over your own history. Distinct from Memory (curated facts Claude reads back); this is derived analytics you never hand-edit.' },
   'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
-  'tasks':         { eyebrow: 'Workspace',  title: 'Tasks across sessions',     intro: 'Active to-dos pulled from every running Claude session. Use this to see what is in flight without tab-hopping.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'plugins':       { eyebrow: 'Configure',  title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
@@ -128,7 +126,6 @@ function renderScreen(active: NavKey, ctx: {
       case 'history':       return <History />
       case 'usage':         return <Usage />
       case 'prompts':       return <Prompts />
-      case 'tasks':         return <Tasks />
       case 'scheduler':     return <Scheduler />
       case 'plugins':       return <Plugins />
       case 'mcp':           return <McpServers />

@@ -117,7 +117,7 @@ export function ProjectsWorkspace() {
                 sortedRows.map((row) => {
                   const label = compactPath(enriched[row.encoded]?.cwd ?? candidatePath(row.encoded))
                   return (
-                    <div key={row.encoded} className="flex items-center gap-1 px-2 py-1 hover:bg-surface-raised group">
+                    <div key={row.encoded} data-testid="projects-launcher-row" className="flex items-center gap-1 px-2 py-1 hover:bg-surface-raised group">
                       <Tooltip content={pinned[row.encoded] ? 'Unpin' : 'Pin to top'}>
                         <button
                           onClick={() => togglePin(row.encoded)}

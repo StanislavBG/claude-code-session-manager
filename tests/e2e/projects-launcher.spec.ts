@@ -24,9 +24,10 @@ test('projects launcher trigger opens list with at least one project', async () 
     const list = win.locator('[data-testid="projects-launcher-list"]')
     await expect(list).toBeVisible({ timeout: 3_000 })
 
-    // Expect at least one project row in the list
-    const rows = list.locator('button + button')
-    await expect(rows.first()).toBeVisible({ timeout: 5_000 })
+    // Expect at least one project row in the list. The scan of ~/.claude/projects
+    // is async, so allow generous time for the first row to populate.
+    const rows = list.locator('[data-testid="projects-launcher-row"]')
+    await expect(rows.first()).toBeVisible({ timeout: 25_000 })
   } finally {
     await app.close()
   }

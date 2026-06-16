@@ -8,6 +8,7 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLiveTab, type LiveTab, type AgentSpawnEntry } from '../../state/live'
 import type { Scope } from '../../lib/scopes'
+import { useAgentNames, agentsDir } from '../../lib/useAgentNames'
 import {
   parseAgentFile,
   serializeAgentFile,
@@ -15,7 +16,6 @@ import {
 } from '../../lib/agentFrontmatter'
 import { CANONICAL_TOOLS, isCanonicalTool } from '../../data/canonicalTools'
 import { CATALOG_AGENTS, type CatalogAgent } from '../../data/catalog'
-import { toast } from '../../state/toast'
 import { formatDuration } from '../../lib/formatTime'
 import {
   HiveSubTabs,
@@ -35,87 +35,27 @@ const COLOR_OPTIONS = ['', 'red', 'blue', 'green', 'yellow', 'purple', 'orange',
 const PERM_MODE_OPTIONS = ['', 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions', 'plan'] as const
 const MEMORY_OPTIONS = ['', 'user', 'project', 'local'] as const
 
-interface AgentDef {
-  scope: Scope
-  name: string
-  path: string
-}
-
-function agentsDir(home: string, cwd: string | null, scope: Scope): string | null {
-  if (scope === 'user') return `${home}/.claude/agents`
-  if (!cwd) return null
-  return `${cwd}/.claude/agents`
-}
-
 export function Subagents() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
   const [scope, setScope] = useState<Scope>('user')
-  const [agents, setAgents] = useState<AgentDef[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [mode, setMode] = useState<'launch' | 'live' | 'configured' | 'library'>('launch')
   const [filter, setFilter] = useState('')
   const [newAgentOpen, setNewAgentOpen] = useState(false)
   const [newAgentName, setNewAgentName] = useState('')
 
+  const { agents, reload } = useAgentNames(scope)
   const dir = useMemo(() => (home ? agentsDir(home, cwd, scope) : null), [home, cwd, scope])
 
-  const loadAgents = async (d: string, currentSel: string | null, currentScope: Scope) => {
-    try {
-      const r = await window.api.config.listDir(d, { filesOnly: true })
-      const next: AgentDef[] = r.entries
-        .filter((e) => e.name.endsWith('.md'))
-        .map((e) => ({ scope: currentScope, name: e.name.replace(/\.md$/, ''), path: e.path }))
-        .sort((a, b) => a.name.localeCompare(b.name))
-      setAgents(next)
-      if (!next.find((a) => a.path === currentSel)) {
-        setSelectedPath(next[0]?.path ?? null)
-      }
-      return next
-    } catch (e) {
-      console.error('[Subagents] listDir failed:', d, e)
-      setAgents([])
-      const msg = e instanceof Error ? e.message : String(e)
-      toast.error(`Could not list subagents: ${msg}`)
-      return []
-    }
-  }
-
+  // Reset selection when the agent list changes (e.g. scope switch, initial load).
   useEffect(() => {
-    if (!dir) {
-      setAgents([])
-      return
-    }
-    let cancelled = false
-    const currentScope = scope
-    const currentSel = selectedPath
-    ;(async () => {
-      try {
-        const r = await window.api.config.listDir(dir, { filesOnly: true })
-        if (cancelled) return
-        const next: AgentDef[] = r.entries
-          .filter((e) => e.name.endsWith('.md'))
-          .map((e) => ({ scope: currentScope, name: e.name.replace(/\.md$/, ''), path: e.path }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-        setAgents(next)
-        if (!next.find((a) => a.path === currentSel)) {
-          setSelectedPath(next[0]?.path ?? null)
-        }
-      } catch (e) {
-        if (!cancelled) {
-          console.error('[Subagents] listDir failed:', dir, e)
-          setAgents([])
-          const msg = e instanceof Error ? e.message : String(e)
-          toast.error(`Could not list subagents: ${msg}`)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
+    if (!agents.find((a) => a.path === selectedPath)) {
+      setSelectedPath(agents[0]?.path ?? null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dir])
+  }, [agents])
 
   const files = useConfig((s) => s.files)
   const loadText = useConfig((s) => s.loadText)
@@ -176,7 +116,7 @@ export function Subagents() {
     }
     setNewAgentOpen(false)
     setNewAgentName('')
-    const next = await loadAgents(dir, path, scope)
+    const next = await reload()
     const created = next.find((a) => a.path === path)
     if (created) setSelectedPath(created.path)
   }
@@ -356,7 +296,7 @@ export function Subagents() {
                         return
                       }
                       setSelectedPath(null)
-                      if (dir) await loadAgents(dir, null, scope)
+                      await reload()
                     }}
                   />
                 ) : (

@@ -39,18 +39,31 @@ interface HivesState {
   delete: (slug: string) => Promise<{ ok: boolean; error?: string }>
 }
 
-/** Merge defaults + user hives. Defaults first (alphabetized), then user
- *  (alphabetized). O(n log n) where n is total hive count. */
-function mergeHives(userHives: Recipe[]): Recipe[] {
+/** Merge defaults + user recipes. Defaults first (alphabetized), then user
+ *  (alphabetized). O(n log n) where n is total recipe count. */
+function mergeRecipes(userRecipes: Recipe[]): Recipe[] {
   const defaults = [...DEFAULT_HIVES].sort((a, b) => a.name.localeCompare(b.name))
-  const users = userHives
+  const users = userRecipes
     .filter((h) => !isDefaultHive(h.slug))
     .sort((a, b) => a.name.localeCompare(b.name))
   return [...defaults, ...users]
 }
 
+/** Deduped list of agentNames referenced by a recipe's steps. */
+export function referencedAgentNames(recipe: Recipe): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const step of recipe.steps) {
+    if (!seen.has(step.agentName)) {
+      seen.add(step.agentName)
+      result.push(step.agentName)
+    }
+  }
+  return result
+}
+
 export const useHives = create<HivesState>((set, get) => ({
-  list: mergeHives([]),
+  list: mergeRecipes([]),
   selectedSlug: null,
   loading: false,
   error: null,
@@ -61,15 +74,15 @@ export const useHives = create<HivesState>((set, get) => ({
       const res = await window.api.hives.list()
       if (res.error) {
         log.warn('hives', 'hives:list returned error', { error: res.error })
-        set({ list: mergeHives([]), loading: false, error: res.error })
+        set({ list: mergeRecipes([]), loading: false, error: res.error })
         toast.error(`Hives: failed to load (${res.error})`)
         return
       }
-      set({ list: mergeHives(res.hives), loading: false, error: null })
+      set({ list: mergeRecipes(res.hives), loading: false, error: null })
     } catch (e) {
       const msg = (e as Error).message
       log.error('hives', 'hives:list threw', { error: msg })
-      set({ list: mergeHives([]), loading: false, error: msg })
+      set({ list: mergeRecipes([]), loading: false, error: msg })
       toast.error(`Hives: ${msg}`)
     }
   },

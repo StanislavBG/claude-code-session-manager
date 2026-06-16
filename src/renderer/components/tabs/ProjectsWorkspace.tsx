@@ -1,8 +1,11 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useEffect } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useEditor } from '../../state/editor'
+import { useProjectsPrefs } from '../../state/projectsPrefs'
+import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { FileTree } from '../layout/FileTree'
 import { EditorView } from './EditorView'
+import { Tooltip } from '../ui/Tooltip'
 import { compactPath } from '../../lib/compactPath'
 
 const SPLIT_KEY = 'sm.projects.splitPct'
@@ -24,9 +27,29 @@ export function ProjectsWorkspace() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
 
   const [pct, setPct] = useState<number>(() => loadSplitPct())
+  const [launcherOpen, setLauncherOpen] = useState(false)
   const pctRef = useRef(pct)
   pctRef.current = pct
   const containerRef = useRef<HTMLDivElement>(null)
+  const launcherRef = useRef<HTMLDivElement>(null)
+
+  const { rows, enriched, openInSession, archiveProject } = useKnownProjects()
+  const pinned = useProjectsPrefs((s) => s.pinned)
+  const togglePin = useProjectsPrefs((s) => s.togglePin)
+
+  const sortedRows = [...rows].sort((a, b) =>
+    (pinned[b.encoded] ? 1 : 0) - (pinned[a.encoded] ? 1 : 0))
+
+  useEffect(() => {
+    if (!launcherOpen) return
+    const handler = (e: MouseEvent) => {
+      if (launcherRef.current && !launcherRef.current.contains(e.target as Node)) {
+        setLauncherOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [launcherOpen])
 
   const openInline = useCallback((path: string) => {
     useEditor.getState().openFile(path)
@@ -71,6 +94,64 @@ export function ProjectsWorkspace() {
         style={{ width: `${pct}%` }}
         data-testid="projects-file-tree-pane"
       >
+        {/* Compact project launcher — always visible */}
+        <div ref={launcherRef} className="relative shrink-0">
+          <button
+            data-testid="projects-launcher-trigger"
+            onClick={() => setLauncherOpen((v) => !v)}
+            className="w-full px-3 py-1.5 border-b border-line text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-surface-raised transition-colors"
+          >
+            <span className="flex-1 truncate text-left">
+              {activeTab ? compactPath(activeTab.cwd) : 'Projects'}
+            </span>
+            <span className="text-fg-faint shrink-0 text-[10px]">{launcherOpen ? '▲' : '▼'}</span>
+          </button>
+          {launcherOpen && (
+            <div
+              data-testid="projects-launcher-list"
+              className="absolute left-0 right-0 top-full z-50 bg-surface border border-line shadow-lg max-h-60 overflow-auto"
+            >
+              {sortedRows.length === 0 ? (
+                <div className="px-3 py-2 text-[11.5px] text-fg-faint">No projects found.</div>
+              ) : (
+                sortedRows.map((row) => {
+                  const label = compactPath(enriched[row.encoded]?.cwd ?? candidatePath(row.encoded))
+                  return (
+                    <div key={row.encoded} className="flex items-center gap-1 px-2 py-1 hover:bg-surface-raised group">
+                      <Tooltip content={pinned[row.encoded] ? 'Unpin' : 'Pin to top'}>
+                        <button
+                          onClick={() => togglePin(row.encoded)}
+                          className={`shrink-0 text-sm leading-none transition-colors ${
+                            pinned[row.encoded] ? 'text-yellow-400' : 'text-fg-faint hover:text-fg-dim'
+                          }`}
+                        >
+                          {pinned[row.encoded] ? '★' : '☆'}
+                        </button>
+                      </Tooltip>
+                      <button
+                        onClick={() => { openInSession(row); setLauncherOpen(false) }}
+                        className="flex-1 min-w-0 text-left text-[11.5px] font-mono truncate text-fg-dim hover:text-fg"
+                      >
+                        {label}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Archive ${label}?`)) return
+                          await archiveProject(row.encoded)
+                        }}
+                        className="shrink-0 text-[10px] text-fg-faint hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Archive"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
+
         {activeTab ? (
           <>
             <div className="px-3 py-2 border-b border-line text-[11.5px] text-fg-faint font-mono truncate shrink-0" title={activeTab.cwd}>

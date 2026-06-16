@@ -3,52 +3,15 @@ import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
 import { Tooltip } from '../ui/Tooltip'
 import { Modal } from '../ui/Modal'
-import { useHomeDir } from '../../lib/useHomeDir'
-import { useSessions } from '../../state/sessions'
-import { shellQuote } from '../../lib/presets'
 import { useProjectsPrefs, type SortCol } from '../../state/projectsPrefs'
-import { enrichProject, type ProjectDetails } from '../../lib/projectEnrichment'
 import { formatBytes } from '../../lib/formatBytes'
 import { ClaudeMdDrawer } from './projects/ClaudeMdDrawer'
-import type { DirEntry } from '../../../preload/api'
-
-interface ProjectRow {
-  encoded: string
-  displayPath: string
-  sessionCount: number
-  lastSession: number
-  path: string
-  sizeBytes: number
-}
-
-interface EnrichmentState extends ProjectDetails {
-  cwd: string | null
-}
-
-function candidatePath(encoded: string): string {
-  return encoded.replace(/-/g, '/')
-}
-
-async function resolveProjectCwd(projectFolder: string): Promise<string | null> {
-  const files = await window.api.config.listDir(projectFolder, { filesOnly: true })
-  const jsonl = (files.entries as DirEntry[])
-    .filter((f) => f.name.endsWith('.jsonl'))
-    .sort((a, b) => a.size - b.size)
-  for (const f of jsonl) {
-    const r = await window.api.config.readText(f.path)
-    if (!r.exists || !r.text) continue
-    for (const line of r.text.split('\n')) {
-      if (!line.includes('"cwd"')) continue
-      try {
-        const obj = JSON.parse(line)
-        if (typeof obj.cwd === 'string' && obj.cwd.length > 0) return obj.cwd
-      } catch {
-        // skip malformed line
-      }
-    }
-  }
-  return null
-}
+import {
+  useKnownProjects,
+  candidatePath,
+  resolveProjectCwd,
+  type ProjectRow,
+} from '../../lib/useKnownProjects'
 
 
 function formatRelTime(ms: number): string {
@@ -139,10 +102,7 @@ const EDITOR_OPTIONS: { value: string; label: string }[] = [
 ]
 
 export function Projects() {
-  const home = useHomeDir()
-  const [rows, setRows] = useState<ProjectRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [enriched, setEnriched] = useState<Record<string, EnrichmentState>>({})
+  const { rows, enriched, loading, openInSession, archiveProject } = useKnownProjects()
   const [inputValue, setInputValue] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
 
@@ -160,8 +120,6 @@ export function Projects() {
 
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const headerCheckboxRef = useRef<HTMLInputElement>(null)
-
-  const addTab = useSessions((s) => s.addTab)
 
   const {
     hydrated,
@@ -216,79 +174,6 @@ export function Projects() {
     return () => clearTimeout(t)
   }, [errorMsg])
 
-  // Initial project scan
-  useEffect(() => {
-    if (!home) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const r = await window.api.config.listDir(`${home}/.claude/projects`, { dirsOnly: true })
-        if (cancelled) return
-        const next: ProjectRow[] = []
-        for (const e of r.entries as DirEntry[]) {
-          if (cancelled) return
-          const files = await window.api.config.listDir(e.path, { filesOnly: true })
-          const jsonl = (files.entries as DirEntry[]).filter((f) => f.name.endsWith('.jsonl'))
-          const lastSession = jsonl.reduce((m, f) => Math.max(m, f.mtimeMs), 0)
-          const sizeBytes = jsonl.reduce((s, f) => s + f.size, 0)
-          next.push({
-            encoded: e.name,
-            displayPath: candidatePath(e.name),
-            sessionCount: jsonl.length,
-            lastSession,
-            path: e.path,
-            sizeBytes,
-          })
-        }
-        next.sort((a, b) => b.lastSession - a.lastSession)
-        if (!cancelled) {
-          setRows(next)
-          setEnriched({})
-          setSelected(new Set())
-        }
-      } catch (err) {
-        console.error('[Projects] scan failed:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [home])
-
-  // Concurrent enrichment
-  useEffect(() => {
-    if (!rows.length) return
-    let cancelled = false
-    const queue = rows.slice()
-    let inFlight = 0
-
-    const tick = () => {
-      while (!cancelled && inFlight < 6 && queue.length) {
-        const row = queue.shift()!
-        inFlight++
-        resolveProjectCwd(row.path)
-          .then(async (cwd) => {
-            if (cancelled) return
-            const details = cwd ? await enrichProject(cwd) : {}
-            if (cancelled) return
-            setEnriched((prev) => ({ ...prev, [row.encoded]: { cwd: cwd ?? null, ...details } }))
-          })
-          .catch(() => {
-            if (!cancelled) {
-              setEnriched((prev) => ({ ...prev, [row.encoded]: { cwd: null } }))
-            }
-          })
-          .finally(() => {
-            inFlight--
-            if (!cancelled) tick()
-          })
-      }
-    }
-
-    tick()
-    return () => { cancelled = true }
-  }, [rows])
 
   // Derived column visibility
   const enrichmentDone = Object.keys(enriched).length >= rows.length
@@ -382,22 +267,6 @@ export function Projects() {
 
   const showError = (msg: string) => setErrorMsg(msg)
 
-  const openInSession = async (row: ProjectRow) => {
-    let cwd = enriched[row.encoded]?.cwd ?? null
-    if (!cwd) cwd = await resolveProjectCwd(row.path)
-    if (!cwd) {
-      cwd = await window.api.app.pickDirectory()
-      if (!cwd) return
-    }
-    const id = crypto.randomUUID()
-    addTab({
-      id,
-      cwd,
-      startupCommand: `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`,
-      presetId: 'projects-tab',
-    })
-  }
-
   const handleOpenInEditor = async (r: ProjectRow) => {
     const cwd = await resolveCwd(r)
     if (!cwd) { showError('Project directory not yet resolved'); return }
@@ -429,16 +298,11 @@ export function Projects() {
     setArchiving(true)
     const archived: string[] = []
     for (const encoded of encodeds) {
-      try {
-        const result = await window.api.app.archiveProject(encoded)
-        if (result.ok) archived.push(encoded)
-        else showError(result.error ?? `Failed to archive ${encoded}`)
-      } catch (err: unknown) {
-        showError(err instanceof Error ? err.message : 'Archive failed')
-      }
+      const result = await archiveProject(encoded)
+      if (result.ok) archived.push(encoded)
+      else showError(result.error ?? `Failed to archive ${encoded}`)
     }
     if (archived.length) {
-      setRows((prev) => prev.filter((r) => !archived.includes(r.encoded)))
       setSelected((prev) => {
         const next = new Set(prev)
         archived.forEach((enc) => next.delete(enc))

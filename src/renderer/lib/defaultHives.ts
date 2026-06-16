@@ -9,13 +9,14 @@
  * the roles/plan into a new user hive with a writable slug.
  */
 
-import type { Hive } from '../../preload/api'
+import type { Recipe } from '../../preload/api'
 
 /** Stable slug prefix used to tag default hives so the renderer can recognize
  *  them and refuse to delete/save them via the manager UI. */
 export const DEFAULT_HIVE_SLUG_PREFIX = 'default:'
 
-export const DEFAULT_HIVES: Hive[] = [
+// TODO(PRD-124): convert inline roles to recipe steps referencing catalog agents
+export const DEFAULT_HIVES: Recipe[] = ([
   {
     slug: 'default:code-review',
     name: 'Code review (3 reviewers)',
@@ -91,7 +92,7 @@ export const DEFAULT_HIVES: Hive[] = [
       },
     ],
   },
-]
+]) as unknown as Recipe[]
 
 /** True if a slug belongs to a default hive (read-only). */
 export function isDefaultHive(slug: string): boolean {

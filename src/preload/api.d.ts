@@ -533,16 +533,17 @@ export interface RepoAnalyzeResult {
 }
 export interface RepoAnalyzeError { ok: false; error: string }
 
-export interface HiveRole { label: string; prompt: string }
-export interface Hive {
+export interface RecipeStep { agentName: string; note?: string }
+export interface Recipe {
   slug: string;
   name: string;
   description: string;
-  roles: HiveRole[];
-  defaultPlan?: string;
+  brief?: string;
+  steps: RecipeStep[];
 }
-export interface HiveListResult { hives: Hive[]; error: string | null }
-export interface HiveGetResult { hive: Hive | null; error: string | null }
+// Channel keeps legacy "hives" name; concept is now "recipe".
+export interface HiveListResult { hives: Recipe[]; error: string | null }
+export interface HiveGetResult { hive: Recipe | null; error: string | null }
 export interface HiveMutationResult { ok: boolean; error: string | null }
 
 export interface WatcherInfo {
@@ -975,7 +976,7 @@ export interface SessionManagerAPI {
   hives: {
     list: () => Promise<HiveListResult>;
     get: (slug: string) => Promise<HiveGetResult>;
-    save: (slug: string, hive: Hive) => Promise<HiveMutationResult>;
+    save: (slug: string, hive: Recipe) => Promise<HiveMutationResult>;
     delete: (slug: string) => Promise<HiveMutationResult>;
   };
   history: {

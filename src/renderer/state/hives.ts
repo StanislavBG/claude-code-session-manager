@@ -13,14 +13,14 @@
  */
 
 import { create } from 'zustand'
-import type { Hive } from '../../preload/api'
+import type { Recipe } from '../../preload/api'
 import { DEFAULT_HIVES, isDefaultHive } from '../lib/defaultHives'
 import { toast } from './toast'
 import { log } from '../lib/logger'
 
 interface HivesState {
   /** All hives currently surfaced, defaults first then user hives, alphabetized. */
-  list: Hive[]
+  list: Recipe[]
   /** Slug of the hive currently selected in HiveManagerModal, or null. */
   selectedSlug: string | null
   /** True while the initial load IPC is in flight. */
@@ -31,17 +31,17 @@ interface HivesState {
   load: () => Promise<void>
   select: (slug: string | null) => void
   /** Update a user hive's fields locally without saving — call save() to persist. */
-  edit: (slug: string, patch: Partial<Omit<Hive, 'slug'>>) => void
+  edit: (slug: string, patch: Partial<Omit<Recipe, 'slug'>>) => void
   /** Persist one hive. Replaces any existing user hive with the same slug.
    *  Refuses to save default-prefixed slugs. */
-  save: (hive: Hive) => Promise<{ ok: boolean; error?: string }>
+  save: (hive: Recipe) => Promise<{ ok: boolean; error?: string }>
   /** Delete one user hive. Refuses to delete defaults. */
   delete: (slug: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 /** Merge defaults + user hives. Defaults first (alphabetized), then user
  *  (alphabetized). O(n log n) where n is total hive count. */
-function mergeHives(userHives: Hive[]): Hive[] {
+function mergeHives(userHives: Recipe[]): Recipe[] {
   const defaults = [...DEFAULT_HIVES].sort((a, b) => a.name.localeCompare(b.name))
   const users = userHives
     .filter((h) => !isDefaultHive(h.slug))

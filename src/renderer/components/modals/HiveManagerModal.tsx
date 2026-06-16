@@ -29,7 +29,11 @@ import { useHives, generateHiveSlug } from '../../state/hives'
 import { useOrchestrator } from '../../state/orchestrator'
 import { isDefaultHive } from '../../lib/defaultHives'
 import { toast } from '../../state/toast'
-import type { Hive, HiveRole } from '../../../preload/api'
+import type { Recipe } from '../../../preload/api'
+
+// TODO(PRD-124): remove when HiveManagerModal is rewritten for Recipe shape
+type _LegacyHive = Recipe & { roles: _LegacyHiveRole[]; defaultPlan?: string }
+type _LegacyHiveRole = { label: string; prompt: string }
 
 interface HiveManagerModalProps {
   open: boolean
@@ -50,7 +54,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   const deleteHive = useHives((s) => s.delete)
   const launchHiveOrch = useOrchestrator((s) => s.launchHive)
 
-  const [draft, setDraft] = useState<Hive | null>(null)
+  const [draft, setDraft] = useState<_LegacyHive | null>(null)
   const [dirty, setDirty] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -70,8 +74,9 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
     select(list[0].slug)
   }, [open, list, selectedSlug, select])
 
+  // TODO(PRD-124): cast removed when modal is rewritten for Recipe shape
   const selectedHive = useMemo(
-    () => list.find((h) => h.slug === selectedSlug) ?? null,
+    () => (list.find((h) => h.slug === selectedSlug) ?? null) as unknown as _LegacyHive | null,
     [list, selectedSlug],
   )
 
@@ -96,17 +101,18 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
     const taken = new Set(list.map((h) => h.slug))
     let guard = 0
     while (taken.has(slug) && guard++ < 8) slug = generateHiveSlug('hive')
-    const blank: Hive = {
+    const blank: _LegacyHive = {
       slug,
       name: 'New hive',
       description: '',
+      steps: [],
       // The IPC save schema requires a non-empty prompt per role. Seed with a
       // placeholder so the first save succeeds; the user can rewrite it.
       roles: [{ label: 'Role 1', prompt: 'Describe what this subagent should do.' }],
       defaultPlan: '',
     }
     // Optimistic local insert — Save persists to disk.
-    const ok = saveHive(blank)
+    const ok = saveHive(blank as unknown as Recipe)
     void ok.then((res) => {
       if (res.ok) {
         select(slug)
@@ -117,14 +123,15 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   const handleClone = useCallback(() => {
     if (!selectedHive) return
     const slug = generateHiveSlug(selectedHive.name)
-    const clone: Hive = {
+    const clone: _LegacyHive = {
       slug,
       name: `${selectedHive.name} (copy)`,
       description: selectedHive.description,
+      steps: selectedHive.steps ?? [],
       roles: selectedHive.roles.map((r) => ({ ...r })),
       defaultPlan: selectedHive.defaultPlan,
     }
-    void saveHive(clone).then((res) => {
+    void saveHive(clone as unknown as Recipe).then((res) => {
       if (res.ok) {
         select(slug)
         toast.info(`Cloned "${selectedHive.name}" → editable copy`)
@@ -135,7 +142,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   const handleSave = useCallback(async () => {
     if (!draft || !canEdit) return
     // Drop empty roles before save; backend requires roles.length >= 1.
-    const cleaned: Hive = {
+    const cleaned: _LegacyHive = {
       ...draft,
       roles: draft.roles
         .map((r) => ({ label: r.label.trim(), prompt: r.prompt.trim() }))
@@ -149,7 +156,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
       return
     }
     setSaving(true)
-    const res = await saveHive(cleaned)
+    const res = await saveHive(cleaned as unknown as Recipe)
     setSaving(false)
     if (res.ok) {
       setDirty(false)
@@ -182,7 +189,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   }, [selectedHive, launchHiveOrch, onLaunch, onClose])
 
   const patchDraft = useCallback(
-    (patch: Partial<Omit<Hive, 'slug'>>) => {
+    (patch: Partial<Omit<_LegacyHive, 'slug'>>) => {
       if (!draft) return
       setDraft({ ...draft, ...patch })
       setDirty(true)
@@ -191,7 +198,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
   )
 
   const patchRole = useCallback(
-    (i: number, role: Partial<HiveRole>) => {
+    (i: number, role: Partial<_LegacyHiveRole>) => {
       if (!draft) return
       const next = draft.roles.slice()
       next[i] = { ...next[i], ...role }
@@ -254,6 +261,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
               {list.map((h) => {
                 const isSel = h.slug === selectedSlug
                 const def = isDefaultHive(h.slug)
+                const legacy = h as unknown as _LegacyHive
                 return (
                   <li key={h.slug}>
                     <button
@@ -276,7 +284,7 @@ export function HiveManagerModal({ open, onClose, onLaunch, variant = 'overlay' 
                         )}
                       </div>
                       <div className="text-[10px] text-fg-faint truncate">
-                        {h.roles.length} role{h.roles.length !== 1 ? 's' : ''}
+                        {(legacy.roles?.length ?? h.steps.length)} role{(legacy.roles?.length ?? h.steps.length) !== 1 ? 's' : ''}
                       </div>
                     </button>
                   </li>

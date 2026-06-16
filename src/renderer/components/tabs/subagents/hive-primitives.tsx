@@ -1,5 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { Hive } from '../../../../preload/api'
+import type { Recipe } from '../../../../preload/api'
+
+// TODO(PRD-124): remove when hive-primitives is rewritten for Recipe shape
+type _LegacyHive = Recipe & { roles: Array<{ label: string; prompt: string }>; defaultPlan?: string }
 import { useHives } from '../../../state/hives'
 import { useOrchestrator } from '../../../state/orchestrator'
 import { useDispatch } from '../../../state/dispatch'
@@ -183,7 +186,7 @@ export function StepHeader({ n, title, hint }: { n?: string; title: string; hint
 }
 
 // Fan-out diagram: main session → N role cells → single digest.
-function FanoutDiagram({ hive, pal }: { hive: Hive; pal: PaletteEntry }) {
+function FanoutDiagram({ hive, pal }: { hive: _LegacyHive; pal: PaletteEntry }) {
   return (
     <div className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-xl border border-line bg-bg p-3">
       {/* Main session node */}
@@ -232,7 +235,7 @@ function RecipeCard({
   active,
   onClick,
 }: {
-  hive: Hive
+  hive: _LegacyHive
   paletteIndex: number
   active: boolean
   onClick: () => void
@@ -308,7 +311,8 @@ export function LaunchView({
   }, [list, selectedSlug])
 
   const selectedIndex = list.findIndex((h) => h.slug === selectedSlug)
-  const selectedHive = selectedIndex >= 0 ? list[selectedIndex] : null
+  // TODO(PRD-124): cast removed when LaunchView is rewritten for Recipe shape
+  const selectedHive = selectedIndex >= 0 ? list[selectedIndex] as unknown as _LegacyHive : null
   const pal = paletteAt(selectedIndex >= 0 ? selectedIndex : 0)
 
   const roleCount = selectedHive?.roles.length ?? 0
@@ -362,7 +366,7 @@ export function LaunchView({
           {list.map((hive, i) => (
             <RecipeCard
               key={hive.slug}
-              hive={hive}
+              hive={hive as unknown as _LegacyHive}
               paletteIndex={i}
               active={hive.slug === selectedSlug}
               onClick={() => setSelectedSlug(hive.slug)}

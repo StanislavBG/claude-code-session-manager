@@ -585,7 +585,6 @@ export function App() {
           active={activeNav}
           onNavigate={navigate}
           onNewSession={handleNewSession}
-          onOpenFile={openFileInApp}
         />
         <MainPane
           active={activeNav}

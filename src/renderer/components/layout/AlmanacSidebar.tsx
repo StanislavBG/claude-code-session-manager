@@ -1,16 +1,13 @@
 /**
  * AlmanacSidebar — primary navigation. Replaces both the old top Header
  * (action toolbar) and the old LeftNav. Three nav groups (Workspace,
- * Configure, Tools), a Navigate/Files toggle, project caption, persistent
- * recording status in the footer, and a New Session primary button.
+ * Configure, Tools), project caption, persistent recording status in the
+ * footer, and a New Session primary button.
  *
  * Click handlers come in via props. Workspace + Configure items navigate via
  * `onNavigate(NavKey)` (these render as full pages in MainPane). Tools items
  * open existing modals via dedicated callbacks the same way the old Header
  * wired them, so no modal logic needs to change.
- *
- * Files mode mounts the existing FileTree rooted at the active tab's cwd.
- * Persisted to localStorage so the user's last mode is restored on launch.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -22,7 +19,6 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useBilling } from '../../state/billing'
 import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
-import { FileTree } from './FileTree'
 import { VoiceButton } from '../VoiceButton'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
@@ -84,6 +80,7 @@ const TOOLS: ToolItem[] = [
 
 // Resizable width — persisted per the user's drag, clamped to a sane range.
 const WIDTH_KEY = 'sm.almanac.sidebarWidth'
+
 const WIDTH_MIN = 180
 const WIDTH_MAX = 480
 const WIDTH_DEFAULT = 252
@@ -93,18 +90,6 @@ function loadWidth(): number {
     if (Number.isFinite(v)) return Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, v))
   } catch { /* ignore */ }
   return WIDTH_DEFAULT
-}
-
-const MODE_KEY = 'sm.almanac.sidebarMode'
-type Mode = 'nav' | 'files'
-
-function loadMode(): Mode {
-  try {
-    const v = localStorage.getItem(MODE_KEY)
-    return v === 'files' ? 'files' : 'nav'
-  } catch {
-    return 'nav'
-  }
 }
 
 // Collapsible nav groups. Each section header (Workspace / Configure / Tools)
@@ -150,17 +135,9 @@ interface AlmanacSidebarProps {
   active: NavKey
   onNavigate: (k: NavKey) => void
   onNewSession: () => void
-  /** Open a file in the main-space Editor scene (and navigate there). */
-  onOpenFile: (path: string) => void
 }
 
-export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenFile }: AlmanacSidebarProps) {
-  const [mode, setMode] = useState<Mode>(() => loadMode())
-  const setModePersist = useCallback((m: Mode) => {
-    setMode(m)
-    try { localStorage.setItem(MODE_KEY, m) } catch { /* ignore */ }
-  }, [])
-
+export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<GroupName>>(() => loadCollapsed())
   const toggleGroup = useCallback((g: GroupName) => {
     setCollapsed((prev) => {
@@ -218,77 +195,55 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession, onOpenFile }:
     >
       <ProjectCaption tab={activeTab} onNewSession={onNewSession} />
 
-      {/* Navigate / Files toggle */}
-      <div className="px-3.5 pt-3 pb-2 flex gap-1">
-        {(['nav', 'files'] as Mode[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => setModePersist(m)}
-            aria-pressed={mode === m}
-            className={`flex-1 py-1.5 rounded-md text-[12px] font-semibold tracking-[0.02em] transition-colors ${
-              mode === m
-                ? 'bg-bg-hi text-fg border border-line'
-                : 'text-fg-faint hover:text-fg-dim border border-transparent'
-            }`}
-          >
-            {m === 'nav' ? 'Navigate' : 'Files'}
-          </button>
-        ))}
-      </div>
-
       <div className="flex-1 min-h-0 overflow-auto px-2 pb-3">
-        {mode === 'nav' ? (
-          <>
-            <NavGroupHeader
-              label="Workspace"
-              collapsed={collapsed.has('Workspace')}
-              count={WORKSPACE.length}
-              onToggle={() => toggleGroup('Workspace')}
+        <>
+          <NavGroupHeader
+            label="Workspace"
+            collapsed={collapsed.has('Workspace')}
+            count={WORKSPACE.length}
+            onToggle={() => toggleGroup('Workspace')}
+          />
+          {!collapsed.has('Workspace') && WORKSPACE.map((item) => (
+            <NavRow
+              key={item.key}
+              item={item}
+              active={active === item.key}
+              live={item.liveKind ? indicators[item.liveKind] : false}
+              onClick={() => onNavigate(item.key)}
             />
-            {!collapsed.has('Workspace') && WORKSPACE.map((item) => (
-              <NavRow
-                key={item.key}
-                item={item}
-                active={active === item.key}
-                live={item.liveKind ? indicators[item.liveKind] : false}
-                onClick={() => onNavigate(item.key)}
-              />
-            ))}
+          ))}
 
-            <NavGroupHeader
-              label="Configure"
-              collapsed={collapsed.has('Configure')}
-              count={CONFIGURE.length}
-              onToggle={() => toggleGroup('Configure')}
+          <NavGroupHeader
+            label="Configure"
+            collapsed={collapsed.has('Configure')}
+            count={CONFIGURE.length}
+            onToggle={() => toggleGroup('Configure')}
+          />
+          {!collapsed.has('Configure') && CONFIGURE.map((item) => (
+            <NavRow
+              key={item.key}
+              item={item}
+              active={active === item.key}
+              live={false}
+              onClick={() => onNavigate(item.key)}
             />
-            {!collapsed.has('Configure') && CONFIGURE.map((item) => (
-              <NavRow
-                key={item.key}
-                item={item}
-                active={active === item.key}
-                live={false}
-                onClick={() => onNavigate(item.key)}
-              />
-            ))}
+          ))}
 
-            <NavGroupHeader
-              label="Tools"
-              collapsed={collapsed.has('Tools')}
-              count={TOOLS.length}
-              onToggle={() => toggleGroup('Tools')}
+          <NavGroupHeader
+            label="Tools"
+            collapsed={collapsed.has('Tools')}
+            count={TOOLS.length}
+            onToggle={() => toggleGroup('Tools')}
+          />
+          {!collapsed.has('Tools') && TOOLS.map((tool) => (
+            <ToolRow
+              key={tool.key}
+              tool={tool}
+              active={active === tool.key}
+              onClick={() => onNavigate(tool.key)}
             />
-            {!collapsed.has('Tools') && TOOLS.map((tool) => (
-              <ToolRow
-                key={tool.key}
-                tool={tool}
-                active={active === tool.key}
-                onClick={() => onNavigate(tool.key)}
-              />
-            ))}
-          </>
-        ) : (
-          <FilesMode tab={activeTab} onOpenFile={onOpenFile} />
-        )}
+          ))}
+        </>
       </div>
 
       <SidebarFooter />
@@ -452,33 +407,6 @@ function ToolRow({ tool, active, onClick }: { tool: ToolItem; active: boolean; o
       <span className="flex-1 truncate">{tool.label}</span>
     </button>
   )
-}
-
-function FilesMode({ tab, onOpenFile }: { tab: { id: string; cwd: string } | null; onOpenFile: (path: string) => void }) {
-  if (!tab) {
-    return (
-      <div className="px-3 py-6 text-center text-[12px] text-fg-faint">
-        No session selected.
-      </div>
-    )
-  }
-  return (
-    <div className="pt-1">
-      <div className="px-3 pb-2 text-[11.5px] text-fg-faint font-mono truncate" title={tab.cwd}>
-        {compactPath(tab.cwd)}
-      </div>
-      <FileTree cwd={tab.cwd} activeTabId={tab.id} onPreviewFile={onOpenFile} />
-    </div>
-  )
-}
-
-function compactPath(p: string): string {
-  const home = '/home/'
-  if (p.startsWith(home)) {
-    const tail = p.slice(home.length).split('/').slice(1).join('/')
-    return tail ? `~/${tail}` : '~'
-  }
-  return p
 }
 
 function SidebarFooter() {

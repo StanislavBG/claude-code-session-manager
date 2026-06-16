@@ -24,7 +24,7 @@ import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
 import { Prompts } from './tabs/Prompts'
 import { Tasks } from './tabs/Tasks'
-import { Projects } from './tabs/Projects'
+import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
 import { DocEditor } from './tabs/DocEditor'
 import { Scheduler } from './tabs/Scheduler'
 import { WebRemote } from './tabs/WebRemote'
@@ -82,7 +82,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'keybindings':   { eyebrow: 'Configure',  title: 'Keybindings',               intro: 'Shortcuts you can override. Bindings here apply to Claude Code itself, not the Session Manager chrome.' },
   'doc-editor':    { eyebrow: 'Configure',  title: 'Doc Editor',                intro: 'Edit CLAUDE.md and project documentation with WYSIWYG. Saves are atomic and live-update Claude when present.' },
   'memory':        { eyebrow: 'Configure',  title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
-  'projects':      { eyebrow: 'Configure',  title: 'Known projects',            intro: 'Every folder Claude has run in. Pin favorites, prune stale entries, or quickly start a session in one.' },
+  // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'system-prompt': { eyebrow: 'Configure',  title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'permissions':   { eyebrow: 'Configure',  title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
   'settings':      { eyebrow: 'Configure',  title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
@@ -115,6 +115,8 @@ function renderScreen(active: NavKey, ctx: {
       )
     case 'editor':
       return <EditorView />
+    case 'projects':
+      return <ProjectsWorkspace />
   }
 
   const meta = PAGE_META[active]
@@ -134,7 +136,6 @@ function renderScreen(active: NavKey, ctx: {
       case 'keybindings':   return <Keybindings />
       case 'doc-editor':    return <DocEditor />
       case 'memory':        return <Memory />
-      case 'projects':      return <Projects />
       case 'system-prompt': return <SystemPrompt />
       case 'permissions':   return <Permissions />
       case 'settings':      return <Settings />

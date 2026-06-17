@@ -337,9 +337,21 @@ function safeSlugPath(slug) {
   return resolved;
 }
 
+// Bundled authoring guide seeded into the scheduler dir so the session-manager-dev
+// plugin's /develop and /prd skills — which reference this stable `~`-absolute
+// path — work on any user's machine, not just the author's.
+const PRD_AUTHORING_TEMPLATE = path.join(__dirname, 'templates', 'PRD_AUTHORING.md');
+const PRD_AUTHORING_DEST = path.join(ROOT, 'PRD_AUTHORING.md');
+
 function ensureDirs() {
   fs.mkdirSync(PRDS_DIR, { recursive: true });
   fs.mkdirSync(RUNS_DIR, { recursive: true });
+  // Seed the authoring guide once; never clobber a user's edited copy.
+  try {
+    if (!fs.existsSync(PRD_AUTHORING_DEST) && fs.existsSync(PRD_AUTHORING_TEMPLATE)) {
+      fs.copyFileSync(PRD_AUTHORING_TEMPLATE, PRD_AUTHORING_DEST);
+    }
+  } catch { /* non-fatal: the guide is a convenience, not load-bearing for a run */ }
 }
 
 // Atomic JSON write helpers delegate to config.cjs's shared implementation.
@@ -1105,6 +1117,15 @@ function isFixPlanSlug(slug) {
 }
 
 /**
+ * Returns true for statuses that a fix-plan completion should promote
+ * (clear) on the original job. Both 'failed' and 'needs_review' are
+ * recoverable via a fix-plan; 'completed', 'running', 'pending' are not.
+ */
+function isPromotableOriginal(status) {
+  return status === 'failed' || status === 'needs_review';
+}
+
+/**
  * Spawn an Opus investigation session for a failed job. The investigator's job
  * is to read the failure log + original PRD, identify the root cause, and write
  * a fix-plan PRD into prds/<NN>-fix-<base>.md. Reconcile picks it up; the next
@@ -1446,13 +1467,17 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           // though the auto-recovery did its job.
           if (effectiveStatus === 'completed' && isFixPlanSlug(job.slug)) {
             const originalSlug = job.slug.replace(/^(\d+)-fix-/, '$1-');
-            const orig = s.jobs.findIndex((x) => x.slug === originalSlug && x.status === 'failed');
+            const orig = s.jobs.findIndex((x) => x.slug === originalSlug && isPromotableOriginal(x.status));
             if (orig >= 0) {
-              console.log(`[scheduler] auto-promote: ${originalSlug} (failed) → completed because ${job.slug} succeeded`);
+              const priorStatus = s.jobs[orig].status;
+              console.log(`[scheduler] auto-promote: ${originalSlug} (${priorStatus}) → completed because ${job.slug} succeeded`);
               s.jobs[orig].status = 'completed';
               s.jobs[orig].exitCode = 0;
               s.jobs[orig].error = null;
               s.jobs[orig].completedBy = job.slug;
+              if (priorStatus === 'needs_review') {
+                delete s.jobs[orig].verifierVerdict;
+              }
             }
           }
         }
@@ -1790,6 +1815,31 @@ function isRescanCandidate(job) {
  *
  * @returns {Promise<{rescanned:number, healed:string[]}>}
  */
+/**
+ * Pure helper — no I/O. Returns the subset of jobs eligible for automatic
+ * fix-plan authoring after a reverify pass leaves them still in needs_review.
+ *
+ * Exclusion rules (all must pass):
+ *   - status === 'needs_review'
+ *   - truthy runId (need a run log to investigate)
+ *   - autoFixAttempted !== true (1-attempt cap)
+ *   - not itself a fix-plan slug (avoids infinite recursion)
+ *   - no fix sibling on disk (fixSlugExists) or already in the queue
+ */
+function selectAutoFixTargets(jobs, { fixSlugExists }) {
+  const slugsInQueue = new Set(jobs.map((j) => j.slug));
+  return jobs.filter((job) => {
+    if (job.status !== 'needs_review') return false;
+    if (!job.runId) return false;
+    if (job.autoFixAttempted) return false;
+    if (isFixPlanSlug(job.slug)) return false;
+    const fixSlug = `${String(job.parallelGroup ?? 99).padStart(2, '0')}-fix-${job.slug.replace(/^\d+-/, '')}`;
+    if (fixSlugExists(fixSlug)) return false;
+    if (slugsInQueue.has(fixSlug)) return false;
+    return true;
+  });
+}
+
 async function reverifyNeedsReview() {
   const snap = await readQueue();
   const candidates = snap.jobs.filter(isRescanCandidate);
@@ -1837,6 +1887,29 @@ async function reverifyNeedsReview() {
     const detail = leftForReview.map((e) => `${e.slug} (${e.reason})`).join(', ');
     console.log(`[scheduler] boot reverify: left for review: ${detail}`);
   }
+
+  // Auto-fix: spawn a fix-plan investigation for each job still in
+  // needs_review after the heal pass (kill-switch: SM_AUTOFIX_DISABLE=1).
+  if (process.env.SM_AUTOFIX_DISABLE !== '1') {
+    const afterHeal = await readQueue();
+    const targets = selectAutoFixTargets(afterHeal.jobs, {
+      fixSlugExists: (s) => fs.existsSync(path.join(PRDS_DIR, `${s}.md`)),
+    });
+    for (const job of targets) {
+      const runDir = path.join(RUNS_DIR, job.runId);
+      // Persist cap BEFORE spawning — a crash mid-investigation still counts
+      // the attempt (mirrors orphanRetries pattern).
+      await mutate((s) => {
+        const j = s.jobs.find((x) => x.slug === job.slug);
+        if (j) j.autoFixAttempted = true;
+      });
+      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (1/1)`);
+      spawnInvestigation(job, runDir).catch((e) => {
+        console.error('[scheduler] auto-fix spawnInvestigation error', job.slug, e);
+      });
+    }
+  }
+
   return { rescanned: candidates.length, healed, leftForReview };
 }
 
@@ -2353,4 +2426,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets };

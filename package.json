@@ -9,6 +9,8 @@
   },
   "files": [
     "bin/",
+    ".claude-plugin/",
+    "plugins/",
     "src/main/",
     "src/preload/",
     "dist/index.html",

@@ -1,0 +1,21 @@
+{
+  "name": "session-manager",
+  "owner": {
+    "name": "Stanislav Georgiev",
+    "url": "https://github.com/StanislavBG"
+  },
+  "metadata": {
+    "description": "Plugins shipped with the Claude Code Session Manager.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "session-manager-dev",
+      "source": "./plugins/session-manager-dev",
+      "description": "Default end-to-end development skillset — pairs with the session-manager scheduler to form a develop → queue → track → review → status → improve loop.",
+      "version": "0.1.0",
+      "category": "development",
+      "strict": false
+    }
+  ]
+}

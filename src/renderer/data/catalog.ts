@@ -33,6 +33,13 @@ export interface CatalogPlugin {
   official: boolean
   source: string
   bundles: string[]
+  /**
+   * Non-official marketplace this plugin installs from. `add` is the
+   * `/plugin marketplace add <add>` argument (a GitHub `owner/repo` or path);
+   * `name` is the marketplace name used in `/plugin install <id>@<name>`.
+   * Omitted for official-catalog plugins (already registered).
+   */
+  marketplace?: { add: string; name: string }
 }
 
 /** Hook template — merges into settings.json `hooks[event]`. */
@@ -162,6 +169,10 @@ export const CATALOG_SKILLS: CatalogSkill[] = [
 ]
 
 export const CATALOG_PLUGINS: CatalogPlugin[] = [
+  // The session-manager's own default dev plugin — its 10 skills + the scheduler
+  // form an end-to-end develop → queue → track → review → status → improve loop.
+  // Ships from this repo's marketplace (`.claude-plugin/marketplace.json`).
+  { id: 'session-manager-dev', name: 'Session Manager Dev', description: 'Default end-to-end dev skillset: /develop + /prd (decompose → scheduler PRDs), /process-feedback + /my-feedback (cross-project intake), /project-status + /optimize-kpi + /local-project-health (status & KPI loop), /requesting-code-review + /security-review (review gate), /explain-to-me (HUMAN_LEARN docs).', official: false, source: 'https://github.com/StanislavBG/claude-code-session-manager/tree/main/plugins/session-manager-dev', bundles: ['skills'], marketplace: { add: 'StanislavBG/claude-code-session-manager', name: 'session-manager' } },
   { id: 'code-review', name: 'Code Review', description: 'Comprehensive code review with best practices and improvement suggestions', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-review', bundles: ['commands', 'agents'] },
   { id: 'pr-review-toolkit', name: 'PR Review Toolkit', description: 'Pull request review automation and workflows', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit', bundles: ['commands', 'agents'] },
   { id: 'commit-commands', name: 'Commit Commands', description: 'Git commit workflow shortcuts with conventional commit formatting', official: true, source: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/commit-commands', bundles: ['commands'] },

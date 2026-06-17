@@ -272,7 +272,14 @@ export function PluginsLibrary() {
       <div className="flex-1 overflow-auto divide-y divide-line">
         {items.map((p) => {
           const on = installed.has(p.id)
-          const installCmd = `/plugin install ${p.id}@anthropics/claude-plugins-official`
+          // Plugins from a non-official marketplace need a one-time
+          // `/plugin marketplace add <repo>` before install; the official
+          // catalog marketplace is pre-registered, so it's install-only.
+          const mktName = p.marketplace?.name ?? 'anthropics/claude-plugins-official'
+          const installLine = `/plugin install ${p.id}@${mktName}`
+          const installCmd = p.marketplace
+            ? `/plugin marketplace add ${p.marketplace.add}\n${installLine}`
+            : installLine
           return (
             <div key={p.id} className="px-4 py-3 flex items-start gap-3 hover:bg-bg-elev/50">
               <div className="flex-1 min-w-0">
@@ -287,7 +294,7 @@ export function PluginsLibrary() {
                   ))}
                 </div>
                 <div className="text-fg-dim text-xs mt-0.5">{p.description}</div>
-                <div className="text-fg-faint text-[10px] font-mono mt-1 truncate">{installCmd}</div>
+                <div className="text-fg-faint text-[10px] font-mono mt-1 truncate">{installLine}</div>
               </div>
               <div className="flex gap-1 shrink-0">
                 <LinkBtn href={p.source}>source</LinkBtn>

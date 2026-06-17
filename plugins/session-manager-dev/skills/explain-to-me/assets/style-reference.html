@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>explain-to-me · style reference (copy this)</title>
+<!--
+  STYLE REFERENCE for the /explain-to-me skill.
+  This is a complete, self-contained exemplar page. When writing a HUMAN_LEARN
+  page, mirror this structure and CSS. Replace the placeholder "Widget Pipeline"
+  content with the real, file:line-grounded explanation of the user's topic.
+  Every component below is optional — use the ones the topic needs.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+    --fg:#e6edf3; --dim:#9da7b3; --faint:#6e7681;
+    --blue:#60a5fa; --green:#34d399; --amber:#fbbf24; --violet:#a78bfa;
+    --pink:#f472b6; --red:#f87171; --cyan:#22d3ee;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--fg);font:15px/1.6 ui-sans-serif,system-ui,sans-serif;padding:0 20px 80px}
+  .wrap{max-width:980px;margin:0 auto}
+  a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+  .crumb{font-size:12px;color:var(--faint);margin:24px 0 14px}
+  h1{font-size:28px;letter-spacing:-.5px;margin-top:26px}
+  .sub{color:var(--dim);margin:8px 0 6px;max-width:780px}
+  h2{font-size:22px;margin:44px 0 12px;padding-top:18px;border-top:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p{margin:8px 0;color:var(--dim)} p strong,li strong{color:var(--fg)}
+  ul.tight{margin:6px 0 6px 20px;color:var(--dim);font-size:13.5px} ul.tight li{margin:4px 0}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg);white-space:nowrap}
+  pre{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:10px 0;line-height:1.55}
+  pre code{background:none;border:none;padding:0;white-space:pre}
+
+  /* signature element: every file:line reference is a traceable chip */
+  .loc{font-family:var(--mono);font-size:11px;color:var(--cyan);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);border-radius:99px;padding:1px 9px;white-space:nowrap}
+
+  /* layer badges — one color per place a step runs */
+  .proc{font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:1px 8px;border-radius:99px;border:1px solid}
+  .proc.hook{color:var(--amber);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.07)}
+  .proc.main{color:var(--green);border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.07)}
+  .proc.sub{color:var(--violet);border-color:rgba(167,139,250,.4);background:rgba(167,139,250,.07)}
+  .proc.rend{color:var(--pink);border-color:rgba(244,114,182,.4);background:rgba(244,114,182,.07)}
+  .proc.disk{color:var(--cyan);border-color:rgba(34,211,238,.4);background:rgba(34,211,238,.07)}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0;font-size:12px;color:var(--dim)}
+
+  /* sticky in-page nav */
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);margin:0 -20px;padding:10px 20px}
+  nav.toc .row{max-width:980px;margin:0 auto;display:flex;gap:8px;flex-wrap:wrap}
+  nav.toc a{font-size:13px;padding:4px 14px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+  nav.toc a:hover{color:var(--fg);border-color:var(--faint);text-decoration:none}
+
+  /* stat strip */
+  .statline{display:flex;gap:18px;flex-wrap:wrap;margin:16px 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 18px}
+  .stat .v{font-size:22px;font-weight:700} .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+
+  /* horizontal flow diagram */
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:16px 0}
+  .flow .box{flex:1 1 150px;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .flow .box .bt{font-weight:700;font-size:13px;margin-bottom:2px}
+  .flow .box .bd{font-size:12px;color:var(--dim)}
+  .flow .box .where{font-family:var(--mono);font-size:10px;color:var(--cyan);margin-top:6px}
+  .flow .arrow{align-self:center;color:var(--faint);font-size:18px;flex:0 0 auto}
+  .box.b-amber{border-top:3px solid var(--amber)} .box.b-green{border-top:3px solid var(--green)}
+  .box.b-violet{border-top:3px solid var(--violet)} .box.b-cyan{border-top:3px solid var(--cyan)}
+  .box.b-pink{border-top:3px solid var(--pink)}
+
+  /* callouts */
+  .callout{border-left:3px solid var(--amber);background:rgba(251,191,36,.06);border-radius:0 8px 8px 0;padding:12px 16px;margin:14px 0;font-size:14px;color:var(--dim)}
+  .callout.ok{border-color:var(--green);background:rgba(52,211,153,.06)}
+  .callout.bad{border-color:var(--red);background:rgba(248,113,113,.06)}
+  .callout strong{color:var(--fg)}
+
+  /* tables + collapsible knobs */
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+  th,td{text-align:left;padding:6px 11px;border:1px solid var(--line)}
+  th{background:var(--panel2);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  td{background:var(--panel);color:var(--dim)} td code{white-space:nowrap}
+  details.consts summary{cursor:pointer;font-size:13px;color:var(--blue);margin:10px 0}
+
+  /* two-column rationale */
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.twocol{grid-template-columns:1fr}.flow .box{flex-basis:100%}}
+
+  footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<nav class="toc"><div class="row">
+  <a href="index.html">📖 HOME</a>
+  <a href="#flow">Flow</a>
+  <a href="#knobs">Knobs</a>
+  <a href="#why">Why</a>
+</div></nav>
+
+<div class="wrap">
+  <div class="crumb"><a href="index.html">HUMAN_LEARN</a> / Widget Pipeline</div>
+  <h1>⚙️ Widget Pipeline — how a request becomes a widget</h1>
+  <p class="sub">
+    One-sentence lead: what this is and when it runs. (Replace this whole page with the
+    real, <code>file:line</code>-grounded explanation of the user's topic — this file is only the
+    visual template.)
+  </p>
+  <div class="legend">
+    <span><span class="proc hook">trigger</span> what kicks it off</span>
+    <span><span class="proc main">core</span> main logic</span>
+    <span><span class="proc sub">worker</span> spawned work</span>
+    <span><span class="proc disk">store</span> persistence</span>
+  </div>
+
+  <div class="statline">
+    <div class="stat"><div class="v">5</div><div class="k">stages</div></div>
+    <div class="stat"><div class="v">20</div><div class="k">batch cap</div></div>
+    <div class="stat"><div class="v">8&nbsp;MB</div><div class="k">read window</div></div>
+  </div>
+
+  <h2 id="flow">The flow, step by step</h2>
+  <div class="flow">
+    <div class="box b-amber"><div class="bt">1 · Trigger</div><div class="bd">what starts it</div><div class="where">file.ext:NN</div></div>
+    <div class="arrow">→</div>
+    <div class="box b-green"><div class="bt">2 · Read</div><div class="bd">bounded input read</div><div class="where">file.ext:NN</div></div>
+    <div class="arrow">→</div>
+    <div class="box b-green"><div class="bt">3 · Transform</div><div class="bd">the core step</div><div class="where">file.ext:NN</div></div>
+    <div class="arrow">→</div>
+    <div class="box b-sub b-violet"><div class="bt">4 · Work</div><div class="bd">spawned subprocess</div><div class="where">file.ext:NN</div></div>
+    <div class="arrow">→</div>
+    <div class="box b-cyan"><div class="bt">5 · Persist</div><div class="bd">atomic write</div><div class="where">file.ext:NN</div></div>
+  </div>
+
+  <h3>3 · Transform <span class="proc main">core</span> <span class="loc">file.ext:120-148</span></h3>
+  <p>Prose explaining the step, with inline <code>constants</code> and a <span class="loc">file.ext:NN</span> for
+  each claim. Show a real snippet when it clarifies:</p>
+  <pre><code>doThing(input, { cap: 20, windowBytes: 8 * 1024 * 1024 })</code></pre>
+
+  <div class="callout ok"><strong>Key insight.</strong> The one thing a reader must take away —
+  e.g. why the design is correct, or the invariant it preserves.</div>
+
+  <h2 id="knobs">The knobs</h2>
+  <details class="consts" open><summary>All constants (real names + values)</summary>
+  <table>
+    <tr><th>Constant</th><th>Value</th><th>Where</th><th>Bounds</th></tr>
+    <tr><td><code>BATCH</code></td><td>20</td><td><span class="loc">file.ext:50</span></td><td>items per unit of work</td></tr>
+    <tr><td><code>MAX_BYTES</code></td><td>8 MB</td><td><span class="loc">file.ext:52</span></td><td>read window per run</td></tr>
+  </table>
+  </details>
+
+  <h2 id="why">Why it's shaped this way</h2>
+  <div class="twocol">
+    <div><h3>Constraint A</h3><p>The real reason — an incident, a platform limit, a cost guard.</p></div>
+    <div><h3>Constraint B</h3><p>Another forcing function that explains a non-obvious choice.</p></div>
+  </div>
+
+  <footer>
+    HUMAN_LEARN · &lt;project&gt; · generated &lt;date&gt; from <code>file.ext</code> + live on-disk state.
+  </footer>
+</div>
+</body>
+</html>

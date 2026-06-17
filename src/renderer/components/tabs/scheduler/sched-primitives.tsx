@@ -104,6 +104,24 @@ export function LegendItem({ dotClass, n, label }: { dotClass: string; n: number
   )
 }
 
+// ─── prdNumber — extract leading numeric group from a slug ──────────────────
+export function prdNumber(slug: string): string | null {
+  const m = slug.match(/^(\d+)-/)
+  return m ? m[1] : null
+}
+
+// ─── PrdNumberBadge — monospaced #NN chip (Almanac design) ──────────────────
+export function PrdNumberBadge({ n }: { n: string }) {
+  return (
+    <span
+      className="font-mono text-[12px] font-semibold text-fg-faint shrink-0 tracking-tight select-none"
+      aria-hidden="true"
+    >
+      #{n}
+    </span>
+  )
+}
+
 // ─── STATUS_TONE — PRD status pill styling ───────────────────────────────────
 // Consumed by SchedulerPrdsView restyle (PRD 20-scheduler-prds).
 export const STATUS_TONE: Record<string, { bg: string; text: string; border: boolean; label: string }> = {

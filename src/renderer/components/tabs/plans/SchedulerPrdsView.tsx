@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
-import { STATUS_TONE, ProjectTag } from '../scheduler/sched-primitives'
+import { STATUS_TONE, ProjectTag, prdNumber, PrdNumberBadge } from '../scheduler/sched-primitives'
 import { EmptyState } from '../../ui/EmptyState'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
@@ -705,6 +705,7 @@ export function SchedulerPrdsView() {
                     {/* Main card content */}
                     <div className="flex-1 min-w-0 py-4 pr-2">
                       <div className="flex items-center gap-2.5 mb-[5px] flex-wrap">
+                        {prdNumber(p.slug) && <PrdNumberBadge n={prdNumber(p.slug)!} />}
                         <span className="font-serif text-[18px] font-semibold text-fg leading-tight">
                           {p.title || p.slug}
                         </span>

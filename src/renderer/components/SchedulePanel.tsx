@@ -7,7 +7,7 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine } from './tabs/scheduler/sched-primitives'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge } from './tabs/scheduler/sched-primitives'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -761,12 +761,15 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
         onFocus={() => onFocused(listIndex)}
         className={`w-full text-left grid grid-cols-[116px_1fr_auto_auto] items-center gap-4 px-[18px] py-3.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${open ? 'bg-bg-elev/40' : ''}`}
         aria-expanded={open}
-        aria-label={`${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
+        aria-label={`${prdNumber(job.slug) ? `PRD ${prdNumber(job.slug)}, ` : ''}${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
         title={job.title}
       >
         <SchBadge status={job.status} />
         <div className="min-w-0">
-          <div className="text-[14.5px] font-medium text-fg leading-snug">{job.title}</div>
+          <div className="flex items-baseline gap-2 text-[14.5px] font-medium text-fg leading-snug">
+            {prdNumber(job.slug) && <PrdNumberBadge n={prdNumber(job.slug)!} />}
+            {job.title}
+          </div>
           {note && (
             <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
               {note}

@@ -1685,6 +1685,34 @@ function pollRecoveryClearSource(pauseReason, hasCachedReset) {
 async function pollLoop() {
   try {
     await reapDeadRunningJobs().catch(() => {});
+
+    // Enterprise auth (Bedrock / Vertex / API-key / corporate gateway): there is
+    // no consumer 5-hour usage meter to poll. Don't hit an endpoint that will
+    // 404/time-out and eventually pause the queue on 'network' — treat usage as
+    // wide-open and fire on pending + memory alone. (Blackrock-style machines.)
+    if (!billing.usageMeterApplicable()) {
+      cachedUtilization = 0;
+      consecutiveFailures = 0;
+      backoffMs = 0;
+      backoffNextAt = null;
+      firstFailureAt = null;
+      firstNon429FailureAt = null;
+      lastFailureKind = null;
+      lastPollAt = Date.now();
+      lastPollOk = true;
+      persistSchedulerState();
+      let cur = await readQueue();
+      // Clear a stale auth/network pause inherited from a prior consumer-auth
+      // session so the queue isn't wedged. Never clears rate_limit/manual.
+      if (cur.paused && (cur.paused.reason === 'auth' || cur.paused.reason === 'network')) {
+        await clearPause('enterprise-auth');
+        cur = await readQueue(); // re-read so the cleared pause is visible to launch THIS cycle
+      }
+      await maybeLaunchWhenAvailable(cur);
+      await broadcast();
+      return; // finally re-arms the timer
+    }
+
     const r = await billing.fetchUsage();
 
     if (r.kind === 'ok') {
@@ -1701,9 +1729,12 @@ async function pollLoop() {
       persistSchedulerState();
 
       // Clear any pause that was waiting for a successful billing read.
-      const cur = await readQueue();
+      let cur = await readQueue();
       const clearSrc = pollRecoveryClearSource(cur.paused?.reason ?? null, !!cachedNextReset);
-      if (clearSrc) await clearPause(clearSrc);
+      if (clearSrc) {
+        await clearPause(clearSrc);
+        cur = await readQueue(); // re-read so the cleared pause launches work THIS cycle
+      }
 
       await maybeLaunchWhenAvailable(cur);
       await broadcast();

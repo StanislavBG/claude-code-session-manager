@@ -1025,8 +1025,14 @@ export interface SessionManagerAPI {
   };
   plugins: {
     /** Run `claude plugin install <slug>` in a hidden pty. Streams output
-     *  via `onInstallProgress`. Returns { ok, exitCode } on exit. */
-    install: (payload: { slug: string }) => Promise<PluginInstallResult>;
+     *  via `onInstallProgress`. Returns { ok, exitCode } on exit.
+     *  Pass `marketplace` for a non-official plugin: the source is registered
+     *  via `claude plugin marketplace add <add>` first, then `<slug>@<name>`
+     *  is installed. */
+    install: (payload: {
+      slug: string;
+      marketplace?: { add: string; name: string };
+    }) => Promise<PluginInstallResult>;
     onInstallProgress: (handler: (ev: PluginInstallProgressEvent) => void) => () => void;
   };
   clipboard: {

@@ -4,10 +4,55 @@ const fsp = require('node:fs/promises');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const { cleanChildEnv } = require('./cleanEnv.cjs');
 
 const CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+
+// macOS stores Claude Code credentials in the login Keychain, not on disk —
+// there is no ~/.claude/.credentials.json there. The Keychain item is a
+// generic password under this service whose secret is the same JSON blob
+// ({ claudeAiOauth: { accessToken, … } }) the Linux/WSL file holds.
+const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
+/** Read the raw credential JSON string from the macOS Keychain, or null. */
+function readKeychainRaw() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const out = execFileSync(
+      'security',
+      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
+      { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const trimmed = out.trim();
+    return trimmed.length ? trimmed : null;
+  } catch {
+    return null; // not found / locked — caller treats as "no creds here"
+  }
+}
+
+/** Discover the account the Keychain item is stored under (for write-back). */
+function keychainAccount() {
+  try {
+    const out = execFileSync(
+      'security',
+      ['find-generic-password', '-s', KEYCHAIN_SERVICE],
+      { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const m = out.match(/"acct"<blob>="([^"]*)"/);
+    if (m && m[1]) return m[1];
+  } catch { /* fall through to login user */ }
+  return os.userInfo().username;
+}
+
+/** Write the credential JSON back into the Keychain (-U upserts in place). */
+function writeKeychainRaw(value) {
+  execFileSync(
+    'security',
+    ['add-generic-password', '-U', '-s', KEYCHAIN_SERVICE, '-a', keychainAccount(), '-w', value],
+    { timeout: 10_000, stdio: 'ignore' },
+  );
+}
 const REFRESH_LOG_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'credential-refresh.log');
 const REFRESH_LOG_MAX_BYTES = 100 * 1024;
 
@@ -16,17 +61,42 @@ const REFRESH_LOG_MAX_BYTES = 100 * 1024;
 // allowing the caller to fall back gracefully.
 const OAUTH_TOKEN_URL = 'https://claude.ai/api/auth/oauth/token';
 
+/** Parse a raw credential JSON blob (from file or Keychain) into a result. */
+function parseCredsRaw(raw, source) {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    return { kind: 'config', message: `cannot parse ${source} credentials: ${e.message}` };
+  }
+  const oa = data?.claudeAiOauth;
+  if (!oa?.accessToken) return { kind: 'config', message: `missing accessToken in ${source} credentials` };
+  return { kind: 'ok', creds: oa, raw: data, source };
+}
+
 async function readCredentials() {
+  // 1) File — Linux / WSL (and macOS in the rare case a file exists).
   try {
     const raw = await fsp.readFile(CREDS_PATH, 'utf8');
-    const data = JSON.parse(raw);
-    const oa = data?.claudeAiOauth;
-    if (!oa?.accessToken) return { kind: 'config', message: 'missing accessToken in credentials file' };
-    return { kind: 'ok', creds: oa, raw: data };
+    return parseCredsRaw(raw, 'file');
   } catch (e) {
-    if (e?.code === 'ENOENT') return { kind: 'config', message: 'credentials file not found' };
-    return { kind: 'config', message: `cannot read credentials: ${e.message}` };
+    if (e?.code !== 'ENOENT') {
+      return { kind: 'config', message: `cannot read credentials: ${e.message}` };
+    }
+    // ENOENT — fall through to the macOS Keychain before giving up.
   }
+
+  // 2) macOS Keychain — the canonical store on darwin (no file there).
+  if (process.platform === 'darwin') {
+    const kc = readKeychainRaw();
+    if (kc) return parseCredsRaw(kc, 'keychain');
+    return {
+      kind: 'config',
+      message: `credentials not found (no ${CREDS_PATH}; no Keychain item "${KEYCHAIN_SERVICE}" — run \`claude\` to log in)`,
+    };
+  }
+
+  return { kind: 'config', message: 'credentials file not found' };
 }
 
 function expiresAtMs(creds) {
@@ -49,8 +119,14 @@ function isExpiringSoon(creds, withinMs = 5 * 60_000) {
   return ms !== null && ms - Date.now() < withinMs;
 }
 
-async function writeCredentials(rawData, freshOauth) {
+async function writeCredentials(rawData, freshOauth, source = 'file') {
   const next = { ...rawData, claudeAiOauth: { ...rawData.claudeAiOauth, ...freshOauth } };
+  if (source === 'keychain') {
+    // macOS: upsert back into the Keychain. Sync + may throw — caller catches
+    // and falls back to the `claude --version` CLI refresh path.
+    writeKeychainRaw(JSON.stringify(next));
+    return;
+  }
   const tmp = `${CREDS_PATH}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmp, JSON.stringify(next, null, 2), { encoding: 'utf8', mode: 0o600 });
   try { await fsp.chmod(tmp, 0o600); } catch { /* umask may have already set it */ }
@@ -130,7 +206,7 @@ function tryCliFallback() {
 async function refreshIfNeeded(forceRefresh = false) {
   const cr = await readCredentials();
   if (cr.kind !== 'ok') return cr;
-  const { creds, raw } = cr;
+  const { creds, raw, source } = cr;
 
   if (!forceRefresh && !isExpiringSoon(creds)) {
     return { kind: 'ok', creds };
@@ -144,7 +220,7 @@ async function refreshIfNeeded(forceRefresh = false) {
 
   if (oauthResult.kind === 'ok') {
     try {
-      await writeCredentials(raw, oauthResult.fresh);
+      await writeCredentials(raw, oauthResult.fresh, source);
       const freshCr = await readCredentials();
       if (freshCr.kind === 'ok') {
         appendRefreshLog({ event: 'oauth_refresh_written_ok' });
@@ -188,4 +264,13 @@ async function refreshIfNeeded(forceRefresh = false) {
   return { kind: 'unsupported', message: 'Auto-refresh failed; token still valid for now', creds };
 }
 
-module.exports = { readCredentials, expiresAtMs, isExpired, isExpiringSoon, refreshIfNeeded };
+module.exports = {
+  readCredentials,
+  expiresAtMs,
+  isExpired,
+  isExpiringSoon,
+  refreshIfNeeded,
+  parseCredsRaw,
+  KEYCHAIN_SERVICE,
+  CREDS_PATH,
+};

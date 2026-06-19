@@ -26,6 +26,7 @@ const watchers = require('./watchers.cjs');
 const teams = require('./teams.cjs');
 const queueOps = require('./queueOps.cjs');
 const pluginInstall = require('./pluginInstall.cjs');
+const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs');
@@ -947,6 +948,12 @@ app.whenReady().then(async () => {
   webRemote.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
+  });
+  // First-boot default: install the bundled session-manager-dev plugin (its 10
+  // dev skills) from the app's own marketplace. One-shot + idempotent; never
+  // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
+  seedDevPlugin({ logger: console }).catch((e) => {
+    logs.writeLine({ scope: 'seed-dev-plugin', level: 'error', message: 'seed failed', meta: { error: e?.message } });
   });
   webRemote.init().catch((e) => {
     logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { toast } from '../../state/toast'
 import {
   CATALOG_MCP,
   CATALOG_SKILLS,
@@ -245,8 +246,23 @@ export function PluginsLibrary() {
 
   const refresh = async () => {
     if (!home) return
+    const ids = new Set<string>()
+    // Legacy signal: a top-level dir under ~/.claude/plugins named for the id.
     const r = await window.api.config.listDir(`${home}/.claude/plugins`, { dirsOnly: true })
-    setInstalled(new Set(r.entries.map((e) => e.name)))
+    for (const e of r.entries) ids.add(e.name)
+    // Authoritative signal: settings.json `enabledPlugins` keyed `id@marketplace`.
+    try {
+      const s = await window.api.config.readJson(`${home}/.claude/settings.json`)
+      const enabled = (s.data as { enabledPlugins?: Record<string, boolean> })?.enabledPlugins
+      if (enabled) {
+        for (const [key, on] of Object.entries(enabled)) {
+          if (on) ids.add(key.split('@')[0])
+        }
+      }
+    } catch {
+      /* settings.json absent/unreadable — dir signal still stands */
+    }
+    setInstalled(ids)
   }
 
   useEffect(() => {
@@ -275,11 +291,14 @@ export function PluginsLibrary() {
           // Plugins from a non-official marketplace need a one-time
           // `/plugin marketplace add <repo>` before install; the official
           // catalog marketplace is pre-registered, so it's install-only.
+          // `bundled` ships inside this app — the in-app Install button wires
+          // the marketplace add automatically, so the copy form is install-only.
           const mktName = p.marketplace?.name ?? 'anthropics/claude-plugins-official'
           const installLine = `/plugin install ${p.id}@${mktName}`
-          const installCmd = p.marketplace
-            ? `/plugin marketplace add ${p.marketplace.add}\n${installLine}`
-            : installLine
+          const installCmd =
+            p.marketplace && p.marketplace.add !== 'bundled'
+              ? `/plugin marketplace add ${p.marketplace.add}\n${installLine}`
+              : installLine
           return (
             <div key={p.id} className="px-4 py-3 flex items-start gap-3 hover:bg-bg-elev/50">
               <div className="flex-1 min-w-0">
@@ -296,9 +315,15 @@ export function PluginsLibrary() {
                 <div className="text-fg-dim text-xs mt-0.5">{p.description}</div>
                 <div className="text-fg-faint text-[10px] font-mono mt-1 truncate">{installLine}</div>
               </div>
-              <div className="flex gap-1 shrink-0">
+              <div className="flex gap-1 shrink-0 items-start">
                 <LinkBtn href={p.source}>source</LinkBtn>
-                <CopyBtn text={installCmd} label="copy install" />
+                <CopyBtn text={installCmd} label="copy" />
+                <InstallBtn
+                  id={p.id}
+                  marketplace={p.marketplace}
+                  installed={on}
+                  onDone={refresh}
+                />
               </div>
             </div>
           )
@@ -961,6 +986,109 @@ function LinkBtn({ href, children }: { href: string; children: React.ReactNode }
     >
       {children}
     </a>
+  )
+}
+
+/**
+ * One-click plugin install. Runs the real `plugins:install` IPC (hidden pty)
+ * which registers `marketplace.add` then installs `<id>@<name>` — the same two
+ * commands the copy button used to hand off to the user. Streams progress into
+ * an expandable log; toasts the outcome.
+ */
+function InstallBtn({
+  id,
+  marketplace,
+  installed,
+  onDone,
+}: {
+  id: string
+  marketplace?: { add: string; name: string }
+  installed: boolean
+  onDone: () => void
+}) {
+  const [status, setStatus] = useState<'idle' | 'running' | 'error'>('idle')
+  const [lines, setLines] = useState<string[]>([])
+  const [show, setShow] = useState(false)
+  // Install resolves asynchronously; the row can unmount (nav away / filter)
+  // before then. Guard post-await state writes so they no-op after unmount.
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
+
+  useEffect(() => {
+    const off = window.api.plugins.onInstallProgress(({ slug, line }) => {
+      if (slug !== id) return
+      setLines((prev) => {
+        const next = [...prev, line]
+        return next.length > 200 ? next.slice(next.length - 200) : next
+      })
+    })
+    return () => off()
+  }, [id])
+
+  const run = async () => {
+    setStatus('running')
+    setLines([])
+    setShow(true)
+    try {
+      const r = await window.api.plugins.install({ slug: id, marketplace })
+      if (!mounted.current) {
+        // Row gone; still surface the outcome via toast + refresh, skip setState.
+        if (r.ok) { toast.info(`Installed ${id}`); onDone() }
+        else toast.error(`Install failed: ${id} (exit ${r.exitCode})${r.error ? ` — ${r.error}` : ''}`)
+        return
+      }
+      if (r.ok) {
+        setStatus('idle')
+        toast.info(`Installed ${id}`)
+        onDone()
+      } else {
+        setStatus('error')
+        toast.error(`Install failed: ${id} (exit ${r.exitCode})${r.error ? ` — ${r.error}` : ''}`)
+      }
+    } catch (err) {
+      if (!mounted.current) { toast.error(`Install error: ${id} — ${err instanceof Error ? err.message : String(err)}`); return }
+      setStatus('error')
+      toast.error(`Install error: ${id} — ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  if (installed) {
+    return (
+      <button
+        disabled
+        className="px-2 py-0.5 text-xs border border-line rounded text-fg-faint bg-bg-elev cursor-default"
+      >
+        installed
+      </button>
+    )
+  }
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        onClick={run}
+        disabled={status === 'running'}
+        className={`px-2 py-0.5 text-xs border rounded ${
+          status === 'running'
+            ? 'border-line text-fg-faint bg-bg-elev cursor-not-allowed'
+            : 'border-accent/50 text-accent hover:bg-accent hover:text-bg'
+        }`}
+      >
+        {status === 'running' ? 'installing…' : status === 'error' ? 'retry' : 'install'}
+      </button>
+      {lines.length > 0 && (
+        <button
+          onClick={() => setShow((s) => !s)}
+          className="text-[10px] text-fg-faint hover:text-fg-dim"
+        >
+          {show ? 'hide log' : 'show log'}
+        </button>
+      )}
+      {show && lines.length > 0 && (
+        <pre className="mt-0.5 max-h-40 w-72 overflow-auto bg-bg-elev border border-line rounded p-2 text-fg-faint font-mono text-[10px] whitespace-pre-wrap text-left">
+          {lines.join('\n')}
+        </pre>
+      )}
+    </div>
   )
 }
 

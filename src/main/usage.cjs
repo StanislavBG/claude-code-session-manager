@@ -24,6 +24,39 @@ const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
 const { writeJson } = require('./config.cjs');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+
+/** A non-empty env value that isn't an explicit falsey string. */
+function envEnabled(v) {
+  return v != null && v !== '' && v !== '0' && String(v).toLowerCase() !== 'false';
+}
+
+/**
+ * Is the consumer 5-hour usage meter (/api/oauth/usage) even applicable here?
+ *
+ * That endpoint only exists for OAuth/subscription auth against
+ * api.anthropic.com. Enterprise auth modes have no such meter, so polling it
+ * just 404s/times-out — and the scheduler must NOT gate on (or pause for) it.
+ * Detected modes: Amazon Bedrock, Google Vertex, raw API-key, a custom auth
+ * token, or a non-Anthropic base URL (corporate gateway/proxy).
+ *
+ * Returns false → caller should treat usage as unavailable-by-design and fire
+ * work on its own (pending + memory) instead of waiting on a meter.
+ */
+function usageMeterApplicable(env = process.env) {
+  if (envEnabled(env.CLAUDE_CODE_USE_BEDROCK)) return false;
+  if (envEnabled(env.CLAUDE_CODE_USE_VERTEX)) return false;
+  if (env.ANTHROPIC_API_KEY) return false;
+  if (env.ANTHROPIC_AUTH_TOKEN) return false;
+  if (env.ANTHROPIC_BASE_URL) {
+    // Parse the host rather than substring-match, so a deceptive gateway like
+    // https://anthropic.com.attacker.example is correctly treated as enterprise.
+    let host;
+    try { host = new URL(env.ANTHROPIC_BASE_URL).hostname.toLowerCase(); }
+    catch { return false; } // unparseable custom URL → treat as a gateway
+    if (host !== 'anthropic.com' && !host.endsWith('.anthropic.com')) return false;
+  }
+  return true;
+}
 const CACHE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'billing-cache.json');
 // Coalesce the 4 renderer pollers (Overview/AppStatusBar/StatusBar/Usage). A
 // fresh ok-cache is served directly without touching the network. Auth/
@@ -164,4 +197,4 @@ function registerBillingHandlers() {
   });
 }
 
-module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse };
+module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse, usageMeterApplicable };

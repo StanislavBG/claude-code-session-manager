@@ -358,8 +358,18 @@ const repoAnalyze = z.object({
 // Plugin install: mirrors pluginInstall.cjs SLUG_RE + length cap. Defense in
 // depth — install() re-checks; the schema rejects earlier.
 const PLUGIN_SLUG_RE = /^[a-z0-9\-/]+$/;
+const PLUGIN_MKT_ADD_RE = /^[A-Za-z0-9][A-Za-z0-9._\-]*\/[A-Za-z0-9._\-]+$/;
 const pluginsInstall = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
+  // Optional non-official marketplace: registered via `plugin marketplace add`
+  // before install. pluginInstall.cjs re-validates (defense in depth).
+  marketplace: z.object({
+    // `owner/repo`, or the literal `bundled` sentinel (app's own packaged
+    // marketplace — pluginInstall.cjs resolves it to an absolute path).
+    add: z.string().min(1).max(200)
+      .refine((v) => v === 'bundled' || PLUGIN_MKT_ADD_RE.test(v), 'invalid marketplace source'),
+    name: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
+  }).optional(),
 }).passthrough();
 const pluginsAbort = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),

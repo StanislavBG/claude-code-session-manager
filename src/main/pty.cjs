@@ -1,4 +1,17 @@
-const pty = require('node-pty');
+// Load the native node-pty lazily-guarded: if its prebuilt/rebuilt binary
+// doesn't match this Electron's ABI, a bare top-level require would throw and
+// crash the WHOLE app at startup (index.cjs requires this module). Instead we
+// capture the error and surface an actionable message when a tab is opened, so
+// the app still boots and the user sees exactly how to fix the terminal.
+let pty = null;
+let ptyLoadError = null;
+try {
+  pty = require('node-pty');
+} catch (e) {
+  ptyLoadError = e;
+  // eslint-disable-next-line no-console
+  console.error('[pty] node-pty failed to load:', e?.message);
+}
 const { ipcMain } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
@@ -7,6 +20,37 @@ const { addAllowedRoot } = require('./config.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+
+// Absolute path to the installed package root (src/main/ -> ../../), shown in
+// the remediation message so the user can cd there and rebuild.
+const PKG_DIR = path.join(__dirname, '..', '..');
+
+/**
+ * ANSI-formatted terminal text explaining a native-module / immediate-exit
+ * failure and exactly how to fix it. Written straight into the tab's output so
+ * a dead terminal explains itself instead of just going blank.
+ */
+function nativeModuleHelp(reason) {
+  const mac = process.platform === 'darwin';
+  const lines = [
+    '',
+    `\x1b[1;33m[session-manager] Terminal could not start.\x1b[0m`,
+    `\x1b[33m${reason}\x1b[0m`,
+    '',
+    `This is almost always the node-pty native module not matching this`,
+    `Electron build. Rebuild it once:`,
+    '',
+    `  \x1b[36mcd ${PKG_DIR}\x1b[0m`,
+    `  \x1b[36mnpx electron-rebuild -f -w node-pty\x1b[0m`,
+    '',
+    mac ? `macOS: if the rebuild fails, install the compiler first:` : '',
+    mac ? `  \x1b[36mxcode-select --install\x1b[0m` : '',
+    mac ? '' : '',
+    `Then quit and reopen session-manager.`,
+    '',
+  ].filter((l) => l !== '');
+  return lines.join('\r\n') + '\r\n';
+}
 
 /**
  * PtyManager — owns every claude PTY process, keyed by tabId (renderer-generated UUID).
@@ -25,6 +69,15 @@ class PtyManager {
 
   spawn({ tabId, cwd, cols = 120, rows = 30 }) {
     console.log('[pty] spawn requested', { tabId });
+
+    // Native module unavailable — explain in the tab and report a clean exit
+    // rather than throwing (which would surface as an opaque IPC error).
+    if (!pty || ptyLoadError) {
+      const reason = `node-pty failed to load: ${ptyLoadError?.message ?? 'module missing'}`;
+      sendIfAlive(this.window, `pty:data:${tabId}`, nativeModuleHelp(reason));
+      setImmediate(() => sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode: 1, signal: undefined }));
+      return { pid: null, cwd, reattached: false, error: 'node-pty unavailable' };
+    }
 
     // Validate that cwd is inside homedir before widening the allowed-root set.
     if (cwd) {
@@ -88,11 +141,19 @@ class PtyManager {
       });
     } catch (err) {
       console.error('[pty] pty.spawn threw:', err);
-      throw err;
+      // Surface the cause in the tab + report a clean exit rather than throwing
+      // an opaque IPC error (covers a missing/invalid cwd or a native fault).
+      sendIfAlive(this.window, `pty:data:${tabId}`, nativeModuleHelp(`pty.spawn failed: ${err?.message ?? String(err)}`));
+      setImmediate(() => sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode: 1, signal: undefined }));
+      return { pid: null, cwd, reattached: false, error: String(err?.message || 'spawn-failed') };
     }
     console.log('[pty] spawned pid=', proc.pid, 'for tabId=', tabId);
 
+    const spawnedAt = Date.now();
+    let gotData = false;
+
     proc.onData((data) => {
+      gotData = true;
       sendIfAlive(this.window, `pty:data:${tabId}`, data);
     });
 
@@ -105,11 +166,19 @@ class PtyManager {
         this.sessions.delete(tabId);
         return;
       }
+      // Fast-exit detector: a shell that dies in <1.2s with a non-zero status
+      // and never printed anything almost certainly couldn't exec (broken
+      // node-pty spawn-helper / ABI on macOS). Explain it in the tab instead of
+      // leaving a blank, instantly-closed terminal. Guarded by !gotData so a
+      // real interactive shell (which prints a prompt immediately) is exempt.
+      if (!gotData && exitCode !== 0 && Date.now() - spawnedAt < 1200) {
+        sendIfAlive(this.window, `pty:data:${tabId}`, nativeModuleHelp(`The shell exited immediately (code ${exitCode}).`));
+      }
       sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode, signal });
       this.sessions.delete(tabId);
     });
 
-    this.sessions.set(tabId, { proc, cwd, created: Date.now() });
+    this.sessions.set(tabId, { proc, cwd, created: spawnedAt });
     return { pid: proc.pid, cwd, reattached: false };
   }
 

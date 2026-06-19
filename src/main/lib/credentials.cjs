@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
-const { cleanChildEnv } = require('./cleanEnv.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
+const { resolveClaudeBin } = require('./claudeBin.cjs');
 
 const CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 
@@ -185,7 +186,12 @@ function tryCliFallback() {
     const timer = setTimeout(() => settle({ ok: false, reason: 'timeout' }), 15_000);
     let child;
     try {
-      child = spawn('claude', ['--version'], { stdio: 'ignore', env: cleanChildEnv() });
+      // Resolve the absolute binary + inject Homebrew/user bins so this works
+      // even when Electron launched from Finder/Dock with a stripped PATH (mac).
+      child = spawn(resolveClaudeBin(), ['--version'], {
+        stdio: 'ignore',
+        env: cleanChildEnv({ PATH: pathWithUserBins() }),
+      });
     } catch (e) {
       clearTimeout(timer);
       return settle({ ok: false, reason: e?.message });

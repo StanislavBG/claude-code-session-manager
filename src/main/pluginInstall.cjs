@@ -21,7 +21,7 @@ const pty = require('node-pty');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
@@ -58,16 +58,8 @@ function send(channel, payload) {
 }
 
 function childEnv() {
-  const home = os.homedir();
-  const extraPath = [
-    path.join(home, '.local', 'bin'),
-    path.join(home, '.npm-global', 'bin'),
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin',
-  ].join(':');
   return cleanChildEnv({
-    PATH: `${extraPath}:${process.env.PATH || ''}`,
+    PATH: pathWithUserBins(),
     TERM: 'xterm-256color',
     FORCE_COLOR: '0', // strip ANSI so the renderer doesn't have to.
   });

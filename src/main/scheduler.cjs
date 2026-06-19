@@ -48,7 +48,7 @@ const { randomUUID } = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
-const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
@@ -921,7 +921,9 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     // Strip Claude Code env and secrets that leak in when session-manager is
     // launched from a `claude` shell. CLAUDE_EFFORT=xhigh forces Opus and
     // overrides `--model sonnet`, so scheduled jobs burn Opus credits silently.
-    const childEnv = cleanChildEnv();
+    // PATH must include Homebrew/user bins or the job's node/git children ENOENT
+    // when Electron was launched from Finder/Dock on macOS (stripped PATH).
+    const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
 
     // Track whether the agent has emitted a `result` event in its JSONL stream.
     // null until seen; then one of "success" | "error_max_turns" | … per the
@@ -1230,7 +1232,7 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
   }
 
   const claudeBin = resolveClaudeBin();
-  const childEnv = cleanChildEnv();
+  const childEnv = cleanChildEnv({ PATH: pathWithUserBins() }); // Homebrew/user bins for macOS
 
   // Investigation needs only a deadman watchdog — no idle-tail or result-tail
   // since investigations are short-running Opus probes with a hard ceiling.

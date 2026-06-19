@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { addAllowedRoot } = require('./config.cjs');
-const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
@@ -62,18 +62,11 @@ class PtyManager {
       return { pid: existing.proc.pid, cwd: existing.cwd, reattached: true };
     }
 
-    // Prefer `claude` on PATH; extend PATH with common user bin dirs since
-    // Electron can launch with a stripped environment.
-    const extraPath = [
-      path.join(os.homedir(), '.local', 'bin'),
-      path.join(os.homedir(), '.npm-global', 'bin'),
-      '/usr/local/bin',
-      '/usr/bin',
-      '/bin',
-    ].join(':');
-
+    // Prefer `claude` on PATH; extend PATH with common user + Homebrew bin dirs
+    // since Electron can launch with a stripped environment (Apple Silicon
+    // Homebrew is /opt/homebrew, absent from the default Electron PATH).
     const env = cleanChildEnv({
-      PATH: `${extraPath}:${process.env.PATH || ''}`,
+      PATH: pathWithUserBins(),
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       FORCE_COLOR: '1',

@@ -51,6 +51,11 @@ const BATCH = 20;                 // prompts per extraction call (also a per-pro
 const KNOWN_VOCAB = 200;          // top node names pre-seeded for dedup-at-extraction
 const MAX_TAIL_BYTES = 8 * 1024 * 1024;   // bound bytes scanned per ingest run
 const MAX_EXTRACTIONS_PER_RUN = 30;       // bound claude calls per run (cost/time)
+// prompts.jsonl is append-only and otherwise grows forever (observed 325 MB).
+// Once we're caught up past this size, rotate it to prompts.jsonl.1 (one backup
+// kept) and reset the cursor — extraction only ever needs the new tail, and the
+// already-extracted prompts live in the per-project graphs.
+const MAX_LOG_BYTES = 256 * 1024 * 1024;
 // Coalescing window before an auto-ingest after new prompts land. Units never
 // mix projects, and a project switch in the log closes the current batch — so
 // with concurrent sessions a short window yields 1-2-prompt batches and one
@@ -157,6 +162,30 @@ async function loadIngestState() {
 
 async function saveIngestState(s) {
   await writeJson(INGEST_STATE_PATH, s);
+}
+
+/**
+ * Rotate prompts.jsonl once it grows past MAX_LOG_BYTES. Only call when caught
+ * up (lastOffset >= size) so no unconsumed prompts are lost. Renames to a single
+ * `.1` backup (overwriting any prior one) and resets the cursor to 0; the
+ * UserPromptSubmit hook recreates prompts.jsonl on its next append. Best-effort:
+ * a failure leaves the log in place and is retried on the next caught-up cycle.
+ */
+async function rotateLogIfTooLarge(st, stat) {
+  if (!stat || stat.size < MAX_LOG_BYTES) return false;
+  const rotated = LOG_PATH + '.1';
+  try {
+    try { await fsp.unlink(rotated); } catch { /* no prior backup */ }
+    await fsp.rename(LOG_PATH, rotated);
+    st.lastOffset = 0;
+    st.updatedAt = new Date().toISOString();
+    await saveIngestState(st);
+    logger.writeLine({ scope: 'kg', level: 'info', message: 'rotated prompts.jsonl', meta: { rotatedBytes: stat.size, backup: rotated } });
+    return true;
+  } catch (e) {
+    logger.writeLine({ scope: 'kg', level: 'warn', message: 'log rotation failed', meta: { error: e?.message } });
+    return false;
+  }
 }
 
 /**
@@ -356,7 +385,19 @@ async function ingest() {
     try { stat = await fsp.stat(LOG_PATH); }
     catch { broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: 0 }); return { ok: true, added: 0, note: 'no log yet' }; }
 
+    // Truncation/rotation recovery: if the log shrank below our watermark it was
+    // rotated or truncated out from under us — restart from the top of the new
+    // file rather than wedging forever at a stale offset.
+    if (stat.size < st.lastOffset) {
+      logger.writeLine({ scope: 'kg', level: 'info', message: 'log shrank; resetting ingest cursor', meta: { size: stat.size, lastOffset: st.lastOffset } });
+      st.lastOffset = 0;
+      st.updatedAt = new Date().toISOString();
+      await saveIngestState(st);
+    }
+
     if (stat.size <= st.lastOffset) {
+      // Caught up — a safe moment to rotate the log if it has grown too large.
+      await rotateLogIfTooLarge(st, stat);
       broadcast('kg:ingest-progress', { phase: 'done', ingesting: false, added: 0 });
       return { ok: true, added: 0, note: 'up to date' };
     }

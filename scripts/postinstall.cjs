@@ -12,13 +12,22 @@
  */
 
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+
+// Resolve the electron-rebuild bin from THIS package's own node_modules first,
+// so a global install never has `npx` reach out to the registry (and risk
+// pulling the wrong/deprecated `electron-rebuild` package). Fall back to npx.
+function rebuildArgv() {
+  const pkgRoot = path.join(__dirname, '..');
+  const local = path.join(pkgRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'electron-rebuild.cmd' : 'electron-rebuild');
+  if (fs.existsSync(local)) return [local, ['-f', '-w', 'node-pty']];
+  return [process.platform === 'win32' ? 'npx.cmd' : 'npx', ['electron-rebuild', '-f', '-w', 'node-pty']];
+}
 
 function run() {
-  const r = spawnSync(
-    process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['electron-rebuild', '-f', '-w', 'node-pty'],
-    { stdio: 'inherit' },
-  );
+  const [cmd, args] = rebuildArgv();
+  const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: path.join(__dirname, '..') });
   return r.status === 0 && !r.error;
 }
 

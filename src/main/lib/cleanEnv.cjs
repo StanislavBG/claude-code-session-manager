@@ -25,10 +25,14 @@ function userBinDirs() {
   ];
 }
 
-/** Electron's PATH prefixed with the user/Homebrew bin dirs — the value to put
- *  in a spawned child's PATH so `claude`, node, git, etc. resolve on macOS. */
+/** Electron's PATH with the user/Homebrew bin dirs APPENDED as a fallback — the
+ *  value to put in a spawned child's PATH so `claude`, node, git, etc. resolve
+ *  on macOS even under a stripped Finder/Dock PATH. Appended (not prepended) so
+ *  a user's version manager (nvm/asdf/volta/mise) earlier in PATH still wins and
+ *  isn't shadowed by /opt/homebrew. */
 function pathWithUserBins() {
-  return `${userBinDirs().join(':')}:${process.env.PATH || ''}`;
+  const base = process.env.PATH || '';
+  return base ? `${base}:${userBinDirs().join(':')}` : userBinDirs().join(':');
 }
 
 function cleanChildEnv(extra = {}) {

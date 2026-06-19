@@ -27,9 +27,11 @@ describe('userBinDirs', () => {
     expect(dirs.some((d: string) => d.endsWith('/.npm-global/bin'))).toBe(true)
   })
 
-  it('pathWithUserBins prepends the dirs ahead of the inherited PATH', () => {
+  it('pathWithUserBins APPENDS the dirs after the inherited PATH (no shadowing)', () => {
     const p = pathWithUserBins()
-    expect(p.startsWith(userBinDirs().join(':'))).toBe(true)
+    expect(p.endsWith(userBinDirs().join(':'))).toBe(true)
     expect(p).toContain('/opt/homebrew/bin')
+    // The inherited PATH must come first so a user's nvm/asdf node still wins.
+    if (process.env.PATH) expect(p.startsWith(process.env.PATH)).toBe(true)
   })
 })

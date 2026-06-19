@@ -17,7 +17,16 @@
  */
 
 const { ipcMain } = require('electron');
-const pty = require('node-pty');
+// Guard like pty.cjs: a node-pty ABI mismatch must not crash the whole app at
+// module load (index.cjs requires this unconditionally). install() reports a
+// clean error if the native module is unavailable.
+let pty = null;
+try {
+  pty = require('node-pty');
+} catch (e) {
+  // eslint-disable-next-line no-console
+  console.error('[pluginInstall] node-pty failed to load:', e?.message);
+}
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
@@ -72,6 +81,10 @@ function childEnv() {
  */
 function runStep({ slug, args, register, unregister }) {
   return new Promise((resolve) => {
+    if (!pty) {
+      resolve({ ok: false, exitCode: -1, error: 'node-pty unavailable (native module failed to load)' });
+      return;
+    }
     const claudeBin = resolveClaudeBin();
     let proc;
     try {

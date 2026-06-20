@@ -122,12 +122,14 @@ export function KnowledgeGraph() {
     else toast.error('Clear failed')
   }, [cwd, state, reload, reloadProjects])
 
-  const toggleExtraction = useCallback(async () => {
-    const next = !(state?.status.extractionEnabled ?? true)
-    const r = await window.api.kg.setExtraction(next)
-    if (r.ok) { toast.info(next ? 'Extraction enabled.' : 'Extraction paused — no further claude -p cost.'); reload(cwd) }
-    else toast.error('Could not change extraction setting')
-  }, [state, cwd, reload])
+  const changeCaptureMode = useCallback(async (mode: 'llm' | 'lite' | 'off') => {
+    const r = await window.api.kg.setCaptureMode(mode)
+    if (r.ok) {
+      const labels: Record<string, string> = { llm: 'LLM (claude -p)', lite: 'lite (heuristic, free)', off: 'off' }
+      toast.info(`Capture mode: ${labels[mode] ?? mode}`)
+      reload(cwd)
+    } else toast.error('Could not change capture mode')
+  }, [cwd, reload])
 
   const askQuestion = useCallback(async () => {
     const q = question.trim()
@@ -221,15 +223,16 @@ export function KnowledgeGraph() {
             <span className="text-amber-600 text-xs">{status.pending} new prompt{status.pending === 1 ? '' : 's'} to process</span>
           )}
           {progress && <span className="text-fg-faint text-xs">{progress}</span>}
-          <button
-            onClick={toggleExtraction}
-            className="text-fg-dim hover:text-fg text-xs border border-line rounded px-2 py-0.5"
-            title={state?.status.extractionEnabled === false
-              ? 'Extraction is paused — no claude -p cost. Click to resume.'
-              : 'Pause the recurring claude -p extraction (stops token cost when you are not using the graph).'}
+          <select
+            value={state?.status.captureMode ?? 'llm'}
+            onChange={(e) => changeCaptureMode(e.target.value as 'llm' | 'lite' | 'off')}
+            className="text-xs bg-bg border border-line rounded px-1.5 py-0.5 text-fg outline-none focus:border-fg-faint"
+            title="llm = claude -p extraction (costs tokens); lite = fast heuristic (free); off = no indexing"
           >
-            {state?.status.extractionEnabled === false ? 'Extraction: off' : 'Extraction: on'}
-          </button>
+            <option value="llm">Mode: llm</option>
+            <option value="lite">Mode: lite</option>
+            <option value="off">Mode: off</option>
+          </select>
           <button
             onClick={clearGraph}
             disabled={ingesting || !state || state.nodes.length === 0}
@@ -240,9 +243,9 @@ export function KnowledgeGraph() {
           </button>
           <button
             onClick={runIngest}
-            disabled={ingesting || state?.status.extractionEnabled === false}
+            disabled={ingesting || state?.status.captureMode === 'off'}
             className="text-fg-dim hover:text-fg text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
-            title={state?.status.extractionEnabled === false ? 'Extraction is paused' : 'Distill new prompt-log lines into the graph'}
+            title={state?.status.captureMode === 'off' ? 'Capture is off' : 'Distill new prompt-log lines into the graph'}
           >
             {ingesting ? 'Processing…' : 'Process now'}
           </button>

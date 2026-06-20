@@ -41,6 +41,7 @@ const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
 const { writeJson } = require('./config.cjs');
 const { pruneGraph } = require('./lib/kgPrune.cjs');
+const { canonicalize, ENTITY_TYPES, liteExtract } = require('./lib/kgLite.cjs');
 
 const HOME = os.homedir();
 const KG_DIR = path.join(HOME, '.claude', 'knowledge-log');
@@ -52,31 +53,56 @@ const KG_CONFIG_PATH = path.join(KG_DIR, 'kg-config.json');
 
 const DEFAULT_MAX_GRAPH_NODES = 300;
 
-/** Read kg-config.json; returns defaults when file is absent or malformed. */
+/** Read kg-config.json; returns defaults when file is absent or malformed.
+ *  `captureMode` is derived from the explicit field (new) or the legacy
+ *  `extractionEnabled` boolean (old configs) for backward compatibility. */
 function kgConfig() {
   try {
     const c = JSON.parse(fs.readFileSync(KG_CONFIG_PATH, 'utf8'));
+    let captureMode;
+    if (c.captureMode === 'lite' || c.captureMode === 'off' || c.captureMode === 'llm') {
+      captureMode = c.captureMode;
+    } else {
+      // Legacy: derive from extractionEnabled boolean.
+      captureMode = c.extractionEnabled === false ? 'off' : 'llm';
+    }
     return {
-      extractionEnabled: c.extractionEnabled !== false,
+      extractionEnabled: captureMode !== 'off',
+      captureMode,
       // 0 = cap disabled; undefined/null → default
       maxGraphNodes: typeof c.maxGraphNodes === 'number' ? c.maxGraphNodes : DEFAULT_MAX_GRAPH_NODES,
     };
   } catch {
-    return { extractionEnabled: true, maxGraphNodes: DEFAULT_MAX_GRAPH_NODES };
+    return { extractionEnabled: true, captureMode: 'llm', maxGraphNodes: DEFAULT_MAX_GRAPH_NODES };
   }
+}
+
+/** Active capture mode — SM_KG_DISABLE=1 forces 'off' regardless of config. */
+function currentCaptureMode() {
+  if (process.env.SM_KG_DISABLE === '1') return 'off';
+  return kgConfig().captureMode;
 }
 
 /** Extraction toggle — lets the user stop the recurring `claude -p` cost when
  *  they aren't using the graph. Default ON; env SM_KG_DISABLE=1 forces OFF. */
 function extractionEnabled() {
-  if (process.env.SM_KG_DISABLE === '1') return false;
-  return kgConfig().extractionEnabled;
+  return currentCaptureMode() !== 'off';
 }
 
 async function setExtractionEnabled(enabled) {
   const current = kgConfig();
-  await writeJson(KG_CONFIG_PATH, { ...current, extractionEnabled: !!enabled });
+  // Toggling off → 'off'; toggling on → restore prior active mode or default 'llm'.
+  const newMode = enabled ? (current.captureMode === 'off' ? 'llm' : current.captureMode) : 'off';
+  await writeJson(KG_CONFIG_PATH, { ...current, captureMode: newMode, extractionEnabled: !!enabled });
   return { ok: true, extractionEnabled: !!enabled };
+}
+
+/** Set capture mode: 'llm' | 'lite' | 'off'. */
+async function setCaptureMode(mode) {
+  if (mode !== 'llm' && mode !== 'lite' && mode !== 'off') return { ok: false, error: 'invalid mode' };
+  const current = kgConfig();
+  await writeJson(KG_CONFIG_PATH, { ...current, captureMode: mode, extractionEnabled: mode !== 'off' });
+  return { ok: true, captureMode: mode };
 }
 const BATCH = 20;                 // prompts per extraction call (also a per-project cap)
 const KNOWN_VOCAB = 200;          // top node names pre-seeded for dedup-at-extraction
@@ -94,7 +120,7 @@ const MAX_LOG_BYTES = 256 * 1024 * 1024;
 // lets prompts accumulate into fuller batches; the KG tab tolerates the lag.
 const WATCH_COALESCE_MS = 5 * 60_000;
 
-const ENTITY_TYPES = ['project', 'feature', 'tool', 'tech', 'concept', 'goal', 'person'];
+// ENTITY_TYPES and canonicalize are imported from ./lib/kgLite.cjs (single source of truth).
 
 // Prompts our own `claude -p` calls send. The SM_KG_INTERNAL env guard on the
 // logging hook prevents NEW ones; these prefixes drop any already in the log.
@@ -268,16 +294,6 @@ async function savePromptIndex(idx) {
   await writeJson(PROMPT_INDEX_PATH, idx);
 }
 
-/** Canonical dedup key: lowercase, strip leading article, collapse whitespace. */
-function canonicalize(name) {
-  return String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^(the|a|an)\s+/i, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[.,;:!?]+$/, '');
-}
-
 /** Read every prompt line currently in the log (real prompts only). */
 async function readAllPrompts() {
   let raw;
@@ -443,7 +459,8 @@ function planUnits(tailText) {
  */
 async function ingest() {
   if (ingesting) return { ok: false, error: 'already running' };
-  if (!extractionEnabled()) return { ok: true, added: 0, note: 'extraction disabled' };
+  const mode = currentCaptureMode();
+  if (mode === 'off') return { ok: true, added: 0, note: 'extraction disabled' };
   ingesting = true;
   broadcast('kg:ingest-progress', { phase: 'start', ingesting: true });
   try {
@@ -532,32 +549,40 @@ async function ingest() {
       const byEdge = new Map(g.edges.map((e) => [`${e.src} ${e.relation} ${e.dst}`, e]));
       const known = [...byKey.values()].sort((a, b) => b.count - a.count).slice(0, KNOWN_VOCAB).map((n) => ({ key: n.key, name: n.name }));
 
-      const r = await runClaude(EXTRACTION_PROMPT(u.entries, known), { model: 'haiku', timeoutMs: 180_000, systemPrompt: EXTRACTION_SYSTEM });
-      extractions++;
-      // Transient failure (timeout / spawn error / rate-limit): stop and stay
-      // resumable — do NOT advance the watermark, so we retry these exact prompts.
-      if (!r.ok) { logger.writeLine({ scope: 'kg', level: 'warn', message: 'extraction failed; pausing (resumable)', meta: { cwd: u.cwd, error: r.error } }); failed = true; break; }
-      const parsed = extractJson(r.out);
-      // Content failure (model refused / returned non-JSON): these prompts are
-      // un-extractable. QUARANTINE the batch — advance past it and CONTINUE so a
-      // single bad batch can't freeze the whole graph (the head-of-line bug).
-      if (!parsed) {
-        logger.writeLine({ scope: 'kg', level: 'warn', message: 'extraction unparseable; skipping batch', meta: { cwd: u.cwd, prompts: u.entries.length } });
-        skipped += u.entries.length;
-        st.lastOffset += u.bytes;
-        st.lastTs = u.entries[u.entries.length - 1].ts || st.lastTs;
-        st.updatedAt = new Date().toISOString();
-        // Write index before advancing watermark: if we crash between these two
-        // writes, the watermark hasn't moved so the batch will be re-processed
-        // (the index count may be slightly high) rather than advanced past a
-        // batch whose index entry was never written.
-        if (!promptIdx[u.enc]) promptIdx[u.enc] = { count: 0, cwd: u.cwd };
-        promptIdx[u.enc].count += u.entries.length;
-        promptIdx[u.enc].cwd = u.cwd;
-        await savePromptIndex(promptIdx);
-        await saveIngestState(st);
-        if (extractions >= MAX_EXTRACTIONS_PER_RUN) { capped = true; break; }
-        continue;
+      // Derive entities/relations: heuristic (lite) or LLM (llm).
+      let parsed;
+      if (mode === 'lite') {
+        // Heuristic extraction — O(W) per prompt, always succeeds, no claude spawn.
+        parsed = liteExtract(u.entries, known);
+      } else {
+        // LLM extraction (mode === 'llm')
+        const r = await runClaude(EXTRACTION_PROMPT(u.entries, known), { model: 'haiku', timeoutMs: 180_000, systemPrompt: EXTRACTION_SYSTEM });
+        extractions++;
+        // Transient failure (timeout / spawn error / rate-limit): stop and stay
+        // resumable — do NOT advance the watermark, so we retry these exact prompts.
+        if (!r.ok) { logger.writeLine({ scope: 'kg', level: 'warn', message: 'extraction failed; pausing (resumable)', meta: { cwd: u.cwd, error: r.error } }); failed = true; break; }
+        parsed = extractJson(r.out);
+        // Content failure (model refused / returned non-JSON): these prompts are
+        // un-extractable. QUARANTINE the batch — advance past it and CONTINUE so a
+        // single bad batch can't freeze the whole graph (the head-of-line bug).
+        if (!parsed) {
+          logger.writeLine({ scope: 'kg', level: 'warn', message: 'extraction unparseable; skipping batch', meta: { cwd: u.cwd, prompts: u.entries.length } });
+          skipped += u.entries.length;
+          st.lastOffset += u.bytes;
+          st.lastTs = u.entries[u.entries.length - 1].ts || st.lastTs;
+          st.updatedAt = new Date().toISOString();
+          // Write index before advancing watermark: if we crash between these two
+          // writes, the watermark hasn't moved so the batch will be re-processed
+          // (the index count may be slightly high) rather than advanced past a
+          // batch whose index entry was never written.
+          if (!promptIdx[u.enc]) promptIdx[u.enc] = { count: 0, cwd: u.cwd };
+          promptIdx[u.enc].count += u.entries.length;
+          promptIdx[u.enc].cwd = u.cwd;
+          await savePromptIndex(promptIdx);
+          await saveIngestState(st);
+          if (extractions >= MAX_EXTRACTIONS_PER_RUN) { capped = true; break; }
+          continue;
+        }
       }
 
       const batchTs = u.entries[u.entries.length - 1].ts || st.lastTs || new Date().toISOString();
@@ -587,7 +612,8 @@ async function ingest() {
       // Tell the renderer this batch landed so it can refresh the graph live.
       broadcast('kg:ingest-progress', { phase: 'batch', ingesting: true, batch: batchNo, totalBatches, cwd: u.cwd, added });
 
-      if (extractions >= MAX_EXTRACTIONS_PER_RUN) { capped = true; break; }
+      // Cap only applies to LLM mode (lite has negligible cost; no claude calls to bound).
+      if (mode === 'llm' && extractions >= MAX_EXTRACTIONS_PER_RUN) { capped = true; break; }
     }
 
     // More to do? Either we hit the per-run cap, or the bounded tail didn't reach
@@ -685,6 +711,7 @@ async function getState(cwd) {
       ingesting,
       logPath: LOG_PATH,
       extractionEnabled: cfg.extractionEnabled,
+      captureMode: cfg.captureMode,
       maxGraphNodes: cfg.maxGraphNodes,
     },
   };
@@ -739,6 +766,7 @@ function registerHandlers() {
   ipcMain.handle('kg:ask', (_e, { question, cwd } = {}) => ask(question, cwd));
   ipcMain.handle('kg:clear', (_e, arg = {}) => (arg.all ? clearAllGraphs() : clearGraph(arg.cwd)));
   ipcMain.handle('kg:set-extraction', (_e, arg = {}) => setExtractionEnabled(arg.enabled));
+  ipcMain.handle('kg:set-capture-mode', (_e, arg = {}) => setCaptureMode(arg.mode));
 }
 
 /** Watch the log; debounce-ingest new prompts. Cheap — only new bytes are read. */

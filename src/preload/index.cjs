@@ -330,6 +330,8 @@ contextBridge.exposeInMainWorld('api', {
     clear: (arg) => ipcRenderer.invoke('kg:clear', arg ?? {}),
     /** Toggle the recurring `claude -p` extraction on/off. */
     setExtraction: (enabled) => ipcRenderer.invoke('kg:set-extraction', { enabled }),
+    /** Set capture mode: 'llm' | 'lite' | 'off'. */
+    setCaptureMode: (mode) => ipcRenderer.invoke('kg:set-capture-mode', { mode }),
     onIngestProgress: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('kg:ingest-progress', listener);

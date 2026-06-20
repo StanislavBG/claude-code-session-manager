@@ -1131,8 +1131,10 @@ export interface SessionManagerAPI {
     ask: (question: string, cwd?: string) => Promise<{ ok: boolean; answer?: string; cited?: { ts: string; prompt: string }[]; error?: string }>;
     /** Purge graphs: one project (`{ cwd }`) or all (`{ all: true }`). */
     clear: (arg?: { cwd?: string; all?: boolean }) => Promise<{ ok: boolean; cleared?: string; removed?: number }>;
-    /** Toggle the recurring claude -p extraction on/off. */
+    /** Toggle the recurring claude -p extraction on/off (sets captureMode 'llm'/'off'). */
     setExtraction: (enabled: boolean) => Promise<{ ok: boolean; extractionEnabled: boolean }>;
+    /** Set capture mode: 'llm' = claude -p extraction; 'lite' = heuristic (free); 'off' = disabled. */
+    setCaptureMode: (mode: 'llm' | 'lite' | 'off') => Promise<{ ok: boolean; captureMode?: string; error?: string }>;
     onIngestProgress: (handler: (ev: KgIngestProgress) => void) => () => void;
   };
 }
@@ -1184,6 +1186,8 @@ export interface KgState {
     ingesting: boolean;
     logPath: string;
     extractionEnabled: boolean;
+    /** Active capture mode: 'llm' | 'lite' | 'off'. */
+    captureMode: 'llm' | 'lite' | 'off';
     /** Node cap from kg-config.json; 0 = disabled; default 300. */
     maxGraphNodes: number;
   };

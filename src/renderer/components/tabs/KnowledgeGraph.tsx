@@ -203,7 +203,19 @@ export function KnowledgeGraph() {
               ))}
             </select>
           )}
-          <span className="text-fg-faint">{state ? `${state.nodes.length} entities · ${state.edges.length} relations` : 'loading…'}</span>
+          <span className="text-fg-faint">
+            {state
+              ? (() => {
+                  const cap = state.status.maxGraphNodes
+                  const n = state.nodes.length
+                  const base = `${n} entities · ${state.edges.length} relations`
+                  if (!cap) return base
+                  return n >= cap
+                    ? `${base} · capped at ${cap}`
+                    : `${base} · ${n} / ${cap}`
+                })()
+              : 'loading…'}
+          </span>
           <div className="flex-1" />
           {status && status.pending > 0 && (
             <span className="text-amber-600 text-xs">{status.pending} new prompt{status.pending === 1 ? '' : 's'} to process</span>

@@ -1184,6 +1184,8 @@ export interface KgState {
     ingesting: boolean;
     logPath: string;
     extractionEnabled: boolean;
+    /** Node cap from kg-config.json; 0 = disabled; default 300. */
+    maxGraphNodes: number;
   };
 }
 export interface KgIngestProgress {

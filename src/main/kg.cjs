@@ -40,6 +40,7 @@ const os = require('node:os');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
 const { writeJson } = require('./config.cjs');
+const { pruneGraph } = require('./lib/kgPrune.cjs');
 
 const HOME = os.homedir();
 const KG_DIR = path.join(HOME, '.claude', 'knowledge-log');
@@ -49,19 +50,32 @@ const INGEST_STATE_PATH = path.join(KG_DIR, 'ingest-state.json');
 const PROMPT_INDEX_PATH = path.join(KG_DIR, 'prompt-index.json');
 const KG_CONFIG_PATH = path.join(KG_DIR, 'kg-config.json');
 
+const DEFAULT_MAX_GRAPH_NODES = 300;
+
+/** Read kg-config.json; returns defaults when file is absent or malformed. */
+function kgConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(KG_CONFIG_PATH, 'utf8'));
+    return {
+      extractionEnabled: c.extractionEnabled !== false,
+      // 0 = cap disabled; undefined/null → default
+      maxGraphNodes: typeof c.maxGraphNodes === 'number' ? c.maxGraphNodes : DEFAULT_MAX_GRAPH_NODES,
+    };
+  } catch {
+    return { extractionEnabled: true, maxGraphNodes: DEFAULT_MAX_GRAPH_NODES };
+  }
+}
+
 /** Extraction toggle — lets the user stop the recurring `claude -p` cost when
  *  they aren't using the graph. Default ON; env SM_KG_DISABLE=1 forces OFF. */
 function extractionEnabled() {
   if (process.env.SM_KG_DISABLE === '1') return false;
-  try {
-    return JSON.parse(fs.readFileSync(KG_CONFIG_PATH, 'utf8')).extractionEnabled !== false;
-  } catch {
-    return true; // no config yet → default on
-  }
+  return kgConfig().extractionEnabled;
 }
 
 async function setExtractionEnabled(enabled) {
-  await writeJson(KG_CONFIG_PATH, { extractionEnabled: !!enabled });
+  const current = kgConfig();
+  await writeJson(KG_CONFIG_PATH, { ...current, extractionEnabled: !!enabled });
   return { ok: true, extractionEnabled: !!enabled };
 }
 const BATCH = 20;                 // prompts per extraction call (also a per-project cap)
@@ -167,6 +181,15 @@ async function loadGraphFor(cwd) {
 }
 
 async function saveGraph(g) {
+  const { maxGraphNodes } = kgConfig();
+  if (maxGraphNodes && g.nodes.length > maxGraphNodes) {
+    const result = pruneGraph(g, maxGraphNodes, Date.now());
+    g.nodes = result.nodes;
+    g.edges = result.edges;
+    if (result.evicted > 0) {
+      logger.writeLine({ scope: 'kg', level: 'info', message: 'graph pruned', meta: { cwd: g.cwd, evicted: result.evicted, remaining: g.nodes.length, cap: maxGraphNodes } });
+    }
+  }
   await writeJson(graphPath(g.cwd), g);
 }
 
@@ -648,6 +671,7 @@ async function getState(cwd) {
   } else {
     totalPrompts = idx[enc]?.count ?? 0;
   }
+  const cfg = kgConfig();
   return {
     cwd: target,
     label: shortLabel(target),
@@ -660,7 +684,8 @@ async function getState(cwd) {
       lastIngest: g.updatedAt,
       ingesting,
       logPath: LOG_PATH,
-      extractionEnabled: extractionEnabled(),
+      extractionEnabled: cfg.extractionEnabled,
+      maxGraphNodes: cfg.maxGraphNodes,
     },
   };
 }

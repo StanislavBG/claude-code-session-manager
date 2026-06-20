@@ -326,6 +326,10 @@ contextBridge.exposeInMainWorld('api', {
     projects: () => ipcRenderer.invoke('kg:projects'),
     ingest: () => ipcRenderer.invoke('kg:ingest'),
     ask: (question, cwd) => ipcRenderer.invoke('kg:ask', { question, cwd }),
+    /** Purge graphs: one project (cwd) or all (`{ all: true }`). */
+    clear: (arg) => ipcRenderer.invoke('kg:clear', arg ?? {}),
+    /** Toggle the recurring `claude -p` extraction on/off. */
+    setExtraction: (enabled) => ipcRenderer.invoke('kg:set-extraction', { enabled }),
     onIngestProgress: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('kg:ingest-progress', listener);

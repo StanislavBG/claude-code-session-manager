@@ -1129,6 +1129,10 @@ export interface SessionManagerAPI {
     ingest: () => Promise<{ ok: boolean; added?: number; projects?: number; stopped?: boolean; error?: string; note?: string }>;
     /** Ask a question answered from ONE project's graph + prompts via claude -p. */
     ask: (question: string, cwd?: string) => Promise<{ ok: boolean; answer?: string; cited?: { ts: string; prompt: string }[]; error?: string }>;
+    /** Purge graphs: one project (`{ cwd }`) or all (`{ all: true }`). */
+    clear: (arg?: { cwd?: string; all?: boolean }) => Promise<{ ok: boolean; cleared?: string; removed?: number }>;
+    /** Toggle the recurring claude -p extraction on/off. */
+    setExtraction: (enabled: boolean) => Promise<{ ok: boolean; extractionEnabled: boolean }>;
     onIngestProgress: (handler: (ev: KgIngestProgress) => void) => () => void;
   };
 }
@@ -1179,6 +1183,7 @@ export interface KgState {
     lastIngest: string | null;
     ingesting: boolean;
     logPath: string;
+    extractionEnabled: boolean;
   };
 }
 export interface KgIngestProgress {

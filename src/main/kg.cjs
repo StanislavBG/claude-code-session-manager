@@ -47,6 +47,23 @@ const LOG_PATH = path.join(KG_DIR, 'prompts.jsonl');
 const GRAPHS_DIR = path.join(KG_DIR, 'graphs');
 const INGEST_STATE_PATH = path.join(KG_DIR, 'ingest-state.json');
 const PROMPT_INDEX_PATH = path.join(KG_DIR, 'prompt-index.json');
+const KG_CONFIG_PATH = path.join(KG_DIR, 'kg-config.json');
+
+/** Extraction toggle — lets the user stop the recurring `claude -p` cost when
+ *  they aren't using the graph. Default ON; env SM_KG_DISABLE=1 forces OFF. */
+function extractionEnabled() {
+  if (process.env.SM_KG_DISABLE === '1') return false;
+  try {
+    return JSON.parse(fs.readFileSync(KG_CONFIG_PATH, 'utf8')).extractionEnabled !== false;
+  } catch {
+    return true; // no config yet → default on
+  }
+}
+
+async function setExtractionEnabled(enabled) {
+  await writeJson(KG_CONFIG_PATH, { extractionEnabled: !!enabled });
+  return { ok: true, extractionEnabled: !!enabled };
+}
 const BATCH = 20;                 // prompts per extraction call (also a per-project cap)
 const KNOWN_VOCAB = 200;          // top node names pre-seeded for dedup-at-extraction
 const MAX_TAIL_BYTES = 8 * 1024 * 1024;   // bound bytes scanned per ingest run
@@ -151,6 +168,33 @@ async function loadGraphFor(cwd) {
 
 async function saveGraph(g) {
   await writeJson(graphPath(g.cwd), g);
+}
+
+/** Purge ONE project's graph. The global ingest cursor has already passed those
+ *  prompt lines, so this is a forget (no auto-rebuild) — exactly what a "this
+ *  graph is a useless hairball, reset it" button wants. */
+async function clearGraph(cwd) {
+  const target = cwd || await defaultCwd();
+  try { await fsp.unlink(graphPath(target)); } catch { /* already gone */ }
+  try {
+    const idx = await readPromptIndex();
+    if (idx) { delete idx[encodeCwd(target)]; await savePromptIndex(idx); }
+  } catch { /* index best-effort */ }
+  return { ok: true, cleared: shortLabel(target) };
+}
+
+/** Purge ALL project graphs. Leaves prompts.jsonl/cursor intact so future
+ *  prompts still build fresh graphs (unless extraction is disabled). */
+async function clearAllGraphs() {
+  let removed = 0;
+  try {
+    for (const f of fs.readdirSync(GRAPHS_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      try { fs.unlinkSync(path.join(GRAPHS_DIR, f)); removed++; } catch { /* skip */ }
+    }
+  } catch { /* no dir yet */ }
+  try { await savePromptIndex({}); } catch { /* */ }
+  return { ok: true, removed };
 }
 
 async function loadIngestState() {
@@ -376,6 +420,7 @@ function planUnits(tailText) {
  */
 async function ingest() {
   if (ingesting) return { ok: false, error: 'already running' };
+  if (!extractionEnabled()) return { ok: true, added: 0, note: 'extraction disabled' };
   ingesting = true;
   broadcast('kg:ingest-progress', { phase: 'start', ingesting: true });
   try {
@@ -615,6 +660,7 @@ async function getState(cwd) {
       lastIngest: g.updatedAt,
       ingesting,
       logPath: LOG_PATH,
+      extractionEnabled: extractionEnabled(),
     },
   };
 }
@@ -666,6 +712,8 @@ function registerHandlers() {
   ipcMain.handle('kg:projects', () => listProjects());
   ipcMain.handle('kg:ingest', () => ingest());
   ipcMain.handle('kg:ask', (_e, { question, cwd } = {}) => ask(question, cwd));
+  ipcMain.handle('kg:clear', (_e, arg = {}) => (arg.all ? clearAllGraphs() : clearGraph(arg.cwd)));
+  ipcMain.handle('kg:set-extraction', (_e, arg = {}) => setExtractionEnabled(arg.enabled));
 }
 
 /** Watch the log; debounce-ingest new prompts. Cheap — only new bytes are read. */

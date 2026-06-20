@@ -114,6 +114,21 @@ export function KnowledgeGraph() {
     reload(cwd); reloadProjects()
   }, [reload, reloadProjects, cwd])
 
+  const clearGraph = useCallback(async () => {
+    const label = state?.label ?? 'this project'
+    if (!window.confirm(`Clear the knowledge graph for "${label}"? This deletes its distilled entities & relations. Your prompts are kept; the graph stops being rebuilt for already-seen prompts.`)) return
+    const r = await window.api.kg.clear({ cwd: cwd ?? undefined })
+    if (r.ok) { toast.info(`Cleared graph for ${r.cleared ?? label}.`); reload(cwd); reloadProjects() }
+    else toast.error('Clear failed')
+  }, [cwd, state, reload, reloadProjects])
+
+  const toggleExtraction = useCallback(async () => {
+    const next = !(state?.status.extractionEnabled ?? true)
+    const r = await window.api.kg.setExtraction(next)
+    if (r.ok) { toast.info(next ? 'Extraction enabled.' : 'Extraction paused — no further claude -p cost.'); reload(cwd) }
+    else toast.error('Could not change extraction setting')
+  }, [state, cwd, reload])
+
   const askQuestion = useCallback(async () => {
     const q = question.trim()
     if (!q || asking) return
@@ -195,10 +210,27 @@ export function KnowledgeGraph() {
           )}
           {progress && <span className="text-fg-faint text-xs">{progress}</span>}
           <button
+            onClick={toggleExtraction}
+            className="text-fg-dim hover:text-fg text-xs border border-line rounded px-2 py-0.5"
+            title={state?.status.extractionEnabled === false
+              ? 'Extraction is paused — no claude -p cost. Click to resume.'
+              : 'Pause the recurring claude -p extraction (stops token cost when you are not using the graph).'}
+          >
+            {state?.status.extractionEnabled === false ? 'Extraction: off' : 'Extraction: on'}
+          </button>
+          <button
+            onClick={clearGraph}
+            disabled={ingesting || !state || state.nodes.length === 0}
+            className="text-fg-dim hover:text-red-500 text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
+            title="Purge this project's distilled graph (prompts are kept)"
+          >
+            Clear graph
+          </button>
+          <button
             onClick={runIngest}
-            disabled={ingesting}
+            disabled={ingesting || state?.status.extractionEnabled === false}
             className="text-fg-dim hover:text-fg text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
-            title="Distill new prompt-log lines into the graph"
+            title={state?.status.extractionEnabled === false ? 'Extraction is paused' : 'Distill new prompt-log lines into the graph'}
           >
             {ingesting ? 'Processing…' : 'Process now'}
           </button>

@@ -547,7 +547,7 @@ async function ingest() {
       const g = await graphFor(u.cwd);
       const byKey = new Map(g.nodes.map((n) => [n.key, n]));
       const byEdge = new Map(g.edges.map((e) => [`${e.src} ${e.relation} ${e.dst}`, e]));
-      const known = [...byKey.values()].sort((a, b) => b.count - a.count).slice(0, KNOWN_VOCAB).map((n) => ({ key: n.key, name: n.name }));
+      const known = [...byKey.values()].sort((a, b) => b.count - a.count).slice(0, KNOWN_VOCAB).map((n) => ({ key: n.key, name: n.name, type: n.type }));
 
       // Derive entities/relations: heuristic (lite) or LLM (llm).
       let parsed;

@@ -119,8 +119,8 @@ function validateWrite(realAbs) {
 }
 
 async function readJson(abs) {
-  abs = validatePath(expandHome(abs));
   try {
+    abs = validatePath(expandHome(abs));
     const raw = await fsp.readFile(abs, 'utf8');
     let data = null;
     let parseError = null;
@@ -140,8 +140,8 @@ async function readJson(abs) {
 }
 
 async function readText(abs) {
-  abs = validatePath(expandHome(abs));
   try {
+    abs = validatePath(expandHome(abs));
     const raw = await fsp.readFile(abs, 'utf8');
     const stat = await fsp.stat(abs);
     return { exists: true, text: raw, mtimeMs: stat.mtimeMs, error: null };
@@ -210,8 +210,8 @@ function writeJsonSync(abs, data) {
 }
 
 async function listDir(abs, { filesOnly = false, dirsOnly = false, includeHidden = false } = {}) {
-  abs = validatePath(expandHome(abs));
   try {
+    abs = validatePath(expandHome(abs));
     const entries = await fsp.readdir(abs, { withFileTypes: true });
     const results = [];
     for (const e of entries) {
@@ -245,8 +245,8 @@ async function listDir(abs, { filesOnly = false, dirsOnly = false, includeHidden
 }
 
 async function exists(abs) {
-  abs = validatePath(expandHome(abs));
   try {
+    abs = validatePath(expandHome(abs));
     await fsp.access(abs);
     return true;
   } catch {

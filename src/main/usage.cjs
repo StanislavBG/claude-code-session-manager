@@ -16,6 +16,7 @@
  *   }
  */
 
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
@@ -31,27 +32,73 @@ function envEnabled(v) {
 }
 
 /**
+ * Reads enterprise-auth signals from Claude Code's own settings files — the
+ * `env` block and `apiKeyHelper`. This is where corporate gateways are usually
+ * configured (a managed/enterprise policy or the user's settings.json), NOT as
+ * exported shell vars. It matters most on macOS, where a GUI-launched app does
+ * not inherit the shell's environment, so `process.env` looks like a clean
+ * consumer install even when `claude` itself is talking to a gateway.
+ *
+ * Precedence mirrors Claude Code: managed (enterprise) settings, then user
+ * settings, then user-local settings. Missing/unreadable/invalid files are
+ * skipped. Returns `{ env, apiKeyHelper }`.
+ */
+function readClaudeSettingsAuth() {
+  const merged = {};
+  let apiKeyHelper = false;
+  const managed = process.platform === 'darwin'
+    ? '/Library/Application Support/ClaudeCode/managed-settings.json'
+    : '/etc/claude-code/managed-settings.json';
+  const files = [
+    managed,
+    path.join(os.homedir(), '.claude', 'settings.json'),
+    path.join(os.homedir(), '.claude', 'settings.local.json'),
+  ];
+  for (const f of files) {
+    try {
+      const data = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (data && typeof data.env === 'object' && data.env) Object.assign(merged, data.env);
+      if (data && data.apiKeyHelper) apiKeyHelper = true;
+    } catch { /* missing / unreadable / invalid JSON → skip */ }
+  }
+  return { env: merged, apiKeyHelper };
+}
+
+/**
  * Is the consumer 5-hour usage meter (/api/oauth/usage) even applicable here?
  *
  * That endpoint only exists for OAuth/subscription auth against
  * api.anthropic.com. Enterprise auth modes have no such meter, so polling it
- * just 404s/times-out — and the scheduler must NOT gate on (or pause for) it.
- * Detected modes: Amazon Bedrock, Google Vertex, raw API-key, a custom auth
- * token, or a non-Anthropic base URL (corporate gateway/proxy).
+ * just 404s/times-out (or 401s with no credentials file) — and the scheduler
+ * must NOT gate on (or pause for) it. Detected modes: Amazon Bedrock, Google
+ * Vertex, raw API-key, a custom auth token, a non-Anthropic base URL (corporate
+ * gateway/proxy), or an `apiKeyHelper` script.
+ *
+ * Signals are read from BOTH process.env and Claude Code's settings files, so a
+ * gateway configured purely in settings.json (the common enterprise case) is
+ * detected even when the GUI process inherited a clean environment.
  *
  * Returns false → caller should treat usage as unavailable-by-design and fire
  * work on its own (pending + memory) instead of waiting on a meter.
  */
-function usageMeterApplicable(env = process.env) {
-  if (envEnabled(env.CLAUDE_CODE_USE_BEDROCK)) return false;
-  if (envEnabled(env.CLAUDE_CODE_USE_VERTEX)) return false;
-  if (env.ANTHROPIC_API_KEY) return false;
-  if (env.ANTHROPIC_AUTH_TOKEN) return false;
-  if (env.ANTHROPIC_BASE_URL) {
+function usageMeterApplicable(env = process.env, settings = readClaudeSettingsAuth()) {
+  // Manual escape hatch: if detection misses an unusual gateway setup, the user
+  // can force "no consumer meter" so the scheduler stops pausing on 'auth'.
+  if (envEnabled(env.SM_NO_USAGE_METER)) return false;
+  // An apiKeyHelper means `claude` mints its own key → non-OAuth, no meter.
+  if (settings && settings.apiKeyHelper) return false;
+  // Effective env: settings.json provides values the GUI process didn't
+  // inherit; a real process.env var wins when both define the same key.
+  const eff = { ...(settings && settings.env), ...env };
+  if (envEnabled(eff.CLAUDE_CODE_USE_BEDROCK)) return false;
+  if (envEnabled(eff.CLAUDE_CODE_USE_VERTEX)) return false;
+  if (eff.ANTHROPIC_API_KEY) return false;
+  if (eff.ANTHROPIC_AUTH_TOKEN) return false;
+  if (eff.ANTHROPIC_BASE_URL) {
     // Parse the host rather than substring-match, so a deceptive gateway like
     // https://anthropic.com.attacker.example is correctly treated as enterprise.
     let host;
-    try { host = new URL(env.ANTHROPIC_BASE_URL).hostname.toLowerCase(); }
+    try { host = new URL(eff.ANTHROPIC_BASE_URL).hostname.toLowerCase(); }
     catch { return false; } // unparseable custom URL → treat as a gateway
     if (host !== 'anthropic.com' && !host.endsWith('.anthropic.com')) return false;
   }
@@ -197,4 +244,4 @@ function registerBillingHandlers() {
   });
 }
 
-module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse, usageMeterApplicable };
+module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse, usageMeterApplicable, readClaudeSettingsAuth };

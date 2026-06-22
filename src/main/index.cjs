@@ -390,6 +390,16 @@ ipcMain.handle('app:cwd', () => process.cwd());
 // The renderer reads this once on mount.
 ipcMain.handle('app:is-e2e', () => process.env.SM_E2E === '1');
 
+// Simple mode: `npx claude-code-session-manager --simple` boots straight into a
+// single full-window terminal running `claude --dangerously-skip-permissions`
+// in the directory the command was run from — no nav, tabs, or config surface.
+// The flag arrives via bin/cli.cjs, which forwards process.argv to Electron.
+// cwd is the launch dir (cli.cjs inherits the user's shell cwd).
+ipcMain.handle('app:launch-mode', () => ({
+  simple: process.argv.includes('--simple'),
+  cwd: process.cwd(),
+}));
+
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
 
 // Boot diagnostics — renderer polls these to surface toasts when `claude` isn't

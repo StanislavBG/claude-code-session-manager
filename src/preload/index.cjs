@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('api', {
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
     // F7: lets the renderer suppress the wizard auto-trigger under SM_E2E=1.
     isE2E: () => ipcRenderer.invoke('app:is-e2e'),
+    // `--simple` CLI flag → { simple, cwd }. Renderer reads once on mount to
+    // boot a stripped single-terminal layout in the launch directory.
+    launchMode: () => ipcRenderer.invoke('app:launch-mode'),
     // Boot diagnostics (v0.10.1) — renderer polls at mount to surface
     // missing-claude-bin / home-symlink-mismatch as toasts.
     claudeBinStatus: () => ipcRenderer.invoke('app:claude-bin-status'),

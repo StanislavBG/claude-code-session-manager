@@ -8,6 +8,7 @@ import { type SearchMode } from './components/modals/SearchModal'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
+import { SimpleShell } from './components/SimpleShell'
 import { Toast } from './components/ui/Toast'
 import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
 import { OrchestratorStatusPanel } from './components/layout/OrchestratorStatusPanel'
@@ -77,6 +78,8 @@ export function App() {
   // applied (the LeftNav-footer toggle that used to call it was dropped).
   useDensity()
   const [activeNav, setActiveNav] = useState<NavKey>('overview')
+  // `--simple` launch flag: null until resolved, then true → SimpleShell.
+  const [simpleMode, setSimpleMode] = useState<boolean | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [searchMode, setSearchMode] = useState<SearchMode>('files')
   const [broadcastOpen, setBroadcastOpen] = useState(false)
@@ -219,42 +222,63 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    // First, hydrate persisted tabs from disk. If any tabs come back, their
-    // startupCommand is `claude --resume <id>` so the transcript + plan
-    // history is reattached automatically. If nothing was persisted, fall
-    // through to the fresh auto-spawn path.
-    hydrateSessions().then(() => {
-      if (useSessions.getState().tabs.length > 0) return
-      const preset = DEFAULT_PRESETS[0]
-      resolvePresetCwd(preset)
-        .then((cwd) => {
-          if (!cwd || useSessions.getState().tabs.length > 0) return
-          const id = crypto.randomUUID()
-          const startupCommand = renderCommand(preset, { sessionId: id, cwd })
-          useSessions.setState((s) => ({
-            tabs: [
-              ...s.tabs,
-              {
-                id,
-                claudeSessionId: id,
-                label: cwd.split('/').filter(Boolean).pop() || cwd,
-                cwd,
-                pid: null,
-                status: 'spawning' as const,
-                exitCode: null,
-                startupCommand,
-                presetId: preset.id,
-                generation: 0,
-              },
-            ],
-            activeTabId: id,
-          }))
+    const preset = DEFAULT_PRESETS[0] // sm-dangerous: claude --dangerously-skip-permissions
+    const spawnTabInCwd = (cwd: string) => {
+      if (!cwd || useSessions.getState().tabs.length > 0) return
+      const id = crypto.randomUUID()
+      const startupCommand = renderCommand(preset, { sessionId: id, cwd })
+      useSessions.setState((s) => ({
+        tabs: [
+          ...s.tabs,
+          {
+            id,
+            claudeSessionId: id,
+            label: cwd.split('/').filter(Boolean).pop() || cwd,
+            cwd,
+            pid: null,
+            status: 'spawning' as const,
+            exitCode: null,
+            startupCommand,
+            presetId: preset.id,
+            generation: 0,
+          },
+        ],
+        activeTabId: id,
+      }))
+    }
+
+    // `--simple`: boot one fresh skip-perms session in the launch dir, skip
+    // hydration (no restored multi-tabs in the chrome-free shell).
+    window.api.app
+      .launchMode()
+      .then(({ simple, cwd }) => {
+        if (simple) {
+          setSimpleMode(true)
+          spawnTabInCwd(cwd)
+          return
+        }
+        setSimpleMode(false)
+        // Normal boot: hydrate persisted tabs (startupCommand becomes
+        // `claude --resume <id>` so transcript + plan history reattach). If
+        // nothing was persisted, fall through to the fresh auto-spawn path.
+        hydrateSessions().then(() => {
+          if (useSessions.getState().tabs.length > 0) return
+          resolvePresetCwd(preset)
+            .then((cwd) => spawnTabInCwd(cwd || ''))
+            .catch((e) => {
+              console.warn('[App] failed to create initial tab:', e)
+              toast.error('Failed to create initial tab. Is the claude CLI on PATH?')
+            })
         })
-        .catch((e) => {
-          console.warn('[App] failed to create initial tab:', e)
-          toast.error('Failed to create initial tab. Is the claude CLI on PATH?')
+      })
+      .catch(() => {
+        // launchMode IPC failed — degrade to normal boot.
+        setSimpleMode(false)
+        hydrateSessions().then(() => {
+          if (useSessions.getState().tabs.length > 0) return
+          resolvePresetCwd(preset).then((cwd) => spawnTabInCwd(cwd || '')).catch(() => {})
         })
-    })
+      })
 
     // Menu → New Session (Ctrl+N): pick a directory and open claude there.
     const offNewSession = window.api.app.onNewSession(() => {
@@ -567,6 +591,10 @@ export function App() {
     })()
     return () => { cancelled = true }
   }, [])
+
+  // Simple mode: chrome-free single terminal. Early-return is after all hooks
+  // above (React rules), so background services still init the same way.
+  if (simpleMode === true) return <SimpleShell />
 
   return (
     <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>

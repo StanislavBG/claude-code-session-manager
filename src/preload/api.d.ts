@@ -857,6 +857,8 @@ export interface SessionManagerAPI {
     testFireHook: (args: TestFireHookArgs) => Promise<TestFireHookResult>;
     /** F7 — true under SM_E2E=1; renderer uses this to suppress wizard auto-trigger. */
     isE2E: () => Promise<boolean>;
+    /** `--simple` CLI flag → stripped single-terminal layout in `cwd`. */
+    launchMode: () => Promise<{ simple: boolean; cwd: string }>;
     /** Boot diagnostic — resolved claude binary path + whether it was found
      *  on disk (false means spawn will rely on PATH and may ENOENT). */
     claudeBinStatus: () => Promise<{ resolved: string; foundOnDisk: boolean }>;

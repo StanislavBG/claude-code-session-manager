@@ -82,7 +82,9 @@ Before writing a new PRD for `~/.claude/session-manager/scheduled-plans/prds/`, 
 
 ## Distribution
 
-Published as `claude-code-session-manager` on npm. Run via `npx claude-code-session-manager@latest`. `bin/cli.cjs` spawns the bundled Electron binary. `postinstall` runs `electron-rebuild` to recompile `node-pty` for the user's Electron ABI. Linux + darwin only.
+Published as `claude-code-session-manager` on npm. Run via `npx claude-code-session-manager@latest`. `bin/cli.cjs` spawns the bundled Electron binary (forwarding `process.argv` so app flags reach the main process). `postinstall` runs `electron-rebuild` to recompile `node-pty` for the user's Electron ABI. Linux + darwin only.
+
+**Simple mode**: `npx claude-code-session-manager@latest --simple` boots a chrome-free single-terminal cockpit — no nav/tabs/config surface, just one `claude --dangerously-skip-permissions` session in the launch directory. Wired via `app:launch-mode` IPC (`process.argv.includes('--simple')` + `process.cwd()`) → `SimpleShell.tsx` (App.tsx early-returns when `simpleMode === true`). The session reuses `DEFAULT_PRESETS[0]` (sm-dangerous); hydration of persisted tabs is skipped.
 
 ## Web-remote v2 mobile cockpit
 

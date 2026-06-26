@@ -320,6 +320,37 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('webRemote:revoked-all', listener);
     },
   },
+  chat: {
+    /** Spawn a headless claude -p job. Results arrive via the on* listeners. */
+    run: (payload) => ipcRenderer.invoke('chat:run', payload),
+    /** Cancel an in-flight run for the given tabId. No-op if none running. */
+    cancel: (tabId) => ipcRenderer.send('chat:cancel', { tabId }),
+    onRunStarted: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:started', listener);
+      return () => ipcRenderer.removeListener('chat:run:started', listener);
+    },
+    onOutput: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:output', listener);
+      return () => ipcRenderer.removeListener('chat:run:output', listener);
+    },
+    onNeedsInput: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:needs-input', listener);
+      return () => ipcRenderer.removeListener('chat:run:needs-input', listener);
+    },
+    onComplete: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:complete', listener);
+      return () => ipcRenderer.removeListener('chat:run:complete', listener);
+    },
+    onError: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:error', listener);
+      return () => ipcRenderer.removeListener('chat:run:error', listener);
+    },
+  },
   kg: {
     /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log),
      *  segregated per project. `cwd` selects which project's graph; omit for the

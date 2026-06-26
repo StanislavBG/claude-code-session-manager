@@ -253,6 +253,27 @@ const agentMemoryDelete = z.object({
   entryId: z.string().regex(AGENT_MEMORY_ID_RE),
 }).strict();
 
+// ──────────────────────────────────────────── Chat runner (PRD 319)
+// Prompt cap: 100 KiB. Matches a generous interactive message budget while
+// preventing accidental megabyte pastes from reaching claude -p.
+const CHAT_PROMPT_MAX_BYTES = 100 * 1024;
+
+const chatRun = z.object({
+  tabId: z.string().min(1).max(128),
+  sessionId: z.string().min(1).max(128),
+  // Non-empty; capped so a malformed renderer can't spawn a 100 MB child argv.
+  prompt: z.string().min(1).refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
+    `prompt must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
+  ),
+  cwd: z.string().min(1).max(4096),
+  resume: z.boolean().optional().default(false),
+});
+
+const chatCancel = z.object({
+  tabId: z.string().min(1).max(128),
+});
+
 // ──────────────────────────────────────────── Web Remote
 // OTP is 8 uppercase alphanumeric chars (case-insensitive entry, normalised to upper in handler).
 const WEB_REMOTE_OTP_RE = /^[A-Z0-9]{8}$/i;
@@ -520,6 +541,8 @@ module.exports = {
     watchersList,
     watchersRemove,
     watchersKillTab,
+    chatRun,
+    chatCancel,
   },
   validated,
 };

@@ -41,6 +41,7 @@ const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
 const webRemote = require('./webRemote.cjs');
+const chatRunner = require('./chatRunner.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
@@ -270,6 +271,7 @@ async function rebootApp() {
     watchers.attachWindow(mainWindow);
     pluginInstall.attachWindow(mainWindow);
     superagent.attachWindow(mainWindow);
+    chatRunner.attachWindow(mainWindow);
     rebooting = false;
     return;
   }
@@ -668,6 +670,7 @@ searchIpc.registerSearchHandlers();
 repoAnalyzer.register(ipcMain);
 hivesIpc.registerHiveHandlers();
 webRemote.registerRemoteHandlers();
+chatRunner.registerChatHandlers();
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());
@@ -956,6 +959,7 @@ app.whenReady().then(async () => {
   superagent.attachWindow(mainWindow);
   kg.attachWindow(mainWindow);
   webRemote.attachWindow(mainWindow);
+  chatRunner.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });

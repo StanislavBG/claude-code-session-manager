@@ -845,6 +845,52 @@ export interface WebRemoteAuditTailResult {
   error?: string;
 }
 
+// ────────────────────────────────────────────── Chat runner (PRD 319)
+
+export interface ChatRunPayload {
+  tabId: string;
+  /** UUID for the claude session — created by the caller; stays the same across
+   *  resumes so transcript context carries forward. */
+  sessionId: string;
+  prompt: string;
+  cwd: string;
+  /** When true, use --resume <sessionId> instead of --session-id. */
+  resume?: boolean;
+}
+
+export interface ChatRunStartedEvent {
+  tabId: string;
+  sessionId: string;
+}
+
+export interface ChatRunOutputEvent {
+  tabId: string;
+  /** Incremental text delta from one assistant content block. */
+  delta: string;
+}
+
+export interface ChatRunNeedsInputEvent {
+  tabId: string;
+  sessionId: string;
+  /** Questions the agent is blocked on. */
+  questions: string[];
+  /** Full raw assistant text including the stop-signal sentinel. */
+  raw: string;
+}
+
+export interface ChatRunCompleteEvent {
+  tabId: string;
+  sessionId: string;
+  /** The run's own final assistant message verbatim. */
+  finalMessage: string;
+}
+
+export interface ChatRunErrorEvent {
+  tabId: string;
+  sessionId: string;
+  message: string;
+}
+
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
@@ -1120,6 +1166,17 @@ export interface SessionManagerAPI {
     /** Confirm that the SAS shown on the desktop matches the browser — marks the
      *  E2E session as authenticated and unblocks MUTATE-tier commands. */
     confirmSas: () => Promise<WebRemoteMutationResult>;
+  };
+  chat: {
+    /** Spawn a headless `claude -p` run for a tab. Results arrive via the on* listeners. */
+    run: (payload: ChatRunPayload) => Promise<{ ok: boolean }>;
+    /** Cancel the in-flight run for a tab (SIGTERM→SIGKILL). No-op when idle. */
+    cancel: (tabId: string) => void;
+    onRunStarted: (handler: (e: ChatRunStartedEvent) => void) => () => void;
+    onOutput: (handler: (e: ChatRunOutputEvent) => void) => () => void;
+    onNeedsInput: (handler: (e: ChatRunNeedsInputEvent) => void) => () => void;
+    onComplete: (handler: (e: ChatRunCompleteEvent) => void) => () => void;
+    onError: (handler: (e: ChatRunErrorEvent) => void) => () => void;
   };
   kg: {
     /** Distilled knowledge graph + ingest status for ONE project (`cwd`).

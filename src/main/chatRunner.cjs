@@ -31,6 +31,7 @@ const { spawn } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
+const { recordExchange } = require('./exchanges.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -283,6 +284,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
             });
           } else {
             broadcast('chat:run:complete', { tabId, sessionId, finalMessage: text });
+            // Record durable exchange off the hot path — UI must not wait on Haiku
+            recordExchange({ sessionId, cwd, prompt, result: text }).catch((err) => {
+              console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
+            });
           }
         } else {
           broadcast('chat:run:error', {

@@ -28,6 +28,7 @@ const { writeTextAtomic, validatePath } = require('./config.cjs');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
+const { summarize: _sharedSummarize } = require('./lib/summarize.cjs');
 const { makeState, confirmSas: confirmSasLogic } = require('./lib/e2eStateMachine.cjs');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -740,70 +741,9 @@ function startSessionListPush() {
 }
 
 // ─── SM-V2-03: mobile summary via Claude Haiku 4.5 ───────────────────────────
+// Summarization logic lives in lib/summarize.cjs (shared with exchanges.cjs).
 
-const SUMMARY_MIN_CHARS = 280;       // below this, push raw — not worth an API call
-const SUMMARY_MODEL = 'claude-haiku-4-5';
-const SUMMARY_MAX_INPUT_CHARS = 24_000; // cap the turn text sent to Haiku (~6k tokens)
-const SUMMARY_SYSTEM =
-  'Summarize this Claude Code assistant turn for a phone screen in 2 sentences max, ' +
-  'followed by an optional list of up to 3 short action items. Plain text only — no ' +
-  'markdown headers, no code blocks. Lead with what was done or decided.';
-
-let _anthropicKeyCache = null; // memoized found key only (string); null = re-resolve
-
-/** Resolve the Anthropic API key: env → web-remote.json → null (degrade to raw).
- *  Only a FOUND key is cached — if absent we re-resolve each call (cheap, loadConfig
- *  is TTL-cached) so adding the key to web-remote.json later takes effect without a restart. */
-async function resolveAnthropicKey() {
-  if (_anthropicKeyCache) return _anthropicKeyCache;
-  const fromEnv = process.env.ANTHROPIC_API_KEY;
-  if (fromEnv && fromEnv.trim()) { _anthropicKeyCache = fromEnv.trim(); return _anthropicKeyCache; }
-  try {
-    const cfg = await loadConfig();
-    const k = cfg.anthropicApiKey;
-    if (typeof k === 'string' && k.trim()) { _anthropicKeyCache = k.trim(); return _anthropicKeyCache; }
-  } catch { /* fall through to null → re-resolve next time */ }
-  return null;
-}
-
-/** POST to the Anthropic Messages API. Returns the first text block, or throws. */
-function anthropicSummarize(apiKey, text) {
-  const body = JSON.stringify({
-    model: SUMMARY_MODEL,
-    max_tokens: 320,
-    system: SUMMARY_SYSTEM,
-    messages: [{ role: 'user', content: text.slice(0, SUMMARY_MAX_INPUT_CHARS) }],
-  });
-  return new Promise((resolve, reject) => {
-    const req = https.request('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-length': Buffer.byteLength(body),
-      },
-      timeout: 20_000,
-    }, (res) => {
-      let data = '';
-      res.on('data', (c) => { data += c; });
-      res.on('end', () => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          return reject(new Error(`anthropic HTTP ${res.statusCode}`));
-        }
-        try {
-          const json = JSON.parse(data);
-          const block = Array.isArray(json.content) ? json.content.find((b) => b.type === 'text') : null;
-          if (!block?.text) return reject(new Error('no text in response'));
-          resolve(block.text.trim());
-        } catch (e) { reject(e); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => req.destroy(new Error('anthropic request timed out')));
-    req.end(body);
-  });
-}
+const SUMMARY_MIN_CHARS = 280; // below this, push raw — not worth an API call
 
 /**
  * Produce a mobile summary of the watcher's last completed assistant turn and push it.
@@ -823,22 +763,15 @@ async function maybeSummarize(w) {
     return;
   }
 
-  const apiKey = await resolveAnthropicKey();
-  if (!apiKey) {
-    // Degrade gracefully: push a trimmed raw message + a hint flag the app can surface.
-    pushEvent('event:session:summary', {
-      tabId: w.tabId, summary: text.slice(0, 600), ofMessageId, model: 'raw', degraded: 'no_api_key', ts: Date.now(),
-    });
-    return;
+  const { summary, model, degraded } = await _sharedSummarize(text);
+  if (degraded) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: `summary degraded: ${degraded}`, meta: {} });
   }
-
-  try {
-    const summary = await anthropicSummarize(apiKey, text);
-    pushEvent('event:session:summary', { tabId: w.tabId, summary, ofMessageId, model: SUMMARY_MODEL, ts: Date.now() });
-  } catch (e) {
-    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'summary failed; pushing raw', meta: { error: e?.message } });
-    pushEvent('event:session:summary', { tabId: w.tabId, summary: text.slice(0, 600), ofMessageId, model: 'raw', degraded: 'api_error', ts: Date.now() });
-  }
+  pushEvent('event:session:summary', {
+    tabId: w.tabId, summary, ofMessageId, model,
+    ...(degraded ? { degraded } : {}),
+    ts: Date.now(),
+  });
 }
 
 // ─── Message handling & command dispatch ─────────────────────────────────────

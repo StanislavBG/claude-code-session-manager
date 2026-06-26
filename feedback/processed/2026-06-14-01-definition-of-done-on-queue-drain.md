@@ -91,22 +91,25 @@ trigger**; a batch containing a risky/money-path change is flagged for review
 rather than silently marked done. Reference incident: this session's 81–85 drain
 on social-signals-trader, where that gate ran only because the user asked.
 
-## RESOLUTION (in progress)
+## RESOLUTION
 
-**Accepted — "Ours, do it."** Anchors verified against current code
-(`scheduler.cjs:1471-1472` drain branch; `runVerify.cjs`; `reverifyNeedsReview`
-at `scheduler.cjs:1731`). Dispatched via `/develop` as 4 sequential PRDs:
+**Shipped.** All 4 PRDs completed `exitCode=0` (verified 2026-06-25):
 
-- `108-dod-batchkey-idempotency` — stable `batchKey` (excludes meta/dod slugs → loop-safe) + report-exists idempotency.
-- `109-dod-ac-reverify-runner` — re-run each completed PRD's acceptance command live (bounded, in-process).
-- `110-dod-riskflag-report` — flag money/auth/migration/schema surfaces + write the consolidated report.
-- `111-dod-wire-drain-branch` — fire at the empty-batch branch, guarded (not paused/rate-limited/cancelled) + idempotent + `SM_DOD_DISABLE` kill-switch + CLAUDE.md docs.
+| PRD | Status |
+|---|---|
+| `108-dod-batchkey-idempotency` | ✅ completed |
+| `109-dod-ac-reverify-runner` | ✅ completed |
+| `110-dod-riskflag-report` | ✅ completed |
+| `111-dod-wire-drain-branch` | ✅ completed |
 
-**Design decision (interpreting the "mechanism options"):** the gate runs
-**in-process at the drain point — no spawned `claude -p` meta-job** — which
-eliminates the self-retrigger loop the feedback flagged, and stays bounded +
-within the max-3-concurrent rule. Deep LLM `/code-review` is **recommended in the
-report** for flagged surfaces, not auto-run.
+**Verified live:** `src/main/lib/dodDrainHook.cjs` exists and is wired at the
+`batch.length === 0` branch in `scheduler.cjs:1553`. Definition-of-done reports
+are generating on disk (`runs/<ts>/definition-of-done-<key>.md` confirmed across
+5+ drain events). CLAUDE.md documents the feature (dodDrainHook, batchKey,
+SM_DOD_DISABLE kill-switch). The AC is fully met: queue drain now produces an
+audit (per-PRD AC re-verify + risk-surface flags) without any human trigger.
 
-Status: **🛠 queued** — execution + verification pending the scheduler
-(`/develop` Phase 2). Not closed until the PRDs land and verify against this AC.
+**Design as shipped:** in-process gate — no spawned `claude -p` meta-job — eliminates
+the self-retrigger loop the feedback flagged. `SM_DOD_DISABLE=1` kill-switch
+available if the gate needs to be bypassed. Deep LLM code-review recommended in
+the report for flagged surfaces, not auto-run.

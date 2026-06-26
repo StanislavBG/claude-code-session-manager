@@ -73,3 +73,28 @@ just dies with a `kill` in an error string.
 A scheduler that develops itself must treat "the app restarted" as an environmental event, never as a failure
 of the work it was running. Orphan ≠ defect: penalizing the victim of a restart is how a self-improvement loop
 silently eats unrelated work.
+
+## RESOLUTION (in progress)
+
+**Accepted — "Ours, do it."** Verified against current code (2026-06-25):
+
+**Partially addressed** by commit `4c5013c` (`fix(scheduler): re-queue external/transient signal-kills below
+the idle threshold, not just <45s`, 2026-06-14): widens the transient-kill window for live SIGTERM/SIGKILL
+(exit 143/137) from 45 s to 20 min (`IDLE_OUTPUT_KILL_MS`). This addresses the *live-kill path* — when the
+scheduler's own process is running and the signal arrives live. These use the `transientRetries` counter
+(separate, also capped at 2).
+
+**Residual gap** — the *boot-reconciliation path* (`scheduler.cjs:2249`) is unchanged:
+`ORPHAN_REQUEUE_CAP = 2`. When the Electron app fully restarts and finds a "running" job on boot, it
+re-queues it via `orphanRetries`. After 2 requeues (3rd restart), the job permanently fails. This is the
+exact path the incident's `105-sb-resilience-held-cursor-generalize` hit (`orphanRetries=2, attempt 2/2`).
+
+The immediate victim (`105-...-held-cursor`) has since completed (`status=completed, orphanRetries=0` — reset
+by manual intervention or later run). The structural gap remains for future self-development cycles.
+
+**Fix queued:** PRD `320-raise-boot-orphan-requeue-cap` queued (2026-06-25) — raises `ORPHAN_REQUEUE_CAP`
+from 2 to 5 in `scheduler.cjs:100`. Covers a 6-restart storm (1 original + 5 requeues). This closes the
+boot-reconciliation side of the feedback's AC: "never lands in permanent `failed` purely because the app
+bounced N times."
+
+Status: **🛠 queued** — not closed until PRD 320 lands and verifies.

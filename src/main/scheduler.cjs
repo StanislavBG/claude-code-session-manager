@@ -97,7 +97,11 @@ const IDLE_CHECK_INTERVAL_MS = 60_000;
 // host died, the PRD didn't. Re-queue it up to this many times before giving up
 // and marking it failed, so a restart self-recovers instead of needing a manual
 // flip + a wasted fix-plan investigation.
-const ORPHAN_REQUEUE_CAP = 2;
+// Cap = 5: covers a self-development cycle that restarts the app up to 6 times
+// total (1 original run + 5 requeues). Mirrors the spirit of the transient-retry
+// path (live-kill, addressed in 4c5013c) but for boot reconciliation orphans.
+// Raised from 2 → 5 to survive burst restart storms (feedback 2026-06-15-01).
+const ORPHAN_REQUEUE_CAP = 5;
 
 // Appended to every scheduled job prompt so the queue can be RELIED ON to finish
 // work to a consistent bar: review → security-review → verify → commit. Enforced

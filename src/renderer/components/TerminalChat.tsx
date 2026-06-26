@@ -71,6 +71,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const sessionId = useSessions((s) => s.tabs.find((t) => t.id === tabId)?.claudeSessionId ?? tabId)
   const chat = useChat((s) => s.chats[tabId])
   const send = useChat((s) => s.send)
+  const hydrate = useChat((s) => s.hydrate)
   const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -78,6 +79,12 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const running = chat?.running ?? false
   const stream = chat?.stream ?? ''
   const queuedPosition = chat?.queuedPosition ?? 0
+
+  // One-shot history rehydration from the durable exchanges store.
+  useEffect(() => {
+    void hydrate({ tabId, cwd, sessionId })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId])
 
   // Auto-scroll to the newest turn / streamed output.
   useEffect(() => {

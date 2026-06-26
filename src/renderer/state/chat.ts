@@ -43,10 +43,18 @@ interface TabChat {
 
 interface ChatState {
   chats: Record<string, TabChat>
+  /** Tabs for which history hydration has been attempted (exactly once per tab). */
+  hydratedTabs: Record<string, true>
   /** Read (or lazily create) the chat slice for a tab. */
   get: (tabId: string) => TabChat
   /** Submit a user command for a tab. sessionId is the tab's claudeSessionId. */
   send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string }) => void
+  /**
+   * One-shot: load prior exchanges from the durable store and prepend them as
+   * history turns. No-ops if already called for this tabId, if there are no
+   * prior exchanges, or if the exchanges API is unavailable.
+   */
+  hydrate: (args: { tabId: string; cwd: string; sessionId: string }) => Promise<void>
 }
 
 const EMPTY: TabChat = { turns: [], running: false, queuedPosition: 0, started: false, stream: '' }
@@ -59,7 +67,44 @@ function turnId(): string {
 
 export const useChat = create<ChatState>((set, get) => ({
   chats: {},
+  hydratedTabs: {},
   get: (tabId) => get().chats[tabId] ?? EMPTY,
+  hydrate: async ({ tabId, cwd, sessionId }) => {
+    // Idempotent: one-shot per tab regardless of outcome.
+    if (get().hydratedTabs[tabId]) return
+    set({ hydratedTabs: { ...get().hydratedTabs, [tabId]: true } })
+
+    if (typeof window === 'undefined' || !window.api?.exchanges) return
+
+    try {
+      const exchanges = await window.api.exchanges.list({ cwd, sessionId })
+      if (!exchanges.length) return
+
+      // API returns newest-first; reverse to chronological for display.
+      const historyTurns: ChatTurn[] = []
+      for (const ex of [...exchanges].reverse()) {
+        const at = new Date(ex.ts).getTime()
+        historyTurns.push({ id: turnId(), role: 'user', text: ex.prompt, at })
+        historyTurns.push({ id: turnId(), role: 'assistant', text: ex.result, at })
+      }
+
+      const cur = get().chats[tabId] ?? EMPTY
+      set({
+        chats: {
+          ...get().chats,
+          [tabId]: {
+            ...cur,
+            // Prepend history before any live turns already in the store.
+            turns: [...historyTurns, ...cur.turns],
+            started: true,
+          },
+        },
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('chat', 'warn', `exchange hydration failed for tab ${tabId}: ${msg}`)
+    }
+  },
   send: ({ tabId, sessionId, cwd, prompt }) => {
     const trimmed = prompt.trim()
     if (!trimmed) return

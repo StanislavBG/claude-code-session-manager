@@ -31,6 +31,7 @@ function writeInChunks(tabId: string, data: string) {
 }
 
 export function Terminal({ tabId, cwd }: Props) {
+  const isDormant = useSessions((s) => s.tabs.find((t) => t.id === tabId)?.status === 'dormant')
   const hostRef = useRef<HTMLDivElement | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -217,6 +218,14 @@ export function Terminal({ tabId, cwd }: Props) {
       term.dispose()
     }
   }, [tabId, cwd])
+
+  if (isDormant) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-bg text-fg-muted text-sm select-none">
+        Session idle — type a command or open a raw session
+      </div>
+    )
+  }
 
   return (
     <div

@@ -223,7 +223,9 @@ export function App() {
 
   useEffect(() => {
     const preset = DEFAULT_PRESETS[0] // sm-dangerous: claude --dangerously-skip-permissions
-    const spawnTabInCwd = (cwd: string) => {
+
+    // Spawn a live (non-dormant) tab — used only by simple mode.
+    const spawnLiveTabInCwd = (cwd: string) => {
       if (!cwd || useSessions.getState().tabs.length > 0) return
       const id = crypto.randomUUID()
       const startupCommand = renderCommand(preset, { sessionId: id, cwd })
@@ -247,6 +249,31 @@ export function App() {
       }))
     }
 
+    // Spawn a dormant tab for the empty-cockpit fallback in normal mode.
+    // No PTY or claude process until wakeTab is called.
+    const spawnDormantTabInCwd = (cwd: string) => {
+      if (!cwd || useSessions.getState().tabs.length > 0) return
+      const id = crypto.randomUUID()
+      useSessions.setState((s) => ({
+        tabs: [
+          ...s.tabs,
+          {
+            id,
+            claudeSessionId: id,
+            label: cwd.split('/').filter(Boolean).pop() || cwd,
+            cwd,
+            pid: null,
+            status: 'dormant' as const,
+            exitCode: null,
+            startupCommand: null,
+            presetId: preset.id,
+            generation: 0,
+          },
+        ],
+        activeTabId: id,
+      }))
+    }
+
     // `--simple`: boot one fresh skip-perms session in the launch dir, skip
     // hydration (no restored multi-tabs in the chrome-free shell).
     window.api.app
@@ -254,17 +281,16 @@ export function App() {
       .then(({ simple, cwd }) => {
         if (simple) {
           setSimpleMode(true)
-          spawnTabInCwd(cwd)
+          spawnLiveTabInCwd(cwd)
           return
         }
         setSimpleMode(false)
-        // Normal boot: hydrate persisted tabs (startupCommand becomes
-        // `claude --resume <id>` so transcript + plan history reattach). If
-        // nothing was persisted, fall through to the fresh auto-spawn path.
+        // Normal boot: hydrate persisted tabs in dormant state (no PTY spawned).
+        // If nothing was persisted, fall through to the dormant auto-spawn path.
         hydrateSessions().then(() => {
           if (useSessions.getState().tabs.length > 0) return
           resolvePresetCwd(preset)
-            .then((cwd) => spawnTabInCwd(cwd || ''))
+            .then((cwd) => spawnDormantTabInCwd(cwd || ''))
             .catch((e) => {
               console.warn('[App] failed to create initial tab:', e)
               toast.error('Failed to create initial tab. Is the claude CLI on PATH?')
@@ -276,7 +302,7 @@ export function App() {
         setSimpleMode(false)
         hydrateSessions().then(() => {
           if (useSessions.getState().tabs.length > 0) return
-          resolvePresetCwd(preset).then((cwd) => spawnTabInCwd(cwd || '')).catch(() => {})
+          resolvePresetCwd(preset).then((cwd) => spawnDormantTabInCwd(cwd || '')).catch(() => {})
         })
       })
 

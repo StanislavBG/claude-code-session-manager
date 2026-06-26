@@ -9,13 +9,13 @@ export interface SessionTab {
   label: string
   cwd: string
   pid: number | null
-  status: 'spawning' | 'running' | 'exited'
+  status: 'dormant' | 'spawning' | 'running' | 'exited'
   exitCode: number | null
-  /** Command written to the shell after PTY spawn. Null = bare shell. */
+  /** Command written to the shell after PTY spawn. Null = bare shell or dormant. */
   startupCommand: string | null
   /** Id of the preset that created this tab, for display/debugging. */
   presetId: string | null
-  /** Incremented on restart to force Terminal remount via key change. */
+  /** Incremented on restart/wake to force Terminal remount via key change. */
   generation: number
 }
 
@@ -37,11 +37,44 @@ interface SessionsState {
   restartTab: (id: string) => void
   reorderTab: (fromIndex: number, toIndex: number) => void
   restoreTabs: (tabs: SessionTab[], activeTabId: string | null) => void
+  /** Transition a dormant tab to spawning, resolving the startup command. */
+  wakeTab: (id: string) => Promise<void>
 }
 
 function labelFromCwd(cwd: string): string {
   const parts = cwd.split('/').filter(Boolean)
   return parts[parts.length - 1] || cwd
+}
+
+/**
+ * Resolves whether a tab should resume an existing transcript or start fresh,
+ * returning the definitive claudeSessionId and the startup command string.
+ *
+ * When freshStart=true (first-ever boot or sync'd tabs.json on a new machine):
+ *   all tabs skip the resume check and get a new UUID assigned.
+ * When freshStart=false (normal case, including wakeTab calls):
+ *   checks if the JSONL transcript exists; resumes if it does, starts fresh
+ *   with the same claudeSessionId otherwise (no new UUID generated — the id
+ *   is already definitive from hydration).
+ */
+async function resolveStartupCommand(
+  p: { cwd: string; claudeSessionId: string },
+  freshStart = false,
+): Promise<{ claudeSessionId: string; startupCommand: string }> {
+  let useResume = !freshStart
+  if (useResume) {
+    const jsonlPath = await window.api.transcripts.pathFor(p.cwd, p.claudeSessionId)
+    const fileExists = await window.api.config.exists(jsonlPath)
+    useResume = fileExists
+  }
+  // Only generate a new UUID on a fresh-start with no JSONL; otherwise the
+  // existing claudeSessionId is already authoritative (avoids UUID churn on
+  // repeated wakeTab calls for tabs that never had a transcript).
+  const claudeSessionId = freshStart && !useResume ? crypto.randomUUID() : p.claudeSessionId
+  const startupCommand = useResume
+    ? `claude --dangerously-skip-permissions --resume ${shellQuote(claudeSessionId)}`
+    : `claude --dangerously-skip-permissions --session-id ${shellQuote(claudeSessionId)}`
+  return { claudeSessionId, startupCommand }
 }
 
 export const useSessions = create<SessionsState>((set, get) => ({
@@ -138,6 +171,21 @@ export const useSessions = create<SessionsState>((set, get) => ({
     set({ tabs })
   },
   restoreTabs: (tabs, activeTabId) => set({ tabs, activeTabId, hydrated: true }),
+  wakeTab: async (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab || tab.status !== 'dormant') return
+    const { claudeSessionId, startupCommand } = await resolveStartupCommand(
+      { cwd: tab.cwd, claudeSessionId: tab.claudeSessionId },
+      false,
+    )
+    set({
+      tabs: get().tabs.map((t) =>
+        t.id === id
+          ? { ...t, claudeSessionId, status: 'spawning' as const, startupCommand, generation: t.generation + 1 }
+          : t
+      ),
+    })
+  },
 }))
 
 /**
@@ -145,26 +193,21 @@ export const useSessions = create<SessionsState>((set, get) => ({
  * the durable fields (id, claudeSessionId, cwd, label, presetId) — pid,
  * status, startupCommand, exitCode are runtime-only.
  *
- * On restore, each tab's startupCommand is set to `claude --resume <id>` so
- * the Terminal component re-spawns claude resumed to the same transcript.
+ * Restored tabs hydrate in a dormant state (no PTY, no claude process). The
+ * caller must invoke wakeTab(id) to transition a tab to spawning when the user
+ * explicitly activates it. This prevents N idle claude processes on boot.
  */
 export async function hydrateSessions(): Promise<void> {
   if (useSessions.getState().hydrated) return
   try {
     const { tabs: persisted, activeTabId, freshStart } = await window.api.sessions.load()
     if (persisted.length > 0) {
-      // For each tab, check whether the JSONL transcript file exists on disk.
-      // If it doesn't (e.g. fresh machine, synced tabs.json), fall back to a
-      // fresh session instead of --resume which would fail.
+      // Resolve the definitive claudeSessionId for each tab (resume vs fresh-UUID).
+      // startupCommand is NOT set here — that happens in wakeTab when the user
+      // activates the session.
       const restored: SessionTab[] = await Promise.all(
         persisted.map(async (p: PersistedTab) => {
-          let useResume = !freshStart
-          if (useResume) {
-            const jsonlPath = await window.api.transcripts.pathFor(p.cwd, p.claudeSessionId)
-            const fileExists = await window.api.config.exists(jsonlPath)
-            useResume = fileExists
-          }
-          const claudeSessionId = useResume ? p.claudeSessionId : crypto.randomUUID()
+          const { claudeSessionId } = await resolveStartupCommand(p, freshStart)
           return {
             id: p.id,
             claudeSessionId,
@@ -172,11 +215,9 @@ export async function hydrateSessions(): Promise<void> {
             label: p.label,
             presetId: p.presetId,
             pid: null,
-            status: 'spawning' as const,
+            status: 'dormant' as const,
             exitCode: null,
-            startupCommand: useResume
-              ? `claude --dangerously-skip-permissions --resume ${shellQuote(claudeSessionId)}`
-              : `claude --dangerously-skip-permissions --session-id ${shellQuote(claudeSessionId)}`,
+            startupCommand: null,
             generation: 0,
           }
         }),

@@ -858,6 +858,13 @@ export interface ChatRunPayload {
   resume?: boolean;
 }
 
+export interface ChatRunQueuedEvent {
+  tabId: string;
+  sessionId: string;
+  /** 1-based position in the FIFO queue while waiting behind a busy lane. */
+  position: number;
+}
+
 export interface ChatRunStartedEvent {
   tabId: string;
   sessionId: string;
@@ -1172,6 +1179,7 @@ export interface SessionManagerAPI {
     run: (payload: ChatRunPayload) => Promise<{ ok: boolean }>;
     /** Cancel the in-flight run for a tab (SIGTERM→SIGKILL). No-op when idle. */
     cancel: (tabId: string) => void;
+    onQueued: (handler: (e: ChatRunQueuedEvent) => void) => () => void;
     onRunStarted: (handler: (e: ChatRunStartedEvent) => void) => () => void;
     onOutput: (handler: (e: ChatRunOutputEvent) => void) => () => void;
     onNeedsInput: (handler: (e: ChatRunNeedsInputEvent) => void) => () => void;

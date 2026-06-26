@@ -31,8 +31,10 @@ export interface ChatTurn {
 
 interface TabChat {
   turns: ChatTurn[]
-  /** A run is in flight — input is disabled. */
+  /** A run is in flight OR waiting in the queue — input is disabled. */
   running: boolean
+  /** 1-based queue position while waiting behind a busy lane; 0 when active/idle. */
+  queuedPosition: number
   /** The session has been created at least once → subsequent sends resume it. */
   started: boolean
   /** Live streamed assistant text for the in-flight run (replaced by finalMessage on complete). */
@@ -47,7 +49,7 @@ interface ChatState {
   send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string }) => void
 }
 
-const EMPTY: TabChat = { turns: [], running: false, started: false, stream: '' }
+const EMPTY: TabChat = { turns: [], running: false, queuedPosition: 0, started: false, stream: '' }
 
 let seq = 0
 function turnId(): string {
@@ -67,7 +69,7 @@ export const useChat = create<ChatState>((set, get) => ({
     set({
       chats: {
         ...get().chats,
-        [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, stream: '' },
+        [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, queuedPosition: 0, stream: '' },
       },
     })
     // resume on every send after the first (the session was created on the first run).
@@ -88,7 +90,7 @@ function patch(tabId: string, fn: (c: TabChat) => TabChat): void {
 }
 
 function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): void {
-  patch(tabId, (c) => ({ ...c, turns: [...c.turns, turn], running: false, stream: '', ...extra }))
+  patch(tabId, (c) => ({ ...c, turns: [...c.turns, turn], running: false, queuedPosition: 0, stream: '', ...extra }))
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {
@@ -101,8 +103,11 @@ function applyError(tabId: string, _sessionId: string, message: string): void {
 // so a non-renderer import (tests) doesn't throw on a missing window.api.
 
 if (typeof window !== 'undefined' && window.api?.chat) {
+  window.api.chat.onQueued(({ tabId, position }) => {
+    patch(tabId, (c) => ({ ...c, running: true, queuedPosition: position }))
+  })
   window.api.chat.onRunStarted(({ tabId }) => {
-    patch(tabId, (c) => ({ ...c, running: true, started: true, stream: '' }))
+    patch(tabId, (c) => ({ ...c, running: true, started: true, queuedPosition: 0, stream: '' }))
   })
   window.api.chat.onOutput(({ tabId, delta }) => {
     patch(tabId, (c) => ({ ...c, stream: c.stream + delta }))

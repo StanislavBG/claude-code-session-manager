@@ -77,6 +77,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
   const stream = chat?.stream ?? ''
+  const queuedPosition = chat?.queuedPosition ?? 0
 
   // Auto-scroll to the newest turn / streamed output.
   useEffect(() => {
@@ -126,7 +127,12 @@ export function TerminalChat({ tabId, cwd }: Props) {
         ))}
         {running && (
           <div className="max-w-[90%] rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg-muted">
-            {stream ? (
+            {queuedPosition > 0 ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-amber-400" />
+                queued · #{queuedPosition} (one loop runs at a time)
+              </span>
+            ) : stream ? (
               <span className="whitespace-pre-wrap">{stream}</span>
             ) : (
               <span className="inline-flex items-center gap-2">

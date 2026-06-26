@@ -325,6 +325,11 @@ contextBridge.exposeInMainWorld('api', {
     run: (payload) => ipcRenderer.invoke('chat:run', payload),
     /** Cancel an in-flight run for the given tabId. No-op if none running. */
     cancel: (tabId) => ipcRenderer.send('chat:cancel', { tabId }),
+    onQueued: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:queued', listener);
+      return () => ipcRenderer.removeListener('chat:run:queued', listener);
+    },
     onRunStarted: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('chat:run:started', listener);

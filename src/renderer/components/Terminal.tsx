@@ -7,6 +7,7 @@ import { useSessions } from '../state/sessions'
 import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from './TerminalControls'
+import { TerminalChat } from './TerminalChat'
 
 // Matches plausible source-path tokens: optional ./ or ../ prefix, dotted name
 // with extension, optional :line[:col] suffix. Word-boundary on the front
@@ -219,12 +220,10 @@ export function Terminal({ tabId, cwd }: Props) {
     }
   }, [tabId, cwd])
 
+  // Dormant tab → chat experience (default). Raw xterm only spawns once the
+  // user opens a raw session (wakeTab) — see TerminalChat's "Open raw session".
   if (isDormant) {
-    return (
-      <div className="h-full w-full flex items-center justify-center bg-bg text-fg-muted text-sm select-none">
-        Session idle — type a command or open a raw session
-      </div>
-    )
+    return <TerminalChat tabId={tabId} cwd={cwd} />
   }
 
   return (

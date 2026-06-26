@@ -6,20 +6,17 @@ import ForceGraph2D from 'react-force-graph-2d'
 import { Panel } from '../ui/Panel'
 import { EmptyState } from '../ui/EmptyState'
 import { toast } from '../../state/toast'
-import type { KgState, KgNode, KgProject } from '../../../preload/api'
+import type { KgState, KgNode, KgProject, Exchange } from '../../../preload/api'
 
 /**
- * KnowledgeGraph — distilled intelligence over your raw prompt LOG
- * (~/.claude/knowledge-log/prompts.jsonl), NOT curated facts (that's Memory).
+ * KnowledgeGraph — two views over project intelligence:
  *
- * SEGREGATED PER PROJECT: pick a project from the toolbar selector and the
- * graph, Q&A, and status all scope to that project's `cwd`. "Process now"
- * ingests new log lines across ALL projects in one pass (single watermark).
+ * Timeline (default): newest-first conversation log sourced from the durable
+ * exchanges log (PRD 323). Searchable by prompt + summary. Expand any row to
+ * see the verbatim result.
  *
- * Three panes: a force-directed graph of entities the backend extracted from
- * your prompts (node size = how often you mention it, color = type), an
- * interactive Q&A box that answers from the graph + your real words via
- * `claude -p`, and an ingest status strip with a "Process now" trigger.
+ * Graph: force-directed entity/relation graph distilled from prompt history.
+ * Q&A and capture controls live here.
  */
 
 const TYPE_COLOR: Record<string, string> = {
@@ -47,7 +44,131 @@ function useSize<T extends HTMLElement>() {
   return { ref, ...size }
 }
 
+// ──────────────────────────────────────────── Timeline sub-component
+
+function ExchangeRow({ exchange }: { exchange: Exchange }) {
+  const [expanded, setExpanded] = useState(false)
+  const ts = new Date(exchange.ts)
+  const dateStr = ts.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  const timeStr = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+  return (
+    <div className="border-b border-line last:border-b-0 py-3 px-3 hover:bg-bg-elev/40 transition-colors">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] text-fg-faint shrink-0">{dateStr} {timeStr}</span>
+            <span className="text-[10px] text-fg-faint truncate font-mono">{exchange.sessionId.slice(0, 8)}…</span>
+          </div>
+          <div className="text-xs text-fg font-medium leading-snug line-clamp-2 mb-1">
+            {exchange.prompt}
+          </div>
+          {exchange.degraded ? (
+            <div className="text-[11px] text-fg-dim italic">
+              summary unavailable — see full result below
+            </div>
+          ) : (
+            <div className="text-[11px] text-fg-dim leading-relaxed line-clamp-3">
+              {exchange.summary}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="shrink-0 text-[10px] text-fg-faint hover:text-fg border border-line rounded px-1.5 py-0.5 ml-1"
+          title={expanded ? 'Collapse' : 'Expand full result'}
+        >
+          {expanded ? '▲' : '▼'}
+        </button>
+      </div>
+      {expanded && (
+        <div className="mt-2 p-2 bg-bg rounded border border-line text-[11px] text-fg-dim font-mono whitespace-pre-wrap max-h-80 overflow-auto leading-relaxed">
+          {exchange.result}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TimelineView({ cwd }: { cwd: string | null }) {
+  const [exchanges, setExchanges] = useState<Exchange[]>([])
+  const [loading, setLoading] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const load = useCallback(async () => {
+    if (!cwd) { setExchanges([]); return }
+    setLoading(true)
+    try {
+      const list = await window.api.exchanges.list({ cwd, limit: 100 })
+      setExchanges(list)
+    } catch (e) {
+      toast.error(`Timeline load failed: ${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [cwd])
+
+  useEffect(() => { load() }, [load])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return exchanges
+    return exchanges.filter(
+      (ex) =>
+        ex.prompt.toLowerCase().includes(q) ||
+        ex.summary.toLowerCase().includes(q),
+    )
+  }, [exchanges, search])
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 py-2 border-b border-line shrink-0">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search prompts and summaries…"
+          className="w-full text-xs bg-bg border border-line rounded px-2 py-1 text-fg outline-none focus:border-fg-faint"
+        />
+      </div>
+      <div className="flex-1 overflow-auto min-h-0">
+        {loading ? (
+          <div className="h-full grid place-items-center text-xs text-fg-faint">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="h-full grid place-items-center p-8">
+            {exchanges.length === 0 ? (
+              <EmptyState
+                title="No conversations recorded yet"
+                hint="Conversations are logged when you use the chat box. Come back after your first exchange."
+              />
+            ) : (
+              <EmptyState
+                title="No matches"
+                hint={`${exchanges.length} exchange${exchanges.length === 1 ? '' : 's'} found — try a different search term.`}
+              />
+            )}
+          </div>
+        ) : (
+          <div>
+            {filtered.map((ex, i) => (
+              <ExchangeRow key={`${ex.ts}-${i}`} exchange={ex} />
+            ))}
+          </div>
+        )}
+      </div>
+      {!loading && exchanges.length > 0 && (
+        <div className="px-3 py-1.5 border-t border-line text-[10px] text-fg-faint shrink-0">
+          {search ? `${filtered.length} / ${exchanges.length}` : exchanges.length} exchange{exchanges.length === 1 ? '' : 's'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────── Main component
+
 export function KnowledgeGraph() {
+  const [view, setView] = useState<'timeline' | 'graph'>('timeline')
   const [state, setState] = useState<KgState | null>(null)
   const [projects, setProjects] = useState<KgProject[]>([])
   const [cwd, setCwd] = useState<string | null>(null)
@@ -191,6 +312,23 @@ export function KnowledgeGraph() {
     <Panel
       toolbar={
         <>
+          {/* View toggle */}
+          <div className="flex border border-line rounded overflow-hidden text-xs">
+            <button
+              onClick={() => setView('timeline')}
+              className={`px-2 py-0.5 ${view === 'timeline' ? 'bg-fg text-bg' : 'text-fg-dim hover:text-fg'}`}
+            >
+              Timeline
+            </button>
+            <button
+              onClick={() => setView('graph')}
+              className={`px-2 py-0.5 ${view === 'graph' ? 'bg-fg text-bg' : 'text-fg-dim hover:text-fg'}`}
+            >
+              Graph
+            </button>
+          </div>
+
+          {/* Project selector (shared between views) */}
           {projects.length > 0 && (
             <select
               value={cwd ?? ''}
@@ -205,175 +343,186 @@ export function KnowledgeGraph() {
               ))}
             </select>
           )}
-          <span className="text-fg-faint">
-            {state
-              ? (() => {
-                  const cap = state.status.maxGraphNodes
-                  const n = state.nodes.length
-                  const base = `${n} entities · ${state.edges.length} relations`
-                  if (!cap) return base
-                  return n >= cap
-                    ? `${base} · capped at ${cap}`
-                    : `${base} · ${n} / ${cap}`
-                })()
-              : 'loading…'}
-          </span>
-          <div className="flex-1" />
-          {status && status.pending > 0 && (
-            <span className="text-amber-600 text-xs">{status.pending} new prompt{status.pending === 1 ? '' : 's'} to process</span>
+
+          {view === 'graph' && (
+            <>
+              <span className="text-fg-faint">
+                {state
+                  ? (() => {
+                      const cap = state.status.maxGraphNodes
+                      const n = state.nodes.length
+                      const base = `${n} entities · ${state.edges.length} relations`
+                      if (!cap) return base
+                      return n >= cap
+                        ? `${base} · capped at ${cap}`
+                        : `${base} · ${n} / ${cap}`
+                    })()
+                  : 'loading…'}
+              </span>
+              <div className="flex-1" />
+              {status && status.pending > 0 && (
+                <span className="text-amber-600 text-xs">{status.pending} new prompt{status.pending === 1 ? '' : 's'} to process</span>
+              )}
+              {progress && <span className="text-fg-faint text-xs">{progress}</span>}
+              <select
+                value={state?.status.captureMode ?? 'llm'}
+                onChange={(e) => changeCaptureMode(e.target.value as 'llm' | 'lite' | 'off')}
+                className="text-xs bg-bg border border-line rounded px-1.5 py-0.5 text-fg outline-none focus:border-fg-faint"
+                title="llm = claude -p extraction (costs tokens); lite = fast heuristic (free); off = no indexing"
+              >
+                <option value="llm">Mode: llm</option>
+                <option value="lite">Mode: lite</option>
+                <option value="off">Mode: off</option>
+              </select>
+              <button
+                onClick={clearGraph}
+                disabled={ingesting || !state || state.nodes.length === 0}
+                className="text-fg-dim hover:text-red-500 text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
+                title="Purge this project's distilled graph (prompts are kept)"
+              >
+                Clear graph
+              </button>
+              <button
+                onClick={runIngest}
+                disabled={ingesting || state?.status.captureMode === 'off'}
+                className="text-fg-dim hover:text-fg text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
+                title={state?.status.captureMode === 'off' ? 'Capture is off' : 'Distill new prompt-log lines into the graph'}
+              >
+                {ingesting ? 'Processing…' : 'Process now'}
+              </button>
+            </>
           )}
-          {progress && <span className="text-fg-faint text-xs">{progress}</span>}
-          <select
-            value={state?.status.captureMode ?? 'llm'}
-            onChange={(e) => changeCaptureMode(e.target.value as 'llm' | 'lite' | 'off')}
-            className="text-xs bg-bg border border-line rounded px-1.5 py-0.5 text-fg outline-none focus:border-fg-faint"
-            title="llm = claude -p extraction (costs tokens); lite = fast heuristic (free); off = no indexing"
-          >
-            <option value="llm">Mode: llm</option>
-            <option value="lite">Mode: lite</option>
-            <option value="off">Mode: off</option>
-          </select>
-          <button
-            onClick={clearGraph}
-            disabled={ingesting || !state || state.nodes.length === 0}
-            className="text-fg-dim hover:text-red-500 text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
-            title="Purge this project's distilled graph (prompts are kept)"
-          >
-            Clear graph
-          </button>
-          <button
-            onClick={runIngest}
-            disabled={ingesting || state?.status.captureMode === 'off'}
-            className="text-fg-dim hover:text-fg text-xs border border-line rounded px-2 py-0.5 disabled:opacity-40"
-            title={state?.status.captureMode === 'off' ? 'Capture is off' : 'Distill new prompt-log lines into the graph'}
-          >
-            {ingesting ? 'Processing…' : 'Process now'}
-          </button>
+
+          {view === 'timeline' && <div className="flex-1" />}
         </>
       }
     >
-      <div className="h-full flex min-h-0">
-        {/* Graph */}
-        <div ref={graphRef} className="flex-1 min-w-0 relative bg-bg">
-          {state && state.nodes.length > 0 ? (
-            <ForceGraph2D
-              width={w}
-              height={h}
-              graphData={graphData}
-              backgroundColor="rgba(0,0,0,0)"
-              nodeRelSize={4}
-              nodeVal={(n: any) => n.val}
-              nodeLabel={(n: any) => `${n.name} · ${n.type} · ${n.count}×`}
-              nodeColor={(n: any) => typeColor(n.type)}
-              linkColor={() => 'rgba(148,163,184,0.25)'}
-              linkDirectionalArrowLength={3}
-              linkDirectionalArrowRelPos={1}
-              onNodeClick={(n: any) => setSelected(n as KgNode)}
-              nodeCanvasObjectMode={() => 'after'}
-              nodeCanvasObject={(n: any, ctx: CanvasRenderingContext2D, scale: number) => {
-                if (scale < 1.2) return
-                ctx.font = `${11 / scale}px ui-sans-serif`
-                ctx.fillStyle = 'rgba(226,232,240,0.85)'
-                ctx.textAlign = 'center'
-                ctx.fillText(n.name, n.x, n.y + 9)
-              }}
-            />
-          ) : (
-            <div className="h-full grid place-items-center p-8">
-              <EmptyState
-                title={status && status.totalPrompts === 0 ? 'No prompts logged yet' : 'Graph not built yet'}
-                hint={
-                  status && status.totalPrompts === 0
-                    ? 'The UserPromptSubmit hook logs your messages as you work. Come back after a few prompts.'
-                    : `${status?.totalPrompts ?? 0} prompts waiting — click "Process now" to distill them into a graph.`
-                }
+      {view === 'timeline' ? (
+        <TimelineView cwd={cwd} />
+      ) : (
+        <div className="h-full flex min-h-0">
+          {/* Graph */}
+          <div ref={graphRef} className="flex-1 min-w-0 relative bg-bg">
+            {state && state.nodes.length > 0 ? (
+              <ForceGraph2D
+                width={w}
+                height={h}
+                graphData={graphData}
+                backgroundColor="rgba(0,0,0,0)"
+                nodeRelSize={4}
+                nodeVal={(n: any) => n.val}
+                nodeLabel={(n: any) => `${n.name} · ${n.type} · ${n.count}×`}
+                nodeColor={(n: any) => typeColor(n.type)}
+                linkColor={() => 'rgba(148,163,184,0.25)'}
+                linkDirectionalArrowLength={3}
+                linkDirectionalArrowRelPos={1}
+                onNodeClick={(n: any) => setSelected(n as KgNode)}
+                nodeCanvasObjectMode={() => 'after'}
+                nodeCanvasObject={(n: any, ctx: CanvasRenderingContext2D, scale: number) => {
+                  if (scale < 1.2) return
+                  ctx.font = `${11 / scale}px ui-sans-serif`
+                  ctx.fillStyle = 'rgba(226,232,240,0.85)'
+                  ctx.textAlign = 'center'
+                  ctx.fillText(n.name, n.x, n.y + 9)
+                }}
               />
-            </div>
-          )}
-          {/* legend */}
-          {state && state.nodes.length > 0 && (
-            <div className="absolute bottom-2 left-2 flex flex-wrap gap-2 text-[10px] bg-bg-elev/80 rounded px-2 py-1 border border-line">
-              {Object.entries(TYPE_COLOR).map(([t, c]) => (
-                <span key={t} className="flex items-center gap-1 text-fg-faint">
-                  <span className="inline-block w-2 h-2 rounded-full" style={{ background: c }} />{t}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Right rail: Q&A + selected entity */}
-        <div className="w-[340px] shrink-0 border-l border-line flex flex-col min-h-0 bg-bg-elev">
-          <div className="p-3 border-b border-line">
-            <div className="text-xs uppercase tracking-wider text-fg-faint mb-2">Ask your history</div>
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) askQuestion() }}
-              placeholder="e.g. What have I been trying to build? Summarize my intent threads."
-              rows={3}
-              className="w-full text-xs bg-bg border border-line rounded p-2 text-fg outline-none focus:border-fg-faint resize-none"
-            />
-            <button
-              onClick={askQuestion}
-              disabled={asking || !question.trim()}
-              className="mt-2 w-full text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded py-1"
-            >
-              {asking ? 'Thinking…' : 'Ask (⌘↵)'}
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-auto p-3 space-y-3">
-            {answer && (
-              <div>
-                <div className="text-xs text-fg whitespace-pre-wrap leading-relaxed">{answer.text}</div>
-                {answer.cited.length > 0 && (
-                  <details className="mt-2">
-                    <summary className="text-[10px] uppercase tracking-wider text-fg-faint cursor-pointer">
-                      {answer.cited.length} prompt{answer.cited.length === 1 ? '' : 's'} cited
-                    </summary>
-                    <ul className="mt-1 space-y-1">
-                      {answer.cited.map((c, i) => (
-                        <li key={i} className="text-[11px] text-fg-dim border-l-2 border-line pl-2">
-                          <span className="text-fg-faint">{new Date(c.ts).toLocaleString()}</span>
-                          <div className="line-clamp-3">{c.prompt}</div>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
+            ) : (
+              <div className="h-full grid place-items-center p-8">
+                <EmptyState
+                  title={status && status.totalPrompts === 0 ? 'No prompts logged yet' : 'Graph not built yet'}
+                  hint={
+                    status && status.totalPrompts === 0
+                      ? 'The UserPromptSubmit hook logs your messages as you work. Come back after a few prompts.'
+                      : `${status?.totalPrompts ?? 0} prompts waiting — click "Process now" to distill them into a graph.`
+                  }
+                />
               </div>
             )}
-
-            {selected && (
-              <div className="border-t border-line pt-3">
-                <div className="flex items-center gap-2">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: typeColor(selected.type) }} />
-                  <span className="text-sm text-fg">{selected.name}</span>
-                  <span className="text-[10px] text-fg-faint">{selected.type} · {selected.count}×</span>
-                </div>
-                {selected.description && <div className="mt-1 text-xs text-fg-dim">{selected.description}</div>}
-                <div className="mt-1 text-[10px] text-fg-faint">
-                  {selected.firstTs && `first ${new Date(selected.firstTs).toLocaleDateString()}`}
-                  {selected.lastTs && ` · last ${new Date(selected.lastTs).toLocaleDateString()}`}
-                </div>
-              </div>
-            )}
-
-            {!answer && !selected && (
-              <div className="text-[11px] text-fg-faint">
-                Click a node to inspect it, or ask a question. Answers are grounded in your own prompts via <code className="font-mono">claude -p</code>.
+            {/* legend */}
+            {state && state.nodes.length > 0 && (
+              <div className="absolute bottom-2 left-2 flex flex-wrap gap-2 text-[10px] bg-bg-elev/80 rounded px-2 py-1 border border-line">
+                {Object.entries(TYPE_COLOR).map(([t, c]) => (
+                  <span key={t} className="flex items-center gap-1 text-fg-faint">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ background: c }} />{t}
+                  </span>
+                ))}
               </div>
             )}
           </div>
 
-          {status && (
-            <div className="p-2 border-t border-line text-[10px] text-fg-faint">
-              {status.promptCount} processed{status.lastIngest ? ` · last ${new Date(status.lastIngest).toLocaleString()}` : ''}
+          {/* Right rail: Q&A + selected entity */}
+          <div className="w-[340px] shrink-0 border-l border-line flex flex-col min-h-0 bg-bg-elev">
+            <div className="p-3 border-b border-line">
+              <div className="text-xs uppercase tracking-wider text-fg-faint mb-2">Ask your history</div>
+              <textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) askQuestion() }}
+                placeholder="e.g. What have I been trying to build? Summarize my intent threads."
+                rows={3}
+                className="w-full text-xs bg-bg border border-line rounded p-2 text-fg outline-none focus:border-fg-faint resize-none"
+              />
+              <button
+                onClick={askQuestion}
+                disabled={asking || !question.trim()}
+                className="mt-2 w-full text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded py-1"
+              >
+                {asking ? 'Thinking…' : 'Ask (⌘↵)'}
+              </button>
             </div>
-          )}
+
+            <div className="flex-1 overflow-auto p-3 space-y-3">
+              {answer && (
+                <div>
+                  <div className="text-xs text-fg whitespace-pre-wrap leading-relaxed">{answer.text}</div>
+                  {answer.cited.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="text-[10px] uppercase tracking-wider text-fg-faint cursor-pointer">
+                        {answer.cited.length} prompt{answer.cited.length === 1 ? '' : 's'} cited
+                      </summary>
+                      <ul className="mt-1 space-y-1">
+                        {answer.cited.map((c, i) => (
+                          <li key={i} className="text-[11px] text-fg-dim border-l-2 border-line pl-2">
+                            <span className="text-fg-faint">{new Date(c.ts).toLocaleString()}</span>
+                            <div className="line-clamp-3">{c.prompt}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {selected && (
+                <div className="border-t border-line pt-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: typeColor(selected.type) }} />
+                    <span className="text-sm text-fg">{selected.name}</span>
+                    <span className="text-[10px] text-fg-faint">{selected.type} · {selected.count}×</span>
+                  </div>
+                  {selected.description && <div className="mt-1 text-xs text-fg-dim">{selected.description}</div>}
+                  <div className="mt-1 text-[10px] text-fg-faint">
+                    {selected.firstTs && `first ${new Date(selected.firstTs).toLocaleDateString()}`}
+                    {selected.lastTs && ` · last ${new Date(selected.lastTs).toLocaleDateString()}`}
+                  </div>
+                </div>
+              )}
+
+              {!answer && !selected && (
+                <div className="text-[11px] text-fg-faint">
+                  Click a node to inspect it, or ask a question. Answers are grounded in your own prompts via <code className="font-mono">claude -p</code>.
+                </div>
+              )}
+            </div>
+
+            {status && (
+              <div className="p-2 border-t border-line text-[10px] text-fg-faint">
+                {status.promptCount} processed{status.lastIngest ? ` · last ${new Date(status.lastIngest).toLocaleString()}` : ''}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </Panel>
   )
 }

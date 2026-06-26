@@ -42,6 +42,7 @@ const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
 const webRemote = require('./webRemote.cjs');
 const chatRunner = require('./chatRunner.cjs');
+const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
@@ -671,6 +672,16 @@ repoAnalyzer.register(ipcMain);
 hivesIpc.registerHiveHandlers();
 webRemote.registerRemoteHandlers();
 chatRunner.registerChatHandlers();
+
+// Exchanges: read the durable per-exchange log (written by chatRunner → recordExchange).
+ipcMain.handle('exchanges:list', validated(schemas.exchangesList, async (payload) => {
+  try {
+    return await listExchanges(payload);
+  } catch (e) {
+    logs.writeLine({ scope: 'exchanges', level: 'error', message: 'listExchanges failed', meta: { error: e?.message } });
+    return [];
+  }
+}));
 
 // OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());

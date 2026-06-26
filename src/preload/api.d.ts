@@ -1186,6 +1186,15 @@ export interface SessionManagerAPI {
     onComplete: (handler: (e: ChatRunCompleteEvent) => void) => () => void;
     onError: (handler: (e: ChatRunErrorEvent) => void) => () => void;
   };
+  exchanges: {
+    /** Durable per-exchange log entries for a project, newest-first (max 100 by default). */
+    list: (payload: {
+      cwd: string;
+      sessionId?: string;
+      limit?: number;
+      offset?: number;
+    }) => Promise<Exchange[]>;
+  };
   kg: {
     /** Distilled knowledge graph + ingest status for ONE project (`cwd`).
      *  Omit `cwd` for the most-active project. */
@@ -1204,6 +1213,27 @@ export interface SessionManagerAPI {
     setCaptureMode: (mode: 'llm' | 'lite' | 'off') => Promise<{ ok: boolean; captureMode?: string; error?: string }>;
     onIngestProgress: (handler: (ev: KgIngestProgress) => void) => () => void;
   };
+}
+
+// ────────────────────────────────────────────── Exchanges (PRD 324 read path)
+
+export interface Exchange {
+  /** ISO 8601 timestamp when the exchange was recorded. */
+  ts: string;
+  /** Claude session UUID. */
+  sessionId: string;
+  /** Project cwd. */
+  cwd: string;
+  /** The user prompt that started the exchange. */
+  prompt: string;
+  /** The verbatim assistant result. */
+  result: string;
+  /** Haiku-generated one-sentence summary. */
+  summary: string;
+  /** Haiku model used for the summary (informational). */
+  model?: string;
+  /** Set when summarization failed — `result` is available but `summary` may be empty. */
+  degraded?: boolean;
 }
 
 export interface KgProject {

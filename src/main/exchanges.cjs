@@ -15,6 +15,7 @@
  */
 
 const fsp = require('node:fs/promises');
+const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
@@ -60,4 +61,65 @@ async function recordExchange({ sessionId, cwd, prompt, result }) {
   await fsp.appendFile(filePath, line, { encoding: 'utf8' });
 }
 
-module.exports = { recordExchange, EXCHANGES_DIR };
+// Match kg.cjs MAX_TAIL_BYTES — prevents a huge log from blocking the main thread.
+const MAX_TAIL_BYTES = 8 * 1024 * 1024;
+const DEFAULT_LIMIT = 100;
+
+/**
+ * Read exchanges for a project, newest-first. Bounded to MAX_TAIL_BYTES from
+ * the end of the file so large logs never block the main thread.
+ *
+ * @param {{ cwd: string, sessionId?: string, limit?: number, offset?: number }}
+ * @returns {Promise<object[]>}
+ */
+async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0 }) {
+  const encoded = encodeCwd(cwd);
+  const filePath = path.join(EXCHANGES_DIR, `${encoded}.jsonl`);
+
+  let stat;
+  try { stat = await fsp.stat(filePath); } catch { return []; }
+
+  // Tail up to MAX_TAIL_BYTES from the end of the file.
+  const readLen = Math.min(stat.size, MAX_TAIL_BYTES);
+  const startPos = stat.size - readLen;
+
+  let raw;
+  try {
+    const fd = await fsp.open(filePath, 'r');
+    try {
+      const buf = Buffer.allocUnsafe(readLen);
+      const { bytesRead } = await fd.read(buf, 0, readLen, startPos);
+      raw = buf.slice(0, bytesRead).toString('utf8');
+    } finally {
+      await fd.close();
+    }
+  } catch { return []; }
+
+  // If we started mid-file, skip the (possibly incomplete) first line.
+  let text = raw;
+  if (startPos > 0) {
+    const nl = text.indexOf('\n');
+    text = nl === -1 ? '' : text.slice(nl + 1);
+  }
+
+  const records = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const rec = JSON.parse(trimmed);
+      if (rec && typeof rec.ts === 'string') records.push(rec);
+    } catch { /* skip malformed */ }
+  }
+
+  // Newest-first
+  records.reverse();
+
+  const filtered = sessionId
+    ? records.filter((r) => r.sessionId === sessionId)
+    : records;
+
+  return filtered.slice(offset, offset + limit);
+}
+
+module.exports = { recordExchange, listExchanges, EXCHANGES_DIR };

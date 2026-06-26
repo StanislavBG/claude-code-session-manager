@@ -356,6 +356,11 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('chat:run:error', listener);
     },
   },
+  exchanges: {
+    /** List exchanges for a project (durable chat-run log), newest-first.
+     *  `sessionId` filters to one session; `limit`/`offset` for pagination. */
+    list: (payload) => ipcRenderer.invoke('exchanges:list', payload),
+  },
   kg: {
     /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log),
      *  segregated per project. `cwd` selects which project's graph; omit for the

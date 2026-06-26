@@ -253,6 +253,16 @@ const agentMemoryDelete = z.object({
   entryId: z.string().regex(AGENT_MEMORY_ID_RE),
 }).strict();
 
+// ──────────────────────────────────────────── Exchanges (PRD 324 read path)
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
+const exchangesList = z.object({
+  cwd: z.string().min(1).max(4096),
+  sessionId: z.string().regex(SESSION_ID_RE).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+  offset: z.number().int().min(0).max(100000).optional(),
+}).strict();
+
 // ──────────────────────────────────────────── Chat runner (PRD 319)
 // Prompt cap: 100 KiB. Matches a generous interactive message budget while
 // preventing accidental megabyte pastes from reaching claude -p.
@@ -455,6 +465,8 @@ const SAS_GATED_READS = new Set([
   'cmd:history:aggregate',
   // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',
+  // exchanges:list returns conversation content — sensitive user data.
+  'cmd:exchanges:list',
 ]);
 
 const MUTATE_COMMANDS = new Set([
@@ -543,6 +555,7 @@ module.exports = {
     watchersKillTab,
     chatRun,
     chatCancel,
+    exchangesList,
   },
   validated,
 };

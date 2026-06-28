@@ -6,6 +6,8 @@ Local cockpit for the Claude Code CLI — multi-tab terminal, configuration surf
 
 You already use the `claude` CLI. This wraps it in a cockpit so you can run multiple sessions at once, edit every config file Claude Code reads, queue overnight work as PRDs, talk to it with your microphone, and watch transcripts in real time — without ever leaving the window.
 
+New tabs open as a lightweight **chat box** and stay dormant — no PTY, no `claude` process — until you actually send a message, so a window full of tabs costs almost nothing. Prefer a single bare terminal? Launch with `--simple`.
+
 Single-author hobby project. Linux and macOS only. Free, MIT, zero telemetry.
 
 ## Screenshots
@@ -23,6 +25,8 @@ Screenshots are placeholders right now; see `screenshots/README-screenshots.md` 
 
 ## Features tour
 
+- **Dormant tabs + chat box** — every new tab opens as a chat box and stays dormant (no PTY, no `claude` process) until you send the first message. The headless chat-run engine drives it through `claude -p` with `stream-json`, session resume, and a stop signal, so a tab is a real conversation without holding a live terminal open. Hydrate into a full terminal whenever you need one.
+- **Simple mode** — `npx claude-code-session-manager@latest --simple` boots a chrome-free, single-terminal cockpit: no nav, no tabs, no config surface, just one `claude` session in the launch directory.
 - **AppStatusBar** — five always-visible pills at the very top of the window: active model, thinking effort, team, voice state, and the current 5-hour usage percentage. Each pill is a shortcut into the relevant settings panel.
 - **Overview cockpit** — the home tab is a real instrument cluster:
   - CockpitStrip at the top with critical session info.
@@ -91,7 +95,7 @@ Three run modes:
 
 - `manual` — only fires when you click Run.
 - `on-reset` — fires at the next 5-hour usage reset.
-- `when-available` — the default. Polls the billing usage endpoint every two minutes and fires when tokens fall below the configured threshold. Auto-pauses if a job hits a rate limit, auto-resumes at the next reset.
+- `when-available` — the default. Polls the billing usage endpoint every ten minutes and fires when tokens fall below the configured threshold. Auto-pauses if a job hits a rate limit, auto-resumes at the next reset.
 
 The queue-health linter scans every queued PRD for two patterns that have caused real stuck jobs in this project: unbounded poll loops with unsatisfiable conditions, and post-AC fixture generators that overrun the acceptance criteria. Both incidents are documented in `PRD_AUTHORING.md`.
 

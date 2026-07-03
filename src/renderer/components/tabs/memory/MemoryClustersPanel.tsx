@@ -8,7 +8,7 @@
  * `refresh: true`. If the IPC throws (e.g. absent at runtime because PRD 355
  * hasn't landed), we fail soft — toast + empty state, never crash the tab.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { EmptyState } from '../../ui/EmptyState'
 import { formatMtimeMs } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
@@ -25,18 +25,26 @@ export function MemoryClustersPanel({ workspace, onOpenMember }: Props) {
   const [result, setResult] = useState<MemoryAggregateResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  // Guards against a slow in-flight request from a prior workspace clobbering
+  // a faster one from the current workspace.
+  const requestRef = useRef(0)
 
   const load = useCallback(
     async (refresh: boolean) => {
+      const requestId = ++requestRef.current
       setBusy(true)
       try {
         const r = await window.api.memory.aggregate(workspace, refresh)
+        if (requestRef.current !== requestId) return
         setResult(r)
       } catch (e) {
+        if (requestRef.current !== requestId) return
         toast.error(`Memory aggregate failed: ${e instanceof Error ? e.message : String(e)}`)
       } finally {
-        setBusy(false)
-        setLoaded(true)
+        if (requestRef.current === requestId) {
+          setBusy(false)
+          setLoaded(true)
+        }
       }
     },
     [workspace],

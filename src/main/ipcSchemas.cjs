@@ -223,6 +223,16 @@ const memoryCreate = z.object({
   description: z.string().max(2048).optional(),
 }).strict();
 
+// memory:aggregate — Memory Clusters (PRD 356). `workspace` here is already
+// the encoded cwd slug (memoryAggregate.cjs reads directly from
+// ~/.claude/projects/<workspace>/memory/), same regex as the other memory:*
+// handlers. `refresh: true` is the cost gate that fires the single claude -p
+// clustering pass; falsy returns the cached result.
+const memoryAggregate = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE),
+  refresh: z.boolean().optional(),
+}).strict();
+
 // ──────────────────────────────────────────── Per-subagent memory
 // Distinct from the workspace-scoped Memory tool: agentMemory is keyed by
 // subagent name (the .md filename in ~/.claude/agents/, e.g. "code-reviewer"),
@@ -545,6 +555,7 @@ module.exports = {
     memoryWrite,
     memoryDelete,
     memoryCreate,
+    memoryAggregate,
     agentMemoryList,
     agentMemoryGet,
     agentMemorySet,

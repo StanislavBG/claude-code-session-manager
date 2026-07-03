@@ -9,11 +9,6 @@ contextBridge.exposeInMainWorld('api', {
     pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
     rebootApp: () => ipcRenderer.send('app:reboot-app'),
-    openInEditor: (cwd, editor) => ipcRenderer.invoke('app:open-in-editor', { cwd, editor }),
-    openExternal: (url) => ipcRenderer.invoke('app:open-external', { url }),
-    openFileInEditor: (filePath, line, col, editor) => ipcRenderer.invoke('app:open-file-in-editor', { path: filePath, line, col, editor }),
-    openInFinder: (cwd) => ipcRenderer.invoke('app:open-in-finder', { cwd }),
-    openInTerminal: (cwd) => ipcRenderer.invoke('app:open-in-terminal', { cwd }),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
     // F7: lets the renderer suppress the wizard auto-trigger under SM_E2E=1.
@@ -121,7 +116,6 @@ contextBridge.exposeInMainWorld('api', {
     },
     getHotkeyConfig: () => ipcRenderer.invoke('voice:get-hotkey-config'),
     setHotkeyConfig: (cfg) => ipcRenderer.invoke('voice:set-hotkey', cfg),
-    getHotkeyConfigPath: () => ipcRenderer.invoke('voice:get-hotkey-config-path'),
     setRecording: (recording) => ipcRenderer.send('voice:set-recording', !!recording),
     // F5 device picker prefs (~/.config/session-manager/voice.json `device` key).
     getDevicePref: () => ipcRenderer.invoke('voice:get-device-pref'),
@@ -158,7 +152,6 @@ contextBridge.exposeInMainWorld('api', {
   },
   history: {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
-    listConversations: () => ipcRenderer.invoke('history:list-conversations'),
     scanProjects: () => ipcRenderer.invoke('history:scan-projects'),
   },
   files: {
@@ -168,8 +161,11 @@ contextBridge.exposeInMainWorld('api', {
     create: (parentPath, name, kind) => ipcRenderer.invoke('files:create', { parentPath, name, kind }),
     rename: (path, newName) => ipcRenderer.invoke('files:rename', { path, newName }),
     delete: (path) => ipcRenderer.invoke('files:delete', { path }),
-    openExternal: (path) => ipcRenderer.invoke('files:open-external', { path }),
-    showInFinder: (path) => ipcRenderer.invoke('files:show-in-finder', { path }),
+  },
+  // Consolidated shell open/reveal — see shell:open in index.cjs.
+  // as: 'editor' | 'fileInEditor' | 'finder' | 'terminal' | 'external' | 'openPath' | 'revealPath'
+  shell: {
+    open: (opts) => ipcRenderer.invoke('shell:open', opts),
   },
   search: {
     files: (cwd, query, opts) => ipcRenderer.invoke('search:files', { cwd, query, opts }),
@@ -191,7 +187,6 @@ contextBridge.exposeInMainWorld('api', {
     runNow: () => ipcRenderer.invoke('schedule:run-now'),
     forceTick: () => ipcRenderer.invoke('schedule:force-tick'),
     resume: () => ipcRenderer.invoke('schedule:resume'),
-    refreshReset: () => ipcRenderer.invoke('schedule:refresh-reset'),
     rescan: () => ipcRenderer.invoke('schedule:rescan'),
     clearQueue: () => ipcRenderer.invoke('schedule:clear-queue'),
     openFolder: () => ipcRenderer.invoke('schedule:open-folder'),
@@ -256,7 +251,6 @@ contextBridge.exposeInMainWorld('api', {
       return ipcRenderer.invoke('agent-memory:set', payload);
     },
     delete: (agentId, entryId) => ipcRenderer.invoke('agent-memory:delete', { agentId, entryId }),
-    listAgents: () => ipcRenderer.invoke('agent-memory:list-agents'),
   },
   docEditor: {
     pickFile: (payload) => ipcRenderer.invoke('doc-editor:pick-file', payload),
@@ -362,26 +356,5 @@ contextBridge.exposeInMainWorld('api', {
     /** List exchanges for a project (durable chat-run log), newest-first.
      *  `sessionId` filters to one session; `limit`/`offset` for pagination. */
     list: (payload) => ipcRenderer.invoke('exchanges:list', payload),
-  },
-  kg: {
-    /** Knowledge Graph distilled from the prompt log (~/.claude/knowledge-log),
-     *  segregated per project. `cwd` selects which project's graph; omit for the
-     *  most-active project. */
-    get: (cwd) => ipcRenderer.invoke('kg:get', { cwd }),
-    /** Projects seen in the log, with per-project graph stats (for the selector). */
-    projects: () => ipcRenderer.invoke('kg:projects'),
-    ingest: () => ipcRenderer.invoke('kg:ingest'),
-    ask: (question, cwd) => ipcRenderer.invoke('kg:ask', { question, cwd }),
-    /** Purge graphs: one project (cwd) or all (`{ all: true }`). */
-    clear: (arg) => ipcRenderer.invoke('kg:clear', arg ?? {}),
-    /** Toggle the recurring `claude -p` extraction on/off. */
-    setExtraction: (enabled) => ipcRenderer.invoke('kg:set-extraction', { enabled }),
-    /** Set capture mode: 'llm' | 'lite' | 'off'. */
-    setCaptureMode: (mode) => ipcRenderer.invoke('kg:set-capture-mode', { mode }),
-    onIngestProgress: (handler) => {
-      const listener = (_e, payload) => handler(payload);
-      ipcRenderer.on('kg:ingest-progress', listener);
-      return () => ipcRenderer.removeListener('kg:ingest-progress', listener);
-    },
   },
 });

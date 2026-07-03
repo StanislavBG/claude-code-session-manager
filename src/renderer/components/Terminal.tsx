@@ -70,7 +70,7 @@ export function Terminal({ tabId, cwd }: Props) {
     // IPC opens the URL in the OS default browser via shell.openExternal,
     // with main-side filter rejecting non-http(s) schemes.
     term.loadAddon(new WebLinksAddon((_event, url) => {
-      window.api.app.openExternal(url).catch(() => {
+      window.api.shell.open({ as: 'external', url }).catch(() => {
         toast.error(`Couldn't open URL: ${url}`)
       })
     }))

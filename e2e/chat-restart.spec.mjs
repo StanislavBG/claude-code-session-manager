@@ -15,6 +15,20 @@ import { installTabsJsonBackup, TABS_JSON } from './_helpers/tabsJsonBackup.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 
+// Navigate via the Cmd-K palette with keyboard Enter, mirroring
+// tests/e2e/_helpers/launchApp.ts#navigateToTab: the app's pollers re-render
+// constantly, so sidebar buttons are never "stable" enough for Playwright's
+// click actionability checks — a raw .click() on the nav hangs until timeout.
+async function gotoTerminal(win) {
+  await win.keyboard.press('Control+K')
+  const palette = win.locator('[data-testid="command-palette"]')
+  await palette.waitFor({ state: 'visible', timeout: 5_000 })
+  await win.locator('[data-testid="command-palette"] input[role="combobox"]').fill('go to terminal')
+  await win.locator('button[data-cmd-id="nav:terminal"]').first().waitFor({ state: 'visible', timeout: 3_000 })
+  await win.keyboard.press('Enter')
+  await palette.waitFor({ state: 'hidden', timeout: 3_000 })
+}
+
 installTabsJsonBackup(test)
 
 // Count claude processes that are descendants of the given pid (the Electron
@@ -55,9 +69,13 @@ function claudeChildrenOf(pid) {
 }
 
 async function launch() {
+  // Tab id / claudeSessionId MUST be a real UUID — the chat engine passes it
+  // to `claude -p --session-id`, which rejects non-UUIDs with exit code 1
+  // ("Invalid session ID. Must be a valid UUID").
+  const sessionId = crypto.randomUUID()
   const seedTab = {
-    id: `restart-tab-${Date.now()}`,
-    claudeSessionId: `restart-session-${Date.now()}`,
+    id: sessionId,
+    claudeSessionId: sessionId,
     cwd: ROOT,
     label: 'restart-rehearsal',
     presetId: 'pick-dangerous',
@@ -89,16 +107,31 @@ test('boot: dormant chat box renders + ZERO claude on boot', async () => {
   // 1) App booted, no fatal page errors.
   expect(errors, `page errors on boot: ${errors.join(' | ')}`).toEqual([])
 
-  // 2) Dormant chat box renders (NOT a live xterm). The "Open raw session"
-  //    button + the chat textarea are the TerminalChat signature.
-  await expect(win.getByRole('button', { name: /Open raw session/i })).toBeVisible({ timeout: 15_000 })
-  await expect(win.getByPlaceholder(/Type a command/i)).toBeVisible({ timeout: 5_000 })
+  // NOTE on locators: if the user's real Session Manager is open it rewrites
+  // ~/.claude/session-manager/tabs.json between our seed-write and app boot,
+  // so the test instance can hydrate MANY dormant tabs — every one mounts a
+  // TerminalChat. Filter to the visible one instead of assuming a single tab.
+  const rawSessionBtns = win.getByRole('button', { name: /Open raw session/i })
+  const visibleRawSessionBtn = rawSessionBtns.locator('visible=true')
 
-  // 3) ZERO claude processes spawned by the app on boot (the core regression).
+  // 2) The app boots on the Overview screen — the dormant chat box must NOT
+  //    leak through it. (Regression: the per-tab layer once forced
+  //    `visibility: visible`, overriding the hidden terminal layer, so this
+  //    assertion passed without the chat box ever being on screen.)
+  await expect(visibleRawSessionBtn).toHaveCount(0, { timeout: 15_000 })
+
+  // 3) Navigate to Terminal: the dormant chat box renders (NOT a live xterm).
+  //    "Open raw session" + the chat textarea are the TerminalChat signature.
+  await gotoTerminal(win)
+  await expect(visibleRawSessionBtn).toHaveCount(1, { timeout: 15_000 })
+  await expect(win.getByPlaceholder(/Type a command/i).locator('visible=true')).toHaveCount(1, { timeout: 5_000 })
+
+  // 4) ZERO claude processes spawned by the app on boot (the core regression) —
+  //    even after landing on the terminal, the dormant tab must not spawn.
   const onBoot = claudeChildrenOf(mainPid)
   expect(onBoot, `expected 0 claude children on boot, found ${onBoot}`).toBe(0)
 
-  // 4) Evidence: the visible chat-box text (reliable), plus a best-effort
+  // 5) Evidence: the visible chat-box text (reliable), plus a best-effort
   //    screenshot (page.screenshot can hang on web-font loading under xvfb).
   const visibleText = (await win.locator('body').innerText()).replace(/\s+/g, ' ').trim()
   console.log(`[chat-box visible text] ${visibleText.slice(0, 300)}`)
@@ -118,19 +151,32 @@ test('boot: dormant chat box renders + ZERO claude on boot', async () => {
 test.skip('send: Enter wires a headless run (claude child spawns)', async () => {
   const { app, win } = await launch()
   const mainPid = app.process().pid
-  const input = win.getByPlaceholder(/Type a command/i)
-  await expect(input).toBeVisible({ timeout: 15_000 })
+  // Boot lands on Overview — route to the terminal before interacting.
+  await gotoTerminal(win)
+  // The visible chat box only — a live user session can inject extra tabs
+  // via the shared tabs.json (see note in the boot test).
+  const input = win.getByPlaceholder(/Type a command/i).locator('visible=true')
+  await expect(input).toHaveCount(1, { timeout: 15_000 })
 
   await input.fill('print exactly: chat-restart-ok')
-  await win.getByRole('button', { name: /^Send$/ }).click()
-  await expect(win.getByText(/running…|queued ·/i)).toBeVisible({ timeout: 8_000 })
+  // Enter submits (see TerminalChat onKeyDown); the Send button is skipped for
+  // the same actionability reason as gotoTerminal.
+  await input.press('Enter')
+  await expect(win.getByText(/running…|queued ·/i).locator('visible=true').first()).toBeVisible({ timeout: 8_000 })
 
   let spawned = 0
   for (let i = 0; i < 20 && spawned === 0; i++) { spawned = claudeChildrenOf(mainPid); await win.waitForTimeout(500) }
-  await win.screenshot({ path: path.join(ROOT, 'e2e', '_artifacts-chat-running.png') })
   expect(spawned, 'a claude child should spawn after Send').toBeGreaterThan(0)
 
-  const cancelBtn = win.getByRole('button', { name: /^Cancel$/ })
+  // Full round-trip: the run's own final message renders verbatim in the chat.
+  await expect(win.getByText('chat-restart-ok', { exact: true }).locator('visible=true').first())
+    .toBeVisible({ timeout: 90_000 })
+  // Best-effort evidence — page.screenshot can hang on font loading under xvfb.
+  try {
+    await win.screenshot({ path: path.join(ROOT, 'e2e', '_artifacts-chat-running.png'), timeout: 8000 })
+  } catch { /* non-fatal */ }
+
+  const cancelBtn = win.getByRole('button', { name: /^Cancel$/ }).locator('visible=true').first()
   if (await cancelBtn.isVisible().catch(() => false)) await cancelBtn.click()
   await app.close()
 })

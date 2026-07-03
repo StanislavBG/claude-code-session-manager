@@ -27,7 +27,6 @@ export type NavKey =
   | 'usage'
   | 'doc-editor'
   | 'scheduler'
-  | 'knowledge-graph'
   // In-app file editor scene. Launched from the Files sidebar + terminal links
   // (no left-nav row of its own — Files is the launch point).
   | 'editor'

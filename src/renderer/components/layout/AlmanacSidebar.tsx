@@ -47,7 +47,6 @@ const WORKSPACE: NavGroupItem[] = [
   { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
   { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
-  { key: 'knowledge-graph', label: 'Knowledge Graph', icon: 'knowledge-graph', hint: 'Distilled graph + Q&A over your prompt log' },
 ]
 
 const CONFIGURE: NavGroupItem[] = [

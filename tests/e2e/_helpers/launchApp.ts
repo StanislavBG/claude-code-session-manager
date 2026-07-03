@@ -75,7 +75,10 @@ export async function navigateToTab(win: Page, navKey: string): Promise<void> {
   // click because the palette list re-renders on the scheduler's 2s poller and
   // is never "stable" enough for Playwright's click actionability checks.
   const input = win.locator('[data-testid="command-palette"] input[role="combobox"]')
-  await input.fill(`go to ${navKey.replace(/-/g, ' ')}`)
+  // Keys whose palette label diverges from the nav key — the fuzzy filter
+  // matches the LABEL ("Go to File Explorer"), so "go to projects" finds nothing.
+  const LABEL_OVERRIDES: Record<string, string> = { projects: 'file explorer' }
+  await input.fill(`go to ${LABEL_OVERRIDES[navKey] ?? navKey.replace(/-/g, ' ')}`)
   await win.locator(`button[data-cmd-id="nav:${navKey}"]`).first().waitFor({ state: 'visible', timeout: 3_000 })
   await win.keyboard.press('Enter')
   await palette.waitFor({ state: 'hidden', timeout: 3_000 })

@@ -313,8 +313,6 @@ function registerHotkeyHandlers() {
     return { ok: true, config: currentConfig };
   }));
 
-  ipcMain.handle('voice:get-hotkey-config-path', () => voiceSettings.storePath());
-
   // F5 — device picker preference (additive subtree on voice.json).
   ipcMain.handle('voice:get-device-pref', async () => {
     return await voiceSettings.loadDevice();

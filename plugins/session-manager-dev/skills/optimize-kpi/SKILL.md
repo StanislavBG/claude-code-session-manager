@@ -4,7 +4,7 @@ description: >-
   Project-agnostic North-Star-KPI optimization cycle. Reads the current project's
   declared North-Star KPI from its CLAUDE.md, measures it, audits real
   consumption/usage telemetry + operational logs, grades the prior iteration's
-  filed lever, then fans out 3 INDEPENDENT recommender agents (Opus 4.8, max
+  filed lever, then fans out 3 INDEPENDENT recommender agents (Fable 5, max
   thinking) that each diagnose the gap and propose the single
   highest-leverage improvement — every recommendation grounded in usage + logs,
   not the scorecard alone; one consolidator agent merges them into ONE feedback
@@ -14,7 +14,7 @@ description: >-
   "optimize the KPI", "improve our north-star metric", or runs the daily KPI
   optimization loop. Keywords: optimize, KPI, north-star, metric, coverage,
   recommenders, consolidate, feedback, scheduler, attribution.
-model: opus
+model: fable
 ---
 
 # /optimize-kpi — measure → grade last lever → 3 recommenders → consolidate → file → scheduler
@@ -158,12 +158,12 @@ the point; do not coordinate them. (Default panel = 3; you may scale to 4–5 wh
 the gap is large and token budget allows, or drop to 2 for a tiny gap — note the
 choice.)
 
-- **Model:** `opus` (Opus 4.8) with **failover to `sonnet`** — launch each agent
-  with `model: opus`; if an agent dies on a model/availability error, re-spawn
-  that one with `model: sonnet`. A **mixed panel** (some opus, some sonnet) is
-  fine — don't block waiting for a uniform fleet. (Fable is not GA and only
-  causes availability failures — do not use it.) Instruct each to think at
-  **maximum depth** before answering.
+- **Model:** `fable` (Fable 5) with **failover to `opus`, then `sonnet`** — launch
+  each agent with `model: fable`; if an agent dies on a model/availability error,
+  re-spawn that one with `model: opus`, and `sonnet` only if opus is also
+  unavailable. A **mixed panel** (some fable, some opus/sonnet) is fine — don't
+  block waiting for a uniform fleet. Instruct each to think at **maximum depth**
+  before answering.
 - **Prompt (identical for all 3, vary only an angle hint):** give each the KPI
   statement, the definition doc path, the Step-1 scorecard block, the **Step-1b
   usage+log evidence block**, the **Step-2 prior-lever grade + in-flight/cooldown
@@ -197,7 +197,7 @@ choice.)
 
 ## Step 4 — Consolidate into ONE recommendation + a ranked backlog (single agent)
 
-Spawn **one** consolidator agent (same `opus`→`sonnet` failover, max thinking).
+Spawn **one** consolidator agent (same `fable`→`opus`→`sonnet` failover, max thinking).
 Give it the 3 temp files **and** the Step-2 in-flight/cooldown set. It must:
 
 - Read all three, dedupe overlapping ideas, and **score** the distinct proposals

@@ -222,16 +222,32 @@ function runProbe(claudeBin, prompt) {
       return;
     }
 
+    // Wall-clock ceiling: --max-budget-usd is NOT a time bound (a network stall
+    // never bills), so a wedged probe would otherwise never resolve, permanently
+    // consuming a probe slot AND leaking an Opus `claude -p` process. SIGTERM then
+    // SIGKILL, and fail-safe to 'ok' on expiry.
+    const PROBE_TIMEOUT_MS = 120_000;
+    let killTimer = null;
+    const killCeiling = setTimeout(() => {
+      console.warn('[supervisor] probe exceeded wall-clock ceiling — killing');
+      try { child.kill('SIGTERM'); } catch { /* */ }
+      killTimer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* */ } }, 3000);
+      resolve({ verdict: 'ok', action: 'none', targetPid: null, reason: 'probe timeout', costUsd: null });
+    }, PROBE_TIMEOUT_MS);
+    const clearTimers = () => { clearTimeout(killCeiling); if (killTimer) clearTimeout(killTimer); };
+
     const stdoutChunks = [];
     child.stdout.on('data', (b) => stdoutChunks.push(b));
     child.stderr.on('data', () => { /* discard */ });
 
     child.on('error', (e) => {
+      clearTimers();
       console.error('[supervisor] probe process error:', e?.message);
       resolve({ verdict: 'ok', action: 'none', targetPid: null, reason: `probe error: ${e?.message}`, costUsd: null });
     });
 
     child.on('exit', () => {
+      clearTimers();
       const stdout = Buffer.concat(stdoutChunks).toString('utf8');
       let costUsd = null;
       let verdictObj = null;

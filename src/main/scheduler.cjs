@@ -52,7 +52,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
-const { claudePidAlive, classifyRunOutcome } = require('./lib/reaperHelpers.cjs');
+const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP } = require('./lib/reaperHelpers.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
@@ -101,7 +101,8 @@ const IDLE_CHECK_INTERVAL_MS = 60_000;
 // total (1 original run + 5 requeues). Mirrors the spirit of the transient-retry
 // path (live-kill, addressed in 4c5013c) but for boot reconciliation orphans.
 // Raised from 2 → 5 to survive burst restart storms (feedback 2026-06-15-01).
-const ORPHAN_REQUEUE_CAP = 5;
+// Value lives in reaperHelpers.cjs (imported above) so the external watchdog
+// shares the exact same budget — both increment the same j.orphanRetries field.
 
 // Appended to every scheduled job prompt so the queue can be RELIED ON to finish
 // work to a consistent bar: review → security-review → verify → commit. Enforced
@@ -674,6 +675,25 @@ let heartbeatInterval = null;
 // In-memory set of slugs currently spawned in this process. Prevents
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
+// Auto-fix investigations spawn Opus `claude -p` OUTSIDE runningSet/pickNextBatch,
+// so they must be capped independently or a boot with N needs_review jobs fans out
+// N concurrent Opus processes — the >3-concurrent class that OOM-killed Electron.
+// Over-cap requests are QUEUED (not dropped) and drained as slots free, so a failed
+// PRD that never reaches 'needs_review' still eventually gets its fix-plan authored.
+let investigationsInFlight = 0;
+const MAX_CONCURRENT_INVESTIGATIONS = 1;
+const deferredInvestigations = new Map(); // fixable-job slug -> { failedJob, runDir }
+
+function drainDeferredInvestigation() {
+  if (investigationsInFlight >= MAX_CONCURRENT_INVESTIGATIONS) return;
+  const next = deferredInvestigations.entries().next();
+  if (next.done) return;
+  const [slug, ctx] = next.value;
+  deferredInvestigations.delete(slug);
+  spawnInvestigation(ctx.failedJob, ctx.runDir).catch((e) => {
+    console.error('[scheduler] drained investigation error', slug, e);
+  });
+}
 let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
 let lastMemGate = null;
@@ -1144,8 +1164,31 @@ function isPromotableOriginal(status) {
 async function spawnInvestigation(failedJob, runDir) {
   if (isFixPlanSlug(failedJob.slug)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is itself a fix plan`);
-    return;
+    return { deferred: false };
   }
+  if (investigationsInFlight >= MAX_CONCURRENT_INVESTIGATIONS) {
+    // Queue for retry when a slot frees rather than dropping — otherwise a failed
+    // job (never 'needs_review', so reverifyNeedsReview won't retry it) would
+    // silently never get an auto-authored fix-plan.
+    if (!deferredInvestigations.has(failedJob.slug)) {
+      deferredInvestigations.set(failedJob.slug, { failedJob, runDir });
+      console.log(`[scheduler] investigation queued for ${failedJob.slug} (slot busy, ${deferredInvestigations.size} waiting)`);
+    }
+    return { deferred: true };
+  }
+  // Reserve the slot synchronously (before any await) so concurrent callers can't
+  // both pass the cap check. Released in onExit, on any pre-spawn early return, or
+  // on a synchronous throw (try/catch below) — and releasing hands the slot to a
+  // queued investigation so none are stranded.
+  investigationsInFlight++;
+  let slotReleased = false;
+  const releaseSlot = () => {
+    if (slotReleased) return;
+    slotReleased = true;
+    investigationsInFlight--;
+    drainDeferredInvestigation();
+  };
+  try {
 
   const failedLogPath = path.join(runDir, `${failedJob.slug}.log`);
   const investigationLogPath = path.join(runDir, `${failedJob.slug}.investigation.log`);
@@ -1166,7 +1209,8 @@ async function spawnInvestigation(failedJob, runDir) {
 
   if (fs.existsSync(fixPath)) {
     console.log(`[scheduler] skip investigation: fix plan already exists at ${fixPath}`);
-    return;
+    releaseSlot();
+    return { deferred: false };
   }
 
   // cwd fallback: if the failed job's cwd is missing on disk, the investigator
@@ -1232,7 +1276,8 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
   if (!investigationPromptCheck.ok) {
     safeLog(`\n[scheduler] ${investigationPromptCheck.error}\n`);
     closeFd();
-    return;
+    releaseSlot();
+    return { deferred: false };
   }
 
   const claudeBin = resolveClaudeBin();
@@ -1271,6 +1316,7 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
     },
     watchdogs: [deadmanWatchdog],
     onExit({ exitCode, error, spawnFailed, safeLog: sl }) {
+      releaseSlot();
       if (error) {
         const errMsg = spawnFailed
           ? `investigation spawn failed: ${error?.message ?? String(error)}`
@@ -1291,6 +1337,13 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
 
   if (child) {
     safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
+  }
+  return { deferred: false };
+  } catch (e) {
+    // A synchronous throw before onExit is wired (e.g. resolveClaudeBin not found,
+    // openLog failure, spawn setup) must not strand the reserved slot.
+    releaseSlot();
+    throw e;
   }
 }
 
@@ -1934,8 +1987,10 @@ async function reverifyNeedsReview() {
     });
     for (const job of targets) {
       const runDir = path.join(RUNS_DIR, job.runId);
-      // Persist cap BEFORE spawning — a crash mid-investigation still counts
-      // the attempt (mirrors orphanRetries pattern).
+      // Persist the attempt BEFORE spawning — a crash mid-investigation still
+      // counts it (mirrors orphanRetries). Safe even when the slot is busy: the
+      // investigation is queued and drained as slots free, so it is genuinely
+      // attempted rather than silently dropped.
       await mutate((s) => {
         const j = s.jobs.find((x) => x.slug === job.slug);
         if (j) j.autoFixAttempted = true;
@@ -1987,13 +2042,6 @@ function registerScheduleHandlers() {
     };
   });
 
-  ipcMain.handle('schedule:reverify-needs-review', async () => {
-    // Manual trigger for the boot self-heal pass — re-scan needs_review jobs
-    // with the current verifier and auto-complete the ones that now pass clean.
-    const result = await reverifyNeedsReview();
-    return { ok: true, ...result };
-  });
-
   ipcMain.handle('schedule:force-tick', async () => {
     // Bypass the billing-poll gate entirely — fire pending jobs immediately regardless of meter state.
     // Clears any existing pause first (same semantics as run-now).
@@ -2039,12 +2087,6 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:resume', async () => {
     await clearPause('manual');
     return { ok: true };
-  });
-
-  ipcMain.handle('schedule:refresh-reset', async () => {
-    const at = await refreshNextReset().catch(() => cachedNextReset);
-    await rescheduleTimer();
-    return { ok: true, nextReset: at };
   });
 
   // Re-scan prds/ folder and merge into queue.json. The `schedule:state`

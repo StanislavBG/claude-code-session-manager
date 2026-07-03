@@ -322,18 +322,17 @@ function registerFilesHandlers() {
     const { path: p } = filesPath.parse(payload);
     return deleteEntry(p);
   });
-  ipcMain.handle('files:open-external', (_e, payload) => {
-    const { path: p } = filesPath.parse(payload);
-    return openExternal(p);
-  });
-  ipcMain.handle('files:show-in-finder', (_e, payload) => {
-    const { path: p } = filesPath.parse(payload);
-    return showInFinder(p);
-  });
+  // files:open-external / files:show-in-finder consolidated into shell:open
+  // (index.cjs, as: 'openPath' / 'revealPath'). The openExternal/showInFinder
+  // functions are exported for that handler to call.
 }
 
 module.exports = {
   registerFilesHandlers,
+  // Path-based reveal/open helpers — routed through the consolidated shell:open
+  // handler in index.cjs (as: 'openPath' / 'revealPath').
+  openExternal,
+  showInFinder,
   // exported for tests
   listDir,
   readFile,

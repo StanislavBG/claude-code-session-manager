@@ -270,21 +270,21 @@ export function Projects() {
   const handleOpenInEditor = async (r: ProjectRow) => {
     const cwd = await resolveCwd(r)
     if (!cwd) { showError('Project directory not yet resolved'); return }
-    const result = await window.api.app.openInEditor(cwd, editor || null)
+    const result = await window.api.shell.open({ as: 'editor', cwd, editor: editor || null })
     if (!result.ok) showError(result.error ?? 'No editor found')
   }
 
   const handleOpenInFinder = async (r: ProjectRow) => {
     const cwd = await resolveCwd(r)
     if (!cwd) { showError('Project directory not yet resolved'); return }
-    const result = await window.api.app.openInFinder(cwd)
+    const result = await window.api.shell.open({ as: 'finder', cwd })
     if (!result.ok) showError(result.error ?? 'Failed to open file manager')
   }
 
   const handleOpenInTerminal = async (r: ProjectRow) => {
     const cwd = await resolveCwd(r)
     if (!cwd) { showError('Project directory not yet resolved'); return }
-    const result = await window.api.app.openInTerminal(cwd)
+    const result = await window.api.shell.open({ as: 'terminal', cwd })
     if (!result.ok) showError(result.error ?? 'No terminal emulator found')
   }
 

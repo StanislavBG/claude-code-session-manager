@@ -228,33 +228,12 @@ async function deleteEntry({ agentId, entryId }) {
   }
 }
 
-async function listAgents() {
-  try {
-    await ensureRoot();
-    const dir = rootDir();
-    const r = await config.listDir(dir, { filesOnly: true });
-    if (!r.ok) return { agents: [], error: r.error };
-    const agents = r.entries
-      .filter((e) => e.name.endsWith('.json'))
-      .map((e) => ({
-        agentId: e.name.replace(/\.json$/, ''),
-        bytes: e.size,
-        mtimeMs: e.mtimeMs,
-      }))
-      .sort((a, b) => a.agentId.localeCompare(b.agentId));
-    return { agents, error: null };
-  } catch (e) {
-    return { agents: [], error: e.message };
-  }
-}
-
 function registerAgentMemoryHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('agent-memory:list', v(s.agentMemoryList, list));
   ipcMain.handle('agent-memory:get', v(s.agentMemoryGet, get));
   ipcMain.handle('agent-memory:set', v(s.agentMemorySet, set));
   ipcMain.handle('agent-memory:delete', v(s.agentMemoryDelete, deleteEntry));
-  ipcMain.handle('agent-memory:list-agents', () => listAgents());
 }
 
 module.exports = {

@@ -33,13 +33,13 @@ export function BinaryPane({ path, name, size, mime, reason }: Props) {
         <div className="mt-1 text-[11px] text-fg-faint">{reason} · {mime} · {humanSize(size)}</div>
         <div className="mt-5 flex items-center justify-center gap-2">
           <button
-            onClick={() => window.api.files.openExternal(path)}
+            onClick={() => window.api.shell.open({ as: 'openPath', path })}
             className="px-3 py-1 text-xs text-fg rounded bg-bg-hi border border-line hover:bg-bg-elev"
           >
             Open in default app
           </button>
           <button
-            onClick={() => window.api.files.showInFinder(path)}
+            onClick={() => window.api.shell.open({ as: 'revealPath', path })}
             className="px-3 py-1 text-xs text-fg-dim hover:text-fg border border-line rounded"
           >
             Reveal

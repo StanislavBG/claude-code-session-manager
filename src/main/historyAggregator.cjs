@@ -42,12 +42,6 @@ class LRUCache {
  */
 const aggrCache = new LRUCache(CACHE_MAX);
 
-/**
- * Cache for parseConversationMeta results.
- * Entry shape: { mtimeMs: number, size: number, readOffset: number, inode: number, result: MetaResult }
- */
-const metaCache = new LRUCache(CACHE_MAX);
-
 // ── date helpers ──────────────────────────────────────────────────────────────
 
 function decodeCwd(encoded) {
@@ -141,31 +135,6 @@ function scanAggrLines(lines, acc, captureFirst) {
     }
   }
   return firstTs;
-}
-
-/**
- * Scan JSONL lines into a conversation-meta accumulator (mutates meta).
- * captureFirst=true: record the first timestamp seen as meta.firstTs.
- */
-function scanMetaLines(lines, meta, captureFirst) {
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
-    const ts = obj.ts ?? obj.timestamp;
-    if (ts) {
-      if (captureFirst && meta.firstTs === null) meta.firstTs = ts;
-      meta.lastTs = ts;
-    }
-    const usage = obj.usage ?? obj.message?.usage;
-    if (usage && typeof usage === 'object') {
-      const inT = usage.input_tokens ?? usage.inputTokens;
-      const outT = usage.output_tokens ?? usage.outputTokens;
-      if (typeof inT === 'number') meta.inputTokens += inT;
-      if (typeof outT === 'number') meta.outputTokens += outT;
-    }
-  }
 }
 
 // ── cached file parsers ───────────────────────────────────────────────────────
@@ -269,71 +238,6 @@ async function parseJSONL(filePath, stat) {
   const readOffsetFull = lastNlFull >= 0 ? lastNlFull + 1 : 0;
   aggrCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset: readOffsetFull, inode: stat.ino, result: acc });
   return { result: acc, cacheHit: false };
-}
-
-/**
- * Parse a JSONL transcript for per-conversation metadata.
- * Returns { result, cacheHit } — same caching strategy as parseJSONL.
- */
-async function parseConversationMeta(filePath, stat) {
-  const emptyMeta = () => ({
-    firstTs: null,
-    lastTs: null,
-    inputTokens: 0,
-    outputTokens: 0,
-    skipped: false,
-  });
-
-  if (stat.size > MAX_FILE_BYTES) {
-    return { result: { ...emptyMeta(), skipped: true }, cacheHit: false };
-  }
-
-  const cached = metaCache.get(filePath);
-  if (cached) {
-    if (cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
-      return { result: cached.result, cacheHit: true };
-    }
-
-    if (stat.size > cached.size) {
-      if (cached.inode !== undefined && cached.inode !== stat.ino) {
-        // inode changed → file replaced; fall through to full parse
-      } else {
-        try {
-          const readFrom = cached.readOffset ?? cached.size;
-          const tail = await readSlice(filePath, readFrom, stat.size);
-          const delta = emptyMeta();
-          scanMetaLines(tail.split('\n'), delta, false);
-          const prev = cached.result;
-          const merged = {
-            firstTs: prev.firstTs, // first timestamp never changes on appends
-            lastTs: delta.lastTs ?? prev.lastTs,
-            inputTokens: prev.inputTokens + delta.inputTokens,
-            outputTokens: prev.outputTokens + delta.outputTokens,
-            skipped: false,
-          };
-          const lastNl = tail.lastIndexOf('\n');
-          const readOffset = lastNl >= 0 ? readFrom + lastNl + 1 : readFrom;
-          metaCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset, inode: stat.ino, result: merged });
-          return { result: merged, cacheHit: false };
-        } catch {
-          // fall through to full parse
-        }
-      }
-    }
-  }
-
-  // Full parse
-  let text;
-  try { text = await fsp.readFile(filePath, 'utf8'); } catch {
-    return { result: emptyMeta(), cacheHit: false };
-  }
-
-  const meta = emptyMeta();
-  scanMetaLines(text.split('\n'), meta, true);
-  const lastNlMeta = text.lastIndexOf('\n');
-  const readOffsetMeta = lastNlMeta >= 0 ? lastNlMeta + 1 : 0;
-  metaCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, readOffset: readOffsetMeta, inode: stat.ino, result: meta });
-  return { result: meta, cacheHit: false };
 }
 
 // ── aggregate ─────────────────────────────────────────────────────────────────
@@ -489,72 +393,6 @@ function registerHistoryAggregatorHandlers() {
     }
     sessions.sort((a, b) => b.mtimeMs - a.mtimeMs);
     return { sessions, scannedMs: Date.now() - t0 };
-  });
-
-  /** Per-conversation metadata: one row per JSONL with derived duration +
-   *  token totals. Used by the Overview detailed-stats panel to compute
-   *  hourly/daily distribution + top-projects. */
-  ipcMain.handle('history:list-conversations', async () => {
-    const t0 = Date.now();
-    const conversations = [];
-    let truncated = false;
-    let skippedBudgetFiles = 0;
-    let parseBudgetSpentMs = 0;
-
-    let projectEntries;
-    try {
-      projectEntries = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
-    } catch {
-      return { conversations: [], truncated: false, scannedMs: Date.now() - t0 };
-    }
-
-    outer:
-    for (const ent of projectEntries) {
-      if (!ent.isDirectory()) continue;
-      const projectDir = path.join(PROJECTS_DIR, ent.name);
-      const projectFolder = '/' + ent.name.replace(/-/g, '/');
-      let files;
-      try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { continue; }
-
-      for (const f of files) {
-        if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
-        const filePath = path.join(projectDir, f.name);
-        let stat;
-        try { stat = await fsp.stat(filePath); } catch { continue; }
-
-        const t1 = Date.now();
-        const { result: meta, cacheHit } = await parseConversationMeta(filePath, stat);
-        if (!cacheHit) parseBudgetSpentMs += Date.now() - t1;
-
-        if (!meta.skipped) {
-          const firstTs = meta.firstTs || new Date(stat.mtimeMs).toISOString();
-          const duration =
-            meta.firstTs && meta.lastTs
-              ? Math.max(0, Date.parse(meta.lastTs) - Date.parse(meta.firstTs))
-              : undefined;
-          conversations.push({
-            timestamp: firstTs,
-            projectFolder,
-            stats: {
-              ...(duration !== undefined ? { duration } : {}),
-              estimatedTokens: meta.inputTokens + meta.outputTokens,
-            },
-          });
-        }
-
-        if (!cacheHit && parseBudgetSpentMs > PARSE_BUDGET_MS) {
-          skippedBudgetFiles++;
-          truncated = true;
-          console.warn(
-            `[historyAggregator] list-conversations: parse budget exhausted after ${parseBudgetSpentMs}ms; ` +
-            `at least ${skippedBudgetFiles} file(s) skipped`
-          );
-          break outer;
-        }
-      }
-    }
-
-    return { conversations, truncated, scannedMs: Date.now() - t0 };
   });
 }
 

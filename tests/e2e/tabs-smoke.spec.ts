@@ -34,7 +34,6 @@ const TABS: NavKey[] = [
   'history',
   'keybindings',
   'usage',
-  'knowledge-graph',
 ]
 
 // Compile-time exhaustiveness: if NavKey gains a member, the assignment below

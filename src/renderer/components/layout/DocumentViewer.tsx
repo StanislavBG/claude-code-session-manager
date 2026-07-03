@@ -90,14 +90,14 @@ export function DocumentViewer({ filePath, onClose }: DocumentViewerProps) {
         <span className="ml-3 text-[10px] text-fg-faint truncate">{filePath}</span>
         <div className="flex-1" />
         <button
-          onClick={() => window.api.files.openExternal(filePath)}
+          onClick={() => window.api.shell.open({ as: 'openPath', path: filePath })}
           className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1"
           title="Open in default app"
         >
           Open
         </button>
         <button
-          onClick={() => window.api.files.showInFinder(filePath)}
+          onClick={() => window.api.shell.open({ as: 'revealPath', path: filePath })}
           className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1"
           title="Reveal in OS"
         >

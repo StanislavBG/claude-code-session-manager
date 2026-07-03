@@ -64,4 +64,10 @@ function classifyRunOutcome(logPath) {
   }
 }
 
-module.exports = { claudePidAlive, classifyRunOutcome };
+// Max times an orphaned job may be re-queued before giving up (marking failed).
+// Single source of truth: both the in-app reaper (scheduler.cjs) and the external
+// offline watchdog (watchdogHelpers.cjs) import this so their give-up budgets can
+// never drift apart (they increment the SAME j.orphanRetries field).
+const ORPHAN_REQUEUE_CAP = 5;
+
+module.exports = { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP };

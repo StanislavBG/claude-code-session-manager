@@ -35,11 +35,13 @@ const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 
-const SLUG_RE = /^[a-z0-9\-/]+$/;
+// Must start with an alphanumeric so a leading `-` can't smuggle a CLI flag into
+// `claude plugin install <slug>` (argv flag injection).
+const SLUG_RE = /^[a-z0-9][a-z0-9\-/]*$/;
 // Marketplace name: same shape as a plugin slug. Marketplace source (`add`):
 // a GitHub `owner/repo` (case-sensitive) or a dotted/hyphenated path segment.
 // Deliberately excludes whitespace, flags (leading `-`), and shell metachars.
-const MKT_NAME_RE = /^[a-z0-9\-/]+$/;
+const MKT_NAME_RE = /^[a-z0-9][a-z0-9\-/]*$/;
 const MKT_ADD_RE = /^[A-Za-z0-9][A-Za-z0-9._\-]*\/[A-Za-z0-9._\-]+$/;
 // Sentinel: register the marketplace that ships inside this app's own files
 // (the npx distribution). Resolved to an absolute path in-process so the

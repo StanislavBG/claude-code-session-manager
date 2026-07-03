@@ -141,29 +141,22 @@ const scheduleRetagPrd = z.object({
 // ──────────────────────────────────────────── Projects
 const ENCODED_SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
-const openInEditor = z.object({
-  cwd: z.string().min(1).max(4096),
-  editor: z.string().max(256).nullable().optional(),
-});
-
-const openExternal = z.object({
-  url: z.string().min(1).max(4096),
-});
-
-const openFileInEditor = z.object({
-  path: z.string().min(1).max(4096),
-  line: z.number().int().positive().optional(),
-  col: z.number().int().positive().optional(),
-  editor: z.string().max(256).nullable().optional(),
-});
-
-const openInFinder = z.object({
-  cwd: z.string().min(1).max(4096),
-});
-
-const openInTerminal = z.object({
-  cwd: z.string().min(1).max(4096),
-});
+// Consolidated shell "open/reveal" API. One channel (shell:open) replaces the
+// former app:open-in-editor / open-file-in-editor / open-in-finder /
+// open-in-terminal / open-external + files:open-external / show-in-finder.
+// Discriminated on `as`; each variant carries only its own fields. Per-variant
+// path/URL guards still run inside the handler (checkInsideHome / http(s) only).
+const _pathStr = z.string().min(1).max(4096);
+const _editorStr = z.string().max(256).nullable().optional();
+const shellOpen = z.discriminatedUnion('as', [
+  z.object({ as: z.literal('editor'), cwd: _pathStr, editor: _editorStr }),
+  z.object({ as: z.literal('fileInEditor'), path: _pathStr, line: z.number().int().positive().optional(), col: z.number().int().positive().optional(), editor: _editorStr }),
+  z.object({ as: z.literal('finder'), cwd: _pathStr }),
+  z.object({ as: z.literal('terminal'), cwd: _pathStr }),
+  z.object({ as: z.literal('external'), url: _pathStr }),
+  z.object({ as: z.literal('openPath'), path: _pathStr }),
+  z.object({ as: z.literal('revealPath'), path: _pathStr }),
+]);
 
 const archiveProject = z.object({
   encoded: z.string().regex(ENCODED_SLUG_RE).min(1).max(4096),
@@ -326,7 +319,7 @@ const historyAggregate = z.object({
 const VOICE_ACCELERATOR_RE = /^(CommandOrControl|CmdOrCtrl|Cmd|Command|Ctrl|Control|Alt|Option|Shift|Super|Meta)(\+(CommandOrControl|CmdOrCtrl|Cmd|Command|Ctrl|Control|Alt|Option|Shift|Super|Meta))*\+([A-Z]|[0-9]|F([1-9]|1[0-9]|2[0-4])|Space|Tab|Enter|Backspace|Delete|Escape|Esc)$/;
 
 const voiceSetHotkey = z.object({
-  accelerator: z.string().regex(VOICE_ACCELERATOR_RE),
+  accelerator: z.string().max(128).regex(VOICE_ACCELERATOR_RE),
   mode: z.enum(['hold', 'toggle']),
   global: z.boolean(),
   schemaVersion: z.number().int().optional(),
@@ -398,7 +391,9 @@ const repoAnalyze = z.object({
 
 // Plugin install: mirrors pluginInstall.cjs SLUG_RE + length cap. Defense in
 // depth — install() re-checks; the schema rejects earlier.
-const PLUGIN_SLUG_RE = /^[a-z0-9\-/]+$/;
+// Leading char must be alphanumeric — a `-` prefix would be parsed as a CLI flag
+// by `claude plugin install` (argv injection). Mirrors pluginInstall.cjs SLUG_RE.
+const PLUGIN_SLUG_RE = /^[a-z0-9][a-z0-9\-/]*$/;
 const PLUGIN_MKT_ADD_RE = /^[A-Za-z0-9][A-Za-z0-9._\-]*\/[A-Za-z0-9._\-]+$/;
 const pluginsInstall = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
@@ -475,8 +470,10 @@ const SAS_GATED_READS = new Set([
   'cmd:history:aggregate',
   // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',
-  // exchanges:list returns conversation content — sensitive user data.
-  'cmd:exchanges:list',
+  // NOTE: cmd:exchanges:list is intentionally NOT allowlisted — webRemote.cjs has
+  // no dispatch handler for it, so an allowlist entry would only fail closed with
+  // an opaque reject. Re-add here together with the handler when remote exchanges
+  // are wired, so the allowlist always mirrors an actual capability.
 ]);
 
 const MUTATE_COMMANDS = new Set([
@@ -530,11 +527,7 @@ module.exports = {
     scheduleArchivePrd,
     scheduleRetagPrd,
     setConfigSchema,
-    openInEditor,
-    openExternal,
-    openFileInEditor,
-    openInFinder,
-    openInTerminal,
+    shellOpen,
     archiveProject,
     historyAggregate,
     voiceSetHotkey,

@@ -73,6 +73,7 @@ take a different route if the codebase conventions say so.
 | 2026-06-10-02-verdict-recovered-env-probes-and-precedence | ✅ | Shipped: `Traceback→ModuleNotFoundError` reclassified as `verify_unavailable`; that class success-gated (recovered env probes annotate, don't downgrade) while real `transcript_errors` still hard-flag; commit-guard now always runs + materially-checkable verdict outranks pattern hits (carried as annotations). 4 tests, live re-scan of all 3 cited logs → clean. Stuck jobs auto-heal on boot reverify. AC-exit-code half deferred (no PRD-AC spec). |
 | 2026-06-14-01-definition-of-done-on-queue-drain | ✅ | Shipped: PRDs 108–111 all completed exitCode=0; `dodDrainHook.cjs` wired at drain, 5+ reports confirmed on disk. Queue drain now produces an audit without human trigger. |
 | 2026-06-15-01-self-restart-orphans-cross-project-prds | 🛠 queued | Partially addressed by `4c5013c` (live-kill transient window widened to 20min). Boot-reconciliation `ORPHAN_REQUEUE_CAP=2` unchanged; PRD 320 queued to raise it to 5. Immediate victim (105-held-cursor) completed. |
+| 2026-06-27-01-high-quality-develop-and-find-opportunity | 🆕 open | From sigma: add `/find-opportunity` (shared-repo triage) + a `quality: high` tier on `/develop` (N plans → best combo → N adversarial project-derived validations, under a token ceiling) + fold review/owner lessons into the project's own conventions. 3 independently-shippable asks. |
 
 ## Lessons for submitters (kept current)
 

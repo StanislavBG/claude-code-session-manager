@@ -10,7 +10,6 @@ import { Subagents } from './tabs/Subagents'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { EditorView } from './tabs/EditorView'
-import { KnowledgeGraph } from './tabs/KnowledgeGraph'
 import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
 import { SearchModal, type SearchMode } from './modals/SearchModal'
 import { VoiceModal } from './layout/VoiceModal'
@@ -70,7 +69,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   // ("The hive" h1 + eyebrow + blurb). Adding it here would double-render the heading.
   'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { eyebrow: 'Workspace',  title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
-  'knowledge-graph': { eyebrow: 'Workspace', title: 'Knowledge Graph',          intro: 'Distilled intelligence over your raw prompt log — entities and relations extracted from what you actually typed, with grounded Q&A over your own history. Distinct from Memory (curated facts Claude reads back); this is derived analytics you never hand-edit.' },
   'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
@@ -122,7 +120,6 @@ function renderScreen(active: NavKey, ctx: {
     switch (active) {
       case 'skills':        return <Skills />
       case 'subagents':     return <Subagents />
-      case 'knowledge-graph': return <KnowledgeGraph />
       case 'history':       return <History />
       case 'usage':         return <Usage />
       case 'prompts':       return <Prompts />
@@ -231,7 +228,11 @@ export function MainPane({
               <div
                 key={`${t.id}-${t.generation}`}
                 className="absolute inset-0"
-                style={{ visibility: t.id === activeTabId ? 'visible' : 'hidden' }}
+                // 'inherit', not 'visible': an explicit `visible` on a child
+                // OVERRIDES the outer layer's `hidden` (CSS visibility is
+                // per-element), leaving the active tab focusable/"visible"
+                // underneath whatever non-terminal screen is painted on top.
+                style={{ visibility: t.id === activeTabId ? 'inherit' : 'hidden' }}
               >
                 <Terminal tabId={t.id} cwd={t.cwd} />
               </div>

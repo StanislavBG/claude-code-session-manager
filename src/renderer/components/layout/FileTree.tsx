@@ -339,7 +339,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     if (isPreviewable(node.name) && onPreviewFile) {
       onPreviewFile(node.path)
     } else {
-      window.api.files.openExternal(node.path)
+      window.api.shell.open({ as: 'openPath', path: node.path })
     }
   }, [toggleDir, onPreviewFile])
 
@@ -524,8 +524,8 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
           onDelete={() => { setDeleteConfirm(menu.node); setMenu(null) }}
           onNewFile={() => { setCreatePrompt({ parent: menu.node.path, kind: 'file' }); setMenu(null) }}
           onNewFolder={() => { setCreatePrompt({ parent: menu.node.path, kind: 'folder' }); setMenu(null) }}
-          onOpenExternal={() => { window.api.files.openExternal(menu.node.path); setMenu(null) }}
-          onShowInFinder={() => { window.api.files.showInFinder(menu.node.path); setMenu(null) }}
+          onOpenExternal={() => { window.api.shell.open({ as: 'openPath', path: menu.node.path }); setMenu(null) }}
+          onShowInFinder={() => { window.api.shell.open({ as: 'revealPath', path: menu.node.path }); setMenu(null) }}
           onCopyPath={() => { navigator.clipboard?.writeText(menu.node.path); setMenu(null) }}
           onSendToChat={() => { sendPathToChat(menu.node.path); setMenu(null) }}
         />
@@ -620,7 +620,7 @@ function Rows(props: RowsProps): React.ReactElement {
                 else props.onFileClick(node)
               }}
               onDoubleClick={() => {
-                if (!node.isDirectory) window.api.files.openExternal(node.path)
+                if (!node.isDirectory) window.api.shell.open({ as: 'openPath', path: node.path })
               }}
               onContextMenu={(e) => onContextMenu(e, node)}
             >

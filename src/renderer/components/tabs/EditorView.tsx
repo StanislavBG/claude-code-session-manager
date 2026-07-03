@@ -87,6 +87,9 @@ export function EditorView() {
   const previewScrollRef = useRef<HTMLDivElement>(null)
   const saveTimer = useRef<number | undefined>(undefined)
 
+  const registerEditor = useCallback((ed: editor.IStandaloneCodeEditor | null) => { monacoRef.current = ed }, [])
+  const getEditor = useCallback(() => monacoRef.current, [])
+
   // Lazily read the active file into the buffer store (text files only; images
   // and PDFs are served straight to their pane over smfile://). Depends ONLY on
   // the active path: depending on buffers/loadState would re-run this effect when
@@ -212,9 +215,6 @@ export function EditorView() {
 
   const modes: ViewMode[] = canSplit ? ['edit', 'preview', 'split'] : renderable ? ['edit', 'preview'] : []
 
-  const registerEditor = useCallback((ed: editor.IStandaloneCodeEditor | null) => { monacoRef.current = ed }, [])
-  const getEditor = useCallback(() => monacoRef.current, [])
-
   // The Monaco editor pane for the active file, reused by edit + split modes.
   const codePane = path && (
     <CodeEditorPane
@@ -295,8 +295,8 @@ export function EditorView() {
           )}
 
           <button onClick={() => setFocusMode(true)} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1" title="Focus mode (Cmd/Ctrl-Shift-F)">Focus</button>
-          <button onClick={() => window.api.files.openExternal(path)} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1" title="Open in default app">Open</button>
-          <button onClick={() => window.api.files.showInFinder(path)} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded" title="Reveal in OS">Reveal</button>
+          <button onClick={() => window.api.shell.open({ as: 'openPath', path })} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1" title="Open in default app">Open</button>
+          <button onClick={() => window.api.shell.open({ as: 'revealPath', path })} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded" title="Reveal in OS">Reveal</button>
         </div>
       )}
 

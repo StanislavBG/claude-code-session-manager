@@ -23,432 +23,446 @@ export interface LearningContent {
 
 export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'overview': {
-    headline: 'Your home base — at-a-glance status of everything Claude Code knows about',
-    intro:
-      'The Overview is the first thing you see when you open Session Manager. It summarises your install: how many projects you have, how many past sessions are recorded, your billing usage for the current 5-hour and weekly windows, and quick counts of your skills, subagents, MCP servers, and plugins. Use it as a dashboard — if a number looks off, click into the matching tab to investigate.',
-    sections: [
-      {
-        title: 'What you see',
-        items: [
-          { term: 'Counts', body: 'Projects, sessions, skills, subagents, MCP servers, and plugins. Each one is a folder under ~/.claude/ that Claude Code reads at startup.' },
-          { term: 'Billing usage', body: 'Live read of your subscription quota: a 5-hour rolling bucket (refills every 5h) and a weekly bucket. Filled bar = used; empty bar = remaining. Pulled from the same endpoint Claude Code uses for /usage.' },
-          { term: 'Open tabs', body: 'How many terminal sessions you currently have running inside Session Manager.' },
-          { term: 'CLAUDE.md / settings.json present', body: 'Quick health checks. If either is missing, the corresponding tab will offer to create one when you first save.' },
-        ],
-      },
-      {
-        title: 'Behaviors this affects',
-        items: [
-          { body: 'Nothing here is editable — Overview only reads. Changing any of these numbers means going to the relevant tab (Projects, Skills, Settings, etc.) and saving there.' },
-          { body: 'Billing data refreshes every 60 seconds. If you see "auth needed" the OAuth token in ~/.claude/.credentials.json has expired — log in again with the Claude CLI.' },
-        ],
-      },
-    ],
-  },
-
+      headline: 'Your home base — a calm landing page for your local Claude Code cockpit',
+      intro:
+        'Overview is the first screen you see. It greets you by time of day and frames Session Manager as a local cockpit that wraps the Claude CLI alongside skills, hooks, MCP servers, and a scheduler. Nothing here phones home. The page is a launchpad, not a settings screen: a live 5-hour usage card, a few quick-start buttons, your most-recent sessions, and a peek at what is queued in the scheduler. Click any of them to jump straight into the relevant tab.',
+      sections: [
+        {
+          title: 'What you see',
+          items: [
+            { term: '5-hour window', body: 'A live read of your subscription usage for the current 5-hour rolling bucket: a bar that fills as you use it, the percent used, the local time it resets, and a live countdown of time remaining. Same data the Usage tab and the CLI /usage command read.' },
+            { term: 'Quick start', body: 'Four buttons — Start a session, Resume last (opens History), Draft a PRD (opens Scheduler), and Add a project (opens Projects) — plus a microphone button that opens voice input.' },
+            { term: 'Recent sessions', body: 'Your four most-recently-touched transcripts, scanned from ~/.claude/projects. Each row shows the project, the short session id, the transcript size, and how long ago it was active. Click a row to reopen that session with claude --resume.' },
+            { term: 'In the scheduler', body: 'A peek at the first three jobs in the scheduler queue, each tagged running or queued with a rough time estimate. “Open scheduler →” jumps to the full Scheduler tab.' },
+          ],
+        },
+        {
+          title: 'Behaviors this affects',
+          items: [
+            { body: 'Overview is read-only and click-through. It never edits anything; every button just navigates you to the tab that does the work (History, Scheduler, Projects, Voice) or starts a new session.' },
+            { body: 'The 5-hour countdown refreshes on a timer. If the usage card shows a dash, billing data is not loaded yet (or the Claude login has expired — re-authenticate with the CLI).' },
+          ],
+        },
+      ],
+    },
   'terminal': {
-    headline: 'A real Claude Code CLI running inside the app, with extra superpowers',
-    intro:
-      'The Terminal tab is a normal terminal session that runs the claude CLI for you. It looks identical to running claude in your own shell, but Session Manager keeps the process alive across nav switches, lets you script multi-tab broadcasts, attach background watchers, and restart cleanly. Each tab is one Claude session — its tab id IS the session id, so you can find its transcript on disk.',
-    sections: [
-      {
-        title: 'Top-bar controls',
-        items: [
-          { term: 'Restart Session', body: 'Kills the current claude process and spawns a fresh one in the same directory. Use this after editing settings, hooks, or skills so Claude reloads them.' },
-          { term: 'Restart App', body: 'Kills every session, quits Session Manager, and relaunches. All your tabs come back automatically. Use when something feels stuck.' },
-          { term: 'Broadcast', body: 'Send the same prompt to multiple selected tabs at once. Great for "run the test suite" across several worktrees.' },
-          { term: 'Watchers', body: 'Attach a long-running shell command (npm test --watch, tail -f log) to this tab. Each line of stdout streams back as a toast and is buffered in a 200-line ring. Survives tab switches, dies when the tab closes.' },
-        ],
-      },
-      {
-        title: 'Things that are easy to miss',
-        items: [
-          { body: 'The cwd shown in the header is the working directory the tab was opened in. Claude inherits that cwd.' },
-          { body: 'Closing a tab kills its claude process. Resuming the same session later from the History tab restarts claude with --session-id pointing at the old transcript.' },
-          { body: 'Voice input (microphone in the left sidebar) types into whichever tab is focused — no separate "voice tab".' },
-        ],
-      },
-    ],
-    tips: [
-      'Press Ctrl+C inside the terminal to interrupt Claude mid-response — same as the standalone CLI.',
-      'If the prompt looks frozen, scroll up: Claude often produced output but the cursor is below the visible window.',
-    ],
-  },
-
+      headline: 'A real Claude Code CLI running inside the app, kept alive across tab switches',
+      intro:
+        'The Terminal tab is a genuine terminal running the claude CLI for you. It behaves like running claude in your own shell, but Session Manager keeps the process alive when you switch to other tabs, makes file paths and URLs clickable, smooths over copy/paste, and lets you broadcast a prompt to several tabs or attach background watchers. Each tab is one Claude session — the tab id IS the session id, so the tab maps directly to its transcript on disk.',
+      sections: [
+        {
+          title: 'In the terminal pane',
+          items: [
+            { term: 'Settings gear (top-right)', body: 'A small gear opens a popover to change the terminal theme (Dark / Light / Paper) and font size (10–22px, with a reset). Changes apply instantly to every open terminal and persist between launches.' },
+            { term: 'Clickable file paths', body: 'Paths like src/main/index.cjs:42 are detected and underlined. Clicking one opens that file in the in-app editor at the right line. URLs are also clickable and open in your system browser.' },
+            { term: 'Paste images', body: 'Ctrl+V pastes clipboard text as usual, but if the clipboard holds an image it is saved to a temp PNG and its path is typed in — so you can paste a screenshot and let Claude read it.' },
+            { term: 'Smart Ctrl+C', body: 'With text selected, Ctrl+C copies it; with nothing selected, Ctrl+C passes through to interrupt Claude (same as a normal terminal). Ctrl+Shift+C always copies.' },
+          ],
+        },
+        {
+          title: 'Session commands (Command Palette / shortcuts)',
+          items: [
+            { term: 'Restart session', body: 'Ctrl+Shift+R kills this tab\'s claude process and spawns a fresh one in the same directory. Use it after editing settings, hooks, or skills so Claude reloads them.' },
+            { term: 'Reboot app', body: 'Relaunches Session Manager; your tabs come back automatically. Use when something feels stuck.' },
+            { term: 'Broadcast', body: 'Ctrl+Shift+B opens a bar to send the same prompt to several tabs at once. You tick which tabs to include; each row shows sent or skipped (a dead session is skipped).' },
+            { term: 'Watchers', body: 'Ctrl+Shift+W attaches a long-running shell command (e.g. npm test --watch, tail -f log) to this tab. Each new line of its output pops up as a toast. Watchers survive tab switches and stop when you remove them.' },
+          ],
+        },
+        {
+          title: 'Things that are easy to miss',
+          items: [
+            { body: 'Open the Command Palette (Cmd-K / Ctrl-K) to reach the session commands above, plus copy-cwd, copy-transcript path, and open-transcript.' },
+            { body: 'Switching to another tab does NOT kill the terminal — the claude process keeps running in the background and the screen is just hidden.' },
+            { body: 'Voice input (the microphone in the sidebar) types into whichever terminal tab is focused — there is no separate voice tab.' },
+          ],
+        },
+      ],
+      tips: [
+        'Press Ctrl+C with nothing selected to interrupt Claude mid-response — same as the standalone CLI.',
+        'If the prompt looks frozen, scroll up: Claude often produced output but the cursor is below the visible window.',
+      ],
+    },
   'system-prompt': {
-    headline: 'Edit the CLAUDE.md files that shape Claude\'s personality and house rules',
-    intro:
-      'CLAUDE.md is a plain-text file Claude reads at the start of every session. Whatever you write here is appended to its system prompt — so it\'s where you put coding standards, communication preferences, project context, and "always do X / never do Y" rules. Three files merge together at runtime: User (global, applies everywhere), Project (this repo), and Local (your personal overrides for this repo, gitignored by convention).',
-    sections: [
-      {
-        title: 'Editor / Presets toggle',
-        items: [
-          { term: 'Editor', body: 'Edit the actual CLAUDE.md file at the selected scope. Saves to disk; Claude picks it up on next session start.' },
-          { term: 'Presets', body: 'Browse a library of starter prompts (e.g. "concise responses", "TDD workflow", "prefers Python"). Click one to copy it into your editor, then refine.' },
-        ],
-      },
-      {
-        title: 'Scope (User / Project / Local)',
-        items: [
-          { term: 'User', body: 'Lives at ~/.claude/CLAUDE.md. Applies to every session you start, in every repo. Best for personal style: communication tone, default tooling preferences, things you always want.' },
-          { term: 'Project', body: 'Lives at <repo>/CLAUDE.md. Applies only when working in this repo. Best for shared team context: stack, architecture, do/don\'t lists, conventions. Should be committed to git.' },
-          { term: 'Local', body: 'Lives at <repo>/CLAUDE.local.md. Applies only when working in this repo, only on your machine. Best for personal overrides that shouldn\'t leak to teammates. Should be gitignored.' },
-          { body: 'At runtime all three are concatenated. If they disagree, more-specific wins: Local > Project > User.' },
-        ],
-      },
-      {
-        title: 'What\'s shown in the header',
-        items: [
-          { term: 'chars / tokens', body: 'Rough size estimate (~4 chars per token). The bigger the file, the more of Claude\'s context window is consumed before your real prompt — keep it tight.' },
-          { term: 'dirty marker (•) on a scope', body: 'You have unsaved edits at that scope. Switching away does NOT auto-save; click Save in the bottom bar.' },
-        ],
-      },
-    ],
-    tips: [
-      'New users: start by writing 3-5 bullets at User scope ("be concise", "use Python type hints", "always run tests after changes"). That alone changes Claude\'s behavior noticeably.',
-      'Don\'t write essays. Claude reads CLAUDE.md before every reply, so every word costs tokens. One-line rules beat paragraphs.',
-    ],
-  },
-
+      headline: 'Edit the CLAUDE.md files that shape Claude\'s house rules',
+      intro:
+        'CLAUDE.md is a plain-text file Claude reads at the start of every session. Whatever you write here is added to its instructions — so it\'s where you put coding standards, communication preferences, project context, and “always do X / never do Y” rules. Up to three files combine at runtime: User (global, applies everywhere), Project (this repo), and Local (your personal overrides for this repo, gitignored by convention). This tab is a markdown editor over whichever scope you pick.',
+      sections: [
+        {
+          title: 'Editor / Presets toggle',
+          items: [
+            { term: 'Editor', body: 'Edit the actual CLAUDE.md file at the selected scope. Save writes it to disk; Claude picks it up on its next session start.' },
+            { term: 'Presets', body: 'Browse a library of starter prompts. Use one as a starting point, then refine it in the editor.' },
+          ],
+        },
+        {
+          title: 'Scope (User / Project / Local)',
+          items: [
+            { term: 'User', body: 'Lives at ~/.claude/CLAUDE.md. Applies to every session you start, in every repo. Best for personal style: communication tone, default tooling preferences, things you always want.' },
+            { term: 'Project', body: 'Lives at <repo>/CLAUDE.md. Applies only when working in this repo. Best for shared team context: stack, architecture, do/don\'t lists, conventions. Commit it to git.' },
+            { term: 'Local', body: 'Lives at <repo>/CLAUDE.local.md. Applies only in this repo, only on your machine. Best for personal overrides that shouldn\'t reach teammates. Gitignore it.' },
+            { body: 'Project and Local scopes need an open project — if no tab has a working directory, those scopes are unavailable and the editor prompts you to open one. At runtime all present files combine; more-specific wins: Local > Project > User.' },
+          ],
+        },
+        {
+          title: 'What\'s shown in the header',
+          items: [
+            { term: 'chars / tokens', body: 'A rough size estimate (~4 chars per token). The bigger the file, the more of Claude\'s context window it consumes before your real prompt — keep it tight.' },
+            { term: 'dirty marker (•) on a scope', body: 'You have unsaved edits at that scope. Switching scope does NOT auto-save; use Save in the bottom bar (or Revert to discard).' },
+            { body: 'If a file doesn\'t exist yet, the bottom bar notes it will be created on save.' },
+          ],
+        },
+      ],
+      tips: [
+        'New users: start with 3–5 bullets at User scope (“be concise”, “use Python type hints”, “always run tests after changes”). That alone changes Claude\'s behavior noticeably.',
+        'Don\'t write essays. Claude reads CLAUDE.md before every reply, so every word costs tokens. One-line rules beat paragraphs.',
+      ],
+    },
   'settings': {
-    headline: 'The settings.json files that control Claude Code\'s behavior',
-    intro:
-      'Claude Code is configured by JSON files named settings.json. This tab shows three of them merged together: User (global), Project (shared with the repo), and Local (your private overrides). The Effective view shows the merged result Claude actually sees; Tree shows individual values; Raw lets you hand-edit JSON. Schemas come from schemastore.org, so you get autocomplete and validation as you type.',
-    sections: [
-      {
-        title: 'Views',
-        items: [
-          { term: 'Effective', body: 'The final merged config Claude reads. Each value shows which scope provided it. Click a row to override it at the current scope.' },
-          { term: 'Tree', body: 'Same data, expandable as a JSON tree. Useful when settings have nested objects (e.g. permissions, hooks).' },
-          { term: 'Raw', body: 'The JSON file at the active scope, edited directly. Save validates against the schema before writing.' },
-          { term: 'Telemetry', body: 'Privacy / data-collection toggles for the CLI itself.' },
-        ],
-      },
-      {
-        title: 'Common settings to know',
-        items: [
-          { term: 'model', body: 'Default model used when you start a session ("opus", "sonnet", "haiku"). Override per-session with /model in the terminal.' },
-          { term: 'permissions', body: 'Allow/deny lists for Bash commands, file edits, MCP tools, web fetches. See the dedicated Permissions tab — it\'s a friendlier UI for the same key.' },
-          { term: 'hooks', body: 'Shell commands the CLI runs in response to events (pre/post tool use, session start, etc.). See the Hooks tab.' },
-          { term: 'env', body: 'Environment variables injected into every claude process — handy for API keys or DEBUG flags.' },
-          { term: 'mcpServers', body: 'External tool servers Claude can call. Edit via the MCP Servers tab for a structured form.' },
-        ],
-      },
-      {
-        title: 'Scope precedence',
-        items: [
-          { body: 'Local overrides Project overrides User. So a Project-scoped setting beats a User-scoped one when you\'re working in that repo, and your personal Local file beats both.' },
-          { body: 'Lists merge (allow + allow), but objects do not — a Project-scoped { permissions: { allow: [...] } } REPLACES the user-scoped object wholesale unless you copy the entries you want to keep.' },
-        ],
-      },
-    ],
-    tips: [
-      'When in doubt, edit at User scope. Project-scoped settings get committed to git; teammates inherit them.',
-      'After changing settings.json, restart any open sessions (Restart Session button on the terminal tab) so Claude reloads.',
-    ],
-  },
-
+      headline: 'The settings.json files that control Claude Code\'s behavior',
+      intro:
+        'Claude Code is configured by JSON files named settings.json. This tab shows up to three of them combined: User (~/.claude/settings.json), Project (<repo>/.claude/settings.json, shared with the repo), and Local (<repo>/.claude/settings.local.json, your private overrides). The Guided view is a friendly card editor; Tree shows the merged values as a JSON tree; Raw lets you hand-edit the file. A bundled schema (from schemastore.org) gives you autocomplete and validation as you type.',
+      sections: [
+        {
+          title: 'Views',
+          items: [
+            { term: 'Guided', body: 'A card-based editor over the merged settings. Each setting shows which scope currently provides it; editing a card writes the change into the scope you\'ve selected.' },
+            { term: 'Tree', body: 'The same merged config as an expandable JSON tree. Useful for nested settings like permissions and hooks; you can override a value into the active scope from here too.' },
+            { term: 'Raw', body: 'The JSON file at the active scope, edited directly. Save validates before writing; a parse error blocks the save and is shown in the bottom bar.' },
+            { term: 'Telemetry', body: 'Opt-in OpenTelemetry export of Session Manager\'s own classified transcript events (tool names, todo counts, usage tokens). Off by default, stored separately from Claude\'s settings, and excludes prompt/plan content unless you turn on “Include content”.' },
+          ],
+        },
+        {
+          title: 'Common settings to know',
+          items: [
+            { term: 'model', body: 'Default model used when you start a session (e.g. “opus”, “sonnet”, “haiku”). Override per-session with /model in the terminal.' },
+            { term: 'permissions', body: 'Allow / Ask / Deny lists for Bash commands, file edits, MCP tools, web fetches. The dedicated Permissions tab is a friendlier UI for this same key.' },
+            { term: 'hooks', body: 'Shell commands the CLI runs in response to events (pre/post tool use, session start, etc.). See the Hooks tab.' },
+            { term: 'env', body: 'Environment variables injected into every claude process — handy for API keys or DEBUG flags.' },
+            { term: 'mcpServers', body: 'External tool servers Claude can call. Edit via the MCP Servers tab for a structured form.' },
+          ],
+        },
+        {
+          title: 'Scope precedence',
+          items: [
+            { body: 'Local overrides Project overrides User. A Project-scoped setting beats a User-scoped one when you work in that repo, and your personal Local file beats both. Project and Local require an open project tab — with no working directory, only User is editable.' },
+            { body: 'Lists merge (allow + allow), but objects do not — a Project-scoped { permissions: { allow: [...] } } REPLACES the user-scoped object wholesale unless you copy the entries you want to keep.' },
+          ],
+        },
+      ],
+      tips: [
+        'When in doubt, edit at User scope. Project-scoped settings get committed to git; teammates inherit them.',
+        'After changing settings.json, restart any open sessions (Restart session, Ctrl+Shift+R) so Claude reloads.',
+      ],
+    },
   'permissions': {
-    headline: 'Decide which tools Claude can run automatically and which need your OK',
-    intro:
-      'Every action Claude takes — running a Bash command, editing a file, calling an MCP tool — passes through a permission check. This tab is a structured editor for the permissions block in settings.json. You build three lists (Allow / Ask / Deny) of glob-style rules; Claude consults them in order. Get this right and you barely see permission prompts; get it wrong and either you\'re hammered with confirmations or Claude runs something you didn\'t want.',
-    sections: [
-      {
-        title: 'The three lists',
-        items: [
-          { term: 'Allow', body: 'Claude runs matching actions silently — no confirmation prompt. Use for safe, repetitive things: "Bash(npm test:*)", "Read(*)", "Edit(src/**)".' },
-          { term: 'Ask', body: 'Claude pauses and asks you before running. The default for anything not explicitly allowed (depending on defaultMode).' },
-          { term: 'Deny', body: 'Claude refuses outright, even if you\'d say yes interactively. Use for genuinely dangerous things: "Bash(rm -rf:*)", "Edit(.env)".' },
-        ],
-      },
-      {
-        title: 'Rule shape',
-        items: [
-          { term: 'Tool(pattern)', body: 'Format is "<ToolName>(<glob>)". Examples: Bash(git push:*), Edit(src/**/*.ts), WebFetch(domain:*.example.com).' },
-          { term: ':*', body: 'Trailing colon-star means "any arguments". Bash(npm:*) allows every npm subcommand; Bash(npm test) only allows the literal "npm test".' },
-          { body: 'Deny wins ties. If a request matches both Allow and Deny, Deny takes effect.' },
-        ],
-      },
-      {
-        title: 'defaultMode',
-        items: [
-          { term: 'default', body: 'Out-of-the-box behavior: ask for risky operations, allow harmless reads.' },
-          { term: 'acceptEdits', body: 'Auto-approve file edits within the session\'s working tree. Speeds up iterative coding; disable for prod repos.' },
-          { term: 'plan', body: 'Read-only mode. Claude can explore and propose, but cannot edit or run shell commands. Good for code review sessions.' },
-          { term: 'bypassPermissions', body: 'Skip ALL prompts. Equivalent to --dangerously-skip-permissions. Use only in throwaway sandboxes.' },
-        ],
-      },
-    ],
-    tips: [
-      'Start permissive at User scope (your common safe commands), then tighten at Project scope for repos with secrets.',
-      'additionalDirectories lets Claude read files outside the cwd. Add reference repos here without cd\'ing into each one.',
-    ],
-  },
-
+      headline: 'Decide which tools Claude can run automatically and which need your OK',
+      intro:
+        'Every action Claude takes — running a Bash command, editing a file, calling an MCP tool — passes a permission check. This tab is a structured editor for the permissions block inside settings.json (there is no separate permissions file). You build three lists — Allow / Deny / Ask — of rules; get them right and you barely see prompts, get them wrong and you\'re either hammered with confirmations or Claude runs something you didn\'t want.',
+      sections: [
+        {
+          title: 'Views',
+          items: [
+            { term: 'Effective', body: 'The merged permissions Claude actually sees, as a tree, with which scope each value came from. Read-and-override here.' },
+            { term: 'Rules', body: 'The structured editor: a Default Mode picker, the Allow / Deny / Ask lists (type a rule and press Enter or click add; × to remove), and Additional Directories. Edits write into the scope you\'ve selected.' },
+            { term: 'Presets', body: 'A starter library of common permission sets to copy from.' },
+          ],
+        },
+        {
+          title: 'The three lists',
+          items: [
+            { term: 'Allow', body: 'Claude runs matching actions silently — no confirmation. Use for safe, repetitive things: Bash(ls:*), Read(~/.claude/**), Edit(src/**).' },
+            { term: 'Deny', body: 'Claude refuses outright, even if you\'d say yes interactively. Use for genuinely dangerous things: Bash(rm -rf:*), Write(/etc/**).' },
+            { term: 'Ask', body: 'Claude pauses and asks before running. Sits between Allow and Deny for things you want to eyeball each time.' },
+          ],
+        },
+        {
+          title: 'Rule shape',
+          items: [
+            { term: 'Tool(pattern)', body: 'Format is <ToolName>(<pattern>). Examples: Bash(git push:*), Edit(src/**/*.ts), WebFetch(domain:*.example.com).' },
+            { term: ':*', body: 'A trailing colon-star means “any arguments”. Bash(npm:*) allows every npm invocation; Bash(npm test) only the literal “npm test”.' },
+            { body: 'Deny wins ties. If a request matches both Allow and Deny, Deny takes effect. (See the “rule syntax” link in the toolbar for the full grammar.)' },
+          ],
+        },
+        {
+          title: 'Default Mode',
+          items: [
+            { term: 'default', body: 'Out-of-the-box behavior: ask for risky operations, allow harmless reads.' },
+            { term: 'acceptEdits', body: 'Auto-approve file edits within the session\'s working tree. Speeds up iterative coding; avoid for prod repos.' },
+            { term: 'plan', body: 'Read-only mode. Claude can explore and propose, but cannot edit or run shell commands. Good for review sessions.' },
+            { term: 'bypassPermissions', body: 'Skip ALL prompts. Equivalent to --dangerously-skip-permissions. Use only in throwaway sandboxes.' },
+          ],
+        },
+      ],
+      tips: [
+        'Start permissive at User scope (your common safe commands), then tighten at Project scope for repos with secrets.',
+        'Additional Directories lets Claude read files outside the cwd — add reference repos here as absolute paths instead of cd’ing into each one.',
+      ],
+    },
   'skills': {
-    headline: 'Reusable instructions Claude loads on demand for specific tasks',
-    intro:
-      'A skill is a markdown file that teaches Claude how to do one specific thing — "write Playwright tests", "review SQL migrations", "format an OpenAPI doc". Each skill has frontmatter describing when to trigger it and a body with the actual instructions. Claude doesn\'t load all skills up front; it scans titles and pulls the body in only when a relevant request arrives, keeping your context tight.',
-    sections: [
-      {
-        title: 'List + Detail',
-        items: [
-          { term: 'Left column', body: 'Every skill installed at the current scope (User: ~/.claude/skills/, Project: <repo>/.claude/skills/). Click one to open its markdown.' },
-          { term: 'Editor', body: 'Standard markdown. The frontmatter (the --- block at the top) controls discovery; the body is what Claude reads when the skill fires.' },
-          { term: 'Library tab', body: 'Browse a curated collection of community skills. Click Install to copy one into your local skills folder.' },
-        ],
-      },
-      {
-        title: 'Skill anatomy',
-        items: [
-          { term: 'name', body: 'Used in transcripts and the Library. Should be unique within a scope.' },
-          { term: 'description', body: 'Critical — Claude scans descriptions to decide when to load this skill. Be specific about WHEN to use it ("when writing E2E tests with Playwright"), not just what it does.' },
-          { term: 'allowed-tools', body: 'Optional. Restricts which tools Claude can use while the skill is active. Adds an extra layer of safety on top of permissions.' },
-          { term: 'Body', body: 'Plain markdown. Procedures, code examples, do/don\'t lists. This is what Claude actually reads.' },
-        ],
-      },
-      {
-        title: 'Slash commands',
-        items: [
-          { body: 'Commands (in ~/.claude/commands/ or .claude/commands/) are skills you invoke explicitly with /name. Skills proper are auto-loaded; commands are user-triggered.' },
-          { body: 'This tab edits both — same shape on disk, different folders.' },
-        ],
-      },
-    ],
-    tips: [
-      'A bad description is worse than no skill — Claude either won\'t load it when needed, or will load it constantly and waste tokens.',
-      'When refining a skill, use Restart Session in the terminal so Claude reloads it.',
-    ],
-  },
-
+      headline: 'Reusable instructions Claude loads on demand for specific tasks',
+      intro:
+        'A skill is a markdown file that teaches Claude how to do one specific thing — "write Playwright tests", "review SQL migrations", "format an OpenAPI doc". Each skill has frontmatter describing when to trigger it and a body with the actual instructions. Claude doesn\'t load all skills up front; it scans titles and pulls the body in only when a relevant request arrives, keeping your context tight.',
+      sections: [
+        {
+          title: 'List + Detail',
+          items: [
+            { term: 'Scope switch', body: 'Toggle User vs Project at the top. User skills live in ~/.claude/skills/ and apply everywhere; Project skills live in <repo>/.claude/skills/ and only when a tab is open in that repo. The toolbar shows the item count and the file path of the selected skill.' },
+            { term: 'Sidebar', body: 'Two groups — Skills and Slash Commands — with a filter box that matches on name. Click an entry to open its markdown in the editor.' },
+            { term: 'Enable toggle', body: 'Each skill has an on/off switch. Turning it off writes disable-model-invocation into the skill\'s frontmatter, so Claude stops auto-invoking it; the file stays on disk and the name shows struck-through. Slash commands have no toggle.' },
+            { term: 'Remove (✕)', body: 'Deletes a skill\'s folder to the trash (recoverable). It comes out of your active set entirely — reinstall any time from the Library. This is different from the toggle, which only stops auto-invocation.' },
+            { term: 'Editor', body: 'Standard markdown with a Save/Revert bar at the bottom. The frontmatter (the --- block at the top) controls discovery; the body is what Claude reads when the skill fires.' },
+            { term: 'Library view', body: 'Switch to Library to browse a curated catalog of skills. Each row gives a "source" link and a "copy install" button (a git-clone command you paste into a terminal) — there is no one-click install for skills.' },
+          ],
+        },
+        {
+          title: 'Skill anatomy',
+          items: [
+            { term: 'name', body: 'Used in transcripts and the Library. Should be unique within a scope.' },
+            { term: 'description', body: 'Critical — Claude scans descriptions to decide when to load this skill. Be specific about WHEN to use it ("when writing E2E tests with Playwright"), not just what it does.' },
+            { term: 'allowed-tools', body: 'Optional. Restricts which tools Claude can use while the skill is active. Adds an extra layer of safety on top of permissions.' },
+            { term: 'Body', body: 'Plain markdown. Procedures, code examples, do/don\'t lists. This is what Claude actually reads.' },
+          ],
+        },
+        {
+          title: 'Slash commands',
+          items: [
+            { body: 'Commands (in ~/.claude/commands/ or .claude/commands/) are skills you invoke explicitly with /name — they show with a leading "/" in the sidebar. Skills proper are auto-loaded; commands are user-triggered.' },
+            { body: 'This tab lists both at the active scope — same markdown shape on disk, different folders.' },
+          ],
+        },
+      ],
+      tips: [
+        'A bad description is worse than no skill — Claude either won\'t load it when needed, or will load it constantly and waste tokens.',
+        'When refining a skill, use Restart Session in the terminal so Claude reloads it.',
+      ],
+    },
   'plugins': {
-    headline: 'Bundled collections of skills, subagents, and hooks that ship together',
-    intro:
-      'A plugin is a directory under ~/.claude/plugins/<name>/ that packages multiple Claude Code primitives (skills, subagents, hooks, MCP servers) under one name. Installing a plugin adds all of them at once; uninstalling removes them cleanly. Use plugins when you want to share a coherent toolkit — "react-frontend-pack", "data-pipeline-helpers" — instead of asking teammates to copy ten files into the right places.',
-    sections: [
-      {
-        title: 'What this tab shows',
-        items: [
-          { body: 'Every plugin folder Claude Code can discover, plus whether it has a plugin.json manifest (most should).' },
-          { term: 'Installed view', body: 'Read-only inspector for plugins already on disk. Click one to see its contents — if you need to edit, use the dedicated Skills/Subagents/Hooks tabs which point at the same files.' },
-          { term: 'Library view', body: 'Browse and install community plugins.' },
-        ],
-      },
-      {
-        title: 'Plugin layout on disk',
-        items: [
-          { term: 'plugin.json', body: 'The manifest — name, version, description, what the plugin includes. Required for the plugin to register cleanly.' },
-          { term: 'skills/', body: 'Same shape as ~/.claude/skills/. Show up in the Skills tab.' },
-          { term: 'agents/', body: 'Same shape as ~/.claude/agents/. Show up in the Subagents tab.' },
-          { term: 'hooks.json', body: 'Hooks contributed by the plugin, merged into your effective hook set.' },
-        ],
-      },
-    ],
-    tips: [
-      'Editing plugin contents directly is fine but be aware: an upgrade may overwrite your changes. Fork the plugin if you need persistent customizations.',
-    ],
-  },
-
+      headline: 'Bundled collections of skills, subagents, and hooks that ship together',
+      intro:
+        'A plugin is a directory under ~/.claude/plugins/<name>/ that packages multiple Claude Code primitives (skills, subagents, hooks, MCP servers, LSPs, monitors) under one name. Installing a plugin adds all of them at once; uninstalling removes them cleanly. Use plugins when you want to share a coherent toolkit — "react-frontend-pack", "data-pipeline-helpers" — instead of asking teammates to copy ten files into the right places.',
+      sections: [
+        {
+          title: 'Three views',
+          items: [
+            { term: 'Installed', body: 'A read-only inspector for every plugin folder on disk, shown as a table: name, origin, version, whether it has a manifest, and a contents summary (counts of agents · skills · hooks · monitors · bin · lsp · mcp). Click a row for a detail panel with the manifest fields (version, license, homepage, repository, author) and the full path. To edit a plugin\'s pieces, use the dedicated Skills / Subagents / Hooks tabs — they point at the same files.' },
+            { term: 'Discover', body: 'A built-in list of official add-ons (LSP servers, MCP integrations). The Install button runs claude plugin install <slug> in a hidden terminal and streams its output below the row; on success the row flips to installed.' },
+            { term: 'Library', body: 'Browse the curated plugin catalog. Each row has a "source" link, a "copy" button for the /plugin install command, and an Install button that wires up the marketplace and installs for you.' },
+          ],
+        },
+        {
+          title: 'Plugin layout on disk',
+          items: [
+            { term: 'plugin.json', body: 'The manifest — name, version, description, what the plugin includes. The canonical location is .claude-plugin/plugin.json; older installs keep it at the folder root. Both are detected.' },
+            { term: 'skills/', body: 'Same shape as ~/.claude/skills/. Show up in the Skills tab.' },
+            { term: 'agents/', body: 'Markdown subagents (same shape as ~/.claude/agents/). Show up in the Subagents tab.' },
+            { term: 'hooks/hooks.json', body: 'Hooks contributed by the plugin (mirrors settings.json\'s hooks shape, keyed by event), merged into your effective hook set.' },
+            { term: '.mcp.json / .lsp.json / monitors/', body: 'Optional — MCP servers, language servers, and monitors the plugin bundles. Their presence shows up in the contents summary.' },
+          ],
+        },
+      ],
+      tips: [
+        'The Installed view is inspect-only here — it will not let you edit or delete plugin files. Edit a plugin\'s contents through the Skills/Subagents/Hooks tabs instead.',
+        'Editing plugin contents directly is fine but be aware: an upgrade may overwrite your changes. Fork the plugin if you need persistent customizations.',
+      ],
+    },
   'mcp': {
-    headline: 'Connect Claude to external tools — databases, APIs, filesystems — via MCP servers',
-    intro:
-      'MCP (Model Context Protocol) is the open spec for letting Claude call out to external tools. An MCP server is a small process (or HTTP endpoint) that exposes a set of functions; once you register it, Claude treats those functions as first-class tools. Common examples: a Postgres server that lets Claude run SELECTs, a Slack server that posts messages, a filesystem server that exposes a specific directory tree.',
-    sections: [
-      {
-        title: 'Where servers are stored',
-        items: [
-          { term: 'User scope', body: '~/.claude.json under mcpServers. Available in every session, every repo.' },
-          { term: 'Project scope', body: '<repo>/.mcp.json. Available only when working in this repo. Commit it so teammates pick up the same servers.' },
-        ],
-      },
-      {
-        title: 'Server types',
-        items: [
-          { term: 'stdio', body: 'Local process — Claude spawns the command and talks to it via stdin/stdout. Most common for tools you ship as a CLI. Fields: command, args, env.' },
-          { term: 'http', body: 'Remote HTTP endpoint with JSON-RPC. Field: url. Use headers for auth.' },
-          { term: 'sse', body: 'Server-Sent Events — like http but with streaming responses. Same fields.' },
-        ],
-      },
-      {
-        title: 'Per-server controls',
-        items: [
-          { term: 'env / headers', body: 'Secrets like API keys go here. Project-scope env values get committed to git — be careful, prefer User scope for anything sensitive.' },
-          { term: 'args', body: 'Command-line arguments passed to a stdio server\'s command. Often used to point at a specific config file or directory.' },
-        ],
-      },
-    ],
-    tips: [
-      'After adding/editing a server, restart the affected sessions so Claude reconnects and rediscovers tools.',
-      'If a server fails to start, the terminal will show "MCP server X failed" — open the server\'s logs (often in ~/.claude/logs/) for details.',
-    ],
-  },
-
+      headline: 'Connect Claude to external tools — databases, APIs, filesystems — via MCP servers',
+      intro:
+        'MCP (Model Context Protocol) is the open spec for letting Claude call out to external tools. An MCP server is a small process (or HTTP endpoint) that exposes a set of functions; once you register it, Claude treats those functions as first-class tools. Common examples: a Postgres server that lets Claude run SELECTs, a Slack server that posts messages, a filesystem server that exposes a specific directory tree.',
+      sections: [
+        {
+          title: 'Where servers are stored',
+          items: [
+            { term: 'User scope', body: '~/.claude.json under mcpServers. Available in every session, every repo.' },
+            { term: 'Project scope', body: '<repo>/.mcp.json. Available only when working in this repo. Commit it so teammates pick up the same servers.' },
+            { term: 'Editing', body: 'Use "+ new server" to add one, click a row to edit it, rename via the name field, and Save/Revert at the bottom. A filter box narrows the list; the Library view installs catalog servers for you.' },
+          ],
+        },
+        {
+          title: 'Server types',
+          items: [
+            { term: 'stdio', body: 'Local process — Claude spawns the command and talks to it via stdin/stdout. Most common for tools you ship as a CLI. Fields: command, args, env.' },
+            { term: 'http / streamable-http', body: 'Remote endpoint with JSON-RPC. Field: url, plus headers for auth.' },
+            { term: 'sse', body: 'Server-Sent Events transport — deprecated; the editor flags it and suggests streamable-http instead.' },
+            { term: 'ws', body: 'WebSocket transport. Same url + headers fields as the other remote types.' },
+          ],
+        },
+        {
+          title: 'Per-server controls',
+          items: [
+            { term: 'env / headers', body: 'Secrets like API keys go here (env for stdio, headers for remote types). Project-scope values get committed to git — be careful; prefer User scope for anything sensitive.' },
+            { term: 'args', body: 'Command-line arguments passed to a stdio server\'s command. Often used to point at a specific config file or directory.' },
+            { term: 'alwaysLoad', body: 'Bypass tool-search deferral and always load this server\'s tools up front (rather than only when searched for).' },
+            { term: 'enabled', body: 'Uncheck to stop loading this server in new sessions without deleting its config.' },
+            { term: 'disabledTools', body: 'A comma-separated denylist of individual tool names to hide from this server.' },
+            { term: 'permissions', body: 'Per-server tool gating: inherit (default), allow all, deny all, or an explicit allowlist of tool names.' },
+          ],
+        },
+      ],
+      tips: [
+        'The name "workspace" is reserved — the editor warns that Claude Code will refuse to load a server with that name. Names like "ide" and "tasks" get a softer caution because they collide with commonly-bundled servers.',
+        'After adding/editing a server, restart the affected sessions so Claude reconnects and rediscovers tools.',
+      ],
+    },
   'hooks': {
-    headline: 'Run scripts when Claude does something — pre/post-tool, session start/end, more',
-    intro:
-      'Hooks let you run a shell command, HTTP request, prompt, or subagent in response to events Claude Code emits. Want to log every Bash command Claude runs to a file? PreToolUse hook. Want a subagent to review every edit before it sticks? PostToolUse hook. Want a Slack ping when a long session ends? Stop hook. Hooks compose with permissions and can block actions outright.',
-    sections: [
-      {
-        title: 'The four hook types',
-        items: [
-          { term: 'command', body: 'Run a shell string. The script receives the event as JSON on stdin and can return a JSON decision (allow/block/transform).' },
-          { term: 'http', body: 'POST the event JSON to a URL. The response body becomes the decision.' },
-          { term: 'prompt', body: 'Send a templated prompt to Claude itself for a quick gut-check. Useful for "should I really run this command?" guards.' },
-          { term: 'agent', body: 'Spawn a subagent (defined in the Subagents tab) with the event as input. The agent\'s output is the decision.' },
-        ],
-      },
-      {
-        title: 'Common events',
-        items: [
-          { term: 'PreToolUse / PostToolUse', body: 'Before / after Claude calls any tool. Most-used hooks live here — gating, logging, transforming.' },
-          { term: 'UserPromptSubmit', body: 'Fires when you press Enter on a prompt. Good for prepending context (current branch, recent errors) before Claude sees the prompt.' },
-          { term: 'SessionStart / SessionEnd', body: 'Boot/teardown housekeeping — refresh tokens, save transcripts, post a summary.' },
-          { term: 'Stop / SubagentStop', body: 'When the main loop or a subagent finishes. Good for "ping me when done" notifications.' },
-          { term: 'PreCompact / PostCompact', body: 'Around the auto-compaction step. Useful for archiving the full transcript before it\'s shrunk.' },
-        ],
-      },
-      {
-        title: 'Decisions',
-        items: [
-          { term: 'allow', body: 'Action proceeds normally.' },
-          { term: 'block', body: 'Action is refused. Claude sees the refusal and either tries another approach or asks you.' },
-          { term: 'modify', body: 'Hook returns a transformed event (e.g. rewritten Bash command, sanitised prompt). Claude proceeds with the modified version.' },
-        ],
-      },
-    ],
-    tips: [
-      'Test new hooks with the Test Fire button in the editor — runs your hook script with synthetic event data so you can debug without waiting for a real session.',
-      'Hooks run synchronously and block Claude until they return. Slow hooks (>1s) are noticeable. Use http or fire-and-forget shell commands for things you don\'t need to wait on.',
-    ],
-  },
-
+      headline: 'Run scripts when Claude does something — pre/post-tool, session start/end, more',
+      intro:
+        'Hooks let you run a shell command, HTTP request, prompt, subagent, or MCP tool in response to events Claude Code emits. Want to log every Bash command Claude runs to a file? PreToolUse hook. Want a subagent to review every edit before it sticks? PostToolUse hook. Want a Slack ping when a long session ends? Stop hook. Hooks are stored in settings.json and can gate, log, or transform actions.',
+      sections: [
+        {
+          title: 'Two ways to view',
+          items: [
+            { term: 'Effective', body: 'The merged result of all scopes (User / Project / Local) — what actually fires. Editing here writes an override into the scope you have selected.' },
+            { term: 'Events', body: 'A per-event editor. The left list shows every supported event with a count of hooks attached; pick one, then add groups (with an optional matcher) and hooks under it.' },
+            { term: 'Library', body: 'Browse catalog hooks. Each event row links to the official hook reference.' },
+          ],
+        },
+        {
+          title: 'The five hook types',
+          items: [
+            { term: 'command', body: 'Run a shell string (with an optional args array for the no-shell exec form). The script receives the event as JSON on stdin and can return a JSON decision. Only command hooks support the Test fire button.' },
+            { term: 'http', body: 'POST the event JSON to a URL. The response becomes the decision.' },
+            { term: 'prompt', body: 'Send a templated prompt to Claude itself for a quick gut-check. Useful for "should I really run this command?" guards.' },
+            { term: 'agent', body: 'Spawn a subagent (defined in the Subagents tab) with the event as input. The agent\'s output is the decision.' },
+            { term: 'mcp_tool', body: 'Invoke a named MCP tool (e.g. mcp__server__tool) in response to the event.' },
+          ],
+        },
+        {
+          title: 'Common events',
+          items: [
+            { term: 'PreToolUse / PostToolUse', body: 'Before / after Claude calls any tool. Most-used hooks live here — gating, logging, transforming. A matcher (tool-name regex or exact match) scopes a group to specific tools.' },
+            { term: 'UserPromptSubmit', body: 'Fires when you press Enter on a prompt. Good for prepending context (current branch, recent errors) before Claude sees the prompt.' },
+            { term: 'SessionStart / SessionEnd', body: 'Boot/teardown housekeeping — refresh tokens, save transcripts, post a summary.' },
+            { term: 'Stop / SubagentStop', body: 'When the main loop or a subagent finishes. Good for "ping me when done" notifications.' },
+            { term: 'PreCompact / PostCompact', body: 'Around the auto-compaction step. Useful for archiving the full transcript before it\'s shrunk.' },
+            { body: 'Many more are supported — permissions, tasks, worktrees, config/file changes, notifications. Hover any event in the list for its trigger and payload shape. Hooks saved under names Claude Code no longer recognizes are flagged in a warning banner.' },
+          ],
+        },
+      ],
+      tips: [
+        'Test new hooks with the "test fire" button next to a command hook — it runs the command against an editable fake event payload (and shows whether your matcher would match) so you can debug without waiting for a real session.',
+        'Each hook can set a timeout (ms) and command hooks can emit a terminalSequence (e.g. a bell). Slow synchronous hooks are noticeable — use http or fire-and-forget for work you don\'t need to wait on.',
+      ],
+    },
   'subagents': {
-    headline: 'Specialised mini-Claudes that handle focused tasks for the main session',
-    intro:
-      'A subagent is a separate Claude instance with its own system prompt, model, and tool restrictions. When the main Claude needs to delegate something focused — code review, security audit, large search — it spawns a subagent, which works in isolation and returns a single summary. Subagents protect the main context window from drowning in intermediate output and let you specialise prompts per task type.',
-    sections: [
-      {
-        title: 'Four views',
-        items: [
-          { term: 'Launch', body: 'The single place to fan work out. Type one brief, then pick a topology: Hive (a preset bundle of subagents in parallel), Orchestrate (a different sub-task per tab), Race (the same brief to N tabs, pick a winner), or Boss (one boss + N specialists on the active tab). The brief is shared — switching topology keeps what you typed.' },
-          { term: 'Live', body: 'Active cross-tab runs (Orchestrate / Race) plus the per-tab Task-tool subagents that have spawned in the last 60 seconds. Shows status and the prompt each was given.' },
-          { term: 'Configured', body: 'Edit the subagents you have defined. Each one is a markdown file in ~/.claude/agents/ (User) or .claude/agents/ (Project), same as skills.' },
-          { term: 'Library', body: 'Browse community subagent definitions and install them.' },
-        ],
-      },
-      {
-        title: 'Subagent anatomy',
-        items: [
-          { term: 'name', body: 'Referenced by the main Claude when delegating ("Task tool, subagent_type: code-reviewer"). Should be a stable identifier.' },
-          { term: 'description', body: 'When to use this subagent. Main Claude reads descriptions to choose. Be specific about scope.' },
-          { term: 'tools', body: 'Optional whitelist. If set, the subagent can ONLY use these tools. Tightening this is the easiest way to make a subagent safer.' },
-          { term: 'model', body: 'Optional. Use a cheaper model (haiku) for simple agents to save cost; opus for complex reasoning.' },
-          { term: 'Body', body: 'The system prompt the subagent runs with. Be explicit about what it should and shouldn\'t do.' },
-        ],
-      },
-    ],
-    tips: [
-      'A subagent that returns 5000 words of debug logs has failed at its job — the whole point is to compress. Tell it to summarise.',
-      'The "explorer" pattern (read-only subagent for codebase search) is a common starting point if you\'re building your first one.',
-    ],
-  },
-
-  'prompts': {
-    headline: 'Click-to-insert prompt library — 46 curated templates across 8 categories',
-    intro:
-      'The Prompts tab is a personal prompt-snippet library. Pick a template from the sidebar, tweak the body in the modal, choose how to send it (paste or auto-fire), and it lands in your active terminal session. Every prompt has a default send mode you can override per-use. You can also edit any prompt permanently — your override shadows the bundled seed until you reset it.',
-    sections: [
-      {
-        title: 'Send modes',
-        items: [
-          { term: 'Paste', body: 'Writes the prompt text to the terminal without a trailing newline. You review it on the prompt line and press Enter yourself — useful when you want to edit further before sending.' },
-          { term: 'Auto-fire', body: 'Appends \\n so Claude receives and acts on the prompt immediately. Good for one-shot queries you trust to run as-is.' },
-        ],
-      },
-      {
-        title: 'Customising prompts',
-        items: [
-          { term: 'Edit root template', body: 'Opens an inline editor for the prompt body. Saving writes to ~/.claude/session-manager/prompts/<category>/<slug>.md — your override is used on every future open of that prompt.' },
-          { term: 'Reset to default', body: 'Visible only when you have a custom override. Clicking it restores the bundled seed text — your edits are discarded.' },
-        ],
-      },
-    ],
-    tips: [
-      'Auto-fire prompts like "Review staged diff for OWASP Top 10" are designed to run without hand-holding — they produce structured output you can act on straight away.',
-      'Paste mode lets you personalise the prompt on the fly (add a specific file path, scope it to one function) before submitting.',
-    ],
-  },
-
+      headline: 'Specialised mini-Claudes that handle focused tasks for the main session',
+      intro:
+        'A subagent is a separate Claude instance with its own system prompt, model, and tool restrictions. When the main Claude needs to delegate something focused — code review, security audit, large search — it spawns a subagent, which works in isolation and returns a single summary. Subagents protect the main context window from drowning in intermediate output and let you specialise prompts per task type.',
+      sections: [
+        {
+          title: 'Three sub-tabs',
+          items: [
+            { term: 'Launch', body: 'Type one brief, then pick a topology: Hive (a preset bundle of subagents fanned out in parallel), Orchestrate (a different sub-task per running tab, needs 2+ tabs), Race (the same brief to 2+ running tabs, pick a winner), or Boss (Claude runs as a boss on the active tab, dispatching N specialists at a chosen depth). The brief is shared — switching topology keeps what you typed.' },
+            { term: 'Live', body: 'Active cross-tab runs (Orchestrate / Race / Boss) plus the per-tab Task-tool subagents spawned in the active session, with a running/done banner, elapsed time, and a results digest that fills in as agents finish.' },
+            { term: 'Agents', body: 'Edit the subagents you have defined. Each is a markdown file in ~/.claude/agents/ (User) or .claude/agents/ (Project). Filter the roster, add a new agent, install a starter from the bundled catalog, or delete one.' },
+          ],
+        },
+        {
+          title: 'Subagent anatomy',
+          items: [
+            { term: 'name', body: 'Referenced by the main Claude when delegating ("Task tool, subagent_type: code-reviewer"). Lowercase-with-hyphens; should be a stable identifier.' },
+            { term: 'description', body: 'When to use this subagent. Main Claude reads descriptions to choose. Be specific about scope.' },
+            { term: 'tools', body: 'A whitelist, edited as clickable chips (Read/Grep/Bash/Write/Edit/… plus a box to add custom or mcp__ tools). Empty = inherit all tools. Tightening this is the easiest way to make a subagent safer.' },
+            { term: 'model', body: 'inherit / opus / sonnet / haiku. Use a cheaper model for simple agents to save cost; opus for complex reasoning.' },
+            { term: 'More settings', body: 'Optional knobs under the expander: effort, color, isolation (worktree), memory scope, permissionMode, maxTurns, run-as-background, initialPrompt, and preloaded skills. Any mcpServers/hooks already in the frontmatter are preserved.' },
+            { term: 'System prompt', body: 'The body of the markdown file — what this agent should and shouldn\'t do. Be explicit.' },
+          ],
+        },
+      ],
+      tips: [
+        'A subagent that returns 5000 words of debug logs has failed at its job — the whole point is to compress. Only its final summary reaches your main session.',
+        'Use "Install a starter" in the Agents roster to drop in a ready-made agent (like a read-only code explorer) if you\'re building your first one.',
+      ],
+    },
   'memory': {
     headline: 'Memories Claude can read and write across sessions — by project or by subagent',
     intro:
-      'Two scopes share one tab, toggled by the Workspace / Subagent switch up top. Workspace is a cwd-scoped notebook at ~/.claude/session-manager/memories/<workspace>/ — plain markdown files with optional name/description frontmatter. Subagent is keyed by agentId at ~/.claude/session-manager/agent-memory/<agentId>.json — facts about a specific agent (e.g. the "code-reviewer" agent\'s preferred test runner) that survive across projects. You can hand-edit either; Claude writes to them during sessions when you ask it to remember things across context resets.',
+      'Two scopes share one tab, toggled by the Workspace / Subagent switch up top (your choice is remembered). Workspace is a cwd-scoped notebook at ~/.claude/session-manager/memories/<workspace>/ — plain markdown files with an optional description. Subagent is keyed by agent at ~/.claude/session-manager/agent-memory/<agentId>.json — facts about a specific agent (e.g. the "code-reviewer" agent\'s preferred test runner) that survive across projects. You can hand-edit either here; Claude writes to them during sessions when you ask it to remember things across context resets.',
     sections: [
       {
-        title: 'How to use it',
+        title: 'Workspace memories',
         items: [
-          { term: 'Workspace', body: 'Auto-selected from the active tab. Switching tabs (different cwd) shows a different memory set. Slugs are lowercase letters/digits/dashes/underscores and become the .md filename.' },
-          { term: 'Subagent', body: 'Pick an agent from the dropdown (scanned from ~/.claude/agents and <cwd>/.claude/agents). Entries can carry a category (command/preference/pattern/avoid/workflow).' },
-          { term: 'Caps', body: '1 MiB per file, 1000 entries per workspace. New writes above the cap are refused.' },
+          { term: 'Scope', body: 'Auto-selected from the active terminal tab\'s directory. Switching to a tab in a different folder shows a different memory set. A watcher refreshes the list when Claude writes to these files mid-session.' },
+          { term: 'New memory', body: 'Names are lowercase letters/digits/dashes/underscores and become the .md filename. You can add an optional one-line description. Edit the body in the markdown editor, then Save (or Delete).' },
+          { term: 'Natural panel', body: 'A chat-style console for the workspace. Type plain commands — list, show <name>, search <text>, remember <text>, forget <name>, help. It never writes on its own: free-form text offers two buttons — "Send to Claude in terminal" (pastes a prompt you still press Enter on) or "Add as new memory" (writes directly).' },
+        ],
+      },
+      {
+        title: 'Subagent memories',
+        items: [
+          { term: 'Agent', body: 'Pick an agent from the dropdown — scanned from ~/.claude/agents and <cwd>/.claude/agents (project agents shadow same-named user ones).' },
+          { term: 'Entries', body: 'Each entry has an id, a body, and an optional category: Commands, Preferences, Patterns, Avoid, or Workflow. Newest entries sort first. Add via "+ New entry"; edit the body and Save, or Delete.' },
+          { term: 'Caps', body: '1 MiB per entry body. Writes above the cap are refused.' },
         ],
       },
     ],
   },
-
   'projects': {
-    headline: 'Every directory you\'ve ever run Claude Code in, with quick-resume',
+    headline: 'Every directory you\'ve ever run Claude Code in, with quick-resume and bulk tools',
     intro:
-      'Whenever you start a Claude session in a new cwd, Claude Code remembers that directory by writing transcripts under ~/.claude/projects/<encoded-cwd>/. This tab lists those directories: how many sessions each has, when you last worked there, total transcript size, and a one-click button to open a fresh tab in that cwd. It\'s your project picker.',
+      'Whenever you start a Claude session in a new directory, Claude Code remembers it by writing transcripts under ~/.claude/projects/<encoded-cwd>/. This tab lists those directories — how many sessions each has, when you last worked there, total transcript size — plus git and CLAUDE.md details it fills in as it reads each folder. Search, filter, pin your favorites, open a folder four different ways, or archive ones you\'re done with.',
     sections: [
       {
         title: 'Columns',
         items: [
-          { term: 'displayPath', body: 'The actual directory path. May be missing if you\'ve since moved or deleted the folder — Session Manager flags this.' },
-          { term: 'sessionCount', body: 'How many session transcripts exist for this project. High numbers mean you work here often.' },
-          { term: 'lastSession', body: 'Modification time of the most recent transcript. Sorted by default — most recent first.' },
-          { term: 'sizeBytes', body: 'Disk usage of all transcripts for this project. Old projects can balloon; safe to delete the folder if you don\'t need the history.' },
+          { term: 'Project', body: 'The directory path (with its detected project name). Hover to peek at the start of its CLAUDE.md if it has one.' },
+          { term: 'Sessions', body: 'How many session transcripts exist for this folder. High numbers mean you work here often.' },
+          { term: 'Last active', body: 'When the most recent transcript was touched. The default sort — most recent first.' },
+          { term: 'Size', body: 'Disk usage of all transcripts for this project. Old projects can balloon; archiving is safe if you don\'t need the history.' },
+          { term: 'Branch / Remote', body: 'The last git branch and git remote, shown once Session Manager finishes reading the folder.' },
         ],
       },
       {
         title: 'Per-row actions',
         items: [
-          { term: 'Open tab', body: 'Spawns a new terminal tab with claude in this cwd.' },
-          { term: 'CLAUDE.md drawer', body: 'Quick peek at this project\'s CLAUDE.md without opening the tab. Edit-in-place via the drawer.' },
+          { term: 'Open in session', body: 'Spawns a new terminal tab running claude in this directory.' },
+          { term: 'Open externally', body: 'Three more openers: your editor (VS Code / Cursor / Sublime / nano — pick a default up top, or Auto), your file manager, or a system terminal.' },
+          { term: 'CLAUDE.md', body: 'A side drawer that previews this project\'s CLAUDE.md read-only (no in-drawer editing).' },
+          { term: 'Pin / Archive', body: 'Star a project to keep it at the top; archive moves it to ~/.claude/projects-archive/ after a confirm.' },
+        ],
+      },
+      {
+        title: 'Finding projects',
+        items: [
+          { term: 'Search', body: 'Matches path, project name, git remote, and the CLAUDE.md preview.' },
+          { term: 'Sort & filter', body: 'Sort by project, sessions, last active, or size (toggle direction). Filter chips narrow by recency (≤7d / ≤30d), git remote, CLAUDE.md presence, or pinned-only.' },
+          { term: 'Stats header', body: 'Totals up top: project count, how many were active in 7 days, total sessions, total on-disk size, and clickable pills for your most-active projects.' },
         ],
       },
     ],
     tips: [
-      'Sort by sizeBytes to find runaway transcript folders. A 500MB project usually means many long sessions — safe to archive if you don\'t need them.',
+      'Tick the checkboxes to select several projects, then archive them all or open them all in your editor at once.',
+      'Sort by size to find runaway transcript folders — a multi-hundred-MB project usually means many long sessions, safe to archive if you don\'t need them.',
     ],
   },
-
   'history': {
     headline: 'Every individual Claude session you\'ve ever run, ready to resume',
     intro:
-      'Where the Projects tab shows directories, the History tab shows individual sessions — one row per .jsonl transcript file under ~/.claude/projects/. You can search across them, open one to see the conversation, or resume any past session in a new tab (Claude picks up exactly where it left off, with full context).',
+      'Where the Projects tab shows directories, the History tab shows individual sessions — one row per .jsonl transcript under ~/.claude/projects/. Two views share the tab: Log is a flat, searchable list you can resume from; Dashboard rolls the same transcripts up into prompt, token, and cost charts. Your view choice is remembered.',
     sections: [
       {
-        title: 'What\'s in each row',
+        title: 'Log view',
         items: [
-          { term: 'sessionId', body: 'UUID identifying the session. Same id appears in --session-id flags and Claude\'s own logs.' },
-          { term: 'projectEncoded', body: 'The project folder this session belongs to (paths get encoded to safe directory names).' },
-          { term: 'mtimeMs', body: 'When the session was last active. Sorted newest first.' },
-          { term: 'sizeBytes', body: 'Transcript size. Big = long conversation.' },
+          { term: 'Session id', body: 'The UUID identifying the session (shown short). The same id appears in --session-id flags and Claude\'s own logs.' },
+          { term: 'Project', body: 'The folder this session belongs to (the encoded directory name, decoded back to a path).' },
+          { term: 'Last active / Size', body: 'When the transcript was last touched (sorted newest first) and its size — a big transcript means a long conversation.' },
+          { term: 'Resume', body: 'Click Resume, pick the directory to run in, and a new tab opens running claude --resume <sessionId>. Claude reads the full transcript and continues; the tab id matches the session id.' },
+          { term: 'Filter', body: 'The search box matches session id and project name (case-insensitive substring); it does not search message text.' },
         ],
       },
       {
-        title: 'Resuming a session',
+        title: 'Dashboard view',
         items: [
-          { body: 'Click a row → opens a new tab in the original cwd, runs claude --resume <sessionId>. Claude reads the full transcript and continues. The tab id matches the session id.' },
-          { body: 'If the original cwd is gone (you moved/deleted it), resume fails. Use the Projects tab to spot orphaned histories.' },
+          { term: 'Summary', body: 'Cards for total prompts, input tokens, output tokens, sessions, and estimated cost across the selected range.' },
+          { term: 'Charts', body: 'A daily trend line (switch between prompts, tokens, sessions, errors, or cost) and a per-day input-vs-output token stack, plus a sortable per-project table with each project\'s top tool and estimated cost.' },
+          { term: 'Range & refresh', body: 'Narrow by from/to date and by project name. Auto-refreshes every 30 seconds, with a manual refresh button and an "updated X ago" stamp. A yellow banner warns if a scan timed out and the numbers are partial.' },
         ],
       },
     ],
     tips: [
-      'The filter box matches session id substrings, project name, and the first user message in the transcript — useful for "find that session where I asked about X".',
+      'Resume lets you pick any directory — handy when you\'ve moved or renamed the original project folder since the session ran.',
     ],
   },
-
   'keybindings': {
     headline: 'Rebind the Claude Code CLI like a game controls screen',
     intro:
@@ -457,126 +471,217 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       {
         title: 'How it maps to the file',
         items: [
-          { term: 'Contexts', body: 'Bindings are scoped to where you are in the CLI — Global, Chat, Select pickers, Scroll mode, Confirmation dialogs, etc. Global applies everywhere.' },
-          { term: 'Keycaps', body: 'Each chip is one keystroke pattern ("ctrl+shift+k"). Removing a chip reverts that key to the Claude Code default.' },
-          { term: 'Disabled keys', body: 'Binding a key to null turns its default off — the "Disable a key" capture writes that for you.' },
-          { term: 'command: bindings', body: 'A key can fire a slash command as if typed ("command:commit"). Visible in Controls, edited in the JSON view.' },
-          { term: 'Reserved', body: 'ctrl+c, ctrl+d and ctrl+m cannot be rebound; the capture rejects them.' },
+          { term: 'Contexts', body: 'Bindings are scoped to where you are in the CLI — Global, Chat, Select pickers, Scroll mode, Confirmation dialogs, etc. Global applies everywhere. The left sidebar shows how many keys you\'ve customized in each.' },
+          { term: 'Keycaps', body: 'Each chip is one keystroke pattern ("ctrl+shift+k"). Removing a chip (the ✕) reverts that key to the Claude Code default.' },
+          { term: 'Disable a key', body: 'The "+ disable a key" capture binds a key to null, turning its Claude Code default off in that context.' },
+          { term: 'command: bindings', body: 'A key can fire a slash command as if typed ("command:commit"). These and any unrecognized bindings show under "Command & other bindings" but are edited in the JSON view.' },
+          { term: 'Reserved keys', body: 'ctrl+c, ctrl+d and ctrl+m cannot be rebound; the capture rejects them. Cmd/meta combos are also rejected — Claude Code runs in a terminal.' },
         ],
       },
     ],
     tips: [
-      'Presets replace the whole file — Save commits, Revert restores what was on disk.',
-      'Defaults stay in effect for any key you don\'t override; after saving, restart open sessions so the CLI picks up changes.',
+      'Presets replace the whole file — Save commits, Revert restores what was on disk. Editing any binding turns a preset into a "custom layout".',
+      'Defaults stay in effect for any key you don\'t override; after saving, restart Claude Code so the CLI picks up changes. The "reference ↗" link opens the official docs.',
     ],
   },
-
   'usage': {
     headline: 'Your subscription\'s rolling-window limits — the same data as /usage',
     intro:
-      'This is the in-app mirror of the `claude /usage` command: how much of your plan you have consumed in each rolling window, pulled live from the billing API (api.anthropic.com/api/oauth/usage) using the OAuth token in ~/.claude/.credentials.json. Use it to answer one question — "am I about to hit a limit?" — without dropping to a terminal.',
+      'This is the in-app mirror of the claude /usage command: how much of your plan you have consumed in each rolling window, pulled live from the billing API (api.anthropic.com/api/oauth/usage) using the OAuth token in ~/.claude/.credentials.json. It refreshes about once a minute. Use it to answer one question — "am I about to hit a limit?" — without dropping to a terminal.',
     sections: [
       {
         title: 'The windows',
         items: [
-          { term: 'Session · 5-hour', body: 'The rolling 5-hour block. Every meter shows percent used, a color bar (green → yellow ≥70% → red ≥90%), and the reset as both a countdown and an absolute Pacific time.' },
+          { term: 'Session · 5-hour', body: 'The rolling 5-hour block. Every meter shows percent used, a color bar (green → yellow at 70% → red at 90%), and the reset as both a countdown and an absolute Pacific time.' },
           { term: 'Weekly · all models', body: 'The 7-day cap across every model. Resets are multi-day, so they show a weekday (e.g. "Tue 3:00 PM PT").' },
-          { term: 'Weekly · Opus / Sonnet', body: 'Per-model weekly sub-limits on Max plans. They collapse automatically on plans that do not have them, so the layout stays clean.' },
-          { term: 'Extra usage', body: 'Pay-as-you-go credits, shown only when enabled — used vs. monthly limit in the plan currency.' },
+          { term: 'Weekly · Opus / Sonnet / OAuth apps', body: 'Per-model and per-integration weekly sub-limits. They appear only on plans that have them, so the layout stays clean.' },
+          { term: 'Extra usage', body: 'Pay-as-you-go credits, shown only when enabled — used vs. monthly limit. Any meter over 100% caps the bar at full and shows an "over limit" badge.' },
         ],
       },
       {
         title: 'Beyond raw /usage',
         items: [
-          { term: 'Burn rate', body: 'Extrapolates the 5-hour window: current %, projected % at reset, and an estimated exhaust time if you are trending over 100%. Fires a desktop notification past 80% / 95% projected.' },
-          { term: 'Session topology', body: 'A secondary, collapsible view — live activity across every open tab (not part of /usage). Independent of the subscription meters.' },
+          { term: 'Burn rate', body: 'Extrapolates the 5-hour window: current %, projected % at reset, and an estimated exhaust time if you are trending over 100%. A pill reads On track / Warning / Critical, and a desktop notification fires once per window when projected passes 80% then 95%.' },
+          { term: 'Session topology', body: 'A secondary, collapsible view (not part of /usage): live activity across every open tab — workspace, state, turns, tokens/min, cache warmth, and active subagents — plus an alerts strip flagging things like runaway context growth or cold caches.' },
         ],
       },
     ],
     tips: [
-      'Percentages can read over 100% — the API reports raw utilization; the meter caps the bar at full but shows the true number in red.',
+      'Percentages can read over 100% — the API reports raw utilization; the meter caps the bar at full but shows the true number in red with an "over limit" badge.',
       'Data is cached; if a fetch is rate-limited or the token expired you will see a stale chip with a Retry button rather than a blank page.',
     ],
   },
-
-  'knowledge-graph': {
-    headline: 'A graph distilled from everything you have actually typed',
-    intro:
-      'A UserPromptSubmit hook appends every prompt you send to an append-only log (~/.claude/knowledge-log/prompts.jsonl). This tab runs an incremental back-end job that reads only the NEW lines, sends them in batches to `claude -p` to extract entities and relations, and merges them into a canonical graph — node size is how often you mention something, color is its type. Ask questions and they are answered from the graph plus your real prompts, grounded and cited.',
-    sections: [
-      {
-        title: 'How it differs from Memory',
-        items: [
-          { term: 'Memory', body: 'Curated facts Claude reads back into context — small, hand/Claude-authored, editable.' },
-          { term: 'Knowledge Graph', body: 'Derived analytics over your raw prompt LOG — read-only, never hand-edited. It answers "what was I trying to build" / "summarize my intent threads".' },
-        ],
-      },
-      {
-        title: 'The pipeline',
-        items: [
-          { term: 'Incremental', body: 'A byte-offset watermark means each run only processes new prompts — never the whole log. Click "Process now" or let the file-watcher trigger it.' },
-          { term: 'Grounded Q&A', body: 'Retrieval = top graph entities + keyword-matched prompts; synthesis = claude -p. Answers cite the real prompts they drew from.' },
-        ],
-      },
-    ],
-    tips: [
-      'It only sees prompts logged AFTER you enabled the hook — open /hooks once to activate it for the current session.',
-      'Roadmap: local MiniLM embeddings + SQLite vector search + community-summary themes are the v2 upgrade path.',
-    ],
-  },
-
   'doc-editor': {
-    headline: 'WYSIWYG editor for Markdown files and plain text',
-    intro:
-      'Doc Editor opens .md, .markdown, .txt, .json and other text files in a multi-tab surface. Markdown files get a WYSIWYG mode (Tiptap/ProseMirror) with a formatting toolbar; plain text and JSON use the Monaco source editor.',
-    sections: [
-      {
-        title: 'Key bindings',
-        items: [
-          { term: 'Ctrl/Cmd-S', body: 'Save the active document.' },
-          { term: 'Ctrl/Cmd-W', body: 'Close the active document tab (prompts if unsaved).' },
-          { term: 'Ctrl/Cmd-B / I', body: 'Bold / Italic in WYSIWYG mode.' },
-        ],
-      },
-    ],
-    tips: [
-      'Switch to Source mode for surgical edits to PRDs and agent files — WYSIWYG normalizes list markers and heading style.',
-      'YAML frontmatter is preserved verbatim regardless of mode. The frontmatter chip in the toolbar shows what is there.',
-    ],
-  },
+      headline: 'A multi-tab editor for Markdown and text files',
+      intro:
+        'Doc Editor opens text files in a tabbed surface. Markdown files (.md, .markdown) get a WYSIWYG mode built on Tiptap with a floating formatting toolbar (bold, italic, headings, lists, code, blockquote, links); everything else opens in the Monaco source editor with syntax highlighting. File types Monaco doesn\'t recognize fall back to a plain textarea. Use Open… to pick a file, or open one from the command palette (Cmd-K → doc:open). A dot on a tab means it has unsaved changes.',
+      sections: [
+        {
+          title: 'Key bindings',
+          items: [
+            { term: 'Ctrl/Cmd-S', body: 'Save the active document. The Save and Save All buttons in the toolbar do the same.' },
+            { term: 'Ctrl/Cmd-W', body: 'Close the active document tab.' },
+            { term: 'Ctrl/Cmd-B / I', body: 'Bold / Italic, in Markdown WYSIWYG mode.' },
+          ],
+        },
+      ],
+      tips: [
+        'For Markdown files, use the WYSIWYG / Source toggle in the toolbar. Switch to Source for surgical edits to PRDs and agent files — WYSIWYG normalizes list markers and heading style.',
+        'YAML frontmatter is never touched by WYSIWYG mode — it is split off, kept read-only, and rejoined on save. The frontmatter chip above the document shows how many lines it holds.',
+      ],
+    },
   'scheduler': {
-    headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
-    intro:
-      'One home for the headless-batch workflow, split into two tabs. The Queue tab runs and monitors jobs; the PRDs tab is where you author the markdown files those jobs execute. PRDs live in ~/.claude/session-manager/scheduled-plans/prds/. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
-    sections: [
-      {
-        title: 'Queue — fire policies',
-        items: [
-          { term: 'manual', body: 'You hit Run for each job. Useful when you want to stagger work yourself.' },
-          { term: 'on-reset', body: 'Fire each job at the next 5-hour boundary.' },
-          { term: 'when-available', body: 'Default. Polls billing every 2 min and fires when utilization is below the threshold.' },
-        ],
-      },
-      {
-        title: 'PRDs — authoring',
-        items: [
-          { body: 'Each file is one task — frontmatter (title, cwd, estimateMinutes) plus a self-contained body Claude can act on without conversation context.' },
-          { term: 'Filename prefix (NN-)', body: 'A two-digit group number. PRDs in the same group run in parallel; different groups run sequentially. Pick a higher number to run later.' },
-          { term: 'estimateMinutes', body: 'Roughly how long you expect the job to take. The scheduler uses this to pick jobs that fit in your remaining 5-hour budget.' },
-        ],
-      },
-    ],
-    tips: [
-      'Use the /prd skill to create a fresh PRD with the right structure — manually-written ones often miss the cwd or estimate fields.',
-      'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
-    ],
-  },
-  // v0.13.1 — Tools-group screens. Bodies are intentionally short; SectionFrame
-  // already provides the editorial header so LearningPanel only needs to add
-  // the "how to use" facts that aren't obvious from the UI itself.
-  'voice':            { headline: 'Voice & microphone',  intro: 'Whisper transcription + push-to-talk hotkey. The model loads on first use; the wizard runs once per schema bump to confirm your mic works.', sections: [], tips: ['Default hotkey is F1. Tap on/off, or hold-to-talk — both modes configurable.'] },
-  'repoviz':          { headline: 'Repo visualization',  intro: 'Language + directory breakdown of the active project. Computed locally; no telemetry leaves your machine.', sections: [], tips: [] },
-  'search':           { headline: 'Search',              intro: 'One surface, two modes. Files (⌘P) fuzzy-finds any file in the current cwd — recently-opened surface first. Content (⌘⇧F) ripgreps across every file under the active cwd, with fs-walk fallback if rg isn\'t installed. The chosen path is inserted into the active terminal.', sections: [], tips: ['Toggle Files / Content at the top, or jump straight in with ⌘P / ⌘⇧F.', 'In Content mode, use the case toggle for case-sensitive matches.'] },
-  'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the Files sidebar or a file link in the terminal. Edit text with Monaco (Cmd-S saves), read Markdown rendered, and run HTML as a sandboxed visualization layer. URLs still open in your browser.', sections: [], tips: ['Toggle Edit/Preview for .md and .html files.', 'HTML previews are sandboxed — page scripts run in an isolated origin.'] },
-  'remote':           { headline: 'Remote Access — disabled by default', intro: 'Allows a paired web browser to send commands to your local session-manager over an end-to-end authenticated relay. Only the 15 explicitly allowlisted command types are accepted; there is no "run arbitrary shell" verb. Disabled = relay connection closed, no remote traffic accepted.', sections: [{ title: 'Security model', items: [{ term: 'Kill switch', body: 'Toggle off is synchronous and total — the WebSocket closes immediately and all subsequent messages are dropped before dispatch.' }, { term: 'Command allowlist', body: 'Only 15 cmd:* types are accepted. Any unrecognised type is silently dropped with no error leakage to the remote.' }, { term: 'Path safety', body: 'All path arguments pass through validatePath (home-dir boundary), identical to local IPC.' }, { term: 'Audit log', body: 'Every accepted command is appended to ~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log at mode 0600. Tokens never appear in logs.' }] }], tips: ['Pair a device by clicking "Pair Device…" and entering the 8-char OTP shown in the web app.', 'Revoke a device immediately from the Paired Devices list — takes effect within one second.', 'The relay only relays; it never stores command payloads.'] },
+      headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
+      intro:
+        'One home for the headless-batch workflow, split into three tabs. The Queue tab runs and monitors jobs; the PRDs tab is where you author the markdown files those jobs execute; the History tab lists recent completed and failed jobs. PRDs live in ~/.claude/session-manager/scheduled-plans/prds/. A status strip across the top shows when the window resets, how many jobs are pending / running / completed today, and how much of the 5-hour window you have used. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
+      sections: [
+        {
+          title: 'Queue — when jobs start',
+          items: [
+            { term: 'when available', body: 'Default. The scheduler polls your billing usage every ~10 minutes and fires the next batch whenever your 5-hour utilization is below the "Pause above" percent (90% by default).' },
+            { term: 'only on reset', body: 'Fire queued jobs shortly after each 5-hour window resets, instead of polling.' },
+            { term: 'manually', body: 'Nothing fires on its own — you start work yourself with "Fire next batch now".' },
+          ],
+        },
+        {
+          title: 'Queue — controls',
+          items: [
+            { term: 'Up to N at once', body: 'How many jobs in the same group may run in parallel. Defaults to 3 — raising it runs more node processes at once, which can exhaust memory on a small machine.' },
+            { term: 'Fire next batch now', body: 'Launches the next batch immediately, bypassing the billing-usage poll. Useful when the usage meter is itself rate-limited or you just want progress now.' },
+            { term: 'Resume', body: 'When the queue is paused (rate-limit, expired sign-in, network, or a manual pause), a banner explains why and offers Resume.' },
+          ],
+        },
+        {
+          title: 'PRDs — authoring',
+          items: [
+            { body: 'Each file is one task — frontmatter (title, cwd, estimateMinutes, parallelGroup) plus a self-contained body Claude can act on without conversation context.' },
+            { term: 'parallelGroup', body: 'The group number. Jobs in the same group run together (up to the concurrency cap); lower groups run before higher ones. If you omit it, the leading "NN-" number in the filename is used, else 99.' },
+            { term: 'estimateMinutes', body: 'Roughly how long you expect the job to take. The scheduler uses this to pick jobs that fit in your remaining 5-hour budget.' },
+          ],
+        },
+      ],
+      tips: [
+        'Use the /prd skill to create a fresh PRD with the right structure — manually-written ones often miss the cwd or estimate fields.',
+        'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
+      ],
+    },
+  'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the File Explorer sidebar or a file link in the terminal. Text files open in Monaco (syntax highlighting, font zoom, word wrap, minimap, Dark/Paper theme); Markdown and HTML add Edit / Preview (and Split for Markdown). Images, PDFs, CSV/TSV tables, and JSONL records each get their own viewer; binary or oversized files show a summary instead. URLs still open in your browser.', sections: [{ title: 'Editing', items: [{ term: 'Cmd/Ctrl-S', body: 'Save the active file. With Autosave on (the "Auto" toggle), edits also save automatically ~1.2 s after you stop typing.' }, { term: 'Cmd/Ctrl-Shift-F', body: 'Toggle Focus mode — hides the tabs and header for distraction-free editing. Esc exits.' }, { term: 'Close guard', body: 'Closing a tab with unsaved changes asks before discarding.' }], }, { title: 'Markdown', items: [{ term: 'Outline', body: 'In Preview or Split mode, a document outline lists headings; click to jump. Toggle it with the Outline button.' }, { term: 'Toolbar', body: 'A formatting toolbar sits above the editor for Markdown files.' }], }], tips: ['Use the view toggle (Edit / Preview / Split) for Markdown and HTML. HTML previews are sandboxed — page scripts run with no access to your files or session.', 'Open and Reveal buttons hand the file to your OS default app or file manager.'] },
+  'voice': {
+      headline: 'Voice & microphone',
+      intro: 'Talk to Claude instead of typing. Speech is transcribed on-device with a Whisper model that loads the first time you record (a progress bar shows the download). A press-to-record hotkey starts and stops the mic; what you say is typed into the active terminal, and an auto-submit timer fires it for you a moment after you stop speaking. A one-time mic check confirms your microphone works.',
+      sections: [
+        {
+          title: 'Recording controls',
+          items: [
+            { term: 'Hotkey', body: 'Press your mic hotkey to record. The default is Ctrl+Shift+Space (Cmd+Option+V on Mac); the panel shows the live binding. Two behaviours: \'Hold to talk\' records only while the key is held (push-to-talk), \'Tap on/off\' starts on one press and stops on the next. The default is hold-to-talk; switch with the radio buttons.' },
+            { term: 'Mic button & device', body: 'The mic button toggles recording with the mouse. The device picker chooses which microphone to use, and a live level meter shows that audio is coming through.' },
+            { term: 'Run mic check', body: 'Opens a short wizard that confirms your mic is picking up sound. It runs automatically once after a settings-format change, or any time you click \'Run mic check\'.' },
+          ],
+        },
+        {
+          title: 'Speaking & hearing back',
+          items: [
+            { term: 'Live transcript', body: 'While recording, a pulsing red dot and the latest transcribed words appear so you can see what was heard. Errors (e.g. mic blocked) surface inline in red.' },
+            { term: 'TTS (read replies aloud)', body: 'The speaker button toggles text-to-speech. When on, Claude\'s replies are read back to you out loud.' },
+          ],
+        },
+      ],
+      tips: [
+        'The speech model downloads on first use only, then stays cached — later recordings start instantly.',
+        'Hold-to-talk is best for quick interjections; Tap on/off is better for longer dictation where you don\'t want to hold a key.',
+      ],
+    },
+  'repoviz': {
+      headline: 'Repo visualization',
+      intro: 'A quick visual map of the project open in your active terminal. It walks the files, counts lines, and reads git status — all locally — then shows you the language mix, the biggest directories, and how many files are uncommitted. Nothing leaves your machine.',
+      sections: [
+        {
+          title: 'What it shows',
+          items: [
+            { term: 'Summary stats', body: 'Three cards at the top: total files, total lines of code, and uncommitted files (highlighted amber when above zero). The current git branch is shown next to the folder name.' },
+            { term: 'Languages', body: 'A colour-coded bar per language (top 12 by file count), each labelled with its file count and line count. Bar length is relative to the largest language.' },
+            { term: 'Top directories', body: 'Treemap-style boxes for the biggest directories, sized by file count so one huge folder doesn\'t crowd out the rest. Hover a box for its exact file and line counts.' },
+          ],
+        },
+      ],
+      tips: [
+        'Open a terminal tab in a folder first — the visualization analyses whichever project your active tab is in, and re-runs automatically when you switch tabs.',
+        'Hit Refresh to re-scan after big changes. Very large repos stop early (5,000-file cap or a 30-second timeout) and are flagged "truncated".',
+      ],
+    },
+  'search': {
+      headline: 'Search',
+      intro: 'One search surface with two modes, both scoped to the project in your active terminal. Files (⌘P) fuzzy-finds a file by name. Content (⌘⇧F) searches inside files for text. Picking a result inserts its path into the active terminal so you can @-mention it to Claude — it does not open the file.',
+      sections: [
+        {
+          title: 'Files mode (⌘P)',
+          items: [
+            { term: 'Fuzzy file find', body: 'Type part of a filename to fuzzy-match files in the current project; filename and path-prefix matches rank highest. With the box empty, recently-opened files show first, then the rest alphabetically.' },
+            { term: 'Insert', body: '↑/↓ to move, Enter (or click) inserts the file\'s path into the active terminal. The path is relative to the project folder when the file lives inside it.' },
+          ],
+        },
+        {
+          title: 'Content mode (⌘⇧F)',
+          items: [
+            { term: 'Search inside files', body: 'Type to search file contents across the whole project. Uses ripgrep when it is installed and falls back to a built-in file walk otherwise (a "fs walk (rg missing)" note appears in that case). Searching is debounced as you type.' },
+            { term: 'Results', body: 'Matches are grouped by file with line numbers; the matched text is highlighted. Enter (or click) inserts that file\'s path and line as path:line into the active terminal.' },
+          ],
+        },
+      ],
+      tips: [
+        'Toggle Files / Content at the top, or jump straight in with ⌘P (Files) / ⌘⇧F (Content).',
+        'In Content mode, the Aa button turns on case-sensitive matching.',
+      ],
+    },
+  'prompts': {
+      headline: 'Click-to-insert prompt library — 46 curated templates across 8 categories',
+      intro: 'A personal library of ready-made prompts. Pick a template from the sidebar (grouped by category, with a filter box at the top), then either fire it as-is or tweak it first. Sending drops the text into your active terminal session. You can also edit any template permanently — your edited version replaces the bundled one until you reset it.',
+      sections: [
+        {
+          title: 'Sending a prompt',
+          items: [
+            { term: 'Use prompt', body: 'Opens a Tweak window where you can edit the text before sending and pick the send mode. Click "Send to terminal" to deliver it. The button is disabled until you have an open terminal session.' },
+            { term: 'Paste', body: 'Writes the prompt to the terminal with no trailing newline. You review it on the prompt line and press Enter yourself — useful when you want to edit further before sending.' },
+            { term: 'Auto-fire', body: 'Appends a newline so Claude receives and acts on the prompt immediately. Good for one-shot prompts you trust to run as-is. Each template ships with a default mode (shown as a chip), which you can override per send.' },
+          ],
+        },
+        {
+          title: 'Customising prompts',
+          items: [
+            { term: 'Edit root template', body: 'Opens an inline editor for the prompt body. Saving writes your version to ~/.claude/session-manager/prompts/<category>/<slug>.md, and it is used on every future open of that prompt. The bundled seed files are never modified.' },
+            { term: 'Reset to default', body: 'Appears only once you have an edited version. Clicking it restores the bundled text and discards your changes.' },
+          ],
+        },
+      ],
+      tips: [
+        'Auto-fire prompts like a staged-diff security review are meant to run without hand-holding — they produce structured output you can act on straight away.',
+        'Paste mode lets you personalise a prompt on the fly (add a file path, scope it to one function) before submitting.',
+      ],
+    },
+  'remote': {
+      headline: 'Remote Access — disabled by default',
+      intro: 'Lets a paired phone or web browser see your sessions and, optionally, send commands to this machine over an encrypted relay. It is off until you turn it on, and even then only a fixed list of command types is accepted — there is no "run any shell command" verb exposed to the relay. Two separate switches keep watching and controlling apart.',
+      sections: [
+        {
+          title: 'Two switches',
+          items: [
+            { term: 'Allow remote control from the web', body: 'The master switch. While off, the relay refuses every connection and no remote traffic is accepted. Turning it on lets a paired device connect and watch session output.' },
+            { term: 'Allow command writes (pty + scheduler)', body: 'A second switch, off by default, that must also be on before a paired device can run terminal commands or queue scheduler jobs. With it off, devices can watch but cannot change anything.' },
+          ],
+        },
+        {
+          title: 'Security model',
+          items: [
+            { term: 'Command allowlist', body: 'Only an enumerated set of command types is accepted (17 today: 2 plain reads, 6 sensitive reads, and 9 write/control commands). Anything unrecognised is rejected with an opaque error so the relay learns nothing.' },
+            { term: 'Encrypted session + code check', body: 'Sessions establish an end-to-end key, then show a short verification code you compare with the one in the browser. Until you confirm the codes match, sensitive reads and all command writes stay blocked.' },
+            { term: 'Path safety', body: 'Any folder or file path in a remote command passes through the same home-directory boundary check (validatePath) used by the local app — nothing outside your home directory can be reached.' },
+            { term: 'Audit log', body: 'Every command is recorded to ~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log (file mode 0600, stays on this machine). Token and payload values are never written. You can view the last 100 lines in-app from the Audit log section.' },
+          ],
+        },
+      ],
+      tips: [
+        'Pair a device by clicking "Pair Device…" and entering the 8-character code shown under "Add Device" in the web app.',
+        'Revoke a single device from the Paired Devices list, or hit Panic / "Revoke all" to tear down every session and invalidate all device tokens at once if you suspect compromise.',
+      ],
+    },
 }

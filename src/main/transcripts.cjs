@@ -44,6 +44,9 @@ function transcriptPath(cwd, sessionUuid) {
 }
 
 const MAX_RAW_STR = 4096;
+// Cap bytes read per readDelta pass. Bounds memory on first attach to a very
+// large transcript (hundreds of MB) — see readDelta's seek-to-tail branch.
+const MAX_DELTA_BYTES = 8 * 1024 * 1024;
 
 // Block types whose text/content fields are parsed structurally by
 // orchestrator.ts / race.ts — truncating them produces mid-token "…" and
@@ -151,14 +154,31 @@ async function readDelta(sub) {
     sub.inode = stat.ino;
     return [];
   }
+  let readFrom = sub.offset;
+  let length = stat.size - readFrom;
+  let skipped = false;
+  if (length > MAX_DELTA_BYTES) {
+    // Huge unread span — typically a very large transcript (hundreds of MB) on
+    // first attach. Materializing the whole thing into a Buffer + decoded string
+    // can OOM-kill the main process, so seek to the last MAX_DELTA_BYTES and
+    // ring-buffer only the most recent events (bounded at 500 anyway).
+    readFrom = stat.size - MAX_DELTA_BYTES;
+    // Include the byte just before the window so the first split segment we drop
+    // below is always either an empty string (if the window began exactly at a
+    // newline) or a genuine partial line — never a complete event.
+    if (readFrom > 0) readFrom -= 1;
+    length = stat.size - readFrom;
+    sub.pending = '';
+    skipped = true;
+  }
   const fd = await fsp.open(sub.filePath, 'r');
   try {
-    const length = stat.size - sub.offset;
     const buf = Buffer.alloc(length);
-    await fd.read(buf, 0, length, sub.offset);
+    await fd.read(buf, 0, length, readFrom);
     const text = sub.pending + buf.toString('utf8');
     const parts = text.split('\n');
     sub.pending = parts.pop() ?? '';
+    if (skipped) parts.shift(); // discard the partial line at the seek boundary
     sub.offset = stat.size;
     sub.inode = stat.ino;
     return parts.filter(Boolean);

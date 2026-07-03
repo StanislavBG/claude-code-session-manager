@@ -83,7 +83,7 @@ export const MarkdownPreview = forwardRef<HTMLDivElement, Props>(function Markdo
     const href = a.getAttribute('href') || ''
     if (/^https?:\/\//i.test(href)) {
       e.preventDefault()
-      window.api.app.openExternal(href).catch(() => { /* ignore */ })
+      window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
     }
     // in-page (#anchor) and relative links fall through harmlessly.
   }

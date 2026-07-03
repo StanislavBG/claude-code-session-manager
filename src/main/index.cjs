@@ -36,7 +36,6 @@ const agentMemory = require('./agentMemory.cjs');
 const { registerDocEditorHandlers } = require('./docEditor.cjs');
 const git = require('./git.cjs');
 const superagent = require('./superagent.cjs');
-const kg = require('./kg.cjs');
 const filesIpc = require('./files.cjs');
 const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
@@ -585,57 +584,66 @@ ipcMain.handle('app:git-branch', validated(schemas.appGitBranch, async ({ cwd })
 // in lib/insideHome.cjs — single chokepoint for the /home/bilkoEVIL prefix-trap.
 // Editor / finder / terminal logic lives in lib/openExternalApp.cjs.
 
-ipcMain.handle('app:open-in-editor', validated(schemas.openInEditor, async ({ cwd, editor }) => {
-  const r = checkInsideHome(cwd);
-  if (!r.ok) throw new Error(r.error);
-  return openInEditor({ cwd, editor });
-}));
-
-ipcMain.handle('app:open-external', validated(schemas.openExternal, async ({ url }) => {
-  // URL filter mirrors setWindowOpenHandler at line ~631: without it, the
-  // renderer could be tricked into asking shell.openExternal to launch
-  // `file:///etc/passwd`, `javascript:…`, or `mailto:…`. Stick to web URLs.
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    return { ok: false, error: 'only http/https URLs are allowed' };
+// Consolidated shell open/reveal endpoint. One channel, discriminated on `as`,
+// replaces five app:open-* handlers plus files:open-external / show-in-finder.
+// Each branch keeps its own boundary guard (home-scope or http(s)-only).
+ipcMain.handle('shell:open', validated(schemas.shellOpen, async (opts) => {
+  switch (opts.as) {
+    case 'editor': {
+      const r = checkInsideHome(opts.cwd);
+      if (!r.ok) throw new Error(r.error);
+      return openInEditor({ cwd: opts.cwd, editor: opts.editor });
+    }
+    case 'finder': {
+      const r = checkInsideHome(opts.cwd);
+      if (!r.ok) throw new Error(r.error);
+      return openInFinder({ cwd: opts.cwd });
+    }
+    case 'terminal': {
+      const r = checkInsideHome(opts.cwd);
+      if (!r.ok) throw new Error(r.error);
+      return openInTerminal({ cwd: opts.cwd });
+    }
+    case 'external': {
+      // Without this, the renderer could ask shell.openExternal to launch
+      // `file:///etc/passwd`, `javascript:…`, or `mailto:…`. Web URLs only.
+      const url = opts.url;
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return { ok: false, error: 'only http/https URLs are allowed' };
+      }
+      await shell.openExternal(url);
+      return { ok: true };
+    }
+    case 'fileInEditor': {
+      const home = os.homedir();
+      const abs = path.isAbsolute(opts.path) ? opts.path : path.resolve(home, opts.path);
+      // Allowed roots: $HOME plus our own clipboard temp dir (clipboard-paste
+      // writes PNGs there; terminal clicks on those paths must resolve).
+      // Resolve symlinks on both sides — on macOS /tmp → /private/tmp.
+      const clipboardDirRaw = path.join(os.tmpdir(), 'session-manager-clipboard');
+      let clipboardDirReal = clipboardDirRaw;
+      try { clipboardDirReal = fs.realpathSync(clipboardDirRaw); } catch { /* not yet created */ }
+      let absReal = abs;
+      try { absReal = fs.realpathSync(abs); } catch { /* may not exist yet — access() below */ }
+      const inClipboardTmp =
+        absReal === clipboardDirReal ||
+        absReal.startsWith(clipboardDirReal + path.sep) ||
+        abs === clipboardDirRaw ||
+        abs.startsWith(clipboardDirRaw + path.sep);
+      if (!inClipboardTmp) {
+        const r = checkInsideHome(abs);
+        if (!r.ok) throw new Error(r.error);
+      }
+      return openFileInEditor({ path: abs, line: opts.line, col: opts.col, editor: opts.editor });
+    }
+    case 'openPath':
+      // validateHomePath runs inside filesIpc.openExternal.
+      return filesIpc.openExternal(opts.path);
+    case 'revealPath':
+      return filesIpc.showInFinder(opts.path);
+    default:
+      return { ok: false, error: 'unknown open target' };
   }
-  await shell.openExternal(url);
-  return { ok: true };
-}));
-
-ipcMain.handle('app:open-file-in-editor', validated(schemas.openFileInEditor, async ({ path: p, line, col, editor }) => {
-  const home = os.homedir();
-  const abs = path.isAbsolute(p) ? p : path.resolve(home, p);
-  // Allowed roots: $HOME (the usual case) plus our own clipboard temp dir
-  // (clipboard-paste writes PNGs there; clicks on those paths from the
-  // terminal must resolve). Resolve symlinks on both sides — on macOS
-  // /tmp is a symlink to /private/tmp, so a literal prefix check fails.
-  const clipboardDirRaw = path.join(os.tmpdir(), 'session-manager-clipboard');
-  let clipboardDirReal = clipboardDirRaw;
-  try { clipboardDirReal = fs.realpathSync(clipboardDirRaw); } catch { /* not yet created */ }
-  let absReal = abs;
-  try { absReal = fs.realpathSync(abs); } catch { /* file may not exist yet — fall through to access() below */ }
-  const inClipboardTmp =
-    absReal === clipboardDirReal ||
-    absReal.startsWith(clipboardDirReal + path.sep) ||
-    abs === clipboardDirRaw ||
-    abs.startsWith(clipboardDirRaw + path.sep);
-  if (!inClipboardTmp) {
-    const r = checkInsideHome(abs);
-    if (!r.ok) throw new Error(r.error);
-  }
-  return openFileInEditor({ path: abs, line, col, editor });
-}));
-
-ipcMain.handle('app:open-in-finder', validated(schemas.openInFinder, async ({ cwd }) => {
-  const r = checkInsideHome(cwd);
-  if (!r.ok) throw new Error(r.error);
-  return openInFinder({ cwd });
-}));
-
-ipcMain.handle('app:open-in-terminal', validated(schemas.openInTerminal, async ({ cwd }) => {
-  const r = checkInsideHome(cwd);
-  if (!r.ok) throw new Error(r.error);
-  return openInTerminal({ cwd });
 }));
 
 ipcMain.handle('app:archive-project', validated(schemas.archiveProject, async ({ encoded }) => {
@@ -970,7 +978,6 @@ app.whenReady().then(async () => {
   watchers.attachWindow(mainWindow);
   pluginInstall.attachWindow(mainWindow);
   superagent.attachWindow(mainWindow);
-  kg.attachWindow(mainWindow);
   webRemote.attachWindow(mainWindow);
   chatRunner.attachWindow(mainWindow);
   scheduler.init().catch((e) => {
@@ -985,11 +992,6 @@ app.whenReady().then(async () => {
   webRemote.init().catch((e) => {
     logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
-  // Knowledge Graph: watch the prompt log + register kg:* IPC. Best-effort.
-  try { kg.init({ logger: logs }); } catch (e) {
-    logs.writeLine({ scope: 'kg', level: 'error', message: 'init failed', meta: { error: e?.message } });
-  }
-
   // Keep the machine awake while the app is open. The scheduler polls billing
   // usage every 2 min and runs `claude -p` jobs that must survive an idle
   // laptop — a system suspend (GNOME/Pop!_OS idle or lid timeout) would freeze

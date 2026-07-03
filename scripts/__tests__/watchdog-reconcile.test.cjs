@@ -48,6 +48,10 @@ function withFakeReaper({ pidAlive, outcome }, watchdogHelpersPath, fn) {
   const originalEntry = require.cache[watchdogHelpersPath];
   const originalReaper = require.cache[fakeReaperPath];
 
+  // Preserve the real ORPHAN_REQUEUE_CAP (single source of truth) so the mock
+  // only overrides the pid/outcome probes, not the shared re-queue budget.
+  const { ORPHAN_REQUEUE_CAP } = require(fakeReaperPath);
+
   // Install fake reaper
   require.cache[fakeReaperPath] = {
     id: fakeReaperPath,
@@ -56,6 +60,7 @@ function withFakeReaper({ pidAlive, outcome }, watchdogHelpersPath, fn) {
     exports: {
       claudePidAlive: () => pidAlive,
       classifyRunOutcome: () => outcome,
+      ORPHAN_REQUEUE_CAP,
     },
   };
 
@@ -222,8 +227,8 @@ test('no .tmp- sibling files left after reconcile (already covered in b+c, expli
   }
 });
 
-// ── bonus: stale + alive PID → SIGTERM sent, then re-queued ─────────────────
-test('stale + alive PID → SIGTERM attempt, then outcome classification', () => {
+// ── stale + alive PID → SIGNAL and DEFER (never classify a live/flushing log) ──
+test('stale + alive PID → SIGTERM sent, job left running (deferred), NOT re-queued', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
   try {
     const job = {
@@ -249,9 +254,78 @@ test('stale + alive PID → SIGTERM attempt, then outcome classification', () =>
 
     const q = readQueue(base);
     const j = q.jobs[0];
-    // Should still be re-queued since outcome is no_result
-    assert.equal(j.status, 'pending');
+    // A LIVE process must NOT be classified/re-queued this tick — doing so would
+    // double-run the PRD. It stays 'running' (deferred) with a SIGTERM stamp so a
+    // later tick escalates/finalizes once the pid is confirmed dead.
+    assert.equal(j.status, 'running', 'live orphan must be left running (deferred)');
+    assert.equal(j.orphanRetries, 0, 'must not consume a re-queue attempt while alive');
+    assert.ok(j.runtime && j.runtime.watchdogSigtermAt, 'SIGTERM stamp recorded for escalation');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── alive PID that ignored SIGTERM → escalates to SIGKILL on next tick ────────
+test('stale + alive PID already SIGTERM-stamped → still running, escalation path', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
+  try {
+    const job = {
+      slug: 'test-job', status: 'running', runId: 'run-004b',
+      runtime: { pid: 9999999, watchdogSigtermAt: new Date(Date.now() - 200_000).toISOString() },
+      orphanRetries: 0,
+      startedAt: new Date().toISOString(), finishedAt: null,
+      exitCode: null, error: null,
+    };
+    makeRunDir(base, 'run-004b', 'test-job', '');
+    const queuePath = makeQueue(base, [job]);
+    const hbPath = makeHeartbeat(base, Date.now() - 10 * 60 * 1000);
+
+    withFakeReaper({ pidAlive: true, outcome: 'no_result' }, WATCHDOG_HELPERS, (helpers) => {
+      helpers.reconcileQueueOffline({
+        heartbeatPath: hbPath, maxAgeMs: 180_000, queuePath, runsDir: path.join(base, 'runs'),
+      });
+    });
+
+    const q = readQueue(base);
+    const j = q.jobs[0];
+    assert.equal(j.status, 'running', 'still deferred while alive (SIGKILL issued, awaits death)');
+    assert.equal(j.orphanRetries, 0);
+    assert.ok(j.runtime.watchdogSigkillAt, 'SIGKILL stamp recorded for the finalize bound');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── bounded finalize: alive PID that survived BOTH SIGTERM + SIGKILL must not ──
+// ── wedge in 'running' forever (macOS PID-reuse / defunct) → finalize from log ─
+test('stale + alive PID with both SIGTERM+SIGKILL stamps → finalizes (no forever-running)', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
+  try {
+    const stamp = new Date(Date.now() - 200_000).toISOString();
+    const job = {
+      slug: 'test-job', status: 'running', runId: 'run-004c',
+      runtime: { pid: 9999999, watchdogSigtermAt: stamp, watchdogSigkillAt: stamp },
+      orphanRetries: 0,
+      startedAt: new Date().toISOString(), finishedAt: null,
+      exitCode: null, error: null,
+    };
+    makeRunDir(base, 'run-004c', 'test-job', '');
+    const queuePath = makeQueue(base, [job]);
+    const hbPath = makeHeartbeat(base, Date.now() - 10 * 60 * 1000);
+
+    // pidAlive stays true (simulates macOS PID reuse / unkillable defunct).
+    withFakeReaper({ pidAlive: true, outcome: 'no_result' }, WATCHDOG_HELPERS, (helpers) => {
+      helpers.reconcileQueueOffline({
+        heartbeatPath: hbPath, maxAgeMs: 180_000, queuePath, runsDir: path.join(base, 'runs'),
+      });
+    });
+
+    const q = readQueue(base);
+    const j = q.jobs[0];
+    // no_result → re-queued to pending; crucially NOT left 'running' forever.
+    assert.equal(j.status, 'pending', 'must finalize after both signals, not defer forever');
     assert.equal(j.orphanRetries, 1);
+    assert.equal(j.runtime, undefined, 'runtime (incl. stamps) cleared on finalize');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -371,7 +445,9 @@ test('stale heartbeat + no pid field → legacy age-only behavior (reaps)', () =
 test('stale + dead PID + orphanRetries at cap → failed', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-test-'));
   try {
-    const ORPHAN_REQUEUE_CAP = 2;
+    // Import the single source of truth so this test tracks the real cap (5),
+    // rather than re-hardcoding it and silently drifting.
+    const { ORPHAN_REQUEUE_CAP } = require('../../src/main/lib/reaperHelpers.cjs');
     const job = {
       slug: 'test-job', status: 'running', runId: 'run-005',
       runtime: { pid: 9999999 }, orphanRetries: ORPHAN_REQUEUE_CAP,

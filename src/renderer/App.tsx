@@ -49,7 +49,6 @@ const SCREEN_KEYS = new Set<NavKey>([
   'prompts',
   'history',
   'usage',
-  'knowledge-graph',
   // Configure
   'skills',
   'plugins',

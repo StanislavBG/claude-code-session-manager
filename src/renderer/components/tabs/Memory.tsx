@@ -13,8 +13,9 @@ import type { MemoryEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
 import { MemoryNaturalPanel } from './MemoryNaturalPanel'
 import { SubagentMemoryView } from './memory/SubagentMemoryView'
+import { MemoryClustersPanel } from './memory/MemoryClustersPanel'
 
-type MemoryView = 'classic' | 'natural'
+type MemoryView = 'classic' | 'natural' | 'clusters'
 type MemoryScope = 'workspace' | 'subagent'
 
 const SLUG_RE = /^[a-z0-9-_]+$/
@@ -175,6 +176,7 @@ function WorkspaceMemoryView() {
             options={[
               { key: 'classic', label: 'Editor' },
               { key: 'natural', label: 'Natural' },
+              { key: 'clusters', label: 'Clusters' },
             ]}
             active={view}
             onChange={setView}
@@ -228,6 +230,14 @@ function WorkspaceMemoryView() {
     >
       {view === 'natural' ? (
         <MemoryNaturalPanel workspace={workspace} entries={entries} onChanged={refresh} />
+      ) : view === 'clusters' ? (
+        <MemoryClustersPanel
+          workspace={workspace}
+          onOpenMember={(slug) => {
+            setSelectedName(`${slug}.md`)
+            setView('classic')
+          }}
+        />
       ) : (
       <ListDetail
         sidebar={

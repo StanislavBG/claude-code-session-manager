@@ -443,6 +443,24 @@ export interface HistoryAggregateResult {
   scannedMs: number;
 }
 
+export interface ConversationSummary {
+  /** ISO 8601 timestamp of the first event in the conversation (or file mtime fallback). */
+  timestamp: string;
+  /** Decoded project cwd, e.g. /home/user/Projects/foo. */
+  projectFolder: string;
+  stats: {
+    /** Wall-clock duration in ms (first event ts → last event ts). Omitted when unknown. */
+    duration?: number;
+    /** Sum of input + output tokens across the file. 0 when no usage blocks present. */
+    estimatedTokens: number;
+  };
+}
+
+export interface ListConversationsResult {
+  conversations: ConversationSummary[];
+  scannedMs: number;
+}
+
 export interface SessionScanEntry {
   sessionId: string;
   projectEncoded: string;
@@ -472,6 +490,7 @@ export interface FilesWriteResult { ok: boolean; error: string | null }
 export interface FilesCreateResult { ok: boolean; path?: string; error: string | null }
 export interface FilesRenameResult { ok: boolean; newPath?: string; error: string | null }
 export interface FilesDeleteResult { ok: boolean; error: string | null }
+export interface FilesShellResult { ok: boolean; error?: string }
 
 export interface SearchFileEntry {
   name: string;
@@ -716,6 +735,17 @@ export interface AgentMemoryMutationResult {
   error: string | null;
 }
 
+export interface AgentMemoryAgentSummary {
+  agentId: string;
+  bytes: number;
+  mtimeMs: number;
+}
+
+export interface AgentMemoryListAgentsResult {
+  agents: AgentMemoryAgentSummary[];
+  error: string | null;
+}
+
 // ────────────────────────────────────────────── Git status (richer than app:git-branch)
 
 /** Mirrors the status returned by src/main/git.cjs mapStatus(). */
@@ -913,6 +943,16 @@ export interface SessionManagerAPI {
     homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
+    openInEditor: (cwd: string, editor?: string | null) => Promise<{ ok: boolean; opener?: string; error?: string }>;
+    /** Open an http/https URL in the OS default browser. file://, javascript:,
+     *  and other schemes are rejected with `ok:false` to prevent abuse. */
+    openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+    /** Open a specific file at line:col in the user's editor. Editors with
+     *  goto-line support (code/cursor/subl) get the `-g file:line:col` form;
+     *  others open the file alone. Image files are routed to the OS default viewer. */
+    openFileInEditor: (filePath: string, line?: number, col?: number, editor?: string | null) => Promise<{ ok: boolean; opener?: string; error?: string }>;
+    openInFinder: (cwd: string) => Promise<{ ok: boolean; opener?: string; error?: string }>;
+    openInTerminal: (cwd: string) => Promise<{ ok: boolean; opener?: string; error?: string }>;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;
   };
   pty: {
@@ -965,6 +1005,7 @@ export interface SessionManagerAPI {
     onHotkeyConfigChanged: (handler: (cfg: VoiceHotkeyConfig) => void) => () => void;
     getHotkeyConfig: () => Promise<VoiceHotkeyConfig>;
     setHotkeyConfig: (cfg: VoiceHotkeyConfig) => Promise<VoiceSetHotkeyResult>;
+    getHotkeyConfigPath: () => Promise<string>;
     setRecording: (recording: boolean) => void;
     /** F5: read persisted audio-input device preference. */
     getDevicePref: () => Promise<VoiceDevicePref>;
@@ -1000,21 +1041,8 @@ export interface SessionManagerAPI {
     create: (parentPath: string, name: string, kind: 'file' | 'folder') => Promise<FilesCreateResult>;
     rename: (path: string, newName: string) => Promise<FilesRenameResult>;
     delete: (path: string) => Promise<FilesDeleteResult>;
-  };
-  /** Consolidated shell open/reveal. One method, discriminated on `as`, replaces
-   *  the former app.openIn* / app.openExternal / files.openExternal / files.showInFinder.
-   *  Each variant's boundary guard (home-scope / http(s)-only) runs in the main handler. */
-  shell: {
-    open: (
-      opts:
-        | { as: 'editor'; cwd: string; editor?: string | null }
-        | { as: 'fileInEditor'; path: string; line?: number; col?: number; editor?: string | null }
-        | { as: 'finder'; cwd: string }
-        | { as: 'terminal'; cwd: string }
-        | { as: 'external'; url: string }
-        | { as: 'openPath'; path: string }
-        | { as: 'revealPath'; path: string }
-    ) => Promise<{ ok: boolean; opener?: string; error?: string }>;
+    openExternal: (path: string) => Promise<FilesShellResult>;
+    showInFinder: (path: string) => Promise<FilesShellResult>;
   };
   search: {
     files: (cwd: string, query?: string, opts?: { limit?: number }) => Promise<SearchFilesResult>;
@@ -1031,6 +1059,7 @@ export interface SessionManagerAPI {
   };
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
+    listConversations: () => Promise<ListConversationsResult>;
     scanProjects: () => Promise<SessionScanResult>;
   };
   schedule: {
@@ -1040,6 +1069,7 @@ export interface SessionManagerAPI {
     runNow: () => Promise<{ ok: boolean }>;
     forceTick: () => Promise<{ ok: boolean }>;
     resume: () => Promise<{ ok: boolean }>;
+    refreshReset: () => Promise<{ ok: boolean; nextReset: string | null }>;
     /** Re-scan prds/ and merge into queue.json; broadcasts updated state. */
     rescan: () => Promise<{ ok: boolean }>;
     /** Move all pending+failed PRDs to prds-archived/<ISO>/ and drop their
@@ -1120,6 +1150,8 @@ export interface SessionManagerAPI {
     ) => Promise<AgentMemoryMutationResult>;
     /** Delete one entry. Removes the file outright when last entry is removed. */
     delete: (agentId: string, entryId: string) => Promise<AgentMemoryMutationResult>;
+    /** List all agents that currently have a memory file on disk. */
+    listAgents: () => Promise<AgentMemoryListAgentsResult>;
   };
   docEditor: {
     pickFile: (payload?: { lastDir?: string }) => Promise<{ path: string | null; error?: string }>;
@@ -1200,6 +1232,8 @@ export interface SessionManagerAPI {
     ask: (question: string, cwd?: string) => Promise<{ ok: boolean; answer?: string; cited?: { ts: string; prompt: string }[]; error?: string }>;
     /** Purge graphs: one project (`{ cwd }`) or all (`{ all: true }`). */
     clear: (arg?: { cwd?: string; all?: boolean }) => Promise<{ ok: boolean; cleared?: string; removed?: number }>;
+    /** Toggle the recurring claude -p extraction on/off (sets captureMode 'llm'/'off'). */
+    setExtraction: (enabled: boolean) => Promise<{ ok: boolean; extractionEnabled: boolean }>;
     /** Set capture mode: 'llm' = claude -p extraction; 'lite' = heuristic (free); 'off' = disabled. */
     setCaptureMode: (mode: 'llm' | 'lite' | 'off') => Promise<{ ok: boolean; captureMode?: string; error?: string }>;
     onIngestProgress: (handler: (ev: KgIngestProgress) => void) => () => void;

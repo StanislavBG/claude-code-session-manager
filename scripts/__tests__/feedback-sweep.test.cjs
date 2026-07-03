@@ -250,15 +250,17 @@ test('sweep() returns correct summary counts', () => {
     const proj2 = path.join(base, 'proj2');
     fs.mkdirSync(proj2);
 
-    // Fake prompts.jsonl with both projects as recently active
-    const logDir = path.join(base, 'knowledge-log');
-    fs.mkdirSync(logDir);
-    const logPath = path.join(logDir, 'prompts.jsonl');
-    const recentTs = Date.now() - 10 * 60 * 1000; // 10 min ago
-    fs.writeFileSync(logPath, [
-      JSON.stringify({ ts: recentTs, cwd: proj1 }),
-      JSON.stringify({ ts: recentTs, cwd: proj2 }),
-    ].join('\n') + '\n');
+    // Fake transcripts marking both projects as recently active (mtime-based
+    // detection — activeProjectCwds no longer reads prompts.jsonl).
+    const projectsDir = path.join(base, 'projects');
+    const recentMtime = new Date(Date.now() - 10 * 60 * 1000); // 10 min ago
+    for (const [slug, cwd] of [['slug-proj1', proj1], ['slug-proj2', proj2]]) {
+      const projDir = path.join(projectsDir, slug);
+      fs.mkdirSync(projDir, { recursive: true });
+      const fp = path.join(projDir, 'a.jsonl');
+      fs.writeFileSync(fp, JSON.stringify({ cwd }) + '\n');
+      fs.utimesSync(fp, recentMtime, recentMtime);
+    }
 
     const prdsDir = path.join(base, 'prds');
     fs.mkdirSync(prdsDir);
@@ -266,8 +268,7 @@ test('sweep() returns correct summary counts', () => {
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
     const result = sweep({
-      logPath,
-      projectsDir: path.join(base, 'projects'), // won't be used (logPath has data)
+      projectsDir,
       prdsDir,
       queuePath,
       skillPath,

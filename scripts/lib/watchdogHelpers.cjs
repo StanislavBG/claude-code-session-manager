@@ -12,10 +12,7 @@ const { activeProjectCwds } = require('./activeSessions.cjs');
 // Relative path into src/main/lib/ — the watchdog is external to the app, so
 // we re-use the helpers without importing any Electron code.
 // (Same claudePidAlive + classifyRunOutcome used by scheduler.cjs boot reconciliation.)
-const { claudePidAlive, classifyRunOutcome } = require('../../src/main/lib/reaperHelpers.cjs');
-
-// Mirrors scheduler.cjs:99.
-const ORPHAN_REQUEUE_CAP = 2;
+const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP } = require('../../src/main/lib/reaperHelpers.cjs');
 
 // Mirrors scheduler.cjs:215 (single source of truth there; kept in sync here).
 const DEFAULT_HEARTBEAT_PATH = path.join(
@@ -166,6 +163,7 @@ function reconcileQueueOffline({
 
   const errors = [];
   let reapedCount = 0;
+  let changed = false;
   // Stamp once so all jobs reapedQueue in the same watchdog run share a finishedAt.
   const reconciledAt = new Date().toISOString();
 
@@ -173,10 +171,37 @@ function reconcileQueueOffline({
     if (j.status !== 'running') continue;
 
     const logPath = j.runId ? path.join(runsDir, j.runId, `${j.slug}.log`) : null;
+    const pid = j.runtime?.pid;
 
-    // If PID is alive and the app is dead: SIGTERM to stop the orphan.
-    if (j.runtime?.pid && claudePidAlive(j.runtime.pid)) {
-      try { process.kill(j.runtime.pid, 'SIGTERM'); } catch { /* ESRCH — already gone */ }
+    // If the orphan is still alive we must NOT classify its log this tick — the
+    // process is still running/flushing, so a partial or in-flight log would be
+    // misread (e.g. a job about to emit result:success gets read as no_result and
+    // re-queued, double-running the same PRD while the original still edits the
+    // repo). Instead escalate across ticks (SIGTERM → SIGKILL), matching the
+    // scheduler's kill discipline (process group first, then the pid).
+    //
+    // Bounded so a job can't wedge in 'running' forever: after we've sent BOTH
+    // SIGTERM and SIGKILL on prior ticks, the real claude process is gone. A pid
+    // still reported "alive" here is an unkillable defunct — or, on macOS (no
+    // /proc, so claudePidAlive can't verify identity), a REUSED pid we must stop
+    // signalling. Either way we fall through to finalize from the now-settled log.
+    if (pid && claudePidAlive(pid)) {
+      if (!j.runtime.watchdogSigtermAt) {
+        try { process.kill(-pid, 'SIGTERM'); }
+        catch { try { process.kill(pid, 'SIGTERM'); } catch { /* ESRCH — died between checks */ } }
+        j.runtime.watchdogSigtermAt = reconciledAt;
+        changed = true;
+        continue; // leave status 'running'; revisit next tick
+      }
+      if (!j.runtime.watchdogSigkillAt) {
+        try { process.kill(-pid, 'SIGKILL'); }
+        catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ESRCH */ } }
+        j.runtime.watchdogSigkillAt = reconciledAt;
+        changed = true;
+        continue; // give SIGKILL a tick to land before finalizing
+      }
+      // SIGTERM + SIGKILL already sent on earlier ticks → stop deferring; the
+      // original process is dead. Fall through to classify + finalize.
     }
 
     const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
@@ -219,9 +244,10 @@ function reconcileQueueOffline({
     }
 
     reapedCount++;
+    changed = true;
   }
 
-  if (reapedCount === 0) {
+  if (!changed) {
     return { reconciled: false, reapedCount: 0, errors };
   }
 
@@ -290,6 +316,9 @@ function hasOpenFeedback(cwd) {
     }
     for (const entry of entries) {
       if (!entry.endsWith('.md')) continue;
+      // README.md is the folder's convention doc, not an open feedback item —
+      // counting it makes a folder with only a README look perpetually "pending".
+      if (entry.toLowerCase() === 'readme.md') continue;
       try {
         const st = fs.statSync(path.join(folderPath, entry));
         if (st.isFile()) return true;
@@ -340,16 +369,26 @@ function emitFeedbackPRD(cwd, {
   }
 
   // Pick next NN: max existing NN prefix + 1. O(P) scan.
+  // We ALSO dedup against the prds dir here: while the app is down it never
+  // ingests new PRD files into queue.json, so the queue check above can't see a
+  // feedback PRD we already wrote on a previous tick. Without this, every stale
+  // watchdog tick emits a fresh NN-feedback-<project>.md, unbounded.
+  const prdDupRe = new RegExp(`^\\d+-feedback-${project}\\.md$`);
   let maxNN = 0;
+  let prdFiles = [];
   try {
-    for (const f of fs.readdirSync(prdsDir)) {
-      const m = f.match(/^(\d+)-/);
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (n > maxNN) maxNN = n;
-      }
-    }
+    prdFiles = fs.readdirSync(prdsDir);
   } catch { /* prdsDir may not exist yet */ }
+  for (const f of prdFiles) {
+    if (prdDupRe.test(f)) {
+      return { emitted: false, reason: 'duplicate' };
+    }
+    const m = f.match(/^(\d+)-/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > maxNN) maxNN = n;
+    }
+  }
   const nn = String(maxNN + 1).padStart(2, '0');
   const slug = `${nn}-feedback-${project}`;
   const prdPath = path.join(prdsDir, `${slug}.md`);
@@ -441,11 +480,10 @@ function emitFeedbackPRD(cwd, {
  * feedback folder (typically small).
  *
  * opts:
- *   logPath, projectsDir  — forwarded to activeProjectCwds for testing
+ *   projectsDir  — forwarded to activeProjectCwds for testing
  *   prdsDir, queuePath, skillPath, standardsPath — forwarded to emitFeedbackPRD
  */
 function sweep({
-  logPath,
   projectsDir,
   prdsDir = DEFAULT_PRDS_DIR,
   queuePath = DEFAULT_QUEUE_PATH,
@@ -453,7 +491,6 @@ function sweep({
   standardsPath = DEFAULT_STANDARDS_PATH,
 } = {}) {
   const activeOpts = {};
-  if (logPath !== undefined) activeOpts.logPath = logPath;
   if (projectsDir !== undefined) activeOpts.projectsDir = projectsDir;
 
   const cwds = activeProjectCwds(90, activeOpts);

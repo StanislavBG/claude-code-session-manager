@@ -227,10 +227,20 @@ export function Terminal({ tabId, cwd }: Props) {
   }
 
   return (
-    <div
-      ref={hostRef}
-      onMouseDown={() => xtermRef.current?.focus()}
-      className="h-full w-full bg-bg"
-    />
+    <div className="relative h-full w-full">
+      <button
+        type="button"
+        onClick={() => useSessions.getState().sleepTab(tabId)}
+        title="Kill this session and return to chat"
+        className="absolute top-2 right-11 z-20 rounded border border-white/10 bg-bg-elev/80 px-2 py-1 text-xs text-fg-muted backdrop-blur-sm hover:bg-white/5 hover:text-fg"
+      >
+        ← Back to chat
+      </button>
+      <div
+        ref={hostRef}
+        onMouseDown={() => xtermRef.current?.focus()}
+        className="h-full w-full bg-bg"
+      />
+    </div>
   )
 }

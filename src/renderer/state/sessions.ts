@@ -40,6 +40,8 @@ interface SessionsState {
   restoreTabs: (tabs: SessionTab[], activeTabId: string | null) => void
   /** Transition a dormant tab to spawning, resolving the startup command. */
   wakeTab: (id: string, modelOverride?: RawModel) => Promise<void>
+  /** Kill the running PTY and return a tab to dormant/chat mode, preserving the tab row. */
+  sleepTab: (id: string) => void
 }
 
 function labelFromCwd(cwd: string): string {
@@ -186,6 +188,16 @@ export const useSessions = create<SessionsState>((set, get) => ({
         t.id === id
           ? { ...t, claudeSessionId, status: 'spawning' as const, startupCommand, generation: t.generation + 1 }
           : t
+      ),
+    })
+  },
+  sleepTab: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab || tab.status === 'dormant') return
+    window.api.pty.kill(id)
+    set({
+      tabs: get().tabs.map((t) =>
+        t.id === id ? { ...t, pid: null, status: 'dormant' as const } : t
       ),
     })
   },

@@ -9,6 +9,7 @@ import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
 import { PluginsDiscover } from './plugins/PluginsDiscover'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
+import { PluginSkillBrowser } from './plugins/PluginSkillBrowser'
 
 type PluginsView = 'installed' | 'library' | 'discover'
 
@@ -249,6 +250,7 @@ function PluginsViewTabs({
 function PluginDetail({ row, home, onClose }: { row: PluginRow; home: string | null; onClose: () => void }) {
   const [skillEntries, setSkillEntries] = useState<PluginSkillEntry[] | null>(null)
   const [loadingSkills, setLoadingSkills] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
 
   const browseSkills = async () => {
     if (!home) return
@@ -257,56 +259,57 @@ function PluginDetail({ row, home, onClose }: { row: PluginRow; home: string | n
       const dir = await resolveInstalledPluginSkillsDir(row.name, row.path, home)
       const entries = dir ? await listPluginSkills(dir) : []
       setSkillEntries(entries)
+      setBrowsing(true)
     } finally {
       setLoadingSkills(false)
     }
   }
 
   return (
-    <div className="border-t border-line p-3 text-xs space-y-1 bg-bg-elev max-h-64 overflow-auto">
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-medium text-fg">{row.manifest?.name ?? row.name}</span>
-        <button onClick={onClose} className="text-fg-faint hover:text-fg">×</button>
-      </div>
-      {row.manifest?.description ? (
-        <div className="text-fg-dim">{row.manifest.description}</div>
-      ) : null}
-      <div className="font-mono text-fg-faint">{row.path}</div>
-      {row.skills > 0 ? (
-        <div className="pt-1">
-          <button
-            onClick={browseSkills}
-            disabled={loadingSkills}
-            className="text-accent hover:underline disabled:opacity-50"
-          >
-            Browse skills → {skillEntries ? `(${skillEntries.length})` : loadingSkills ? '(…)' : ''}
-          </button>
-          {skillEntries ? (
-            <pre className="mt-1 whitespace-pre-wrap text-fg-faint">
-              {JSON.stringify(skillEntries.map((s) => s.id))}
-            </pre>
-          ) : null}
+    <div className="border-t border-line bg-bg-elev">
+      <div className="p-3 text-xs space-y-1 max-h-64 overflow-auto">
+        <div className="flex items-center justify-between mb-1">
+          <span className="font-medium text-fg">{row.manifest?.name ?? row.name}</span>
+          <button onClick={onClose} className="text-fg-faint hover:text-fg">×</button>
         </div>
-      ) : null}
-      {row.manifest ? (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1">
-          {row.manifest.version ? <Kv k="version" v={row.manifest.version} /> : null}
-          {row.manifest.license ? <Kv k="license" v={row.manifest.license} /> : null}
-          {row.manifest.homepage ? <Kv k="homepage" v={row.manifest.homepage} /> : null}
-          {row.manifest.repository ? <Kv k="repository" v={row.manifest.repository} /> : null}
-          {row.manifest.author ? (
-            <Kv
-              k="author"
-              v={typeof row.manifest.author === 'string' ? row.manifest.author : row.manifest.author.name ?? ''}
-            />
-          ) : null}
+        {row.manifest?.description ? (
+          <div className="text-fg-dim">{row.manifest.description}</div>
+        ) : null}
+        <div className="font-mono text-fg-faint">{row.path}</div>
+        {row.skills > 0 ? (
+          <div className="pt-1">
+            <button
+              onClick={browseSkills}
+              disabled={loadingSkills}
+              className="text-accent hover:underline disabled:opacity-50"
+            >
+              Browse skills → {skillEntries ? `(${skillEntries.length})` : loadingSkills ? '(…)' : ''}
+            </button>
+          </div>
+        ) : null}
+        {row.manifest ? (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1">
+            {row.manifest.version ? <Kv k="version" v={row.manifest.version} /> : null}
+            {row.manifest.license ? <Kv k="license" v={row.manifest.license} /> : null}
+            {row.manifest.homepage ? <Kv k="homepage" v={row.manifest.homepage} /> : null}
+            {row.manifest.repository ? <Kv k="repository" v={row.manifest.repository} /> : null}
+            {row.manifest.author ? (
+              <Kv
+                k="author"
+                v={typeof row.manifest.author === 'string' ? row.manifest.author : row.manifest.author.name ?? ''}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        <div className="pt-1 text-fg-faint">
+          contents — agents: {row.agents} · skills: {row.skills} · hooks: {row.hooks} · monitors:{' '}
+          {row.monitors} · bin: {row.binCount} · lsp: {row.hasLsp ? 'yes' : 'no'} · mcp:{' '}
+          {row.hasMcp ? 'yes' : 'no'}
         </div>
-      ) : null}
-      <div className="pt-1 text-fg-faint">
-        contents — agents: {row.agents} · skills: {row.skills} · hooks: {row.hooks} · monitors:{' '}
-        {row.monitors} · bin: {row.binCount} · lsp: {row.hasLsp ? 'yes' : 'no'} · mcp:{' '}
-        {row.hasMcp ? 'yes' : 'no'}
       </div>
+      {browsing && skillEntries ? (
+        <PluginSkillBrowser skills={skillEntries} onClose={() => setBrowsing(false)} />
+      ) : null}
     </div>
   )
 }

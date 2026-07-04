@@ -37,6 +37,18 @@ function rejectCredentials(real) {
   if (path.basename(real) === '.credentials.json') {
     throw new Error('Write to .credentials.json denied');
   }
+  // Defense-in-depth: files:* is renderer-only (not web-remote reachable), but a
+  // renderer compromise could otherwise write code-execution-persistence or
+  // credential material a cockpit file browser has no business modifying. Block
+  // WRITES to these (reads are unaffected — they don't call this). Shell rc files
+  // are deliberately NOT blocked; developers legitimately edit those.
+  const rel = path.relative(os.homedir(), real);
+  if (rel === '.ssh' || rel.startsWith('.ssh' + path.sep)) {
+    throw new Error('Write inside ~/.ssh denied');
+  }
+  if (rel.startsWith(path.join('.config', 'autostart') + path.sep)) {
+    throw new Error('Write to ~/.config/autostart denied');
+  }
 }
 
 // Invalid characters for file/folder names (cross-platform).
@@ -334,6 +346,7 @@ module.exports = {
   openExternal,
   showInFinder,
   // exported for tests
+  rejectCredentials,
   listDir,
   readFile,
   writeFile,

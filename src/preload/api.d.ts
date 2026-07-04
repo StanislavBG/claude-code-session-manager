@@ -869,6 +869,14 @@ export interface ChatRunOutputEvent {
   delta: string;
 }
 
+export interface ChatRunToolUseEvent {
+  tabId: string;
+  /** tool_use content block id from the stream-json event. */
+  id: string;
+  kind: 'skill' | 'mcp' | 'tool';
+  label: string;
+}
+
 export interface ChatRunNeedsInputEvent {
   tabId: string;
   sessionId: string;
@@ -1175,6 +1183,7 @@ export interface SessionManagerAPI {
     onQueued: (handler: (e: ChatRunQueuedEvent) => void) => () => void;
     onRunStarted: (handler: (e: ChatRunStartedEvent) => void) => () => void;
     onOutput: (handler: (e: ChatRunOutputEvent) => void) => () => void;
+    onToolUse: (handler: (e: ChatRunToolUseEvent) => void) => () => void;
     onNeedsInput: (handler: (e: ChatRunNeedsInputEvent) => void) => () => void;
     onComplete: (handler: (e: ChatRunCompleteEvent) => void) => () => void;
     onError: (handler: (e: ChatRunErrorEvent) => void) => () => void;

@@ -22,6 +22,7 @@
  *   chat:run:queued     { tabId, sessionId, position }   — waiting behind a busy lane
  *   chat:run:started    { tabId, sessionId }
  *   chat:run:output     { tabId, delta }
+ *   chat:run:tool-use   { tabId, id, kind, label }
  *   chat:run:complete   { tabId, sessionId, finalMessage }
  *   chat:run:needs-input { tabId, sessionId, questions, raw }
  *   chat:run:error      { tabId, sessionId, message }
@@ -32,6 +33,7 @@ const { ipcMain } = require('electron');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { recordExchange } = require('./exchanges.cjs');
+const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -265,6 +267,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
           if (block.type === 'text' && typeof block.text === 'string') {
             finalAssistantText += block.text;
             broadcast('chat:run:output', { tabId, delta: block.text });
+          } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+            const classified = classifyToolUse(block);
+            broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified });
           }
         }
       } else if (event.type === 'result') {

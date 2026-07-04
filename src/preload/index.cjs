@@ -336,6 +336,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('chat:run:output', listener);
       return () => ipcRenderer.removeListener('chat:run:output', listener);
     },
+    onToolUse: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:tool-use', listener);
+      return () => ipcRenderer.removeListener('chat:run:tool-use', listener);
+    },
     onNeedsInput: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('chat:run:needs-input', listener);

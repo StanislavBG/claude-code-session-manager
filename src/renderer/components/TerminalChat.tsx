@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify'
 import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
+import { LearningPanel } from './LearningPanel'
 
 /**
  * TerminalChat — the DEFAULT terminal-screen experience for a dormant tab
@@ -129,8 +130,11 @@ export function TerminalChat({ tabId, cwd }: Props) {
   return (
     <div className="flex h-full w-full flex-col bg-bg">
       <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
-        <div className="text-xs text-fg-muted">
-          Chat · headless session — no process runs between commands
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-fg-muted">
+            Chat · headless session — no process runs between commands
+          </div>
+          <LearningPanel active="terminal" />
         </div>
         <div ref={modelMenuRef} className="relative flex items-stretch">
           <button

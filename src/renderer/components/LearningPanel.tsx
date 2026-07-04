@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NavKey } from './LeftNav'
 import { LEARNING_CONTENT, type LearningContent } from './learningContent'
 
@@ -24,12 +24,14 @@ function saveCollapsed(collapsed: boolean) {
 }
 
 export function LearningPanel({ active }: { active: NavKey }) {
-  const [collapsed, setCollapsed] = useState<boolean>(() => loadCollapsed())
+  // `collapsed` boolean logic inverted: open = !collapsed.
+  const [open, setOpen] = useState<boolean>(() => !loadCollapsed())
+  const rootRef = useRef<HTMLSpanElement | null>(null)
 
   const toggle = useCallback(() => {
-    setCollapsed((prev) => {
+    setOpen((prev) => {
       const next = !prev
-      saveCollapsed(next)
+      saveCollapsed(!next)
       return next
     })
   }, [])
@@ -37,36 +39,51 @@ export function LearningPanel({ active }: { active: NavKey }) {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return
-      setCollapsed(loadCollapsed())
+      setOpen(!loadCollapsed())
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) {
+        setOpen(false)
+        saveCollapsed(true)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  // Close on tab change (skip the initial mount so persisted state still applies).
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true
+      return
+    }
+    setOpen(false)
+  }, [active])
+
   const content: LearningContent | undefined = LEARNING_CONTENT[active]
   if (!content) return null
 
   return (
-    <section
-      className="shrink-0 border-b border-line bg-bg-elev"
-      aria-label="learning panel"
-    >
+    <span ref={rootRef} className="relative inline-block">
       <button
         type="button"
         onClick={toggle}
-        className="w-full px-4 py-1.5 flex items-center gap-2 text-left hover:bg-bg-hi transition-colors"
-        aria-expanded={!collapsed}
-        title={collapsed ? 'Expand learning panel' : 'Collapse learning panel'}
+        className="text-[10px] uppercase tracking-wider text-accent font-medium hover:opacity-80 transition-opacity"
+        aria-expanded={open}
+        title={open ? 'Close learning panel' : 'What is this?'}
       >
-        <span className="text-[10px] uppercase tracking-wider text-accent font-medium">
-          Learn
-        </span>
-        <span className="text-xs text-fg-dim truncate">{content.headline}</span>
-        <div className="flex-1" />
-        <span className="text-fg-faint text-xs">{collapsed ? '▸ expand' : '▾ collapse'}</span>
+        Learn
       </button>
-      {!collapsed && (
-        <div className="px-4 pb-4 pt-1 max-w-4xl">
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-96 max-h-[70vh] overflow-y-auto rounded border border-line bg-bg-elev shadow-lg px-4 pb-4 pt-3 text-left">
           <p className="text-xs text-fg-dim leading-relaxed mb-3">{content.intro}</p>
           {content.sections.map((sec) => (
             <div key={sec.title} className="mb-3 last:mb-0">
@@ -102,6 +119,6 @@ export function LearningPanel({ active }: { active: NavKey }) {
           )}
         </div>
       )}
-    </section>
+    </span>
   )
 }

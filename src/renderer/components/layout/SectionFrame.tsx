@@ -1,3 +1,6 @@
+import type { NavKey } from '../LeftNav'
+import { LearningPanel } from '../LearningPanel'
+
 /**
  * Almanac section frame — wraps a promoted screen (Settings, Skills, etc.)
  * with a small-caps eyebrow + serif heading + optional intro paragraph.
@@ -17,15 +20,17 @@ interface SectionFrameProps {
   intro?: string
   /** When false, render only padding — no header. */
   frame?: boolean
+  /** When set (and a header renders), shows a "Learn" trigger top-right of the header. */
+  learnKey?: NavKey
   children: React.ReactNode
 }
 
-export function SectionFrame({ eyebrow, title, intro, frame = true, children }: SectionFrameProps) {
+export function SectionFrame({ eyebrow, title, intro, frame = true, learnKey, children }: SectionFrameProps) {
   const hasHeader = frame && (eyebrow || title || intro)
   return (
     <div className="h-full w-full flex flex-col bg-bg text-fg">
       {hasHeader && (
-        <header className="shrink-0 px-8 pt-7 pb-5">
+        <header className="shrink-0 px-8 pt-7 pb-5 flex items-start justify-between gap-4">
           <div className="max-w-[820px]">
             {eyebrow && (
               <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-faint mb-2">
@@ -43,6 +48,7 @@ export function SectionFrame({ eyebrow, title, intro, frame = true, children }: 
               </p>
             )}
           </div>
+          {learnKey && <LearningPanel active={learnKey} />}
         </header>
       )}
       <div className={`flex-1 min-h-0 ${hasHeader ? 'px-8 pb-7' : 'p-8'}`}>

@@ -7,6 +7,7 @@ import { useScheduleState } from '../../state/scheduleState'
 import { formatAgo, formatRelative } from '../../lib/formatTime'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { LegendItem } from './scheduler/sched-primitives'
+import { LearningPanel } from '../LearningPanel'
 
 /**
  * Scheduler — the single home for the claude -p batch workflow. Three tabs:
@@ -174,8 +175,11 @@ export function Scheduler() {
     <div className="h-full flex flex-col">
       {/* ── Header + window strip + sub-tabs ─────────────────────── */}
       <div className="shrink-0 px-9 pt-7 pb-0">
-        <div className="text-xs font-bold text-fg-faint tracking-[0.8px] uppercase mb-1">
-          Workspace
+        <div className="flex items-start justify-between gap-4">
+          <div className="text-xs font-bold text-fg-faint tracking-[0.8px] uppercase mb-1">
+            Workspace
+          </div>
+          <LearningPanel active="scheduler" />
         </div>
         <h1 className="m-0 font-serif text-[40px] font-semibold leading-none tracking-tight text-fg">
           Scheduler

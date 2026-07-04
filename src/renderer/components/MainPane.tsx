@@ -3,7 +3,6 @@ import type { NavKey } from './LeftNav'
 import { Terminal } from './Terminal'
 import { TerminalControls } from './TerminalControls'
 import { BroadcastBar } from './BroadcastBar'
-import { LearningPanel } from './LearningPanel'
 import { Home } from './tabs/Home'
 import { Skills } from './tabs/Skills'
 import { Subagents } from './tabs/Subagents'
@@ -145,7 +144,7 @@ function renderScreen(active: NavKey, ctx: {
   })()
   if (!body) return null
   return meta
-    ? <SectionFrame eyebrow={meta.eyebrow} title={meta.title} intro={meta.intro}>{body}</SectionFrame>
+    ? <SectionFrame eyebrow={meta.eyebrow} title={meta.title} intro={meta.intro} learnKey={active}>{body}</SectionFrame>
     : body
 }
 
@@ -210,7 +209,6 @@ export function MainPane({
           />
         </div>
       )}
-      <LearningPanel active={active} />
       <div className="flex-1 min-h-0 relative">
         {/*
          * Terminals stay mounted across nav switches — unmounting them drops

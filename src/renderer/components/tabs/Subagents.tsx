@@ -24,6 +24,7 @@ import {
   ToolChip,
   paletteAt,
 } from './subagents/hive-primitives'
+import { LearningPanel } from '../LearningPanel'
 import { DispatchLaunch } from './subagents/DispatchLaunch'
 import { DispatchLive } from './subagents/DispatchLive'
 import { useOrchestrator } from '../../state/orchestrator'
@@ -125,8 +126,11 @@ export function Subagents() {
     <div className="h-full flex flex-col overflow-hidden">
       {/* ── Editorial header + sub-tab bar ── */}
       <div className="shrink-0 px-9 pt-7 pb-5 border-b border-line bg-bg">
-        <div className="text-xs font-bold tracking-[0.8px] uppercase text-fg-faint mb-1">
-          Workspace · Subagents
+        <div className="flex items-start justify-between gap-4">
+          <div className="text-xs font-bold tracking-[0.8px] uppercase text-fg-faint mb-1">
+            Workspace · Subagents
+          </div>
+          <LearningPanel active="subagents" />
         </div>
         <div className="flex items-baseline gap-4 flex-wrap mb-5">
           <h1 className="m-0 font-serif text-4xl font-semibold leading-none tracking-tight text-fg shrink-0">

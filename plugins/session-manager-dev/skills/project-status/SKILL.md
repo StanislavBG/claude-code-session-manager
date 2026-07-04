@@ -141,6 +141,19 @@ pending feedback (cross-project asks others filed to us, plus the prior cycle's
 `/my-feedback`, decline-with-reason. Don't generate new levers on top of an
 unprocessed backlog. (If the inbox is empty, say so and move on.)
 
+**Reconcile queued feedback — this audit owns it, because `/process-feedback`
+hands off at queue time.** Under the resilience contract, `/process-feedback` is
+done the moment an item is queued as a PRD and archived to `processed/` — it does
+NOT wait for the PRD to land. So the ongoing tracking is **this skill's job**: as
+part of the chores/scheduler audit, cross-reference the feedback status-log
+against `queue.json` and (a) flip any **🛠** row whose PRD now shows `completed`
+to **✅** with the landing evidence, and (b) surface any `failed` / `needs_review`
+/ stuck Burrow PRD behind a still-🛠 row as a finding to route. The file is
+already in `processed/`; only the row's status is reconciled here. A `-local` may
+supply the exact cross-reference command (grep 🛠 rows → look up their PRD id in
+the queue); if it doesn't, do it inline. Never expect `/process-feedback` to have
+delivery-gated the archive — that's the anti-pattern this split removes.
+
 Then route **this audit's own findings**, by ownership:
 
 1. **A finding that belongs to another project** (an upstream/downstream service

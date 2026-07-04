@@ -3,10 +3,10 @@ name: process-feedback
 description: >-
   Process the current project's inbound feedback folder end-to-end: read every
   open item, evaluate it against real code, and for work that belongs to this
-  project queue it as scheduled PRDs via /develop (never implement inline) —
-  then track those PRDs to completion, archive the item as processed, and fold
-  lessons back into the folder's README so future feedback (written by other
-  agents/projects) gets better. Use whenever the user says "/process-feedback",
+  project queue it as scheduled PRDs via /develop (never implement inline),
+  archive the item as processed **the moment it is queued** (the scheduler owns
+  execution from there), and fold lessons back into the folder's README so
+  future feedback (written by other agents/projects) gets better. Use whenever the user says "/process-feedback",
   "review the feedback folder", "work through the feedback", "any open
   feedback?", or drops new files into feedback/. Keywords: feedback, intake,
   external-feedback, cross-project requests, process feedback, triage feedback.
@@ -30,9 +30,24 @@ conventions — read it first; the steps below are the process.
 **Core principle:** this skill *triages and dispatches*; it does not implement.
 Anything that requires writing code for this project is decomposed and queued as
 scheduled PRDs through **`/develop`**, which runs them headlessly on the
-session-manager scheduler. process-feedback then watches those PRDs to
-completion and does the bookkeeping. Implementing feedback inline — bypassing
-the scheduler — is the one thing this skill must not do.
+session-manager scheduler. **process-feedback is done the moment every item is
+dispositioned — queued as a PRD, declined, or forwarded — and archived; the
+scheduler owns execution from there on.** It does NOT hold items in the inbox
+waiting for PRDs to land, and it does NOT babysit the scheduler. Implementing
+feedback inline — bypassing the scheduler — is the one thing this skill must not
+do.
+
+**Definition of done (resilience contract):** the actionable inbox is empty.
+Every open item has been turned into a scheduler PRD (or declined / forwarded
+with a reason), given a `## RESOLUTION`, and moved to `processed/`. Archival
+happens at **disposition time, not delivery time** — once an item is a queued
+PRD, its job is done and the file is archived immediately. The README
+status-log **row** (🛠) is the durable execution tracker that lives on after the
+file is archived; it is reconciled 🛠→✅ (and failures flagged) by
+`/project-status`'s scheduler-PRD audit, cross-referencing the queue — never by
+process-feedback blocking on it. A pass that leaves a queued item sitting in the
+inbox "until its PRD lands" is the non-resilient bug this contract exists to
+prevent.
 
 ## Steps
 
@@ -50,14 +65,16 @@ so the empty case must cost almost nothing:
   an agent loop.
 - Only when at least one **open** item exists do you continue — an open item
   means *someone cares about this project*, so it's worth the full pass (and,
-  per step 7, leaving the README better for next time).
+  per step 6, leaving the README better for next time).
 
 ### 1. Read the intake
 
-- Read `feedback/README.md` (conventions + the status log), then every file
-  whose status is open/🆕. Skip files already ✅/archived. Items already 🛠
-  (queued — see step 4) are in flight: don't re-queue them, just re-check their
-  PRD status (step 5).
+- Read `feedback/README.md` (conventions + the status log), then every open/🆕
+  file still in the inbox. Under this contract a **🛠 (queued) item has already
+  been archived to `processed/`** at disposition time — so anything still sitting
+  in the inbox is genuinely un-dispositioned and needs a pass. You will not find
+  🛠 items in the inbox to "re-check"; their execution is tracked by the
+  status-log row + `/project-status`'s scheduler audit, not by the folder.
 - If the folder doesn't exist, say so and stop — don't invent one.
 
 ### 2. Evaluate before queueing
@@ -102,55 +119,45 @@ work — the implementation **commit + deploy**. That means process-feedback doe
 
 Record the emitted PRD filenames/ids — you need them for steps 4–6.
 
-### 4. Interim bookkeeping — commit the triage now
+### 4. Disposition + archive every item now — this is the definition of done
 
-Two cases:
+Every open item gets a disposition, a `## RESOLUTION`, and a `git mv` to
+`feedback/processed/` **in this pass** — archival is at disposition time, not
+delivery time. Do NOT leave a queued item in the inbox "until its PRD lands":
+that is the drift this contract forbids. By disposition:
 
-- **Closed-without-code** items (declines, upstream forwards): append a full
-  `## RESOLUTION` (what was declined and why / what was forwarded where, with the
-  upstream file id), flip the README row to ✅, and `git mv` the file to
-  `feedback/processed/` — these are done.
-- **Queued** items (sent to `/develop`): append a `## RESOLUTION (in progress)`
-  recording the queued PRD filenames/ids and that execution is pending the
-  scheduler. Flip the README row to **🛠 queued** (add 🛠 to the log's legend if
-  absent) — **not** ✅. Leave the file in `feedback/` until the PRDs land. Do not
-  fabricate verification for code that hasn't run yet.
+- **Queued (Ours, do it):** append `## RESOLUTION` naming the emitted PRD
+  filename(s)/id(s) and stating execution is now the scheduler's job. Set the
+  README status-log row to **🛠 queued (PRD NN)** (add 🛠 to the legend if
+  absent). `git mv` the file (and any `-REPLY`) to `processed/` **now**. The 🛠
+  row — not the file's location — is what tracks execution; do not fabricate
+  verification for code that hasn't run yet, just record the handoff.
+- **Declined (Ours, decline):** append `## RESOLUTION` with the reason (contract
+  / boundary conflict), flip the row to ✅, `git mv` to `processed/`.
+- **Forwarded (Theirs):** append `## RESOLUTION` naming the upstream filing
+  (`/my-feedback to <project>` id), flip the row to ✅ (closed here — the ask now
+  lives in their intake), `git mv` to `processed/`.
 
-Commit only this feedback bookkeeping + any upstream filings (message references
-the feedback file id, e.g. `chore(feedback): triage + queue 2026-06-10-01`).
+After this step the actionable inbox is **empty** — only genuinely un-dispositioned
+items (still being triaged) may remain, and only within this same pass. Commit the
+feedback bookkeeping + any upstream filings in one clean commit (message
+references the file id, e.g. `chore(feedback): triage + queue 2026-06-10-01`).
 Only commit a clean, green tree; if unrelated in-flight work is mixed into the
 working tree, stop and tell the user instead of committing around it.
 
-### 5. Track to completion — delegate to /develop Phase 2
+### 5. Hand off to the scheduler — do NOT babysit
 
-The queued PRDs run headlessly and can take a while. **Do not re-implement the
-monitor here** — `/develop` Phase 2 already owns it (the 30-min scheduler watch,
-the escalate-on-stuck/`needs_review`/timeout logic, and the live verification
-against each PRD's acceptance criteria). When you call `/develop` in step 3, that
-tracking runs as part of it.
+Execution is the scheduler's job from here. **Do not run an interactive watch
+loop, and do not block the pass on PRDs landing** — `/develop` already queued
+them with the engineering standards inline, the scheduler runs them at its
+cadence, and **`/project-status` owns the ongoing audit**: its scheduler-PRD
+check cross-references `queue.json` to reconcile each 🛠 status-log row → ✅ when
+its PRD lands (the file is already archived), and surfaces any `failed` /
+`needs_review` / stuck Burrow PRD. If a PRD later fails, the requester re-files or
+the status audit escalates it — the feedback pass does not stay open waiting for
+that. If the user wants live progress, point them at the SchedulePanel.
 
-Your only job in this step is to consume its outcome per queued item:
-
-- **`/develop` escalated a PRD** (failed / stuck / needs attention) — relay it to
-  the user with its specifics; leave the feedback item at 🛠 (still in flight)
-  until it's resolved or re-queued. Don't archive a broken item as done.
-- **`/develop` reported all of an item's PRDs landed + verified** — proceed to
-  step 6 to finalize that item's bookkeeping.
-
-### 6. Finalize the archive (when an item's PRDs land + verify)
-
-Once `/develop` Phase 2 reports an item's PRDs merged and verified against the AC:
-
-- Append the final `## RESOLUTION`: what changed, the PRD/commit refs, what was
-  declined/forwarded, and how `/develop` verified it (cite its gate result —
-  don't re-run the verification it already did).
-- Flip the README row **🛠 → ✅** (keep the row — the log is the durable index).
-- `git mv` the file to `feedback/processed/` (create the dir if needed). Closed
-  items live there as the durable record; only files entered in error are ever
-  deleted.
-- Commit the bookkeeping.
-
-### 7. Self-improve the intake (always do this)
+### 6. Self-improve the intake (always do this)
 
 Update the folder's `README.md` guidance section based on what this round
 taught you:
@@ -172,12 +179,20 @@ This step is the point of the skill: every processing pass should make the
 - **Never implement feedback inline.** Code that belongs to this project goes
   through `/develop` → the scheduler. The only commits process-feedback makes
   itself are feedback bookkeeping and upstream filings.
-- **Never mark a queued item ✅ or move it to `processed/` before its PRDs land
-  and verify.** Queued ≠ done; 🛠 is the honest interim state. An item archived
-  as resolved must point to merged, verified work.
+- **Archive at disposition time, not delivery time.** The moment an item is
+  queued as a PRD (or declined / forwarded), give it a RESOLUTION and `git mv` it
+  to `processed/` — do NOT leave it in the inbox waiting for the PRD to land. A
+  queued item is archived with a **🛠** status-log row (not ✅); the row is the
+  durable execution tracker and is reconciled 🛠→✅ by `/project-status` from the
+  scheduler queue. Leaving dispositioned items in the inbox "until they verify"
+  is the non-resilient behavior this contract exists to kill.
+- **The status-log row is honest about state even after archival.** 🛠 = "PRD
+  queued, scheduler owns it, not yet landed"; ✅ = "landed/verified (or
+  declined/forwarded)". Never fabricate a ✅ for code that hasn't run — archive at
+  🛠 and let the status audit flip it.
 - Never delete feedback files to "clear" the folder — archive them.
 - Service boundaries outrank feedback asks: an item that requests a boundary
   violation gets a documented decline + an upstream filing, not compliance.
-- Report honestly in the RESOLUTION: PRDs that failed or stalled, asks left
-  open, deps on other teams. An archived item with open external deps should say
-  what unblocks it.
+- Report honestly in the RESOLUTION: which PRD id owns the work, what was
+  declined/forwarded and why, deps on other teams. An archived item with open
+  external deps should say what unblocks it.

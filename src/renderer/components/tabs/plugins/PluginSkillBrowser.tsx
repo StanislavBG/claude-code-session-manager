@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ListDetail } from '../../ui/ListDetail'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { EmptyState } from '../../ui/EmptyState'
+import { SkillReferenceGraph } from './SkillReferenceGraph'
 import { detectSkillEdges, type PluginSkillEntry } from '../../../lib/pluginSkills'
 
 /** Read-only list+detail browser for an installed plugin's skills — mirrors Skills.tsx's shape. */
@@ -14,19 +15,45 @@ export function PluginSkillBrowser({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(skills[0]?.id ?? null)
   const selected = selectedId ? skills.find((s) => s.id === selectedId) ?? null : null
-  const edgeCount = useMemo(() => detectSkillEdges(skills).length, [skills])
+  const edges = useMemo(() => detectSkillEdges(skills), [skills])
+  const [view, setView] = useState<'list' | 'graph'>('list')
 
   return (
     <div className="border-t border-line bg-bg-elev h-80 flex flex-col">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-line text-xs">
         <span className="text-fg-faint">
-          {skills.length} {skills.length === 1 ? 'skill' : 'skills'} · {edgeCount}{' '}
-          {edgeCount === 1 ? 'reference' : 'references'}
+          {skills.length} {skills.length === 1 ? 'skill' : 'skills'} · {edges.length}{' '}
+          {edges.length === 1 ? 'reference' : 'references'}
         </span>
-        <button onClick={onClose} className="text-fg-faint hover:text-fg">×</button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded border border-line overflow-hidden">
+            <button
+              onClick={() => setView('list')}
+              className={`px-2 py-0.5 ${view === 'list' ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg'}`}
+            >
+              list
+            </button>
+            <button
+              onClick={() => setView('graph')}
+              className={`px-2 py-0.5 ${view === 'graph' ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg'}`}
+            >
+              graph
+            </button>
+          </div>
+          <button onClick={onClose} className="text-fg-faint hover:text-fg">×</button>
+        </div>
       </div>
       {skills.length === 0 ? (
         <EmptyState title="no skills in this plugin" />
+      ) : view === 'graph' ? (
+        <div className="flex-1 min-h-0">
+          <SkillReferenceGraph
+            skills={skills}
+            edges={edges}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+        </div>
       ) : (
         <div className="flex-1 min-h-0">
           <ListDetail

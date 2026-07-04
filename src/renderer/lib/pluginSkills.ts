@@ -75,3 +75,33 @@ export async function listPluginSkills(skillsDir: string): Promise<PluginSkillEn
   }
   return entries
 }
+
+export interface SkillEdge {
+  from: string
+  to: string
+}
+
+/**
+ * O(n·m) where n = skills.length and m = average body length: for each of the
+ * n skills, every other skill's id is tested against its body with a regex
+ * scan (O(m) per test), so total work is O(n^2 · m).
+ */
+export function detectSkillEdges(skills: PluginSkillEntry[]): SkillEdge[] {
+  const edges: SkillEdge[] = []
+  const seen = new Set<string>()
+  for (const a of skills) {
+    for (const b of skills) {
+      if (a.id === b.id) continue
+      const escaped = b.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const patterns = [`/${escaped}\\b`, `\`${escaped}\``]
+      if (b.id.length >= 4) patterns.push(`\\b${escaped}\\b`)
+      const matches = patterns.some((p) => new RegExp(p, 'i').test(a.body))
+      if (!matches) continue
+      const key = `${a.id}->${b.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      edges.push({ from: a.id, to: b.id })
+    }
+  }
+  return edges
+}

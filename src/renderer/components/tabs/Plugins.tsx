@@ -8,6 +8,7 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
 import { PluginsDiscover } from './plugins/PluginsDiscover'
+import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 
 type PluginsView = 'installed' | 'library' | 'discover'
 
@@ -201,7 +202,7 @@ export function Plugins() {
             />
           </div>
           {selectedRow ? (
-            <PluginDetail row={selectedRow} onClose={() => setSelected(null)} />
+            <PluginDetail key={selectedRow.path} row={selectedRow} home={home} onClose={() => setSelected(null)} />
           ) : null}
         </div>
       )}
@@ -245,7 +246,22 @@ function PluginsViewTabs({
   )
 }
 
-function PluginDetail({ row, onClose }: { row: PluginRow; onClose: () => void }) {
+function PluginDetail({ row, home, onClose }: { row: PluginRow; home: string | null; onClose: () => void }) {
+  const [skillEntries, setSkillEntries] = useState<PluginSkillEntry[] | null>(null)
+  const [loadingSkills, setLoadingSkills] = useState(false)
+
+  const browseSkills = async () => {
+    if (!home) return
+    setLoadingSkills(true)
+    try {
+      const dir = await resolveInstalledPluginSkillsDir(row.name, row.path, home)
+      const entries = dir ? await listPluginSkills(dir) : []
+      setSkillEntries(entries)
+    } finally {
+      setLoadingSkills(false)
+    }
+  }
+
   return (
     <div className="border-t border-line p-3 text-xs space-y-1 bg-bg-elev max-h-64 overflow-auto">
       <div className="flex items-center justify-between mb-1">
@@ -256,6 +272,22 @@ function PluginDetail({ row, onClose }: { row: PluginRow; onClose: () => void })
         <div className="text-fg-dim">{row.manifest.description}</div>
       ) : null}
       <div className="font-mono text-fg-faint">{row.path}</div>
+      {row.skills > 0 ? (
+        <div className="pt-1">
+          <button
+            onClick={browseSkills}
+            disabled={loadingSkills}
+            className="text-accent hover:underline disabled:opacity-50"
+          >
+            Browse skills → {skillEntries ? `(${skillEntries.length})` : loadingSkills ? '(…)' : ''}
+          </button>
+          {skillEntries ? (
+            <pre className="mt-1 whitespace-pre-wrap text-fg-faint">
+              {JSON.stringify(skillEntries.map((s) => s.id))}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
       {row.manifest ? (
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1">
           {row.manifest.version ? <Kv k="version" v={row.manifest.version} /> : null}

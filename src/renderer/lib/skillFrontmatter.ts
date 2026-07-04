@@ -30,6 +30,62 @@ export function readSkillDisabled(text: string): boolean {
  * (disabled=false → key removed, since absence is the default-on state).
  * Returns the input unchanged when already in the requested state.
  */
+function unquote(v: string): string {
+  const t = v.trim()
+  if (t.length >= 2 && ((t[0] === '"' && t[t.length - 1] === '"') || (t[0] === "'" && t[t.length - 1] === "'"))) {
+    return t.slice(1, -1)
+  }
+  return t
+}
+
+/** Indentation (leading whitespace) width of a line. */
+function indentOf(line: string): number {
+  return line.length - line.trimStart().length
+}
+
+/**
+ * Extract `name`/`description` scalars from a SKILL.md's frontmatter, folding
+ * a multi-line `description: >-` block into one space-joined string. Not a
+ * general YAML parser — just enough to read these two known fields.
+ */
+export function parseSkillMeta(text: string): { name: string | null; description: string | null; body: string } {
+  const m = text.match(FRONTMATTER_RE)
+  if (!m) return { name: null, description: null, body: text }
+
+  const lines = m[1].split(/\r?\n/)
+  const body = m[2] ?? ''
+  let name: string | null = null
+  let description: string | null = null
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const keyMatch = line.match(/^(\s*)(name|description)\s*:(.*)$/)
+    if (!keyMatch) continue
+    const [, , key, rest] = keyMatch
+    const restTrimmed = rest.trim()
+    const keyIndent = indentOf(line)
+
+    let value: string
+    if (restTrimmed === '' || restTrimmed === '>-' || restTrimmed === '>' || restTrimmed === '|-' || restTrimmed === '|') {
+      // Folded/literal block scalar: gather further-indented continuation lines.
+      const parts: string[] = []
+      let j = i + 1
+      while (j < lines.length && lines[j].trim() !== '' && indentOf(lines[j]) > keyIndent) {
+        parts.push(lines[j].trim())
+        j++
+      }
+      value = parts.join(' ')
+    } else {
+      value = unquote(restTrimmed)
+    }
+
+    if (key === 'name') name = value
+    else description = value
+  }
+
+  return { name, description, body }
+}
+
 export function setSkillDisabled(text: string, disabled: boolean): string {
   const m = text.match(FRONTMATTER_RE)
 

@@ -9,7 +9,7 @@
  * Source: src/renderer/lib/skillFrontmatter.ts.
  */
 import { describe, it, expect } from 'vitest'
-import { readSkillDisabled, setSkillDisabled } from '../../src/renderer/lib/skillFrontmatter'
+import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../src/renderer/lib/skillFrontmatter'
 
 const SKILL = `---
 name: my-skill
@@ -72,5 +72,41 @@ describe('setSkillDisabled', () => {
     expect(readSkillDisabled(out)).toBe(true)
     // Only one occurrence — replaced in place, not appended.
     expect(out.match(/disable-model-invocation/g)?.length).toBe(1)
+  })
+})
+
+describe('parseSkillMeta', () => {
+  it('parses name/description from a simple flat frontmatter block', () => {
+    const meta = parseSkillMeta(SKILL)
+    expect(meta.name).toBe('my-skill')
+    expect(meta.description).toBe('does a thing')
+  })
+
+  it('returns nulls for a bare body with no frontmatter', () => {
+    const meta = parseSkillMeta('# Just a body')
+    expect(meta).toEqual({ name: null, description: null, body: '# Just a body' })
+  })
+
+  it('folds a multi-line description: >- block into one space-joined string', () => {
+    const folded = `---
+name: folded-skill
+description: >-
+  first line of the description
+  second line continues it
+allowed-tools: Read
+---
+
+# Folded Skill
+`
+    const meta = parseSkillMeta(folded)
+    expect(meta.name).toBe('folded-skill')
+    expect(meta.description).toBe('first line of the description second line continues it')
+  })
+
+  it('never includes the frontmatter block in body', () => {
+    const meta = parseSkillMeta(SKILL)
+    expect(meta.body).not.toContain('name: my-skill')
+    expect(meta.body).not.toContain('description: does a thing')
+    expect(meta.body).toContain('Body stays put.')
   })
 })

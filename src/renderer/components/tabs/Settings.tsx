@@ -15,6 +15,7 @@ import { mergeScopes, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { SettingsTelemetry } from './SettingsTelemetry'
+import { SettingsAppPrefs } from './SettingsAppPrefs'
 
 export function Settings() {
   const home = useHomeDir()
@@ -24,7 +25,7 @@ export function Settings() {
   const cwd = activeTab?.cwd ?? null
 
   const [scope, setScope] = useState<Scope>('user')
-  const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry'>('effective')
+  const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'app'>('effective')
 
   // Resolve paths for every scope so we can annotate existence on the switcher.
   const scopePaths = useMemo(() => {
@@ -103,11 +104,12 @@ export function Settings() {
               { key: 'tree', label: 'Tree' },
               { key: 'raw', label: 'Raw' },
               { key: 'telemetry', label: 'Telemetry' },
+              { key: 'app', label: 'Session Manager' },
             ]}
             active={view}
             onChange={setView}
           />
-          {view !== 'telemetry' && (
+          {view !== 'telemetry' && view !== 'app' && (
             <>
               <span className="mx-2 text-fg-faint">·</span>
               <ScopeSwitcher
@@ -139,7 +141,7 @@ export function Settings() {
         </>
       }
       footer={
-        view !== 'telemetry' && activePath && file ? (
+        view !== 'telemetry' && view !== 'app' && activePath && file ? (
           <SaveBar
             dirty={file.dirty}
             busy={file.busy}
@@ -161,6 +163,8 @@ export function Settings() {
     >
       {view === 'telemetry' ? (
         <SettingsTelemetry />
+      ) : view === 'app' ? (
+        <SettingsAppPrefs />
       ) : scopeNeedsCwd(scope) ? (
         <EmptyState
           title="no active project"

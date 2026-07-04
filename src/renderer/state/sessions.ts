@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { PersistedTab } from '../../preload/api'
 import { shellQuote, findPreset, renderCommand } from '../lib/presets'
+import { getRawSessionModel, type RawModel } from '../lib/rawSessionModel'
 
 export interface SessionTab {
   id: string
@@ -38,7 +39,7 @@ interface SessionsState {
   reorderTab: (fromIndex: number, toIndex: number) => void
   restoreTabs: (tabs: SessionTab[], activeTabId: string | null) => void
   /** Transition a dormant tab to spawning, resolving the startup command. */
-  wakeTab: (id: string) => Promise<void>
+  wakeTab: (id: string, modelOverride?: RawModel) => Promise<void>
 }
 
 function labelFromCwd(cwd: string): string {
@@ -60,6 +61,7 @@ function labelFromCwd(cwd: string): string {
 async function resolveStartupCommand(
   p: { cwd: string; claudeSessionId: string },
   freshStart = false,
+  model: RawModel = getRawSessionModel(),
 ): Promise<{ claudeSessionId: string; startupCommand: string }> {
   let useResume = !freshStart
   if (useResume) {
@@ -72,8 +74,8 @@ async function resolveStartupCommand(
   // repeated wakeTab calls for tabs that never had a transcript).
   const claudeSessionId = freshStart && !useResume ? crypto.randomUUID() : p.claudeSessionId
   const startupCommand = useResume
-    ? `claude --dangerously-skip-permissions --resume ${shellQuote(claudeSessionId)}`
-    : `claude --dangerously-skip-permissions --session-id ${shellQuote(claudeSessionId)}`
+    ? `claude --dangerously-skip-permissions --resume ${shellQuote(claudeSessionId)} --model ${model}`
+    : `claude --dangerously-skip-permissions --session-id ${shellQuote(claudeSessionId)} --model ${model}`
   return { claudeSessionId, startupCommand }
 }
 
@@ -171,12 +173,13 @@ export const useSessions = create<SessionsState>((set, get) => ({
     set({ tabs })
   },
   restoreTabs: (tabs, activeTabId) => set({ tabs, activeTabId, hydrated: true }),
-  wakeTab: async (id) => {
+  wakeTab: async (id, modelOverride) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab || tab.status !== 'dormant') return
     const { claudeSessionId, startupCommand } = await resolveStartupCommand(
       { cwd: tab.cwd, claudeSessionId: tab.claudeSessionId },
       false,
+      modelOverride ?? getRawSessionModel(),
     )
     set({
       tabs: get().tabs.map((t) =>

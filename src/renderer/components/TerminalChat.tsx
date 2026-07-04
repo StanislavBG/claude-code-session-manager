@@ -3,6 +3,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn } from '../state/chat'
+import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 
 /**
  * TerminalChat — the DEFAULT terminal-screen experience for a dormant tab
@@ -73,7 +74,9 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
   const [draft, setDraft] = useState('')
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const modelMenuRef = useRef<HTMLDivElement | null>(null)
 
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
@@ -104,8 +107,23 @@ export function TerminalChat({ tabId, cwd }: Props) {
     }
   }
 
+  // Close the model menu on outside click so it doesn't linger open over content.
+  useEffect(() => {
+    if (!modelMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!modelMenuRef.current?.contains(e.target as Node)) setModelMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [modelMenuOpen])
+
   const openRaw = () => {
     void useSessions.getState().wakeTab(tabId)
+  }
+
+  const openRawWithModel = (model: RawModel) => {
+    void useSessions.getState().wakeTab(tabId, model)
+    setModelMenuOpen(false)
   }
 
   return (
@@ -114,13 +132,35 @@ export function TerminalChat({ tabId, cwd }: Props) {
         <div className="text-xs text-fg-muted">
           Chat · headless session — no process runs between commands
         </div>
-        <button
-          onClick={openRaw}
-          className="rounded border border-white/10 px-2 py-1 text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
-          title="Drop into a live interactive claude session in this directory"
-        >
-          Open raw session ⌃
-        </button>
+        <div ref={modelMenuRef} className="relative flex items-stretch">
+          <button
+            onClick={openRaw}
+            className="rounded-l border border-white/10 px-2 py-1 text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
+            title="Drop into a live interactive claude session in this directory"
+          >
+            Open raw session ⌃
+          </button>
+          <button
+            onClick={() => setModelMenuOpen((v) => !v)}
+            className="rounded-r border border-l-0 border-white/10 px-1.5 py-1 text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
+            title="Choose model for this raw session"
+          >
+            ▾
+          </button>
+          {modelMenuOpen && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-32 rounded border border-white/10 bg-bg shadow-lg">
+              {RAW_MODELS.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => openRawWithModel(m)}
+                  className="block w-full px-3 py-1.5 text-left text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
+                >
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">

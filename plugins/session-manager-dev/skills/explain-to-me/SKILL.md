@@ -62,7 +62,7 @@ If you can't state it in the present tense without a date or a PRD, cut it.
 - **The Skill Map** — `HUMAN_LEARN/SKILL_MAP.html`, a **separate, dedicated** page
   (NOT a section of index.html) that visualizes the *local-development skill chain*:
   the two intakes (interactive human prompt; agent feedback via `/process-feedback`)
-  converging on `/develop`, which reads `/prd` + `standards.md`, queues onto the
+  converging on `/develop`, which owns PRD authoring + reads `standards.md`, queues onto the
   scheduler, and gates with review/verify — plus `/my-feedback` outbound. It is the
   "how I build on this project" companion to index.html's "how this project works."
   index.html links to it from the nav; it links back.

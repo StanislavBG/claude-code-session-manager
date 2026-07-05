@@ -21,8 +21,7 @@ arrives via `/process-feedback`, which evaluates it and then calls this skill. E
 here on is identical regardless of who asked.
 
 **Never** hand-implement the work inline in chat, and never restate rules that live elsewhere:
-single-PRD structure/sizing belongs to `/prd`, the engineering rules belong to `standards.md`.
-Reference them; don't fork them.
+the engineering rules belong to `standards.md`. Reference it; don't fork it.
 
 ## Standards (single source of truth)
 
@@ -48,12 +47,10 @@ can't load skills.
    reuse (per the API-reuse standard — search before writing new code), the test command, and
    any constraints. Capture exact file paths and signatures; they go straight into the PRDs.
 
-3. **Decompose into a series of SMALL, bounded PRDs.** This is the part `/develop` owns that
-   `/prd` doesn't: split a large ask into multiple PRDs and sequence them. For each PRD's
-   *size, command-bounding, `NN` parallel group, and structure*, follow `~/.claude/skills/prd/SKILL.md`
-   — it is the canonical authority; do not restate its rules here. To pick `NN`, **compute the
-   highest in-use number deterministically — never eyeball or narrow-grep the `ls`** (a
-   narrowed pattern like `'^10[0-9]'` silently misses `110+` and collides):
+3. **Decompose into a series of SMALL, bounded PRDs.** Split a large ask into multiple PRDs and
+   sequence them. To pick each PRD's `NN` (parallel group), **compute the highest in-use number
+   deterministically — never eyeball or narrow-grep the `ls`** (a narrowed pattern like
+   `'^10[0-9]'` silently misses `110+` and collides):
    ```bash
    ls ~/.claude/session-manager/scheduled-plans/prds/ | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
    ```
@@ -62,7 +59,93 @@ can't load skills.
    is unrelated to every existing group. Record each cross-PRD dependency in the dependent
    PRD's notes.
 
-4. **Emit each PRD** to the canonical path per `/prd`'s structure, then **append `## Engineering
+   ### PRD structure and location
+
+   Each individual PRD must follow this structure — this is `/develop`'s single authority on
+   one PRD's structure, location, and scope sizing (the engineering rules stay separate, in
+   `standards.md`).
+
+   You are writing a PRD that will be executed by the user's session-manager scheduler — a
+   system that runs `claude -p <prd-body> --dangerously-skip-permissions` jobs around 5-hour
+   token-window resets, with auto-pause on rate-limit and auto-resume.
+
+   **Canonical location — non-negotiable.** PRDs MUST be written to:
+   ```
+   ~/.claude/session-manager/scheduled-plans/prds/<NN>-<kebab-slug>.md
+   ```
+   **Anywhere else doesn't get scheduled.** If you write to `data/prds/`, `docs/prds/`, or the
+   project root, the scheduler will not see it and the user loses their token-budget-managed
+   execution. There is exactly one queue for all projects — that's intentional, because the
+   5-hour token budget is global across all of the user's Claude work. The `~` expands to
+   `os.homedir()` so the same convention works for any user on any machine.
+
+   **Filename rules.** `NN` is the 2-digit zero-padded parallel group (picked per the `ls`
+   command above — same `NN` as an independent sibling, or next free `NN` = max+1 when this PRD
+   hard-depends on prior work). `<kebab-slug>` is a short, descriptive kebab-case identifier
+   (e.g. `voice-commands-send-cancel`, `ticker-velocity-mcp`), kept under 60 chars. Verify your
+   chosen filename doesn't already exist before writing.
+
+   **Required frontmatter:**
+   ```yaml
+   ---
+   title: <one-line human-readable title>
+   cwd: <path to target project — where claude -p will run>
+   estimateMinutes: <integer wall-clock estimate>
+   ---
+   ```
+   `cwd` is critical — without it the job runs in the scheduler's default cwd (session-manager).
+   Always set it to the path of the project the work targets, written as `~/Projects/<repo>`
+   (the parser expands `~` to `os.homedir()` at ingest, so the same PRD works on any machine).
+   Avoid hardcoding an absolute home path (`/home/<you>/Projects/<repo>`); it breaks on any
+   machine with a different home directory.
+
+   **Required body sections, in this order:**
+   ```markdown
+   # Goal
+
+   <2-4 sentences. What the executor will build and why it matters. NO "as a user I want to"
+   framing. Concrete: name the function, the file, the user-visible change.>
+
+   # Acceptance criteria
+
+   - [ ] <each line is a verifiable check the executor can run after building>
+   - [ ] <include explicit file paths, function names, expected behavior>
+   - [ ] a bounded test command passes, e.g. `timeout 300 npm run typecheck` / `pytest -x` /
+     `cargo check` (the run-before-done / never-end-on-red rule lives in standards.md →
+     Execution discipline; the AC just has to name the command).
+
+   # Implementation notes
+
+   <file paths the executor will need to read first; the architectural pattern to follow; any
+   non-obvious constraints. Be specific. Quote function signatures if it saves the executor a
+   Read call.>
+
+   # Out of scope
+
+   <short bulleted list of what NOT to build, to prevent scope creep>
+   ```
+
+   **Self-containment is load-bearing.** The executor (`claude -p`) starts with NO conversation
+   context — only the PRD body and the project files. So: include exact file paths (e.g.
+   `src/main/index.cjs:142`); quote function signatures or relevant code blocks if the executor
+   would have to grep for them; name the libraries/patterns to use (e.g. "use the existing
+   `validatePath` helper in `config.cjs`"); don't reference "the conversation we just had" or
+   "the design we discussed"; if a PRD depends on another PRD's output, say so in
+   `# Implementation notes` AND give it a higher `NN` so it queues after.
+
+   **Scope sizing — keep it SMALL (data-driven, 2026-06).** Across 400+ real runs the median
+   PRD finishes in **~7 minutes**, p90 **~21 min**, p99 **~66 min** — yet authored
+   `estimateMinutes` ran 5–8× too high. Oversized scoping anchors PRDs too big and pushes them
+   into the rare >60-min tail where ~100% of true hangs live (deploy poll-loops, unbounded e2e
+   suites). Target ~15 minutes of wall-clock work per PRD — **hard ceiling ~30 min; if you
+   project more, SPLIT** into sequential `NN` PRDs and document the dependency in each. Set
+   `estimateMinutes` realistically: **p50≈8, p90≈21** — don't write 60/90, it's almost always
+   wrong and hides real outliers. Each execution costs ~$0.50–$2; smaller PRDs = smaller blast
+   radius when a run is rate-limited, timed out, or killed. **`rateLimited` exit-1 is NOT a
+   failure** — it's the scheduler's designed auto-pause; the job auto-resumes at the next
+   window reset. Don't add retry logic for it.
+
+4. **Emit each PRD** to the canonical path and structure above, then **append `## Engineering
    standards` and paste the full contents of `standards.md` verbatim.** This is the
    load-bearing step — it's the only way the standards (incl. Execution discipline) reach the
    headless run. Honor the `PRD_AUTHORING.md` §10 pre-queue checklist.
@@ -99,7 +182,6 @@ single definition of "tracked to done" for both entry paths.
 
 ## References (reuse, don't duplicate)
 
-- `~/.claude/skills/prd/SKILL.md` — canonical single-PRD structure, location, filename rules, scope sizing.
 - `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` — the §1–§10 safety rules.
 - `~/.claude/skills/develop/standards.md` — the engineering + execution-discipline rules inlined into every PRD.
 - `test-driven-development`, `systematic-debugging` — interactive dev sessions.
@@ -110,3 +192,6 @@ single definition of "tracked to done" for both entry paths.
 - Write PRD files directly, then confirm — don't draft them inline in chat for review first.
 - Don't combine unrelated features into one PRD. One focused, completable unit each.
 - Don't add a `parallelGroup` frontmatter key — the filename `NN-` prefix drives grouping.
+- Don't write a PRD to `data/prds/`, `docs/prds/`, the project's own folder, or anywhere outside
+  the canonical path. The user has explicitly flagged this as a recurring problem.
+- Don't leave `cwd` unset hoping for the default. Be explicit.

@@ -120,27 +120,34 @@ export const TERMINAL_THEMES: Record<TerminalThemeName, ITheme> = {
     brightWhite: '#1f2328',
   },
   // Paper-warm — matches the Almanac chrome. The redesigned palette I shipped
-  // in v0.13.0 and the user asked to dethrone as default.
+  // in v0.13.0 and the user asked to dethrone as default. 2026-07-05: several
+  // ANSI colors (esp. the brights) were below WCAG AA 4.5:1 against the cream
+  // background — bad enough that live CLI output using those codes (very
+  // common: warnings/info in bright yellow/cyan/etc.) was unreadable. Every
+  // color below is retuned to >=4.5:1 against #f6efe1, same hue family.
+  // NOTE FOR REVIEW: this is a contrast-only patch, not a full pass — revisit
+  // once the broader Almanac-wide reskin (design import) is actually built,
+  // in case the shared palette tokens change again.
   paper: {
     background: '#f6efe1',
     foreground: '#2a221a',
-    cursor: '#b85c34',
+    cursor: '#a7532f',
     selectionBackground: '#e0d3b8',
     black: '#2a221a',
     red: '#b8443c',
     green: '#5c6f3a',
-    yellow: '#a8761f',
+    yellow: '#8e641a',
     blue: '#3a6ea5',
     magenta: '#8a4a8c',
-    cyan: '#3a7a82',
+    cyan: '#38767e',
     white: '#5b4a36',
-    brightBlack: '#8a7a60',
-    brightRed: '#c44e44',
-    brightGreen: '#6f7d52',
-    brightYellow: '#c08a2a',
-    brightBlue: '#4a7eb8',
-    brightMagenta: '#9c5a9e',
-    brightCyan: '#4a8a94',
+    brightBlack: '#796b54',
+    brightRed: '#b8493f',
+    brightGreen: '#65714a',
+    brightYellow: '#8c641e',
+    brightBlue: '#416ea1',
+    brightMagenta: '#925494',
+    brightCyan: '#3e757d',
     brightWhite: '#2a221a',
   },
 }

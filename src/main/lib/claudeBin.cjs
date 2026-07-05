@@ -18,6 +18,9 @@ const os = require('node:os');
 let cached = null;
 
 function resolveClaudeBin() {
+  // Explicit override wins and is never cached — lets operators pin a binary
+  // and lets tests point the runner at a controllable stub process.
+  if (process.env.SM_CLAUDE_BIN) return process.env.SM_CLAUDE_BIN;
   if (cached) return cached;
   // Merged candidate list — was forked in scheduler vs pluginInstall before.
   const home = os.homedir();

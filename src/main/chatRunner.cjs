@@ -174,6 +174,20 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
       resolve();
     };
 
+    // Guarantees the renderer receives EXACTLY ONE terminal event
+    // (complete / needs-input / error) per run. Without this, a cancelled or
+    // killed run exits with `killed=true` and the old exit-guard broadcast
+    // nothing — leaving the chat store stuck at running:true forever (disabled
+    // textarea, "running…" spinner, unresponsive UI). Every terminal broadcast
+    // funnels through here so the exit path can emit a fallback only when the
+    // run settled without one.
+    let terminalSent = false;
+    const emitTerminal = (channel, payload) => {
+      if (terminalSent) return;
+      terminalSent = true;
+      broadcast(channel, payload);
+    };
+
     const claudeBin = resolveClaudeBin();
     const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
 
@@ -209,7 +223,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
         detached: true, // own process group so killTree can SIGTERM descendants
       });
     } catch (err) {
-      broadcast('chat:run:error', {
+      emitTerminal('chat:run:error', {
         tabId,
         sessionId,
         message: `spawn failed: ${err?.message ?? String(err)}`,
@@ -237,7 +251,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
 
     // Hard wall-clock ceiling — SIGTERM + SIGKILL on expiry
     const killTimer = setTimeout(() => {
-      broadcast('chat:run:error', {
+      emitTerminal('chat:run:error', {
         tabId,
         sessionId,
         message: 'run exceeded 30-minute wall-clock ceiling',
@@ -253,7 +267,6 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
     let lineBuffer = '';
     let finalAssistantText = '';
     let stderrBuffer = '';
-    let gotResult = false;
 
     const processLine = (line) => {
       if (!line) return;
@@ -273,7 +286,6 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
           }
         }
       } else if (event.type === 'result') {
-        gotResult = true;
         // Use the authoritative `result` field when available; fall back to
         // accumulated assistant text (same content, different source).
         const text = typeof event.result === 'string' ? event.result : finalAssistantText;
@@ -281,21 +293,21 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
         if (event.subtype === 'success') {
           const signal = parseStopSignal(text);
           if (signal) {
-            broadcast('chat:run:needs-input', {
+            emitTerminal('chat:run:needs-input', {
               tabId,
               sessionId,
               questions: signal.questions,
               raw: text,
             });
           } else {
-            broadcast('chat:run:complete', { tabId, sessionId, finalMessage: text });
+            emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
             // Record durable exchange off the hot path — UI must not wait on Haiku
             recordExchange({ sessionId, cwd, prompt, result: text }).catch((err) => {
               console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
             });
           }
         } else {
-          broadcast('chat:run:error', {
+          emitTerminal('chat:run:error', {
             tabId,
             sessionId,
             message: `run ended with result subtype: ${event.subtype ?? 'unknown'}`,
@@ -319,7 +331,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
 
     child.on('error', (err) => {
       clearTimeout(killTimer);
-      broadcast('chat:run:error', {
+      emitTerminal('chat:run:error', {
         tabId,
         sessionId,
         message: err?.message ?? String(err),
@@ -332,15 +344,28 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
       // Flush any partial line that didn't end with \n
       if (lineBuffer.trim()) processLine(lineBuffer.trim());
 
-      if (!gotResult && !killed) {
-        const errDetail = stderrBuffer.trim()
-          ? `: ${stderrBuffer.trim().slice(0, 300)}`
-          : '';
-        broadcast('chat:run:error', {
-          tabId,
-          sessionId,
-          message: `process exited without a result event (code=${code} signal=${signal})${errDetail}`,
-        });
+      // Emit a fallback terminal event for any run that ended without one — a
+      // cancel/SIGTERM (killed=true), a crash before a result, or a silent
+      // exit. `emitTerminal` no-ops if the run already sent complete/needs-
+      // input/error, so the normal success path never double-fires. This is
+      // what unsticks the renderer's running flag after Cancel.
+      if (!terminalSent) {
+        if (killed) {
+          emitTerminal('chat:run:error', {
+            tabId,
+            sessionId,
+            message: 'run cancelled',
+          });
+        } else {
+          const errDetail = stderrBuffer.trim()
+            ? `: ${stderrBuffer.trim().slice(0, 300)}`
+            : '';
+          emitTerminal('chat:run:error', {
+            tabId,
+            sessionId,
+            message: `process exited without a result event (code=${code} signal=${signal})${errDetail}`,
+          });
+        }
       }
       settle();
     });

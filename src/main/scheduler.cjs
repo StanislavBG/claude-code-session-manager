@@ -629,7 +629,7 @@ async function reconcile(state) {
       error: null,
     });
   }
-  state.jobs = next.sort((a, b) => a.slug.localeCompare(b.slug));
+  state.jobs = next.sort((a, b) => b.slug.localeCompare(a.slug));
   return state;
 }
 

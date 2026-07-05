@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useSessions } from '../state/sessions'
-import { useChat, type ChatTurn } from '../state/chat'
+import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 import { LearningPanel } from './LearningPanel'
 
@@ -26,6 +26,37 @@ interface Props {
 function renderMd(src: string): string {
   // marked.parse is sync for string input; sanitize before injecting.
   return DOMPurify.sanitize(marked.parse(src, { async: false }) as string)
+}
+
+// Mirrors hive-primitives.tsx's ToolChip shape (rounded border pill, text-[10px]
+// font-mono) without importing it directly — that component's tone is a binary
+// read/write concept tied to the Hive design system, not this skill/mcp/tool trace.
+const TOOL_USE_TONE: Record<ToolUseTrace['kind'], string> = {
+  skill: 'border-sage/60 bg-sage/10 text-sage',
+  mcp: 'border-accent/60 bg-accent/10 text-accent',
+  tool: 'border-white/15 bg-white/5 text-fg-muted',
+}
+
+const TOOL_USE_ICON: Record<ToolUseTrace['kind'], string> = {
+  skill: '🧩',
+  mcp: '🔌',
+  tool: '⚙',
+}
+
+function ToolUseTraceStrip({ items }: { items: ToolUseTrace[] | undefined }) {
+  if (!items?.length) return null
+  return (
+    <div className="mb-1 flex flex-wrap items-center gap-1">
+      {items.map((u) => (
+        <span
+          key={u.id}
+          className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${TOOL_USE_TONE[u.kind]}`}
+        >
+          {TOOL_USE_ICON[u.kind]} {u.label}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 function Turn({ turn }: { turn: ChatTurn }) {
@@ -61,11 +92,14 @@ function Turn({ turn }: { turn: ChatTurn }) {
   }
   // assistant — render the run's final message verbatim (markdown).
   return (
-    <div
-      className="prose-chat max-w-[90%] rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg"
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
-    />
+    <div className="max-w-[90%]">
+      <ToolUseTraceStrip items={turn.toolUses} />
+      <div
+        className="prose-chat rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
+      />
+    </div>
   )
 }
 
@@ -83,6 +117,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const running = chat?.running ?? false
   const stream = chat?.stream ?? ''
   const queuedPosition = chat?.queuedPosition ?? 0
+  const liveToolUses = chat?.liveToolUses ?? []
 
   // One-shot history rehydration from the durable exchanges store.
   useEffect(() => {
@@ -177,20 +212,23 @@ export function TerminalChat({ tabId, cwd }: Props) {
           <Turn key={t.id} turn={t} />
         ))}
         {running && (
-          <div className="max-w-[90%] rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg-muted">
-            {queuedPosition > 0 ? (
-              <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
-                queued · #{queuedPosition} (one loop runs at a time)
-              </span>
-            ) : stream ? (
-              <span className="whitespace-pre-wrap">{stream}</span>
-            ) : (
-              <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                running…
-              </span>
-            )}
+          <div className="max-w-[90%]">
+            <ToolUseTraceStrip items={liveToolUses} />
+            <div className="rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg-muted">
+              {queuedPosition > 0 ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" />
+                  queued · #{queuedPosition} (one loop runs at a time)
+                </span>
+              ) : stream ? (
+                <span className="whitespace-pre-wrap">{stream}</span>
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                  running…
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>

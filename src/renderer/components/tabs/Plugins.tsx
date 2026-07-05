@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
@@ -7,11 +7,10 @@ import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
-import { PluginsDiscover } from './plugins/PluginsDiscover'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 import { PluginSkillBrowser } from './plugins/PluginSkillBrowser'
 
-type PluginsView = 'installed' | 'library' | 'discover'
+type PluginsView = 'installed' | 'library'
 
 interface PluginManifest {
   name?: string
@@ -129,39 +128,10 @@ export function Plugins() {
     },
   ]
 
-  const installedSlugs = useMemo(() => new Set(rows.map((r) => r.name)), [rows])
-
-  const reloadInstalled = async () => {
-    if (!home) return
-    const r = await window.api.config.listDir(`${home}/.claude/plugins`, { dirsOnly: true })
-    const next: PluginRow[] = []
-    for (const e of r.entries as DirEntry[]) {
-      const row = await inspectPluginDir(e)
-      next.push(row)
-    }
-    next.sort((a, b) => a.name.localeCompare(b.name))
-    setRows(next)
-  }
-
   if (view === 'library') {
     return (
       <Panel toolbar={<PluginsViewTabs active={view} onChange={setView} />}>
         <PluginsLibrary />
-      </Panel>
-    )
-  }
-
-  if (view === 'discover') {
-    return (
-      <Panel toolbar={<PluginsViewTabs active={view} onChange={setView} />}>
-        <PluginsDiscover
-          installedSlugs={installedSlugs}
-          onInstalled={() => {
-            // Refresh installed list so the row flips to "installed" without
-            // requiring a tab switch. Best-effort; ignore errors.
-            reloadInstalled().catch(() => { /* */ })
-          }}
-        />
       </Panel>
     )
   }
@@ -212,9 +182,8 @@ export function Plugins() {
 }
 
 /**
- * 3-way tab switcher: Installed / Discover / Library. ViewSwitcher in
- * Library.tsx is locked to 2-way for the other tabs that use it (Skills,
- * MCP Servers), so Plugins ships its own.
+ * 2-way tab switcher: Installed / Library, matching the ViewSwitcher pattern
+ * used by Skills / MCP Servers.
  */
 function PluginsViewTabs({
   active,
@@ -225,7 +194,6 @@ function PluginsViewTabs({
 }) {
   const items: Array<[PluginsView, string]> = [
     ['installed', 'Installed'],
-    ['discover', 'Discover'],
     ['library', 'Library'],
   ]
   return (

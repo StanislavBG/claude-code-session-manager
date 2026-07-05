@@ -20,6 +20,12 @@ import { toast } from './toast'
 
 export type ChatTurnRole = 'user' | 'assistant' | 'question' | 'error'
 
+export interface ToolUseTrace {
+  id: string
+  kind: 'skill' | 'mcp' | 'tool'
+  label: string
+}
+
 export interface ChatTurn {
   id: string
   role: ChatTurnRole
@@ -27,6 +33,8 @@ export interface ChatTurn {
   text: string
   questions?: string[]
   at: number
+  /** Tools/skills/MCP calls that fired while producing this turn (assistant turns only). */
+  toolUses?: ToolUseTrace[]
 }
 
 interface TabChat {
@@ -39,6 +47,8 @@ interface TabChat {
   started: boolean
   /** Live streamed assistant text for the in-flight run (replaced by finalMessage on complete). */
   stream: string
+  /** Tool/skill/MCP calls accumulated for the in-flight run (mirrors `stream`). */
+  liveToolUses: ToolUseTrace[]
 }
 
 interface ChatState {
@@ -57,7 +67,14 @@ interface ChatState {
   hydrate: (args: { tabId: string; cwd: string; sessionId: string }) => Promise<void>
 }
 
-const EMPTY: TabChat = { turns: [], running: false, queuedPosition: 0, started: false, stream: '' }
+const EMPTY: TabChat = {
+  turns: [],
+  running: false,
+  queuedPosition: 0,
+  started: false,
+  stream: '',
+  liveToolUses: [],
+}
 
 let seq = 0
 function turnId(): string {
@@ -135,7 +152,15 @@ function patch(tabId: string, fn: (c: TabChat) => TabChat): void {
 }
 
 function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): void {
-  patch(tabId, (c) => ({ ...c, turns: [...c.turns, turn], running: false, queuedPosition: 0, stream: '', ...extra }))
+  patch(tabId, (c) => ({
+    ...c,
+    turns: [...c.turns, { ...turn, toolUses: c.liveToolUses }],
+    running: false,
+    queuedPosition: 0,
+    stream: '',
+    liveToolUses: [],
+    ...extra,
+  }))
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {
@@ -152,10 +177,13 @@ if (typeof window !== 'undefined' && window.api?.chat) {
     patch(tabId, (c) => ({ ...c, running: true, queuedPosition: position }))
   })
   window.api.chat.onRunStarted(({ tabId }) => {
-    patch(tabId, (c) => ({ ...c, running: true, started: true, queuedPosition: 0, stream: '' }))
+    patch(tabId, (c) => ({ ...c, running: true, started: true, queuedPosition: 0, stream: '', liveToolUses: [] }))
   })
   window.api.chat.onOutput(({ tabId, delta }) => {
     patch(tabId, (c) => ({ ...c, stream: c.stream + delta }))
+  })
+  window.api.chat.onToolUse(({ tabId, id, kind, label }) => {
+    patch(tabId, (c) => ({ ...c, liveToolUses: [...c.liveToolUses, { id, kind, label }] }))
   })
   window.api.chat.onComplete(({ tabId, finalMessage }) => {
     pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now() })

@@ -43,18 +43,31 @@ const TOOL_USE_ICON: Record<ToolUseTrace['kind'], string> = {
   tool: '⚙',
 }
 
-function ToolUseTraceStrip({ items }: { items: ToolUseTrace[] | undefined }) {
+function ToolUseTraceStrip({
+  items,
+  running = false,
+}: {
+  items: ToolUseTrace[] | undefined
+  running?: boolean
+}) {
   if (!items?.length) return null
+  const lastIdx = items.length - 1
   return (
     <div className="mb-1 flex flex-wrap items-center gap-1">
-      {items.map((u) => (
-        <span
-          key={u.id}
-          className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${TOOL_USE_TONE[u.kind]}`}
-        >
-          {TOOL_USE_ICON[u.kind]} {u.label}
-        </span>
-      ))}
+      {items.map((u, i) => {
+        const inFlight = running && i === lastIdx
+        return (
+          <span
+            key={u.id}
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${
+              inFlight ? 'border-accent/40 bg-accent/10 text-accent' : TOOL_USE_TONE[u.kind]
+            }`}
+          >
+            {TOOL_USE_ICON[u.kind]} {u.label}
+          </span>
+        )
+      })}
+      <span className="text-[10px] font-mono text-fg-dim">· {items.length} steps</span>
     </div>
   )
 }
@@ -73,7 +86,7 @@ function Turn({ turn }: { turn: ChatTurn }) {
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-lg bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
+        <div className="max-w-[80%] rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
           {turn.text}
         </div>
       </div>
@@ -102,13 +115,18 @@ function Turn({ turn }: { turn: ChatTurn }) {
   }
   // assistant — render the run's final message verbatim (markdown).
   return (
-    <div className="max-w-[90%]">
-      <ToolUseTraceStrip items={turn.toolUses} />
-      <div
-        className="prose-chat rounded-lg bg-elev px-3 py-2 text-sm text-fg"
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
-      />
+    <div className="flex max-w-[90%] items-start gap-2">
+      <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
+        C
+      </div>
+      <div className="min-w-0 flex-1">
+        <ToolUseTraceStrip items={turn.toolUses} />
+        <div
+          className="prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg [&_p]:max-w-lg [&_pre]:max-w-none"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
+        />
+      </div>
     </div>
   )
 }
@@ -176,6 +194,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
     <div className="flex h-full w-full flex-col bg-bg">
       <div className="flex items-center justify-between border-b border-rule px-4 py-2">
         <div className="flex items-center gap-3">
+          <div className="font-serif text-base text-fg">Chat</div>
           <div className="text-xs text-fg-dim">
             Chat · headless session — no process runs between commands
           </div>
@@ -223,7 +242,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
         ))}
         {running && (
           <div className="max-w-[90%]">
-            <ToolUseTraceStrip items={liveToolUses} />
+            <ToolUseTraceStrip items={liveToolUses} running={running && !stream} />
             <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
               {queuedPosition > 0 ? (
                 <span className="inline-flex items-center gap-2">

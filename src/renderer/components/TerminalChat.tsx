@@ -34,7 +34,7 @@ function renderMd(src: string): string {
 const TOOL_USE_TONE: Record<ToolUseTrace['kind'], string> = {
   skill: 'border-sage/60 bg-sage/10 text-sage',
   mcp: 'border-accent/60 bg-accent/10 text-accent',
-  tool: 'border-white/15 bg-white/5 text-fg-muted',
+  tool: 'border-line bg-elev text-fg-dim',
 }
 
 const TOOL_USE_ICON: Record<ToolUseTrace['kind'], string> = {
@@ -59,6 +59,16 @@ function ToolUseTraceStrip({ items }: { items: ToolUseTrace[] | undefined }) {
   )
 }
 
+// Error/question turns keep red/amber as an intentional accent (same pattern as
+// Toast.tsx / StatusBadge.tsx) but retuned off the dark-theme red-*/amber-* shades:
+// text colors below are checked at >=4.5:1 contrast against all three paper
+// background shades (#f6efe1 / #efe6d3 / #fbf6ec) using the same WCAG formula as
+// the TerminalControls.tsx xterm-theme fix.
+const ERROR_TEXT = 'text-[#8a2f28]'
+const ERROR_TINT = 'border-[#b8443c]/40 bg-[#b8443c]/10'
+const AMBER_TEXT = 'text-[#7a5416]'
+const AMBER_TINT = 'border-[#8e641a]/40 bg-[#8e641a]/10'
+
 function Turn({ turn }: { turn: ChatTurn }) {
   if (turn.role === 'user') {
     return (
@@ -71,15 +81,15 @@ function Turn({ turn }: { turn: ChatTurn }) {
   }
   if (turn.role === 'error') {
     return (
-      <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+      <div className={`rounded-lg border px-3 py-2 text-sm ${ERROR_TINT} ${ERROR_TEXT}`}>
         {turn.text}
       </div>
     )
   }
   if (turn.role === 'question') {
     return (
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
+      <div className={`rounded-lg border px-3 py-2 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
+        <div className={`mb-1 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
           Needs your answer
         </div>
         <ul className="list-disc space-y-1 pl-5">
@@ -95,7 +105,7 @@ function Turn({ turn }: { turn: ChatTurn }) {
     <div className="max-w-[90%]">
       <ToolUseTraceStrip items={turn.toolUses} />
       <div
-        className="prose-chat rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg"
+        className="prose-chat rounded-lg bg-elev px-3 py-2 text-sm text-fg"
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
       />
@@ -164,9 +174,9 @@ export function TerminalChat({ tabId, cwd }: Props) {
 
   return (
     <div className="flex h-full w-full flex-col bg-bg">
-      <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-rule px-4 py-2">
         <div className="flex items-center gap-3">
-          <div className="text-xs text-fg-muted">
+          <div className="text-xs text-fg-dim">
             Chat · headless session — no process runs between commands
           </div>
           <LearningPanel active="terminal" />
@@ -174,25 +184,25 @@ export function TerminalChat({ tabId, cwd }: Props) {
         <div ref={modelMenuRef} className="relative flex items-stretch">
           <button
             onClick={openRaw}
-            className="rounded-l border border-white/10 px-2 py-1 text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
+            className="rounded-l border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
             title="Drop into a live interactive claude session in this directory"
           >
             Open raw session ⌃
           </button>
           <button
             onClick={() => setModelMenuOpen((v) => !v)}
-            className="rounded-r border border-l-0 border-white/10 px-1.5 py-1 text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
+            className="rounded-r border border-l-0 border-line px-1.5 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
             title="Choose model for this raw session"
           >
             ▾
           </button>
           {modelMenuOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-32 rounded border border-white/10 bg-bg shadow-lg">
+            <div className="absolute right-0 top-full z-10 mt-1 w-32 rounded border border-line bg-hi shadow-lg">
               {RAW_MODELS.map((m) => (
                 <button
                   key={m}
                   onClick={() => openRawWithModel(m)}
-                  className="block w-full px-3 py-1.5 text-left text-xs text-fg-muted hover:bg-white/5 hover:text-fg"
+                  className="block w-full px-3 py-1.5 text-left text-xs text-fg-dim hover:bg-elev hover:text-fg"
                 >
                   {m.charAt(0).toUpperCase() + m.slice(1)}
                 </button>
@@ -204,7 +214,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {turns.length === 0 && !running && (
-          <div className="flex h-full items-center justify-center text-sm text-fg-muted select-none">
+          <div className="flex h-full items-center justify-center text-sm text-fg-faint select-none">
             Type a command to start a session. It runs, reports back, and asks if it needs you.
           </div>
         )}
@@ -214,10 +224,10 @@ export function TerminalChat({ tabId, cwd }: Props) {
         {running && (
           <div className="max-w-[90%]">
             <ToolUseTraceStrip items={liveToolUses} />
-            <div className="rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-fg-muted">
+            <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
               {queuedPosition > 0 ? (
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-amber-400" />
+                  <span className="h-2 w-2 rounded-full bg-butter" />
                   queued · #{queuedPosition} (one loop runs at a time)
                 </span>
               ) : stream ? (
@@ -233,7 +243,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
         )}
       </div>
 
-      <div className="border-t border-white/5 p-3">
+      <div className="border-t border-rule p-3">
         <div className="flex items-end gap-2">
           <textarea
             value={draft}
@@ -242,12 +252,12 @@ export function TerminalChat({ tabId, cwd }: Props) {
             disabled={running}
             rows={2}
             placeholder={running ? 'Running… cancel or wait' : 'Type a command (Enter to send, Shift+Enter for newline)'}
-            className="flex-1 resize-none rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-accent/50 focus:outline-none disabled:opacity-50"
+            className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
           {running ? (
             <button
               onClick={() => window.api.chat.cancel(tabId)}
-              className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10"
+              className={`rounded-md border px-3 py-2 text-sm hover:bg-[#b8443c]/10 ${ERROR_TEXT} border-[#b8443c]/40`}
             >
               Cancel
             </button>
@@ -255,7 +265,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
             <button
               onClick={submit}
               disabled={!draft.trim()}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-black hover:bg-accent/90 disabled:opacity-40"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-40"
             >
               Send
             </button>

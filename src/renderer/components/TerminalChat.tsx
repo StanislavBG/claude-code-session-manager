@@ -113,6 +113,98 @@ const ERROR_TINT = 'border-[#b8443c]/40 bg-[#b8443c]/10'
 const AMBER_TEXT = 'text-[#7a5416]'
 const AMBER_TINT = 'border-[#8e641a]/40 bg-[#8e641a]/10'
 
+// Mirrors the "Chat" design's SessionRail breakpoint (showRail = vw > 1180) —
+// narrow enough that a fixed-width rail never fights the message column below it.
+const RAIL_BREAKPOINT = 1180
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return width
+}
+
+// Read-only, real-data-only subset of the design's SessionRail: no Branch/Model
+// (no per-session plumbing reaches this component), no 5h window (that's
+// AppStatusBar's job), no Touched files (not captured by classifyToolUse today).
+function ChatSessionRail({
+  cwd,
+  label,
+  running,
+  queuedPosition,
+  stream,
+  liveToolUses,
+}: {
+  cwd: string
+  label: string
+  running: boolean
+  queuedPosition: number
+  stream: string
+  liveToolUses: ToolUseTrace[]
+}) {
+  const inFlightIdx = running && !stream ? liveToolUses.length - 1 : -1
+  return (
+    <div className="w-[280px] shrink-0 overflow-y-auto border-l border-rule px-3 py-4">
+      <div className="rounded-lg border border-line bg-elev px-3 py-2.5">
+        <div className="text-xs font-semibold text-fg">{label}</div>
+        <div className="mt-0.5 truncate font-mono text-[11px] text-fg-dim" title={cwd}>
+          {cwd}
+        </div>
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-fg-dim">
+          {running ? (
+            queuedPosition > 0 ? (
+              <>
+                <span className="h-1.5 w-1.5 rounded-full bg-butter" />
+                queued · #{queuedPosition}
+              </>
+            ) : (
+              <>
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                running
+              </>
+            )
+          ) : (
+            <>
+              <span className="h-1.5 w-1.5 rounded-full bg-line" />
+              idle
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+        This turn
+      </div>
+      {liveToolUses.length === 0 ? (
+        <div className="mt-1.5 text-[11px] text-fg-faint">No tool activity yet.</div>
+      ) : (
+        <ul className="mt-1.5 space-y-1">
+          {liveToolUses.map((u, i) => (
+            <li
+              key={u.id}
+              className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] font-mono ${
+                i === inFlightIdx ? 'border-accent/40 bg-accent/10 text-accent' : TOOL_USE_TONE[u.kind]
+              }`}
+            >
+              {i === inFlightIdx ? (
+                <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+              ) : (
+                <span aria-hidden className="shrink-0">
+                  {TOOL_USE_ICON[u.kind]}
+                </span>
+              )}
+              <span className="truncate">{u.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function Turn({ turn }: { turn: ChatTurn }) {
   if (turn.role === 'user') {
     return (
@@ -172,7 +264,8 @@ function Turn({ turn }: { turn: ChatTurn }) {
 }
 
 export function TerminalChat({ tabId, cwd }: Props) {
-  const sessionId = useSessions((s) => s.tabs.find((t) => t.id === tabId)?.claudeSessionId ?? tabId)
+  const tab = useSessions((s) => s.tabs.find((t) => t.id === tabId))
+  const sessionId = tab?.claudeSessionId ?? tabId
   const chat = useChat((s) => s.chats[tabId])
   const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
@@ -180,6 +273,8 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const viewportWidth = useViewportWidth()
+  const showRail = viewportWidth > RAIL_BREAKPOINT
 
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
@@ -271,34 +366,46 @@ export function TerminalChat({ tabId, cwd }: Props) {
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {turns.length === 0 && !running && (
-          <div className="flex h-full items-center justify-center text-sm text-fg-faint select-none">
-            Type a command to start a session. It runs, reports back, and asks if it needs you.
-          </div>
-        )}
-        {turns.map((t) => (
-          <Turn key={t.id} turn={t} />
-        ))}
-        {running && (
-          <div className="max-w-[90%]">
-            <ToolUseTraceStrip items={liveToolUses} running={running && !stream} />
-            <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
-              {queuedPosition > 0 ? (
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-butter" />
-                  queued · #{queuedPosition} (one loop runs at a time)
-                </span>
-              ) : stream ? (
-                <span className="whitespace-pre-wrap">{stream}</span>
-              ) : (
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                  running…
-                </span>
-              )}
+      <div className="flex min-h-0 flex-1">
+        <div ref={scrollRef} className="min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+          {turns.length === 0 && !running && (
+            <div className="flex h-full items-center justify-center text-sm text-fg-faint select-none">
+              Type a command to start a session. It runs, reports back, and asks if it needs you.
             </div>
-          </div>
+          )}
+          {turns.map((t) => (
+            <Turn key={t.id} turn={t} />
+          ))}
+          {running && (
+            <div className="max-w-[90%]">
+              <ToolUseTraceStrip items={liveToolUses} running={running && !stream} />
+              <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
+                {queuedPosition > 0 ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-butter" />
+                    queued · #{queuedPosition} (one loop runs at a time)
+                  </span>
+                ) : stream ? (
+                  <span className="whitespace-pre-wrap">{stream}</span>
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                    running…
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        {showRail && (
+          <ChatSessionRail
+            cwd={cwd}
+            label={tab?.label ?? cwd}
+            running={running}
+            queuedPosition={queuedPosition}
+            stream={stream}
+            liveToolUses={liveToolUses}
+          />
         )}
       </div>
 

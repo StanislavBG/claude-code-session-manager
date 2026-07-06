@@ -59,6 +59,30 @@
 .markdown-body th { background: #f1e7d2; font-weight: 600; }
 .markdown-body h1[id], .markdown-body h2[id], .markdown-body h3[id] { scroll-margin-top: 1rem; }
 
+/* PlanCard-style treatment for assistant chat turns whose markdown contains a list
+ * (TerminalChat.tsx Turn()) — read-only presentational weight, no interactive state. */
+.prose-chat--plan {
+  border: 1px solid #8e641a40;
+  border-radius: 14px;
+  background: #8e641a0d;
+}
+.prose-chat--plan ul, .prose-chat--plan ol {
+  list-style: none;
+  padding-left: 1.4rem;
+  margin: 0.4rem 0;
+}
+.prose-chat--plan li {
+  position: relative;
+  margin: 0.3rem 0;
+}
+.prose-chat--plan li::before {
+  content: '✓';
+  position: absolute;
+  left: -1.4rem;
+  color: #4d7a4d;
+  font-weight: 600;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;

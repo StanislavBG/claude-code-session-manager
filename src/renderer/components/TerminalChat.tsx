@@ -5,6 +5,7 @@ import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 import { LearningPanel } from './LearningPanel'
+import { extractUrls } from '../lib/extractUrls'
 
 /**
  * TerminalChat — the DEFAULT terminal-screen experience for a dormant tab
@@ -26,6 +27,36 @@ interface Props {
 function renderMd(src: string): string {
   // marked.parse is sync for string input; sanitize before injecting.
   return DOMPurify.sanitize(marked.parse(src, { async: false }) as string)
+}
+
+// Raw-markdown heuristic for "does this turn contain a list" — used only to add a
+// CSS class to the container; not a real markdown AST parse (see renderMd).
+const HAS_LIST_RE = /^\s*(?:[-*+]\s+.+|\d+\.\s+.+)/m
+function hasMarkdownList(text: string): boolean {
+  return HAS_LIST_RE.test(text)
+}
+
+function UrlCallout({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = () => {
+    void navigator.clipboard.writeText(url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1100)
+  }
+  return (
+    <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-line bg-elev px-2.5 py-1.5 text-xs">
+      <span aria-hidden className="text-fg-dim">
+        🔗
+      </span>
+      <span className="min-w-0 flex-1 truncate font-mono text-fg-dim">{url}</span>
+      <button
+        onClick={onCopy}
+        className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
 }
 
 // Mirrors hive-primitives.tsx's ToolChip shape (rounded border pill, text-[10px]
@@ -101,8 +132,9 @@ function Turn({ turn }: { turn: ChatTurn }) {
   }
   if (turn.role === 'question') {
     return (
-      <div className={`rounded-lg border px-3 py-2 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
-        <div className={`mb-1 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
+      <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
+        <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
+          <span aria-hidden>❓</span>
           Needs your answer
         </div>
         <ul className="list-disc space-y-1 pl-5">
@@ -110,10 +142,15 @@ function Turn({ turn }: { turn: ChatTurn }) {
             <li key={i}>{q}</li>
           ))}
         </ul>
+        <div className={`mt-2 border-t pt-2 text-[11px] opacity-70 ${AMBER_TINT}`}>
+          Reply in the composer below to answer.
+        </div>
       </div>
     )
   }
   // assistant — render the run's final message verbatim (markdown).
+  const urls = extractUrls(turn.text)
+  const isPlan = hasMarkdownList(turn.text)
   return (
     <div className="flex max-w-[90%] items-start gap-2">
       <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
@@ -122,10 +159,13 @@ function Turn({ turn }: { turn: ChatTurn }) {
       <div className="min-w-0 flex-1">
         <ToolUseTraceStrip items={turn.toolUses} />
         <div
-          className="prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg [&_p]:max-w-lg [&_pre]:max-w-none"
+          className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg [&_p]:max-w-lg [&_pre]:max-w-none ${isPlan ? 'prose-chat--plan' : ''}`}
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
         />
+        {urls.map((url) => (
+          <UrlCallout key={url} url={url} />
+        ))}
       </div>
     </div>
   )

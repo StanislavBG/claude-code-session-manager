@@ -6,6 +6,9 @@ import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 import { LearningPanel } from './LearningPanel'
 import { extractUrls } from '../lib/extractUrls'
+import { matchSlashNav } from '../lib/slashCommand'
+import { toast } from '../state/toast'
+import type { NavKey } from './LeftNav'
 
 /**
  * TerminalChat — the DEFAULT terminal-screen experience for a dormant tab
@@ -116,6 +119,32 @@ const AMBER_TINT = 'border-[#8e641a]/40 bg-[#8e641a]/10'
 // Mirrors the "Chat" design's SessionRail breakpoint (showRail = vw > 1180) —
 // narrow enough that a fixed-width rail never fights the message column below it.
 const RAIL_BREAKPOINT = 1180
+
+const NAV_LABELS: Record<NavKey, string> = {
+  overview: 'Overview',
+  terminal: 'Terminal',
+  'system-prompt': 'System Prompt',
+  settings: 'Settings',
+  permissions: 'Permissions',
+  skills: 'Skills',
+  plugins: 'Plugins',
+  mcp: 'MCP Servers',
+  hooks: 'Hooks',
+  subagents: 'Subagents',
+  memory: 'Memory',
+  projects: 'Projects',
+  history: 'History',
+  keybindings: 'Keybindings',
+  usage: 'Usage',
+  'doc-editor': 'Doc Editor',
+  scheduler: 'Scheduler',
+  editor: 'Editor',
+  voice: 'Voice',
+  repoviz: 'Repo Viz',
+  search: 'Search',
+  prompts: 'Prompts',
+  remote: 'Remote',
+}
 
 function useViewportWidth(): number {
   const [width, setWidth] = useState(() => window.innerWidth)
@@ -295,6 +324,13 @@ export function TerminalChat({ tabId, cwd }: Props) {
 
   const submit = () => {
     if (running || !draft.trim()) return
+    const navKey = matchSlashNav(draft.trim())
+    if (navKey) {
+      setDraft('')
+      window.dispatchEvent(new CustomEvent('sm:navigate', { detail: navKey }))
+      toast.info(`Opened ${NAV_LABELS[navKey]} — showing the live list`)
+      return
+    }
     send({ tabId, sessionId, cwd, prompt: draft })
     setDraft('')
   }

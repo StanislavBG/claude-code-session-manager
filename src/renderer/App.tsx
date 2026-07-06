@@ -105,6 +105,12 @@ export function App() {
     window.addEventListener('sm:open-editor', h)
     return () => window.removeEventListener('sm:open-editor', h)
   }, [navigate])
+
+  useEffect(() => {
+    const h = (e: Event) => navigate((e as CustomEvent<NavKey>).detail)
+    window.addEventListener('sm:navigate', h)
+    return () => window.removeEventListener('sm:navigate', h)
+  }, [navigate])
   const activeTabId = useSessions((s) => s.activeTabId)
   const tabs = useSessions((s) => s.tabs)
 

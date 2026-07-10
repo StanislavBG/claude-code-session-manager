@@ -24,13 +24,42 @@ import { ActionBar } from './browser/ActionBar'
 import { CapturePanel } from './browser/CapturePanel'
 import { RecorderPanel } from './browser/RecorderPanel'
 import { ObservePanel } from './browser/ObservePanel'
+import { FindBar } from './browser/FindBar'
 
 export function Browser() {
   const tabs = useBrowserState((s) => s.tabs)
   const activeTabId = useBrowserState((s) => s.activeTabId)
   const openTab = useBrowserState((s) => s.openTab)
   const mode = useBrowserState((s) => s.mode)
+  const findOpen = useBrowserState((s) => s.findOpen)
   const columnRef = useRef<HTMLDivElement | null>(null)
+
+  // Cmd/Ctrl+F (find) and Cmd/Ctrl +/-/0 (zoom) — scoped to this component's
+  // lifetime, which mirrors "only while the Browser tab is active" since
+  // MainPane renders exactly one screen at a time (see project convention:
+  // keybindings only wired while the owning nav tab is mounted).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const id = useBrowserState.getState().activeTabId
+      if (!id) return
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault()
+        useBrowserState.getState().openFind(id)
+      } else if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        useBrowserState.getState().zoomIn(id)
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault()
+        useBrowserState.getState().zoomOut(id)
+      } else if (e.key === '0') {
+        e.preventDefault()
+        useBrowserState.getState().zoomReset(id)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // Stable across nav-state broadcasts (loading/title updates re-create the
   // `tabs` array reference on every event) — only changes on tab
@@ -104,6 +133,7 @@ export function Browser() {
               Recording interactions — every click, type &amp; navigation is captured as a step
             </div>
           )}
+          {findOpen && activeTab && <FindBar tab={activeTab} />}
           <div ref={columnRef} className="relative min-h-0 flex-1" />
           <ActionBar />
         </div>

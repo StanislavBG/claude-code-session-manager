@@ -89,6 +89,15 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.removeListener(channel, listener);
     },
+    setZoom: (payload) => ipcRenderer.invoke('browser:set-zoom', payload),
+    find: (payload) => ipcRenderer.invoke('browser:find', payload),
+    stopFind: (viewId) => ipcRenderer.invoke('browser:stop-find', { viewId }),
+    onFindResult: (viewId, handler) => {
+      const channel = `browser:find-result:${viewId}`;
+      const listener = (_e, result) => handler(result);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

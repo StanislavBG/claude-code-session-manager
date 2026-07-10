@@ -15,9 +15,53 @@
  */
 
 const path = require('path');
+const os = require('os');
+const fs = require('fs');
 const crypto = require('crypto');
 const { WebContentsView, shell } = require('electron');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const { readJson, writeJson } = require('./config.cjs');
+
+// ── History + zoom persistence (PRD 402) ──────────────────────────────
+// Both files live under ~/.claude/session-manager/browser/, inside
+// config.cjs's WRITE_PREFIXES allowlist, and are written through
+// config.cjs's writeJson (tmp+rename atomic write) — never re-implemented.
+const BROWSER_DATA_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'browser');
+const HISTORY_PATH = path.join(BROWSER_DATA_DIR, 'history.json');
+const ZOOM_PATH = path.join(BROWSER_DATA_DIR, 'zoom.json');
+const HISTORY_MAX = 500;
+
+let lastZoomFactor = 1;
+// Startup-only, fixed constant path (not user input) — a plain sync read is
+// simpler than threading an async load through registerBrowserView's callers.
+function loadPersistedZoom() {
+  try {
+    const raw = fs.readFileSync(ZOOM_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    if (data && typeof data.factor === 'number' && Number.isFinite(data.factor)) {
+      lastZoomFactor = data.factor;
+    }
+  } catch {
+    // no persisted zoom yet — keep default 1
+  }
+}
+
+// Serializes read-modify-write cycles against history.json so concurrent
+// navigations across multiple sub-tabs can't race and drop entries.
+let historyWriteChain = Promise.resolve();
+function appendHistoryEntry({ url, title }) {
+  if (!url || url === 'about:blank') return;
+  historyWriteChain = historyWriteChain.then(async () => {
+    try {
+      const existing = await readJson(HISTORY_PATH);
+      const list = Array.isArray(existing.data) ? existing.data : [];
+      list.unshift({ url, title: title || '', ts: Date.now() });
+      await writeJson(HISTORY_PATH, list.slice(0, HISTORY_MAX));
+    } catch {
+      // best-effort — history is a convenience, not load-bearing
+    }
+  });
+}
 
 /** @type {Map<string, WebContentsView>} */
 const views = new Map();
@@ -43,6 +87,11 @@ const stepCounters = new Map();
 // preload via `additionalArguments`/`process.argv` (never touches the DOM or
 // a script tag the page could inspect), and required on every toggle call.
 const recordTokens = new Map();
+
+// viewId -> last search text passed to findInPage, so repeat calls with the
+// same text advance to the next/previous match (findNext: true) while a new
+// search term restarts the highlight pass (findNext: false).
+const lastFindText = new Map();
 
 function emitRecordStep(viewId, partial) {
   const n = (stepCounters.get(viewId) || 0) + 1;
@@ -105,6 +154,10 @@ function wireNavEvents(viewId, view) {
   wc.on('did-start-navigation', emit);
   wc.on('did-navigate', (_e, url) => {
     emit();
+    // wc.getTitle() here still reports the PREVIOUS page's title — the new
+    // page's <title> hasn't parsed yet. Wait one tick for dom-ready so the
+    // history entry gets the title of the page actually navigated to.
+    wc.once('dom-ready', () => appendHistoryEntry({ url, title: wc.getTitle() }));
     if (recordingViewIds.has(viewId)) emitRecordStep(viewId, { verb: 'navigate', target: url });
   });
   wc.on('did-navigate-in-page', emit);
@@ -136,6 +189,14 @@ function wireNavEvents(viewId, view) {
   wc.session.on('will-download', (event) => {
     event.preventDefault();
   });
+
+  wc.on('found-in-page', (_e, result) => {
+    sendIfAlive(win, `browser:find-result:${viewId}`, {
+      requestId: result.requestId,
+      matches: result.matches,
+      activeMatchOrdinal: result.activeMatchOrdinal,
+    });
+  });
 }
 
 function create({ viewId, partition }) {
@@ -155,6 +216,7 @@ function create({ viewId, partition }) {
   views.set(viewId, view);
   browserViewContentsIds.add(view.webContents.id);
   contentsIdToViewId.set(view.webContents.id, viewId);
+  view.webContents.setZoomFactor(lastZoomFactor);
   wireNavEvents(viewId, view);
   view.webContents.once('destroyed', () => {
     browserViewContentsIds.delete(view.webContents.id);
@@ -162,6 +224,7 @@ function create({ viewId, partition }) {
     recordingViewIds.delete(viewId);
     stepCounters.delete(viewId);
     recordTokens.delete(viewId);
+    lastFindText.delete(viewId);
   });
   if (win && !win.isDestroyed()) {
     win.contentView.addChildView(view);
@@ -202,11 +265,49 @@ function destroy({ viewId }) {
   contentsIdToViewId.delete(view.webContents.id);
   recordingViewIds.delete(viewId);
   stepCounters.delete(viewId);
+  lastFindText.delete(viewId);
   if (win && !win.isDestroyed()) {
     try { win.contentView.removeChildView(view); } catch { /* already detached */ }
   }
   try { view.webContents.close(); } catch { /* already closed */ }
   views.delete(viewId);
+  return { ok: true };
+}
+
+// PRD 402: address-bar zoom control. Factor is clamped to Chromium's own
+// findInPage-adjacent zoom range and persisted so the next-opened tab (and
+// next app launch, via loadPersistedZoom) starts at the last value used.
+function setZoom({ viewId, factor }) {
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  const clamped = Math.min(3, Math.max(0.25, Number(factor) || 1));
+  view.webContents.setZoomFactor(clamped);
+  lastZoomFactor = clamped;
+  writeJson(ZOOM_PATH, { factor: clamped }).catch(() => {});
+  return { ok: true, factor: clamped };
+}
+
+// PRD 402: Cmd/Ctrl+F find bar. Empty text clears the search instead of
+// running an empty findInPage query (Electron throws on '').
+function find({ viewId, text, forward }) {
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  if (!text) {
+    view.webContents.stopFindInPage('clearSelection');
+    lastFindText.delete(viewId);
+    return { ok: true };
+  }
+  const isRepeat = lastFindText.get(viewId) === text;
+  lastFindText.set(viewId, text);
+  view.webContents.findInPage(text, { forward: forward !== false, findNext: isRepeat });
+  return { ok: true };
+}
+
+function stopFind({ viewId }) {
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  view.webContents.stopFindInPage('clearSelection');
+  lastFindText.delete(viewId);
   return { ok: true };
 }
 
@@ -473,6 +574,7 @@ async function captureShot({ viewId }) {
 
 function registerBrowserView({ mainWindow, ipcMain }) {
   attachWindow(mainWindow);
+  loadPersistedZoom();
   const { schemas, validated } = require('./ipcSchemas.cjs');
   ipcMain.handle('browser:create', validated(schemas.browserCreate, (payload) => create(payload)));
   ipcMain.handle('browser:set-bounds', validated(schemas.browserSetBounds, (payload) => setBounds(payload)));
@@ -490,6 +592,9 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   ipcMain.handle('browser:replay', validated(schemas.browserReplay, (payload) => replay(payload)));
   ipcMain.handle('browser:capture-dom', validated(schemas.browserCaptureDom, (payload) => captureDom(payload)));
   ipcMain.handle('browser:capture-shot', validated(schemas.browserViewId, (payload) => captureShot(payload)));
+  ipcMain.handle('browser:set-zoom', validated(schemas.browserSetZoom, (payload) => setZoom(payload)));
+  ipcMain.handle('browser:find', validated(schemas.browserFind, (payload) => find(payload)));
+  ipcMain.handle('browser:stop-find', validated(schemas.browserViewId, (payload) => stopFind(payload)));
   ipcMain.handle('browser:save-binary', validated(schemas.browserSaveBinary, (payload) => {
     const { writeBinaryAtomic } = require('./config.cjs');
     return writeBinaryAtomic(payload.path, Buffer.from(payload.base64, 'base64'))

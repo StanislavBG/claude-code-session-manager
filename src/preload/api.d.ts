@@ -49,6 +49,27 @@ export interface ReplayStepResult {
   detail?: string;
 }
 
+/** find-in-page result (PRD 402), streamed as `browser:find-result:<viewId>`. */
+export interface FindResult {
+  requestId: number;
+  matches: number;
+  activeMatchOrdinal: number;
+}
+
+/** One entry in `~/.claude/session-manager/browser/history.json` (PRD 402). */
+export interface BrowserHistoryEntry {
+  url: string;
+  title: string;
+  ts: number;
+}
+
+/** One entry in `~/.claude/session-manager/browser/bookmarks.json` (PRD 402). */
+export interface BrowserBookmark {
+  url: string;
+  title: string;
+  ts: number;
+}
+
 export interface ReadJsonResult {
   exists: boolean;
   raw: string;
@@ -999,6 +1020,10 @@ export interface SessionManagerAPI {
       continueOnError?: boolean;
     }) => Promise<{ ok: boolean; error?: string; stopped?: boolean; failedAt?: number }>;
     onReplayStep: (viewId: string, handler: (step: ReplayStepResult) => void) => () => void;
+    setZoom: (payload: { viewId: string; factor: number }) => Promise<{ ok: boolean; error?: string; factor?: number }>;
+    find: (payload: { viewId: string; text: string; forward?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+    stopFind: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    onFindResult: (viewId: string, handler: (result: FindResult) => void) => () => void;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

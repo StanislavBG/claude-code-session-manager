@@ -8,7 +8,7 @@
  * `id` and as the main-process WebContentsView key.
  */
 import { create } from 'zustand'
-import type { RecordStep } from '../../preload/api'
+import type { RecordStep, BrowserHistoryEntry, BrowserBookmark, FindResult } from '../../preload/api'
 
 export interface BrowserTab {
   id: string
@@ -20,7 +20,17 @@ export interface BrowserTab {
   canGoForward: boolean
   loading: boolean
   isSecure: boolean
+  zoomFactor: number
 }
+
+// PRD 402: history + bookmarks persistence, both under config.cjs's WRITE_PREFIXES
+// allowlist and read/written via the existing config:read-json/config:write-json
+// IPC path (window.api.config.*) — no dedicated browser:* channel needed.
+const HISTORY_FILE = '~/.claude/session-manager/browser/history.json'
+const BOOKMARKS_FILE = '~/.claude/session-manager/browser/bookmarks.json'
+const ZOOM_MIN = 0.25
+const ZOOM_MAX = 3
+const ZOOM_STEP = 0.1
 
 /** Contextual mode driving the right-side panel slot + webview chrome. */
 export type BrowserMode = 'browse' | 'capture' | 'record' | 'observe'
@@ -77,6 +87,35 @@ interface BrowserState {
   toggleRecordingPause: () => void
   /** "parameterize as {{var}}" checkbox — flips a step's `variable` flag. */
   toggleStepVariable: (n: number) => void
+
+  // ── Bookmarks (PRD 402) ─────────────────────────────────────────────
+  bookmarks: BrowserBookmark[]
+  bookmarksHydrated: boolean
+  hydrateBookmarks: () => Promise<void>
+  /** Star toggle in the address bar — adds/removes the tab's current URL. */
+  toggleBookmark: (id: string) => void
+
+  // ── History autocomplete (PRD 402) ──────────────────────────────────
+  historyEntries: BrowserHistoryEntry[]
+  /** Re-reads history.json — call when the address bar gains focus so
+   * suggestions include navigations from other sub-tabs. */
+  refreshHistory: () => Promise<void>
+
+  // ── Zoom (PRD 402) ───────────────────────────────────────────────────
+  setZoom: (id: string, factor: number) => void
+  zoomIn: (id: string) => void
+  zoomOut: (id: string) => void
+  zoomReset: (id: string) => void
+
+  // ── Find-in-page (PRD 402) ───────────────────────────────────────────
+  findOpen: boolean
+  findText: string
+  findMatches: FindResult | null
+  openFind: (id: string) => void
+  closeFind: (id: string) => void
+  setFindText: (id: string, text: string) => void
+  findNext: (id: string) => void
+  findPrev: (id: string) => void
 }
 
 const TAB_COLORS = ['#b85c34', '#6f7d52', '#e4b85a', '#5f6f86', '#8a5a6e', '#4f7d72']
@@ -138,6 +177,16 @@ function stopRecordTimer() {
   }
 }
 
+const findResultUnsubs = new Map<string, () => void>()
+
+function unsubscribeFindResult(viewId: string) {
+  const off = findResultUnsubs.get(viewId)
+  if (off) {
+    off()
+    findResultUnsubs.delete(viewId)
+  }
+}
+
 export const useBrowserState = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTabId: null,
@@ -155,6 +204,7 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
       canGoForward: false,
       loading: false,
       isSecure: false,
+      zoomFactor: 1,
     }
     set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }))
     subscribeNavState(viewId)
@@ -170,6 +220,7 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab) return
     unsubscribeNavState(tab.viewId)
+    unsubscribeFindResult(tab.viewId)
     window.api.browser.destroy(tab.viewId).catch(() => {})
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id)
@@ -300,5 +351,111 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
           : step,
       ),
     }))
+  },
+
+  bookmarks: [],
+  bookmarksHydrated: false,
+
+  hydrateBookmarks: async () => {
+    if (get().bookmarksHydrated) return
+    try {
+      const r = await window.api.config.readJson(BOOKMARKS_FILE)
+      const list = r.exists && Array.isArray(r.data) ? (r.data as BrowserBookmark[]) : []
+      set({ bookmarks: list, bookmarksHydrated: true })
+    } catch {
+      set({ bookmarksHydrated: true })
+    }
+  },
+
+  toggleBookmark: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab || !tab.url || tab.url === 'about:blank') return
+    const existing = get().bookmarks
+    const alreadyBookmarked = existing.some((b) => b.url === tab.url)
+    const next = alreadyBookmarked
+      ? existing.filter((b) => b.url !== tab.url)
+      : [{ url: tab.url, title: tab.title, ts: Date.now() }, ...existing]
+    set({ bookmarks: next })
+    window.api.config.writeJson(BOOKMARKS_FILE, next).catch(() => {})
+  },
+
+  historyEntries: [],
+
+  refreshHistory: async () => {
+    try {
+      const r = await window.api.config.readJson(HISTORY_FILE)
+      const list = r.exists && Array.isArray(r.data) ? (r.data as BrowserHistoryEntry[]) : []
+      set({ historyEntries: list })
+    } catch {
+      // keep the last-known list on read failure
+    }
+  },
+
+  setZoom: (id, factor) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab) return
+    const clamped = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, factor))
+    set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, zoomFactor: clamped } : t)) }))
+    window.api.browser.setZoom({ viewId: tab.viewId, factor: clamped }).catch(() => {})
+  },
+
+  zoomIn: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (tab) get().setZoom(id, tab.zoomFactor + ZOOM_STEP)
+  },
+
+  zoomOut: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (tab) get().setZoom(id, tab.zoomFactor - ZOOM_STEP)
+  },
+
+  zoomReset: (id) => get().setZoom(id, 1),
+
+  findOpen: false,
+  findText: '',
+  findMatches: null,
+
+  openFind: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab) return
+    set({ findOpen: true, findText: '', findMatches: null })
+    unsubscribeFindResult(tab.viewId)
+    const off = window.api.browser.onFindResult(tab.viewId, (result) => {
+      useBrowserState.setState({ findMatches: result })
+    })
+    findResultUnsubs.set(tab.viewId, off)
+  },
+
+  closeFind: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    set({ findOpen: false, findText: '', findMatches: null })
+    if (!tab) return
+    unsubscribeFindResult(tab.viewId)
+    window.api.browser.stopFind(tab.viewId).catch(() => {})
+  },
+
+  setFindText: (id, text) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    set({ findText: text })
+    if (!tab) return
+    if (!text) {
+      window.api.browser.find({ viewId: tab.viewId, text: '' }).catch(() => {})
+      return
+    }
+    window.api.browser.find({ viewId: tab.viewId, text, forward: true }).catch(() => {})
+  },
+
+  findNext: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    const { findText } = get()
+    if (!tab || !findText) return
+    window.api.browser.find({ viewId: tab.viewId, text: findText, forward: true }).catch(() => {})
+  },
+
+  findPrev: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    const { findText } = get()
+    if (!tab || !findText) return
+    window.api.browser.find({ viewId: tab.viewId, text: findText, forward: false }).catch(() => {})
   },
 }))

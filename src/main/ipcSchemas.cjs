@@ -117,6 +117,20 @@ const browserReplay = z.object({
   continueOnError: z.boolean().optional(),
 });
 
+// PRD 402: address-bar zoom control. factor is clamped again in
+// browserView.cjs's setZoom — this just bounds the wire payload.
+const browserSetZoom = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  factor: z.number().min(0.1).max(10),
+});
+
+// PRD 402: Cmd/Ctrl+F find bar.
+const browserFind = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  text: z.string().max(2000),
+  forward: z.boolean().optional(),
+});
+
 // ──────────────────────────────────────────── Transcripts
 const SESSION_UUID_RE = /^[a-zA-Z0-9-]{1,64}$/;
 
@@ -593,6 +607,8 @@ module.exports = {
     browserCopyImage,
     browserSaveBinary,
     browserReplay,
+    browserSetZoom,
+    browserFind,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

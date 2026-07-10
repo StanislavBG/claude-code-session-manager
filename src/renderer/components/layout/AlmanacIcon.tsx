@@ -19,6 +19,7 @@ export type AlmanacIconName =
   | 'check' | 'x' | 'send'
   | 'browser' | 'target' | 'record' | 'eye' | 'camera'
   | 'arrowleft' | 'arrowright' | 'reload' | 'lock' | 'stop'
+  | 'star' | 'minus'
 
 interface IconProps {
   name: AlmanacIconName
@@ -101,6 +102,8 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'reload':       return <svg {...props}><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>
     case 'lock':         return <svg {...props}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></svg>
     case 'stop':         return <svg {...props}><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none" /></svg>
+    case 'star':         return <svg {...props}><path d="M12 3l2.6 5.6 6.1.6-4.6 4.1 1.3 6-5.4-3.2-5.4 3.2 1.3-6-4.6-4.1 6.1-.6z" /></svg>
+    case 'minus':        return <svg {...props}><path d="M5 12h14" /></svg>
     default: return null
   }
 }

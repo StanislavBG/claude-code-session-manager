@@ -54,6 +54,13 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('pty:write-error', listener);
     },
   },
+  browser: {
+    create: (payload) => ipcRenderer.invoke('browser:create', payload),
+    setBounds: (payload) => ipcRenderer.invoke('browser:set-bounds', payload),
+    show: (viewId) => ipcRenderer.invoke('browser:show', { viewId }),
+    hide: (viewId) => ipcRenderer.invoke('browser:hide', { viewId }),
+    destroy: (viewId) => ipcRenderer.invoke('browser:destroy', { viewId }),
+  },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),
     unsubscribe: (tabId) => ipcRenderer.invoke('transcript:unsubscribe', { tabId }),

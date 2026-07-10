@@ -45,6 +45,31 @@ const ptyResize = z.object({
   rows: z.number().int().min(3).max(1000),
 });
 
+// ──────────────────────────────────────────── Browser (WebContentsView embed)
+// viewId is a renderer-generated identifier; restrict to a safe charset (no
+// '/', no '.') since it keys the in-process Map<viewId, WebContentsView> —
+// not used as a filesystem path, but kept consistent with tabId conventions.
+const BROWSER_VIEW_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const browserViewId = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+});
+
+const browserCreate = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  // Non-persistent partition string (PRD 400 run-mode isolation). No leading
+  // 'persist:' enforced here — callers choose persistence explicitly.
+  partition: z.string().min(1).max(256),
+});
+
+const BOUNDS_INT = z.number().int().min(0).max(100000);
+const browserSetBounds = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  x: BOUNDS_INT,
+  y: BOUNDS_INT,
+  width: BOUNDS_INT,
+  height: BOUNDS_INT,
+});
+
 // ──────────────────────────────────────────── Transcripts
 const SESSION_UUID_RE = /^[a-zA-Z0-9-]{1,64}$/;
 
@@ -513,6 +538,9 @@ module.exports = {
     ptyWrite,
     ptyResize,
     sessionSubscribe,
+    browserViewId,
+    browserCreate,
+    browserSetBounds,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

@@ -7,6 +7,7 @@ const os = require('node:os');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
+const browserView = require('./browserView.cjs');
 const configMgr = require('./config.cjs');
 const transcripts = require('./transcripts.cjs');
 const usageMatrix = require('./usageMatrix.cjs');
@@ -264,6 +265,7 @@ async function rebootApp() {
     configMgr.attachWindow(mainWindow);
     transcripts.attachWindow(mainWindow);
     usageMatrix.attachWindow(mainWindow);
+    browserView.attachWindow(mainWindow);
     voiceHotkey.init(mainWindow).catch((e) => {
       logs.writeLine({ scope: 'voice-hotkey', level: 'error', message: 'reinit failed', meta: { error: e?.message } });
     });
@@ -969,6 +971,7 @@ app.whenReady().then(async () => {
   configMgr.attachWindow(mainWindow);
   transcripts.attachWindow(mainWindow);
   usageMatrix.attachWindow(mainWindow);
+  browserView.registerBrowserView({ mainWindow, ipcMain });
   voiceHotkey.init(mainWindow).catch((e) => {
     logs.writeLine({ scope: 'voice-hotkey', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });

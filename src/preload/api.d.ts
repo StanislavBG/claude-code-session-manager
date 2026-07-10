@@ -934,6 +934,13 @@ export interface SessionManagerAPI {
     onExit: (tabId: string, handler: (info: PtyExit) => void) => () => void;
     onWriteError: (handler: (ev: WriteErrorEvent) => void) => () => void;
   };
+  browser: {
+    create: (payload: { viewId: string; partition: string }) => Promise<{ ok: boolean }>;
+    setBounds: (payload: { viewId: string; x: number; y: number; width: number; height: number }) => Promise<{ ok: boolean }>;
+    show: (viewId: string) => Promise<{ ok: boolean }>;
+    hide: (viewId: string) => Promise<{ ok: boolean }>;
+    destroy: (viewId: string) => Promise<{ ok: boolean }>;
+  };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;
     /** Release the sub back to the LRU cache (view-switch). Does not destroy the watcher. */

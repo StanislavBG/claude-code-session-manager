@@ -14,6 +14,8 @@
  * from a ResizeObserver remains out of scope (PRD 401).
  */
 
+const path = require('path');
+const crypto = require('crypto');
 const { WebContentsView, shell } = require('electron');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
@@ -24,6 +26,29 @@ const views = new Map();
 // main-window nav lock without weakening the lock itself.
 const browserViewContentsIds = new Set();
 let win = null;
+
+// ── Recorder engine (PRD 408) ─────────────────────────────────────────
+// viewId <-> webContents.id so the record-event channel (sent from the
+// page's isolated-preload bridge, which only knows its own sender) can be
+// routed back to the right viewId's step stream.
+const contentsIdToViewId = new Map();
+const recordingViewIds = new Set();
+const stepCounters = new Map();
+// contextBridge.exposeInMainWorld puts the recorder toggle in the EMBEDDED
+// PAGE's own JS context — an adversarial site being recorded could call it
+// directly. The actual step-forwarding gate is `recordingViewIds` (only this
+// module can set it), so a rogue page can't forge/exfiltrate anything, but it
+// could still pause a legitimate session out from under the user. Close that
+// with a per-view secret the page can't read: generated here, handed to the
+// preload via `additionalArguments`/`process.argv` (never touches the DOM or
+// a script tag the page could inspect), and required on every toggle call.
+const recordTokens = new Map();
+
+function emitRecordStep(viewId, partial) {
+  const n = (stepCounters.get(viewId) || 0) + 1;
+  stepCounters.set(viewId, n);
+  sendIfAlive(win, `browser:record-step:${viewId}`, { n, ...partial });
+}
 
 function attachWindow(mainWindow) {
   win = mainWindow;
@@ -78,7 +103,10 @@ function wireNavEvents(viewId, view) {
   const emit = () => broadcastNavState(viewId, view);
 
   wc.on('did-start-navigation', emit);
-  wc.on('did-navigate', emit);
+  wc.on('did-navigate', (_e, url) => {
+    emit();
+    if (recordingViewIds.has(viewId)) emitRecordStep(viewId, { verb: 'navigate', target: url });
+  });
   wc.on('did-navigate-in-page', emit);
   wc.on('page-title-updated', emit);
   wc.on('did-fail-load', (_e, errorCode) => {
@@ -86,6 +114,16 @@ function wireNavEvents(viewId, view) {
     // real failure. Skip so the renderer doesn't show a noisy error banner.
     if (errorCode === -3) return;
     emit();
+  });
+  // The recorder-preload's `capturing` flag lives in the page's JS context,
+  // which is torn down on every navigation — re-arm it after each load so a
+  // recording session survives the page it started on navigating away.
+  wc.on('did-finish-load', () => {
+    if (!recordingViewIds.has(viewId)) return;
+    const token = recordTokens.get(viewId);
+    wc.executeJavaScript(
+      `window.__smRecorder && window.__smRecorder.setRecording(true, ${JSON.stringify(token)})`,
+    ).catch(() => {});
   });
 
   wc.setWindowOpenHandler(({ url }) => {
@@ -102,19 +140,28 @@ function wireNavEvents(viewId, view) {
 
 function create({ viewId, partition }) {
   if (views.has(viewId)) return { ok: true };
+  const recordToken = crypto.randomBytes(16).toString('hex');
+  recordTokens.set(viewId, recordToken);
   const view = new WebContentsView({
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       partition,
+      preload: path.join(__dirname, '..', 'preload', 'browserViewPreload.cjs'),
+      additionalArguments: [`--sm-record-token=${recordToken}`],
     },
   });
   views.set(viewId, view);
   browserViewContentsIds.add(view.webContents.id);
+  contentsIdToViewId.set(view.webContents.id, viewId);
   wireNavEvents(viewId, view);
   view.webContents.once('destroyed', () => {
     browserViewContentsIds.delete(view.webContents.id);
+    contentsIdToViewId.delete(view.webContents.id);
+    recordingViewIds.delete(viewId);
+    stepCounters.delete(viewId);
+    recordTokens.delete(viewId);
   });
   if (win && !win.isDestroyed()) {
     win.contentView.addChildView(view);
@@ -152,12 +199,60 @@ function destroy({ viewId }) {
   const view = views.get(viewId);
   if (!view) return { ok: true };
   browserViewContentsIds.delete(view.webContents.id);
+  contentsIdToViewId.delete(view.webContents.id);
+  recordingViewIds.delete(viewId);
+  stepCounters.delete(viewId);
   if (win && !win.isDestroyed()) {
     try { win.contentView.removeChildView(view); } catch { /* already detached */ }
   }
   try { view.webContents.close(); } catch { /* already closed */ }
   views.delete(viewId);
   return { ok: true };
+}
+
+function recordStart({ viewId }) {
+  const view = views.get(viewId);
+  if (!view) return { ok: false, error: 'unknown viewId' };
+  recordingViewIds.add(viewId);
+  stepCounters.set(viewId, 0);
+  const token = recordTokens.get(viewId);
+  view.webContents
+    .executeJavaScript(`window.__smRecorder && window.__smRecorder.setRecording(true, ${JSON.stringify(token)})`)
+    .catch(() => {});
+  return { ok: true };
+}
+
+function recordStop({ viewId }) {
+  recordingViewIds.delete(viewId);
+  const view = views.get(viewId);
+  if (view && !view.webContents.isDestroyed()) {
+    const token = recordTokens.get(viewId);
+    view.webContents
+      .executeJavaScript(`window.__smRecorder && window.__smRecorder.setRecording(false, ${JSON.stringify(token)})`)
+      .catch(() => {});
+  }
+  return { ok: true };
+}
+
+// Sent by the recorder-preload's contextBridge (never the page itself — the
+// page has no node/ipcRenderer access under sandbox+contextIsolation). Only
+// forwarded while the view is actually in a recording session, and only the
+// two verbs the preload emits; typed values are never included (privacy
+// invariant — "sandboxed · no filesystem · no passwords").
+function handleRecordEvent(event, payload) {
+  const viewId = contentsIdToViewId.get(event.sender.id);
+  if (!viewId || !recordingViewIds.has(viewId)) return;
+  const verb = payload && payload.verb;
+  if (verb !== 'click' && verb !== 'type') return;
+  const target = typeof payload.target === 'string' ? payload.target.slice(0, 300) : '';
+  const step = { verb, target };
+  if (verb === 'type') {
+    step.masked = true;
+    if (typeof payload.variableSuggestion === 'string') {
+      step.variableSuggestion = payload.variableSuggestion.slice(0, 64);
+    }
+  }
+  emitRecordStep(viewId, step);
 }
 
 function navigate({ viewId, url }) {
@@ -221,6 +316,9 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   ipcMain.handle('browser:forward', validated(schemas.browserViewId, (payload) => forward(payload)));
   ipcMain.handle('browser:reload', validated(schemas.browserViewId, (payload) => reload(payload)));
   ipcMain.handle('browser:stop', validated(schemas.browserViewId, (payload) => stop(payload)));
+  ipcMain.handle('browser:record-start', validated(schemas.browserViewId, (payload) => recordStart(payload)));
+  ipcMain.handle('browser:record-stop', validated(schemas.browserViewId, (payload) => recordStop(payload)));
+  ipcMain.on('browser:record-event', handleRecordEvent);
 }
 
 module.exports = { registerBrowserView, attachWindow, views, isBrowserViewContents };

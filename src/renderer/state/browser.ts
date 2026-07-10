@@ -8,6 +8,7 @@
  * `id` and as the main-process WebContentsView key.
  */
 import { create } from 'zustand'
+import type { RecordStep } from '../../preload/api'
 
 export interface BrowserTab {
   id: string
@@ -43,6 +44,23 @@ interface BrowserState {
    * matching mode off if already active, and routes the `shot` verb into
    * capture mode preset to screenshot. */
   onVerb: (verb: 'capture' | 'record' | 'observe' | 'shot') => void
+
+  // ── Recorder (PRD 408 engine → PRD 409 panel) ─────────────────────
+  /** True once `recordStart` has been called and not yet stopped. */
+  recorderActive: boolean
+  /** True = actively capturing + elapsed timer running; false = paused
+   * (session still open — mirrors the design's single `recording` flag). */
+  recording: boolean
+  recorderElapsedSec: number
+  recorderSteps: RecordStep[]
+  /** Entering record mode: starts the engine session for `viewId`. */
+  startRecording: (viewId: string) => void
+  /** Leaving record mode / Stop button: ends the engine session. */
+  stopRecording: (viewId: string) => void
+  /** Record/Pause transport button — toggles capture without ending the session. */
+  toggleRecordingPause: () => void
+  /** "parameterize as {{var}}" checkbox — flips a step's `variable` flag. */
+  toggleStepVariable: (n: number) => void
 }
 
 const TAB_COLORS = ['#b85c34', '#6f7d52', '#e4b85a', '#5f6f86', '#8a5a6e', '#4f7d72']
@@ -83,6 +101,24 @@ function unsubscribeNavState(viewId: string) {
   if (off) {
     off()
     navUnsubs.delete(viewId)
+  }
+}
+
+const recordStepUnsubs = new Map<string, () => void>()
+let recordTimer: ReturnType<typeof setInterval> | null = null
+
+function unsubscribeRecordStep(viewId: string) {
+  const off = recordStepUnsubs.get(viewId)
+  if (off) {
+    off()
+    recordStepUnsubs.delete(viewId)
+  }
+}
+
+function stopRecordTimer() {
+  if (recordTimer) {
+    clearInterval(recordTimer)
+    recordTimer = null
   }
 }
 
@@ -177,5 +213,51 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
       return
     }
     set({ mode: verb, captureMode: verb === 'capture' ? 'agent' : get().captureMode })
+  },
+
+  recorderActive: false,
+  recording: false,
+  recorderElapsedSec: 0,
+  recorderSteps: [],
+
+  startRecording: (viewId) => {
+    if (get().recorderActive) return
+    set({ recorderActive: true, recording: true, recorderElapsedSec: 0, recorderSteps: [] })
+    window.api.browser.recordStart(viewId).catch(() => {})
+    unsubscribeRecordStep(viewId)
+    const off = window.api.browser.onRecordStep(viewId, (step) => {
+      if (!useBrowserState.getState().recording) return
+      useBrowserState.setState((s) => ({ recorderSteps: [...s.recorderSteps, step] }))
+    })
+    recordStepUnsubs.set(viewId, off)
+    stopRecordTimer()
+    recordTimer = setInterval(() => {
+      if (useBrowserState.getState().recording) {
+        useBrowserState.setState((s) => ({ recorderElapsedSec: s.recorderElapsedSec + 1 }))
+      }
+    }, 1000)
+  },
+
+  stopRecording: (viewId) => {
+    if (!get().recorderActive) return
+    window.api.browser.recordStop(viewId).catch(() => {})
+    unsubscribeRecordStep(viewId)
+    stopRecordTimer()
+    set({ recorderActive: false, recording: false })
+  },
+
+  toggleRecordingPause: () => {
+    if (!get().recorderActive) return
+    set((s) => ({ recording: !s.recording }))
+  },
+
+  toggleStepVariable: (n) => {
+    set((s) => ({
+      recorderSteps: s.recorderSteps.map((step) =>
+        step.n === n
+          ? { ...step, variable: step.variable ? null : step.variableSuggestion || 'value' }
+          : step,
+      ),
+    }))
   },
 }))

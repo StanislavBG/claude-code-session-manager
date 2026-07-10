@@ -24,6 +24,20 @@ export interface BrowserNavState {
   isSecure: boolean;
 }
 
+/** One captured recorder step (PRD 408 engine → PRD 409 panel). */
+export interface RecordStep {
+  n: number;
+  verb: 'navigate' | 'click' | 'type' | 'wait-for';
+  target: string;
+  kind?: 'nav' | 'assert';
+  /** True for `type` steps — the actual typed value is never captured. */
+  masked?: boolean;
+  /** Engine-suggested `{{var}}` name for a `type` step (e.g. field name). */
+  variableSuggestion?: string;
+  /** Renderer-owned: set once the user checks "parameterize as {{var}}". */
+  variable?: string | null;
+}
+
 export interface ReadJsonResult {
   exists: boolean;
   raw: string;
@@ -955,6 +969,9 @@ export interface SessionManagerAPI {
     reload: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
     stop: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
     onNavState: (viewId: string, handler: (state: BrowserNavState) => void) => () => void;
+    recordStart: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    recordStop: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    onRecordStep: (viewId: string, handler: (step: RecordStep) => void) => () => void;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

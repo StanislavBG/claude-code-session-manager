@@ -71,6 +71,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.removeListener(channel, listener);
     },
+    recordStart: (viewId) => ipcRenderer.invoke('browser:record-start', { viewId }),
+    recordStop: (viewId) => ipcRenderer.invoke('browser:record-stop', { viewId }),
+    onRecordStep: (viewId, handler) => {
+      const channel = `browser:record-step:${viewId}`;
+      const listener = (_e, step) => handler(step);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

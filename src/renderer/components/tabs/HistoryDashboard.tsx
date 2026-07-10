@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { EmptyState } from '../ui/EmptyState'
 import type { DayProjectRow, HistoryAggregateResult } from '../../../preload/api'
-
-const PROJECT_COLORS = [
-  '#60a5fa', '#34d399', '#f59e0b', '#f87171', '#a78bfa',
-  '#fb923c', '#38bdf8', '#4ade80', '#e879f9', '#fbbf24',
-]
+import { CHART_CATEGORICAL, categoricalColor, HEAT_RAMP } from '../../lib/chartPalette'
 
 type MetricKey = 'promptCount' | 'inputTokens' | 'outputTokens' | 'sessionCount' | 'errorCount' | 'estimatedCostUsd'
 type SortDir = 'asc' | 'desc'
@@ -69,6 +65,7 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
   // without the user having to do anything.
   const [tick, setTick] = useState(0)
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null)
+  const [heatMetric, setHeatMetric] = useState<'cost' | 'sessions' | 'tokens'>('cost')
 
   useEffect(() => {
     let cancelled = false
@@ -161,9 +158,8 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
     return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
   }, [filteredRows])
 
-  // Per-date input/output token sums for the stacked-bar chart below.
-  // O(rows); maxTokens kept separate so the bars share a y-scale.
-  const { stackedBars, maxStackedTokens } = useMemo(() => {
+  // Per-date input/output token sums for the stacked-bar chart below. O(rows).
+  const stackedBars = useMemo(() => {
     const byDate = new Map<string, { date: string; input: number; output: number; cost: number }>()
     for (const r of filteredRows) {
       let cur = byDate.get(r.date)
@@ -172,10 +168,70 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
       cur.output += r.outputTokens
       cur.cost += r.estimatedCostUsd
     }
-    const bars = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
-    const max = bars.reduce((m, d) => Math.max(m, d.input + d.output), 1)
-    return { stackedBars: bars, maxStackedTokens: max }
+    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
   }, [filteredRows])
+
+  // Per-day totals across ALL filtered projects (summed, unlike per-project chartData). O(rows).
+  const dailyTotals = useMemo<Map<string, { cost: number; sessions: number; tokens: number }>>(() => {
+    const m = new Map<string, { cost: number; sessions: number; tokens: number }>()
+    for (const r of filteredRows) {
+      const cur = m.get(r.date) ?? { cost: 0, sessions: 0, tokens: 0 }
+      cur.cost += r.estimatedCostUsd
+      cur.sessions += r.sessionCount
+      cur.tokens += r.inputTokens + r.outputTokens
+      m.set(r.date, cur)
+    }
+    return m
+  }, [filteredRows])
+
+  // Full inclusive fromDate→toDate calendar grid, grouped into Sunday-start week
+  // columns. O(days-in-range) — range is bounded to ~365 days by the date picker,
+  // so this is not a complexity hazard.
+  const heatWeeks = useMemo<{ date: string | null; value: number }[][]>(() => {
+    const [fy, fm, fd] = fromDate.split('-').map(Number)
+    const [ty, tm, td] = toDate.split('-').map(Number)
+    const start = new Date(fy, fm - 1, fd)
+    const end = new Date(ty, tm - 1, td)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return []
+
+    const days: { date: string; value: number }[] = []
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const totals = dailyTotals.get(key)
+      const value = !totals ? 0
+        : heatMetric === 'cost' ? totals.cost
+        : heatMetric === 'sessions' ? totals.sessions
+        : totals.tokens
+      days.push({ date: key, value })
+    }
+    if (!days.length) return []
+
+    const leadingBlanks = start.getDay()
+    const cells: { date: string | null; value: number }[] = [
+      ...Array.from({ length: leadingBlanks }, () => ({ date: null, value: 0 })),
+      ...days,
+    ]
+    const weeks: { date: string | null; value: number }[][] = []
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+    return weeks
+  }, [fromDate, toDate, dailyTotals, heatMetric])
+
+  const heatMax = useMemo(() => {
+    let max = 0
+    for (const week of heatWeeks) for (const cell of week) if (cell.date) max = Math.max(max, cell.value)
+    return max
+  }, [heatWeeks])
+
+  function heatBucket(value: number): number {
+    if (value <= 0 || heatMax === 0) return 0
+    return 1 + Math.min(3, Math.max(0, Math.floor((value / heatMax) * 4 - 1e-9)))
+  }
+
+  function formatHeatValue(value: number): string {
+    if (heatMetric === 'cost') return `$${value.toFixed(4)}`
+    if (heatMetric === 'sessions') return `${value} session${value === 1 ? '' : 's'}`
+    return `${formatTokens(value)} tokens`
+  }
 
   const { chartData, projectKeys } = useMemo(() => {
     const projects = [...new Set(filteredRows.map((r) => r.projectCwd))]
@@ -282,7 +338,7 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
                 type="monotone"
                 dataKey={proj}
                 name={proj.length > 30 ? '…' + proj.slice(-28) : proj}
-                stroke={PROJECT_COLORS[i % PROJECT_COLORS.length]}
+                stroke={categoricalColor(i)}
                 dot={false}
                 strokeWidth={1.5}
               />
@@ -292,35 +348,71 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
       </div>
 
       <div className="border border-line rounded bg-bg-elev p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs uppercase tracking-wider text-fg">Activity heatmap</h3>
+          <div className="flex border border-line rounded overflow-hidden text-[10px]">
+            {(['cost', 'sessions', 'tokens'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setHeatMetric(m)}
+                className={`px-2 py-0.5 ${heatMetric === m ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg'}`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-1 overflow-x-auto">
+          <div className="flex flex-col gap-[2px] pr-1 text-[9px] text-fg-faint justify-between">
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <span key={i}>{d}</span>)}
+          </div>
+          <div className="flex gap-[2px]">
+            {heatWeeks.map((week, wi) => (
+              <div key={wi} className="flex flex-col gap-[2px]">
+                {week.map((cell, di) => (
+                  <div
+                    key={di}
+                    className="w-[10px] h-[10px] rounded-[2px]"
+                    style={{ background: cell.date ? HEAT_RAMP[heatBucket(cell.value)] : 'transparent' }}
+                    title={cell.date ? `${cell.date} · ${formatHeatValue(cell.value)}` : undefined}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="border border-line rounded bg-bg-elev p-4">
         <div className="flex items-baseline justify-between mb-3">
           <h3 className="text-xs uppercase tracking-wider text-fg">Input vs output tokens</h3>
           <div className="flex items-center gap-3 text-[10px] text-fg-faint">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-cyan-500/70" />input</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500/70" />output</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: CHART_CATEGORICAL[0] }} />input</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: CHART_CATEGORICAL[4] }} />output</span>
           </div>
         </div>
-        <div className="flex items-end gap-px h-32">
-          {stackedBars.map((d) => {
-            const inH = (d.input / maxStackedTokens) * 100
-            const outH = (d.output / maxStackedTokens) * 100
-            return (
-              <div
-                key={d.date}
-                className="flex-1 flex flex-col justify-end gap-px"
-                title={`${d.date} · in ${formatTokens(d.input)} · out ${formatTokens(d.output)} · $${d.cost.toFixed(4)}`}
-              >
-                <div
-                  className="w-full bg-purple-500/70 rounded-t-sm"
-                  style={{ height: `${outH}%`, minHeight: d.output > 0 ? 2 : 0 }}
-                />
-                <div
-                  className="w-full bg-cyan-500/70 rounded-b-sm"
-                  style={{ height: `${inH}%`, minHeight: d.input > 0 ? 2 : 0 }}
-                />
-              </div>
-            )
-          })}
-        </div>
+        <ResponsiveContainer width="100%" height={128}>
+          <BarChart data={stackedBars}>
+            <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+            <YAxis tick={{ fontSize: 10 }} width={60} />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload || !payload.length) return null
+                const d = payload[0]?.payload as { date: string; input: number; output: number; cost: number }
+                return (
+                  <div className="bg-bg-elev border border-line rounded px-2 py-1 text-[10px] text-fg">
+                    <div>{label}</div>
+                    <div>in {formatTokens(d.input)}</div>
+                    <div>out {formatTokens(d.output)}</div>
+                    <div>${d.cost.toFixed(4)}</div>
+                  </div>
+                )
+              }}
+            />
+            <Bar dataKey="input" stackId="tok" fill={CHART_CATEGORICAL[0]} />
+            <Bar dataKey="output" stackId="tok" fill={CHART_CATEGORICAL[4]} />
+          </BarChart>
+        </ResponsiveContainer>
         <div className="flex justify-between mt-2 text-[10px] text-fg-faint">
           <span>in {formatTokens(totals.inputTokens)}</span>
           <span>out {formatTokens(totals.outputTokens)}</span>

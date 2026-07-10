@@ -153,6 +153,7 @@ const RAIL_BREAKPOINT = 1180
 const NAV_LABELS: Record<NavKey, string> = {
   overview: 'Overview',
   terminal: 'Terminal',
+  browser: 'Browser',
   'system-prompt': 'System Prompt',
   settings: 'Settings',
   permissions: 'Permissions',

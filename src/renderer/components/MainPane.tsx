@@ -21,6 +21,7 @@ import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
+import { Browser } from './tabs/Browser'
 import { Scheduler } from './tabs/Scheduler'
 import { WebRemote } from './tabs/WebRemote'
 import { SectionFrame } from './layout/SectionFrame'
@@ -108,6 +109,8 @@ function renderScreen(active: NavKey, ctx: {
       return <EditorView />
     case 'projects':
       return <ProjectsWorkspace />
+    case 'browser':
+      return <Browser />
   }
 
   const meta = PAGE_META[active]

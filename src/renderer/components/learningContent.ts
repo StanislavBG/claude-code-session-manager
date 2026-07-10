@@ -82,6 +82,19 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'If the prompt looks frozen, scroll up: Claude often produced output but the cursor is below the visible window.',
       ],
     },
+  'browser': {
+      headline: 'An embedded dev browser for capturing DOM state and recording click-sequences',
+      intro:
+        'Browser is a foundation stub today — the tab shell exists so later work can add sub-tabs, an address bar, an embedded webview, and capture/record/observe tooling without a routing change.',
+      sections: [
+        {
+          title: 'What you see',
+          items: [
+            { body: 'A placeholder page. The embedded browser, DOM capture, and click-recording features arrive in follow-up work.' },
+          ],
+        },
+      ],
+    },
   'system-prompt': {
       headline: 'Edit the CLAUDE.md files that shape Claude\'s house rules',
       intro:

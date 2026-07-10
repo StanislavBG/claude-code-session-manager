@@ -44,6 +44,7 @@ const SCREEN_KEYS = new Set<NavKey>([
   // Workspace
   'overview',
   'terminal',
+  'browser',
   'subagents',
   'scheduler',
   'history',

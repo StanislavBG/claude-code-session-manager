@@ -12,6 +12,7 @@
 export type NavKey =
   | 'overview'
   | 'terminal'
+  | 'browser'
   | 'system-prompt'
   | 'settings'
   | 'permissions'

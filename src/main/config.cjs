@@ -120,6 +120,13 @@ function validateWrite(realAbs) {
       if (realAbs === fixturesSub || realAbs.startsWith(fixturesSub + path.sep)) {
         return;
       }
+      // PRD 410 Recorder → Playwright-spec export: narrowly scoped to
+      // tests/e2e/ (matches the repo's existing e2e spec location), not a
+      // general project-root write grant.
+      const e2eSub = path.join(realRoot, 'tests', 'e2e');
+      if (realAbs === e2eSub || realAbs.startsWith(e2eSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

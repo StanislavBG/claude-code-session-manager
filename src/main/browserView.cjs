@@ -255,6 +255,133 @@ function handleRecordEvent(event, payload) {
   emitRecordStep(viewId, step);
 }
 
+// ── Replay engine (PRD 410) ───────────────────────────────────────────
+// Each step is bounded so a bad/stale selector can't hang the run; the
+// caller supplies `steps` (renderer owns the recorded step list — the main
+// process never persists them), so replay is stateless between calls.
+const REPLAY_STEP_TIMEOUT_MS = 10_000;
+const REPLAY_WAIT_POLL_MS = 250;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function replayClickOrType(wc, step, values) {
+  const script =
+    step.verb === 'type'
+      ? `(() => {
+          const el = document.querySelector(${JSON.stringify(step.target)});
+          if (!el) return false;
+          el.focus();
+          // React (and similar frameworks) override the native value setter
+          // to track state; assigning el.value directly leaves that tracked
+          // state stale, so the framework's onChange never fires. Go through
+          // the native prototype setter — the same workaround React Testing
+          // Library / Playwright use — so the dispatched 'input' event is
+          // seen as a real change.
+          const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+          const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value');
+          if (nativeSetter && nativeSetter.set) {
+            nativeSetter.set.call(el, ${JSON.stringify(step.variable && values[step.variable] !== undefined ? String(values[step.variable]) : '')});
+          } else {
+            el.value = ${JSON.stringify(step.variable && values[step.variable] !== undefined ? String(values[step.variable]) : '')};
+          }
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })()`
+      : step.verb === 'select'
+        ? `(() => {
+            const el = document.querySelector(${JSON.stringify(step.target)});
+            if (!el) return false;
+            el.value = ${JSON.stringify(step.value ?? '')};
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          })()`
+        : `(() => {
+            const el = document.querySelector(${JSON.stringify(step.target)});
+            if (!el) return false;
+            el.click();
+            return true;
+          })()`;
+  const found = await withTimeout(wc.executeJavaScript(script), REPLAY_STEP_TIMEOUT_MS, step.verb);
+  if (!found) throw new Error(`selector not found: ${step.target}`);
+}
+
+async function replayWaitFor(wc, step) {
+  const target = step.target;
+  const deadline = Date.now() + REPLAY_STEP_TIMEOUT_MS;
+  const checkScript = `(() => {
+    try {
+      return (document.body && document.body.innerText.includes(${JSON.stringify(target)})) || location.href.includes(${JSON.stringify(target)});
+    } catch { return false; }
+  })()`;
+  for (;;) {
+    const found = await wc.executeJavaScript(checkScript).catch(() => false);
+    if (found) return;
+    if (Date.now() >= deadline) throw new Error(`wait-for timed out: ${target}`);
+    await new Promise((r) => setTimeout(r, REPLAY_WAIT_POLL_MS));
+  }
+}
+
+async function replayStep(view, step, values) {
+  const wc = view.webContents;
+  if (step.verb === 'navigate') {
+    const normalized = normalizeUrl(step.target);
+    if (!normalized.ok) throw new Error(normalized.error);
+    await withTimeout(wc.loadURL(normalized.url), REPLAY_STEP_TIMEOUT_MS, 'navigate');
+    return;
+  }
+  if (step.verb === 'click' || step.verb === 'type' || step.verb === 'select') {
+    await replayClickOrType(wc, step, values);
+    return;
+  }
+  if (step.verb === 'wait-for') {
+    await replayWaitFor(wc, step);
+    return;
+  }
+  throw new Error(`unsupported step verb: ${step.verb}`);
+}
+
+// `continueOnError` defaults to false: replay stops at the first failed step
+// (fail-fast, matches the transport's "pass/fail per step" model) — the
+// caller can opt into running every step regardless by passing `true`.
+//
+// Replayed navigations/clicks/types are synthetic but indistinguishable from
+// real user input to the recorder's own listeners (did-navigate,
+// browser:record-event) — without suppressing capture here, replaying a
+// session that's still "recording" (armed until stop, not just paused; see
+// browser.ts toggleRecordingPause) would re-append every replayed step back
+// into the step list. Drop the viewId out of recordingViewIds for the
+// duration of the run and restore its prior membership afterward.
+async function replay({ viewId, steps, values, continueOnError }) {
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  const stepList = Array.isArray(steps) ? steps : [];
+  const resolvedValues = values || {};
+  const wasRecording = recordingViewIds.has(viewId);
+  recordingViewIds.delete(viewId);
+  try {
+    for (const step of stepList) {
+      try {
+        await replayStep(view, step, resolvedValues);
+        sendIfAlive(win, `browser:replay-step:${viewId}`, { n: step.n, status: 'pass' });
+      } catch (e) {
+        const detail = e && e.message ? e.message : String(e);
+        sendIfAlive(win, `browser:replay-step:${viewId}`, { n: step.n, status: 'fail', detail });
+        if (!continueOnError) return { ok: true, stopped: true, failedAt: step.n };
+      }
+    }
+    return { ok: true, stopped: false };
+  } finally {
+    if (wasRecording) recordingViewIds.add(viewId);
+  }
+}
+
 function navigate({ viewId, url }) {
   const view = views.get(viewId);
   if (!view) return { ok: false, error: 'unknown viewId' };
@@ -360,6 +487,7 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   ipcMain.handle('browser:record-start', validated(schemas.browserViewId, (payload) => recordStart(payload)));
   ipcMain.handle('browser:record-stop', validated(schemas.browserViewId, (payload) => recordStop(payload)));
   ipcMain.on('browser:record-event', handleRecordEvent);
+  ipcMain.handle('browser:replay', validated(schemas.browserReplay, (payload) => replay(payload)));
   ipcMain.handle('browser:capture-dom', validated(schemas.browserCaptureDom, (payload) => captureDom(payload)));
   ipcMain.handle('browser:capture-shot', validated(schemas.browserViewId, (payload) => captureShot(payload)));
   ipcMain.handle('browser:save-binary', validated(schemas.browserSaveBinary, (payload) => {

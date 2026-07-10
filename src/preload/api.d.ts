@@ -27,7 +27,9 @@ export interface BrowserNavState {
 /** One captured recorder step (PRD 408 engine → PRD 409 panel). */
 export interface RecordStep {
   n: number;
-  verb: 'navigate' | 'click' | 'type' | 'wait-for';
+  /** `select` is accepted by replay/export (PRD 410) for forward-compat;
+   * the live engine does not emit it yet. */
+  verb: 'navigate' | 'click' | 'type' | 'select' | 'wait-for';
   target: string;
   kind?: 'nav' | 'assert';
   /** True for `type` steps — the actual typed value is never captured. */
@@ -36,6 +38,15 @@ export interface RecordStep {
   variableSuggestion?: string;
   /** Renderer-owned: set once the user checks "parameterize as {{var}}". */
   variable?: string | null;
+  /** `select` steps only — the option value to choose on replay/export. */
+  value?: string;
+}
+
+/** Per-step replay outcome (PRD 410), streamed as `browser:replay-step:<viewId>`. */
+export interface ReplayStepResult {
+  n: number;
+  status: 'pass' | 'fail';
+  detail?: string;
 }
 
 export interface ReadJsonResult {
@@ -981,6 +992,13 @@ export interface SessionManagerAPI {
       | { ok: false; error: string }
     >;
     saveBinary: (path: string, base64: string) => Promise<{ ok: boolean; error?: string }>;
+    replay: (payload: {
+      viewId: string;
+      steps: RecordStep[];
+      values?: Record<string, string>;
+      continueOnError?: boolean;
+    }) => Promise<{ ok: boolean; error?: string; stopped?: boolean; failedAt?: number }>;
+    onReplayStep: (viewId: string, handler: (step: ReplayStepResult) => void) => () => void;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

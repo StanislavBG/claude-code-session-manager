@@ -82,6 +82,13 @@ contextBridge.exposeInMainWorld('api', {
     captureDom: (payload) => ipcRenderer.invoke('browser:capture-dom', payload),
     captureShot: (viewId) => ipcRenderer.invoke('browser:capture-shot', { viewId }),
     saveBinary: (path, base64) => ipcRenderer.invoke('browser:save-binary', { path, base64 }),
+    replay: (payload) => ipcRenderer.invoke('browser:replay', payload),
+    onReplayStep: (viewId, handler) => {
+      const channel = `browser:replay-step:${viewId}`;
+      const listener = (_e, step) => handler(step);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

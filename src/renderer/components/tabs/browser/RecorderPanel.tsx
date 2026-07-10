@@ -5,12 +5,18 @@
  * PRD-408 engine (`window.api.browser.recordStart/recordStop/onRecordStep`)
  * via the browser store's recorder slice.
  *
- * Replay + the three export actions (Playwright/Markdown/PRD fixture) are
- * PRD 410 — the buttons render here but are disabled/no-op until then.
+ * Replay (`window.api.browser.replay`/`onReplayStep`) and the three export
+ * destinations (Playwright spec / Markdown repro / PRD fixture) are PRD 410
+ * — replay drives the live view step-by-step and the exports are written
+ * via the same atomic `config.writeText` path CapturePanel uses.
  */
 import { useEffect, useState } from 'react'
 import { AlmanacIcon, type AlmanacIconName } from '../../layout/AlmanacIcon'
 import { useBrowserState } from '../../../state/browser'
+import { toast } from '../../../state/toast'
+import { destPath } from '../../../lib/captureDest'
+import { stepsToPlaywright, stepsToMarkdown, stepsToPrdFixture } from '../../../lib/browserExport'
+import type { ReplayStepResult } from '../../../../preload/api'
 import { PanelShell, SectionLabel } from './panel-primitives'
 
 function IconBtn({
@@ -43,10 +49,10 @@ function IconBtn({
   )
 }
 
-const REC_EXPORTS: { id: string; label: string; hint: string; primary?: boolean }[] = [
+const REC_EXPORTS: { id: 'pw' | 'md' | 'prd'; label: string; hint: string; primary?: boolean }[] = [
   { id: 'pw', label: 'Playwright spec', hint: 'tests/e2e/*.spec.ts', primary: true },
   { id: 'md', label: 'Markdown steps', hint: 'human repro' },
-  { id: 'prd', label: 'PRD fixture', hint: 'feed a claude -p job' },
+  { id: 'prd', label: 'PRD fixture', hint: 'paste into a PRD by hand' },
 ]
 
 function verbColor(verb: string) {
@@ -69,6 +75,9 @@ export function RecorderPanel() {
 
   const viewId = tabs.find((t) => t.id === activeTabId)?.viewId ?? null
   const [openStep, setOpenStep] = useState<number | null>(null)
+  const [replaying, setReplaying] = useState(false)
+  const [replayResults, setReplayResults] = useState<Record<number, ReplayStepResult>>({})
+  const [exporting, setExporting] = useState(false)
 
   // Entering record mode starts the engine session; leaving stops it.
   useEffect(() => {
@@ -77,6 +86,56 @@ export function RecorderPanel() {
     return () => stopRecording(viewId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewId])
+
+  useEffect(() => {
+    if (!viewId) return
+    return window.api.browser.onReplayStep(viewId, (step) => {
+      setReplayResults((prev) => ({ ...prev, [step.n]: step }))
+    })
+  }, [viewId])
+
+  const onReplay = async () => {
+    if (!viewId || recorderSteps.length === 0 || replaying) return
+    setReplaying(true)
+    setReplayResults({})
+    try {
+      const result = await window.api.browser.replay({ viewId, steps: recorderSteps })
+      if (!result.ok) throw new Error(result.error || 'replay failed')
+      if (result.stopped) toast.error(`Replay stopped at step ${result.failedAt}`)
+      else toast.info('Replay passed')
+    } catch (e) {
+      toast.error(`Replay failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setReplaying(false)
+    }
+  }
+
+  const saveExport = async (dirBase: string, ext: string, content: string) => {
+    const path = destPath(dirBase, 'recorded', ext)
+    const result = await window.api.config.writeText(path, content)
+    if (!result.ok) throw new Error('save failed')
+    toast.info(`Saved: ${path}`)
+  }
+
+  const onExport = async (id: 'pw' | 'md' | 'prd') => {
+    if (recorderSteps.length === 0 || exporting) return
+    setExporting(true)
+    try {
+      if (id === 'pw') {
+        const cwd = await window.api.app.cwd()
+        await saveExport(`${cwd}/tests/e2e`, 'spec.ts', stepsToPlaywright(recorderSteps, { title: 'Recorded flow' }))
+      } else {
+        const home = await window.api.app.homeDir()
+        const dirBase = `${home}/.claude/session-manager/browser-captures`
+        if (id === 'md') await saveExport(dirBase, 'md', stepsToMarkdown(recorderSteps))
+        else await saveExport(dirBase, 'txt', stepsToPrdFixture(recorderSteps))
+      }
+    } catch (e) {
+      toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const mm = String(Math.floor(recorderElapsedSec / 60)).padStart(2, '0')
   const ss = String(recorderElapsedSec % 60).padStart(2, '0')
@@ -94,10 +153,10 @@ export function RecorderPanel() {
               <button
                 key={e.id}
                 type="button"
-                disabled
-                title="Export lands in PRD 410"
-                className={`flex cursor-not-allowed items-center gap-2.5 rounded-lg border px-3 py-2 text-left opacity-90 ${
-                  e.primary ? 'border-accent bg-accent' : 'border-line bg-bg-hi'
+                disabled={recorderSteps.length === 0 || exporting}
+                onClick={() => onExport(e.id)}
+                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
+                  e.primary ? 'cursor-pointer border-accent bg-accent' : 'cursor-pointer border-line bg-bg-hi'
                 }`}
               >
                 <span className={`inline-flex ${e.primary ? 'text-white' : 'text-accent'}`}>
@@ -134,7 +193,13 @@ export function RecorderPanel() {
             onClick={toggleRecordingPause}
           />
           <IconBtn name="stop" title="Stop" size={14} onClick={() => viewId && stopRecording(viewId)} />
-          <IconBtn name="play" title="Replay (PRD 410)" size={13} disabled />
+          <IconBtn
+            name="play"
+            title={replaying ? 'Replaying…' : 'Replay'}
+            size={13}
+            onClick={onReplay}
+            disabled={!viewId || recorderSteps.length === 0 || replaying}
+          />
         </div>
       </div>
 
@@ -166,8 +231,20 @@ export function RecorderPanel() {
                   {s.target}
                 </span>
                 {s.variable && (
-                  <span className="ml-auto flex-shrink-0 rounded border border-accent-muted bg-bg px-1.5 py-px font-mono text-[10.5px] font-bold text-accent">
+                  <span className="rounded border border-accent-muted bg-bg px-1.5 py-px font-mono text-[10.5px] font-bold text-accent">
                     {`{{${s.variable}}}`}
+                  </span>
+                )}
+                {replayResults[s.n] && (
+                  <span
+                    title={replayResults[s.n].detail}
+                    className={`ml-auto flex-shrink-0 rounded px-1.5 py-px font-mono text-[10.5px] font-bold ${
+                      replayResults[s.n].status === 'pass'
+                        ? 'bg-sage/20 text-sage'
+                        : 'bg-[#c0503a]/20 text-[#c0503a]'
+                    }`}
+                  >
+                    {replayResults[s.n].status === 'pass' ? '✓ pass' : '✗ fail'}
                   </span>
                 )}
               </button>

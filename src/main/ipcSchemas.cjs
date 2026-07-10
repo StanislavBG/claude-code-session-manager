@@ -95,6 +95,28 @@ const browserSaveBinary = z.object({
   base64: z.string().min(1).max(50_000_000),
 });
 
+// PRD 410: replay a recorded step list against a live view. The renderer
+// owns the step list (main never persists recorded steps), so every call is
+// self-contained. `select` is accepted for forward-compat even though the
+// live recorder engine doesn't emit it yet.
+const browserReplayStep = z.object({
+  n: z.number().int().min(1),
+  verb: z.enum(['navigate', 'click', 'type', 'select', 'wait-for']),
+  target: z.string().max(2000),
+  value: z.string().max(2000).optional(),
+  variable: z.string().max(64).nullable().optional(),
+  kind: z.enum(['nav', 'assert']).optional(),
+  masked: z.boolean().optional(),
+  variableSuggestion: z.string().max(64).optional(),
+});
+
+const browserReplay = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  steps: z.array(browserReplayStep).max(500),
+  values: z.record(z.string().max(64), z.string().max(2000)).optional(),
+  continueOnError: z.boolean().optional(),
+});
+
 // ──────────────────────────────────────────── Transcripts
 const SESSION_UUID_RE = /^[a-zA-Z0-9-]{1,64}$/;
 
@@ -570,6 +592,7 @@ module.exports = {
     browserCaptureDom,
     browserCopyImage,
     browserSaveBinary,
+    browserReplay,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

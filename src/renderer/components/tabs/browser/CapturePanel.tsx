@@ -10,16 +10,8 @@ import { useState } from 'react'
 import { useBrowserState } from '../../../state/browser'
 import { useSessions } from '../../../state/sessions'
 import { toast } from '../../../state/toast'
+import { destPath, provenanceLine } from '../../../lib/captureDest'
 import { PanelShell, SectionLabel } from './panel-primitives'
-
-function destPath(prefix: string, mode: string, ext: string) {
-  const ts = new Date().toISOString().replace(/[:.]/g, '-')
-  return `${prefix}/${ts}-${mode}.${ext}`
-}
-
-function provenanceLine(url: string, mode: string): string {
-  return `# Captured from ${url} (${mode}) @ ${new Date().toISOString()}\n`
-}
 
 // The Claude-session destination injects raw page content from a
 // browser-controlled, potentially untrusted site directly into the terminal.

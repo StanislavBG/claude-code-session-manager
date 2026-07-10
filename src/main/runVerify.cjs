@@ -616,6 +616,18 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       ? { ...(annotations.length ? { annotations } : {}), ...sentinelFields }
       : undefined;
 
+    // No pattern hits is not automatically "clean": a run that neither
+    // committed anything nor ever emitted the finish-protocol sentinel likely
+    // ended before doing real work (e.g. stopped on a clarifying question).
+    // Weaker evidence than a caught transcript error, but still not clean.
+    if (sentinel === null && !committedDuringRun) {
+      issues.push({
+        verdict: 'no_verdict_sentinel',
+        reason: 'run made no commit and emitted no SCHEDULER_VERDICT sentinel — likely ended before the finish protocol (e.g. stopped on a clarifying question)',
+        priority: 1,
+      });
+    }
+
     if (issues.length === 0) {
       const reason = annotations.length
         ? `no blocking issues (${annotations.length} annotation(s): ${annotations.map((a) => a.reason).join('; ')})`
@@ -623,7 +635,8 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       return conclude('clean', reason, null, extras);
     }
 
-    // Pick highest-priority issue (transcript_errors > verify_unavailable).
+    // Pick highest-priority issue (transcript_errors > verify_unavailable ==
+    // no_verdict_sentinel; ties keep the loop's original order via stable sort).
     issues.sort((a, b) => b.priority - a.priority);
     const top = issues[0];
 

@@ -285,7 +285,7 @@ test('Truly clean run (no error markers) → clean/null', async () => {
       {
         type: 'result',
         subtype: 'success',
-        result: 'Feature complete. All acceptance criteria satisfied.',
+        result: 'Feature complete. All acceptance criteria satisfied.\nSCHEDULER_VERDICT: PASS',
       },
     ];
 
@@ -367,7 +367,7 @@ test('FAIL recovered within 30 events → clean', async () => {
       {
         type: 'result',
         subtype: 'success',
-        result: 'Fixed the failing test and verified all pass.',
+        result: 'Fixed the failing test and verified all pass.\nSCHEDULER_VERDICT: PASS',
       },
     ];
 
@@ -416,7 +416,7 @@ function bashRunEvents(content, { toolName = 'Bash', resultSubtype = 'success' }
         }],
       },
     },
-    { type: 'result', subtype: resultSubtype, result: 'All acceptance criteria verified.' },
+    { type: 'result', subtype: resultSubtype, result: 'All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS' },
   ];
 }
 
@@ -568,7 +568,7 @@ test('harness tool error (<tool_use_error>) in final 20% → clean', async () =>
     events.push({ type: 'user', message: { role: 'user', content: [
       { type: 'tool_result', tool_use_id: 'tbad',
         content: '<tool_use_error>Error: No such tool available: bash</tool_use_error>', is_error: true }] } });
-    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' });
+    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS' });
 
     writeLog(tmp, slug, events);
     const prdPath = writePrd(tmp, slug, '# Correctness batch');
@@ -804,6 +804,76 @@ test('no sentinel + committed + allowPreSentinelHeal=false (default) → transcr
     });
     assert.equal(verdict.verdict, 'transcript_errors', `must not heal without allowPreSentinelHeal, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// ─── no_verdict_sentinel: no commit + no sentinel is not "clean" by default ──
+
+/** A run with zero tool_result pattern hits — e.g. the agent asked a
+ *  clarifying question and stopped, ending its turn without touching tools. */
+function noOpRunEvents(resultText) {
+  return [
+    { type: 'result', subtype: 'success', result: resultText },
+  ];
+}
+
+test('no_verdict_sentinel: no tool_result issues, no sentinel, no commit → needs_review', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '406-browser-capture-panel-ui';
+    writeLog(tmp, slug, noOpRunEvents('I need clarification on which capture API to target before proceeding.'));
+    const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'no_verdict_sentinel', `expected no_verdict_sentinel, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('no_verdict_sentinel guard: same run but committedDuringRun:true → stays clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '406-browser-capture-panel-ui-committed';
+    writeLog(tmp, slug, noOpRunEvents('I need clarification on which capture API to target before proceeding.'));
+    const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'clean', `commit landed should stay clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('no_verdict_sentinel guard: same run but with SCHEDULER_VERDICT: PASS sentinel → stays clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '406-browser-capture-panel-ui-sentinel';
+    writeLog(tmp, slug, noOpRunEvents('All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'clean', `PASS sentinel should stay clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
   } finally {
     rmdir(tmp);
   }

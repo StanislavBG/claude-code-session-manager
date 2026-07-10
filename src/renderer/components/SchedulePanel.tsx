@@ -65,6 +65,7 @@ const VERDICT_LABELS: Record<string, string> = {
   transcript_errors: 'transcript had errors',
   verify_unavailable: 'verify unavailable',
   uncommitted_changes: 'uncommitted changes',
+  no_verdict_sentinel: 'no commit or verdict sentinel',
 }
 
 function loadHidden(): Set<string> {

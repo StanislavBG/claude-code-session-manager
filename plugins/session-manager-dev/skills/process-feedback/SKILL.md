@@ -9,7 +9,7 @@ description: >-
   future feedback (written by other agents/projects) gets better. Use whenever the user says "/process-feedback",
   "review the feedback folder", "work through the feedback", "any open
   feedback?", or drops new files into feedback/. Keywords: feedback, intake,
-  external-feedback, cross-project requests, process feedback, triage feedback.
+  cross-project requests, process feedback, triage feedback.
 model: opus
 ---
 
@@ -21,11 +21,15 @@ an interactive human prompt. It evaluates inbound feedback, dispatches the codea
 RESOLUTION, archive). It does **not** implement, and it does **not** re-specify how PRDs are
 tracked — that lives once, in `/develop` Phase 2.
 
-Work the project's intra-project feedback intake (`feedback/` at the repo root;
-some projects name it `external-feedback/`). Each file is a request from an
+Work the project's intra-project feedback intake (`feedback/` at the repo root —
+this is the **one** canonical name; do not create or treat a differently-named
+folder like `external-feedback/` as equivalent, even for cross-service requests
+— that split caused ~2.5 weeks of drifted duplicate tracking in burrow before
+being merged back on 2026-07-10). Each file is a request from an
 upstream/downstream service in the same stack (e.g. Burrow ⇄ signal-builder ⇄
-social-signals-trader). The folder's own `README.md` is the authority on file
-conventions — read it first; the steps below are the process.
+social-signals-trader) — cross-service origin does not mean a different folder,
+it's still just `feedback/`. The folder's own `README.md` is the authority on
+file conventions — read it first; the steps below are the process.
 
 **Core principle:** this skill *triages and dispatches*; it does not implement.
 Anything that requires writing code for this project is decomposed and queued as
@@ -57,8 +61,9 @@ prevent.
 skill is run on a schedule across many projects (the scheduler's feedback sweep),
 so the empty case must cost almost nothing:
 
-- If neither `feedback/` nor `external-feedback/` exists → report
-  "no feedback intake in `<project>`" and **EXIT**.
+- If `feedback/` doesn't exist → report "no feedback intake in `<project>`" and
+  **EXIT**. (Don't check for or fall back to an `external-feedback/`-style
+  variant — `feedback/` is the only canonical name.)
 - If the folder exists but holds **no open item** (every file is in `processed/`
   or marked ✅/archived; nothing open/🆕) → report "no open feedback in
   `<project>`" and **EXIT immediately**. Do NOT read source, evaluate, or start

@@ -39,15 +39,19 @@ The invocation is `/my-feedback to <<project>>` (or "send feedback to
   ```bash
   for d in ~/Projects/*/; do
     [ -d "$d/feedback" ] && echo "  - $(basename "$d")  (feedback/)"
-    [ -d "$d/external-feedback" ] && echo "  - $(basename "$d")  (external-feedback/)"
   done
   ```
   and stop.
-- Resolve the path: `~/Projects/<project>/feedback/` (some projects
-  use `external-feedback/` — check both). Fuzzy-match a near miss to a real
-  directory, but confirm the resolved name before writing.
-- **If the target has no feedback/external-feedback folder, STOP.** Don't invent
-  one — say the project doesn't accept feedback this way and ask how to proceed
+- Resolve the path: `~/Projects/<project>/feedback/`. This is the **one**
+  canonical folder name — do not accept or invent variants (`external-feedback/`,
+  `feedback-inbox/`, etc.) even if a near-miss directory exists; a stray
+  differently-named folder is drift, not a valid convention (burrow's
+  `external-feedback/` existed for ~2.5 weeks from exactly this mistake before
+  being merged back into `feedback/` on 2026-07-10 — don't recreate it, in burrow
+  or anywhere else). Fuzzy-match a near miss only to confirm it's actually named
+  `feedback/`, not to accept a differently-named folder as equivalent.
+- **If the target has no `feedback/` folder, STOP.** Don't invent one under any
+  name — say the project doesn't accept feedback this way and ask how to proceed
   (it may take requests via issues, a different folder, or not at all).
 
 ## 1. Read the target's README FIRST — it is the authority

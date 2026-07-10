@@ -62,8 +62,9 @@ files it points to:
   all, that itself is a finding — recommend adding it.
 - **The levers** — the files the section names as the knobs (tiers/config,
   selection, throughput/cadence/registry, etc.).
-- **The feedback intake** — `feedback/` (or `external-feedback/`) at the repo
-  root, and its `README.md` convention.
+- **The feedback intake** — `feedback/` at the repo root (the one canonical
+  name — do not treat a differently-named folder as equivalent), and its
+  `README.md` convention.
 
 **If CLAUDE.md declares no North-Star KPI section, STOP** and tell the user this
 project hasn't declared one — the KPI belongs in CLAUDE.md's mission statement

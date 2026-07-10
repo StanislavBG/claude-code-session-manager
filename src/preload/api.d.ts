@@ -1049,6 +1049,15 @@ export interface SessionManagerAPI {
     pickerStart: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
     pickerStop: (viewId: string) => Promise<{ ok: boolean; error?: string; wasPicking?: boolean }>;
     onPickerEvent: (viewId: string, handler: (ev: PickerEvent) => void) => () => void;
+    /** Selection-scoped capture pipeline (PRD 404): filter -> prune -> summarize -> chunk for 'agent', outerHTML for 'html', CDP AX-tree for 'a11y', fallback-chain for 'selector'. */
+    capture: (payload: {
+      viewId: string;
+      selectors: string[];
+      mode: 'agent' | 'html' | 'a11y' | 'selector';
+    }) => Promise<
+      | { ok: true; mode: string; text: string; meta: { chunks?: number; tokens?: number } }
+      | { ok: false; error: string }
+    >;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

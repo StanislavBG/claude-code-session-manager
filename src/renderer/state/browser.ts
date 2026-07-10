@@ -42,6 +42,10 @@ export interface CapturedPayload {
   title: string
   text?: string
   dataUrl?: string
+  /** Set for text modes captured via the selection-scoped pipeline (PRD 404) — filter/prune/summarize/chunk stats for 'agent' mode. */
+  meta?: { chunks?: number; tokens?: number }
+  /** The picker selectors the capture was taken from (absent for 'shot', which screenshots the whole view). */
+  selectors?: string[]
   at: number
 }
 
@@ -59,17 +63,21 @@ interface BrowserState {
   mode: BrowserMode
   captureMode: CaptureMode
   setMode: (mode: BrowserMode) => void
+  /** Mode-radio change in CapturePanel — also clears stale `captured` output (design: `setCaptured(false)` on mode change). */
+  setCaptureMode: (mode: CaptureMode) => void
   /** Verb-button click handler — mirrors the design's `onVerb`: toggles the
    * matching mode off if already active, and routes the `shot` verb into
    * capture mode preset to screenshot. */
   onVerb: (verb: 'capture' | 'record' | 'observe' | 'shot') => void
 
-  // ── Capture (PRD 407) ──────────────────────────────────────────────
+  // ── Capture (PRD 404/406/407) ───────────────────────────────────────
   captured: CapturedPayload | null
-  /** Grabs the active tab's content per `captureMode` and stores it in
-   * `captured`. Throws on failure so the caller (CapturePanel) can toast —
-   * stores don't import toast per project convention. */
-  capture: () => Promise<void>
+  /** Grabs the current selection's content per `captureMode` (or the whole
+   * view for 'shot') and stores it in `captured`. `selectors` come from the
+   * picker (PRD 403) — required for every mode except 'shot'. Throws on
+   * failure so the caller (CapturePanel) can toast — stores don't import
+   * toast per project convention. */
+  capture: (selectors?: string[]) => Promise<void>
 
   // ── Recorder (PRD 408 engine → PRD 409 panel) ─────────────────────
   /** True once `recordStart` has been called and not yet stopped. */
@@ -269,10 +277,12 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
 
   setMode: (mode) => set((s) => ({ mode, captured: mode === 'capture' ? s.captured : null })),
 
+  setCaptureMode: (captureMode) => set({ captureMode, captured: null }),
+
   onVerb: (verb) => {
     const { mode } = get()
     if (verb === 'shot') {
-      set({ mode: 'capture', captureMode: 'shot' })
+      set({ mode: 'capture', captureMode: 'shot', captured: null })
       return
     }
     if (mode === verb) {
@@ -288,7 +298,7 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
 
   captured: null,
 
-  capture: async () => {
+  capture: async (selectors) => {
     const { activeTabId, tabs, captureMode } = get()
     const tab = tabs.find((t) => t.id === activeTabId)
     if (!tab) throw new Error('No active browser tab')
@@ -298,13 +308,20 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
       set({ captured: { mode: captureMode, url: result.url, title: result.title, dataUrl: result.dataUrl, at: Date.now() } })
       return
     }
-    // 'html' maps to a raw-HTML capture; 'agent'/'a11y'/'selector' don't have
-    // their own extraction yet (richer extraction is a later PRD) so they
-    // fall back to page text.
-    const kind = captureMode === 'html' ? 'html' : 'text'
-    const result = await window.api.browser.captureDom({ viewId: tab.viewId, kind })
+    if (!selectors || !selectors.length) throw new Error('No element selected')
+    const result = await window.api.browser.capture({ viewId: tab.viewId, selectors, mode: captureMode })
     if (!result.ok) throw new Error(result.error)
-    set({ captured: { mode: captureMode, url: result.url, title: result.title, text: result.text, at: Date.now() } })
+    set({
+      captured: {
+        mode: captureMode,
+        url: tab.url,
+        title: tab.title,
+        text: result.text,
+        meta: result.meta,
+        selectors,
+        at: Date.now(),
+      },
+    })
   },
 
   recorderActive: false,

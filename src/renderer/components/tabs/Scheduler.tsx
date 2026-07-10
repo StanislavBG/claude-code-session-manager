@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ViewTabs } from '../ui/ViewTabs'
+import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
 import { SchedulePanel } from '../SchedulePanel'
 import { SchedulerPrdsView } from './plans/SchedulerPrdsView'
 import { SchedulerHistoryView } from './plans/SchedulerHistoryView'
@@ -195,8 +195,8 @@ export function Scheduler() {
           <WindowStrip />
         </div>
 
-        <div className="flex items-center gap-3 border-b border-line pb-0">
-          <ViewTabs options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
+        <div className="flex items-center gap-3 pb-0">
+          <SchedulerSubTabs options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
         </div>
       </div>
 

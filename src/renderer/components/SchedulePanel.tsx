@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
 import { toast } from '../state/toast'
 import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
@@ -227,20 +228,25 @@ export function SchedulePanel() {
 
       <div className="px-9 py-6 max-w-[1100px] mx-auto space-y-4">
 
-        {/* Status banner */}
+        {/* Status banner — FireStatus card */}
         <div
           className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border ${statusBannerClassAlmanac(status.kind)}`}
           title={status.tooltip}
         >
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <StatusIcon kind={status.kind} />
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className={`w-[38px] h-[38px] rounded-[10px] bg-bg border border-line flex items-center justify-center shrink-0 ${statusToneClass(status.kind)}`}>
+              <AlmanacIcon name="clock" size={19} />
+            </div>
             <div className="min-w-0">
-              <div className="text-[13px] font-medium text-fg truncate">{status.line1}</div>
+              <div className="text-[14px] text-fg truncate">{renderStatusLine1(withUtilization(status.line1, snap.utilization))}</div>
               {status.line2 && (
-                <div className="text-[11.5px] text-fg-faint font-mono mt-0.5 truncate">{status.line2}</div>
+                <div className="text-[12px] text-fg-faint font-mono mt-0.5 truncate">{status.line2}</div>
               )}
             </div>
           </div>
+          <span className="ml-auto font-mono text-[11.5px] text-fg-faint whitespace-nowrap">
+            {config.concurrencyCap ?? 4} slot{(config.concurrencyCap ?? 4) !== 1 ? 's' : ''} · last batch {formatAgo(lastRunAt ? Date.parse(lastRunAt) : null, now)}
+          </span>
           {status.action && (
             <button
               type="button"
@@ -450,6 +456,9 @@ export function SchedulePanel() {
               title={showAllCompleted ? 'Re-collapse old/cleared completed' : 'Show all completed (incl. cleared and >24h)'}
             >
               {showAllCompleted ? '▾' : '▸'} {collapsedCount} more completed
+              <span className="ml-1.5 font-mono text-[11.5px] text-fg-faint">
+                · fresh &amp; capped at 5 shown inline
+              </span>
               {hiddenSlugs.size > 0 && (
                 <span
                   className="ml-2 underline"
@@ -673,20 +682,42 @@ function partitionJobs(
   return { inline, collapsedCount }
 }
 
-function StatusIcon({ kind }: { kind: StatusKind }) {
-  if (kind === 'running') return <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-  if (kind === 'paused') return <span className="text-[13px] shrink-0" title="paused">⏸</span>
-  if (kind === 'manual') return <span className="text-[13px] shrink-0" title="manual">✋</span>
-  if (kind === 'on-reset' || kind === 'auto-soon') return <span className="text-[13px] shrink-0" title="auto">⏰</span>
-  if (kind === 'auto-throttled') return <span className="text-[13px] shrink-0" title="throttled">⏳</span>
-  return <span className="w-2 h-2 rounded-full bg-fg-faint/40 shrink-0" />
-}
-
 function statusBannerClassAlmanac(kind: StatusKind): string {
   if (kind === 'running') return 'bg-amber-400/10 border-amber-400/25'
   if (kind === 'paused') return 'bg-amber-500/10 border-amber-500/25'
   if (kind === 'auto-throttled') return 'bg-amber-500/5 border-amber-500/15'
   return 'bg-bg-elev border-line'
+}
+
+/** FireStatus icon tone by status kind — mirrors the design's kind→tone mapping. */
+function statusToneClass(kind: StatusKind): string {
+  if (kind === 'running' || kind === 'auto-soon') return 'text-accent'
+  if (kind === 'idle') return 'text-sage'
+  if (kind === 'paused' || kind === 'auto-throttled') return 'text-butter'
+  return 'text-fg-faint' // manual, on-reset
+}
+
+const STATUS_MODE_WORDS = ['Running', 'Paused', 'Manual', 'On-reset', 'Auto']
+
+/** Bolds the leading mode token (Running/Paused/Manual/On-reset/Auto) in a status line1, if present. */
+function renderStatusLine1(line1: string): ReactNode {
+  for (const word of STATUS_MODE_WORDS) {
+    if (line1.startsWith(word)) {
+      return (
+        <>
+          <strong className="font-bold">{word}</strong>
+          {line1.slice(word.length)}
+        </>
+      )
+    }
+  }
+  return line1
+}
+
+/** Appends `· util N%` to a status line1 when utilization is known and not already present. */
+function withUtilization(line1: string, utilization: number | null | undefined): string {
+  if (utilization === null || utilization === undefined || line1.includes('util')) return line1
+  return `${line1} · util ${Math.round(utilization)}%`
 }
 
 /** Per-job ETA. O(1) given pre-computed `aheadIndex` from computeAheadCounts.

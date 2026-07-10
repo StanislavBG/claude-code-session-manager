@@ -16,6 +16,9 @@ export type AlmanacIconName =
   | 'race' | 'background' | 'repoviz' | 'subagents' | 'system-prompt'
   | 'permissions' | 'agent-memory' | 'tool' | 'quick-open' | 'global-search'
   | 'remote' | 'wifi' | 'shield' | 'link' | 'copy'
+  | 'check' | 'x' | 'send'
+  | 'browser' | 'target' | 'record' | 'eye' | 'camera'
+  | 'arrowleft' | 'arrowright' | 'reload' | 'lock' | 'stop'
 
 interface IconProps {
   name: AlmanacIconName
@@ -85,6 +88,19 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'shield':       return <svg {...props}><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></svg>
     case 'link':         return <svg {...props}><path d="M9 12h6" /><path d="M10 8H7a4 4 0 000 8h3M14 8h3a4 4 0 010 8h-3" /></svg>
     case 'copy':         return <svg {...props}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 012-2h8" /></svg>
+    case 'check':        return <svg {...props}><path d="M5 12l5 5 9-10" /></svg>
+    case 'x':            return <svg {...props}><path d="M6 6l12 12M18 6L6 18" /></svg>
+    case 'send':         return <svg {...props}><path d="M4 11l17-7-7 17-3-7z" /></svg>
+    case 'browser':      return <svg {...props}><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="3.2" ry="8" /><path d="M4 12h16" /></svg>
+    case 'target':       return <svg {...props}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
+    case 'record':       return <svg {...props}><circle cx="12" cy="12" r="7" fill="currentColor" stroke="none" /></svg>
+    case 'eye':          return <svg {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+    case 'camera':        return <svg {...props}><path d="M4 8h3l2-2h6l2 2h3v11H4z" /><circle cx="12" cy="13.5" r="3.5" /></svg>
+    case 'arrowleft':    return <svg {...props}><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+    case 'arrowright':   return <svg {...props}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+    case 'reload':       return <svg {...props}><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>
+    case 'lock':         return <svg {...props}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></svg>
+    case 'stop':         return <svg {...props}><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none" /></svg>
     default: return null
   }
 }

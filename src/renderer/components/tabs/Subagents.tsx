@@ -27,6 +27,7 @@ import {
 import { LearningPanel } from '../LearningPanel'
 import { DispatchLaunch } from './subagents/DispatchLaunch'
 import { DispatchLive } from './subagents/DispatchLive'
+import { ExamplePromptsSection } from './subagents/ExamplePromptsSection'
 import { useOrchestrator } from '../../state/orchestrator'
 import { useRace } from '../../state/race'
 
@@ -329,6 +330,8 @@ export function Subagents() {
           </div>
         )}
       </div>
+
+      <ExamplePromptsSection />
     </div>
   )
 }

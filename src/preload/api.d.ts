@@ -82,6 +82,8 @@ export interface SubscribeResult {
 export interface PersistedTab {
   id: string;
   claudeSessionId: string;
+  /** Chat mode's own session id, decoupled from claudeSessionId. Optional for backwards-compat with tabs.json written before this field existed. */
+  chatSessionId?: string;
   cwd: string;
   label: string;
   presetId: string | null;

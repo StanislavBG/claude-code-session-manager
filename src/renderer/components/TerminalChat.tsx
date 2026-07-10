@@ -323,10 +323,14 @@ function Turn({ turn }: { turn: ChatTurn }) {
 
 export function TerminalChat({ tabId, cwd }: Props) {
   const tab = useSessions((s) => s.tabs.find((t) => t.id === tabId))
-  const sessionId = tab?.claudeSessionId ?? tabId
+  // Chat uses its own dedicated session id, never the raw PTY's claudeSessionId
+  // (see the comment on SessionTab.chatSessionId — sharing it caused a
+  // create-collision on the first send after reload).
+  const sessionId = tab?.chatSessionId ?? tabId
   const chat = useChat((s) => s.chats[tabId])
   const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
+  const resetThread = useChat((s) => s.resetThread)
   const [draft, setDraft] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -390,6 +394,19 @@ export function TerminalChat({ tabId, cwd }: Props) {
     setModelMenuOpen(false)
   }
 
+  const [confirmingNewThread, setConfirmingNewThread] = useState(false)
+
+  const newThread = () => {
+    if (running) return
+    if (!confirmingNewThread) {
+      setConfirmingNewThread(true)
+      return
+    }
+    useSessions.getState().newChatThread(tabId)
+    resetThread(tabId)
+    setConfirmingNewThread(false)
+  }
+
   return (
     <div className="flex h-full w-full flex-col bg-bg">
       <div className="flex items-center justify-between border-b border-rule px-4 py-2">
@@ -400,6 +417,18 @@ export function TerminalChat({ tabId, cwd }: Props) {
           </div>
           <LearningPanel active="terminal" />
         </div>
+        <div className="flex items-stretch gap-2">
+        <button
+          onClick={newThread}
+          onBlur={() => setConfirmingNewThread(false)}
+          disabled={running}
+          title="Start a brand-new chat thread (clears this conversation's context)"
+          className={`rounded border px-2 py-1 text-xs hover:bg-elev disabled:opacity-40 disabled:hover:bg-transparent ${
+            confirmingNewThread ? 'border-accent/60 text-accent' : 'border-line text-fg-dim hover:text-fg'
+          }`}
+        >
+          {confirmingNewThread ? 'Confirm new thread?' : 'New thread'}
+        </button>
         <div ref={modelMenuRef} className="relative flex items-stretch">
           <button
             onClick={openRaw}
@@ -428,6 +457,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
               ))}
             </div>
           )}
+        </div>
         </div>
       </div>
 

@@ -90,6 +90,7 @@ const sessionsPayload = z.object({
   tabs: z.array(z.object({
     id: z.string().min(1).max(128),
     claudeSessionId: z.string().min(1).max(128),
+    chatSessionId: z.string().min(1).max(128).optional(),
     cwd: z.string().min(1).max(4096),
     label: z.string().max(256),
     presetId: z.string().max(128).nullable(),

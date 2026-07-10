@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { toast } from './toast'
+import { transcriptExists } from '../lib/transcriptExists'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -57,8 +58,10 @@ interface ChatState {
   hydratedTabs: Record<string, true>
   /** Read (or lazily create) the chat slice for a tab. */
   get: (tabId: string) => TabChat
-  /** Submit a user command for a tab. sessionId is the tab's claudeSessionId. */
+  /** Submit a user command for a tab. sessionId is the tab's chatSessionId. */
   send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string }) => void
+  /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newChatThread). */
+  resetThread: (tabId: string) => void
   /**
    * One-shot: load prior exchanges from the durable store and prepend them as
    * history turns. No-ops if already called for this tabId, if there are no
@@ -134,13 +137,31 @@ export const useChat = create<ChatState>((set, get) => ({
         [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, queuedPosition: 0, stream: '' },
       },
     })
-    // resume on every send after the first (the session was created on the first run).
-    window.api.chat
-      .run({ tabId, sessionId, prompt: trimmed, cwd, resume: cur.started })
+    // Durable resume-vs-create decision: check the on-disk transcript (same
+    // check the raw session uses) instead of the ephemeral `started` flag,
+    // which goes stale across an app reload and produced the "Session ID
+    // <uuid> is already in use" error on the first send after restart.
+    transcriptExists(cwd, sessionId)
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        window.api?.logs?.write('chat', 'warn', `transcript-exists check failed for tab ${tabId}: ${msg}`)
+        return cur.started
+      })
+      .then((resume) =>
+        window.api.chat.run({ tabId, sessionId, prompt: trimmed, cwd, resume }),
+      )
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
         applyError(tabId, sessionId, msg)
       })
+  },
+  resetThread: (tabId) => {
+    set({
+      chats: {
+        ...get().chats,
+        [tabId]: { ...EMPTY },
+      },
+    })
   },
 }))
 

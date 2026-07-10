@@ -2,11 +2,22 @@ import { create } from 'zustand'
 import type { PersistedTab } from '../../preload/api'
 import { shellQuote, findPreset, renderCommand } from '../lib/presets'
 import { getRawSessionModel, type RawModel } from '../lib/rawSessionModel'
+import { transcriptExists } from '../lib/transcriptExists'
 
 export interface SessionTab {
   id: string
   /** UUID used as --session-id when launching claude; same as tab id by default. */
   claudeSessionId: string
+  /**
+   * UUID chat mode uses as its own --session-id, separate from
+   * claudeSessionId. Chat and the raw ("Open raw session") PTY must never
+   * share an id: the raw session holds a live process lock on its
+   * claudeSessionId, and reusing it for chat's `claude -p --session-id`
+   * produced the "Session ID <uuid> is already in use" create-collision
+   * (chat.ts's first send after reload, or once the raw session's
+   * transcript already exists on disk).
+   */
+  chatSessionId: string
   label: string
   cwd: string
   pid: number | null
@@ -42,6 +53,8 @@ interface SessionsState {
   wakeTab: (id: string, modelOverride?: RawModel) => Promise<void>
   /** Kill the running PTY and return a tab to dormant/chat mode, preserving the tab row. */
   sleepTab: (id: string) => void
+  /** Mint a fresh chatSessionId for the tab, starting a brand-new chat thread. */
+  newChatThread: (id: string) => void
 }
 
 function labelFromCwd(cwd: string): string {
@@ -67,9 +80,7 @@ async function resolveStartupCommand(
 ): Promise<{ claudeSessionId: string; startupCommand: string }> {
   let useResume = !freshStart
   if (useResume) {
-    const jsonlPath = await window.api.transcripts.pathFor(p.cwd, p.claudeSessionId)
-    const fileExists = await window.api.config.exists(jsonlPath)
-    useResume = fileExists
+    useResume = await transcriptExists(p.cwd, p.claudeSessionId)
   }
   // Only generate a new UUID on a fresh-start with no JSONL; otherwise the
   // existing claudeSessionId is already authoritative (avoids UUID churn on
@@ -98,6 +109,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const tab: SessionTab = {
       id,
       claudeSessionId: id,
+      chatSessionId: crypto.randomUUID(),
       label: label ?? labelFromCwd(cwd),
       cwd,
       pid: null,
@@ -201,6 +213,13 @@ export const useSessions = create<SessionsState>((set, get) => ({
       ),
     })
   },
+  newChatThread: (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab) return
+    set({
+      tabs: get().tabs.map((t) => (t.id === id ? { ...t, chatSessionId: crypto.randomUUID() } : t)),
+    })
+  },
 }))
 
 /**
@@ -226,6 +245,10 @@ export async function hydrateSessions(): Promise<void> {
           return {
             id: p.id,
             claudeSessionId,
+            // Backwards-compat: older persisted tabs predate chatSessionId.
+            // Mint a fresh one rather than reusing claudeSessionId, which
+            // would reintroduce the raw/chat session-lock collision.
+            chatSessionId: p.chatSessionId ?? crypto.randomUUID(),
             cwd: p.cwd,
             label: p.label,
             presetId: p.presetId,
@@ -256,6 +279,7 @@ export async function hydrateSessions(): Promise<void> {
     const persisted: PersistedTab[] = tabs.map((t) => ({
       id: t.id,
       claudeSessionId: t.claudeSessionId,
+      chatSessionId: t.chatSessionId,
       cwd: t.cwd,
       label: t.label,
       presetId: t.presetId,

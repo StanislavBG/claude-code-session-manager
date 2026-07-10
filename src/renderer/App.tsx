@@ -238,6 +238,7 @@ export function App() {
           {
             id,
             claudeSessionId: id,
+            chatSessionId: crypto.randomUUID(),
             label: cwd.split('/').filter(Boolean).pop() || cwd,
             cwd,
             pid: null,
@@ -263,6 +264,7 @@ export function App() {
           {
             id,
             claudeSessionId: id,
+            chatSessionId: crypto.randomUUID(),
             label: cwd.split('/').filter(Boolean).pop() || cwd,
             cwd,
             pid: null,

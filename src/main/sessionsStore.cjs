@@ -5,9 +5,9 @@
  * Storage: ~/.config/session-manager/tabs.json
  * Shape: { tabs: PersistedTab[], activeTabId: string | null, savedAt: number }
  *
- * Only serializable, durable fields are persisted: id, claudeSessionId, cwd,
- * label, presetId. Runtime-only fields (pid, status, startupCommand,
- * exitCode) are recomputed on boot.
+ * Only serializable, durable fields are persisted: id, claudeSessionId,
+ * chatSessionId, cwd, label, presetId. Runtime-only fields (pid, status,
+ * startupCommand, exitCode) are recomputed on boot.
  */
 
 const fs = require('node:fs');
@@ -59,6 +59,7 @@ async function markFreshRestart() {
   const freshTabs = tabs.map((t) => ({
     ...t,
     claudeSessionId: crypto.randomUUID(),
+    chatSessionId: crypto.randomUUID(),
   }));
   await save({ tabs: freshTabs, activeTabId, freshStart: true });
 }

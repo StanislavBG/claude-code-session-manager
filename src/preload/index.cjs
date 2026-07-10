@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.removeListener(channel, listener);
     },
+    capture: (payload) => ipcRenderer.invoke('browser:capture', payload),
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

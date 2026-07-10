@@ -1,0 +1,47 @@
+{
+  "tag": "section",
+  "attrs": { "aria-label": "Pro Plan" },
+  "style": {},
+  "children": [
+    {
+      "tag": "h3",
+      "attrs": {},
+      "style": {},
+      "children": [{ "type": "text", "text": "Pro" }]
+    },
+    {
+      "tag": "p",
+      "attrs": {},
+      "style": {},
+      "children": [{ "type": "text", "text": "$20/mo" }]
+    },
+    {
+      "tag": "ul",
+      "attrs": {},
+      "style": {},
+      "children": [
+        { "tag": "li", "attrs": {}, "style": {}, "children": [{ "type": "text", "text": "Unlimited projects" }] },
+        { "tag": "li", "attrs": {}, "style": {}, "children": [{ "type": "text", "text": "Priority support" }] },
+        { "tag": "li", "attrs": {}, "style": {}, "children": [{ "type": "text", "text": "Full history" }] }
+      ]
+    },
+    {
+      "tag": "button",
+      "attrs": { "data-testid": "buy-pro" },
+      "style": {},
+      "children": [{ "type": "text", "text": "Buy" }]
+    },
+    {
+      "tag": "script",
+      "attrs": {},
+      "style": {},
+      "children": [{ "type": "text", "text": "trackClick();" }]
+    },
+    {
+      "tag": "div",
+      "attrs": { "style": "display:none" },
+      "style": { "display": "none" },
+      "children": [{ "type": "text", "text": "hidden promo copy" }]
+    }
+  ]
+}

@@ -81,6 +81,14 @@ const browserCaptureDom = z.object({
   kind: z.enum(['text', 'html']),
 });
 
+// PRD 404: filter -> prune -> summarize -> chunk capture of a picked
+// selection (browser:capture). selectors comes from the PRD 403 picker.
+const browserCaptureSelection = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  selectors: z.array(z.string().min(1).max(2048)).min(1).max(50),
+  mode: z.enum(['agent', 'html', 'a11y', 'selector']),
+});
+
 // PRD 407: clipboard image write (browser:copy-image). dataUrl is a PNG data
 // URL from webContents.capturePage() — capped well above any realistic
 // screenshot so a malformed/huge payload can't wedge the IPC channel.
@@ -604,6 +612,7 @@ module.exports = {
     browserSetBounds,
     browserNavigate,
     browserCaptureDom,
+    browserCaptureSelection,
     browserCopyImage,
     browserSaveBinary,
     browserReplay,

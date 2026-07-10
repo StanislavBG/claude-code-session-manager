@@ -1,22 +1,35 @@
 /**
  * Browser — embedded dev browser tab. Renders the chrome (sub-tab strip,
- * address bar, webview column placeholder) that wraps the native
- * WebContentsView the main process positions on top of this window. The
- * placeholder div itself shows nothing — the native view covers it; a
+ * address bar, webview column placeholder, bottom action bar) that wraps the
+ * native WebContentsView the main process positions on top of this window.
+ * The placeholder div itself shows nothing — the native view covers it; a
  * ResizeObserver keeps `browser:set-bounds` in sync with the div's rect.
  *
- * Bottom action bar + mode state (browse/capture/record/observe) + side
- * panel slot are PRD 402. This PRD ships browse mode only.
+ * Mode (browse/capture/record/observe) lives on the browser store so the
+ * verb buttons, address bar banner, and the contextual side panel all read
+ * the same value. Opening a panel adds a 344px flex sibling next to the
+ * webview column, so the existing ResizeObserver picks up the narrower rect
+ * automatically — no separate bounds-shrink wiring needed here.
+ *
+ * The native view sits ABOVE this DOM, so mode-specific overlays (recording
+ * bar, observe ring) can't be full-cover overlays — they're rendered as
+ * chrome siblings around the webview-column placeholder instead (a banner
+ * that pushes the column down, a border frame that insets it).
  */
 import { useEffect, useRef } from 'react'
 import { useBrowserState } from '../../state/browser'
 import { SubTabStrip } from './browser/SubTabStrip'
 import { AddressBar } from './browser/AddressBar'
+import { ActionBar } from './browser/ActionBar'
+import { CapturePanel } from './browser/CapturePanel'
+import { RecorderPanel } from './browser/RecorderPanel'
+import { ObservePanel } from './browser/ObservePanel'
 
 export function Browser() {
   const tabs = useBrowserState((s) => s.tabs)
   const activeTabId = useBrowserState((s) => s.activeTabId)
   const openTab = useBrowserState((s) => s.openTab)
+  const mode = useBrowserState((s) => s.mode)
   const columnRef = useRef<HTMLDivElement | null>(null)
 
   // Stable across nav-state broadcasts (loading/title updates re-create the
@@ -80,10 +93,24 @@ export function Browser() {
       <SubTabStrip />
       {activeTab && <AddressBar tab={activeTab} />}
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div
+          className={`flex min-h-0 min-w-0 flex-1 flex-col ${
+            mode === 'observe' ? 'border-2 border-accent' : 'border-2 border-transparent'
+          }`}
+        >
+          {mode === 'record' && (
+            <div className="flex flex-shrink-0 items-center gap-2 bg-red-600 px-4 py-1.5 font-sans text-[12.5px] font-semibold text-white">
+              <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-white" />
+              Recording interactions — every click, type &amp; navigation is captured as a step
+            </div>
+          )}
           <div ref={columnRef} className="relative min-h-0 flex-1" />
+          <ActionBar />
         </div>
-        {/* right side-panel slot arrives in PRD 402 */}
+
+        {mode === 'capture' && <CapturePanel />}
+        {mode === 'record' && <RecorderPanel />}
+        {mode === 'observe' && <ObservePanel />}
       </div>
     </div>
   )

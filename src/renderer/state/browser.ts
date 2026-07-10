@@ -21,6 +21,10 @@ export interface BrowserTab {
   isSecure: boolean
 }
 
+/** Contextual mode driving the right-side panel slot + webview chrome. */
+export type BrowserMode = 'browse' | 'capture' | 'record' | 'observe'
+export type CaptureMode = 'agent' | 'html' | 'a11y' | 'selector' | 'shot'
+
 interface BrowserState {
   tabs: BrowserTab[]
   activeTabId: string | null
@@ -32,6 +36,13 @@ interface BrowserState {
   forward: (id: string) => void
   reload: (id: string) => void
   stop: (id: string) => void
+  mode: BrowserMode
+  captureMode: CaptureMode
+  setMode: (mode: BrowserMode) => void
+  /** Verb-button click handler — mirrors the design's `onVerb`: toggles the
+   * matching mode off if already active, and routes the `shot` verb into
+   * capture mode preset to screenshot. */
+  onVerb: (verb: 'capture' | 'record' | 'observe' | 'shot') => void
 }
 
 const TAB_COLORS = ['#b85c34', '#6f7d52', '#e4b85a', '#5f6f86', '#8a5a6e', '#4f7d72']
@@ -148,5 +159,23 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab) return
     window.api.browser.stop(tab.viewId).catch(() => {})
+  },
+
+  mode: 'browse',
+  captureMode: 'agent',
+
+  setMode: (mode) => set({ mode }),
+
+  onVerb: (verb) => {
+    const { mode } = get()
+    if (verb === 'shot') {
+      set({ mode: 'capture', captureMode: 'shot' })
+      return
+    }
+    if (mode === verb) {
+      set({ mode: 'browse' })
+      return
+    }
+    set({ mode: verb, captureMode: verb === 'capture' ? 'agent' : get().captureMode })
   },
 }))

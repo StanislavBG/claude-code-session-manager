@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "session-manager-scheduler": {
+      "command": "node",
+      "args": ["scripts/scheduler-mcp-server.cjs"]
+    }
+  }
+}

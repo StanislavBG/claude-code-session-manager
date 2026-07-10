@@ -34,6 +34,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9\-/]+$/`, 5 min kill ceiling, single in-flight per slug.
 - `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool.
 - `webRemoteServer.cjs` — same-origin relay server for web-remote mobile cockpit. Ping/auth/session state/summary RPC endpoints. Rate limits + audit log.
+- `adminServer.cjs` — loopback-only, token-authed HTTP admin API (127.0.0.1, OS-assigned port, token in `~/.claude/session-manager/admin-api.json`). Narrow surface: list scheduler jobs + reset one stuck job. Wrapped as MCP tools by `scripts/scheduler-mcp-server.cjs` (registered in this repo's `.mcp.json`) — `scheduler_reset_job`/`scheduler_list_jobs` only work while the Electron app is running, since that's what hosts the admin server.
 
 **Renderer** (`src/renderer/`):
 - `state/config.ts` — per-path FileState with dirty tracking. Backed by config.cjs IPC.

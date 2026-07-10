@@ -492,12 +492,23 @@ export interface DayProjectRow {
   sessionCount: number;
   errorCount: number;
   estimatedCostUsd: number;
+  byModel: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    costUsd: number;
+    /** Set when the model id didn't match opus/sonnet/haiku and was priced at Sonnet rates as a fallback. */
+    estimated?: boolean;
+  }>;
 }
 
 export interface HistoryAggregateResult {
   rows: DayProjectRow[];
   partial: boolean;
   scannedMs: number;
+  /** Total $ saved across all rows from cache-read pricing vs. full input pricing. Global, not per-row. */
+  cacheSavingsUsd: number;
 }
 
 export interface SessionScanEntry {

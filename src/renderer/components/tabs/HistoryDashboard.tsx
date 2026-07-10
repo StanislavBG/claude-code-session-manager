@@ -16,6 +16,23 @@ const METRIC_LABELS: Record<MetricKey, string> = {
   estimatedCostUsd: 'Est. cost',
 }
 
+// Fixed per-model accent so a model's color is stable across renders/filters,
+// not index-derived like the project palette. 'other' covers unmapped ids.
+const MODEL_COLOR: Record<string, string> = {
+  opus: 'bg-accent',
+  sonnet: 'bg-sage',
+  haiku: 'bg-butter',
+  other: 'bg-hive-slate',
+}
+
+function modelColorFor(modelId: string): string {
+  const id = modelId.toLowerCase()
+  if (id.includes('opus')) return MODEL_COLOR.opus
+  if (id.includes('sonnet')) return MODEL_COLOR.sonnet
+  if (id.includes('haiku')) return MODEL_COLOR.haiku
+  return MODEL_COLOR.other
+}
+
 const TABLE_COLS = [
   { key: 'project', label: 'project' },
   { key: 'daysActive', label: 'days' },
@@ -156,6 +173,33 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
       estimatedCostUsd += r.estimatedCostUsd
     }
     return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
+  }, [filteredRows])
+
+  // Per-model spend + cache-hit totals across all filtered rows. Follows the
+  // same reduce-into-map-then-sort pattern as projectAggs above.
+  const modelTotals = useMemo(() => {
+    const map = new Map<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd: number }>()
+    for (const row of filteredRows) {
+      for (const [modelId, bucket] of Object.entries(row.byModel ?? {})) {
+        const cur = map.get(modelId) ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 }
+        cur.inputTokens += bucket.inputTokens
+        cur.outputTokens += bucket.outputTokens
+        cur.cacheReadTokens += bucket.cacheReadTokens
+        cur.costUsd += bucket.costUsd
+        map.set(modelId, cur)
+      }
+    }
+    const entries = Array.from(map.entries())
+      .map(([modelId, t]) => ({ modelId, ...t }))
+      .sort((a, b) => b.costUsd - a.costUsd)
+    const totalCostUsd = entries.reduce((sum, e) => sum + e.costUsd, 0)
+    let cacheRead = 0, inputPlusCacheRead = 0
+    for (const e of entries) {
+      cacheRead += e.cacheReadTokens
+      inputPlusCacheRead += e.inputTokens + e.cacheReadTokens
+    }
+    const cacheHitPct = inputPlusCacheRead > 0 ? (cacheRead / inputPlusCacheRead) * 100 : 0
+    return { entries, totalCostUsd, cacheHitPct }
   }, [filteredRows])
 
   // Per-date input/output token sums for the stacked-bar chart below. O(rows).
@@ -347,6 +391,49 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
         </ResponsiveContainer>
       </div>
 
+      <div className="grid grid-cols-2 gap-3">
+        <div className="border border-line rounded bg-bg-elev p-4">
+          <h3 className="text-xs uppercase tracking-wider text-fg mb-3">Spend by model</h3>
+          {modelTotals.entries.length === 0 ? (
+            <div className="text-xs text-fg-faint">no model data in range</div>
+          ) : (
+            <div className="space-y-2">
+              {modelTotals.entries.map((e) => {
+                const pct = modelTotals.totalCostUsd > 0 ? (e.costUsd / modelTotals.totalCostUsd) * 100 : 0
+                return (
+                  <div key={e.modelId}>
+                    <div className="flex items-center justify-between text-xs mb-0.5">
+                      <span className="flex items-center gap-1.5 font-mono text-fg-dim truncate">
+                        <span className={`w-2 h-2 rounded-sm shrink-0 ${modelColorFor(e.modelId)}`} />
+                        {e.modelId}
+                      </span>
+                      <span className="text-fg-faint whitespace-nowrap ml-2">
+                        ${e.costUsd.toFixed(4)} · {pct.toFixed(0)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
+                      <div className={`h-full ${modelColorFor(e.modelId)}`} style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="border border-line rounded bg-bg-elev p-4">
+          <h3 className="text-xs uppercase tracking-wider text-fg mb-3">Cache savings</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <Stat label="cache-hit rate" value={`${modelTotals.cacheHitPct.toFixed(1)}%`} />
+            {/* cacheSavingsUsd is a top-level, date-range-scoped figure computed
+                server-side (historyAggregator.cjs) since only it has the
+                per-model pricing table; it isn't re-scoped by the project
+                text filter the way modelTotals is. */}
+            <Stat label="$ saved" value={`$${(result?.cacheSavingsUsd ?? 0).toFixed(4)}`} highlight />
+          </div>
+        </div>
+      </div>
+
       <div className="border border-line rounded bg-bg-elev p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs uppercase tracking-wider text-fg">Activity heatmap</h3>
@@ -468,7 +555,7 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
 
       <div className="text-xs text-fg-faint">
         path shown is path at session time — renames create separate rows.
-        cost estimate uses Sonnet-4.6 flat rate ($3/$15 per MTok); actual cost may differ.
+        cost estimate uses per-model pricing (Opus/Sonnet/Haiku); unrecognized models are estimated at Sonnet rates; actual cost may differ from billing.
       </div>
     </div>
   )

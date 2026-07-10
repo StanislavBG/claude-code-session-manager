@@ -11,6 +11,32 @@ const PARSE_BUDGET_MS = 2_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const CACHE_MAX = 500;
 
+// Dollars per million tokens (input / output / cache-read). Cache-read
+// tokens are priced far below input because they're served from
+// Anthropic's prompt cache, not re-processed — this is what makes the
+// cache-savings figure in the dashboard real money, not a vanity stat.
+const MODEL_PRICING = {
+  opus:   { i: 15,  o: 75, c: 1.5 },
+  sonnet: { i: 3,   o: 15, c: 0.3 },
+  haiku:  { i: 0.8, o: 4,  c: 0.08 },
+};
+const DEFAULT_PRICING_KEY = 'sonnet'; // fallback for unrecognized model ids
+
+/**
+ * Resolve a raw model id (e.g. "claude-opus-4-8-20260115") to a pricing
+ * bucket key. Model ids aren't stable enough to match exactly, so this is a
+ * case-insensitive substring check. Unrecognized ids fall back to
+ * DEFAULT_PRICING_KEY and are flagged so callers can annotate them as
+ * estimated rather than exact.
+ */
+function resolvePricingKey(modelId) {
+  const id = String(modelId ?? '').toLowerCase();
+  if (id.includes('opus')) return { key: 'opus', estimated: false };
+  if (id.includes('sonnet')) return { key: 'sonnet', estimated: false };
+  if (id.includes('haiku')) return { key: 'haiku', estimated: false };
+  return { key: DEFAULT_PRICING_KEY, estimated: true };
+}
+
 // ── LRU cache ─────────────────────────────────────────────────────────────────
 // Backed by an insertion-order Map: delete+re-insert on access = O(1) LRU.
 class LRUCache {
@@ -114,6 +140,19 @@ function scanAggrLines(lines, acc, captureFirst) {
       if (typeof outT === 'number') acc.outputTokens += outT;
       if (typeof cacheR === 'number') acc.cacheReadTokens += cacheR;
       if (typeof cacheC === 'number') acc.cacheCreationTokens += cacheC;
+
+      // Only assistant usage lines carry model+usage together in practice;
+      // read defensively rather than assuming every usage line has a model.
+      const modelId = obj.message?.model;
+      if (typeof modelId === 'string' && modelId) {
+        const bucket = acc.byModel[modelId] ?? (acc.byModel[modelId] = {
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+        });
+        if (typeof inT === 'number') bucket.inputTokens += inT;
+        if (typeof outT === 'number') bucket.outputTokens += outT;
+        if (typeof cacheR === 'number') bucket.cacheReadTokens += cacheR;
+        if (typeof cacheC === 'number') bucket.cacheCreationTokens += cacheC;
+      }
     }
 
     const content = obj.message?.content ?? obj.content;
@@ -157,6 +196,7 @@ async function parseJSONL(filePath, stat) {
     cacheCreationTokens: 0,
     toolCallCount: 0,
     toolBreakdown: {},
+    byModel: {},
     errorCount: 0,
     sessionDate: null,
     skipped: false,
@@ -195,12 +235,25 @@ async function parseJSONL(filePath, stat) {
             cacheCreationTokens: prev.cacheCreationTokens + delta.cacheCreationTokens,
             toolCallCount: prev.toolCallCount + delta.toolCallCount,
             toolBreakdown: { ...prev.toolBreakdown },
+            byModel: {},
             errorCount: prev.errorCount + delta.errorCount,
             sessionDate: prev.sessionDate, // firstTs doesn't change on appends
             skipped: false,
           };
           for (const [k, v] of Object.entries(delta.toolBreakdown)) {
             merged.toolBreakdown[k] = (merged.toolBreakdown[k] ?? 0) + v;
+          }
+          for (const [modelId, srcBucket] of Object.entries(prev.byModel ?? {})) {
+            merged.byModel[modelId] = { ...srcBucket };
+          }
+          for (const [modelId, deltaBucket] of Object.entries(delta.byModel)) {
+            const b = merged.byModel[modelId] ?? (merged.byModel[modelId] = {
+              inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+            });
+            b.inputTokens += deltaBucket.inputTokens;
+            b.outputTokens += deltaBucket.outputTokens;
+            b.cacheReadTokens += deltaBucket.cacheReadTokens;
+            b.cacheCreationTokens += deltaBucket.cacheCreationTokens;
           }
           // readOffset advances to the last complete newline so the next tail
           // always starts at a line boundary. size stays at stat.size so the
@@ -307,6 +360,7 @@ async function aggregate(req) {
           cacheCreationTokens: 0,
           toolCallCount: 0,
           toolBreakdown: {},
+          byModel: {},
           sessionCount: 0,
           errorCount: 0,
         });
@@ -321,6 +375,15 @@ async function aggregate(req) {
       b.toolCallCount += parsed.toolCallCount;
       for (const [tool, cnt] of Object.entries(parsed.toolBreakdown)) {
         b.toolBreakdown[tool] = (b.toolBreakdown[tool] ?? 0) + cnt;
+      }
+      for (const [modelId, srcBucket] of Object.entries(parsed.byModel ?? {})) {
+        const dst = b.byModel[modelId] ?? (b.byModel[modelId] = {
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+        });
+        dst.inputTokens += srcBucket.inputTokens;
+        dst.outputTokens += srcBucket.outputTokens;
+        dst.cacheReadTokens += srcBucket.cacheReadTokens;
+        dst.cacheCreationTokens += srcBucket.cacheCreationTokens;
       }
       b.sessionCount++;
       b.errorCount += parsed.errorCount;
@@ -337,15 +400,30 @@ async function aggregate(req) {
     }
   }
 
-  const rows = Array.from(buckets.values()).map((b) => ({
-    ...b,
-    estimatedCostUsd: (b.inputTokens * 3 + b.outputTokens * 15) / 1_000_000,
-  }));
+  let cacheSavingsUsd = 0;
+  const rows = Array.from(buckets.values()).map((b) => {
+    const byModel = {};
+    let estimatedCostUsd = 0;
+    for (const [modelId, bucket] of Object.entries(b.byModel)) {
+      const { key, estimated } = resolvePricingKey(modelId);
+      const pricing = MODEL_PRICING[key];
+      const costUsd =
+        (bucket.inputTokens + bucket.cacheCreationTokens) * pricing.i / 1e6 +
+        bucket.outputTokens * pricing.o / 1e6 +
+        bucket.cacheReadTokens * pricing.c / 1e6;
+      byModel[modelId] = { ...bucket, costUsd, ...(estimated ? { estimated: true } : {}) };
+      estimatedCostUsd += costUsd;
+      // What those cache-read tokens would have cost at the full input rate,
+      // minus what they actually cost at the cache rate.
+      cacheSavingsUsd += bucket.cacheReadTokens * (pricing.i - pricing.c) / 1e6;
+    }
+    return { ...b, byModel, estimatedCostUsd };
+  });
 
   rows.sort((a, b) => a.date.localeCompare(b.date) || a.projectCwd.localeCompare(b.projectCwd));
 
   const scannedMs = Date.now() - t0;
-  return { rows, partial: truncated, truncated, scannedMs, skippedLargeFiles };
+  return { rows, partial: truncated, truncated, scannedMs, skippedLargeFiles, cacheSavingsUsd };
 }
 
 // ── IPC registration ──────────────────────────────────────────────────────────
@@ -398,4 +476,12 @@ function registerHistoryAggregatorHandlers() {
 
 const remote = { aggregate };
 
-module.exports = { registerHistoryAggregatorHandlers, remote };
+module.exports = {
+  registerHistoryAggregatorHandlers,
+  remote,
+  MODEL_PRICING,
+  // exported for tests
+  scanAggrLines,
+  parseJSONL,
+  resolvePricingKey,
+};

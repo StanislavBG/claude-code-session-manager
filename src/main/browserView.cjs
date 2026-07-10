@@ -572,6 +572,13 @@ async function captureShot({ viewId }) {
   }
 }
 
+// PRD 403: getter passed to browserCapture.cjs's registerBrowserCapture so
+// the picker can reach a live WebContentsView without this module exposing
+// its whole `views` Map as a mutable dependency surface.
+function getView(viewId) {
+  return views.get(viewId);
+}
+
 function registerBrowserView({ mainWindow, ipcMain }) {
   attachWindow(mainWindow);
   loadPersistedZoom();
@@ -603,4 +610,4 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   }));
 }
 
-module.exports = { registerBrowserView, attachWindow, views, isBrowserViewContents };
+module.exports = { registerBrowserView, attachWindow, views, isBrowserViewContents, getView };

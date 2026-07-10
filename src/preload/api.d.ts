@@ -56,6 +56,17 @@ export interface FindResult {
   activeMatchOrdinal: number;
 }
 
+/** Element-picker event (PRD 403), streamed as `browser:picker-event:<viewId>`. */
+export interface PickerEvent {
+  type: 'hover' | 'pick' | 'unpick' | 'exit';
+  selector?: string;
+  label?: string;
+  tag?: string;
+  rect?: { x: number; y: number; width: number; height: number };
+  /** Present on a 'pick' event fired by an unmodified click — the selection was replaced, not accumulated. */
+  replace?: boolean;
+}
+
 /** One entry in `~/.claude/session-manager/browser/history.json` (PRD 402). */
 export interface BrowserHistoryEntry {
   url: string;
@@ -1035,6 +1046,9 @@ export interface SessionManagerAPI {
     find: (payload: { viewId: string; text: string; forward?: boolean }) => Promise<{ ok: boolean; error?: string }>;
     stopFind: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
     onFindResult: (viewId: string, handler: (result: FindResult) => void) => () => void;
+    pickerStart: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    pickerStop: (viewId: string) => Promise<{ ok: boolean; error?: string; wasPicking?: boolean }>;
+    onPickerEvent: (viewId: string, handler: (ev: PickerEvent) => void) => () => void;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

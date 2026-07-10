@@ -98,6 +98,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.removeListener(channel, listener);
     },
+    pickerStart: (viewId) => ipcRenderer.invoke('browser:picker-start', { viewId }),
+    pickerStop: (viewId) => ipcRenderer.invoke('browser:picker-stop', { viewId }),
+    onPickerEvent: (viewId, handler) => {
+      const channel = `browser:picker-event:${viewId}`;
+      const listener = (_e, ev) => handler(ev);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

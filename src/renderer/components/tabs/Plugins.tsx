@@ -37,6 +37,22 @@ interface PluginRow {
   skills: number
   binCount: number
   hasMcp: boolean
+  /** Part of the `installed_plugins.json` key after `@`; the marketplace the plugin came from. */
+  marketplace?: string
+}
+
+interface InstalledPluginEntry {
+  scope: string
+  installPath: string
+  version: string
+  installedAt: string
+  lastUpdated: string
+  gitCommitSha?: string
+}
+
+interface InstalledPluginsManifest {
+  version: number
+  plugins: Record<string, InstalledPluginEntry[]>
 }
 
 // Single source for the provenance input so the column + toolbar badges agree.
@@ -62,15 +78,38 @@ export function Plugins() {
     let cancelled = false
     ;(async () => {
       setLoading(true)
-      const r = await window.api.config.listDir(`${home}/.claude/plugins`, {
-        dirsOnly: true,
-      })
-      if (cancelled) return
       const next: PluginRow[] = []
-      for (const e of r.entries as DirEntry[]) {
-        const row = await inspectPluginDir(e)
-        next.push(row)
+      try {
+        const r = await window.api.config.readJson(`${home}/.claude/plugins/installed_plugins.json`)
+        if (r.exists && !r.parseError && r.data && typeof r.data === 'object') {
+          const manifest = r.data as InstalledPluginsManifest
+          for (const [key, entries] of Object.entries(manifest.plugins ?? {})) {
+            if (!Array.isArray(entries)) continue
+            const name = key.split('@')[0]
+            const marketplace = key.split('@')[1]
+            for (const entry of entries) {
+              if (!entry?.installPath) continue
+              const dirEntry: DirEntry = {
+                name,
+                path: entry.installPath,
+                isDirectory: true,
+                isFile: false,
+                mtimeMs: 0,
+                size: 0,
+              }
+              const row = await inspectPluginDir(dirEntry)
+              if (!row.manifest?.version) {
+                row.manifest = { ...(row.manifest ?? {}), version: entry.version }
+              }
+              row.marketplace = marketplace
+              next.push(row)
+            }
+          }
+        }
+      } catch {
+        // Missing/unparseable manifest → empty list, no throw.
       }
+      if (cancelled) return
       next.sort((a, b) => a.name.localeCompare(b.name))
       if (!cancelled) {
         setRows(next)
@@ -147,7 +186,7 @@ export function Plugins() {
           <span className="text-fg-faint">{rows.length} plugins</span>
           <div className="flex-1" />
           {selectedRow && <ProvenanceBadge input={pluginProvInput(selectedRow)} className="mr-2" />}
-          <span className="text-fg-faint font-mono truncate">~/.claude/plugins/</span>
+          <span className="text-fg-faint font-mono truncate">~/.claude/plugins/installed_plugins.json</span>
         </>
       }
     >

@@ -58,3 +58,26 @@ scroll-container identity; a password field typed into leaves zero events.
   agnostic.
 - Cross-references: Burrow PRDs 358 (CLI recorder, completed 2026-07-03), 359
   (translator), 360 (reels capture consumer).
+
+## RESOLUTION
+
+**Accepted, already in flight — "Ours, do it."** Verified against `queue.json` and `git log`
+(2026-07-10): this ask is already being built as an existing scheduler PRD chain, not something
+this pass needed to newly queue. Session-manager's Browser workspace tab
+(`src/renderer/components/tabs/Browser.tsx`, `WebContentsView`-backed) and its capture/recorder
+subsystem are PRDs `402`–`413`: `402` (panel-slot scaffold, landed `57a830c`), `403`–`406`
+(picker overlay / capture pipeline / screenshot / capture panel UI), `407` (capture
+destinations), `408`–`410` (recorder engine / panel UI / replay+export), `411` (observe+act),
+`412` (persistence), `413` (e2e+docs). `preload/index.cjs`'s `browser.*` surface already exposes
+`navigate/back/forward/reload/stop/recordStart/recordStop/onRecordStep` — this item's core ask
+(embedded pane + record toggle + JSONL handoff) matches the shape of `408`–`410` directly.
+
+**Caveat — verification is currently compromised.** A separate, freshly-filed bug
+(`2026-07-10-01-scheduler-marks-jobs-completed-without-landed-commit`, see its own RESOLUTION)
+found that PRDs `403`–`406` are marked `completed` in `queue.json` but landed **no code** — the
+scheduler's verdict scanner has a gap that let a run which asked a clarifying question and did
+nothing get marked as a clean success. Until that's fixed and `403`–`406` are manually reset and
+re-run, treat this item's implementation as NOT actually verified despite `queue.json` saying
+otherwise, even though `407`+ are progressing. No new PRD queued from this pass — the existing
+chain (once `403`–`406` are re-run for real) already covers the ask; nothing here needs
+re-decomposition.

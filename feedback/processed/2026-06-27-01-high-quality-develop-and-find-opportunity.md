@@ -151,3 +151,29 @@ stakes prompt vs auto-trigger on labels); whether `/find-opportunity` is
 standalone or only the loop's front-half (I lean standalone — triage is useful
 alone); where validation lenses persist per project so they sharpen over time
 (target's `AGENTS.md` vs a plugin-side cache keyed by repo).
+
+## RESOLUTION
+
+**Accepted, partial — "Ours, do it."** Verified against current code (2026-07-10): `/develop`
+still runs a single plan→implement→verify pass, no `/find-opportunity` skill existed, no
+conventions-loop existed. All three asks are legitimately session-manager's to build.
+
+**Ask 1 (`/find-opportunity`) — shipped directly.** The filer's own recommendation ("I lean
+standalone — triage is useful alone") is taken: authored
+`plugins/session-manager-dev/skills/find-opportunity/SKILL.md` as a standalone skill
+implementing the full spec — claim-matching against PR title/body/branch (not just `Closes #`),
+diff-conflict detection against open PRs' touched files, blocked/needs-decision skip, and a
+ranked-shortlist + exhaustive-reasoned-skip-list output shape. Registered in the plugin's
+routing table (`~/.claude/CLAUDE.md`) and `plugin.json`. Done as a direct instruction-file edit
+(no PRD) — a new `SKILL.md` has no build/test surface, so routing it through the scheduler would
+be pure overhead.
+
+**Ask 2 (`quality: high` tier on `/develop`) and Ask 3 (conventions-loop into
+`/process-feedback`) — deferred, not queued.** Both have genuine open design questions the
+filer explicitly left as "your call" (flag surface, where validation lenses persist,
+loop composition) that materially change the implementation shape — guessing wrong here means
+shipping a whole new `/develop` mode or `/process-feedback` behavior that has to be reworked.
+Per this project's working style (ask before guessing on decisions that cost real rework, don't
+ask permission for the obvious), this needs the project owner's call before it's queued, not a
+unilateral design decision made during triage. Left open for a follow-up pass once bilko decides:
+flag surface for `quality: high`, and where validation lenses should persist.

@@ -74,7 +74,7 @@ A scheduler that develops itself must treat "the app restarted" as an environmen
 of the work it was running. Orphan ≠ defect: penalizing the victim of a restart is how a self-improvement loop
 silently eats unrelated work.
 
-## RESOLUTION (in progress)
+## RESOLUTION
 
 **Accepted — "Ours, do it."** Verified against current code (2026-06-25):
 
@@ -96,5 +96,10 @@ by manual intervention or later run). The structural gap remains for future self
 from 2 to 5 in `scheduler.cjs:100`. Covers a 6-restart storm (1 original + 5 requeues). This closes the
 boot-reconciliation side of the feedback's AC: "never lands in permanent `failed` purely because the app
 bounced N times."
+
+**Verified landed (2026-07-10):** `git log --oneline` shows `43a70ba fix(scheduler): raise
+ORPHAN_REQUEUE_CAP 2→5 to survive restart storms (feedback 2026-06-15-01)`; `scheduler.cjs` now imports
+`ORPHAN_REQUEUE_CAP` from `lib/reaperHelpers.cjs`, no longer hardcoded to 2 inline. Both the live-kill and
+boot-reconciliation paths are fixed. Closed.
 
 Status: **🛠 queued** — not closed until PRD 320 lands and verifies.

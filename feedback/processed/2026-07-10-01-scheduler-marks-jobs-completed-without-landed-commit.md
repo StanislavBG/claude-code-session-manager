@@ -71,3 +71,39 @@ not accept `exitCode: 0` alone as "completed". At minimum:
    worth an audit of the rest of `queue.json` for other `completed` entries with
    no matching commit, so other silently-stalled chains surface now rather than
    at the next dependent PRD.
+
+## RESOLUTION
+
+**Accepted — "Ours, do it."** Verified independently (2026-07-10), before queueing: confirmed no
+`browserCapture.cjs`, no picker/capture/screenshot IPC in `browserView.cjs`/`preload/index.cjs`,
+and zero commits for any of `403`–`406` in `git log --all` — matches the item's own evidence
+exactly. Traced the exact code gap in `src/main/runVerify.cjs`'s `verifyRun()`: the `issues`
+array is only populated by positive pattern hits (`transcript_errors`/`verify_unavailable`); a
+run with zero risky tool calls (because it made no changes and just asked a question) produces
+zero hits → `issues.length === 0` → unconditional `verdict: 'clean'`. There is no independent
+check for "did this run actually finish" (no `SCHEDULER_VERDICT` sentinel AND no commit landed).
+
+**Queued:** PRD `1-verdict-scanner-require-sentinel-or-commit.md` — adds exactly that missing
+check as a new `no_verdict_sentinel` issue (same priority tier as `verify_unavailable`,
+downgrades to `needs_review` via the existing `conclude()` path), plus 3 new unit tests. Given
+`cwd`, `standards.md`. Given a deliberately **low** parallelGroup (`1`, not the next-free `419`)
+so the scheduler's late-arrival rule fires it as soon as a concurrency slot frees up, rather than
+queuing behind the entire in-flight browser-feature chain — this bug undermines trust in every
+other PRD's "completed" status, so it doesn't wait in line.
+
+**Suggestion 1 (retry-cap exemption)** is out of scope for the queued PRD — not what this bug
+is; no separate action needed, this item is specifically about the completion classifier.
+**Suggestion 2 (stop_reason on questions)** is effectively covered by the sentinel/commit check
+(a question-ending run has neither) rather than needing a separate `stop_reason` check — the
+queued PRD's fix subsumes it. **Suggestion 3 (queue-wide audit)** explicitly NOT done in this
+pass: `queue.json` is global across all of bilko's projects, and a real audit requires
+per-job `cwd`-scoped git history checks against repos this session doesn't have access to widely
+verify in one pass. Flagged as a possible future `/find-opportunity` or feedback item once the
+verdict-scanner fix lands, rather than attempted half-blind here.
+
+**Not automated: resetting `403`–`406` to `pending`.** Deliberately left as a manual action for
+bilko (via the Scheduler tab's own reset control) rather than scripted — mutating `queue.json`
+from outside the running Electron app races against its in-process `mutate()` serialization
+(which only guards concurrent writers *within* the same process), and this session directly
+observed the live app mutating `queue.json` continuously throughout this pass. A UI click uses
+the app's own safe IPC path; an external script does not.

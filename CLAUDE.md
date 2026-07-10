@@ -12,6 +12,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run build` — production renderer build into `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
 - `npm run test:e2e` — Playwright Electron tests under `xvfb-run` (Linux).
+- `npm run health` — `src/main/health.cjs`. Validates build (types, dist artifact, e2e infra present) + runtime (config dir writable, scheduler queue.json + PRD count, transcripts dir). Exit 0 = GREEN, 1 = RED. Entry point for `/local-project-health`.
 - `npm publish` — runs `vite build` via `prepublishOnly`. Tag is `latest`.
 
 ## Architecture (load-bearing files)
@@ -20,7 +21,8 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `index.cjs` — BrowserWindow + IPC registration. Navigation locked: `setWindowOpenHandler` denies, `will-navigate` allows only the dev URL.
 - `config.cjs` — fs layer. **All paths go through `validatePath` (allowedRoots = home dir)**. Atomic writes via tmp + rename. Chokidar watchers refcounted per absolute path.
 - `transcripts.cjs` — tails `~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl`, classifies events, ring-buffers per tab, broadcasts `transcript:event:<tabId>`.
-- `kg.cjs` — knowledge graph extraction. Tails `~/.claude/knowledge-log/prompts.jsonl` (written by the UserPromptSubmit logging hook), filters automated prompts (role-play patterns, long machine-generated data), calls `claude -p` with extraction prompt + EXTRACTION_SYSTEM role. Per-project vocab + per-run caps (MAX_EXTRACTIONS_PER_RUN=30, MAX_TAIL_BYTES=8MB).
+- `memoryAggregate.cjs` — Memory Clusters backend (replaced the old Knowledge Graph tab/`kg.cjs`). Reads one project's workspace memories (the `.md` files under `~/.claude/projects/<encodedCwd>/memory/`, the same store `memoryTool.cjs` owns) and, via a single cost-gated `claude -p` pass (only fires on explicit `refresh: true`), organizes them into named semantic clusters with `[[wikilink]]`-derived connections. Cache: `~/.claude/session-manager/memory-clusters/<workspace>.json`. Spawn pattern mirrors the old kg.cjs: stdin closed, model pinned, hard timeout, `SM_KG_INTERNAL=1` so the prompt-logging hook skips it, brace-matching JSON extractor.
+- `chatRunner.cjs` — runs a dormant Terminal tab's chat command as a headless `claude -p --output-format stream-json` job that exits when done (first command `--session-id`, later `--resume`). Serialized through a FIFO queue at concurrency 1 (`SM_CHAT_CONCURRENCY`, clamp [1,3]) so bursts can't fan out into a parallel-`claude -p` OOM. Stop-signal protocol `<<<SM_NEEDS_INPUT>>>`+JSON lets a run ask questions.
 - `scheduler.cjs` — runs PRDs from `~/.claude/session-manager/scheduled-plans/prds/` as `claude -p` jobs. Modes: `manual` / `on-reset` / `when-available` (default; polls billing usage every 10 min — `POLL_INTERVAL_MS` in `lib/schedulerConfig.cjs`). Auto-pause on rate-limit, auto-resume at next 5h reset. **Boot reconciliation**: on startup, reaps orphaned jobs (PIDs no longer alive) and logs outcome (success/timeout/error). **Dead-process reaper**: background process check + PID-alive validation, run-outcome classifier to detect hangs. Both reduce manual cleanup of stuck PRD jobs.
 - `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by SM_SUPERVISOR_DISABLE.
 - **Definition-of-done gate** (`lib/dodDrainHook.cjs`): fires at queue-drain (when `pickNextBatch` returns an empty batch). Re-verifies each completed PRD's AC live (`reverifyBatch`), flags risky surfaces (`flagRiskySurfaces`), writes `runs/<ts>/definition-of-done-<key>.md` (`writeReport`). Idempotent: `batchKey` (excludes dod/meta slugs) + `reportExists` make a re-drain over the same completed set a single fs-stat no-op. Non-blocking: called fire-and-forget from `tickQueue`; errors are logged not thrown. Skipped when `state.paused` (covers rate-limit), `cancelToken.cancelled`, or no completed jobs. Kill-switch: `SM_DOD_DISABLE=1`.
@@ -45,7 +47,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `components/tabs/Skills.tsx` — canonical "list+detail" shape. Other list tabs (Subagents, Hooks, McpServers, Plugins) follow it.
 - `components/tabs/Scheduler.tsx` — Scheduler cockpit (Almanac design). Renders Queue/PRDs/History via SchedulePanel + scheduleState.
 - `components/tabs/Subagents.tsx` — Hive cockpit (Launch-first editorial shell). Conductor for Configured/Library/Live sub-tabs. Reads hives.ts + live.ts.
-- `components/tabs/KnowledgeGraph.tsx` — Graph visualization + search. Renders entities/relations from `~/.claude/knowledge-log/graphs/<encodedCwd>.json` (one graph per project cwd). See `HUMAN_LEARN/index.html#knowledge-graph` for the full pipeline.
+- `components/tabs/Memory.tsx` / `MemoryNaturalPanel.tsx` — Memory Clusters UI over `memoryAggregate.cjs`'s output. Replaced the old `KnowledgeGraph.tsx` graph-visualization tab (KG feature retired; its prompt-log ingestion pipeline is gone).
 - `components/tabs/WebRemote.tsx` — web-remote cockpit: relay URL, session state, device list, tunnel status.
 - `components/SchedulePanel.tsx` — modular pane (Queue/PRDs/History tabs). Extracted 2026-06 to be reusable by Scheduler tab + web-remote. Owns filter state.
 - `components/tabs/scheduler/sched-primitives.tsx` — Almanac design shared: SchBadge (status color/mark), ProjectTag, DetailBlock/Line (project dots hashed-color palette).
@@ -110,6 +112,7 @@ Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). 
 - Cross-subscribing between renderer state stores — e.g., don't read `live.ts` from `config.ts` or vice versa. Each store is an island; components compose them via hooks. Complex queries go in components or memoized selectors, not in store initialization.
 - Adding pane-specific state to parent tabs — if a SchedulePanel needs filter persistence, keep it in the pane, not the tab. Panes own their UI concerns; tabs own layout + navigation.
 - Importing design primitives via wildcard (`import * as SchElements from ...`) — requires explicit named imports to prevent accidental cross-system usage.
+- Adding a new LeftNav tab for a live/observability feature before checking whether an existing surface (Terminal, Subagents Live, Scheduler) already owns that data. Treat each nav destination as an independent "micro-service" — before adding one, check if an existing item already owns the data/job and extend it (a sub-tab) instead of shipping a parallel UI. When two surfaces read the same underlying state, consolidate rather than duplicate. The nav has been pruned once already (2026-06-03: Scheduler/Plans/Background-Agents merged into one Scheduler destination) after growing to ~31 destinations with real overlap.
 
 ## Future: Files API
 

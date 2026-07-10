@@ -23,6 +23,18 @@ here on is identical regardless of who asked.
 **Never** hand-implement the work inline in chat, and never restate rules that live elsewhere:
 the engineering rules belong to `standards.md`. Reference it; don't fork it.
 
+This applies even when the plan is already fully scoped and confirmed in conversation — that
+makes the PRD queue clean, it isn't a reason to skip queuing. The reason to route through the
+scheduler isn't decomposition need, it's model economics: keep the interactive main-loop session
+(an expensive planner-tier model) focused on discussion and decisions, and let a cheaper executor
+model do the implementing as a headless `claude -p` job.
+
+**Only execution is delegated — authoring never is.** Write every PRD's markdown yourself, in
+the main loop: the thinking, decomposition, scope, and acceptance criteria are the planner's
+job. Do not spawn a subagent to draft a PRD or otherwise hand off the writing/thinking — that
+defeats the point of keeping planning on the expensive model. The scheduled `claude -p` job is
+the only step that runs on the cheaper executor.
+
 ## Standards (single source of truth)
 
 The engineering standards (Performance, Debugging, API reuse / single source of truth, TDD,

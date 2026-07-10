@@ -31,8 +31,7 @@ if (typeof (window as unknown as { api?: unknown }).api === 'undefined') {
 // declared in api.d.ts isn't actually exposed in preload/index.cjs. Without
 // this, the bug only surfaces the first time a user touches the affected
 // feature, with a useless `Cannot read properties of undefined` deep in the
-// bundle (real example: Doc Editor crashed because docEditor namespace was in
-// api.d.ts but missing from preload/index.cjs).
+// bundle.
 runApiBootCheck()
 
 // NOTE: StrictMode is intentionally disabled. The Terminal component owns an

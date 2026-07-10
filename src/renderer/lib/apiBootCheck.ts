@@ -40,7 +40,6 @@ const EXPECTED_NAMESPACES = [
   'plugins',
   'clipboard',
   'memory',
-  'docEditor',
 ] as const
 
 export type ApiBootIssue =

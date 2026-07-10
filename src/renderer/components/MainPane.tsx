@@ -20,9 +20,7 @@ import { Memory } from './tabs/Memory'
 import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
-import { Prompts } from './tabs/Prompts'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
-import { DocEditor } from './tabs/DocEditor'
 import { Scheduler } from './tabs/Scheduler'
 import { WebRemote } from './tabs/WebRemote'
 import { SectionFrame } from './layout/SectionFrame'
@@ -68,14 +66,12 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   // ("The hive" h1 + eyebrow + blurb). Adding it here would double-render the heading.
   'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { eyebrow: 'Workspace',  title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
-  'prompts':       { eyebrow: 'Workspace',  title: 'Prompts',                   intro: 'Click-to-insert templates for security, QA, performance, code review, debugging, refactoring, docs, and git/PR workflows. Tweak before send.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'plugins':       { eyebrow: 'Configure',  title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
   'mcp':           { eyebrow: 'Configure',  title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
   'hooks':         { eyebrow: 'Configure',  title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
   'keybindings':   { eyebrow: 'Configure',  title: 'Keybindings',               intro: 'Shortcuts you can override. Bindings here apply to Claude Code itself, not the Session Manager chrome.' },
-  'doc-editor':    { eyebrow: 'Configure',  title: 'Doc Editor',                intro: 'Edit CLAUDE.md and project documentation with WYSIWYG. Saves are atomic and live-update Claude when present.' },
   'memory':        { eyebrow: 'Configure',  title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'system-prompt': { eyebrow: 'Configure',  title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
@@ -121,13 +117,11 @@ function renderScreen(active: NavKey, ctx: {
       case 'subagents':     return <Subagents />
       case 'history':       return <History />
       case 'usage':         return <Usage />
-      case 'prompts':       return <Prompts />
       case 'scheduler':     return <Scheduler />
       case 'plugins':       return <Plugins />
       case 'mcp':           return <McpServers />
       case 'hooks':         return <Hooks />
       case 'keybindings':   return <Keybindings />
-      case 'doc-editor':    return <DocEditor />
       case 'memory':        return <Memory />
       case 'system-prompt': return <SystemPrompt />
       case 'permissions':   return <Permissions />

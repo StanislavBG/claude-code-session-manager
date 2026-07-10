@@ -2,19 +2,19 @@
  * EditorView — the in-app Editor scene (main-space, NavKey 'editor').
  *
  * Launched from the Files sidebar and from terminal file links. Owns: the
- * open-files tab strip, per-file buffer loading, the Edit/Preview/Split toggle,
- * autosave, the document outline + status bar (Google-Docs chrome), focus mode,
- * scene-level Cmd/Ctrl-S, and the unsaved-changes close guard. Panes are dumb
- * renderers of the active file's buffer (held in the editor store).
+ * open-files tab strip, per-file buffer loading, the Edit/Wysiwyg/Preview/Split
+ * toggle, autosave, the document outline + status bar (Google-Docs chrome),
+ * focus mode, scene-level Cmd/Ctrl-S, and the unsaved-changes close guard.
+ * Panes are dumb renderers of the active file's buffer (held in the editor store).
  *
  * File dispatch: images → ImagePane, PDFs → PdfPane, binary/oversize → BinaryPane
  * (files.cjs flags these), CSV/TSV → TablePane, JSONL → JsonlPane (record CRUD),
- * markdown/html → preview, else Monaco. Wide-file support rides the smfile://
- * scheme + binary sniff; the Docs
- * feel rides marked + the .markdown-body page canvas. Zero new npm deps.
+ * markdown/html → preview, markdown Wysiwyg → TiptapBody (rich-text editing,
+ * lazy-loaded), else Monaco. Wide-file support rides the smfile:// scheme +
+ * binary sniff; the Docs feel rides marked + the .markdown-body page canvas.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import type { editor } from 'monaco-editor'
 import {
   useEditor,
@@ -44,6 +44,12 @@ import { PdfPane } from './editor/PdfPane'
 import { TablePane } from './editor/TablePane'
 import { JsonlPane } from './editor/JsonlPane'
 import { BinaryPane } from './editor/BinaryPane'
+
+// Lazy-loaded so Tiptap (~150 KB gz) is not bundled for users who never
+// switch a markdown file into Wysiwyg mode.
+const TiptapBody = lazy(() =>
+  import('./editor/TiptapBody').then((m) => ({ default: m.TiptapBody }))
+)
 
 interface BinaryInfo { binary: true; size: number; mime: string; reason: string }
 type LoadState = 'loading' | 'ready' | { error: string } | BinaryInfo
@@ -213,7 +219,7 @@ export function EditorView() {
   const isTextFile = !!path && !isMediaPath(path) && ls === 'ready'
   const showStatusBar = isTextFile
 
-  const modes: ViewMode[] = canSplit ? ['edit', 'preview', 'split'] : renderable ? ['edit', 'preview'] : []
+  const modes: ViewMode[] = canSplit ? ['edit', 'wysiwyg', 'preview', 'split'] : renderable ? ['edit', 'preview'] : []
 
   // The Monaco editor pane for the active file, reused by edit + split modes.
   const codePane = path && (
@@ -255,7 +261,7 @@ export function EditorView() {
           <div className="flex-1" />
 
           {/* Outline toggle (markdown preview/split only) */}
-          {isMarkdown(path) && effMode !== 'edit' && (
+          {isMarkdown(path) && (effMode === 'preview' || effMode === 'split') && (
             <button
               onClick={() => setShowOutline((v) => !v)}
               className={`px-2 py-0.5 text-[10px] border border-line rounded mr-1 ${showOutline ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`}
@@ -317,6 +323,10 @@ export function EditorView() {
             <div className="p-6 text-xs text-red-400">{ls.error}</div>
           ) : ls !== 'ready' ? (
             <div className="p-6 text-xs text-fg-faint">loading…</div>
+          ) : effMode === 'wysiwyg' && isMarkdown(path) ? (
+            <Suspense fallback={<div className="p-6 text-xs text-fg-faint">Loading editor…</div>}>
+              <TiptapBody key={path} value={buffers[path] ?? ''} onChange={(text) => setBuffer(path, text)} />
+            </Suspense>
           ) : effMode === 'split' && isMarkdown(path) ? (
             <div className="flex h-full">
               {showOutline && <DocOutline text={buffers[path] ?? ''} scrollRef={previewScrollRef} />}

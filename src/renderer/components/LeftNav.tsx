@@ -25,7 +25,6 @@ export type NavKey =
   | 'history'
   | 'keybindings'
   | 'usage'
-  | 'doc-editor'
   | 'scheduler'
   // In-app file editor scene. Launched from the Files sidebar + terminal links
   // (no left-nav row of its own — Files is the launch point).
@@ -36,5 +35,4 @@ export type NavKey =
   | 'voice'
   | 'repoviz'
   | 'search'
-  | 'prompts'
   | 'remote'

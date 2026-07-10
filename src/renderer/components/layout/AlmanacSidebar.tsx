@@ -44,7 +44,6 @@ const WORKSPACE: NavGroupItem[] = [
   { key: 'projects',   label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
   { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Fan out work: Hive · Orchestrate · Race · Boss' },
   { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
-  { key: 'prompts',   label: 'Prompts',    icon: 'book',         hint: 'Click-to-insert prompt library' },
   { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
   { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
 ]
@@ -55,7 +54,6 @@ const CONFIGURE: NavGroupItem[] = [
   { key: 'mcp',           label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations' },
   { key: 'hooks',         label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events' },
   { key: 'keybindings',   label: 'Keybindings',    icon: 'keys',           hint: 'Shortcuts you can override' },
-  { key: 'doc-editor',    label: 'Doc Editor',     icon: 'docs',           hint: 'Edit CLAUDE.md and friends' },
   { key: 'memory',        label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store' },
   { key: 'system-prompt', label: 'System Prompt',  icon: 'system-prompt',  hint: 'Personality and behavior' },
   { key: 'permissions',   label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },

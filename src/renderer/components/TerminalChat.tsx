@@ -77,6 +77,35 @@ const TOOL_USE_ICON: Record<ToolUseTrace['kind'], string> = {
   tool: '⚙',
 }
 
+// A run of consecutive identical (kind+label) tool uses collapsed into one chip.
+// Keeps the raw step count so the "· N steps" summary stays truthful while the
+// chip strip stops ballooning when an agent fires e.g. Bash 20× in a row.
+interface ToolUseRun {
+  id: string
+  kind: ToolUseTrace['kind']
+  label: string
+  count: number
+}
+
+function collapseToolUseRuns(items: ToolUseTrace[]): ToolUseRun[] {
+  const runs: ToolUseRun[] = []
+  for (const u of items) {
+    const last = runs[runs.length - 1]
+    if (last && last.kind === u.kind && last.label === u.label) {
+      last.count += 1
+      last.id = u.id // key off the newest member so React reuses the chip node
+    } else {
+      runs.push({ id: u.id, kind: u.kind, label: u.label, count: 1 })
+    }
+  }
+  return runs
+}
+
+// "Bash" · "Bash ×2" · "Bash ×12" — compact, and only when it actually repeated.
+function runLabel(run: ToolUseRun): string {
+  return run.count > 1 ? `${run.label} ×${run.count}` : run.label
+}
+
 function ToolUseTraceStrip({
   items,
   running = false,
@@ -85,10 +114,11 @@ function ToolUseTraceStrip({
   running?: boolean
 }) {
   if (!items?.length) return null
-  const lastIdx = items.length - 1
+  const runs = collapseToolUseRuns(items)
+  const lastIdx = runs.length - 1
   return (
     <div className="mb-1 flex flex-wrap items-center gap-1">
-      {items.map((u, i) => {
+      {runs.map((u, i) => {
         const inFlight = running && i === lastIdx
         return (
           <span
@@ -97,7 +127,7 @@ function ToolUseTraceStrip({
               inFlight ? 'border-accent/40 bg-accent/10 text-accent' : TOOL_USE_TONE[u.kind]
             }`}
           >
-            {TOOL_USE_ICON[u.kind]} {u.label}
+            {TOOL_USE_ICON[u.kind]} {runLabel(u)}
           </span>
         )
       })}
@@ -136,13 +166,11 @@ const NAV_LABELS: Record<NavKey, string> = {
   history: 'History',
   keybindings: 'Keybindings',
   usage: 'Usage',
-  'doc-editor': 'Doc Editor',
   scheduler: 'Scheduler',
   editor: 'Editor',
   voice: 'Voice',
   repoviz: 'Repo Viz',
   search: 'Search',
-  prompts: 'Prompts',
   remote: 'Remote',
 }
 
@@ -174,7 +202,8 @@ function ChatSessionRail({
   stream: string
   liveToolUses: ToolUseTrace[]
 }) {
-  const inFlightIdx = running && !stream ? liveToolUses.length - 1 : -1
+  const runs = collapseToolUseRuns(liveToolUses)
+  const inFlightIdx = running && !stream ? runs.length - 1 : -1
   return (
     <div className="w-[280px] shrink-0 overflow-y-auto border-l border-rule px-3 py-4">
       <div className="rounded-lg border border-line bg-elev px-3 py-2.5">
@@ -207,11 +236,11 @@ function ChatSessionRail({
       <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
         This turn
       </div>
-      {liveToolUses.length === 0 ? (
+      {runs.length === 0 ? (
         <div className="mt-1.5 text-[11px] text-fg-faint">No tool activity yet.</div>
       ) : (
         <ul className="mt-1.5 space-y-1">
-          {liveToolUses.map((u, i) => (
+          {runs.map((u, i) => (
             <li
               key={u.id}
               className={`flex items-center gap-1.5 rounded border px-1.5 py-1 text-[11px] font-mono ${
@@ -225,7 +254,7 @@ function ChatSessionRail({
                   {TOOL_USE_ICON[u.kind]}
                 </span>
               )}
-              <span className="truncate">{u.label}</span>
+              <span className="truncate">{runLabel(u)}</span>
             </li>
           ))}
         </ul>

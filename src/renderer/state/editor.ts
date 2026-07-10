@@ -16,7 +16,7 @@ export interface OpenFile {
   name: string
 }
 
-export type ViewMode = 'edit' | 'preview' | 'split'
+export type ViewMode = 'edit' | 'preview' | 'split' | 'wysiwyg'
 
 /** A pending request to reveal a line after a file opens (terminal links). */
 interface PendingReveal {
@@ -197,7 +197,7 @@ export function isJsonl(p: string): boolean {
 export function isRenderable(p: string): boolean {
   return isMarkdown(p) || isHtml(p) || isTabular(p) || isJsonl(p)
 }
-/** Markdown is the only type that gets the full three-way edit/preview/split. */
+/** Markdown is the only type that gets the full edit/wysiwyg/preview/split set. */
 export function supportsSplit(p: string): boolean {
   return isMarkdown(p)
 }
@@ -214,6 +214,5 @@ export function smfileUrl(absPath: string): string {
   return `smfile://local${encoded.startsWith('/') ? '' : '/'}${encoded}`
 }
 
-// Test handle — mirrors state/docEditor.ts's window.__docEditor convention so
-// e2e specs can drive the Editor scene without a live Claude session.
+// Test handle so e2e specs can drive the Editor scene without a live Claude session.
 ;(window as unknown as Record<string, unknown>).__editor = useEditor

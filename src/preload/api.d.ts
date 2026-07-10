@@ -1129,11 +1129,6 @@ export interface SessionManagerAPI {
     /** Delete one entry. Removes the file outright when last entry is removed. */
     delete: (agentId: string, entryId: string) => Promise<AgentMemoryMutationResult>;
   };
-  docEditor: {
-    pickFile: (payload?: { lastDir?: string }) => Promise<{ path: string | null; error?: string }>;
-    readFile: (path: string) => Promise<{ ok: boolean; text?: string; mtimeMs?: number; error?: string }>;
-    writeFile: (path: string, text: string) => Promise<{ ok: boolean; mtimeMs?: number; error?: string }>;
-  };
   git: {
     /** Full git status for `cwd`. Returns null when not a git repo, git is
      *  missing, or the call times out (5s ceiling). Cached per-cwd for 5s. */

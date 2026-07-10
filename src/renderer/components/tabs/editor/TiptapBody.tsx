@@ -1,5 +1,5 @@
 /**
- * TiptapBody — WYSIWYG markdown editor for the Doc Editor.
+ * TiptapBody — WYSIWYG pane for the Editor scene's markdown Wysiwyg view mode.
  *
  * Architecture: Tiptap (ProseMirror) over tiptap-markdown for round-trip
  * serialization. StarterKit covers all common marks; Link adds URL handling.
@@ -28,7 +28,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import { Markdown } from 'tiptap-markdown'
-import { splitFrontmatter, joinFrontmatter, type SplitDoc } from '../../lib/markdownDoc'
+import { splitFrontmatter, joinFrontmatter, type SplitDoc } from '../../../lib/markdownDoc'
 
 interface Props {
   value: string
@@ -102,7 +102,7 @@ function FrontmatterChip({ frontmatter }: { frontmatter: string }) {
 
 export function TiptapBody({ value, onChange }: Props) {
   // Split frontmatter once on mount; capture it for the lifetime of this
-  // component instance (keyed by path in DocEditor, so remount = new path).
+  // component instance (keyed by path in EditorView, so remount = new path).
   const splitRef = useRef<SplitDoc>(splitFrontmatter(value))
   // Track whether this is an internal update (Tiptap → onChange) to avoid
   // re-setting content from outside while the user is typing.

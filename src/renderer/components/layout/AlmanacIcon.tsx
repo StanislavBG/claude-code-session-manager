@@ -10,7 +10,7 @@
 export type AlmanacIconName =
   | 'home' | 'terminal' | 'agents' | 'skills' | 'history' | 'usage'
   | 'hive' | 'plugins' | 'mcp' | 'hooks' | 'keys' | 'plans' | 'tasks' | 'projects'
-  | 'docs' | 'memory' | 'search' | 'chevron' | 'caret' | 'dot' | 'plus'
+  | 'memory' | 'search' | 'chevron' | 'caret' | 'dot' | 'plus'
   | 'folder' | 'file' | 'play' | 'pause' | 'sparkle' | 'book' | 'compass'
   | 'scheduler' | 'settings' | 'mic' | 'clock' | 'leaf' | 'orchestrator'
   | 'race' | 'background' | 'repoviz' | 'subagents' | 'system-prompt'
@@ -52,7 +52,6 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'plans':        return <svg {...props}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 9h8M8 13h8M8 17h5" /></svg>
     case 'tasks':        return <svg {...props}><rect x="3" y="4" width="7" height="7" rx="1.5" /><rect x="3" y="13" width="7" height="7" rx="1.5" /><path d="M14 6h7M14 10h5M14 15h7M14 19h5" /></svg>
     case 'projects':     return <svg {...props}><path d="M3 7l3-3h4l2 2h9v13H3z" /></svg>
-    case 'docs':         return <svg {...props}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4M9 13h6M9 17h6M9 9h3" /></svg>
     case 'memory':
     case 'agent-memory': return <svg {...props}><path d="M9 4a4 4 0 00-4 4v1a3 3 0 000 6v1a4 4 0 004 4h6a4 4 0 004-4v-1a3 3 0 000-6V8a4 4 0 00-4-4z" /><path d="M9 9v6M12 6v12M15 9v6" /></svg>
     case 'search':

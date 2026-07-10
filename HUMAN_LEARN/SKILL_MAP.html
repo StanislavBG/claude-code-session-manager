@@ -101,8 +101,9 @@
       Every skill in <span class="path">plugins/session-manager-dev/skills/</span> as a node, with a directed edge
       wherever one skill's own <code>SKILL.md</code> names another as something it calls, dispatches, or hands off to.
       Arrows carry the real sequencing — <code>process-feedback → develop → requesting-code-review</code> is a chain,
-      not a cluster. Dashed boxes are external triggers (a human, another project's feedback file, a cron) — everything
-      solid is a real file at <span class="path">plugins/session-manager-dev/skills/&lt;name&gt;/SKILL.md</span>.
+      not a cluster. Dashed boxes are external triggers (a human, another project's feedback file, a cron) — every
+      solid box is a real file on disk, either a <span class="path">skills/&lt;name&gt;/SKILL.md</span> or, for
+      <code>standards.md</code>, the one reference doc a skill reads rather than calls.
       Hover any node to trace only its own edges.
     </p>
     <div class="legend">
@@ -122,7 +123,7 @@
   audit loop that can trigger every other pipeline skill; <code>optimize-kpi</code> and <code>process-feedback</code>
   both terminate in either <code>develop</code> (this project's own code) or <code>my-feedback</code> (someone else's).
   <code>develop</code> is the convergence point — everything that reaches it ends the same way, reading
-  <code>prd</code> for structure and gating on <code>requesting-code-review</code>. The bottom row
+  <code>standards.md</code> for structure and gating on <code>requesting-code-review</code>. The bottom row
   (<code>local-project-health</code>, <code>security-review</code>, <code>explain-to-me</code>) has no edges either
   direction — each runs standalone, invoked directly, never chained.</p>
 
@@ -156,7 +157,7 @@
       <path data-from="ps" data-to="mf"          class="e-out" marker-end="url(#arrow-out)" d="M990,220 C1065,300 1065,460 990,538"></path>
       <path data-from="kpi" data-to="pf"         marker-end="url(#arrow)" d="M800,388 Q680,305 620,238"></path>
       <path data-from="kpi" data-to="mf"         class="e-out" marker-end="url(#arrow-out)" d="M895,426 L895,500"></path>
-      <path data-from="develop" data-to="prd"    class="e-authdown" marker-end="url(#arrow-auth)" d="M420,586 Q375,630 335,680"></path>
+      <path data-from="develop" data-to="standards" class="e-authdown" marker-end="url(#arrow-auth)" d="M420,586 Q375,630 335,680"></path>
       <path data-from="develop" data-to="rcr"    marker-end="url(#arrow)" d="M600,586 Q595,630 580,680"></path>
     </svg>
 
@@ -205,9 +206,9 @@
     </div>
 
     <!-- row 5: develop's own reads / gate -->
-    <div class="node auth" id="n-prd" data-id="prd" style="left:250px;top:680px;width:170px;height:76px">
-      <div class="nt">📄 prd <span class="role auth">authority</span></div>
-      <div class="nd">One PRD's structure, canonical location, filename rules, scope sizing. Never decomposes a large ask.</div>
+    <div class="node auth" id="n-standards" data-id="standards" style="left:250px;top:680px;width:170px;height:76px">
+      <div class="nt">📄 standards.md <span class="role auth">authority</span></div>
+      <div class="nd">Reference doc beside develop's SKILL.md — PRD structure, filename rules, scope sizing, engineering + execution-discipline rules. Not an invocable skill.</div>
     </div>
     <div class="node gate" id="n-rcr" data-id="rcr" style="left:470px;top:680px;width:220px;height:76px">
       <div class="nt">✅ requesting-code-review <span class="role gate">gate</span></div>
@@ -269,12 +270,12 @@
     <tr>
       <td><code>develop</code></td><td><span class="role pipe">pipeline</span></td>
       <td>Decompose → queue → <strong>track to completion</strong> (Phase 2). The convergence point for every entry above.</td>
-      <td class="never">hand-implement in chat; restate <code>prd</code> or <code>standards.md</code> rules.</td>
+      <td class="never">hand-implement in chat; restate <code>standards.md</code>'s rules instead of pointing to it.</td>
     </tr>
     <tr>
-      <td><code>prd</code></td><td><span class="role auth">authority</span></td>
-      <td>One PRD's structure, canonical location, filename rules, and scope sizing — read (not called) by <code>develop</code>.</td>
-      <td class="never">own engineering rules; decompose a large ask into many PRDs.</td>
+      <td><code>standards.md</code></td><td><span class="role auth">authority</span></td>
+      <td>Reference file beside <code>develop</code>'s own <code>SKILL.md</code> — PRD structure, canonical location, filename rules, scope sizing, plus the engineering + execution-discipline rules inlined into every scheduled PRD. Read in place, never called as a skill.</td>
+      <td class="never">exist as its own invocable skill; decompose a large ask into many PRDs (that's <code>develop</code>'s job).</td>
     </tr>
     <tr>
       <td><code>requesting-code-review</code></td><td><span class="role gate">gate</span></td>
@@ -316,7 +317,7 @@
   <h3>Human → code</h3>
   <ol class="seq">
     <li>You type <code>build me X</code>. <code>develop</code> clarifies any genuine ambiguity, explores the repo.</li>
-    <li>It decomposes X into small PRDs (sizing per <code>prd</code>), appends <code>standards.md</code>, writes them to the queue.</li>
+    <li>It decomposes X into small PRDs (sizing per <code>standards.md</code>), appends its engineering rules inline, writes them to the queue.</li>
     <li>It confirms each PRD (filename, group, cwd, ETA), then enters Phase 2.</li>
     <li>Every ~30 min it checks the scheduler; if a PRD stalls or trips <code>needs_review</code>, it surfaces that to you.</li>
     <li>On success it verifies live against the AC, optionally runs <code>requesting-code-review</code>, and reports what landed.</li>
@@ -341,8 +342,9 @@
   </ol>
 
   <footer>
-    HUMAN_LEARN · session-manager · Skill Map · generated 2026-07-04 from
-    <code>plugins/session-manager-dev/skills/{develop,prd,process-feedback,my-feedback,discover-features,optimize-kpi,project-status,local-project-health,requesting-code-review,security-review,explain-to-me}/SKILL.md</code>.
+    HUMAN_LEARN · session-manager · Skill Map · generated 2026-07-06 from
+    <code>plugins/session-manager-dev/skills/{develop,process-feedback,my-feedback,discover-features,optimize-kpi,project-status,local-project-health,requesting-code-review,security-review,explain-to-me}/SKILL.md</code>
+    and <code>plugins/session-manager-dev/skills/develop/standards.md</code>.
     Runtime engine documented at <a href="index.html#scheduler">HUMAN_LEARN › Scheduler</a>. Maintained by <code>explain-to-me</code>.
   </footer>
 </div>

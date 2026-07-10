@@ -33,7 +33,6 @@ const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs')
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const agentMemory = require('./agentMemory.cjs');
-const { registerDocEditorHandlers } = require('./docEditor.cjs');
 const git = require('./git.cjs');
 const superagent = require('./superagent.cjs');
 const filesIpc = require('./files.cjs');
@@ -673,7 +672,6 @@ pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 registerMemoryAggregateIpc();
 agentMemory.registerAgentMemoryHandlers();
-registerDocEditorHandlers();
 git.register(ipcMain);
 superagent.registerSuperAgentHandlers();
 filesIpc.registerFilesHandlers();

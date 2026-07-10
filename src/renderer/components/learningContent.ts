@@ -511,25 +511,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'Data is cached; if a fetch is rate-limited or the token expired you will see a stale chip with a Retry button rather than a blank page.',
     ],
   },
-  'doc-editor': {
-      headline: 'A multi-tab editor for Markdown and text files',
-      intro:
-        'Doc Editor opens text files in a tabbed surface. Markdown files (.md, .markdown) get a WYSIWYG mode built on Tiptap with a floating formatting toolbar (bold, italic, headings, lists, code, blockquote, links); everything else opens in the Monaco source editor with syntax highlighting. File types Monaco doesn\'t recognize fall back to a plain textarea. Use Open… to pick a file, or open one from the command palette (Cmd-K → doc:open). A dot on a tab means it has unsaved changes.',
-      sections: [
-        {
-          title: 'Key bindings',
-          items: [
-            { term: 'Ctrl/Cmd-S', body: 'Save the active document. The Save and Save All buttons in the toolbar do the same.' },
-            { term: 'Ctrl/Cmd-W', body: 'Close the active document tab.' },
-            { term: 'Ctrl/Cmd-B / I', body: 'Bold / Italic, in Markdown WYSIWYG mode.' },
-          ],
-        },
-      ],
-      tips: [
-        'For Markdown files, use the WYSIWYG / Source toggle in the toolbar. Switch to Source for surgical edits to PRDs and agent files — WYSIWYG normalizes list markers and heading style.',
-        'YAML frontmatter is never touched by WYSIWYG mode — it is split off, kept read-only, and rejoined on save. The frontmatter chip above the document shows how many lines it holds.',
-      ],
-    },
   'scheduler': {
       headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
       intro:
@@ -565,7 +546,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
       ],
     },
-  'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the File Explorer sidebar or a file link in the terminal. Text files open in Monaco (syntax highlighting, font zoom, word wrap, minimap, Dark/Paper theme); Markdown and HTML add Edit / Preview (and Split for Markdown). Images, PDFs, CSV/TSV tables, and JSONL records each get their own viewer; binary or oversized files show a summary instead. URLs still open in your browser.', sections: [{ title: 'Editing', items: [{ term: 'Cmd/Ctrl-S', body: 'Save the active file. With Autosave on (the "Auto" toggle), edits also save automatically ~1.2 s after you stop typing.' }, { term: 'Cmd/Ctrl-Shift-F', body: 'Toggle Focus mode — hides the tabs and header for distraction-free editing. Esc exits.' }, { term: 'Close guard', body: 'Closing a tab with unsaved changes asks before discarding.' }], }, { title: 'Markdown', items: [{ term: 'Outline', body: 'In Preview or Split mode, a document outline lists headings; click to jump. Toggle it with the Outline button.' }, { term: 'Toolbar', body: 'A formatting toolbar sits above the editor for Markdown files.' }], }], tips: ['Use the view toggle (Edit / Preview / Split) for Markdown and HTML. HTML previews are sandboxed — page scripts run with no access to your files or session.', 'Open and Reveal buttons hand the file to your OS default app or file manager.'] },
+  'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the File Explorer sidebar or a file link in the terminal. Text files open in Monaco (syntax highlighting, font zoom, word wrap, minimap, Dark/Paper theme); Markdown adds Edit / Wysiwyg / Preview / Split, HTML adds Edit / Preview. Images, PDFs, CSV/TSV tables, and JSONL records each get their own viewer; binary or oversized files show a summary instead. URLs still open in your browser.', sections: [{ title: 'Editing', items: [{ term: 'Cmd/Ctrl-S', body: 'Save the active file. With Autosave on (the "Auto" toggle), edits also save automatically ~1.2 s after you stop typing.' }, { term: 'Cmd/Ctrl-Shift-F', body: 'Toggle Focus mode — hides the tabs and header for distraction-free editing. Esc exits.' }, { term: 'Close guard', body: 'Closing a tab with unsaved changes asks before discarding.' }], }, { title: 'Markdown', items: [{ term: 'Wysiwyg', body: 'A rich-text mode built on Tiptap with a floating formatting toolbar (bold, italic, headings, lists, code, blockquote, links) — edit the rendered document directly instead of raw markdown. YAML frontmatter is split off, kept read-only, and rejoined on save; switch to Edit for surgical edits to PRDs and agent files, since Wysiwyg normalizes list markers and heading style.' }, { term: 'Outline', body: 'In Preview or Split mode, a document outline lists headings; click to jump. Toggle it with the Outline button.' }, { term: 'Toolbar', body: 'A formatting toolbar sits above the editor for Markdown files.' }], }], tips: ['Use the view toggle (Edit / Wysiwyg / Preview / Split) for Markdown, or Edit / Preview for HTML. HTML previews are sandboxed — page scripts run with no access to your files or session.', 'Open and Reveal buttons hand the file to your OS default app or file manager.'] },
   'voice': {
       headline: 'Voice & microphone',
       intro: 'Talk to Claude instead of typing. Speech is transcribed on-device with a Whisper model that loads the first time you record (a progress bar shows the download). A press-to-record hotkey starts and stops the mic; what you say is typed into the active terminal, and an auto-submit timer fires it for you a moment after you stop speaking. A one-time mic check confirms your microphone works.',
@@ -631,31 +612,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       tips: [
         'Toggle Files / Content at the top, or jump straight in with ⌘P (Files) / ⌘⇧F (Content).',
         'In Content mode, the Aa button turns on case-sensitive matching.',
-      ],
-    },
-  'prompts': {
-      headline: 'Click-to-insert prompt library — 46 curated templates across 8 categories',
-      intro: 'A personal library of ready-made prompts. Pick a template from the sidebar (grouped by category, with a filter box at the top), then either fire it as-is or tweak it first. Sending drops the text into your active terminal session. You can also edit any template permanently — your edited version replaces the bundled one until you reset it.',
-      sections: [
-        {
-          title: 'Sending a prompt',
-          items: [
-            { term: 'Use prompt', body: 'Opens a Tweak window where you can edit the text before sending and pick the send mode. Click "Send to terminal" to deliver it. The button is disabled until you have an open terminal session.' },
-            { term: 'Paste', body: 'Writes the prompt to the terminal with no trailing newline. You review it on the prompt line and press Enter yourself — useful when you want to edit further before sending.' },
-            { term: 'Auto-fire', body: 'Appends a newline so Claude receives and acts on the prompt immediately. Good for one-shot prompts you trust to run as-is. Each template ships with a default mode (shown as a chip), which you can override per send.' },
-          ],
-        },
-        {
-          title: 'Customising prompts',
-          items: [
-            { term: 'Edit root template', body: 'Opens an inline editor for the prompt body. Saving writes your version to ~/.claude/session-manager/prompts/<category>/<slug>.md, and it is used on every future open of that prompt. The bundled seed files are never modified.' },
-            { term: 'Reset to default', body: 'Appears only once you have an edited version. Clicking it restores the bundled text and discards your changes.' },
-          ],
-        },
-      ],
-      tips: [
-        'Auto-fire prompts like a staged-diff security review are meant to run without hand-holding — they produce structured output you can act on straight away.',
-        'Paste mode lets you personalise a prompt on the fly (add a file path, scope it to one function) before submitting.',
       ],
     },
   'remote': {

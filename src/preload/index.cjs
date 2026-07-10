@@ -252,11 +252,6 @@ contextBridge.exposeInMainWorld('api', {
     },
     delete: (agentId, entryId) => ipcRenderer.invoke('agent-memory:delete', { agentId, entryId }),
   },
-  docEditor: {
-    pickFile: (payload) => ipcRenderer.invoke('doc-editor:pick-file', payload),
-    readFile: (p) => ipcRenderer.invoke('doc-editor:read-file', { path: p }),
-    writeFile: (p, text) => ipcRenderer.invoke('doc-editor:write-file', { path: p, text }),
-  },
   git: {
     // Returns null when cwd is not a git repo, git is missing, or the call
     // times out (5s ceiling). The existing `app.gitBranch` is intentionally

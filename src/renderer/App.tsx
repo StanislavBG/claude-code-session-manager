@@ -46,7 +46,6 @@ const SCREEN_KEYS = new Set<NavKey>([
   'terminal',
   'subagents',
   'scheduler',
-  'prompts',
   'history',
   'usage',
   // Configure
@@ -55,7 +54,6 @@ const SCREEN_KEYS = new Set<NavKey>([
   'mcp',
   'hooks',
   'keybindings',
-  'doc-editor',
   'memory',
   'projects',
   'system-prompt',
@@ -676,8 +674,6 @@ export function App() {
           setPaletteOpen(false)
           if (cmd.id.startsWith('nav:')) {
             navigate(cmd.id.slice(4) as NavKey)
-          } else if (cmd.id === 'doc:open-file' || cmd.id.startsWith('doc:recent:')) {
-            navigate('doc-editor')
           }
         }}
       />

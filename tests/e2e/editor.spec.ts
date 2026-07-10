@@ -2,10 +2,10 @@
  * In-app Editor scene — open / preview / edit / save + HTML sandbox.
  *
  * The Editor is launched from the Files sidebar and terminal links, neither of
- * which needs a live Claude session here. We drive it through the same kind of
- * window test handle docEditor uses (`window.__editor` → the useEditor store),
- * then assert the rendered DOM. Fixtures live UNDER $HOME because both
- * files.read and the smfile:// handler enforce home containment.
+ * which needs a live Claude session here. We drive it through a window test
+ * handle (`window.__editor` → the useEditor store), then assert the rendered
+ * DOM. Fixtures live UNDER $HOME because both files.read and the smfile://
+ * handler enforce home containment.
  */
 import { test, expect } from '@playwright/test'
 import os from 'node:os'
@@ -16,12 +16,16 @@ import { launchApp } from './_helpers/launchApp'
 let dir: string
 const files: Record<string, string> = {}
 
+const FRONTMATTER = '---\ntitle: Frontmatter fixture\ntags: [a, b]\n---\n'
+
 test.beforeAll(() => {
   dir = fs.mkdtempSync(path.join(os.homedir(), '.sm-editor-e2e-'))
   files.md = path.join(dir, 'note.md')
+  files.mdFrontmatter = path.join(dir, 'with-frontmatter.md')
   files.ts = path.join(dir, 'data.ts')
   files.html = path.join(dir, 'viz.html')
   fs.writeFileSync(files.md, '# Hello Editor\n\nA **bold** idea and a list:\n\n- one\n- two\n')
+  fs.writeFileSync(files.mdFrontmatter, `${FRONTMATTER}# Doc\n\nSome body text.\n`)
   fs.writeFileSync(files.ts, 'export const x: number = 1\n')
   fs.writeFileSync(
     files.html,
@@ -53,6 +57,36 @@ test('markdown opens rendered, with a tab', async () => {
     await expect(win.locator('.markdown-body h1', { hasText: 'Hello Editor' })).toBeVisible({ timeout: 5000 })
     // Strong text survived sanitization.
     await expect(win.locator('.markdown-body strong', { hasText: 'bold' })).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
+
+test('markdown Wysiwyg mode renders Tiptap and preserves frontmatter untouched', async () => {
+  const { app, win } = await launchApp()
+  try {
+    await openInEditor(win, files.mdFrontmatter)
+    await expect(win.locator('text=with-frontmatter.md').first()).toBeVisible({ timeout: 5000 })
+
+    // The view-mode toggle for markdown includes Wysiwyg alongside Edit/Preview/Split.
+    const wysiwygBtn = win.locator('button', { hasText: /^wysiwyg$/i })
+    await expect(wysiwygBtn).toBeVisible({ timeout: 5000 })
+
+    // Switch via the store directly for determinism (avoids click/viewport timing).
+    await win.evaluate((p) => {
+      const ed = (window as unknown as { __editor: { getState: () => { setViewMode: (a: string, b: string) => void } } }).__editor
+      ed.getState().setViewMode(p, 'wysiwyg')
+    }, files.mdFrontmatter)
+
+    await expect(win.locator('[data-testid="tiptap-editor"]')).toBeVisible({ timeout: 5000 })
+
+    // Opening into Wysiwyg without editing must leave the frontmatter block
+    // byte-identical in the buffer — TiptapBody never lets Tiptap see it.
+    const buffer = await win.evaluate((p) => {
+      const ed = (window as unknown as { __editor: { getState: () => { buffers: Record<string, string> } } }).__editor
+      return ed.getState().buffers[p]
+    }, files.mdFrontmatter)
+    expect(buffer?.startsWith(FRONTMATTER)).toBe(true)
   } finally {
     await app.close()
   }

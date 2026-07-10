@@ -303,6 +303,47 @@ function stop({ viewId }) {
   return { ok: true };
 }
 
+// Cap returned capture text so a huge DOM can't blow up the IPC channel.
+const CAPTURE_TEXT_MAX = 500_000;
+
+// PRD 407: grab page text/HTML for the Capture panel. Reuses the same
+// executeJavaScript access path the recorder-preload re-arm already uses
+// above (did-finish-load handler) — one round trip returns url/title/text
+// together instead of three separate calls.
+async function captureDom({ viewId, kind }) {
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  try {
+    const script = kind === 'html'
+      ? '({ url: location.href, title: document.title, text: document.documentElement.outerHTML })'
+      : '({ url: location.href, title: document.title, text: document.body ? document.body.innerText : "" })';
+    const result = await view.webContents.executeJavaScript(script);
+    let text = typeof result?.text === 'string' ? result.text : '';
+    let truncated = false;
+    if (text.length > CAPTURE_TEXT_MAX) {
+      text = text.slice(0, CAPTURE_TEXT_MAX);
+      truncated = true;
+    }
+    return { ok: true, url: result?.url || '', title: result?.title || '', text, truncated };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// PRD 407: screenshot the active browser sub-tab as a PNG data URL.
+async function captureShot({ viewId }) {
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  try {
+    const wc = view.webContents;
+    const image = await wc.capturePage();
+    const dataUrl = image.toDataURL();
+    return { ok: true, url: wc.getURL(), title: wc.getTitle(), dataUrl };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 function registerBrowserView({ mainWindow, ipcMain }) {
   attachWindow(mainWindow);
   const { schemas, validated } = require('./ipcSchemas.cjs');
@@ -319,6 +360,14 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   ipcMain.handle('browser:record-start', validated(schemas.browserViewId, (payload) => recordStart(payload)));
   ipcMain.handle('browser:record-stop', validated(schemas.browserViewId, (payload) => recordStop(payload)));
   ipcMain.on('browser:record-event', handleRecordEvent);
+  ipcMain.handle('browser:capture-dom', validated(schemas.browserCaptureDom, (payload) => captureDom(payload)));
+  ipcMain.handle('browser:capture-shot', validated(schemas.browserViewId, (payload) => captureShot(payload)));
+  ipcMain.handle('browser:save-binary', validated(schemas.browserSaveBinary, (payload) => {
+    const { writeBinaryAtomic } = require('./config.cjs');
+    return writeBinaryAtomic(payload.path, Buffer.from(payload.base64, 'base64'))
+      .then(() => ({ ok: true }))
+      .catch((e) => ({ ok: false, error: e && e.message ? e.message : String(e) }));
+  }));
 }
 
 module.exports = { registerBrowserView, attachWindow, views, isBrowserViewContents };

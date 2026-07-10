@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, nativeImage, powerSaveBlocker, protocol } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -445,6 +445,19 @@ ipcMain.handle('clipboard:paste-image', async () => {
     return { ok: false, error: e && e.message ? e.message : String(e) };
   }
 });
+
+// PRD 407 Capture panel — write side of paste-image's read. Writes a
+// screenshot capture to the OS clipboard as an image.
+ipcMain.handle('browser:copy-image', validated(schemas.browserCopyImage, ({ dataUrl }) => {
+  try {
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (!img || img.isEmpty()) return { ok: false, error: 'empty image' };
+    clipboard.writeImage(img);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}));
 
 // Hooks tab "Test fire": run a hook command with a fake event payload piped
 // to stdin. shell:true is intentional — Claude Code's hook field is a shell

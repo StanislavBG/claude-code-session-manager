@@ -26,6 +26,15 @@ export interface BrowserTab {
 export type BrowserMode = 'browse' | 'capture' | 'record' | 'observe'
 export type CaptureMode = 'agent' | 'html' | 'a11y' | 'selector' | 'shot'
 
+export interface CapturedPayload {
+  mode: CaptureMode
+  url: string
+  title: string
+  text?: string
+  dataUrl?: string
+  at: number
+}
+
 interface BrowserState {
   tabs: BrowserTab[]
   activeTabId: string | null
@@ -44,6 +53,13 @@ interface BrowserState {
    * matching mode off if already active, and routes the `shot` verb into
    * capture mode preset to screenshot. */
   onVerb: (verb: 'capture' | 'record' | 'observe' | 'shot') => void
+
+  // ── Capture (PRD 407) ──────────────────────────────────────────────
+  captured: CapturedPayload | null
+  /** Grabs the active tab's content per `captureMode` and stores it in
+   * `captured`. Throws on failure so the caller (CapturePanel) can toast —
+   * stores don't import toast per project convention. */
+  capture: () => Promise<void>
 
   // ── Recorder (PRD 408 engine → PRD 409 panel) ─────────────────────
   /** True once `recordStart` has been called and not yet stopped. */
@@ -200,7 +216,7 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
   mode: 'browse',
   captureMode: 'agent',
 
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) => set((s) => ({ mode, captured: mode === 'capture' ? s.captured : null })),
 
   onVerb: (verb) => {
     const { mode } = get()
@@ -209,10 +225,35 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
       return
     }
     if (mode === verb) {
-      set({ mode: 'browse' })
+      set({ mode: 'browse', captured: verb === 'capture' ? null : get().captured })
       return
     }
-    set({ mode: verb, captureMode: verb === 'capture' ? 'agent' : get().captureMode })
+    set({
+      mode: verb,
+      captureMode: verb === 'capture' ? 'agent' : get().captureMode,
+      captured: verb === 'capture' ? get().captured : null,
+    })
+  },
+
+  captured: null,
+
+  capture: async () => {
+    const { activeTabId, tabs, captureMode } = get()
+    const tab = tabs.find((t) => t.id === activeTabId)
+    if (!tab) throw new Error('No active browser tab')
+    if (captureMode === 'shot') {
+      const result = await window.api.browser.captureShot(tab.viewId)
+      if (!result.ok) throw new Error(result.error)
+      set({ captured: { mode: captureMode, url: result.url, title: result.title, dataUrl: result.dataUrl, at: Date.now() } })
+      return
+    }
+    // 'html' maps to a raw-HTML capture; 'agent'/'a11y'/'selector' don't have
+    // their own extraction yet (richer extraction is a later PRD) so they
+    // fall back to page text.
+    const kind = captureMode === 'html' ? 'html' : 'text'
+    const result = await window.api.browser.captureDom({ viewId: tab.viewId, kind })
+    if (!result.ok) throw new Error(result.error)
+    set({ captured: { mode: captureMode, url: result.url, title: result.title, text: result.text, at: Date.now() } })
   },
 
   recorderActive: false,

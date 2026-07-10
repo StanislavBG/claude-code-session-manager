@@ -103,7 +103,10 @@ function validateWrite(realAbs) {
     (p) => realAbs === p || realAbs.startsWith(p + path.sep)
   );
   if (inWritePrefix) return;
-  // Also allowed inside a registered project root's .claude/ subtree.
+  // Also allowed inside a registered project root's .claude/ subtree, OR its
+  // tests/fixtures/browser-capture/ subtree (PRD 407 "PRD fixture" capture
+  // destination — narrowly scoped to that one path segment, not a general
+  // project-root write grant).
   for (const root of allowedRoots) {
     if (root === os.homedir()) continue;
     let realRoot;
@@ -111,6 +114,10 @@ function validateWrite(realAbs) {
     if (realAbs === realRoot || realAbs.startsWith(realRoot + path.sep)) {
       const claudeSub = path.join(realRoot, '.claude');
       if (realAbs === claudeSub || realAbs.startsWith(claudeSub + path.sep)) {
+        return;
+      }
+      const fixturesSub = path.join(realRoot, 'tests', 'fixtures', 'browser-capture');
+      if (realAbs === fixturesSub || realAbs.startsWith(fixturesSub + path.sep)) {
         return;
       }
     }
@@ -173,6 +180,27 @@ async function writeTextAtomic(abs, text, opts = {}) {
       // writeFile when the file pre-exists.
       try { await fsp.chmod(tmp, opts.mode); } catch { /* */ }
     }
+    await fsp.rename(tmp, real);
+  } catch (e) {
+    try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
+    throw e;
+  }
+  const stat = await fsp.stat(real);
+  return { ok: true, mtimeMs: stat.mtimeMs };
+}
+
+/**
+ * Binary-safe sibling of writeTextAtomic — same validate + tmp+rename flow,
+ * for callers (screenshot capture) whose payload is a Buffer, not utf8 text.
+ */
+async function writeBinaryAtomic(abs, buffer) {
+  const real = validatePath(expandHome(abs));
+  validateWrite(real);
+  const dir = path.dirname(real);
+  await fsp.mkdir(dir, { recursive: true });
+  const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await fsp.writeFile(tmp, buffer);
     await fsp.rename(tmp, real);
   } catch (e) {
     try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
@@ -374,6 +402,7 @@ module.exports = {
   writeJson,
   writeJsonSync,
   writeTextAtomic,
+  writeBinaryAtomic,
   listDir,
   exists,
   addAllowedRoot,

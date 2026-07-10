@@ -79,6 +79,9 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.removeListener(channel, listener);
     },
+    captureDom: (payload) => ipcRenderer.invoke('browser:capture-dom', payload),
+    captureShot: (viewId) => ipcRenderer.invoke('browser:capture-shot', { viewId }),
+    saveBinary: (path, base64) => ipcRenderer.invoke('browser:save-binary', { path, base64 }),
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),
@@ -251,6 +254,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   clipboard: {
     pasteImage: () => ipcRenderer.invoke('clipboard:paste-image'),
+    copyImage: (dataUrl) => ipcRenderer.invoke('browser:copy-image', { dataUrl }),
   },
   memory: {
     list: (workspace) => ipcRenderer.invoke('memory:list', workspace ? { workspace } : {}),

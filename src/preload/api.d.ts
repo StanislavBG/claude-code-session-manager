@@ -972,6 +972,15 @@ export interface SessionManagerAPI {
     recordStart: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
     recordStop: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
     onRecordStep: (viewId: string, handler: (step: RecordStep) => void) => () => void;
+    captureDom: (payload: { viewId: string; kind: 'text' | 'html' }) => Promise<
+      | { ok: true; url: string; title: string; text: string; truncated?: boolean }
+      | { ok: false; error: string }
+    >;
+    captureShot: (viewId: string) => Promise<
+      | { ok: true; url: string; title: string; dataUrl: string }
+      | { ok: false; error: string }
+    >;
+    saveBinary: (path: string, base64: string) => Promise<{ ok: boolean; error?: string }>;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;
@@ -1140,6 +1149,8 @@ export interface SessionManagerAPI {
       | { ok: true; path: string; bytes: number }
       | { ok: false; empty?: true; error?: string }
     >;
+    /** Write side — copies a Capture-panel screenshot data URL to the OS clipboard. */
+    copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>;
   };
   memory: {
     /** List markdown memory entries for the given workspace (defaults to 'default'). */

@@ -75,6 +75,26 @@ const browserNavigate = z.object({
   url: z.string().min(1).max(8192),
 });
 
+// PRD 407: DOM/text capture from the active browser sub-tab.
+const browserCaptureDom = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  kind: z.enum(['text', 'html']),
+});
+
+// PRD 407: clipboard image write (browser:copy-image). dataUrl is a PNG data
+// URL from webContents.capturePage() — capped well above any realistic
+// screenshot so a malformed/huge payload can't wedge the IPC channel.
+const browserCopyImage = z.object({
+  dataUrl: z.string().min(1).max(50_000_000),
+});
+
+// PRD 407: binary-safe atomic write (browser:save-binary) for screenshot
+// captures — config:write-text is utf8-only.
+const browserSaveBinary = z.object({
+  path: z.string().min(1).max(4096),
+  base64: z.string().min(1).max(50_000_000),
+});
+
 // ──────────────────────────────────────────── Transcripts
 const SESSION_UUID_RE = /^[a-zA-Z0-9-]{1,64}$/;
 
@@ -547,6 +567,9 @@ module.exports = {
     browserCreate,
     browserSetBounds,
     browserNavigate,
+    browserCaptureDom,
+    browserCopyImage,
+    browserSaveBinary,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

@@ -2479,7 +2479,12 @@ const remote = {
     });
     if (!found) return { ok: false, error: 'not found' };
     await broadcast();
-    return { ok: true };
+    return { ok: true, slug, status: 'pending' };
+  },
+
+  async listJobs() {
+    const state = await readQueue();
+    return state.jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd }));
   },
 
   async runNow() {

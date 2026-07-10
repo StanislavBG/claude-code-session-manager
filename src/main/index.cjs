@@ -774,6 +774,11 @@ app.on('web-contents-created', (_e, wc) => {
   });
 
   wc.on('will-navigate', (event, url) => {
+    // The embedded Browser tab's WebContentsView is a real browser — it must
+    // be able to navigate anywhere. Exempt ONLY webContents registered by
+    // browserView.cjs; the main window's lock below is unchanged.
+    if (browserView.isBrowserViewContents(wc.id)) return;
+
     const allowed = useDevServer
       ? ['http://localhost:5173', 'http://127.0.0.1:5173']
       : [];

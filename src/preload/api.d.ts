@@ -15,6 +15,15 @@ export interface WriteErrorEvent {
   reason: string;
 }
 
+export interface BrowserNavState {
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  loading: boolean;
+  isSecure: boolean;
+}
+
 export interface ReadJsonResult {
   exists: boolean;
   raw: string;
@@ -940,6 +949,12 @@ export interface SessionManagerAPI {
     show: (viewId: string) => Promise<{ ok: boolean }>;
     hide: (viewId: string) => Promise<{ ok: boolean }>;
     destroy: (viewId: string) => Promise<{ ok: boolean }>;
+    navigate: (payload: { viewId: string; url: string }) => Promise<{ ok: boolean; error?: string }>;
+    back: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    forward: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    reload: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    stop: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
+    onNavState: (viewId: string, handler: (state: BrowserNavState) => void) => () => void;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

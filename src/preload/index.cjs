@@ -60,6 +60,17 @@ contextBridge.exposeInMainWorld('api', {
     show: (viewId) => ipcRenderer.invoke('browser:show', { viewId }),
     hide: (viewId) => ipcRenderer.invoke('browser:hide', { viewId }),
     destroy: (viewId) => ipcRenderer.invoke('browser:destroy', { viewId }),
+    navigate: (payload) => ipcRenderer.invoke('browser:navigate', payload),
+    back: (viewId) => ipcRenderer.invoke('browser:back', { viewId }),
+    forward: (viewId) => ipcRenderer.invoke('browser:forward', { viewId }),
+    reload: (viewId) => ipcRenderer.invoke('browser:reload', { viewId }),
+    stop: (viewId) => ipcRenderer.invoke('browser:stop', { viewId }),
+    onNavState: (viewId, handler) => {
+      const channel = `browser:nav-state:${viewId}`;
+      const listener = (_e, state) => handler(state);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

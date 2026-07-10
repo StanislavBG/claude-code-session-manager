@@ -70,6 +70,11 @@ const browserSetBounds = z.object({
   height: BOUNDS_INT,
 });
 
+const browserNavigate = z.object({
+  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
+  url: z.string().min(1).max(8192),
+});
+
 // ──────────────────────────────────────────── Transcripts
 const SESSION_UUID_RE = /^[a-zA-Z0-9-]{1,64}$/;
 
@@ -541,6 +546,7 @@ module.exports = {
     browserViewId,
     browserCreate,
     browserSetBounds,
+    browserNavigate,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

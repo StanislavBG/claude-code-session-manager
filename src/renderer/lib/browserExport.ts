@@ -18,8 +18,29 @@ function playwrightLineFor(step: RecordStep): string {
   switch (step.verb) {
     case 'navigate':
       return `await page.goto(${jsStr(step.target)})`
-    case 'click':
-      return `await page.click(${jsStr(step.target)})`
+    case 'click': {
+      const line = `await page.click(${jsStr(step.target)})`
+      if (step.x !== undefined && step.y !== undefined) {
+        return `${line} // captured at (${step.x}, ${step.y})`
+      }
+      return line
+    }
+    case 'drag': {
+      if (step.target && step.endTarget) {
+        return `await page.dragAndDrop(${jsStr(step.target)}, ${jsStr(step.endTarget)})`
+      }
+      const hasCoords =
+        step.x !== undefined && step.y !== undefined && step.endX !== undefined && step.endY !== undefined
+      if (!hasCoords) {
+        return `// unsupported drag step: missing both a selector and captured coordinates`
+      }
+      return (
+        `await page.mouse.move(${step.x}, ${step.y})\n` +
+        `  await page.mouse.down()\n` +
+        `  await page.mouse.move(${step.endX}, ${step.endY})\n` +
+        `  await page.mouse.up()`
+      )
+    }
     case 'type': {
       // Typed values are never captured by the engine (privacy invariant) —
       // a parameterized step substitutes the named const; an unparameterized
@@ -68,6 +89,8 @@ function verbLabel(verb: RecordStep['verb']): string {
       return 'Select in'
     case 'wait-for':
       return 'Wait for'
+    case 'drag':
+      return 'Drag'
     default:
       return verb
   }
@@ -94,7 +117,8 @@ export function stepsToMarkdown(steps: RecordStep[]): string {
     const n = s.n ?? i + 1
     const expected = expectedFor(s)
     const varSuffix = s.variable ? ` (${codeSpan(`{{${s.variable}}}`)})` : ''
-    return `${n}. **${verbLabel(s.verb)}** ${codeSpan(s.target)}${varSuffix}${expected ? ` — _expect: ${expected}_` : ''}`
+    const targetSpan = s.verb === 'drag' && s.endTarget ? `${codeSpan(s.target)} → ${codeSpan(s.endTarget)}` : codeSpan(s.target)
+    return `${n}. **${verbLabel(s.verb)}** ${targetSpan}${varSuffix}${expected ? ` — _expect: ${expected}_` : ''}`
   })
   return `# Recorded steps\n\n${lines.join('\n')}\n`
 }

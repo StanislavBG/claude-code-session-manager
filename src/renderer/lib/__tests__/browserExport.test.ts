@@ -27,6 +27,35 @@ describe('stepsToPlaywright', () => {
     const spec = stepsToPlaywright([{ n: 1, verb: 'type', target: '#note' }])
     expect(spec).toContain('page.fill("#note", "")')
   })
+
+  it('annotates a click with its captured coordinates without dropping the selector', () => {
+    const spec = stepsToPlaywright([{ n: 1, verb: 'click', target: '#btn', x: 12, y: 34 }])
+    expect(spec).toContain('page.click("#btn")')
+    expect(spec).toContain('captured at (12, 34)')
+  })
+
+  it('leaves a coordinate-less click unannotated', () => {
+    const spec = stepsToPlaywright([{ n: 1, verb: 'click', target: '#btn' }])
+    expect(spec).toContain('page.click("#btn")')
+    expect(spec).not.toContain('captured at')
+  })
+
+  it('emits dragAndDrop when both drag selectors are present', () => {
+    const spec = stepsToPlaywright([
+      { n: 1, verb: 'drag', target: '#src', endTarget: '#dst', x: 1, y: 2, endX: 3, endY: 4 },
+    ])
+    expect(spec).toContain('page.dragAndDrop("#src", "#dst")')
+  })
+
+  it('falls back to coordinate-based mouse moves when a drag selector is missing', () => {
+    const spec = stepsToPlaywright([
+      { n: 1, verb: 'drag', target: '', endTarget: '', x: 1, y: 2, endX: 3, endY: 4 },
+    ])
+    expect(spec).toContain('page.mouse.move(1, 2)')
+    expect(spec).toContain('page.mouse.down()')
+    expect(spec).toContain('page.mouse.move(3, 4)')
+    expect(spec).toContain('page.mouse.up()')
+  })
 })
 
 describe('stepsToMarkdown', () => {
@@ -35,6 +64,13 @@ describe('stepsToMarkdown', () => {
     expect(md).toContain('1. **Navigate to** `https://example.com`')
     expect(md).toContain('{{email}}')
     expect(md).toContain('4. **Wait for** `Welcome`')
+  })
+
+  it('includes the end target for a drag step', () => {
+    const md = stepsToMarkdown([{ n: 1, verb: 'drag', target: '#src', endTarget: '#dst' }])
+    expect(md).toContain('**Drag**')
+    expect(md).toContain('`#src`')
+    expect(md).toContain('`#dst`')
   })
 })
 

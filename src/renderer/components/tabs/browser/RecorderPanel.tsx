@@ -58,7 +58,13 @@ const REC_EXPORTS: { id: 'pw' | 'md' | 'prd'; label: string; hint: string; prima
 function verbColor(verb: string) {
   if (verb === 'navigate') return 'text-sage'
   if (verb === 'wait-for') return 'text-butter'
+  if (verb === 'drag') return 'text-butter'
   return 'text-accent'
+}
+
+function coordHint(x?: number, y?: number): string | null {
+  if (x === undefined || y === undefined) return null
+  return `(${x}, ${y})`
 }
 
 export function RecorderPanel() {
@@ -228,8 +234,15 @@ export function RecorderPanel() {
                   {s.verb}
                 </span>
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-fg">
-                  {s.target}
+                  {s.verb === 'drag'
+                    ? s.target && s.endTarget
+                      ? `${s.target} → ${s.endTarget}`
+                      : `${coordHint(s.x, s.y) ?? '(?, ?)'} → ${coordHint(s.endX, s.endY) ?? '(?, ?)'}`
+                    : s.target}
                 </span>
+                {s.verb === 'click' && coordHint(s.x, s.y) && (
+                  <span className="flex-shrink-0 font-mono text-[10.5px] text-fg-faint">{coordHint(s.x, s.y)}</span>
+                )}
                 {s.variable && (
                   <span className="rounded border border-accent-muted bg-bg px-1.5 py-px font-mono text-[10.5px] font-bold text-accent">
                     {`{{${s.variable}}}`}
@@ -267,6 +280,18 @@ export function RecorderPanel() {
                         <span className="text-fg-faint">assert </span>
                         {s.target}
                       </div>
+                    )}
+                    {s.verb === 'drag' && (
+                      <>
+                        <div>
+                          <span className="text-fg-faint">from </span>
+                          {s.target || '(no selector)'} {coordHint(s.x, s.y)}
+                        </div>
+                        <div>
+                          <span className="text-fg-faint">to </span>
+                          {s.endTarget || '(no selector)'} {coordHint(s.endX, s.endY)}
+                        </div>
+                      </>
                     )}
                   </div>
                   {s.verb === 'type' && (

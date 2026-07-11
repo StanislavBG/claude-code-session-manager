@@ -21,6 +21,8 @@ const {
   reverifyBatch,
   flagRiskySurfaces,
   writeReport,
+  readWatermark,
+  writeWatermark,
 } = require('./definitionOfDone.cjs');
 
 // Track keys whose DoD pass is currently in-flight.
@@ -58,7 +60,19 @@ async function runDefinitionOfDoneOnDrain(state, opts = {}) {
   if (state.paused) return;
   if (cancelToken.cancelled) return;
 
-  const completedJobs = (state.jobs || []).filter(j => j.status === 'completed');
+  const allCompleted = (state.jobs || []).filter(j => j.status === 'completed');
+  if (allCompleted.length === 0) return;
+
+  // Watermark: only reverify jobs that finished after the last DoD report.
+  // Jobs missing finishedAt are treated as older than any real watermark
+  // (excluded once a watermark exists; included on the first-ever drain when
+  // watermark is null, preserving back-compat with the unbounded behavior).
+  const wmIso = readWatermark(runsDir);            // null on first-ever drain
+  const wm = wmIso ? new Date(wmIso).getTime() : 0; // 0 = beginning of time
+  const completedJobs = allCompleted.filter(j => {
+    const t = j.finishedAt ? new Date(j.finishedAt).getTime() : NaN;
+    return wm === 0 ? true : (Number.isFinite(t) && t > wm);
+  });
   if (completedJobs.length === 0) return;
 
   const key = batchKey(completedJobs);
@@ -73,6 +87,14 @@ async function runDefinitionOfDoneOnDrain(state, opts = {}) {
     if (cancelToken.cancelled) return;
     const riskFlags = flagRiskySurfaces(completedJobs, { prdsDir });
     writeReport(key, { acResults, riskFlags, runsDir });
+
+    // Advance watermark to the newest finishedAt we just covered, so the next
+    // drain excludes this batch. Guard against jobs with no/invalid finishedAt.
+    const maxFinished = completedJobs
+      .map(j => (j.finishedAt ? new Date(j.finishedAt).getTime() : NaN))
+      .filter(Number.isFinite)
+      .reduce((a, b) => Math.max(a, b), wm);
+    if (maxFinished > wm) writeWatermark(new Date(maxFinished).toISOString(), runsDir);
   } finally {
     _inFlight.delete(key);
   }

@@ -533,6 +533,42 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
   return reportPath;
 }
 
+const WATERMARK_FILENAME = '.dod-watermark.json';
+
+/**
+ * Read the persisted "last finished" watermark used to bound which completed
+ * jobs get reverified on each drain. Never throws — a missing or unparseable
+ * sidecar means "beginning of time" (process everything), matching the
+ * pre-watermark unbounded behavior on first-ever drain.
+ *
+ * @param {string} [runsDir] Override for testing; defaults to RUNS_DIR
+ * @returns {string|null}  ISO8601 timestamp, or null if unset/unreadable.
+ */
+function readWatermark(runsDir = RUNS_DIR) {
+  try {
+    const raw = fs.readFileSync(path.join(runsDir, WATERMARK_FILENAME), 'utf8');
+    const parsed = JSON.parse(raw);
+    return typeof parsed.lastFinishedAt === 'string' ? parsed.lastFinishedAt : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the "last finished" watermark so the next drain only reverifies
+ * jobs that completed after it.
+ *
+ * @param {string} lastFinishedAt  ISO8601 timestamp.
+ * @param {string} [runsDir]       Override for testing; defaults to RUNS_DIR
+ */
+function writeWatermark(lastFinishedAt, runsDir = RUNS_DIR) {
+  fs.mkdirSync(runsDir, { recursive: true });
+  _writeFileAtomic(
+    path.join(runsDir, WATERMARK_FILENAME),
+    JSON.stringify({ lastFinishedAt }, null, 2)
+  );
+}
+
 module.exports = {
   batchKey,
   reportPathFor,
@@ -542,4 +578,6 @@ module.exports = {
   reverifyBatch,
   flagRiskySurfaces,
   writeReport,
+  readWatermark,
+  writeWatermark,
 };

@@ -19,6 +19,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const { runDefinitionOfDoneOnDrain } = require('../lib/dodDrainHook.cjs');
+const { readWatermark } = require('../lib/definitionOfDone.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -166,6 +167,110 @@ test('paused state → no report written', async () => {
   try {
     await runDefinitionOfDoneOnDrain(state, { cancelToken, prdsDir, runsDir });
     assert.strictEqual(countReports(runsDir), 0, 'paused state must suppress the report');
+  } finally {
+    if (savedDisable !== undefined) process.env.SM_DOD_DISABLE = savedDisable;
+    rmdir(tmpDir);
+  }
+});
+
+test('first-ever drain (no watermark file) processes all completed jobs', async () => {
+  const tmpDir = makeTmpDir();
+  const prdsDir = path.join(tmpDir, 'prds');
+  const runsDir = path.join(tmpDir, 'runs');
+  const cwd = path.join(tmpDir, 'project');
+  fs.mkdirSync(prdsDir);
+  fs.mkdirSync(cwd);
+
+  const jobA = writePrd(prdsDir, '106-old', cwd);
+  jobA.finishedAt = '2020-01-01T00:00:00.000Z';
+  const jobB = writePrd(prdsDir, '107-new', cwd);
+  jobB.finishedAt = '2026-07-11T00:00:00.000Z';
+  const state = { paused: null, jobs: [jobA, jobB] };
+  const cancelToken = { cancelled: false };
+  const savedDisable = process.env.SM_DOD_DISABLE;
+  delete process.env.SM_DOD_DISABLE;
+
+  try {
+    assert.strictEqual(readWatermark(runsDir), null, 'no watermark should exist yet');
+    await runDefinitionOfDoneOnDrain(state, { cancelToken, prdsDir, runsDir });
+    assert.strictEqual(countReports(runsDir), 1);
+
+    const reportsRoot = fs.readdirSync(runsDir, { withFileTypes: true }).filter(e => e.isDirectory());
+    const reportFile = reportsRoot
+      .map(e => path.join(runsDir, e.name))
+      .flatMap(dir => fs.readdirSync(dir).filter(f => f.startsWith('definition-of-done-')).map(f => path.join(dir, f)))[0];
+    const contents = fs.readFileSync(reportFile, 'utf8');
+    assert.match(contents, /106-old/, 'first-ever drain must include old job too');
+    assert.match(contents, /107-new/);
+  } finally {
+    if (savedDisable !== undefined) process.env.SM_DOD_DISABLE = savedDisable;
+    rmdir(tmpDir);
+  }
+});
+
+test('subsequent drain with a persisted watermark only reverifies newer jobs', async () => {
+  const tmpDir = makeTmpDir();
+  const prdsDir = path.join(tmpDir, 'prds');
+  const runsDir = path.join(tmpDir, 'runs');
+  const cwd = path.join(tmpDir, 'project');
+  fs.mkdirSync(prdsDir);
+  fs.mkdirSync(cwd);
+  fs.mkdirSync(runsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(runsDir, '.dod-watermark.json'),
+    JSON.stringify({ lastFinishedAt: '2026-01-01T00:00:00.000Z' })
+  );
+
+  const jobOld = writePrd(prdsDir, '108-old', cwd);
+  jobOld.finishedAt = '2025-01-01T00:00:00.000Z';
+  const jobNew = writePrd(prdsDir, '109-new', cwd);
+  jobNew.finishedAt = '2026-07-11T00:00:00.000Z';
+  const state = { paused: null, jobs: [jobOld, jobNew] };
+  const cancelToken = { cancelled: false };
+  const savedDisable = process.env.SM_DOD_DISABLE;
+  delete process.env.SM_DOD_DISABLE;
+
+  try {
+    await runDefinitionOfDoneOnDrain(state, { cancelToken, prdsDir, runsDir });
+    assert.strictEqual(countReports(runsDir), 1);
+
+    const reportsRoot = fs.readdirSync(runsDir, { withFileTypes: true }).filter(e => e.isDirectory());
+    const reportFile = reportsRoot
+      .map(e => path.join(runsDir, e.name))
+      .flatMap(dir => fs.readdirSync(dir).filter(f => f.startsWith('definition-of-done-')).map(f => path.join(dir, f)))[0];
+    const contents = fs.readFileSync(reportFile, 'utf8');
+    assert.doesNotMatch(contents, /108-old/, 'jobs finished before the watermark must be excluded');
+    assert.match(contents, /109-new/, 'jobs finished after the watermark must be included');
+  } finally {
+    if (savedDisable !== undefined) process.env.SM_DOD_DISABLE = savedDisable;
+    rmdir(tmpDir);
+  }
+});
+
+test('watermark advances after a report so a repeat drain over the same jobs is a no-op', async () => {
+  const tmpDir = makeTmpDir();
+  const prdsDir = path.join(tmpDir, 'prds');
+  const runsDir = path.join(tmpDir, 'runs');
+  const cwd = path.join(tmpDir, 'project');
+  fs.mkdirSync(prdsDir);
+  fs.mkdirSync(cwd);
+
+  const job = writePrd(prdsDir, '110-test', cwd);
+  job.finishedAt = '2026-07-11T00:00:00.000Z';
+  const state = { paused: null, jobs: [job] };
+  const cancelToken = { cancelled: false };
+  const savedDisable = process.env.SM_DOD_DISABLE;
+  delete process.env.SM_DOD_DISABLE;
+
+  try {
+    await runDefinitionOfDoneOnDrain(state, { cancelToken, prdsDir, runsDir });
+    assert.strictEqual(countReports(runsDir), 1, 'first drain writes one report');
+    assert.strictEqual(readWatermark(runsDir), job.finishedAt, 'watermark must advance to the covered job\'s finishedAt');
+
+    // Second drain with a fresh job list containing the same already-covered job.
+    const state2 = { paused: null, jobs: [{ ...job }] };
+    await runDefinitionOfDoneOnDrain(state2, { cancelToken, prdsDir, runsDir });
+    assert.strictEqual(countReports(runsDir), 1, 'repeat drain over the same (now-old) job must be a no-op');
   } finally {
     if (savedDisable !== undefined) process.env.SM_DOD_DISABLE = savedDisable;
     rmdir(tmpDir);

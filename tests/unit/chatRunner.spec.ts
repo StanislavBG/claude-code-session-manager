@@ -9,10 +9,36 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createRequire } from 'node:module'
+import { EventEmitter } from 'node:events'
 
 vi.mock('electron', () => ({ ipcMain: { handle: vi.fn(), on: vi.fn() } }))
 
 const require = createRequire(import.meta.url)
+
+// This repo's .cjs main-process specs load their target module via createRequire,
+// which bypasses vitest's vi.mock transform pipeline. Patching the shared
+// node:child_process / exchanges.cjs exports in place (before chatRunner.cjs's own
+// require() destructures them) is the pattern that actually reaches chatRunner.cjs.
+const cp = require('node:child_process') as { spawn: (...args: unknown[]) => unknown }
+type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: (sig?: string) => void }
+let nextChild: FakeChild | null = null
+cp.spawn = () => {
+  const child = new EventEmitter() as FakeChild
+  child.stdout = new EventEmitter()
+  child.stderr = new EventEmitter()
+  child.pid = 12345
+  child.kill = () => {}
+  nextChild = child
+  return child
+}
+
+const exchanges = require('../../src/main/exchanges.cjs') as { recordExchange: (...a: unknown[]) => Promise<unknown> }
+const recordExchangeCalls: unknown[][] = []
+exchanges.recordExchange = (...args: unknown[]) => {
+  recordExchangeCalls.push(args)
+  return Promise.resolve()
+}
+
 const chatRunner = require('../../src/main/chatRunner.cjs') as {
   run: (opts: Record<string, unknown>) => void
   attachWindow: (win: unknown) => void
@@ -24,6 +50,17 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   } | null
   probeContextUsage: (opts: { tabId: string; sessionId: string; cwd: string }) => void
   __setExecutor: (fn: ((job: Record<string, unknown>) => Promise<void>) | null) => void
+}
+
+function emitResultLine(child: FakeChild, resultText: string) {
+  const assistantLine = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: resultText }] } })
+  const resultLine = JSON.stringify({ type: 'result', subtype: 'success', result: resultText })
+  child.stdout.emit('data', Buffer.from(`${assistantLine}\n${resultLine}\n`))
+  child.emit('exit', 0, null)
+}
+
+async function flush() {
+  await new Promise((r) => setTimeout(r, 20))
 }
 
 const CONTEXT_MARKDOWN = `## Context Usage
@@ -154,15 +191,46 @@ describe('silent flag threading (run -> waiting -> executor)', () => {
   })
 })
 
-// NOTE: this repo has no existing convention for mocking `node:child_process` spawn
-// inside a `.cjs` module (no spec in tests/unit/ uses vi.mock against a scheduler-
-// or chatRunner-style spawn call — they all test pure/exported helpers or use the
-// __setExecutor-style seam). chatRunner.cjs's real `executeRun` (the default
-// executor, only bypassed above via __setExecutor) is not exported, so this spec
-// cannot drive its real stream-parsing/broadcast/recordExchange logic without a
-// live child process. The `if (!silent)` guards on chat:run:started/output/tool-use
-// and the `emitTerminal`-based skip of chat:run:complete/needs-input/error plus the
-// recordExchange skip (chatRunner.cjs's executeRun, silent branch) are exercised by
-// code inspection + the tests above (which cover the full silent flag path through
-// run/waiting/executor and the onSilentResult parse+broadcast wiring) rather than by
-// a full spawn-driven integration test.
+describe('recordExchange gating (real executeRun path via a faked child process)', () => {
+  beforeEach(() => {
+    chatRunner.__setExecutor(null) // restore the real executeRun (earlier tests stub it)
+    recordExchangeCalls.length = 0
+    nextChild = null
+  })
+
+  it('skips recordExchange and turn-affecting broadcasts when silent: true', async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: unknown) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.run({ tabId: 'tab-silent-exec', sessionId: 'sess-silent-exec', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
+    await flush()
+    expect(nextChild).not.toBeNull()
+    emitResultLine(nextChild!, 'silent probe output')
+    await flush()
+
+    expect(recordExchangeCalls).toHaveLength(0)
+    expect(sent.some((e) => e.channel === 'chat:run:output')).toBe(false)
+    expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(false)
+  })
+
+  it('still calls recordExchange and emits turn broadcasts when silent is unset (regression guard)', async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: unknown) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.run({ tabId: 'tab-visible-exec', sessionId: 'sess-visible-exec', prompt: 'hello', cwd: '/tmp', resume: false })
+    await flush()
+    expect(nextChild).not.toBeNull()
+    emitResultLine(nextChild!, 'visible turn output')
+    await flush()
+
+    expect(recordExchangeCalls).toHaveLength(1)
+    expect(sent.some((e) => e.channel === 'chat:run:output')).toBe(true)
+    expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true)
+  })
+})

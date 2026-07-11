@@ -8,6 +8,7 @@ import { LearningPanel } from './LearningPanel'
 import { extractUrls } from '../lib/extractUrls'
 import { matchSlashNav } from '../lib/slashCommand'
 import { toast } from '../state/toast'
+import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import type { NavKey } from './LeftNav'
 
 /**
@@ -376,6 +377,39 @@ export function TerminalChat({ tabId, cwd }: Props) {
     }
   }
 
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget
+    const selStart = el.selectionStart ?? draft.length
+    const selEnd = el.selectionEnd ?? selStart
+    // We handle image-first-then-text ourselves, so block the browser default.
+    e.preventDefault()
+    void (async () => {
+      try {
+        const r = await resolveChatPaste(
+          {
+            pasteImage: () => window.api.clipboard.pasteImage(),
+            readText: () => navigator.clipboard.readText(),
+          },
+          draft,
+          selStart,
+          selEnd,
+        )
+        setDraft(r.value)
+        if (r.toast) toast.info(r.toast)
+        // Restore caret after React re-renders the controlled value.
+        requestAnimationFrame(() => {
+          try {
+            el.setSelectionRange(r.caret, r.caret)
+          } catch {
+            /* detached */
+          }
+        })
+      } catch {
+        /* clipboard unavailable — leave draft unchanged */
+      }
+    })()
+  }
+
   // Close the model menu on outside click so it doesn't linger open over content.
   useEffect(() => {
     if (!modelMenuOpen) return
@@ -511,6 +545,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             disabled={running}
             rows={2}
             placeholder={running ? 'Running… cancel or wait' : 'Type a command (Enter to send, Shift+Enter for newline)'}

@@ -14,6 +14,7 @@ const transcripts = require('./transcripts.cjs');
 const usageMatrix = require('./usageMatrix.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const billing = require('./usage.cjs');
+const { probeMcpStatus } = require('./mcpStatus.cjs');
 const logs = require('./logs.cjs');
 const crashDiagnostics = require('./crashDiagnostics.cjs');
 // Start the local minidump collector before app-ready (required by Electron).
@@ -407,6 +408,10 @@ ipcMain.handle('app:launch-mode', () => ({
   simple: process.argv.includes('--simple'),
   cwd: process.cwd(),
 }));
+
+// MCP Servers tab (PRD 456 consumes this): probes live connection status via
+// `claude mcp list`. Read-only, single in-flight call — no polling.
+ipcMain.handle('mcp:status', () => probeMcpStatus());
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
 

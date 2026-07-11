@@ -198,6 +198,21 @@ export type BillingFetchResult =
   | { kind: 'transient'; message: string; httpStatus: number | null }
   | { kind: 'config'; message: string };
 
+// ── MCP server live connection probe (`claude mcp list`)
+export interface McpServerStatus {
+  name: string;
+  target: string;
+  transport: 'stdio' | 'http' | 'sse' | 'ws' | 'unknown';
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'unknown';
+}
+
+export interface McpStatusResult {
+  ok: boolean;
+  servers: McpServerStatus[];
+  error?: string;
+  checkedAt: number;
+}
+
 // ── Usage matrix (AgOps dashboard, main-side aggregator)
 export type UsageMatrixState = 'idle' | 'executing' | 'plan' | 'background';
 export type UsageMatrixIntensity = 'idle' | 'low' | 'medium' | 'critical';
@@ -1075,6 +1090,9 @@ export interface SessionManagerAPI {
   };
   billing: {
     fetch: () => Promise<BillingFetchResult>;
+  };
+  mcp: {
+    status: () => Promise<McpStatusResult>;
   };
   usageMatrix: {
     snapshot: () => Promise<UsageMatrixSnapshot>;

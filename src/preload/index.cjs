@@ -129,6 +129,9 @@ contextBridge.exposeInMainWorld('api', {
   billing: {
     fetch: () => ipcRenderer.invoke('billing:fetch'),
   },
+  mcp: {
+    status: () => ipcRenderer.invoke('mcp:status'),
+  },
   usageMatrix: {
     snapshot: () => ipcRenderer.invoke('usage:matrix:snapshot'),
     onTick: (handler) => {

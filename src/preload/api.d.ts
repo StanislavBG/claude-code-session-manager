@@ -1079,6 +1079,8 @@ export interface SessionManagerAPI {
       | { ok: true; mode: string; text: string; meta: { chunks?: number; tokens?: number } }
       | { ok: false; error: string }
     >;
+    /** Fired when the embedded page tries to open a new window (target="_blank", window.open, ctrl/cmd-click) — the main process denies the native popup and forwards the URL here. */
+    onOpenTabRequest: (handler: (payload: { url: string }) => void) => () => void;
   };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;

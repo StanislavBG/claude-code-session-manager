@@ -73,6 +73,18 @@ export function Browser() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // New-window requests (target="_blank", window.open, ctrl/cmd-click) from
+  // inside an embedded page — main process denies the native popup and
+  // forwards the URL here instead, so it opens as an in-app sub-tab via the
+  // same path as the "+ new tab" button.
+  useEffect(() => {
+    const off = window.api.browser.onOpenTabRequest(({ url }) => {
+      useBrowserState.getState().openTab({ url })
+    })
+    return off
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Show the active view, hide every other view — the native layer only
   // ever shows one browser sub-tab at a time.
   useEffect(() => {

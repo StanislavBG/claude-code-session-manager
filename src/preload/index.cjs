@@ -107,6 +107,11 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener(channel, listener);
     },
     capture: (payload) => ipcRenderer.invoke('browser:capture', payload),
+    onOpenTabRequest: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('browser:open-tab-request', listener);
+      return () => ipcRenderer.removeListener('browser:open-tab-request', listener);
+    },
   },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),

@@ -18,7 +18,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
-const { WebContentsView, shell } = require('electron');
+const { WebContentsView } = require('electron');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { readJson, writeJson } = require('./config.cjs');
 
@@ -181,7 +181,7 @@ function wireNavEvents(viewId, view) {
 
   wc.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
-      shell.openExternal(url).catch(() => {});
+      sendIfAlive(win, 'browser:open-tab-request', { url });
     }
     return { action: 'deny' };
   });

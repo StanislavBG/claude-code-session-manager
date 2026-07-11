@@ -26,6 +26,7 @@
  *   chat:run:complete   { tabId, sessionId, finalMessage }
  *   chat:run:needs-input { tabId, sessionId, questions, raw }
  *   chat:run:error      { tabId, sessionId, message }
+ *   chat:run:notice     { tabId, sessionId, message }        — informational, not terminal
  */
 
 const { spawn } = require('node:child_process');
@@ -69,6 +70,32 @@ function parseStopSignal(finalText) {
     // Malformed JSON — treat as complete, no crash
     return null;
   }
+}
+
+// ─── MCP consent-denial detection ──────────────────────────────────────────
+// Best-effort substring heuristic over known CLI phrasing — NOT a documented
+// stream-json schema field. Confirmed by extracting strings from the compiled
+// `claude` CLI binary (2.1.207): a non-interactive/`-p` run that hits an
+// MCP server requiring first-party consent (e.g. `claude_design`) throws a
+// tool error whose message is exactly:
+//   "<tool label> The user hasn't granted this — run /design consent to
+//   grant it (it can't be approved automatically in this permission mode)."
+// which surfaces to stdout as a `tool_result` block (is_error: true) inside a
+// `type: "user"` stream-json event. Since consent flows exist for MCP servers
+// beyond `claude_design`, match on the generic phrasing rather than the
+// design-specific slash command.
+const MCP_CONSENT_DENIAL_MARKERS = [
+  "hasn't granted this",
+  'run /design consent',
+  'connect to claude design',
+  'requires consent',
+  'needs a claude.ai credential',
+];
+
+function hasMcpConsentDenial(text) {
+  if (typeof text !== 'string' || !text) return false;
+  const lower = text.toLowerCase();
+  return MCP_CONSENT_DENIAL_MARKERS.some((marker) => lower.includes(marker));
 }
 
 // Instruction prepended to every prompt. Tells the agent how to signal that
@@ -188,6 +215,24 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
       broadcast(channel, payload);
     };
 
+    // Separate one-shot guard for the MCP-consent notice (orthogonal to
+    // terminalSent — a run can hit this mid-stream and still legitimately
+    // finish with a normal complete/error afterward).
+    let noticeSent = false;
+    const emitNoticeOnce = () => {
+      if (noticeSent) return;
+      noticeSent = true;
+      broadcast('chat:run:notice', {
+        tabId,
+        sessionId,
+        message:
+          'This run needs interactive consent for an MCP server (e.g. Claude Design), which ' +
+          "can't be granted in chat mode because stdin is closed for headless runs. Open a " +
+          'raw terminal session for this tab ("Back to chat" toggle) and grant consent there, ' +
+          'then retry.',
+      });
+    };
+
     const claudeBin = resolveClaudeBin();
     const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
 
@@ -284,6 +329,21 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
             const classified = classifyToolUse(block);
             broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified });
           }
+        }
+      } else if (event.type === 'user') {
+        // Tool results come back as content blocks on a synthetic "user" event.
+        // An MCP consent-denial surfaces here as an is_error tool_result whose
+        // text carries one of MCP_CONSENT_DENIAL_MARKERS.
+        const content = Array.isArray(event.message?.content) ? event.message.content : [];
+        for (const block of content) {
+          if (block.type !== 'tool_result') continue;
+          const inner = block.content;
+          const text = typeof inner === 'string'
+            ? inner
+            : Array.isArray(inner)
+              ? inner.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text).join('\n')
+              : '';
+          if (hasMcpConsentDenial(text)) emitNoticeOnce();
         }
       } else if (event.type === 'result') {
         // Use the authoritative `result` field when available; fall back to

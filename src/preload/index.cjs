@@ -409,6 +409,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('chat:run:error', listener);
       return () => ipcRenderer.removeListener('chat:run:error', listener);
     },
+    onNotice: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:run:notice', listener);
+      return () => ipcRenderer.removeListener('chat:run:notice', listener);
+    },
   },
   exchanges: {
     /** List exchanges for a project (durable chat-run log), newest-first.

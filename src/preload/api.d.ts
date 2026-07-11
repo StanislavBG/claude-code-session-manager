@@ -993,6 +993,12 @@ export interface ChatRunErrorEvent {
   message: string;
 }
 
+export interface ChatRunNoticeEvent {
+  tabId: string;
+  sessionId: string;
+  message: string;
+}
+
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
@@ -1329,6 +1335,7 @@ export interface SessionManagerAPI {
     onNeedsInput: (handler: (e: ChatRunNeedsInputEvent) => void) => () => void;
     onComplete: (handler: (e: ChatRunCompleteEvent) => void) => () => void;
     onError: (handler: (e: ChatRunErrorEvent) => void) => () => void;
+    onNotice: (handler: (e: ChatRunNoticeEvent) => void) => () => void;
   };
   exchanges: {
     /** Durable per-exchange log entries for a project, newest-first (max 100 by default). */

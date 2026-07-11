@@ -300,6 +300,17 @@ function Turn({ turn }: { turn: ChatTurn }) {
       </div>
     )
   }
+  if (turn.role === 'notice') {
+    return (
+      <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
+        <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
+          <span aria-hidden>ℹ️</span>
+          Needs your attention
+        </div>
+        {turn.text}
+      </div>
+    )
+  }
   // assistant — render the run's final message verbatim (markdown).
   const urls = extractUrls(turn.text)
   const isPlan = hasMarkdownList(turn.text)

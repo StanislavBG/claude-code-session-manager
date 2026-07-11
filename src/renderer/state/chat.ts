@@ -19,7 +19,7 @@ import { transcriptExists } from '../lib/transcriptExists'
  * later commands resume it (resume:true → --resume) so context carries forward.
  */
 
-export type ChatTurnRole = 'user' | 'assistant' | 'question' | 'error'
+export type ChatTurnRole = 'user' | 'assistant' | 'question' | 'error' | 'notice'
 
 export interface ToolUseTrace {
   id: string
@@ -189,6 +189,15 @@ function applyError(tabId: string, _sessionId: string, message: string): void {
   toast.error(message)
 }
 
+// Not a terminal event — the run may still legitimately reach complete/error
+// afterward, so this must NOT touch running/stream/liveToolUses (unlike pushTurn).
+function applyNotice(tabId: string, _sessionId: string, message: string): void {
+  patch(tabId, (c) => ({
+    ...c,
+    turns: [...c.turns, { id: turnId(), role: 'notice', text: message, at: Date.now() }],
+  }))
+}
+
 // ─── one-time global IPC subscription ──────────────────────────────────────
 // Wired at module load (like live.ts subscribes to transcript events). Guarded
 // so a non-renderer import (tests) doesn't throw on a missing window.api.
@@ -220,5 +229,8 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   })
   window.api.chat.onError(({ tabId, sessionId, message }) => {
     applyError(tabId, sessionId, message)
+  })
+  window.api.chat.onNotice(({ tabId, sessionId, message }) => {
+    applyNotice(tabId, sessionId, message)
   })
 }

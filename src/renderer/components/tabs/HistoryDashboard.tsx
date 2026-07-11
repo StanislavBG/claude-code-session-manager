@@ -212,15 +212,16 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
   }, [filteredRows])
 
   const totals = useMemo(() => {
-    let promptCount = 0, inputTokens = 0, outputTokens = 0, sessionCount = 0, estimatedCostUsd = 0
+    let promptCount = 0, inputTokens = 0, outputTokens = 0, sessionCount = 0, estimatedCostUsd = 0, cacheReadTokens = 0
     for (const r of filteredRows) {
       promptCount += r.promptCount
       inputTokens += r.inputTokens
       outputTokens += r.outputTokens
       sessionCount += r.sessionCount
       estimatedCostUsd += r.estimatedCostUsd
+      cacheReadTokens += r.cacheReadTokens
     }
-    return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
+    return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd, cacheReadTokens }
   }, [filteredRows])
 
   // Previous-period rows, filtered the same way as the primary range's
@@ -422,27 +423,38 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
 
   return (
     <div data-testid="history-dashboard" className="p-4 space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-fg">History</h1>
+          <p className="text-xs text-fg-faint mt-0.5 max-w-2xl">
+            Usage analytics across every project you have ever run Claude Code in — cost,
+            tokens, and activity, trended over time.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-fg-faint shrink-0 pt-1">
+          <FreshnessIndicator lastFetchedAt={lastFetchedAt} />
+          <button
+            onClick={refresh}
+            className="px-2 py-0.5 border border-line rounded hover:text-fg hover:bg-bg-hi"
+            title="Rescan transcripts"
+          >
+            ↻ refresh
+          </button>
+        </div>
+      </div>
+
       {result?.partial && (
-        <div className="text-xs text-yellow-400 border border-yellow-800 bg-yellow-950/30 rounded px-3 py-2">
-          Scan took longer than expected — showing partial results. Full results may differ.
+        <div className="flex items-center gap-2 text-xs text-fg-faint border border-line bg-bg-elev rounded px-3 py-2">
+          <span className="text-accent">↻</span>
+          Still scanning — showing partial results so far. Numbers will settle as the scan finishes.
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2 text-xs text-fg-faint">
-        <FreshnessIndicator lastFetchedAt={lastFetchedAt} />
-        <button
-          onClick={refresh}
-          className="px-2 py-0.5 border border-line rounded hover:text-fg hover:bg-bg-hi"
-          title="Rescan transcripts"
-        >
-          ↻ refresh
-        </button>
-      </div>
-
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         <Stat label="total prompts" value={totals.promptCount.toLocaleString()} delta={deltas.promptCount} />
         <Stat label="input tokens" value={totals.inputTokens.toLocaleString()} delta={deltas.inputTokens} />
         <Stat label="output tokens" value={totals.outputTokens.toLocaleString()} delta={deltas.outputTokens} />
+        <Stat label="cache tokens" value={totals.cacheReadTokens.toLocaleString()} />
         <Stat label="sessions" value={totals.sessionCount.toLocaleString()} delta={deltas.sessionCount} />
         <Stat
           label="est. cost"
@@ -499,7 +511,10 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
 
       <div className="grid grid-cols-2 gap-3">
         <div className="border border-line rounded bg-bg-elev p-4">
-          <h3 className="text-xs uppercase tracking-wider text-fg mb-3">Spend by model</h3>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-xs uppercase tracking-wider text-fg">Spend by model</h3>
+            <span className="text-xs font-mono text-fg-faint">${modelTotals.totalCostUsd.toFixed(4)} total</span>
+          </div>
           {modelTotals.entries.length === 0 ? (
             <div className="text-xs text-fg-faint">no model data in range</div>
           ) : (
@@ -528,15 +543,30 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
         </div>
 
         <div className="border border-line rounded bg-bg-elev p-4">
-          <h3 className="text-xs uppercase tracking-wider text-fg mb-3">Cache savings</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <Stat label="cache-hit rate" value={`${modelTotals.cacheHitPct.toFixed(1)}%`} />
-            {/* cacheSavingsUsd is a top-level, date-range-scoped figure computed
-                server-side (historyAggregator.cjs) since only it has the
-                per-model pricing table; it isn't re-scoped by the project
-                text filter the way modelTotals is. */}
-            <Stat label="$ saved" value={`$${(result?.cacheSavingsUsd ?? 0).toFixed(4)}`} highlight />
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-xs uppercase tracking-wider text-fg">Cache savings</h3>
+            <span className="text-xs font-mono text-accent">${(result?.cacheSavingsUsd ?? 0).toFixed(4)} saved</span>
           </div>
+          <div className="mb-2">
+            <div className="flex items-center justify-between text-xs mb-0.5">
+              <span className="text-fg-faint">hit rate</span>
+              <span className="font-mono text-fg-dim">{modelTotals.cacheHitPct.toFixed(1)}%</span>
+            </div>
+            <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
+              <div
+                className="h-full bg-sage"
+                style={{ width: `${Math.max(modelTotals.cacheHitPct, modelTotals.cacheHitPct > 0 ? 2 : 0)}%` }}
+              />
+            </div>
+          </div>
+          {/* cacheSavingsUsd is a top-level, date-range-scoped figure computed
+              server-side (historyAggregator.cjs) since only it has the
+              per-model pricing table; it isn't re-scoped by the project
+              text filter the way modelTotals is. */}
+          <p className="text-[10px] text-fg-faint">
+            Cache reads billed at a discount vs. full input pricing — the saved figure reflects
+            that discount across every session in range.
+          </p>
         </div>
       </div>
 

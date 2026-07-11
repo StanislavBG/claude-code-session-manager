@@ -63,6 +63,12 @@ interface ChatState {
   /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newChatThread). */
   resetThread: (tabId: string) => void
   /**
+   * Push an ephemeral, in-session-only notice turn (e.g. a slash-nav shortcut
+   * acknowledgment). Does NOT touch running/stream/liveToolUses and is never
+   * persisted via recordExchange — mirrors the IPC-driven applyNotice below.
+   */
+  pushNotice: (tabId: string, message: string) => void
+  /**
    * One-shot: load prior exchanges from the durable store and prepend them as
    * history turns. No-ops if already called for this tabId, if there are no
    * prior exchanges, or if the exchanges API is unavailable.
@@ -162,6 +168,9 @@ export const useChat = create<ChatState>((set, get) => ({
         [tabId]: { ...EMPTY },
       },
     })
+  },
+  pushNotice: (tabId, message) => {
+    applyNotice(tabId, '', message)
   },
 }))
 

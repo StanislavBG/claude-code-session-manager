@@ -21,6 +21,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
       onComplete: vi.fn(),
       onNeedsInput: vi.fn(),
       onError: vi.fn(),
+      onNotice: vi.fn(),
     },
     transcripts: {
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
@@ -98,5 +99,44 @@ describe('chat.ts resetThread()', () => {
     expect(cleared.stream).toBe('')
     expect(cleared.liveToolUses).toEqual([])
     expect(cleared.running).toBe(false)
+  })
+})
+
+describe('chat.ts pushNotice()', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('appends a notice turn without touching running/stream/liveToolUses', async () => {
+    installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.setState({
+      chats: {
+        't1': {
+          turns: [],
+          running: true,
+          queuedPosition: 2,
+          started: true,
+          stream: 'partial',
+          liveToolUses: [{ id: 'u1', kind: 'tool', label: 'Bash' }],
+        },
+      },
+    })
+
+    useChat.getState().pushNotice('t1', '→ opened Skills — showing the live list')
+
+    const after = useChat.getState().get('t1')
+    expect(after.turns).toHaveLength(1)
+    expect(after.turns[0]).toMatchObject({
+      role: 'notice',
+      text: '→ opened Skills — showing the live list',
+    })
+    // Ephemeral notice: must not clobber an in-flight run's live state.
+    expect(after.running).toBe(true)
+    expect(after.queuedPosition).toBe(2)
+    expect(after.stream).toBe('partial')
+    expect(after.liveToolUses).toEqual([{ id: 'u1', kind: 'tool', label: 'Bash' }])
   })
 })

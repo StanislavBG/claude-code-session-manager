@@ -344,6 +344,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
   const resetThread = useChat((s) => s.resetThread)
+  const pushNotice = useChat((s) => s.pushNotice)
   const [draft, setDraft] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -374,6 +375,8 @@ export function TerminalChat({ tabId, cwd }: Props) {
     if (action.type === 'nav') {
       setDraft('')
       window.dispatchEvent(new CustomEvent('sm:navigate', { detail: action.key }))
+      const message = `→ opened ${NAV_LABELS[action.key]} — showing the live list`
+      pushNotice(tabId, message)
       toast.info(`Opened ${NAV_LABELS[action.key]} — showing the live list`)
       return
     }

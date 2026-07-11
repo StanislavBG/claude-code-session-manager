@@ -1250,6 +1250,13 @@ export interface SessionManagerAPI {
       | { ok: true; path: string; bytes: number }
       | { ok: false; empty?: true; error?: string }
     >;
+    /** Ctrl+V text paste — reads OS clipboard text via Electron's native API
+     *  (renderer's navigator.clipboard.readText() is denied by the
+     *  permission-request handler, which only allows media permissions). */
+    pasteText: () => Promise<
+      | { ok: true; text: string }
+      | { ok: false; error?: string }
+    >;
     /** Write side — copies a Capture-panel screenshot data URL to the OS clipboard. */
     copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>;
   };

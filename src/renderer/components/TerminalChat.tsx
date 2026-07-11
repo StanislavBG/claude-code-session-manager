@@ -405,7 +405,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
         const r = await resolveChatPaste(
           {
             pasteImage: () => window.api.clipboard.pasteImage(),
-            readText: () => navigator.clipboard.readText(),
+            readText: () => window.api.clipboard.pasteText().then((r) => (r.ok ? r.text : '')),
           },
           draft,
           selStart,

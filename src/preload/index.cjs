@@ -282,6 +282,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   clipboard: {
     pasteImage: () => ipcRenderer.invoke('clipboard:paste-image'),
+    pasteText: () => ipcRenderer.invoke('clipboard:paste-text'),
     copyImage: (dataUrl) => ipcRenderer.invoke('browser:copy-image', { dataUrl }),
   },
   memory: {

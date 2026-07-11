@@ -153,8 +153,8 @@ export function Terminal({ tabId, cwd }: Props) {
               toast.info(`Pasted image: ${img.path.split('/').pop()}`)
               return
             }
-            const text = await navigator.clipboard.readText()
-            if (text) writeInChunks(tabId, text)
+            const pasted = await window.api.clipboard.pasteText()
+            if (pasted.ok && pasted.text) writeInChunks(tabId, pasted.text)
           } catch {
             /* clipboard unavailable — ignore */
           }

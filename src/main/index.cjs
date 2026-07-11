@@ -455,6 +455,20 @@ ipcMain.handle('clipboard:paste-image', async () => {
   }
 });
 
+// Text paste — same rationale as clipboard:paste-image above: the renderer's
+// navigator.clipboard.readText() requires the 'clipboard-read' permission,
+// which setPermissionRequestHandler denies (MEDIA_PERMS only), so it always
+// rejects. Reading via Electron's main-process clipboard.readText() sidesteps
+// that permission gate entirely — no permission-handler changes needed.
+ipcMain.handle('clipboard:paste-text', async () => {
+  try {
+    const text = clipboard.readText();
+    return { ok: true, text: text || '' };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+});
+
 // PRD 407 Capture panel — write side of paste-image's read. Writes a
 // screenshot capture to the OS clipboard as an image.
 ipcMain.handle('browser:copy-image', validated(schemas.browserCopyImage, ({ dataUrl }) => {

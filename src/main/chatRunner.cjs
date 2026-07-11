@@ -228,12 +228,15 @@ const STOP_SIGNAL_INSTRUCTION =
   `Otherwise complete the task and end with a concise summary of what you did.\n\n`;
 
 // ─── Serial run queue (v0.34) ───────────────────────────────────────────────
-// CONCURRENCY_CAP=1 (default) → one loop at a time. The cap is the machine-wide
-// "≤3 concurrent claude -p" ceiling from CLAUDE.md; default 1 is the v0.34
-// guarantee. The waiting list FIFO-queues anything that can't start yet.
+// CONCURRENCY_CAP=2 (default) → two loops can run at once, so a user actively
+// driving two different tabs at the same time doesn't queue behind each other.
+// The cap still stays inside the machine-wide "≤3 concurrent claude -p"
+// ceiling from CLAUDE.md (shared with the scheduler + manual runners);
+// SM_CHAT_CONCURRENCY still overrides, clamped to [1, 3]. The waiting list
+// FIFO-queues anything that can't start yet (e.g. a 3rd concurrent tab).
 
-const DEFAULT_CAP = 1;
-// Clamp to [1, 3]; default 1 = "one loop at a time".
+const DEFAULT_CAP = 2;
+// Clamp to [1, 3]; default 2 = "two loops at a time".
 const CONCURRENCY_CAP = Math.min(
   3,
   Math.max(1, parseInt(process.env.SM_CHAT_CONCURRENCY || String(DEFAULT_CAP), 10) || DEFAULT_CAP),
@@ -269,9 +272,9 @@ function broadcast(channel, payload) {
 
 /**
  * Enqueue a chat run for a tab. Fire-and-forget — results arrive via IPC. With
- * CONCURRENCY_CAP=1 (default) runs execute one at a time; extra submits FIFO-
- * queue and are announced via chat:run:queued. De-dupes a tab already in the
- * pipeline (the UI disables input while running, but guard anyway).
+ * CONCURRENCY_CAP=2 (default) up to two runs execute at once; extra submits
+ * FIFO-queue and are announced via chat:run:queued. De-dupes a tab already in
+ * the pipeline (the UI disables input while running, but guard anyway).
  *
  * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void }} opts
  */

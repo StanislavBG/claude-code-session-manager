@@ -191,6 +191,53 @@ describe('silent flag threading (run -> waiting -> executor)', () => {
   })
 })
 
+describe('concurrency (default cap = 2)', () => {
+  let captured: Array<Record<string, unknown>>
+  let resolvers: Array<() => void>
+
+  beforeEach(() => {
+    captured = []
+    resolvers = []
+    chatRunner.__setExecutor((job) => {
+      captured.push(job)
+      return new Promise<void>((resolve) => { resolvers.push(resolve) })
+    })
+  })
+
+  it('runs 2 different tabs concurrently under the default cap', async () => {
+    chatRunner.run({ tabId: 'tab-conc-a', sessionId: 'sess-conc-a', prompt: 'a', cwd: '/tmp', resume: false })
+    chatRunner.run({ tabId: 'tab-conc-b', sessionId: 'sess-conc-b', prompt: 'b', cwd: '/tmp', resume: false })
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Both invoked the executor before either resolved.
+    expect(captured).toHaveLength(2)
+    expect(captured.map((j) => j.tabId)).toEqual(['tab-conc-a', 'tab-conc-b'])
+
+    resolvers.forEach((resolve) => resolve())
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('queues a 3rd concurrent tab behind the 2 already running', async () => {
+    chatRunner.run({ tabId: 'tab-conc-x', sessionId: 'sess-conc-x', prompt: 'x', cwd: '/tmp', resume: false })
+    chatRunner.run({ tabId: 'tab-conc-y', sessionId: 'sess-conc-y', prompt: 'y', cwd: '/tmp', resume: false })
+    chatRunner.run({ tabId: 'tab-conc-z', sessionId: 'sess-conc-z', prompt: 'z', cwd: '/tmp', resume: false })
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Only the first 2 lanes are filled; the 3rd tab is still waiting.
+    expect(captured).toHaveLength(2)
+    expect(captured.map((j) => j.tabId)).toEqual(['tab-conc-x', 'tab-conc-y'])
+
+    // Freeing a lane lets the 3rd tab start.
+    resolvers[0]()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(captured).toHaveLength(3)
+    expect(captured[2].tabId).toBe('tab-conc-z')
+
+    resolvers.slice(1).forEach((resolve) => resolve())
+    await new Promise((r) => setTimeout(r, 0))
+  })
+})
+
 describe('recordExchange gating (real executeRun path via a faked child process)', () => {
   beforeEach(() => {
     chatRunner.__setExecutor(null) // restore the real executeRun (earlier tests stub it)

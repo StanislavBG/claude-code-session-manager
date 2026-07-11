@@ -530,7 +530,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
                 {queuedPosition > 0 ? (
                   <span className="inline-flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-butter" />
-                    queued · #{queuedPosition} (one loop runs at a time)
+                    queued · #{queuedPosition} — waiting for a free run slot
                   </span>
                 ) : stream ? (
                   <span className="whitespace-pre-wrap">{stream}</span>

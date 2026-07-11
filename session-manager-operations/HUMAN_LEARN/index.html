@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Session Manager — Executive Overview</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+  --fg:#e6edf3; --dim:#9da7b3; --faint:#6e7681;
+  --blue:#60a5fa; --green:#34d399; --amber:#fbbf24; --violet:#a78bfa;
+  --cyan:#22d3ee;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--fg);
+  font:15px/1.6 ui-sans-serif,system-ui,sans-serif;padding:0 20px 60px}
+.wrap{max-width:820px;margin:0 auto}
+code,.loc{font-family:var(--mono);font-size:12px}
+.loc{color:var(--cyan);background:rgba(34,211,238,.08);
+  border:1px solid rgba(34,211,238,.25);border-radius:99px;padding:1px 9px;
+  white-space:nowrap}
+h1{font-size:26px;margin:36px 0 6px}
+h2{font-size:18px;margin:0 0 8px;color:var(--fg)}
+.tag{color:var(--dim);font-size:14px;margin-bottom:24px}
+.nav{position:sticky;top:0;z-index:5;background:rgba(13,17,23,.9);
+  backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+  padding:10px 0;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:6px}
+.nav a{font-size:12px;color:var(--dim);text-decoration:none;
+  border:1px solid var(--line);border-radius:99px;padding:4px 10px}
+.nav a:hover{color:var(--fg);border-color:var(--faint)}
+.feature{background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:18px 20px;margin-bottom:14px}
+.feature p{color:var(--dim);margin:6px 0}
+.refs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+footer{color:var(--faint);font-size:12px;margin-top:40px;
+  border-top:1px solid var(--line);padding-top:16px}
+a.ext{color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="nav">
+  <a href="#terminal">Terminal</a>
+  <a href="#scheduler">Scheduler</a>
+  <a href="#browser">Browser</a>
+  <a href="#voice">Voice</a>
+  <a href="#config-tabs">Config tabs</a>
+  <a href="#memory">Memory</a>
+  <a href="#usage-history">Usage &amp; History</a>
+  <a href="#web-remote">Web Remote</a>
+  <a href="#admin-mcp">Admin API / MCP</a>
+</div>
+
+<h1>Session Manager</h1>
+<div class="tag">Executive overview — what it is and its top features, briefly.</div>
+
+<div class="feature">
+<p>An Electron desktop app that acts as a local cockpit for the Claude Code CLI: a terminal
+you actually work in, plus 25+ tabs for configuration, observability, and scheduling around
+that terminal. A companion mobile web cockpit mirrors session state from the desktop app.</p>
+</div>
+
+<h2 id="terminal">Terminal sessions</h2>
+<div class="feature">
+<p>Each open tab is a real PTY running <code>claude</code>, managed by a per-tab
+<code>PtyManager</code>. The tab ID doubles as the Claude session UUID, so it passes straight
+through to <code>--session-id</code> and to transcript lookup — no separate ID mapping.</p>
+<div class="refs"><span class="loc">src/main/pty.cjs:59</span></div>
+</div>
+
+<h2 id="scheduler">Scheduler — unattended PRD execution</h2>
+<div class="feature">
+<p>Runs written task specs ("PRDs") as headless <code>claude -p</code> jobs, on a schedule or
+when API usage frees up. Policies: <code>manual</code>, <code>on-reset</code>, or
+<code>when-available</code> (default), which polls billing usage every minute to decide when
+to start/stop jobs around the 5-hour usage window. Concurrency is capped at 3 simultaneous
+jobs to avoid overloading the machine. A boot-time reconciler reaps jobs orphaned by a crash,
+and a periodic supervisor probe kills stuck poll-loops without killing the agent itself.</p>
+<div class="refs">
+<span class="loc">src/main/scheduler.cjs:253</span>
+<span class="loc">src/main/lib/schedulerConfig.cjs:10</span>
+<span class="loc">src/main/supervisor.cjs</span>
+</div>
+</div>
+
+<h2 id="browser">Capture panel</h2>
+<div class="feature">
+<p>A built-in browser view the agent can drive and capture from — selection-scoped page
+capture in agent/HTML/accessibility/CSS-selector modes, wired into the Capture panel UI.</p>
+<div class="refs"><span class="loc">src/renderer/components/tabs/Browser.tsx</span></div>
+</div>
+
+<h2 id="voice">Voice</h2>
+<div class="feature">
+<p>Hands-free dictation into the terminal: local voice-activity detection decides when
+you're speaking, transcription runs locally via Whisper, and a countdown auto-submits your
+utterance unless you keep talking.</p>
+<div class="refs"><span class="loc">src/renderer/state/voice.ts</span></div>
+</div>
+
+<h2 id="config-tabs">Configuration &amp; observability tabs</h2>
+<div class="feature">
+<p>One left-nav entry per concern: Settings, Permissions, Skills, Plugins, MCP Servers,
+Hooks, Subagents, Projects, Keybindings, System Prompt, Repo Viz, Search. Each follows one
+of two shared UI shapes — a scoped JSON editor (Settings) or a list-plus-detail view
+(Skills) — so new tabs stay consistent without reinventing layout.</p>
+<div class="refs">
+<span class="loc">src/renderer/components/LeftNav.tsx:12</span>
+<span class="loc">src/renderer/components/tabs/Settings.tsx</span>
+<span class="loc">src/renderer/components/tabs/Skills.tsx</span>
+</div>
+</div>
+
+<h2 id="memory">Memory Clusters</h2>
+<div class="feature">
+<p>Reads a project's saved workspace memories and, on request, groups them into named
+semantic clusters with cross-links — a browsable map of what the agent has remembered
+about the project.</p>
+<div class="refs"><span class="loc">src/main/memoryAggregate.cjs</span></div>
+</div>
+
+<h2 id="usage-history">Usage &amp; History</h2>
+<div class="feature">
+<p>Usage shows live billing/rate-limit standing pulled from Anthropic's usage endpoint.
+History is analytics over past sessions — cost and activity charts, not a session
+browser or resume point.</p>
+<div class="refs">
+<span class="loc">src/renderer/components/tabs/Usage.tsx</span>
+<span class="loc">src/renderer/components/tabs/History.tsx</span>
+</div>
+</div>
+
+<h2 id="web-remote">Web Remote (mobile)</h2>
+<div class="feature">
+<p>A same-origin relay lets a paired phone browser watch and lightly steer an active
+desktop session — session state, summaries, and gated remote-control actions — with the
+desktop app remaining the source of truth.</p>
+<div class="refs"><span class="loc">src/main/webRemote.cjs</span></div>
+</div>
+
+<h2 id="admin-mcp">Admin API &amp; MCP integration</h2>
+<div class="feature">
+<p>A loopback-only, token-authed HTTP API exposes a narrow scheduler-control surface
+(list jobs, reset a stuck one), wrapped as MCP tools so an agent — or this very app —
+can manage the job queue directly.</p>
+<div class="refs"><span class="loc">src/main/adminServer.cjs:11</span></div>
+</div>
+
+<footer>
+Sources: src/main/pty.cjs, src/main/scheduler.cjs, src/main/lib/schedulerConfig.cjs,
+src/main/supervisor.cjs, src/renderer/components/tabs/Browser.tsx, src/renderer/state/voice.ts,
+src/renderer/components/LeftNav.tsx, src/main/memoryAggregate.cjs, src/main/webRemote.cjs,
+src/main/adminServer.cjs · generated 2026-07-10
+</footer>
+
+</div>
+</body>
+</html>

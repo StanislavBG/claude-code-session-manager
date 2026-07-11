@@ -191,4 +191,4 @@ Landscape-level research (product categories, not deep-linked claims):
 - Grafana (dashboards, drill-down, thresholds): <https://grafana.com>
 - GitHub contribution graph (activity heatmap pattern): <https://github.com>
 - WakaTime (coding-time analytics/heatmaps): <https://wakatime.com>
-- Internal: `HUMAN_LEARN/index.html#knowledge-graph` (transcript pipeline), `docs/Browser-pre-Design.md` (companion pre-design spec / format).
+- Internal: `session-manager-operations/HUMAN_LEARN/index.html#knowledge-graph` (transcript pipeline), `docs/Browser-pre-Design.md` (companion pre-design spec / format).

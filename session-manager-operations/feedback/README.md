@@ -7,7 +7,7 @@ This folder is the intake queue for improvement requests, bug reports, and enhan
 Create **one file per item** in this folder:
 
 ```
-feedback/<yyyy-mm-dd>-<kebab-slug>.md        e.g. feedback/2026-06-10-scheduler-pause-banner.md
+session-manager-operations/feedback/<yyyy-mm-dd>-<kebab-slug>.md        e.g. session-manager-operations/feedback/2026-06-10-scheduler-pause-banner.md
 ```
 
 Don't append to existing files, don't bundle unrelated asks into one file, and don't edit items already in `processed/`.
@@ -60,9 +60,9 @@ take a different route if the codebase conventions say so.
 
 ## Lifecycle
 
-1. **Open**: file sits in `feedback/`.
+1. **Open**: file sits in `session-manager-operations/feedback/`.
 2. **Processing**: the processor reads every open item, implements accepted ones (code + tests + typecheck), declines others with written reasons.
-3. **Processed**: item is moved to `feedback/processed/` with a `## Resolution` section appended — what shipped (commit/PR), or why it was declined. The file is never silently deleted.
+3. **Processed**: item is moved to `session-manager-operations/feedback/processed/` with a `## Resolution` section appended — what shipped (commit/PR), or why it was declined. The file is never silently deleted.
 4. **Lessons**: recurring submission problems (vague repro, wrong folder, bundled asks) get folded back into this README so the next submitter does better.
 
 ## Status log

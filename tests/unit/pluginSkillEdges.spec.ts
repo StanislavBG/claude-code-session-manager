@@ -2,7 +2,7 @@
  * Cross-skill reference detection for a plugin's skill set.
  *
  * `detectSkillEdges` generalizes the hand-built node graph in
- * HUMAN_LEARN/SKILL_MAP.html: an edge A -> B whenever A's body text
+ * session-manager-operations/HUMAN_LEARN/SKILL_MAP.html: an edge A -> B whenever A's body text
  * references B by name (backticked, leading-slash, or bare whole-word).
  *
  * Source: src/renderer/lib/pluginSkills.ts.

@@ -6,7 +6,7 @@ import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 import { LearningPanel } from './LearningPanel'
 import { extractUrls } from '../lib/extractUrls'
-import { matchSlashNav, isUnroutedSlashCommand } from '../lib/slashCommand'
+import { decideSubmitAction } from '../lib/slashCommand'
 import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import type { NavKey } from './LeftNav'
@@ -359,14 +359,14 @@ export function TerminalChat({ tabId, cwd }: Props) {
 
   const submit = () => {
     if (running || !draft.trim()) return
-    const navKey = matchSlashNav(draft.trim())
-    if (navKey) {
+    const action = decideSubmitAction(draft.trim())
+    if (action.type === 'nav') {
       setDraft('')
-      window.dispatchEvent(new CustomEvent('sm:navigate', { detail: navKey }))
-      toast.info(`Opened ${NAV_LABELS[navKey]} — showing the live list`)
+      window.dispatchEvent(new CustomEvent('sm:navigate', { detail: action.key }))
+      toast.info(`Opened ${NAV_LABELS[action.key]} — showing the live list`)
       return
     }
-    if (isUnroutedSlashCommand(draft.trim())) {
+    if (action.type === 'warn-unrouted') {
       toast.info(
         'Interactive prompts (consent/approval dialogs) need a real terminal — ' +
           'use "Open raw session" if this command asks you something and nothing appears.',

@@ -18,6 +18,13 @@ const SLASH_NAV_COMMANDS: Record<string, NavKey> = {
   resume: 'history',
   keybindings: 'keybindings',
   scheduler: 'scheduler',
+  remote: 'remote',
+  projects: 'projects',
+  voice: 'voice',
+  repoviz: 'repoviz',
+  repo: 'repoviz',
+  search: 'search',
+  system: 'system-prompt',
 }
 
 export function matchSlashNav(input: string): NavKey | null {
@@ -42,4 +49,17 @@ export function isUnroutedSlashCommand(input: string): boolean {
   const command = trimmed.slice(1).split(/\s+/)[0]?.toLowerCase()
   if (!command) return false
   return matchSlashNav(input) === null
+}
+
+// The single decision point TerminalChat's submit() delegates to: whether an
+// input navigates locally, warns-and-still-sends, or sends to the headless
+// runner. Keeping this out of the component makes the branch unit-testable
+// without a DOM (this repo has no jsdom) — the component just switches on it.
+export type SubmitAction = { type: 'nav'; key: NavKey } | { type: 'warn-unrouted' } | { type: 'send' }
+
+export function decideSubmitAction(input: string): SubmitAction {
+  const navKey = matchSlashNav(input)
+  if (navKey) return { type: 'nav', key: navKey }
+  if (isUnroutedSlashCommand(input)) return { type: 'warn-unrouted' }
+  return { type: 'send' }
 }

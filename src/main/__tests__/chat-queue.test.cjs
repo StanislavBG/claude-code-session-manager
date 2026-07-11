@@ -1,8 +1,10 @@
 /**
  * chat-queue.test.cjs — unit tests for the chatRunner serial run queue (v0.34).
- * Asserts the "up to two loops at a time" guarantee: runs execute up to the
- * concurrency cap in FIFO order, and a queued (not-yet-started) run can be
- * cancelled without running.
+ * Asserts the "up to two loops at a time" guarantee: SILENT (automated probe)
+ * runs execute up to the concurrency cap in FIFO order, and a queued
+ * (not-yet-started) silent run can be cancelled without running. PRD 493:
+ * this cap/FIFO governs silent runs only — manual runs bypass it entirely
+ * (see chatRunner.spec.ts's "manual runs are uncapped" tests).
  *
  * Run: timeout 120 node --test src/main/__tests__/chat-queue.test.cjs
  */
@@ -17,7 +19,7 @@ const assert = require('node:assert/strict');
 const cr = require('../chatRunner.cjs');
 
 const tick = () => new Promise((r) => setImmediate(r));
-const job = (id) => ({ tabId: id, sessionId: id, prompt: 'x', cwd: '/', resume: false });
+const job = (id) => ({ tabId: id, sessionId: id, prompt: 'x', cwd: '/', resume: true, silent: true });
 
 test('runs execute up to the concurrency cap in FIFO order', async () => {
   const order = [];

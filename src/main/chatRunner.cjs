@@ -5,16 +5,19 @@
  * the terminal chat UI (PRD 319). Each call spawns a fresh process that exits
  * when done; no idle process lives between commands.
  *
- * v0.34: runs are serialized through a FIFO queue — ONE loop at a time by
- * default (SM_CHAT_CONCURRENCY overrides, clamped to [1,3]). Extra submits
- * queue instead of erroring; modeled on the scheduler's serialized queue so a
- * burst of commands across tabs can't fan out into the parallel-`claude -p`
- * OOM that SIGKILLed a job on 2026-06-26.
+ * v0.34: silent (automated) runs are serialized through a FIFO queue capped at
+ * CONCURRENCY_CAP (SM_CHAT_CONCURRENCY overrides, clamped to [1,3]); modeled
+ * on the scheduler's serialized queue so a burst of probes can't fan out into
+ * the parallel-`claude -p` OOM that SIGKILLed a job on 2026-06-26.
+ * PRD 493: manual, user-initiated runs bypass that lane entirely — they always
+ * execute immediately, uncapped, so a foreground send never queues behind
+ * another tab.
  *
  * Public surface:
  *   run({ tabId, sessionId, prompt, cwd, resume, silent }): void  — fire-and-forget enqueue.
- *     `silent` (PRD 470) still goes through the same per-tab FIFO lane, but suppresses the
- *     six turn-affecting broadcasts + recordExchange (see probeContextUsage below).
+ *     `silent` (PRD 470) runs still go through the CONCURRENCY_CAP FIFO lane and suppress the
+ *     six turn-affecting broadcasts + recordExchange (see probeContextUsage below). Non-silent
+ *     (manual) runs (PRD 493) execute immediately, uncapped, never entering the FIFO lane.
  *   cancel(tabId): void
  *   parseStopSignal(finalText): { questions: string[] } | null     — exported for reuse
  *   parseContextUsageMarkdown(text): { usedTokens, totalTokens, usedPct, categories } | null
@@ -228,12 +231,10 @@ const STOP_SIGNAL_INSTRUCTION =
   `Otherwise complete the task and end with a concise summary of what you did.\n\n`;
 
 // ─── Serial run queue (v0.34) ───────────────────────────────────────────────
-// CONCURRENCY_CAP=2 (default) → two loops can run at once, so a user actively
-// driving two different tabs at the same time doesn't queue behind each other.
-// The cap still stays inside the machine-wide "≤3 concurrent claude -p"
-// ceiling from CLAUDE.md (shared with the scheduler + manual runners);
-// SM_CHAT_CONCURRENCY still overrides, clamped to [1, 3]. The waiting list
-// FIFO-queues anything that can't start yet (e.g. a 3rd concurrent tab).
+// CONCURRENCY_CAP=2 (default) governs SILENT (automated probe) runs only —
+// two probes can run at once before a 3rd queues. SM_CHAT_CONCURRENCY still
+// overrides, clamped to [1, 3]. PRD 493: manual runs never touch this cap or
+// the `waiting` FIFO — see run() below.
 
 const DEFAULT_CAP = 2;
 // Clamp to [1, 3]; default 2 = "two loops at a time".
@@ -271,17 +272,35 @@ function broadcast(channel, payload) {
 // ─── Public queue entry ─────────────────────────────────────────────────────
 
 /**
- * Enqueue a chat run for a tab. Fire-and-forget — results arrive via IPC. With
- * CONCURRENCY_CAP=2 (default) up to two runs execute at once; extra submits
- * FIFO-queue and are announced via chat:run:queued. De-dupes a tab already in
- * the pipeline (the UI disables input while running, but guard anyway).
+ * Enqueue a chat run for a tab. Fire-and-forget — results arrive via IPC.
+ * Silent (automated probe) runs go through the CONCURRENCY_CAP=2 (default)
+ * FIFO lane — extra submits queue and are announced via chat:run:queued.
+ * Manual (user-initiated) runs (PRD 493) execute immediately and never enter
+ * that lane. De-dupes a tab already in the pipeline (the UI disables input
+ * while running, but guard anyway).
  *
  * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void }} opts
  */
 function run(opts) {
+  // Per-tab exclusivity guard — unrelated to the cross-tab cap; must hold for
+  // BOTH manual and silent runs so a manual send can't race a /context probe
+  // for the same tab against the same --resume sessionId.
   if (inFlight.has(opts.tabId) || waiting.some((w) => w.tabId === opts.tabId)) return;
-  waiting.push(opts);
-  pump();
+
+  if (opts.silent === true) {
+    // Automated probe: keep the CONCURRENCY_CAP FIFO lane machinery (protects
+    // against the 2026-06-10 parallel-claude-p OOM).
+    waiting.push(opts);
+    pump();
+    return;
+  }
+
+  // PRD 493: manual/user-initiated sends are intentionally UNCAPPED — never
+  // queue behind another tab. This means the ≤3-concurrent-claude-p ceiling in
+  // CLAUDE.md no longer strictly holds for foreground sessions (accepted
+  // tradeoff). executeRun still registers in inFlight synchronously, so the
+  // per-tab guard above and cancel() keep working; no activeCount, no pump.
+  executor(opts).catch(() => { /* executeRun never rejects; defensive */ });
 }
 
 // Fill open lanes FIFO up to CONCURRENCY_CAP, then announce queue positions for

@@ -204,9 +204,12 @@ describe('concurrency (default cap = 2)', () => {
     })
   })
 
-  it('runs 2 different tabs concurrently under the default cap', async () => {
-    chatRunner.run({ tabId: 'tab-conc-a', sessionId: 'sess-conc-a', prompt: 'a', cwd: '/tmp', resume: false })
-    chatRunner.run({ tabId: 'tab-conc-b', sessionId: 'sess-conc-b', prompt: 'b', cwd: '/tmp', resume: false })
+  // PRD 493: CONCURRENCY_CAP now governs SILENT (automated probe) runs only —
+  // these were written under PRD 486 against plain (manual) run() calls, so
+  // they're updated to silent:true to keep testing the FIFO lane they target.
+  it('runs 2 different silent probes concurrently under the default cap', async () => {
+    chatRunner.run({ tabId: 'tab-conc-a', sessionId: 'sess-conc-a', prompt: 'a', cwd: '/tmp', resume: true, silent: true })
+    chatRunner.run({ tabId: 'tab-conc-b', sessionId: 'sess-conc-b', prompt: 'b', cwd: '/tmp', resume: true, silent: true })
     await new Promise((r) => setTimeout(r, 0))
 
     // Both invoked the executor before either resolved.
@@ -217,10 +220,10 @@ describe('concurrency (default cap = 2)', () => {
     await new Promise((r) => setTimeout(r, 0))
   })
 
-  it('queues a 3rd concurrent tab behind the 2 already running', async () => {
-    chatRunner.run({ tabId: 'tab-conc-x', sessionId: 'sess-conc-x', prompt: 'x', cwd: '/tmp', resume: false })
-    chatRunner.run({ tabId: 'tab-conc-y', sessionId: 'sess-conc-y', prompt: 'y', cwd: '/tmp', resume: false })
-    chatRunner.run({ tabId: 'tab-conc-z', sessionId: 'sess-conc-z', prompt: 'z', cwd: '/tmp', resume: false })
+  it('queues a 3rd concurrent silent probe behind the 2 already running', async () => {
+    chatRunner.run({ tabId: 'tab-conc-x', sessionId: 'sess-conc-x', prompt: 'x', cwd: '/tmp', resume: true, silent: true })
+    chatRunner.run({ tabId: 'tab-conc-y', sessionId: 'sess-conc-y', prompt: 'y', cwd: '/tmp', resume: true, silent: true })
+    chatRunner.run({ tabId: 'tab-conc-z', sessionId: 'sess-conc-z', prompt: 'z', cwd: '/tmp', resume: true, silent: true })
     await new Promise((r) => setTimeout(r, 0))
 
     // Only the first 2 lanes are filled; the 3rd tab is still waiting.
@@ -235,6 +238,111 @@ describe('concurrency (default cap = 2)', () => {
 
     resolvers.slice(1).forEach((resolve) => resolve())
     await new Promise((r) => setTimeout(r, 0))
+  })
+})
+
+describe('manual runs are uncapped (PRD 493)', () => {
+  let captured: Array<Record<string, unknown>>
+  let resolvers: Array<() => void>
+
+  beforeEach(() => {
+    captured = []
+    resolvers = []
+    chatRunner.__setExecutor((job) => {
+      captured.push(job)
+      return new Promise<void>((resolve) => { resolvers.push(resolve) })
+    })
+  })
+
+  it('two manual runs for different tabs both invoke the executor immediately, even with cap effectively 1', async () => {
+    // Two DIFFERENT tabs, both manual (silent unset). If manual runs shared
+    // the silent lane's cap, the 2nd would sit in `waiting` until the 1st
+    // resolved. It must not.
+    chatRunner.run({ tabId: 'tab-manual-a', sessionId: 'sess-manual-a', prompt: 'a', cwd: '/tmp', resume: false })
+    chatRunner.run({ tabId: 'tab-manual-b', sessionId: 'sess-manual-b', prompt: 'b', cwd: '/tmp', resume: false })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(captured).toHaveLength(2)
+    expect(captured.map((j) => j.tabId).sort()).toEqual(['tab-manual-a', 'tab-manual-b'])
+
+    resolvers.forEach((resolve) => resolve())
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('a manual run does not inflate activeCount / starve a silent probe on another tab', async () => {
+    // Fill both silent lanes first.
+    chatRunner.run({ tabId: 'tab-sil-x', sessionId: 'sess-sil-x', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
+    chatRunner.run({ tabId: 'tab-sil-y', sessionId: 'sess-sil-y', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(captured).toHaveLength(2)
+
+    // A burst of manual runs across other tabs must not block/queue a 3rd
+    // silent probe waiting behind the 2 already-active silent lanes, nor
+    // themselves queue.
+    chatRunner.run({ tabId: 'tab-man-1', sessionId: 'sess-man-1', prompt: '1', cwd: '/tmp', resume: false })
+    chatRunner.run({ tabId: 'tab-man-2', sessionId: 'sess-man-2', prompt: '2', cwd: '/tmp', resume: false })
+    chatRunner.run({ tabId: 'tab-man-3', sessionId: 'sess-man-3', prompt: '3', cwd: '/tmp', resume: false })
+    await new Promise((r) => setTimeout(r, 0))
+
+    // All 3 manual runs started immediately (on top of the 2 active silent lanes).
+    expect(captured).toHaveLength(5)
+    expect(captured.filter((j) => j.tabId?.toString().startsWith('tab-man-'))).toHaveLength(3)
+
+    resolvers.forEach((resolve) => resolve())
+    await new Promise((r) => setTimeout(r, 0))
+  })
+})
+
+describe('per-tab exclusivity across manual + silent tracks (PRD 493)', () => {
+  // Uses the REAL executeRun (via the faked spawn/child from the top of this
+  // file), because inFlight bookkeeping — which the per-tab guard reads — is
+  // only populated by the real executeRun, not the __setExecutor stub.
+  beforeEach(() => {
+    chatRunner.__setExecutor(null)
+    recordExchangeCalls.length = 0
+    nextChild = null
+  })
+
+  it('a silent probe for a tab already running a manual run is dropped (per-tab guard holds)', async () => {
+    const sent: Array<{ channel: string; payload: unknown }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: unknown) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.run({ tabId: 'tab-excl', sessionId: 'sess-excl', prompt: 'hello', cwd: '/tmp', resume: false })
+    await flush()
+    const manualChild = nextChild
+    expect(manualChild).not.toBeNull()
+
+    // While the manual run is still active (child hasn't exited), a silent
+    // probe for the SAME tab must be dropped, not queued or executed —
+    // no new child is spawned.
+    nextChild = null
+    chatRunner.run({ tabId: 'tab-excl', sessionId: 'sess-excl', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
+    await flush()
+    expect(nextChild).toBeNull()
+
+    emitResultLine(manualChild!, 'manual result')
+    await flush()
+    expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true)
+  })
+
+  it('a manual run for a tab already running a silent probe is dropped (per-tab guard holds)', async () => {
+    chatRunner.run({ tabId: 'tab-excl-2', sessionId: 'sess-excl-2', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
+    await flush()
+    const silentChild = nextChild
+    expect(silentChild).not.toBeNull()
+
+    // While the silent probe is still active, a manual run for the SAME tab
+    // must be dropped — no new child is spawned.
+    nextChild = null
+    chatRunner.run({ tabId: 'tab-excl-2', sessionId: 'sess-excl-2', prompt: 'hello', cwd: '/tmp', resume: false })
+    await flush()
+    expect(nextChild).toBeNull()
+
+    emitResultLine(silentChild!, 'silent result')
+    await flush()
   })
 })
 

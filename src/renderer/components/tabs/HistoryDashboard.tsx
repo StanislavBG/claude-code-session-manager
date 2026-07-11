@@ -3,6 +3,10 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, Responsi
 import { EmptyState } from '../ui/EmptyState'
 import type { DayProjectRow, HistoryAggregateResult } from '../../../preload/api'
 import { CHART_CATEGORICAL, categoricalColor, HEAT_RAMP } from '../../lib/chartPalette'
+import { computeDelta, computeBudgetProjection, type Delta } from '../../lib/historyMath'
+
+const BUDGET_CAP_STORAGE_KEY = 'sm.history.budgetCapUsd'
+const DEFAULT_BUDGET_CAP_USD = 50
 
 type MetricKey = 'promptCount' | 'inputTokens' | 'outputTokens' | 'sessionCount' | 'errorCount' | 'estimatedCostUsd'
 type SortDir = 'asc' | 'desc'
@@ -83,6 +87,16 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
   const [tick, setTick] = useState(0)
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null)
   const [heatMetric, setHeatMetric] = useState<'cost' | 'sessions' | 'tokens'>('cost')
+  const [prevResult, setPrevResult] = useState<HistoryAggregateResult | null>(null)
+  const [budgetCapUsd, setBudgetCapUsd] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem(BUDGET_CAP_STORAGE_KEY)
+      const parsed = raw === null ? NaN : Number(raw)
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BUDGET_CAP_USD
+    } catch {
+      return DEFAULT_BUDGET_CAP_USD
+    }
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -105,6 +119,40 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
     // not an input. Including it would re-fire the effect after every fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromDate, toDate, tick])
+
+  // Prior-period fetch for the delta chips — same aggregate() call, shifted
+  // back by the current range's length (inclusive day count) so a 30-day
+  // range compares against the 30 days immediately preceding it. Mirrors the
+  // primary fetch's cancellation guard so a fast date-range change doesn't
+  // leave a stale previous-period result rendered.
+  useEffect(() => {
+    let cancelled = false
+    const [fy, fm, fd] = fromDate.split('-').map(Number)
+    const [ty, tm, td] = toDate.split('-').map(Number)
+    const start = new Date(fy, fm - 1, fd)
+    const end = new Date(ty, tm - 1, td)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      setPrevResult(null)
+      return
+    }
+    const rangeDays = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1
+    const prevEnd = new Date(start)
+    prevEnd.setDate(prevEnd.getDate() - 1)
+    const prevStart = new Date(start)
+    prevStart.setDate(prevStart.getDate() - rangeDays)
+    window.api.history.aggregate({
+      fromDate: prevStart.toLocaleDateString('en-CA'),
+      toDate: prevEnd.toLocaleDateString('en-CA'),
+    })
+      .then((r) => { if (!cancelled) setPrevResult(r) })
+      .catch(() => { if (!cancelled) setPrevResult(null) })
+    return () => { cancelled = true }
+  }, [fromDate, toDate])
+
+  // Persist the user-set monthly budget cap across sessions.
+  useEffect(() => {
+    try { localStorage.setItem(BUDGET_CAP_STORAGE_KEY, String(budgetCapUsd)) } catch { /* quota / private mode — ignore */ }
+  }, [budgetCapUsd])
 
   // Reset the first-load gate when the date range changes so the user sees
   // a "scanning…" affordance, not a stale chart, while the new range fetches.
@@ -173,6 +221,51 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
       estimatedCostUsd += r.estimatedCostUsd
     }
     return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
+  }, [filteredRows])
+
+  // Previous-period rows, filtered the same way as the primary range's
+  // filteredRows, so the delta chips compare apples to apples under the
+  // active project filter.
+  const prevFilteredRows = useMemo<DayProjectRow[]>(() => {
+    if (!prevResult) return []
+    if (!projectFilter.trim()) return prevResult.rows
+    const q = projectFilter.toLowerCase()
+    return prevResult.rows.filter((r) => r.projectCwd.toLowerCase().includes(q))
+  }, [prevResult, projectFilter])
+
+  const prevTotals = useMemo(() => {
+    let promptCount = 0, inputTokens = 0, outputTokens = 0, sessionCount = 0, estimatedCostUsd = 0
+    for (const r of prevFilteredRows) {
+      promptCount += r.promptCount
+      inputTokens += r.inputTokens
+      outputTokens += r.outputTokens
+      sessionCount += r.sessionCount
+      estimatedCostUsd += r.estimatedCostUsd
+    }
+    return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
+  }, [prevFilteredRows])
+
+  const deltas = useMemo(() => ({
+    promptCount: computeDelta(totals.promptCount, prevTotals.promptCount),
+    inputTokens: computeDelta(totals.inputTokens, prevTotals.inputTokens),
+    outputTokens: computeDelta(totals.outputTokens, prevTotals.outputTokens),
+    sessionCount: computeDelta(totals.sessionCount, prevTotals.sessionCount),
+    estimatedCostUsd: computeDelta(totals.estimatedCostUsd, prevTotals.estimatedCostUsd),
+  }), [totals, prevTotals])
+
+  // Month-to-date spend + run-rate projection for the Monthly budget card.
+  // Computed client-side from already-fetched filteredRows — no new IPC call.
+  const budget = useMemo(() => {
+    const now = new Date()
+    const monthPrefix = now.toLocaleDateString('en-CA').slice(0, 7)
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const daysElapsed = now.getDate()
+    let mtdSpend = 0
+    for (const r of filteredRows) {
+      if (r.date.startsWith(monthPrefix)) mtdSpend += r.estimatedCostUsd
+    }
+    const projectedSpend = computeBudgetProjection(mtdSpend, daysElapsed, daysInMonth)
+    return { mtdSpend, projectedSpend, daysElapsed, daysInMonth }
   }, [filteredRows])
 
   // Per-model spend + cache-hit totals across all filtered rows. Follows the
@@ -347,12 +440,25 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
       </div>
 
       <div className="grid grid-cols-5 gap-3">
-        <Stat label="total prompts" value={totals.promptCount.toLocaleString()} />
-        <Stat label="input tokens" value={totals.inputTokens.toLocaleString()} />
-        <Stat label="output tokens" value={totals.outputTokens.toLocaleString()} />
-        <Stat label="sessions" value={totals.sessionCount.toLocaleString()} />
-        <Stat label="est. cost" value={`$${totals.estimatedCostUsd.toFixed(4)}`} highlight />
+        <Stat label="total prompts" value={totals.promptCount.toLocaleString()} delta={deltas.promptCount} />
+        <Stat label="input tokens" value={totals.inputTokens.toLocaleString()} delta={deltas.inputTokens} />
+        <Stat label="output tokens" value={totals.outputTokens.toLocaleString()} delta={deltas.outputTokens} />
+        <Stat label="sessions" value={totals.sessionCount.toLocaleString()} delta={deltas.sessionCount} />
+        <Stat
+          label="est. cost"
+          value={`$${totals.estimatedCostUsd.toFixed(4)}`}
+          highlight
+          delta={deltas.estimatedCostUsd}
+          goodDirection="down"
+        />
       </div>
+
+      <BudgetCard
+        mtdSpend={budget.mtdSpend}
+        projectedSpend={budget.projectedSpend}
+        capUsd={budgetCapUsd}
+        onCapChange={setBudgetCapUsd}
+      />
 
       <div className="border border-line rounded bg-bg-elev p-4">
         <div className="flex items-center justify-between mb-3">
@@ -561,11 +667,99 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
   )
 }
 
-function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function Stat({
+  label,
+  value,
+  highlight,
+  delta,
+  goodDirection = 'neutral',
+}: {
+  label: string
+  value: string
+  highlight?: boolean
+  delta?: Delta
+  /** Which direction counts as "good" for coloring the delta chip. 'neutral' renders an uncolored chip. */
+  goodDirection?: 'up' | 'down' | 'neutral'
+}) {
   return (
     <div className="border border-line rounded p-3 bg-bg-elev">
       <div className="text-xs text-fg-faint uppercase tracking-wider mb-1">{label}</div>
       <div className={`text-lg font-mono ${highlight ? 'text-accent' : 'text-fg'}`}>{value}</div>
+      {delta && <DeltaChip delta={delta} goodDirection={goodDirection} />}
+    </div>
+  )
+}
+
+// Prior-period % change indicator. Only the `cost` tile passes a non-neutral
+// goodDirection (decreasing cost is "good") — prompts/tokens/sessions render
+// an uncolored, purely informational chip per the mockup's goodDown semantics.
+function DeltaChip({ delta, goodDirection }: { delta: Delta; goodDirection: 'up' | 'down' | 'neutral' }) {
+  if (delta.pct === null) {
+    return <div className="text-[10px] text-fg-faint mt-1">— vs prior period</div>
+  }
+  const isGood = goodDirection !== 'neutral' && delta.direction === goodDirection
+  const isBad = goodDirection !== 'neutral' && delta.direction !== 'flat' && delta.direction !== goodDirection
+  const tone = isGood ? 'text-sage-dark' : isBad ? 'text-red-400' : 'text-fg-faint'
+  const arrow = delta.direction === 'up' ? '▲' : delta.direction === 'down' ? '▼' : '·'
+  return (
+    <div className={`text-[10px] mt-1 font-mono ${tone}`}>
+      {arrow} {Math.abs(delta.pct).toFixed(1)}% vs prior period
+    </div>
+  )
+}
+
+function BudgetCard({
+  mtdSpend,
+  projectedSpend,
+  capUsd,
+  onCapChange,
+}: {
+  mtdSpend: number
+  projectedSpend: number
+  capUsd: number
+  onCapChange: (cap: number) => void
+}) {
+  const overBudget = projectedSpend > capUsd
+  const pctOfCap = capUsd > 0 ? Math.min(100, (mtdSpend / capUsd) * 100) : 0
+  return (
+    <div className="border border-line rounded bg-bg-elev p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs uppercase tracking-wider text-fg">Monthly budget</h3>
+        <label className="flex items-center gap-1.5 text-[10px] text-fg-faint">
+          cap
+          <span className="text-fg-faint">$</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={capUsd}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              if (Number.isFinite(v) && v > 0) onCapChange(v)
+            }}
+            className="w-16 bg-bg border border-line rounded px-1.5 py-0.5 text-xs text-fg font-mono"
+          />
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <Stat label="month-to-date" value={`$${mtdSpend.toFixed(4)}`} />
+        <Stat
+          label="projected (run-rate)"
+          value={`$${projectedSpend.toFixed(4)}`}
+          highlight={!overBudget}
+        />
+      </div>
+      <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
+        <div
+          className={`h-full ${overBudget ? 'bg-red-400' : 'bg-sage'}`}
+          style={{ width: `${Math.max(pctOfCap, pctOfCap > 0 ? 2 : 0)}%` }}
+        />
+      </div>
+      <div className={`text-[10px] mt-1.5 font-mono ${overBudget ? 'text-red-400' : 'text-fg-faint'}`}>
+        {overBudget
+          ? `projected to exceed $${capUsd.toFixed(0)} cap`
+          : `${pctOfCap.toFixed(0)}% of $${capUsd.toFixed(0)} cap`}
+      </div>
     </div>
   )
 }

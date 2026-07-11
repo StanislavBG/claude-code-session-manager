@@ -1,7 +1,7 @@
 ---
 name: my-feedback
 description: >-
-  File a feedback/enhancement request FROM the current project INTO another
+  File a feedback or enhancement request FROM the current project INTO another
   project's inbound feedback folder, following that project's own README
   convention. The cross-project complement of /process-feedback (which works the
   *current* project's inbox). Use whenever the user says "/my-feedback to X",
@@ -38,21 +38,25 @@ The invocation is `/my-feedback to <<project>>` (or "send feedback to
   <project>`."* Then list candidate sibling projects that have an intake folder:
   ```bash
   for d in ~/Projects/*/; do
-    [ -d "$d/feedback" ] && echo "  - $(basename "$d")  (feedback/)"
+    [ -d "$d/session-manager-operations/feedback" ] && echo "  - $(basename "$d")  (session-manager-operations/feedback/)"
   done
   ```
   and stop.
-- Resolve the path: `~/Projects/<project>/feedback/`. This is the **one**
-  canonical folder name — do not accept or invent variants (`external-feedback/`,
-  `feedback-inbox/`, etc.) even if a near-miss directory exists; a stray
-  differently-named folder is drift, not a valid convention (burrow's
-  `external-feedback/` existed for ~2.5 weeks from exactly this mistake before
-  being merged back into `feedback/` on 2026-07-10 — don't recreate it, in burrow
-  or anywhere else). Fuzzy-match a near miss only to confirm it's actually named
-  `feedback/`, not to accept a differently-named folder as equivalent.
-- **If the target has no `feedback/` folder, STOP.** Don't invent one under any
-  name — say the project doesn't accept feedback this way and ask how to proceed
-  (it may take requests via issues, a different folder, or not at all).
+- Resolve the path: `~/Projects/<project>/session-manager-operations/feedback/`.
+  This is the **one** canonical folder name — do not accept or invent variants
+  (`external-feedback/`, `feedback-inbox/`, a root-level `feedback` folder, etc.) even
+  if a near-miss directory exists; a stray differently-named folder is drift,
+  not a valid convention (burrow's `external-feedback/` existed for ~2.5 weeks
+  from exactly this mistake before being merged back into `feedback` on
+  2026-07-10 — don't recreate it, in burrow or anywhere else). Fuzzy-match a
+  near miss only to confirm it's actually named
+  `session-manager-operations/feedback/`, not to accept a differently-named
+  folder as equivalent. All session-manager per-project operations live under
+  `session-manager-operations/`.
+- **If the target has no `session-manager-operations/feedback/` folder, STOP.**
+  Don't invent one under any name — say the project doesn't accept feedback
+  this way and ask how to proceed (it may take requests via issues, a
+  different folder, or not at all).
 
 ## 1. Read the target's README FIRST — it is the authority
 
@@ -61,9 +65,9 @@ unique per project** (file-naming scheme, required sections, the status-log
 table, the closing ritual). Read it before writing anything:
 
 ```bash
-cat ~/Projects/<project>/feedback/README.md
-ls  ~/Projects/<project>/feedback/                # open items + numbering
-ls  ~/Projects/<project>/feedback/processed/ 2>/dev/null   # closed examples to match
+cat ~/Projects/<project>/session-manager-operations/feedback/README.md
+ls  ~/Projects/<project>/session-manager-operations/feedback/                # open items + numbering
+ls  ~/Projects/<project>/session-manager-operations/feedback/processed/ 2>/dev/null   # closed examples to match
 ```
 
 Read one **processed** example end-to-end to copy the house format exactly — the

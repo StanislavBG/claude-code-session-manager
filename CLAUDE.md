@@ -2,6 +2,8 @@
 
 Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, Usage, Subagents, History, Scheduler, Knowledge Graph, Web Remote, Memory, Permissions, etc.). Mobile web cockpit at bilko.run (v2: same-origin relay + session state/summary protocol).
 
+All session-manager per-project operations (feedback intake, the `/explain-to-me` knowledge base) live under `session-manager-operations/` at the repo root — e.g. `session-manager-operations/feedback/`, `session-manager-operations/HUMAN_LEARN/`.
+
 ## Stack
 
 Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Whisper (ricky0123/vad-web + onnxruntime-web) for voice.

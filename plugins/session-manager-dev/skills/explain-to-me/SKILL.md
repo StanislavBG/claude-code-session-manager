@@ -1,28 +1,31 @@
 ---
 name: explain-to-me
 description: >-
-  Build and maintain HUMAN_LEARN/ — a human-readable, visually-rich HTML
-  knowledge base at the repo root that explains how this project actually works.
-  Deep-probes the codebase for a given topic/component (real file:line refs,
-  real constants, real on-disk state — never invented), then writes or updates a
-  clean, self-contained HTML — one combined component page (HUMAN_LEARN/index.html)
-  plus a separate skill-chain map (HUMAN_LEARN/SKILL_MAP.html) for the local-dev
-  workflow — with advanced CSS, flow diagrams, sticky nav, collapsible tables. Use
-  whenever the user says "/explain-to-me X", "explain X to me", "explain how X
-  works", "document X for me", "add X to HUMAN_LEARN", "make me a human-readable
-  page for X", or "update the skill map". Keywords: explain, explain-to-me,
-  human-learn, HUMAN_LEARN, skill map, document, one-pager, how does X work, visual
-  explainer, knowledge base.
+  Build and maintain session-manager-operations/HUMAN_LEARN/ — a human-readable,
+  visually-rich HTML knowledge base at the repo root that explains how this
+  project actually works. Deep-probes the codebase for a given topic/component
+  (real file:line refs, real constants, real on-disk state — never invented),
+  then writes or updates a clean, self-contained HTML — one combined component
+  page (session-manager-operations/HUMAN_LEARN/index.html) plus a separate
+  skill-chain map (session-manager-operations/HUMAN_LEARN/SKILL_MAP.html) for
+  the local-dev workflow — with advanced CSS, flow diagrams, sticky nav,
+  collapsible tables. Use whenever the user says "/explain-to-me X", "explain X
+  to me", "explain how X works", "document X for me", "add X to HUMAN_LEARN",
+  "make me a human-readable page for X", or "update the skill map". Keywords:
+  explain, explain-to-me, human-learn, HUMAN_LEARN, skill map, document,
+  one-pager, how does X work, visual explainer, knowledge base.
 model: opus
 ---
 
 # explain-to-me
 
 Turn a question about this codebase ("explain how the scheduler works") into a
-**clean, visually-rich HTML one-pager** in `HUMAN_LEARN/` at the repo root, and
-keep that folder's index coherent as it grows. The output is for a *human*
-catching up on the project — not for the model. It is the human-facing complement
-to the Memory tab (which is Claude's own terse recall store).
+**clean, visually-rich HTML one-pager** in `session-manager-operations/HUMAN_LEARN/`
+at the repo root, and keep that folder's index coherent as it grows. The output
+is for a *human* catching up on the project — not for the model. It is the
+human-facing complement to the Memory tab (which is Claude's own terse recall
+store). All session-manager per-project operations live under
+`session-manager-operations/`.
 
 The bar: **clean, explanatory, visually rich, self-contained** (opens directly in
 a browser — no build, no external network deps). Every claim grounded in the
@@ -53,26 +56,35 @@ If you can't state it in the present tense without a date or a PRD, cut it.
 ## Where things live
 
 - Repo root: `git rev-parse --show-toplevel` (fall back to cwd if not a git repo).
-- Knowledge base: `<root>/HUMAN_LEARN/`. Create it if missing.
-- **One combined page** — `HUMAN_LEARN/index.html`. Every component explainer is a
-  `<section>` in this single file, under a sticky section-nav, ordered so the page
-  reads top-to-bottom as one narrative. A new topic becomes a **new `<section>`**,
-  never a new file. One navigable page that logically follows itself beats a folder
-  of thin pages; do not re-introduce per-topic `.html` files.
-- **The Skill Map** — `HUMAN_LEARN/SKILL_MAP.html`, a **separate, dedicated** page
-  (NOT a section of index.html) that visualizes the *local-development skill chain*:
-  the two intakes (interactive human prompt; agent feedback via `/process-feedback`)
-  converging on `/develop`, which owns PRD authoring + reads `standards.md`, queues onto the
-  scheduler, and gates with review/verify — plus `/my-feedback` outbound. It is the
-  "how I build on this project" companion to index.html's "how this project works."
-  index.html links to it from the nav; it links back.
+- Knowledge base: `<root>/session-manager-operations/HUMAN_LEARN/`. Create it
+  (and `session-manager-operations/` if needed) if missing.
+- **One combined page** — `session-manager-operations/HUMAN_LEARN/index.html`.
+  Every component explainer is a `<section>` in this single file, under a sticky
+  section-nav, ordered so the page reads top-to-bottom as one narrative. A new
+  topic becomes a **new `<section>`**, never a new file. One navigable page that
+  logically follows itself beats a folder of thin pages; do not re-introduce
+  per-topic `.html` files.
+- **The Skill Map** — `session-manager-operations/HUMAN_LEARN/SKILL_MAP.html`, a
+  **separate, dedicated** page (NOT a section of index.html) that visualizes the
+  *local-development skill chain*: the two intakes (interactive human prompt;
+  agent feedback via `/process-feedback`) converging on `/develop`, which owns
+  PRD authoring + reads `standards.md`, queues onto the scheduler, and gates with
+  review/verify — plus `/my-feedback` outbound. It is the "how I build on this
+  project" companion to index.html's "how this project works." index.html links
+  to it from the nav; it links back.
 
 ## Workflow
 
-1. **Locate & survey.** Find the repo root + `HUMAN_LEARN/`. If `index.html`
-   exists, read it to see what's already documented — you are *maintaining* a
-   knowledge base, not starting fresh. If the topic already has a page/section,
-   you are updating it, not duplicating it.
+0. **Self-migrate a legacy root-level folder first.** If `HUMAN_LEARN/` exists
+   at the repo root **and** `session-manager-operations/HUMAN_LEARN/` does not,
+   relocate it now — `mkdir -p session-manager-operations` (if needed), then
+   `git mv HUMAN_LEARN session-manager-operations/HUMAN_LEARN` when the repo is
+   git-tracked, else a plain `mv`. This converges any project this skill runs
+   in to the new layout even if its bulk-relocation PRD hasn't landed yet.
+1. **Locate & survey.** Find the repo root + `session-manager-operations/HUMAN_LEARN/`.
+   If `index.html` exists, read it to see what's already documented — you are
+   *maintaining* a knowledge base, not starting fresh. If the topic already has
+   a page/section, you are updating it, not duplicating it.
 2. **Deep-probe the topic.** Read the real code. Gather exact `file:line`
    references, real constant names + values, and real on-disk state where it
    matters (run `ls`/`cat`/`jq` to ground claims in what actually exists). For a
@@ -98,8 +110,9 @@ If you can't state it in the present tense without a date or a PRD, cut it.
    in `~/.claude/skills/`, a changed Role/Never contract, a re-routed step in the
    chain — refresh `SKILL_MAP.html` (its chain diagram + the role-contract table +
    the two walkthroughs) so it stays a faithful map of the actual files on disk.
-7. **Tell the user the path** to open (`HUMAN_LEARN/index.html` or
-   `HUMAN_LEARN/SKILL_MAP.html`, optionally with a `#anchor`). Do not commit unless asked.
+7. **Tell the user the path** to open (`session-manager-operations/HUMAN_LEARN/index.html`
+   or `session-manager-operations/HUMAN_LEARN/SKILL_MAP.html`, optionally with a
+   `#anchor`). Do not commit unless asked.
 
 ## Grounding rules (non-negotiable)
 

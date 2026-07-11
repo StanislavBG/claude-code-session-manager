@@ -8,8 +8,9 @@ description: >-
   execution from there), and fold lessons back into the folder's README so
   future feedback (written by other agents/projects) gets better. Use whenever the user says "/process-feedback",
   "review the feedback folder", "work through the feedback", "any open
-  feedback?", or drops new files into feedback/. Keywords: feedback, intake,
-  cross-project requests, process feedback, triage feedback.
+  feedback?", or drops new files into session-manager-operations/feedback/.
+  Keywords: feedback, intake, cross-project requests, process feedback, triage
+  feedback.
 model: opus
 ---
 
@@ -21,15 +22,18 @@ an interactive human prompt. It evaluates inbound feedback, dispatches the codea
 RESOLUTION, archive). It does **not** implement, and it does **not** re-specify how PRDs are
 tracked — that lives once, in `/develop` Phase 2.
 
-Work the project's intra-project feedback intake (`feedback/` at the repo root —
-this is the **one** canonical name; do not create or treat a differently-named
-folder like `external-feedback/` as equivalent, even for cross-service requests
-— that split caused ~2.5 weeks of drifted duplicate tracking in burrow before
-being merged back on 2026-07-10). Each file is a request from an
-upstream/downstream service in the same stack (e.g. Burrow ⇄ signal-builder ⇄
-social-signals-trader) — cross-service origin does not mean a different folder,
-it's still just `feedback/`. The folder's own `README.md` is the authority on
-file conventions — read it first; the steps below are the process.
+Work the project's intra-project feedback intake
+(`session-manager-operations/feedback/` at the repo root — this is the **one**
+canonical name; do not create or treat a differently-named folder like
+`external-feedback/` as equivalent, even for cross-service requests — that
+split caused ~2.5 weeks of drifted duplicate tracking in burrow before being
+merged back on 2026-07-10). Each file is a request from an upstream/downstream
+service in the same stack (e.g. Burrow ⇄ signal-builder ⇄ social-signals-trader)
+— cross-service origin does not mean a different folder, it's still just
+`session-manager-operations/feedback/`. The folder's own `README.md` is the
+authority on file conventions — read it first; the steps below are the
+process. All session-manager per-project operations live under
+`session-manager-operations/`.
 
 **Core principle:** this skill *triages and dispatches*; it does not implement.
 Anything that requires writing code for this project is decomposed and queued as
@@ -55,15 +59,27 @@ prevent.
 
 ## Steps
 
+### 0a. Self-migrate a legacy root-level folder first
+
+Before anything else, check for the pre-migration layout: if a legacy
+`feedback` folder exists at the repo root **and**
+`session-manager-operations/feedback/` does not, relocate it now —
+`mkdir -p session-manager-operations` (if needed), then
+`git mv feedback session-manager-operations/feedback` when the repo is
+git-tracked, else a plain `mv`. This converges any project this skill runs in
+to the new layout even if its bulk-relocation PRD hasn't landed yet. Only then
+continue with step 0.
+
 ### 0. Quick-exit — bail in milliseconds if there's nothing to do
 
 **Do this first, cheaply, before reading any code or spawning anything.** This
 skill is run on a schedule across many projects (the scheduler's feedback sweep),
 so the empty case must cost almost nothing:
 
-- If `feedback/` doesn't exist → report "no feedback intake in `<project>`" and
+- If `session-manager-operations/feedback/` doesn't exist (after the step-0a
+  self-migration check) → report "no feedback intake in `<project>`" and
   **EXIT**. (Don't check for or fall back to an `external-feedback/`-style
-  variant — `feedback/` is the only canonical name.)
+  variant — `session-manager-operations/feedback/` is the only canonical name.)
 - If the folder exists but holds **no open item** (every file is in `processed/`
   or marked ✅/archived; nothing open/🆕) → report "no open feedback in
   `<project>`" and **EXIT immediately**. Do NOT read source, evaluate, or start
@@ -74,7 +90,7 @@ so the empty case must cost almost nothing:
 
 ### 1. Read the intake
 
-- Read `feedback/README.md` (conventions + the status log), then every open/🆕
+- Read `session-manager-operations/feedback/README.md` (conventions + the status log), then every open/🆕
   file still in the inbox. Under this contract a **🛠 (queued) item has already
   been archived to `processed/`** at disposition time — so anything still sitting
   in the inbox is genuinely un-dispositioned and needs a pass. You will not find
@@ -95,7 +111,7 @@ drifted. Then classify each ask:
   RESOLUTION with the reason; never silently skip. Resolved now (no code) →
   close immediately in step 4.
 - **Theirs, forward** — the root cause lives in another service. Do NOT reach
-  across the boundary to hack around it; file a feedback/PRD item in *that*
+  across the boundary to hack around it; file a feedback or PRD item in *that*
   project's intake folder and reference it (use `/my-feedback to <project>`).
   Resolved now (no code in *this* repo) → close immediately in step 4.
 
@@ -127,7 +143,7 @@ Record the emitted PRD filenames/ids — you need them for steps 4–6.
 ### 4. Disposition + archive every item now — this is the definition of done
 
 Every open item gets a disposition, a `## RESOLUTION`, and a `git mv` to
-`feedback/processed/` **in this pass** — archival is at disposition time, not
+`session-manager-operations/feedback/processed/` **in this pass** — archival is at disposition time, not
 delivery time. Do NOT leave a queued item in the inbox "until its PRD lands":
 that is the drift this contract forbids. By disposition:
 

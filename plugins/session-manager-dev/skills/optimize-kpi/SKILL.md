@@ -62,9 +62,9 @@ files it points to:
   all, that itself is a finding — recommend adding it.
 - **The levers** — the files the section names as the knobs (tiers/config,
   selection, throughput/cadence/registry, etc.).
-- **The feedback intake** — `feedback/` at the repo root (the one canonical
-  name — do not treat a differently-named folder as equivalent), and its
-  `README.md` convention.
+- **The feedback intake** — `session-manager-operations/feedback/` at the repo
+  root (the one canonical name — do not treat a differently-named folder as
+  equivalent), and its `README.md` convention.
 
 **If CLAUDE.md declares no North-Star KPI section, STOP** and tell the user this
 project hasn't declared one — the KPI belongs in CLAUDE.md's mission statement
@@ -228,7 +228,7 @@ Give it the 3 temp files **and** the Step-2 in-flight/cooldown set. It must:
   failure mode this rule exists to prevent.
 - **Write ONE consolidated feedback item** (for the this-project-owned half) into
   this project's intake folder, named by the folder README's convention
-  (`feedback/<YYYY-MM-DD>-NN-kpi-optimization.md`, next free `NN`), with: title,
+  (`session-manager-operations/feedback/<YYYY-MM-DD>-NN-kpi-optimization.md`, next free `NN`), with: title,
   **From:** `optimize-kpi loop`, date (PT), priority + why, **TL;DR**, **Evidence**
   (cite the Step-1 scorecard numbers, the **Step-1b usage+log findings** the root
   cause rests on, *and* the Step-2 prior-lever grade), **Why it matters**

@@ -193,10 +193,12 @@ function gitHead(cwd) {
   });
 }
 
-// Returns true if ≥1 commit landed in cwd between startedAt and finishedAt
-// (with 60s slack). Used by the self-heal pass to derive committedDuringRun
-// from the recorded run window — the live commit-guard uses gitHead() instead.
-// Never throws; git-unavailable → false (no override, job stays as-is).
+// Returns true if ≥1 commit landed on any ref (branch, remote-tracking branch,
+// or tag) in cwd between startedAt and finishedAt (with 60s slack) — not just
+// the currently checked-out branch. Used by the self-heal pass to derive
+// committedDuringRun from the recorded run window — the live commit-guard uses
+// gitHead() instead. Never throws; git-unavailable → false (no override, job
+// stays as-is).
 function committedInWindow(cwd, startedAt, finishedAt) {
   return new Promise((resolve) => {
     if (!cwd || !startedAt) { resolve(false); return; }
@@ -205,7 +207,7 @@ function committedInWindow(cwd, startedAt, finishedAt) {
       : new Date().toISOString();
     execFile(
       'git',
-      ['-C', cwd, 'log', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
+      ['-C', cwd, 'log', '--all', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
       { timeout: 10_000, windowsHide: true },
       (err, stdout) => { resolve(!err && String(stdout || '').trim().length > 0); },
     );
@@ -2658,4 +2660,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow };

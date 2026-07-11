@@ -67,6 +67,7 @@ const VERDICT_LABELS: Record<string, string> = {
   verify_unavailable: 'verify unavailable',
   uncommitted_changes: 'uncommitted changes',
   no_verdict_sentinel: 'no commit or verdict sentinel',
+  pass_no_commit: 'PASS sentinel but no commit landed',
 }
 
 function loadHidden(): Set<string> {

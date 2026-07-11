@@ -628,6 +628,22 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       });
     }
 
+    // A truthful-looking PASS sentinel with no commit is still not "clean":
+    // the finish protocol requires the commit to land before printing PASS
+    // (see the module's finish-protocol docs), so a PASS with no commit means
+    // the run's own claim of success is unsubstantiated — route it to
+    // needs_review so the auto-fix pipeline can investigate rather than
+    // silently accepting a bare sentinel as proof of work done. Mutually
+    // exclusive with the no_verdict_sentinel case above (sentinel === null
+    // vs sentinel === 'pass'), kept as a separate sibling check for clarity.
+    if (sentinel === 'pass' && !committedDuringRun) {
+      issues.push({
+        verdict: 'pass_no_commit',
+        reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
+        priority: 1,
+      });
+    }
+
     if (issues.length === 0) {
       const reason = annotations.length
         ? `no blocking issues (${annotations.length} annotation(s): ${annotations.map((a) => a.reason).join('; ')})`

@@ -297,6 +297,7 @@ test('Truly clean run (no error markers) → clean/null', async () => {
       prdPath,
       queueEntry: { slug, status: 'running' },
       allJobs: [],
+      committedDuringRun: true,
     });
 
     assert.equal(verdict.verdict, 'clean', `expected clean, got ${verdict.verdict}: ${verdict.reason}`);
@@ -379,6 +380,7 @@ test('FAIL recovered within 30 events → clean', async () => {
       prdPath,
       queueEntry: { slug, status: 'running' },
       allJobs: [],
+      committedDuringRun: true,
     });
 
     assert.equal(verdict.verdict, 'clean', `self-recovery should yield clean, got ${verdict.verdict}: ${verdict.reason}`);
@@ -430,7 +432,7 @@ test('feedback 01: reviewer prose mentioning ImportError mid-sentence → clean'
     ].join('\n');
     writeLog(tmp, slug, bashRunEvents(prose));
     const prdPath = writePrd(tmp, slug, '# Hardening');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `prose mention must not flag, got ${verdict.verdict}: ${verdict.reason}`);
   } finally { rmdir(tmp); }
 });
@@ -477,7 +479,7 @@ test('addendum: Traceback→ModuleNotFoundError in a SUCCEEDED run → clean (an
     ].join('\n');
     writeLog(tmp, slug, bashRunEvents(probe)); // resultSubtype defaults to success
     const prdPath = writePrd(tmp, slug, '# Shared lib');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `recovered env probe must not downgrade, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, null);
     assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length === 1, 'should record one annotation');
@@ -491,7 +493,7 @@ test('addendum: bare Import/ModuleNotFound probe (no traceback) in SUCCEEDED run
     const slug = '26-self-parser-tests';
     writeLog(tmp, slug, bashRunEvents("ModuleNotFoundError: No module named 'conftest'"));
     const prdPath = writePrd(tmp, slug, '# Parser tests');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `got ${verdict.verdict}: ${verdict.reason}`);
     assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length === 1);
   } finally { rmdir(tmp); }
@@ -527,7 +529,7 @@ test('feedback 01: error-shaped text inside a Task (subagent) result → clean',
     ].join('\n');
     writeLog(tmp, slug, bashRunEvents(reviewFinding, { toolName: 'Task' }));
     const prdPath = writePrd(tmp, slug, '# Review-heavy PRD');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `Task results must be exempt from pattern scan, got ${verdict.verdict}: ${verdict.reason}`);
   } finally { rmdir(tmp); }
 });
@@ -543,7 +545,7 @@ test('feedback 01: quoted "Traceback..." line (leading quote) → clean', async 
     ].join('\n');
     writeLog(tmp, slug, bashRunEvents(prose));
     const prdPath = writePrd(tmp, slug, '# Docs PRD');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `quoted traceback prose must not flag, got ${verdict.verdict}: ${verdict.reason}`);
   } finally { rmdir(tmp); }
 });
@@ -572,7 +574,7 @@ test('harness tool error (<tool_use_error>) in final 20% → clean', async () =>
 
     writeLog(tmp, slug, events);
     const prdPath = writePrd(tmp, slug, '# Correctness batch');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `harness tool error must not flag, got ${verdict.verdict}: ${verdict.reason}`);
   } finally { rmdir(tmp); }
 });
@@ -859,7 +861,7 @@ test('no_verdict_sentinel guard: same run but committedDuringRun:true → stays 
   }
 });
 
-test('no_verdict_sentinel guard: same run but with SCHEDULER_VERDICT: PASS sentinel → stays clean', async () => {
+test('no_verdict_sentinel guard: same run but with SCHEDULER_VERDICT: PASS sentinel + a commit → stays clean', async () => {
   const tmp = makeTmpDir();
   try {
     const slug = '406-browser-capture-panel-ui-sentinel';
@@ -870,10 +872,32 @@ test('no_verdict_sentinel guard: same run but with SCHEDULER_VERDICT: PASS senti
       prdPath,
       queueEntry: { slug, status: 'running' },
       allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'clean', `PASS sentinel + commit should stay clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// ─── pass_no_commit: PASS sentinel with no commit is not "clean" ───────────
+
+test('pass_no_commit: SCHEDULER_VERDICT: PASS but no commit landed → needs_review', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '511-recorder-mouse-drag-panel-export';
+    writeLog(tmp, slug, noOpRunEvents('All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Recorder mouse drag panel export');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
       committedDuringRun: false,
     });
-    assert.equal(verdict.verdict, 'clean', `PASS sentinel should stay clean, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
   } finally {
     rmdir(tmp);
   }

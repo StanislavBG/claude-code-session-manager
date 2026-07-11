@@ -1165,6 +1165,73 @@ function healTargetForFix(fixSlug, jobs) {
 }
 
 /**
+ * Build the Opus investigation prompt. Pure/hermetic so its content can be
+ * unit-tested (no spawn, no fs). Inputs are the already-resolved values that
+ * spawnInvestigation computes.
+ */
+function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group }) {
+  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.
+
+# Failed job
+- Slug: ${failedJob.slug}
+- Title: ${failedJob.title}
+- cwd: ${cwd}
+- Exit code: ${failedJob.exitCode}
+- Full failure log: ${failedLogPath}
+
+# Original PRD body (this is what the job was trying to do)
+\`\`\`
+${originalBody}
+\`\`\`
+
+# Last ~16KB of the failure log (stream-json format from \`claude -p\`)
+\`\`\`
+${logTail}
+\`\`\`
+
+# Your task
+1. Read the full failure log at ${failedLogPath} if the tail above isn't sufficient.
+2. Read source files in ${cwd} as needed to understand the context.
+3. Identify the root cause of the failure.
+4. Write a NEW fix-plan PRD file at exactly this path:
+
+   ${fixPath}
+
+5. The frontmatter MUST be exactly this format (no extra keys):
+   \`\`\`
+   ---
+   title: Fix: <short summary of the fix>
+   cwd: ${cwd}
+   parallelGroup: ${group}
+   estimateMinutes: <your time estimate>
+   ---
+   \`\`\`
+6. The PRD body MUST be self-contained — \`claude -p\` runs it on a fresh Sonnet session with NO conversation context. Include:
+   - Root-cause analysis (what went wrong and why)
+   - Concrete fix steps (specific files / commands / edits)
+   - Verification command(s) the next agent should run to confirm the fix
+   - Acceptance criteria
+   - Before writing the fix-plan PRD body, read
+     \`plugins/session-manager-dev/skills/develop/standards.md\` (resolve it relative to the failed
+     job's repo root — for session-manager-authored PRDs that is this cwd). Inline its
+     \`## Execution discipline (headless runs)\` section VERBATIM into the new fix-plan PRD under an
+     \`## Engineering standards\` heading, exactly as the \`/develop\` skill's Phase 1 does for normal
+     PRDs. Reuse that convention — do not invent a second, paraphrased set of warnings. The headless
+     Sonnet executor that runs your fix-plan sees no skills and no conversation, so inlining these
+     rules verbatim is the only way they reach it.
+   - Known failure class — "delegated instead of executed": if the failure log tail above shows the
+     failed run invoked the \`Skill\` tool with a \`session-manager-dev:develop\` or
+     \`session-manager-dev:process-feedback\` argument, and/or called \`ScheduleWakeup\`, and then exited
+     0 without producing the diff/tests its PRD demanded, recognize this as a self-delegation failure.
+     In that case LEAD the fix-plan PRD by quoting VERBATIM the canonical rule from standards.md's
+     Execution discipline section — "You ARE the executor — never re-queue or self-schedule" — rather
+     than authoring new prose. Instruct the fix-plan's executor plainly that a queued PRD is the task,
+     not evidence of completion, and that the deliverable is the code diff.
+
+DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
+}
+
+/**
  * Spawn an Opus investigation session for a failed job. The investigator's job
  * is to read the failure log + original PRD, identify the root cause, and write
  * a fix-plan PRD into prds/<NN>-fix-<base>.md. Reconcile picks it up; the next
@@ -1236,49 +1303,7 @@ async function spawnInvestigation(failedJob, runDir) {
     console.warn(`[scheduler] investigation cwd missing (${cwd}); falling back to ${DEFAULT_PROJECT_CWD}`);
     cwd = DEFAULT_PROJECT_CWD;
   }
-  const prompt = `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.
-
-# Failed job
-- Slug: ${failedJob.slug}
-- Title: ${failedJob.title}
-- cwd: ${cwd}
-- Exit code: ${failedJob.exitCode}
-- Full failure log: ${failedLogPath}
-
-# Original PRD body (this is what the job was trying to do)
-\`\`\`
-${originalBody}
-\`\`\`
-
-# Last ~16KB of the failure log (stream-json format from \`claude -p\`)
-\`\`\`
-${logTail}
-\`\`\`
-
-# Your task
-1. Read the full failure log at ${failedLogPath} if the tail above isn't sufficient.
-2. Read source files in ${cwd} as needed to understand the context.
-3. Identify the root cause of the failure.
-4. Write a NEW fix-plan PRD file at exactly this path:
-
-   ${fixPath}
-
-5. The frontmatter MUST be exactly this format (no extra keys):
-   \`\`\`
-   ---
-   title: Fix: <short summary of the fix>
-   cwd: ${cwd}
-   parallelGroup: ${group}
-   estimateMinutes: <your time estimate>
-   ---
-   \`\`\`
-6. The PRD body MUST be self-contained — \`claude -p\` runs it on a fresh Sonnet session with NO conversation context. Include:
-   - Root-cause analysis (what went wrong and why)
-   - Concrete fix steps (specific files / commands / edits)
-   - Verification command(s) the next agent should run to confirm the fix
-   - Acceptance criteria
-
-DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediately.`;
+  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group });
 
   // Phase 1: open log fd for pre-spawn diagnostics.
   const { fd, safeLog, closeFd } = openLog(investigationLogPath);
@@ -2633,4 +2658,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt };

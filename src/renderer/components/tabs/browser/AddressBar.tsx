@@ -80,6 +80,21 @@ export function AddressBar({ tab }: { tab: BrowserTab }) {
     return out
   }, [draft, editing, historyEntries])
 
+  const dropdownOpen = (editing && suggestions.length > 0) || bookmarksOpen
+
+  useEffect(() => {
+    const viewId = tab.viewId
+    if (!viewId) return
+    if (dropdownOpen) {
+      window.api.browser.hide(viewId).catch(() => {})
+    } else {
+      window.api.browser.show(viewId).catch(() => {})
+    }
+    return () => {
+      if (dropdownOpen && viewId) window.api.browser.show(viewId).catch(() => {})
+    }
+  }, [dropdownOpen, tab.viewId])
+
   const commit = (url?: string) => {
     setEditing(false)
     const trimmed = (url ?? draft).trim()

@@ -8,7 +8,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { isPromotableOriginal } = require('../scheduler.cjs');
+const { isPromotableOriginal, healTargetForFix } = require('../scheduler.cjs');
 
 test('isPromotableOriginal: failed → true', () => {
   assert.strictEqual(isPromotableOriginal('failed'), true);
@@ -28,6 +28,24 @@ test('isPromotableOriginal: running → false', () => {
 
 test('isPromotableOriginal: pending → false', () => {
   assert.strictEqual(isPromotableOriginal('pending'), false);
+});
+
+test('healTargetForFix: matches the specific original by full numeric-prefixed slug, not just base', () => {
+  const jobs = [
+    { slug: '451-foo', status: 'needs_review' },
+    { slug: '453-foo', status: 'needs_review' },
+  ];
+  const target = healTargetForFix('451-fix-foo', jobs);
+  assert.strictEqual(target.slug, '451-foo');
+});
+
+test('healTargetForFix: returns null when no promotable original matches', () => {
+  const jobs = [
+    { slug: '451-foo', status: 'completed' },
+    { slug: '453-foo', status: 'needs_review' },
+  ];
+  const target = healTargetForFix('451-fix-foo', jobs);
+  assert.strictEqual(target, null);
 });
 
 console.log('scheduler-autopromote tests: PASS');

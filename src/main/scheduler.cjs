@@ -1152,6 +1152,19 @@ function isPromotableOriginal(status) {
 }
 
 /**
+ * Pure helper: given a completed fix-plan slug (e.g. '451-fix-foo'), find the
+ * SPECIFIC promotable original job it heals. Matches on the full
+ * numeric-prefixed slug ('451-foo'), not just the base ('foo') — two
+ * needs_review jobs can share a base slug with different NN prefixes
+ * (e.g. '451-foo' and '453-foo'), and a fix plan must only heal the
+ * lineage whose NN it was authored against. Exported for tests.
+ */
+function healTargetForFix(fixSlug, jobs) {
+  const originalSlug = fixSlug.replace(/^(\d+)-fix-/, '$1-');
+  return jobs.find((x) => x.slug === originalSlug && isPromotableOriginal(x.status)) || null;
+}
+
+/**
  * Spawn an Opus investigation session for a failed job. The investigator's job
  * is to read the failure log + original PRD, identify the root cause, and write
  * a fix-plan PRD into prds/<NN>-fix-<base>.md. Reconcile picks it up; the next
@@ -1329,6 +1342,13 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
         console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
       } else {
         console.log(`[scheduler] investigation finished WITHOUT producing fix plan (slug=${failedJob.slug}, code=${exitCode})`);
+        // Record the no-plan outcome so selectAutoFixTargets can offer one
+        // bounded retry instead of permanently dead-ending behind the
+        // 1-attempt cap (autoFixAttempted stays true).
+        mutate((s) => {
+          const j = s.jobs.find((x) => x.slug === failedJob.slug);
+          if (j) j.autoFixOutcome = 'no-plan';
+        }).catch(() => {});
       }
       // Trigger a tick so the new fix plan is reconciled into the queue and fired.
       tickQueue().catch(() => {});
@@ -1525,17 +1545,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           // this, the queue stalls indefinitely behind a stale failure even
           // though the auto-recovery did its job.
           if (effectiveStatus === 'completed' && isFixPlanSlug(job.slug)) {
-            const originalSlug = job.slug.replace(/^(\d+)-fix-/, '$1-');
-            const orig = s.jobs.findIndex((x) => x.slug === originalSlug && isPromotableOriginal(x.status));
-            if (orig >= 0) {
-              const priorStatus = s.jobs[orig].status;
-              console.log(`[scheduler] auto-promote: ${originalSlug} (${priorStatus}) → completed because ${job.slug} succeeded`);
-              s.jobs[orig].status = 'completed';
-              s.jobs[orig].exitCode = 0;
-              s.jobs[orig].error = null;
-              s.jobs[orig].completedBy = job.slug;
+            const orig = healTargetForFix(job.slug, s.jobs);
+            if (orig) {
+              const priorStatus = orig.status;
+              console.log(`[scheduler] auto-promote: ${orig.slug} (${priorStatus}) → completed because ${job.slug} succeeded`);
+              orig.status = 'completed';
+              orig.exitCode = 0;
+              orig.error = null;
+              orig.completedBy = job.slug;
               if (priorStatus === 'needs_review') {
-                delete s.jobs[orig].verifierVerdict;
+                delete orig.verifierVerdict;
               }
             }
           }
@@ -1882,15 +1901,56 @@ function selectHistoryJobs(jobs, limit) {
 const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable']);
 
 /**
+ * Backfill a job's missing runId by scanning RUNS_DIR for a run directory
+ * whose contents reference this job's slug (a '<slug>.log' file inside it).
+ * A needs_review job can lose its runId (e.g. an old queue-schema gap) and
+ * become invisible to every auto-resolution path that requires job.runId
+ * truthy. O(number of run dirs) — a single readdir + per-dir existsSync
+ * check, no nested loop over user-scaled data. Dir names are ISO timestamps,
+ * so lexical-descending sort picks the newest match. Exported for tests.
+ */
+function resolveRunId(job, { runsDir = RUNS_DIR } = {}) {
+  if (!job || job.runId) return job?.runId || null;
+  if (!job.slug) return null;
+  let dirs;
+  try {
+    dirs = fs.readdirSync(runsDir);
+  } catch {
+    return null;
+  }
+  const matches = dirs.filter((d) => {
+    try {
+      return fs.existsSync(path.join(runsDir, d, `${job.slug}.log`));
+    } catch {
+      return false;
+    }
+  });
+  if (!matches.length) return null;
+  matches.sort().reverse();
+  return matches[0];
+}
+
+/**
+ * Pure predicate: a needs_review job with no runId and no backfillable run
+ * directory can never self-heal or get an auto-fix investigation — it must
+ * be surfaced for a human rather than silently dead-ended. Exported for
+ * tests.
+ */
+function isUnresolvableNeedsReview(job, { hasRunDir }) {
+  return !!job && job.status === 'needs_review' && !job.runId && !hasRunDir;
+}
+
+/**
  * Pure predicate: is this job eligible for the boot re-verify self-heal? Only
- * needs_review jobs with a run log AND a transcript-scan verdict. Crucially
- * EXCLUDES 'uncommitted_changes' (git commit-guard) — verifyRun can't see git,
- * so re-scanning it would falsely heal an unfinished job. Exported for tests.
+ * needs_review jobs with a run log (own or backfilled via resolveRunId) AND a
+ * transcript-scan verdict. Crucially EXCLUDES 'uncommitted_changes' (git
+ * commit-guard) — verifyRun can't see git, so re-scanning it would falsely
+ * heal an unfinished job. Exported for tests.
  */
 function isRescanCandidate(job) {
   return !!job
     && job.status === 'needs_review'
-    && !!job.runId
+    && !!(job.runId || resolveRunId(job))
     && RESCANNABLE_VERDICTS.has(job.verifierVerdict);
 }
 
@@ -1906,23 +1966,32 @@ function isRescanCandidate(job) {
  * @returns {Promise<{rescanned:number, healed:string[]}>}
  */
 /**
- * Pure helper — no I/O. Returns the subset of jobs eligible for automatic
- * fix-plan authoring after a reverify pass leaves them still in needs_review.
+ * Pure helper — no I/O by default (resolveJobRunId is injectable; production
+ * caller passes resolveRunId, which does touch disk). Returns the subset of
+ * jobs eligible for automatic fix-plan authoring after a reverify pass
+ * leaves them still in needs_review.
  *
  * Exclusion rules (all must pass):
  *   - status === 'needs_review'
- *   - truthy runId (need a run log to investigate)
- *   - autoFixAttempted !== true (1-attempt cap)
+ *   - a runId, own or backfilled via resolveJobRunId (need a run log to investigate)
  *   - not itself a fix-plan slug (avoids infinite recursion)
+ *   - autoFixAttempted cap: a job with no prior attempt is eligible; a job
+ *     whose prior attempt outcome was 'no-plan' gets ONE bounded retry
+ *     (autoFixRetries < 1); any other attempted job (or an exhausted
+ *     no-plan retry) is excluded
  *   - no fix sibling on disk (fixSlugExists) or already in the queue
  */
-function selectAutoFixTargets(jobs, { fixSlugExists }) {
+function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRunId }) {
   const slugsInQueue = new Set(jobs.map((j) => j.slug));
   return jobs.filter((job) => {
     if (job.status !== 'needs_review') return false;
-    if (!job.runId) return false;
-    if (job.autoFixAttempted) return false;
+    const runId = job.runId || resolveJobRunId(job);
+    if (!runId) return false;
     if (isFixPlanSlug(job.slug)) return false;
+    if (job.autoFixAttempted) {
+      if (job.autoFixOutcome !== 'no-plan') return false;
+      if ((job.autoFixRetries ?? 0) >= 1) return false;
+    }
     const fixSlug = `${String(job.parallelGroup ?? 99).padStart(2, '0')}-fix-${job.slug.replace(/^\d+-/, '')}`;
     if (fixSlugExists(fixSlug)) return false;
     if (slugsInQueue.has(fixSlug)) return false;
@@ -1936,7 +2005,7 @@ async function reverifyNeedsReview() {
   const healed = [];
   const leftForReview = [];
   for (const job of candidates) {
-    const runDir = path.join(RUNS_DIR, job.runId);
+    const runDir = path.join(RUNS_DIR, job.runId || resolveRunId(job));
     const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
     // Derive committedDuringRun from the recorded run window. The live
     // commit-guard uses gitHead() (before/after HEAD diff); here the run is
@@ -1978,24 +2047,72 @@ async function reverifyNeedsReview() {
     console.log(`[scheduler] boot reverify: left for review: ${detail}`);
   }
 
+  // Surface needs_review jobs that can never self-heal or get an auto-fix
+  // investigation (no runId, no backfillable run dir) instead of leaving
+  // them silently stranded. Also surface no-plan auto-fix jobs whose one
+  // bounded retry is already exhausted. Both are annotated, never looped on.
+  const afterHealForAnnotate = await readQueue();
+  const unresolvable = afterHealForAnnotate.jobs.filter(
+    (j) => isUnresolvableNeedsReview(j, { hasRunDir: !!resolveRunId(j) }) && j.verifierVerdict !== 'no_run_artifacts',
+  );
+  const exhaustedNoPlan = afterHealForAnnotate.jobs.filter(
+    (j) => j.status === 'needs_review'
+      && j.autoFixAttempted && j.autoFixOutcome === 'no-plan' && (j.autoFixRetries ?? 0) >= 1
+      && j.verifierVerdict !== 'autofix_no_plan',
+  );
+  if (unresolvable.length || exhaustedNoPlan.length) {
+    const unresolvableSet = new Set(unresolvable.map((j) => j.slug));
+    const exhaustedSet = new Set(exhaustedNoPlan.map((j) => j.slug));
+    await mutate((s) => {
+      for (const j of s.jobs) {
+        if (unresolvableSet.has(j.slug)) {
+          j.verifierVerdict = 'no_run_artifacts';
+          j.error = 'no run artifacts — manual review';
+        } else if (exhaustedSet.has(j.slug)) {
+          j.verifierVerdict = 'autofix_no_plan';
+          j.error = 'auto-fix investigation produced no fix plan after retry — manual review';
+        }
+      }
+    });
+    if (unresolvable.length) {
+      console.log(`[scheduler] boot reverify: no run artifacts for ${unresolvable.map((j) => j.slug).join(', ')} — flagged for manual review`);
+    }
+    if (exhaustedNoPlan.length) {
+      console.log(`[scheduler] boot reverify: auto-fix retry exhausted for ${exhaustedNoPlan.map((j) => j.slug).join(', ')} — flagged for manual review`);
+    }
+    await broadcast();
+  }
+
   // Auto-fix: spawn a fix-plan investigation for each job still in
   // needs_review after the heal pass (kill-switch: SM_AUTOFIX_DISABLE=1).
+  // spawnInvestigation early-returns once investigationsInFlight reaches
+  // MAX_CONCURRENT_INVESTIGATIONS (queues the rest for retry), so this loop
+  // cannot fan out past the cap regardless of how many targets are selected.
   if (process.env.SM_AUTOFIX_DISABLE !== '1') {
     const afterHeal = await readQueue();
     const targets = selectAutoFixTargets(afterHeal.jobs, {
       fixSlugExists: (s) => fs.existsSync(path.join(PRDS_DIR, `${s}.md`)),
     });
     for (const job of targets) {
-      const runDir = path.join(RUNS_DIR, job.runId);
+      const runId = job.runId || resolveRunId(job);
+      const runDir = path.join(RUNS_DIR, runId);
+      const isNoPlanRetry = job.autoFixAttempted && job.autoFixOutcome === 'no-plan';
       // Persist the attempt BEFORE spawning — a crash mid-investigation still
       // counts it (mirrors orphanRetries). Safe even when the slot is busy: the
       // investigation is queued and drained as slots free, so it is genuinely
       // attempted rather than silently dropped.
       await mutate((s) => {
         const j = s.jobs.find((x) => x.slug === job.slug);
-        if (j) j.autoFixAttempted = true;
+        if (j) {
+          j.autoFixAttempted = true;
+          if (!j.runId && runId) j.runId = runId;
+          if (isNoPlanRetry) {
+            j.autoFixRetries = (j.autoFixRetries ?? 0) + 1;
+            delete j.autoFixOutcome;
+          }
+        }
       });
-      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (1/1)`);
+      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (${isNoPlanRetry ? 'retry' : '1/1'})`);
       spawnInvestigation(job, runDir).catch((e) => {
         console.error('[scheduler] auto-fix spawnInvestigation error', job.slug, e);
       });
@@ -2335,10 +2452,16 @@ async function init() {
     // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
     // job whose work actually landed (committed in-window, no FAIL sentinel)
     // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded — the
-    // log scan only runs when something is actually flagged.
-    const s = readQueueSync();
-    if (s.jobs.some((j) => j.status === 'needs_review')) {
-      reverifyNeedsReview().catch(() => {});
+    // log scan only runs when something is actually flagged. Kill-switch:
+    // SM_REVERIFY_PERIODIC_DISABLE=1 (boot reverify above stays always-on).
+    // reverifyNeedsReview's auto-fix loop is capped downstream by
+    // MAX_CONCURRENT_INVESTIGATIONS (spawnInvestigation queues/early-returns
+    // past it), so this interval firing cannot fan out investigations.
+    if (process.env.SM_REVERIFY_PERIODIC_DISABLE !== '1') {
+      const s = readQueueSync();
+      if (s.jobs.some((j) => j.status === 'needs_review')) {
+        reverifyNeedsReview().catch(() => {});
+      }
     }
   }, 10 * 60_000);
 
@@ -2510,4 +2633,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix };

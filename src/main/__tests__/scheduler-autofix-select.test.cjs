@@ -8,9 +8,10 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { selectAutoFixTargets } = require('../scheduler.cjs');
+const { selectAutoFixTargets, isUnresolvableNeedsReview } = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
+const noRunDir = () => null;
 
 function makeJob(overrides = {}) {
   return {
@@ -53,8 +54,55 @@ test('excludes a completed job', () => {
   assert.strictEqual(result.length, 0);
 });
 
-test('excludes a job missing runId', () => {
+test('excludes a job missing runId when no run dir resolves', () => {
   const jobs = [makeJob({ runId: null })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk, resolveJobRunId: noRunDir });
+  assert.strictEqual(result.length, 0);
+});
+
+test('selects a job missing runId when a run dir resolves (gap 1: runId backfill)', () => {
+  const jobs = [makeJob({ runId: null })];
+  const result = selectAutoFixTargets(jobs, {
+    fixSlugExists: noSiblingOnDisk,
+    resolveJobRunId: () => '2026-06-16T10-00-00-000Z',
+  });
+  assert.strictEqual(result.length, 1);
+});
+
+test('isUnresolvableNeedsReview: needs_review + no runId + no run dir → true', () => {
+  const job = makeJob({ runId: null });
+  assert.strictEqual(isUnresolvableNeedsReview(job, { hasRunDir: false }), true);
+});
+
+test('isUnresolvableNeedsReview: needs_review + no runId + has run dir → false', () => {
+  const job = makeJob({ runId: null });
+  assert.strictEqual(isUnresolvableNeedsReview(job, { hasRunDir: true }), false);
+});
+
+test('isUnresolvableNeedsReview: needs_review + runId present → false', () => {
+  const job = makeJob();
+  assert.strictEqual(isUnresolvableNeedsReview(job, { hasRunDir: false }), false);
+});
+
+test('isUnresolvableNeedsReview: non needs_review status → false', () => {
+  const job = makeJob({ runId: null, status: 'failed' });
+  assert.strictEqual(isUnresolvableNeedsReview(job, { hasRunDir: false }), false);
+});
+
+test('autoFixOutcome no-plan with retries=0 is retried', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixOutcome: 'no-plan', autoFixRetries: 0 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 1);
+});
+
+test('autoFixOutcome no-plan with retries=1 is exhausted (not selected)', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixOutcome: 'no-plan', autoFixRetries: 1 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
+});
+
+test('autoFixAttempted true with no outcome recorded stays excluded (existing 1-attempt cap)', () => {
+  const jobs = [makeJob({ autoFixAttempted: true })];
   const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
   assert.strictEqual(result.length, 0);
 });

@@ -76,6 +76,7 @@ take a different route if the codebase conventions say so.
 | 2026-06-27-01-high-quality-develop-and-find-opportunity | 🛠 partial | Ask 1 (`/find-opportunity` skill) shipped directly 2026-07-10 (instruction-file edit, no PRD needed). Asks 2 (`quality: high` tier) and 3 (conventions loop) deferred — genuine open design questions the filer left for bilko's call; not queued. |
 | 2026-07-03-url-browser-pane-with-dom-recording | 🛠 in flight | Already covered by the existing Browser-tab PRD chain (402–413: panel scaffold, picker/capture/screenshot, recorder engine/panel/replay, persistence, e2e+docs). No new PRD needed. Verification currently blocked on 2026-07-10-01's fix (403–406 falsely show completed). |
 | 2026-07-10-01-scheduler-marks-jobs-completed-without-landed-commit | 🛠 queued (PRD 1) | Root-caused: `runVerify.cjs`'s verdict scanner only flags positive pattern hits, never checks for "no sentinel + no commit" (a run that does nothing sails through as clean). PRD `1-verdict-scanner-require-sentinel-or-commit` queued at low parallelGroup (1) to preempt the queue. Manually resetting 403–406 is left to bilko (Scheduler tab UI, not automatable safely from outside the running app). |
+| 2026-07-10-02-fullscreen-agent-browser-split-layout | 🆕 | Enhancement: full-screen split view (agent transcript left, Browser tab right) with a toggle button and agent action buttons anchored to the pane's top edge. No existing split/fullscreen layout in the renderer today — `MainPane` shows one screen at a time. |
 
 ## Lessons for submitters (kept current)
 

@@ -344,13 +344,26 @@ function handleRecordEvent(event, payload) {
   const viewId = contentsIdToViewId.get(event.sender.id);
   if (!viewId || !recordingViewIds.has(viewId)) return;
   const verb = payload && payload.verb;
-  if (verb !== 'click' && verb !== 'type') return;
+  if (verb !== 'click' && verb !== 'type' && verb !== 'drag') return;
   const target = typeof payload.target === 'string' ? payload.target.slice(0, 300) : '';
   const step = { verb, target };
   if (verb === 'type') {
     step.masked = true;
     if (typeof payload.variableSuggestion === 'string') {
       step.variableSuggestion = payload.variableSuggestion.slice(0, 64);
+    }
+  }
+  if (verb === 'click') {
+    const x = Number(payload.x);
+    const y = Number(payload.y);
+    if (Number.isFinite(x)) step.x = x;
+    if (Number.isFinite(y)) step.y = y;
+  }
+  if (verb === 'drag') {
+    if (typeof payload.endTarget === 'string') step.endTarget = payload.endTarget.slice(0, 300);
+    for (const key of ['x', 'y', 'endX', 'endY']) {
+      const n = Number(payload[key]);
+      if (Number.isFinite(n)) step[key] = n;
     }
   }
   emitRecordStep(viewId, step);
@@ -371,7 +384,16 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+async function replayPositionedClick(wc, x, y) {
+  wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+  wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+}
+
 async function replayClickOrType(wc, step, values) {
+  if (step.verb === 'click' && Number.isFinite(step.x) && Number.isFinite(step.y)) {
+    await replayPositionedClick(wc, step.x, step.y);
+    return;
+  }
   const script =
     step.verb === 'type'
       ? `(() => {
@@ -429,6 +451,25 @@ async function replayWaitFor(wc, step) {
   }
 }
 
+const REPLAY_DRAG_STEPS = 3;
+
+async function replayDrag(wc, step) {
+  const { x, y, endX, endY } = step;
+  if (![x, y, endX, endY].every((n) => Number.isFinite(n))) {
+    throw new Error('drag step missing coordinates');
+  }
+  wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+  for (let i = 1; i <= REPLAY_DRAG_STEPS; i += 1) {
+    const t = i / REPLAY_DRAG_STEPS;
+    wc.sendInputEvent({
+      type: 'mouseMove',
+      x: Math.round(x + (endX - x) * t),
+      y: Math.round(y + (endY - y) * t),
+    });
+  }
+  wc.sendInputEvent({ type: 'mouseUp', x: endX, y: endY, button: 'left', clickCount: 1 });
+}
+
 async function replayStep(view, step, values) {
   const wc = view.webContents;
   if (step.verb === 'navigate') {
@@ -443,6 +484,10 @@ async function replayStep(view, step, values) {
   }
   if (step.verb === 'wait-for') {
     await replayWaitFor(wc, step);
+    return;
+  }
+  if (step.verb === 'drag') {
+    await withTimeout(replayDrag(wc, step), REPLAY_STEP_TIMEOUT_MS, 'drag');
     return;
   }
   throw new Error(`unsupported step verb: ${step.verb}`);

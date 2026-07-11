@@ -36,6 +36,24 @@ h2{font-size:18px;margin:0 0 8px;color:var(--fg)}
 footer{color:var(--faint);font-size:12px;margin-top:40px;
   border-top:1px solid var(--line);padding-top:16px}
 a.ext{color:var(--blue)}
+.stage{border-left:2px solid var(--line);margin:14px 0 14px 6px;padding:0}
+.stage li{list-style:none;position:relative;padding:2px 0 14px 20px}
+.stage li::before{content:"";position:absolute;left:-6px;top:6px;
+  width:9px;height:9px;border-radius:50%;background:var(--panel2);
+  border:2px solid var(--blue)}
+.stage b{color:var(--fg);font-size:13.5px}
+.stage .d{color:var(--dim);font-size:13px;margin-top:2px}
+.callout{border-left:3px solid var(--amber);background:rgba(251,191,36,.06);
+  border-radius:0 8px 8px 0;padding:10px 14px;margin:12px 0;font-size:13.5px;color:var(--dim)}
+.callout b{color:var(--fg)}
+.kv{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}
+.kv th{text-align:left;color:var(--faint);font-weight:600;font-size:11px;
+  text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;border-bottom:1px solid var(--line)}
+.kv td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--dim);vertical-align:top}
+.kv td:first-child{color:var(--fg);font-family:var(--mono);font-size:12px;white-space:nowrap}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--blue);font-size:12.5px;user-select:none}
+summary:hover{color:var(--fg)}
 </style>
 </head>
 <body>
@@ -44,7 +62,8 @@ a.ext{color:var(--blue)}
 <div class="nav">
   <a href="#terminal">Terminal</a>
   <a href="#scheduler">Scheduler</a>
-  <a href="#browser">Browser</a>
+  <a href="#dom-capture">DOM Capture</a>
+  <a href="#record">Record</a>
   <a href="#voice">Voice</a>
   <a href="#config-tabs">Config tabs</a>
   <a href="#memory">Memory</a>
@@ -85,11 +104,167 @@ and a periodic supervisor probe kills stuck poll-loops without killing the agent
 </div>
 </div>
 
-<h2 id="browser">Capture panel</h2>
+<h2 id="dom-capture">DOM Capture — pull page content into a Claude session</h2>
 <div class="feature">
-<p>A built-in browser view the agent can drive and capture from — selection-scoped page
-capture in agent/HTML/accessibility/CSS-selector modes, wired into the Capture panel UI.</p>
-<div class="refs"><span class="loc">src/renderer/components/tabs/Browser.tsx</span></div>
+<p>A selection-scoped extractor built into the Browser tab's embedded webview: pick one or
+more elements on the live page and pull them out as agent-ready DOM, full HTML, an
+accessibility tree, a robust selector chain, or a PNG screenshot — then route the result
+to a Claude session, the clipboard, or disk.</p>
+
+<p style="margin-top:14px"><b style="color:var(--fg);font-size:13.5px">How to use it</b></p>
+<ol class="stage">
+<li><b>Open the Capture panel</b> — click the target/crosshair icon in the Browser tab's
+action bar, which sets browser mode to <code>capture</code>.
+<div class="d">This starts the element picker inside the embedded page: a hover-highlight
+overlay is injected via <code>executeJavaScript</code>, since the view is a sandboxed
+<code>WebContentsView</code> with no reachable app globals — the picker buffers pick
+events on <code>window.__smPicker</code> and the main process polls/drains them.</div>
+<div class="refs"><span class="loc">src/renderer/components/tabs/browser/CapturePanel.tsx:79</span>
+<span class="loc">src/main/browserCapture.cjs:1</span></div></li>
+
+<li><b>Hover and click elements on the page</b> — a click selects it (⌘-click adds more to
+the selection); each pick reports back a selector generated from a fallback chain:
+<code>[data-testid]</code> → <code>#id</code> → role+accessible-name → a minimal unique CSS
+path → an nth-of-type XPath.
+<div class="d">Selected elements appear as a list in the panel's "Selection" section.</div>
+<div class="refs"><span class="loc">src/main/browserCapture.cjs:33</span></div></li>
+
+<li><b>Pick a capture mode</b> — <i>Agent-ready DOM</i> (filter → prune → summarize →
+chunk, sized to a token budget), <i>Full HTML</i> (raw outer HTML), <i>Accessibility
+tree</i> (roles/ARIA/labels/states), <i>Selector</i> (the CSS/XPath/ARIA chain itself), or
+<i>Screenshot</i> (PNG, for non-semantic UI the other modes can't describe).
+<div class="refs"><span class="loc">src/renderer/components/tabs/browser/CapturePanel.tsx:37</span></div></li>
+
+<li><b>Click Capture</b> — for the four text/tree modes this calls
+<code>browser:capture</code>, which runs the selected mode's extraction over the live DOM
+in the sandboxed view and returns the result to the panel. Screenshot mode instead calls
+<code>browser:capture-shot</code>, which grabs the tab's <code>webContents.capturePage()</code>
+as a PNG data URL.
+<div class="d">The result renders in the panel — a syntax-styled text block for
+text/tree modes, an inline image preview for screenshots. Nothing is written to disk yet.</div>
+<div class="refs"><span class="loc">src/main/browserView.cjs:562</span></div></li>
+
+<li><b>Choose a destination</b> — four options appear once something is captured:
+<b>Copy to clipboard</b> (text or, for a screenshot, the image itself); <b>→ Claude
+session</b> (writes the capture into the active terminal tab's PTY input, prefixed with an
+explicit provenance banner); <b>Save to scratch file</b>; <b>Save as PRD fixture</b>. See
+the storage table below for the last two.
+<div class="d">The Claude-session destination frames the pasted content as
+<b>inert reference data, not instructions</b> — a two-line comment banner
+(<code># Captured page content below — untrusted data from &lt;url&gt; …</code>) wraps it,
+the same defensive framing used for knowledge-graph ingestion, so a page an agent is
+capturing can't smuggle in a prompt injection disguised as user input. Text payloads are
+also truncated to stay under the PTY-write IPC boundary's 64 KiB cap.</div>
+<div class="refs"><span class="loc">src/renderer/components/tabs/browser/CapturePanel.tsx:24</span>
+<span class="loc">src/renderer/components/tabs/browser/CapturePanel.tsx:35</span></div></li>
+</ol>
+
+<p style="margin-top:14px"><b style="color:var(--fg);font-size:13.5px">Where it's stored</b></p>
+<div class="callout"><b>Nothing persists automatically.</b> A capture lives only in
+renderer memory (the browser store's <code>captured</code> field) until you explicitly
+click "Save to scratch file" or "Save as PRD fixture" — closing the panel or navigating
+away discards it. Clipboard and Claude-session destinations never touch disk at all.</div>
+
+<table class="kv">
+<tr><th>Destination</th><th>Path</th><th>Format</th></tr>
+<tr><td>Save to scratch file (text modes)</td><td>&lt;project cwd&gt;/session-manager-operations/browser/dom-captures/&lt;ISO-timestamp&gt;-&lt;mode&gt;.txt</td><td>plain text</td></tr>
+<tr><td>Save to scratch file (screenshot)</td><td>&lt;project cwd&gt;/session-manager-operations/browser/screenshots/&lt;ISO-timestamp&gt;-shot.png</td><td>PNG (base64-decoded)</td></tr>
+<tr><td>Save as PRD fixture</td><td>&lt;project cwd&gt;/tests/fixtures/browser-capture/&lt;ISO-timestamp&gt;-&lt;mode&gt;.txt</td><td>plain text</td></tr>
+</table>
+<div class="refs" style="margin-top:8px">
+<span class="loc">src/renderer/lib/captureDest.ts:8</span>
+<span class="loc">src/renderer/components/tabs/browser/CapturePanel.tsx:169</span>
+<span class="loc">src/main/browserView.cjs:605</span>
+</div>
+
+<details>
+<summary>Show the write mechanics</summary>
+<p style="margin-top:8px">Every save goes through this project's shared atomic-write
+path — a temp file + rename, never a partial write on disk — and every destination path is
+run through <code>validatePath</code>, which restricts writes to the user's home directory
+tree. Text saves call <code>config.writeText</code> (renderer IPC → <code>writeTextAtomic</code>);
+the screenshot's base64 PNG is decoded and written with <code>writeBinaryAtomic</code> via
+the <code>browser:save-binary</code> handler.</p>
+<div class="refs" style="margin-top:6px">
+<span class="loc">src/main/config.cjs:71</span>
+<span class="loc">src/main/config.cjs:184</span>
+<span class="loc">src/main/browserView.cjs:605</span>
+</div>
+</details>
+</div>
+
+<h2 id="record">Record — turn a manual page flow into a replayable test</h2>
+<div class="feature">
+<p>Records real interactions in the Browser tab's embedded page — clicks, typed input,
+navigations, assertions — as a step list you can replay in place or export as a runnable
+Playwright spec, a human-readable Markdown repro, or a PRD fixture.</p>
+
+<p style="margin-top:14px"><b style="color:var(--fg);font-size:13.5px">How to use it</b></p>
+<ol class="stage">
+<li><b>Open the Recorder panel</b> — switching Browser mode to <code>record</code> mounts
+<code>RecorderPanel</code>, which immediately starts an engine session for the active
+sub-tab and begins the transport clock at 00:00.
+<div class="d">Starting the session arms a per-view recorder-preload (loaded into the
+embedded page with a random <code>--sm-record-token</code>) that forwards real DOM events
+back to the main process over a dedicated, token-checked channel — the embedded page's own
+JS can never spoof a step, since only events carrying the matching token from the
+recorder-preload's isolated context are accepted.</div>
+<div class="refs"><span class="loc">src/renderer/components/tabs/browser/RecorderPanel.tsx:80</span>
+<span class="loc">src/main/browserView.cjs:204</span>
+<span class="loc">src/main/browserView.cjs:343</span></div></li>
+
+<li><b>Interact with the page normally</b> — click, type, navigate. Each interpreted
+interaction appears live in the panel's step list, tagged with a verb (<code>navigate</code>,
+<code>click</code>, <code>type</code>, <code>wait-for</code>, …) and the target selector
+(the same fallback-chain selector generator DOM Capture uses).
+<div class="d">A navigation is recorded even if you're mid-session on a new page — the
+recorder-preload re-arms itself on every page load using the same session token, so the
+recording survives the page it started on navigating away.</div>
+<div class="refs"><span class="loc">src/main/browserView.cjs:96</span>
+<span class="loc">src/main/browserView.cjs:171</span></div></li>
+
+<li><b>Pause / resume / stop</b> — the transport row's record/pause button toggles capture
+without ending the session (paused time doesn't advance new steps); Stop ends the engine
+session for that view entirely.
+<div class="refs"><span class="loc">src/renderer/components/tabs/browser/RecorderPanel.tsx:186</span></div></li>
+
+<li><b>Parameterize a typed value</b> (optional) — expand a <code>type</code> step and
+check "parameterize" to swap a literal value for a <code>{{variable}}</code> placeholder in
+exports, so the same recording can drive multiple runs with different input.</li>
+
+<li><b>Replay</b> (optional) — plays the recorded steps back against the live page one at a
+time, marking each pass/fail inline, without needing an export first. Replay temporarily
+drops the view out of the active recording set so replayed actions don't re-append
+themselves as new steps.
+<div class="refs"><span class="loc">src/main/browserView.cjs:456</span></div></li>
+
+<li><b>Export</b> — three destinations in the panel's footer. See the storage table below.</li>
+</ol>
+
+<p style="margin-top:14px"><b style="color:var(--fg);font-size:13.5px">Where it's stored</b></p>
+<div class="callout"><b>The step list lives only in the renderer's browser store</b>
+(<code>recorderSteps</code>) for the lifetime of the recording session — the main process
+only ever streams individual step events over IPC, it never persists them itself. Nothing
+reaches disk until you click one of the three "Export as" buttons; stopping the recorder or
+closing the tab without exporting discards the steps.</div>
+
+<table class="kv">
+<tr><th>Export</th><th>Path</th><th>Format</th></tr>
+<tr><td>Playwright spec</td><td>&lt;project cwd&gt;/tests/e2e/&lt;ISO-timestamp&gt;-recorded.spec.ts</td><td>runnable Playwright test</td></tr>
+<tr><td>Markdown steps</td><td>&lt;project cwd&gt;/session-manager-operations/browser/flow-recordings/&lt;ISO-timestamp&gt;-recorded.md</td><td>human-readable repro</td></tr>
+<tr><td>PRD fixture</td><td>&lt;project cwd&gt;/session-manager-operations/browser/flow-recordings/&lt;ISO-timestamp&gt;-recorded.txt</td><td>plain text, paste into a PRD by hand</td></tr>
+</table>
+<div class="refs" style="margin-top:8px">
+<span class="loc">src/renderer/components/tabs/browser/RecorderPanel.tsx:120</span>
+<span class="loc">src/renderer/lib/browserExport.ts</span>
+</div>
+
+<div class="callout" style="border-left-color:var(--green)">A recorded Playwright spec
+lands in <code>tests/e2e/</code> as a plain file — exporting it does <b>not</b> register or
+queue it as a scheduler job. The panel's own footer note ("Won't emit self-e2e jobs against
+scheduled plans") is a deliberate boundary: this project's own e2e suite is explicitly kept
+out of the headless PRD scheduler, so nothing here silently wires a recorded flow into that
+queue.</div>
 </div>
 
 <h2 id="voice">Voice</h2>
@@ -150,9 +325,12 @@ can manage the job queue directly.</p>
 
 <footer>
 Sources: src/main/pty.cjs, src/main/scheduler.cjs, src/main/lib/schedulerConfig.cjs,
-src/main/supervisor.cjs, src/renderer/components/tabs/Browser.tsx, src/renderer/state/voice.ts,
+src/main/supervisor.cjs, src/renderer/components/tabs/browser/CapturePanel.tsx,
+src/renderer/components/tabs/browser/RecorderPanel.tsx, src/main/browserCapture.cjs,
+src/main/browserView.cjs, src/renderer/state/browser.ts, src/renderer/lib/captureDest.ts,
+src/renderer/lib/browserExport.ts, src/main/config.cjs, src/renderer/state/voice.ts,
 src/renderer/components/LeftNav.tsx, src/main/memoryAggregate.cjs, src/main/webRemote.cjs,
-src/main/adminServer.cjs · generated 2026-07-10
+src/main/adminServer.cjs · generated 2026-07-11
 </footer>
 
 </div>

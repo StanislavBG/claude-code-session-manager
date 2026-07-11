@@ -29,7 +29,7 @@ export interface RecordStep {
   n: number;
   /** `select` is accepted by replay/export (PRD 410) for forward-compat;
    * the live engine does not emit it yet. */
-  verb: 'navigate' | 'click' | 'type' | 'select' | 'wait-for';
+  verb: 'navigate' | 'click' | 'type' | 'select' | 'wait-for' | 'drag';
   target: string;
   kind?: 'nav' | 'assert';
   /** True for `type` steps — the actual typed value is never captured. */
@@ -40,6 +40,16 @@ export interface RecordStep {
   variable?: string | null;
   /** `select` steps only — the option value to choose on replay/export. */
   value?: string;
+  /** Click position, or drag-start position for `drag` steps. */
+  x?: number;
+  /** Click position, or drag-start position for `drag` steps. */
+  y?: number;
+  /** `drag` steps only — drag-end target selector. */
+  endTarget?: string;
+  /** `drag` steps only — drag-end x position. */
+  endX?: number;
+  /** `drag` steps only — drag-end y position. */
+  endY?: number;
 }
 
 /** Per-step replay outcome (PRD 410), streamed as `browser:replay-step:<viewId>`. */

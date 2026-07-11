@@ -16,6 +16,9 @@ const TOKEN_PREFIX = '--sm-record-token=';
 const expectedToken = (process.argv.find((a) => a.startsWith(TOKEN_PREFIX)) || '').slice(TOKEN_PREFIX.length) || null;
 
 let capturing = false;
+let dragStart = null;
+
+const DRAG_THRESHOLD_PX = 6;
 
 function selectorFor(el) {
   if (!el || el.nodeType !== 1) return '';
@@ -39,7 +42,54 @@ document.addEventListener(
   'click',
   (e) => {
     if (!capturing) return;
-    ipcRenderer.send('browser:record-event', { verb: 'click', target: selectorFor(e.target) });
+    ipcRenderer.send('browser:record-event', {
+      verb: 'click',
+      target: selectorFor(e.target),
+      x: e.clientX,
+      y: e.clientY,
+    });
+  },
+  true,
+);
+
+document.addEventListener(
+  'mousedown',
+  (e) => {
+    if (!capturing) return;
+    if (e.button !== 0) return;
+    dragStart = { target: e.target, x: e.clientX, y: e.clientY };
+  },
+  true,
+);
+
+document.addEventListener(
+  'mousemove',
+  () => {
+    if (!capturing) return;
+    // No per-event emit — the coalesced step is emitted on mouseup.
+  },
+  true,
+);
+
+document.addEventListener(
+  'mouseup',
+  (e) => {
+    if (!capturing) return;
+    if (!dragStart) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    if (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX) {
+      ipcRenderer.send('browser:record-event', {
+        verb: 'drag',
+        target: selectorFor(dragStart.target),
+        x: dragStart.x,
+        y: dragStart.y,
+        endTarget: selectorFor(e.target),
+        endX: e.clientX,
+        endY: e.clientY,
+      });
+    }
+    dragStart = null;
   },
   true,
 );
@@ -63,5 +113,6 @@ contextBridge.exposeInMainWorld('__smRecorder', {
   setRecording: (v, token) => {
     if (!expectedToken || token !== expectedToken) return;
     capturing = !!v;
+    dragStart = null;
   },
 });

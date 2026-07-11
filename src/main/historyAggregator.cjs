@@ -9,7 +9,12 @@ const { schemas } = require('./ipcSchemas.cjs');
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const PARSE_BUDGET_MS = 2_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const CACHE_MAX = 500;
+// Cache entries are small scalar aggregates (token counts, per-model buckets, a
+// tool-name histogram) — NOT raw transcript content — so a much larger cap costs
+// little memory. 50k is safely above the observed real-workspace file count
+// (~26,604 .jsonl files on the dev machine), so repeat scans over the same date
+// range hit cache instead of self-evicting mid-scan and spuriously truncating.
+const CACHE_MAX = 50_000;
 
 // Dollars per million tokens (input / output / cache-read). Cache-read
 // tokens are priced far below input because they're served from
@@ -484,4 +489,6 @@ module.exports = {
   scanAggrLines,
   parseJSONL,
   resolvePricingKey,
+  CACHE_MAX,
+  LRUCache,
 };

@@ -298,15 +298,17 @@ function stripLeadingH1(content) {
 /**
  * hasOpenFeedback(cwd) → boolean
  *
- * Returns true iff `<cwd>/feedback/` or `<cwd>/external-feedback/` exists AND
- * contains at least one *.md file directly in its root (i.e. NOT inside
- * `processed/` or any subdirectory). Pure filesystem check — no LLM call.
+ * Returns true iff `<cwd>/session-manager-operations/feedback/` (the PRD-462
+ * convention) or, as a transitional fallback for repos not yet relocated,
+ * the legacy `<cwd>/feedback/` exists AND contains at least one *.md file
+ * directly in its root (i.e. NOT inside `processed/` or any subdirectory).
+ * Pure filesystem check — no LLM call.
  *
  * Mirrors process-feedback skill step 0 (cheap quick-exit signal).
  * Complexity: O(F) where F ≤ entries in the feedback folder root.
  */
 function hasOpenFeedback(cwd) {
-  for (const folderName of ['feedback', 'external-feedback']) {
+  for (const folderName of [path.join('session-manager-operations', 'feedback'), 'feedback']) {
     const folderPath = path.join(cwd, folderName);
     let entries;
     try {
@@ -428,8 +430,8 @@ function emitFeedbackPRD(cwd, {
     '# Acceptance criteria',
     '',
     '- [ ] All open feedback items evaluated and either queued via /develop, declined with RESOLUTION, or forwarded upstream.',
-    '- [ ] Processed items archived to feedback/processed/ (or external-feedback/processed/) with RESOLUTION notes.',
-    '- [ ] feedback/README.md self-improved with lessons from this pass.',
+    '- [ ] Processed items archived to session-manager-operations/feedback/processed/ (or, for repos not yet relocated, legacy feedback/processed/) with RESOLUTION notes.',
+    '- [ ] session-manager-operations/feedback/README.md (or legacy feedback/README.md) self-improved with lessons from this pass.',
     '- [ ] timeout 60 git diff --exit-code runs clean (no uncommitted inline work).',
     '',
     '# Implementation notes',

@@ -58,13 +58,13 @@ function makeSkillFiles(base) {
   return { skillPath, standardsPath };
 }
 
-// ── (a) open feedback/2026-01-01-foo.md → hasOpenFeedback true + PRD written ─
+// ── (a) open session-manager-operations/feedback/2026-01-01-foo.md → hasOpenFeedback true + PRD written ─
 
 test('(a) open feedback file → hasOpenFeedback true and PRD emitted with correct content', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
-    const feedbackDir = path.join(projectDir, 'feedback');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
     fs.mkdirSync(feedbackDir, { recursive: true });
     fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n\nSome request.\n');
 
@@ -110,7 +110,7 @@ test('(b) only processed/ subdir → hasOpenFeedback false', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
-    const processedDir = path.join(projectDir, 'feedback', 'processed');
+    const processedDir = path.join(projectDir, 'session-manager-operations', 'feedback', 'processed');
     fs.mkdirSync(processedDir, { recursive: true });
     fs.writeFileSync(path.join(processedDir, 'old.md'), '# Old feedback\n');
 
@@ -135,18 +135,18 @@ test('(b2) no feedback dir → hasOpenFeedback false', () => {
   }
 });
 
-// ── (b3) external-feedback/ with open file → hasOpenFeedback true ────────────
+// ── (b3) legacy <cwd>/feedback/ with open file → hasOpenFeedback true (fallback) ─
 
-test('(b3) external-feedback/ with open .md → hasOpenFeedback true', () => {
+test('(b3) legacy feedback/ with open .md and no session-manager-operations/ → hasOpenFeedback true', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
-    const efDir = path.join(projectDir, 'external-feedback');
-    fs.mkdirSync(efDir, { recursive: true });
-    fs.writeFileSync(path.join(efDir, '2026-01-01-request.md'), '# Request\n');
+    const legacyDir = path.join(projectDir, 'feedback');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, '2026-01-01-request.md'), '# Request\n');
 
     assert.equal(hasOpenFeedback(projectDir), true,
-      'hasOpenFeedback must be true for external-feedback/ open file');
+      'hasOpenFeedback must fall back to legacy feedback/ when session-manager-operations/feedback/ does not exist');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -158,7 +158,7 @@ test('(c) pending feedback job already queued → no duplicate PRD', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
-    const feedbackDir = path.join(projectDir, 'feedback');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
     fs.mkdirSync(feedbackDir, { recursive: true });
     fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
 
@@ -188,7 +188,7 @@ test('(c2) running feedback job in queue → no duplicate PRD', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
-    const feedbackDir = path.join(projectDir, 'feedback');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
     fs.mkdirSync(feedbackDir, { recursive: true });
     fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
 
@@ -214,7 +214,7 @@ test('NN selection picks next after highest existing in prdsDir', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'aproject');
-    const feedbackDir = path.join(projectDir, 'feedback');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
     fs.mkdirSync(feedbackDir, { recursive: true });
     fs.writeFileSync(path.join(feedbackDir, '2026-01-01-x.md'), '# X\n');
 
@@ -243,8 +243,8 @@ test('sweep() returns correct summary counts', () => {
   try {
     // Project 1: has open feedback → should emit
     const proj1 = path.join(base, 'proj1');
-    fs.mkdirSync(path.join(proj1, 'feedback'), { recursive: true });
-    fs.writeFileSync(path.join(proj1, 'feedback', '2026-01-01-item.md'), '# Item\n');
+    fs.mkdirSync(path.join(proj1, 'session-manager-operations', 'feedback'), { recursive: true });
+    fs.writeFileSync(path.join(proj1, 'session-manager-operations', 'feedback', '2026-01-01-item.md'), '# Item\n');
 
     // Project 2: no feedback dir → should not emit
     const proj2 = path.join(base, 'proj2');

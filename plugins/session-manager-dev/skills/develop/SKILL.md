@@ -38,10 +38,19 @@ the only step that runs on the cheaper executor.
 ## Standards (single source of truth)
 
 The engineering standards (Performance, Debugging, API reuse / single source of truth, TDD,
-and the executor-facing Execution discipline) live in **`standards.md`** beside this file:
-`~/.claude/skills/develop/standards.md`. Read it, hold it while planning, and inline it
-verbatim into every PRD you emit (Phase 1 step 4). Never restate or fork its content — one
-concept, one implementation.
+and the executor-facing Execution discipline) live in **`standards.md`** beside this file, in
+the same skill directory (`.../skills/develop/standards.md` — NOT `~/.claude/skills/develop/`,
+which is a different, non-existent path; resolve it relative to wherever this SKILL.md itself
+was loaded from). **Re-read that file fresh with the Read tool immediately before pasting it
+into each PRD (Phase 1 step 4) — never reuse a copy cached earlier in the same conversation.**
+A long authoring session can span an edit to `standards.md` (including one autonomously applied
+by a prior incident's fix-plan) without the model noticing; pasting a stale in-context copy
+silently ships PRDs missing the latest execution-discipline rules. This is exactly the
+single-source-of-truth violation the standards themselves warn against — don't let it happen to
+the standards block itself. (Incident: PRDs 467/468 authored late in a long session carried a
+standards.md snapshot from before the "You ARE the executor" guard was added earlier that same
+session, so PRD 467's headless run repeated the exact anti-pattern the guard exists to prevent.)
+Never restate or fork its content — one concept, one implementation.
 
 For interactive dev work, also apply the `test-driven-development` and `systematic-debugging`
 skills; the headless PRDs get the distilled core from `standards.md` instead, since they
@@ -195,7 +204,7 @@ single definition of "tracked to done" for both entry paths.
 ## References (reuse, don't duplicate)
 
 - `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` — the §1–§10 safety rules.
-- `~/.claude/skills/develop/standards.md` — the engineering + execution-discipline rules inlined into every PRD.
+- `standards.md` beside this file — the engineering + execution-discipline rules inlined into every PRD. Re-read fresh each time (see "Standards" above) — don't reuse a cached copy.
 - `test-driven-development`, `systematic-debugging` — interactive dev sessions.
 - `requesting-code-review` — the Phase-2 review gate.
 

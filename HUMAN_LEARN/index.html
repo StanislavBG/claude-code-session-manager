@@ -2,159 +2,843 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Session Manager — Executive Overview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HUMAN_LEARN · session-manager — how it actually works</title>
 <style>
-:root{
-  --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
-  --fg:#e6edf3; --dim:#9da7b3; --faint:#6e7681;
-  --blue:#60a5fa; --green:#34d399; --amber:#fbbf24; --violet:#a78bfa;
-  --cyan:#22d3ee;
-  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--fg);
-  font:15px/1.6 ui-sans-serif,system-ui,sans-serif;padding:0 20px 60px}
-.wrap{max-width:820px;margin:0 auto}
-code,.loc{font-family:var(--mono);font-size:12px}
-.loc{color:var(--cyan);background:rgba(34,211,238,.08);
-  border:1px solid rgba(34,211,238,.25);border-radius:99px;padding:1px 9px;
-  white-space:nowrap}
-h1{font-size:26px;margin:36px 0 6px}
-h2{font-size:18px;margin:0 0 8px;color:var(--fg)}
-.tag{color:var(--dim);font-size:14px;margin-bottom:24px}
-.nav{position:sticky;top:0;z-index:5;background:rgba(13,17,23,.9);
-  backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
-  padding:10px 0;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:6px}
-.nav a{font-size:12px;color:var(--dim);text-decoration:none;
-  border:1px solid var(--line);border-radius:99px;padding:4px 10px}
-.nav a:hover{color:var(--fg);border-color:var(--faint)}
-.feature{background:var(--panel);border:1px solid var(--line);
-  border-radius:10px;padding:18px 20px;margin-bottom:14px}
-.feature p{color:var(--dim);margin:6px 0}
-.refs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-footer{color:var(--faint);font-size:12px;margin-top:40px;
-  border-top:1px solid var(--line);padding-top:16px}
-a.ext{color:var(--blue)}
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+    --fg:#e6edf3; --dim:#9da7b3; --faint:#6e7681;
+    --blue:#60a5fa; --green:#34d399; --amber:#fbbf24; --violet:#a78bfa;
+    --pink:#f472b6; --red:#f87171; --cyan:#22d3ee;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--fg);font:15px/1.6 ui-sans-serif,system-ui,sans-serif;padding:0 20px 90px}
+  .wrap{max-width:980px;margin:0 auto}
+  a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+
+  /* sticky section nav */
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);margin:0 -20px;padding:10px 20px}
+  nav.toc .row{max-width:980px;margin:0 auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  nav.toc a{font-size:13px;padding:4px 14px;border-radius:99px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  nav.toc a:hover{color:var(--fg);border-color:var(--faint);text-decoration:none}
+  nav.toc a.home{border-color:transparent;color:var(--faint)}
+  nav.toc a.map{border-color:rgba(167,139,250,.45);color:var(--violet)}
+
+  /* hero */
+  .hero{margin:40px 0 6px}
+  h1{font-size:34px;letter-spacing:-.6px}
+  .sub{color:var(--dim);margin:12px 0 4px;max-width:820px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:16px 0;font-size:12px;color:var(--dim)}
+  .legend span{display:flex;align-items:center;gap:6px}
+
+  /* section shell */
+  section.comp{margin-top:64px;padding-top:10px;scroll-margin-top:64px}
+  .comp-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;border-bottom:2px solid var(--line);padding-bottom:10px;margin-bottom:6px}
+  .comp-head .icon{font-size:30px}
+  .comp-head h2{font-size:24px;border:none;margin:0;padding:0}
+  .comp-head .files{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  h3{font-size:17px;margin:28px 0 8px}
+  h4{font-size:14px;margin:16px 0 6px}
+  p{margin:8px 0;color:var(--dim)} p strong,li strong{color:var(--fg)}
+  ul.tight{margin:6px 0 6px 20px;color:var(--dim);font-size:13.5px} ul.tight li{margin:5px 0}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg);white-space:nowrap}
+  pre{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:10px 0;line-height:1.55}
+  pre code{background:none;border:none;padding:0;white-space:pre}
+  .loc{font-family:var(--mono);font-size:11px;color:var(--cyan);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);border-radius:99px;padding:1px 9px;white-space:nowrap}
+
+  /* horizontal flow */
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:16px 0}
+  .flow .box{flex:1 1 150px;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .flow .box .bt{font-weight:700;font-size:13px;margin-bottom:2px}
+  .flow .box .bd{font-size:12px;color:var(--dim)}
+  .flow .box .where{font-family:var(--mono);font-size:10px;color:var(--cyan);margin-top:6px}
+  .flow .arrow{align-self:center;color:var(--faint);font-size:18px;flex:0 0 auto}
+  .box.b-amber{border-top:3px solid var(--amber)} .box.b-green{border-top:3px solid var(--green)}
+  .box.b-violet{border-top:3px solid var(--violet)} .box.b-pink{border-top:3px solid var(--pink)}
+  .box.b-cyan{border-top:3px solid var(--cyan)} .box.b-red{border-top:3px solid var(--red)}
+  .box.b-blue{border-top:3px solid var(--blue)} .box.b-you{border-top:3px solid var(--amber)}
+  .box.b-cc{border-top:3px solid var(--violet)} .box.b-main{border-top:3px solid var(--green)}
+  .box.b-disk{border-top:3px solid var(--cyan)}
+
+  /* process badges (all layers across all sections) */
+  .proc{font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:1px 8px;border-radius:99px;border:1px solid}
+  .proc.hook{color:var(--amber);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.07)}
+  .proc.you{color:var(--amber);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.07)}
+  .proc.main{color:var(--green);border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.07)}
+  .proc.sub{color:var(--violet);border-color:rgba(167,139,250,.4);background:rgba(167,139,250,.07)}
+  .proc.cc{color:var(--violet);border-color:rgba(167,139,250,.4);background:rgba(167,139,250,.07)}
+  .proc.rend{color:var(--pink);border-color:rgba(244,114,182,.4);background:rgba(244,114,182,.07)}
+  .proc.disk{color:var(--cyan);border-color:rgba(34,211,238,.4);background:rgba(34,211,238,.07)}
+  .proc.net{color:var(--blue);border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.07)}
+
+  /* numbered vertical pipeline (KG) */
+  .pipeline{margin:24px 0 8px}
+  .stage{display:flex;gap:0;align-items:stretch}
+  .stage .num{flex:0 0 56px;display:flex;flex-direction:column;align-items:center}
+  .stage .num .ball{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:14px;color:#0d1117}
+  .stage .num .stem{flex:1;width:2px;background:var(--line);margin:4px 0}
+  .stage:last-child .num .stem{background:transparent}
+  .stage .card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px 16px;margin-bottom:18px}
+  .stage .card .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+  .stage .card .head .t{font-weight:700;font-size:16px}
+  .stage .card p{font-size:13.5px} .stage .card ul{margin:6px 0 0 18px;font-size:13.5px;color:var(--dim)} .stage .card li{margin:3px 0}
+
+  /* two-scope split (memory) */
+  .scopes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}
+  .scope{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .scope.ws{border-top:3px solid var(--green)} .scope.sa{border-top:3px solid var(--violet)}
+  .scope h3{margin-top:0;display:flex;align-items:center;gap:8px}
+  .scope .path{font-family:var(--mono);font-size:11px;color:var(--cyan);margin:8px 0;word-break:break-all}
+  .scope ul{margin:8px 0 0 16px;font-size:13px;color:var(--dim)} .scope li{margin:4px 0}
+
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+  th,td{text-align:left;padding:6px 11px;border:1px solid var(--line)}
+  th{background:var(--panel2);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  td{background:var(--panel);color:var(--dim)} td code{white-space:nowrap}
+
+  .callout{border-left:3px solid var(--amber);background:rgba(251,191,36,.06);border-radius:0 8px 8px 0;padding:12px 16px;margin:14px 0;font-size:14px;color:var(--dim)}
+  .callout.ok{border-color:var(--green);background:rgba(52,211,153,.06)}
+  .callout.bad{border-color:var(--red);background:rgba(248,113,113,.06)}
+  .callout strong{color:var(--fg)}
+
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .statline{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+  .statline .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 18px}
+  .statline .stat .v{font-size:22px;font-weight:700} .statline .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+  details.consts{margin:10px 0} details.consts summary{cursor:pointer;font-size:13px;color:var(--blue)}
+
+  @media(max-width:760px){.twocol{grid-template-columns:1fr}.scopes{grid-template-columns:1fr}.flow .box{flex-basis:100%}.stage .num{flex-basis:44px}}
+  footer{margin-top:70px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--faint)}
 </style>
 </head>
 <body>
-<div class="wrap">
 
-<div class="nav">
-  <a href="#terminal">Terminal</a>
-  <a href="#scheduler">Scheduler</a>
-  <a href="#browser">Browser</a>
-  <a href="#voice">Voice</a>
-  <a href="#config-tabs">Config tabs</a>
-  <a href="#memory">Memory</a>
-  <a href="#usage-history">Usage &amp; History</a>
-  <a href="#web-remote">Web Remote</a>
-  <a href="#admin-mcp">Admin API / MCP</a>
-</div>
+<nav class="toc"><div class="row">
+  <a class="home" href="#top">📖 HUMAN_LEARN</a>
+  <a href="#terminal">🖥 Terminal</a>
+  <a href="#scheduler">📅 Scheduler</a>
+  <a href="#scheduler-watchdog">🐕 Watchdog</a>
+  <a href="#knowledge-graph">🕸 Knowledge Graph</a>
+  <a href="#memory">🧠 Memory</a>
+  <a href="#webremote">📱 Web Remote</a>
+  <a href="#browser">🌐 Browser</a>
+  <a class="map" href="SKILL_MAP.html">⛓ Skill Map ↗</a>
+</div></nav>
 
-<h1>Session Manager</h1>
-<div class="tag">Executive overview — what it is and its top features, briefly.</div>
+<div class="wrap" id="top">
+  <div class="hero">
+    <h1>📖 HUMAN_LEARN — session-manager</h1>
+    <p class="sub">
+      One human-readable page for the whole cockpit: <strong>claude-code-session-manager</strong>, the Electron
+      front-end for Claude Code CLI. The codebase is large; this page walks its pillars in the order they
+      actually matter when you sit down to work — <em>a live session → autonomous jobs → distilled intelligence →
+      cross-session recall → the phone mirror</em>. Every claim is tagged with a real <span class="loc">file:line</span>;
+      open this file directly in a browser, no build step.
+    </p>
+    <p class="sub">Building <em>on</em> the project (the skills/PRD/scheduler dev loop) lives in its own diagram:
+      <a href="SKILL_MAP.html">⛓ the Skill Map →</a></p>
+    <div class="legend">
+      <span><span class="proc hook">hook</span> shell hook on a CC event</span>
+      <span><span class="proc main">main</span> electron main process</span>
+      <span><span class="proc sub">subprocess</span> headless <code>claude -p</code></span>
+      <span><span class="proc rend">renderer</span> React UI</span>
+      <span><span class="proc disk">disk</span> on-disk state</span>
+      <span><span class="proc net">network</span> the relay</span>
+    </div>
+  </div>
 
-<div class="feature">
-<p>An Electron desktop app that acts as a local cockpit for the Claude Code CLI: a terminal
-you actually work in, plus 25+ tabs for configuration, observability, and scheduling around
-that terminal. A companion mobile web cockpit mirrors session state from the desktop app.</p>
-</div>
+  <!-- ════════════════════════ TERMINAL & LIVE STATE ════════════════════════ -->
+  <section class="comp" id="terminal">
+    <div class="comp-head">
+      <span class="icon">🖥</span>
+      <h2>Terminal &amp; Live State — one UUID ties everything together</h2>
+      <span class="files">pty.cjs · transcripts.cjs · state/live.ts · App.tsx</span>
+    </div>
+    <p>The core trick of the whole app: <strong>the tab ID <em>is</em> the Claude session ID</strong>. The renderer mints a
+    UUID, launches <code>claude --session-id &lt;uuid&gt;</code> in a pty, and because Claude Code names its transcript file
+    after that same UUID, the app knows <em>exactly</em> which JSONL file to tail for that tab — no guessing, no scanning.
+    Everything live (todos, plans, subagents, usage) derives from that tail.</p>
 
-<h2 id="terminal">Terminal sessions</h2>
-<div class="feature">
-<p>Each open tab is a real PTY running <code>claude</code>, managed by a per-tab
-<code>PtyManager</code>. The tab ID doubles as the Claude session UUID, so it passes straight
-through to <code>--session-id</code> and to transcript lookup — no separate ID mapping.</p>
-<div class="refs"><span class="loc">src/main/pty.cjs:59</span></div>
-</div>
+    <div class="flow">
+      <div class="box b-pink"><div class="bt">1 · Mint UUID</div><div class="bd"><code>crypto.randomUUID()</code> = tab id = session id</div><div class="where">App.tsx:244</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-green"><div class="bt">2 · Spawn pty</div><div class="bd">node-pty shell, runs <code>claude --session-id &lt;id&gt;</code></div><div class="where">pty.cjs · presets.ts:53</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-cyan"><div class="bt">3 · CLI writes JSONL</div><div class="bd">Claude Code's own transcript</div><div class="where">~/.claude/projects/&lt;encodeCwd&gt;/&lt;uuid&gt;.jsonl</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-green"><div class="bt">4 · Tail + classify</div><div class="bd">chokidar watch, 8 event types, 500-entry ring</div><div class="where">transcripts.cjs:181-321</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-pink"><div class="bt">5 · Derive live state</div><div class="bd">flat per-tab object in zustand</div><div class="where">live.ts</div></div>
+    </div>
 
-<h2 id="scheduler">Scheduler — unattended PRD execution</h2>
-<div class="feature">
-<p>Runs written task specs ("PRDs") as headless <code>claude -p</code> jobs, on a schedule or
-when API usage frees up. Policies: <code>manual</code>, <code>on-reset</code>, or
-<code>when-available</code> (default), which polls billing usage every minute to decide when
-to start/stop jobs around the 5-hour usage window. Concurrency is capped at 3 simultaneous
-jobs to avoid overloading the machine. A boot-time reconciler reaps jobs orphaned by a crash,
-and a periodic supervisor probe kills stuck poll-loops without killing the agent itself.</p>
-<div class="refs">
-<span class="loc">src/main/scheduler.cjs:253</span>
-<span class="loc">src/main/lib/schedulerConfig.cjs:10</span>
-<span class="loc">src/main/supervisor.cjs</span>
-</div>
-</div>
+    <h3>1 · Tab creation <span class="proc rend">renderer</span></h3>
+    <p>Creating a tab mints <code>crypto.randomUUID()</code> (<span class="loc">App.tsx:244</span>) and renders the launch
+    command from the active preset: <code>claude [--dangerously-skip-permissions] --session-id &lt;uuid&gt;</code>
+    (<span class="loc">lib/presets.ts:53-55</span>, also <span class="loc">lib/createPickedSession.ts:19</span>).
+    The UUID is the tab key in every store and every IPC channel from here on
+    (<span class="loc">state/sessions.ts:7</span>).</p>
 
-<h2 id="browser">Capture panel</h2>
-<div class="feature">
-<p>A built-in browser view the agent can drive and capture from — selection-scoped page
-capture in agent/HTML/accessibility/CSS-selector modes, wired into the Capture panel UI.</p>
-<div class="refs"><span class="loc">src/renderer/components/tabs/Browser.tsx</span></div>
-</div>
+    <h3>2 · PTY layer <span class="proc main">electron main</span></h3>
+    <p><code>pty.cjs</code> spawns a node-pty <strong>interactive shell</strong> (xterm-256color) per tab keyed by that UUID
+    and writes the startup command into it — so the terminal survives Claude exiting and behaves like a real shell.
+    Data/resize/exit flow over per-tab IPC channels; output is chunked at 60 KiB so a huge paste can't stall the IPC pipe.
+    Closing a tab kills the pty and tears down its channels.</p>
 
-<h2 id="voice">Voice</h2>
-<div class="feature">
-<p>Hands-free dictation into the terminal: local voice-activity detection decides when
-you're speaking, transcription runs locally via Whisper, and a countdown auto-submits your
-utterance unless you keep talking.</p>
-<div class="refs"><span class="loc">src/renderer/state/voice.ts</span></div>
-</div>
+    <h3>3 · Transcript tailing <span class="proc main">electron main</span> <span class="proc disk">disk</span></h3>
+    <p><code>transcripts.cjs</code> resolves <code>~/.claude/projects/&lt;encodeCwd(cwd)&gt;/&lt;uuid&gt;.jsonl</code> —
+    the same <code>encodeCwd</code> slug convention the Knowledge Graph uses (<span class="loc">transcripts.cjs:11</span>) —
+    and tails it with a chokidar watcher (<code>awaitWriteFinish: 30 ms stability / 20 ms poll</code>,
+    <span class="loc">transcripts.cjs:321</span>). Each JSONL line is <strong>classified</strong> into one of 8 event types
+    (assistant text, tool use, todos, plan, subagent activity, usage, …), oversized raw strings truncated at 4,096 chars
+    (<span class="loc">transcripts.cjs:46</span>), buffered in a <strong>500-entry ring</strong> per subscription
+    (<span class="loc">transcripts.cjs:181-183</span>), and broadcast on <code>transcript:event:&lt;tabId&gt;</code>.
+    Subscriptions are capped at 20 concurrent (<span class="loc">transcripts.cjs:228</span>) and ref-counted, so two
+    consumers of one tab share a single watcher.</p>
 
-<h2 id="config-tabs">Configuration &amp; observability tabs</h2>
-<div class="feature">
-<p>One left-nav entry per concern: Settings, Permissions, Skills, Plugins, MCP Servers,
-Hooks, Subagents, Projects, Keybindings, System Prompt, Repo Viz, Search. Each follows one
-of two shared UI shapes — a scoped JSON editor (Settings) or a list-plus-detail view
-(Skills) — so new tabs stay consistent without reinventing layout.</p>
-<div class="refs">
-<span class="loc">src/renderer/components/LeftNav.tsx:12</span>
-<span class="loc">src/renderer/components/tabs/Settings.tsx</span>
-<span class="loc">src/renderer/components/tabs/Skills.tsx</span>
-</div>
-</div>
+    <h3>4 · Live state <span class="proc rend">renderer</span></h3>
+    <p><code>state/live.ts</code> subscribes per tab and <strong>reduces</strong> the event stream into one flat object —
+    todos, current plan, subagent rows, token usage, and a 32-slot activity ring — "hot data contiguous" by convention:
+    no nesting per event, just the latest derived truth. Sub-collections are bounded (50 agents/plans/tools) and replay
+    on mount is suppressed so re-opening a tab doesn't re-animate history. Consumers: the terminal tab's overlay panes
+    and the status bar (the old AgentView tab was deleted 2026-06; its monitor rows folded into the Subagents Live view).</p>
 
-<h2 id="memory">Memory Clusters</h2>
-<div class="feature">
-<p>Reads a project's saved workspace memories and, on request, groups them into named
-semantic clusters with cross-links — a browsable map of what the agent has remembered
-about the project.</p>
-<div class="refs"><span class="loc">src/main/memoryAggregate.cjs</span></div>
-</div>
+    <h3>5 · Lifecycle</h3>
+    <ul class="tight">
+      <li><strong>Close</strong> — pty killed, watcher ref-dropped, live-state slot discarded.</li>
+      <li><strong>Restart</strong> — a <em>new</em> UUID (new transcript identity), unless…</li>
+      <li><strong>Resume</strong> — when the old transcript exists on disk, the tab relaunches with <code>claude --resume &lt;id&gt;</code> so transcript + plan continuity survive (<span class="loc">App.tsx:235</span>).</li>
+    </ul>
 
-<h2 id="usage-history">Usage &amp; History</h2>
-<div class="feature">
-<p>Usage shows live billing/rate-limit standing pulled from Anthropic's usage endpoint.
-History is analytics over past sessions — cost and activity charts, not a session
-browser or resume point.</p>
-<div class="refs">
-<span class="loc">src/renderer/components/tabs/Usage.tsx</span>
-<span class="loc">src/renderer/components/tabs/History.tsx</span>
-</div>
-</div>
+    <details class="consts"><summary>All terminal/live constants (9)</summary>
+    <table>
+      <tr><th>Constant</th><th>Value</th><th>Where</th></tr>
+      <tr><td>transcript ring buffer</td><td>500 entries</td><td><span class="loc">transcripts.cjs:183</span></td></tr>
+      <tr><td><code>MAX_RAW_STR</code> (per-block truncation)</td><td>4,096 chars</td><td><span class="loc">transcripts.cjs:46</span></td></tr>
+      <tr><td><code>MAX_TRANSCRIPT_SUBS</code></td><td>20</td><td><span class="loc">transcripts.cjs:228</span></td></tr>
+      <tr><td>chokidar awaitWriteFinish</td><td>30 ms / 20 ms</td><td><span class="loc">transcripts.cjs:321</span></td></tr>
+      <tr><td>pty output chunk</td><td>60 KiB</td><td><span class="loc">pty.cjs</span></td></tr>
+      <tr><td>live.ts agents/plans/tools caps</td><td>50 each</td><td><span class="loc">live.ts</span></td></tr>
+      <tr><td>live.ts activity ring</td><td>32 slots</td><td><span class="loc">live.ts</span></td></tr>
+    </table>
+    </details>
+  </section>
 
-<h2 id="web-remote">Web Remote (mobile)</h2>
-<div class="feature">
-<p>A same-origin relay lets a paired phone browser watch and lightly steer an active
-desktop session — session state, summaries, and gated remote-control actions — with the
-desktop app remaining the source of truth.</p>
-<div class="refs"><span class="loc">src/main/webRemote.cjs</span></div>
-</div>
+  <!-- ════════════════════════ SCHEDULER ════════════════════════ -->
+  <section class="comp" id="scheduler">
+    <div class="comp-head">
+      <span class="icon">📅</span>
+      <h2>Scheduler — PRDs become autonomous <code>claude -p</code> jobs</h2>
+      <span class="files">scheduler.cjs (~2,000 ln) · supervisor.cjs · queueOps.cjs · lib/schedulerConfig.cjs</span>
+    </div>
+    <p>Drop a PRD markdown file into a folder; the scheduler waits for a cheap moment on your 5-hour billing window,
+    runs it headlessly with four overlapping watchdogs, verifies the result, and can even write its own fix-plan
+    when a job fails. The hard-won design driver: <strong>headless jobs hang in creative ways</strong>
+    (the fizzpop poll-hang, the etch-engine post-AC overrun) — so almost everything here is a safety net.
+    This is the engine the <a href="SKILL_MAP.html">dev-skill chain</a> queues work onto.</p>
 
-<h2 id="admin-mcp">Admin API &amp; MCP integration</h2>
-<div class="feature">
-<p>A loopback-only, token-authed HTTP API exposes a narrow scheduler-control surface
-(list jobs, reset a stuck one), wrapped as MCP tools so an agent — or this very app —
-can manage the job queue directly.</p>
-<div class="refs"><span class="loc">src/main/adminServer.cjs:11</span></div>
-</div>
+    <div class="flow">
+      <div class="box b-cyan"><div class="bt">1 · PRD file</div><div class="bd">drop <code>NN-slug.md</code> with YAML frontmatter into <code>prds/</code></div><div class="where">~/.claude/session-manager/scheduled-plans/</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-green"><div class="bt">2 · Reconcile + lint</div><div class="bd">queue.json entry created; unbounded-loop &amp; overrun lint</div><div class="where">scheduler.cjs:486 · queueOps.cjs:51</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-amber"><div class="bt">3 · Fire policy</div><div class="bd">when-available: usage poll &lt; 90% util</div><div class="where">10-min poll · schedulerConfig.cjs:7</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-violet"><div class="bt">4 · Execute</div><div class="bd"><code>claude -p</code> + 4 watchdogs, ≤3 parallel</div><div class="where">scheduler.cjs:935</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-blue"><div class="bt">5 · Verify + recover</div><div class="bd">commit-guard, verifyRun, Opus fix-plan</div><div class="where">scheduler.cjs:1032-1281</div></div>
+    </div>
 
-<footer>
-Sources: src/main/pty.cjs, src/main/scheduler.cjs, src/main/lib/schedulerConfig.cjs,
-src/main/supervisor.cjs, src/renderer/components/tabs/Browser.tsx, src/renderer/state/voice.ts,
-src/renderer/components/LeftNav.tsx, src/main/memoryAggregate.cjs, src/main/webRemote.cjs,
-src/main/adminServer.cjs · generated 2026-07-10
-</footer>
+    <h3>1 · Input: the PRD queue <span class="proc disk">disk</span></h3>
+    <pre><code>~/.claude/session-manager/scheduled-plans/
+├── prds/                        # NN-slug.md — NN prefix = parallel group
+├── queue.json                   # config + jobs[] + paused state (SoR)
+├── runs/&lt;ISO&gt;/&lt;slug&gt;.log        # captured stdout/stderr per run
+├── runs/&lt;ISO&gt;/&lt;slug&gt;.meta.json  # exitCode, duration, outcome classification
+└── prds-archived/&lt;ISO&gt;/         # archived, never deleted</code></pre>
+    <p>Frontmatter carries <code>title</code>, <code>cwd</code>, <code>parallelGroup</code>, <code>estimateMinutes</code>
+    (<span class="loc">queueOps.cjs:85-150</span>). A reconcile pass (<span class="loc">scheduler.cjs:486-534</span>) walks
+    <code>prds/</code>, queues new files as pending, prunes orphans. <strong>The linter blocks known footguns before they queue</strong>
+    (<span class="loc">queueOps.cjs:51-83</span>): unbounded <code>until</code>/<code>while true</code> loops (error — the fizzpop
+    incident), sequences ≥500 (error — the etch-engine incident), <code>--no-verify</code>/<code>--no-gpg-sign</code> (warn),
+    missing cwd on disk (error).</p>
 
+    <h3>2 · Fire policies — when does a job start? <span class="proc main">electron main</span></h3>
+    <ul class="tight">
+      <li><strong><code>when-available</code></strong> (default) — polls the billing usage API every 10 min (<code>POLL_INTERVAL_MS</code>, <span class="loc">schedulerConfig.cjs:7</span>); fires when 5-hour utilization is below <code>utilizationThreshold</code> = 90%. A 429 from the meter itself fires anyway at util=0; an auth error pauses for manual resume; 30 min of network failures auto-pauses with exponential backoff capped at 8 min (<span class="loc">scheduler.cjs:1581-1586</span>).</li>
+      <li><strong><code>on-reset</code></strong> — one <code>setTimeout</code> for <code>nextReset + offsetMinutes</code> (15 min default), reset time read from the usage API's <code>five_hour.resets_at</code> (<span class="loc">scheduler.cjs:542-548, 628-637</span>).</li>
+      <li><strong><code>manual</code></strong> — only the "Run now" button.</li>
+    </ul>
+    <p>Jobs sharing an <code>NN-</code> prefix form a <strong>parallel group</strong>: the group fires together (capped at
+    <code>concurrencyCap</code> = 3) and the next group waits. Each slot also passes a <strong>memory gate</strong> —
+    1,500 MB free RAM required per job (<span class="loc">scheduler.cjs:188</span>) — because 5 parallel <code>claude -p</code>
+    processes OOM-killed Electron on 2026-06-10.</p>
+
+    <h3>3 · Execution — one job, four watchdogs <span class="proc sub">subprocess</span></h3>
+    <pre><code>claude -p "&lt;PRD body + FINISH_PROTOCOL&gt;" --model sonnet
+       --dangerously-skip-permissions --output-format stream-json
+       --verbose --session-id &lt;UUID&gt;          # spawned detached → whole-tree kill</code></pre>
+    <ul class="tight">
+      <li><strong>result-tail</strong> — polls the run log every 5 s for <code>result=success</code>; once seen, grants a 90 s grace, then SIGTERM → SIGKILL after 30 s more (<span class="loc">scheduler.cjs:80-82</span>). This is the anti-"post-AC overrun" net: a job that declared success cannot keep running fixture generators for hours.</li>
+      <li><strong>idle-tail</strong> — SIGTERM when the log mtime stalls &gt; 20 min (<span class="loc">scheduler.cjs:91</span>). Anti-poll-hang.</li>
+      <li><strong>deadman</strong> — unconditional SIGKILL at 4 h (<code>MAX_JOB_DURATION_MS</code>, <span class="loc">schedulerConfig.cjs:17</span>).</li>
+      <li><strong>supervisor probe</strong> (<span class="loc">supervisor.cjs</span>, every 15 min, Linux-only, gated by <code>SM_SUPERVISOR_DISABLE</code>) — when a job's log is &gt;10 min stale, an Opus probe reads the pstree, child bash cmdlines, and log tail, then chooses <code>kill-bash</code> (SIGTERM the stuck descendant shell, keep the agent) or <code>kill-agent</code> (the job itself is wedged). All probes ring-logged (50 entries).</li>
+    </ul>
+
+    <h3>4 · After exit — verify, guard, self-heal <span class="proc main">electron main</span></h3>
+    <ul class="tight">
+      <li><strong>Commit-guard</strong> (<span class="loc">scheduler.cjs:1197-1281</span>) — git status is snapshotted before the run; afterwards, new uncommitted files downgrade the job to <code>needs_review</code> instead of silently passing. Skipped when HEAD moved (job committed its work) or concurrent writers touched the tree.</li>
+      <li><strong>Rate-limit detection</strong> — pauses the whole queue, auto-resumes at <code>nextReset + 30 s</code>.</li>
+      <li><strong>Transient-kill retry</strong> — exit 143/137 in under 45 s reads as an external kill: auto-retry up to 2× (<span class="loc">scheduler.cjs:1359-1361</span>).</li>
+      <li><strong>Fix-plan auto-recovery</strong> (<span class="loc">scheduler.cjs:1032-1183</span>) — on real failure, an Opus investigation (30-min deadman) reads the failure log + original PRD and writes a <code>&lt;group&gt;-fix-&lt;base&gt;.md</code> PRD; when the fix job succeeds, the original is auto-promoted to completed.</li>
+      <li><strong>Boot reconciliation + dead-process reaper</strong> (<span class="loc">scheduler.cjs:1934-1979, 1475-1513</span>) — on startup and every poll cycle, orphaned PIDs are killed and their jobs classified from the run log (success/timeout/error), so a crash never wedges the queue.</li>
+    </ul>
+
+    <h3>5 · Renderer <span class="proc rend">renderer</span></h3>
+    <p><code>state/scheduleState.ts</code> mirrors queue + history from <code>schedule:*</code> IPC broadcasts;
+    <code>SchedulePanel.tsx</code> (Queue / PRDs / History sub-tabs, owns its own filter state) renders inside the
+    Scheduler tab's Almanac shell (<code>sched-primitives.tsx</code>: SchBadge status colors, hashed project-dot palette)
+    and is reused by web-remote.</p>
+
+    <details class="consts"><summary>All scheduler constants (16)</summary>
+    <table>
+      <tr><th>Constant</th><th>Value</th><th>Where</th></tr>
+      <tr><td><code>POLL_INTERVAL_MS</code></td><td>10 min</td><td><span class="loc">schedulerConfig.cjs:7</span></td></tr>
+      <tr><td><code>MAX_JOB_DURATION_MS</code></td><td>4 h</td><td><span class="loc">schedulerConfig.cjs:17</span></td></tr>
+      <tr><td><code>POST_RESULT_GRACE_MS</code> / <code>KILL_MS</code></td><td>90 s / 30 s</td><td><span class="loc">scheduler.cjs:80-81</span></td></tr>
+      <tr><td><code>RESULT_TAIL_POLL_MS</code></td><td>5 s</td><td><span class="loc">scheduler.cjs:82</span></td></tr>
+      <tr><td><code>IDLE_OUTPUT_KILL_MS</code></td><td>20 min</td><td><span class="loc">scheduler.cjs:91</span></td></tr>
+      <tr><td><code>MIN_FREE_MB_PER_JOB</code></td><td>1,500 MB</td><td><span class="loc">scheduler.cjs:188</span></td></tr>
+      <tr><td><code>concurrencyCap</code></td><td>3 (clamp 1–20)</td><td><span class="loc">scheduler.cjs:192</span></td></tr>
+      <tr><td><code>utilizationThreshold</code></td><td>90%</td><td><span class="loc">scheduler.cjs:199</span></td></tr>
+      <tr><td><code>offsetMinutes</code></td><td>15</td><td><span class="loc">scheduler.cjs:191</span></td></tr>
+      <tr><td>supervisor interval / stale</td><td>15 min / 10 min</td><td><span class="loc">scheduler.cjs:203-205</span></td></tr>
+      <tr><td><code>MAX_INVESTIGATION_DURATION_MS</code></td><td>30 min</td><td><span class="loc">scheduler.cjs:69</span></td></tr>
+      <tr><td>transient kill = retry</td><td>143/137 &amp; &lt;45 s, ≤2×</td><td><span class="loc">scheduler.cjs:1359-1361</span></td></tr>
+      <tr><td>network pause / backoff cap</td><td>30 min / 8 min</td><td><span class="loc">scheduler.cjs:1581-1586</span></td></tr>
+      <tr><td>heartbeat + supervisor log rotation</td><td>1 MB each</td><td><span class="loc">scheduler.cjs:179 · supervisor.cjs:23</span></td></tr>
+    </table>
+    </details>
+  </section>
+
+  <!-- ════════════════════════ SCHEDULER WATCHDOG ══════════════════════ -->
+  <section class="comp" id="scheduler-watchdog">
+    <div class="comp-head">
+      <span class="icon">🐕</span>
+      <h2>Scheduler Watchdog — external heartbeat outside Electron</h2>
+      <span class="files">scripts/scheduler-watchdog.cjs · scripts/scheduler-watchdog.sh · scripts/install-scheduler-watchdog.sh</span>
+    </div>
+    <p>The in-process scheduler (scheduler.cjs) only runs while Electron is open. The <strong>external watchdog</strong>
+    is a separate check-and-exit process invoked every 2–3 min by a systemd user timer (or cron fallback),
+    so the queue stays healthy even when the desktop app is closed.</p>
+
+    <div class="flow">
+      <div class="box b-amber"><div class="bt">1 · Timer fires</div><div class="bd">systemd user timer or <code>*/3 cron</code></div><div class="where">scheduler-watchdog.timer · OnUnitActiveSec=2min</div></div>
+      <div class="arr">→</div>
+      <div class="box b-blue"><div class="bt">2 · flock -n</div><div class="bd">overlapping ticks skip cleanly</div><div class="where">scheduler-watchdog.sh</div></div>
+      <div class="arr">→</div>
+      <div class="box b-green"><div class="bt">3 · reconcileQueueOffline()</div><div class="bd">reap orphaned PIDs, classify outcomes</div><div class="where">scheduler-watchdog.cjs</div></div>
+      <div class="arr">→</div>
+      <div class="box b-violet"><div class="bt">4 · sweep()</div><div class="bd">feedback scan → emit auto-PRDs</div><div class="where">scheduler-watchdog.cjs</div></div>
+    </div>
+
+    <h3>What it does</h3>
+    <ul>
+      <li><strong>Heartbeat-gated reconcile</strong> — <code>reconcileQueueOffline()</code> reads the queue's heartbeat file; if Electron's in-process scheduler is running it skips to avoid double-writes. When Electron is absent it reaps orphaned PIDs and promotes jobs from <code>running</code> to <code>success</code>/<code>timeout</code>/<code>error</code> based on the run log — same logic as the in-process boot reconciler.</li>
+      <li><strong>Active-session detection</strong> — <code>activeProjectCwds()</code> enumerates live Claude Code terminal sessions by scanning <code>~/.claude/projects/</code> JSONL files for recent mtime activity; used by <code>sweep()</code> to gate feedback ingestion only when a session is open.</li>
+      <li><strong>Feedback sweep + auto-PRD emitter</strong> — <code>sweep()</code> scans <code>~/.claude/session-manager/feedback/</code> for open items, cheap-reads them, and emits PRDs into the scheduler queue so the next available billing window picks them up automatically.</li>
+    </ul>
+
+    <h3>Install</h3>
+    <p>Run once per machine. Idempotent — safe to re-run.</p>
+    <pre>bash scripts/install-scheduler-watchdog.sh</pre>
+    <p>To preview without activating a live timer:</p>
+    <pre>SM_WATCHDOG_DRYRUN=1 bash scripts/install-scheduler-watchdog.sh</pre>
+    <p>The installer prints the exact <code>loginctl enable-linger "$USER"</code> command needed to keep the timer alive after logout (for headless servers or suspended laptops).</p>
+
+    <h3>Fallback priority</h3>
+    <ol>
+      <li><strong>systemd user timer</strong> (preferred) — <code>~/.config/systemd/user/scheduler-watchdog.{service,timer}</code>; <code>OnUnitActiveSec=2min</code>, <code>Persistent=true</code>.</li>
+      <li><strong>cron</strong> (fallback when <code>systemctl --user</code> is unavailable) — <code>*/3 * * * *</code> with <code>flock -n</code> overlap protection and <code>grep -qF</code> idempotency guard.</li>
+    </ol>
+  </section>
+
+  <!-- ════════════════════════ KNOWLEDGE GRAPH ════════════════════════ -->
+  <section class="comp" id="knowledge-graph">
+    <div class="comp-head">
+      <span class="icon">🕸</span>
+      <h2>Knowledge Graph — how a prompt becomes a node</h2>
+      <span class="files">src/main/kg.cjs (~650 ln) · KnowledgeGraph.tsx · UserPromptSubmit hook</span>
+    </div>
+    <p>The Knowledge Graph distills the developer's <em>own Claude Code prompts</em> into a per-project graph of
+    entities (projects, features, tools, goals…) and relations — what you're building and how it all connects.
+    It is distilled intelligence over the raw prompt log, <strong>not</strong> curated facts (that's the Memory tab below).</p>
+
+    <div class="statline">
+      <div class="stat"><div class="v">288</div><div class="k">entities (this project)</div></div>
+      <div class="stat"><div class="v">566</div><div class="k">relations</div></div>
+      <div class="stat"><div class="v">164</div><div class="k">prompts distilled</div></div>
+      <div class="stat"><div class="v">14+</div><div class="k">projects, each its own graph</div></div>
+      <div class="stat"><div class="v">166&nbsp;MB</div><div class="k">global prompt log</div></div>
+    </div>
+
+    <h3>The pipeline, step by step</h3>
+    <div class="pipeline">
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--amber)">1</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Capture</span><span class="proc hook">shell hook</span><span class="loc">~/.claude/settings.json · UserPromptSubmit</span></div>
+          <p>Every prompt you submit in <em>any</em> Claude Code session fires the <code>log-prompts-knowledge-graph</code>
+          <strong>UserPromptSubmit hook</strong> — a one-liner <code>jq</code> append. It writes one JSON line per prompt to a single
+          global append-only log:</p>
+          <pre><code>{ "ts": "…", "session_id": "…", "cwd": "/home/bilko/Projects/session-manager",
+  "transcript_path": "…", "prompt": "the user's literal words" }
+   ──append──▶  ~/.claude/knowledge-log/prompts.jsonl</code></pre>
+          <ul>
+            <li><strong><code>cwd</code> is captured here</strong> — the directory the session was launched from. This single field is what makes the whole graph per-project (step 6).</li>
+            <li>The hook exits early when <code>SM_KG_INTERNAL=1</code> is set, so the pipeline's own <code>claude&nbsp;-p</code> calls never log themselves (no self-ingestion loop).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--green)">2</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Trigger</span><span class="proc main">electron main</span><span class="loc">kg.cjs:631-648 init()</span></div>
+          <p>The main process watches the log directory with <code>fs.watch</code>. The first new prompt arms a
+          <strong>leading-edge coalescing timer</strong> (<code>WATCH_COALESCE_MS</code> = 5 min, <span class="loc">kg.cjs:59</span>);
+          later prompts ride along instead of resetting it — so a busy session can't starve ingest, and each run sees a full
+          window's worth of prompts. Two other ways in: the <strong>"Process now"</strong> button in the KG tab
+          (<code>kg:ingest</code> IPC) and the self re-arm in step 5 when a run leaves backlog.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--green)">3</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Ingest — read only what's new</span><span class="proc main">electron main</span><span class="loc">kg.cjs:348-388 ingest()</span></div>
+          <p>A <strong>global byte-offset watermark</strong> (<code>ingest-state.json → lastOffset</code>) marks how far into
+          <code>prompts.jsonl</code> the pipeline has committed. Each run opens the file, seeks to the watermark, and reads at most
+          <code>MAX_TAIL_BYTES</code> = 8&nbsp;MB of new tail — so an 80&nbsp;MB backlog never lands in memory at once; the rest is
+          drained by 3-second re-arms. A head-of-line guard (<span class="loc">kg.cjs:379-385</span>) skips past any single line
+          bigger than the whole window so one pathological line can't freeze ingest forever.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--green)">4</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Filter noise &amp; plan per-project batches</span><span class="proc main">electron main</span><span class="loc">kg.cjs:63-103 isNoise · kg.cjs:313-339 planUnits()</span></div>
+          <p>The new tail is split into ordered <em>units</em>. A line is dropped as noise if it is:</p>
+          <ul>
+            <li><strong>Internal</strong> — starts with one of the pipeline's own prompt prefixes ("You extract a knowledge graph from a developer…") — belt-and-suspenders behind the <code>SM_KG_INTERNAL</code> env guard.</li>
+            <li><strong>Automated, role-setting</strong> — matches <code>/^\s*you are (a|an|the)\b/i</code>. A real dev rarely opens a prompt with "You are a…"; other agents' machine prompts always do.</li>
+            <li><strong>Automated, long + strict-format</strong> — over 2,000 chars <em>and</em> demands machine output ("return only JSON", "respond with only", <code>&lt;output_format&gt;</code>). Length alone is never enough — devs paste long diffs and stack traces.</li>
+          </ul>
+          <p>Surviving prompts are grouped into batches of at most <code>BATCH</code> = 20 that
+          <strong>never mix projects</strong>: a change of <code>encodeCwd(cwd)</code> closes the current batch
+          (<span class="loc">kg.cjs:329-335</span>). That invariant is what makes every extracted entity attributable to exactly one graph.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--violet)">5</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Extract — one <code>claude -p</code> per batch</span><span class="proc sub">subprocess</span><span class="loc">kg.cjs:202-228 runClaude · kg.cjs:255-275 prompt · kg.cjs:426</span></div>
+          <p>Each batch is sent to a headless Claude:</p>
+          <pre><code>claude -p "&lt;EXTRACTION_PROMPT + up to 20 logged prompts&gt;"
+       --model haiku  --output-format text
+       --append-system-prompt "&lt;EXTRACTION_SYSTEM&gt;"
+       --dangerously-skip-permissions
+env: SM_KG_INTERNAL=1      stdio: ['ignore', pipe, pipe]      timeout: 180 s</code></pre>
+          <ul>
+            <li><strong>stdin must be closed</strong> (<code>'ignore'</code>) — <code>claude&nbsp;-p</code> otherwise blocks waiting for piped stdin and returns empty. (Hard-won gotcha, <span class="loc">kg.cjs:206-208</span>.)</li>
+            <li><strong><code>EXTRACTION_SYSTEM</code></strong> (<span class="loc">kg.cjs:253</span>) sets a deterministic-extractor role so the embedded logged prompts read as inert <em>data</em> — without it, "You are a…" text inside the log trips Claude's prompt-injection resistance and it refuses.</li>
+            <li>The prompt asks for <code>{entities, relations}</code> JSON with 7 entity types (<code>project · feature · tool · tech · concept · goal · person</code>) and pre-seeds the project's <strong>top 200 known entity keys</strong> (<code>KNOWN_VOCAB</code>) so the model reuses keys instead of minting near-duplicates — dedup at extraction time.</li>
+            <li>Output is parsed by a balanced-brace scanner (<code>extractJson</code>, <span class="loc">kg.cjs:231-249</span>) that tolerates prose and code fences around the JSON.</li>
+            <li><strong>Failure semantics:</strong> a <em>transient</em> failure (timeout / spawn / rate-limit) stops the run <em>without</em> advancing the watermark — fully resumable, no double-counting. An <em>unparseable</em> response (model refused) quarantines just that batch — advance past it and continue, so one bad batch can't freeze the graph (<span class="loc">kg.cjs:428-451</span>). Hard cap: <code>MAX_EXTRACTIONS_PER_RUN</code> = 30 claude calls per run.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--cyan)">6</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Persist — upsert into <em>that project's</em> graph</span><span class="proc disk">disk</span><span class="loc">kg.cjs:277-304 upsert · kg.cjs:454-474 commit</span></div>
+          <p>Entities are canonicalized (lowercase, strip leading article, collapse whitespace — <span class="loc">kg.cjs:176-183</span>)
+          and upserted: an existing node gains <code>count += 1</code> and a fresher <code>lastTs</code>; an existing edge gains
+          <code>weight += 1</code>. Everything lands in <strong>one JSON file per project</strong>:</p>
+          <pre><code>~/.claude/knowledge-log/
+├── prompts.jsonl                 # global append-only log (step 1)
+├── ingest-state.json             # global byte-offset watermark
+├── prompt-index.json             # per-project prompt counts (sidecar)
+└── graphs/
+    ├── -home-bilko-Projects-session-manager.json   ◀ THIS project's graph
+    ├── -home-bilko-Projects-burrow.json
+    └── …one file per encodeCwd(cwd)</code></pre>
+          <p><strong>Crash-safe commit order per batch</strong>: graph file first (atomic tmp+rename via <code>config.cjs writeJson</code>),
+          then the prompt index, then the watermark — a crash at any point re-processes at most the batch in flight, never skips one.
+          The graph grows <em>live</em>, batch by batch, with a <code>kg:ingest-progress</code> broadcast after each commit.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num"><div class="ball" style="background:var(--pink)">7</div><div class="stem"></div></div>
+        <div class="card">
+          <div class="head"><span class="t">Serve — visualize &amp; ask</span><span class="proc rend">renderer</span><span class="loc">KnowledgeGraph.tsx · kg.cjs:623-628 IPC</span></div>
+          <p>The KG tab talks to main over four IPC handlers — <code>kg:get</code> (one project's nodes+edges+status),
+          <code>kg:projects</code> (project list with pending counts), <code>kg:ingest</code> ("Process now"),
+          <code>kg:ask</code> (Q&amp;A) — and subscribes to <code>kg:ingest-progress</code> for live updates
+          (per-batch reloads coalesced at 500&nbsp;ms).</p>
+          <ul>
+            <li><strong>Graph pane</strong>: <code>react-force-graph-2d</code> canvas force layout. Node size = mention count, color = entity type, directional arrows on edges. Node/link objects are identity-stable across reloads so the simulation doesn't re-heat (<span class="loc">KnowledgeGraph.tsx:128-168</span>).</li>
+            <li><strong>"Ask your history"</strong> (<span class="loc">kg.cjs:582-621</span>): builds a context of the project's top 40 nodes + top 60 edges + 15 keyword-matched raw prompts, then one <code>claude&nbsp;-p --model sonnet</code> call answers, citing the actual prompts it used.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <h3 id="per-project">Per-project scoping — verified</h3>
+    <div class="callout ok">
+      <strong>Yes — the graph is strictly per project, keyed by the session's launch directory.</strong>
+      The hook records <code>cwd</code> at submit time (step 1); <code>encodeCwd()</code>
+      (<span class="loc">src/main/lib/encodeCwd.cjs</span>) turns it into a slug by replacing every non-alphanumeric character
+      with <code>-</code> (mirroring Claude Code's own transcript-directory convention); and that slug <em>is</em> the graph
+      filename: <code>graphs/&lt;encodeCwd(cwd)&gt;.json</code> (<span class="loc">kg.cjs:129</span>). Batches never mix
+      cwds (step 4), Q&amp;A filters prompts to the selected project's encoded cwd (<span class="loc">kg.cjs:588</span>),
+      and on load the filename is treated as authoritative over the file's own <code>cwd</code> field (<span class="loc">kg.cjs:140</span>).
+    </div>
+    <div class="callout">
+      <strong>The fine print: "project" means "launch directory".</strong>
+      <code>/home/bilko/Projects/session-manager</code> → <code>-home-bilko-Projects-session-manager.json</code>, but a session
+      launched from a <em>subdirectory</em> encodes to a <em>different</em> slug and feeds a <em>different</em> graph. There is no
+      "walk up to the git root" logic anywhere in the pipeline. <strong>Run sessions from the project root</strong> to keep one
+      coherent graph per project.
+    </div>
+
+    <details class="consts"><summary>All knowledge-graph knobs (9)</summary>
+    <table>
+      <tr><th>Constant</th><th>Value</th><th>Where</th><th>What it bounds</th></tr>
+      <tr><td><code>WATCH_COALESCE_MS</code></td><td>5 min</td><td><span class="loc">kg.cjs:59</span></td><td>Leading-edge wait between new prompts landing and auto-ingest.</td></tr>
+      <tr><td><code>MAX_TAIL_BYTES</code></td><td>8 MB</td><td><span class="loc">kg.cjs:52</span></td><td>Log bytes read per run; backlog drains via 3 s re-arms.</td></tr>
+      <tr><td><code>BATCH</code></td><td>20 prompts</td><td><span class="loc">kg.cjs:50</span></td><td>Prompts per <code>claude -p</code> extraction call; never mixes projects.</td></tr>
+      <tr><td><code>MAX_EXTRACTIONS_PER_RUN</code></td><td>30 calls</td><td><span class="loc">kg.cjs:53</span></td><td>Claude spawns per run (cost/time guard); resumable when capped.</td></tr>
+      <tr><td><code>KNOWN_VOCAB</code></td><td>200 keys</td><td><span class="loc">kg.cjs:51</span></td><td>Top entity keys pre-seeded into the prompt for dedup-at-extraction.</td></tr>
+      <tr><td><code>AUTOMATED_LONG_LEN</code></td><td>2,000 chars</td><td><span class="loc">kg.cjs:95</span></td><td>Length above which a strict-format demand marks a prompt as machine noise.</td></tr>
+      <tr><td>extraction model</td><td><code>haiku</code> · 180 s</td><td><span class="loc">kg.cjs:426</span></td><td>Cheap + fast; structured extraction doesn't need a big model.</td></tr>
+      <tr><td>Q&amp;A model</td><td><code>sonnet</code> · 120 s</td><td><span class="loc">kg.cjs:618</span></td><td>Answer synthesis over graph + raw prompts.</td></tr>
+      <tr><td><code>ENTITY_TYPES</code></td><td>7 types</td><td><span class="loc">kg.cjs:61</span></td><td>project · feature · tool · tech · concept · goal · person</td></tr>
+    </table>
+    </details>
+
+    <h3>Why it's shaped this way</h3>
+    <div class="twocol">
+      <div>
+        <h4>LightRAG-shaped, incremental</h4>
+        <p>One global watermark + per-batch commits means a rate-limit, crash, or app quit mid-run loses at most the batch
+        in flight. The next run retries exactly those prompts — no re-extraction, no double-counted weights.</p>
+        <h4>Zero native deps</h4>
+        <p>JSON files for storage, <code>claude -p</code> for both extraction and answers. Nothing to <code>node-gyp</code>,
+        so <code>npx claude-code-session-manager</code> never breaks on a native rebuild.</p>
+      </div>
+      <div>
+        <h4>Injection-resistant by role, not by sanitizing</h4>
+        <p>Logged prompts can contain anything — including other agents' "You are a…" instructions. The
+        <code>EXTRACTION_SYSTEM</code> append-system-prompt declares them inert data, and the noise filter drops the worst
+        offenders before they're ever sent.</p>
+        <h4>Self-ingestion is impossible twice over</h4>
+        <p><code>SM_KG_INTERNAL=1</code> stops the hook from logging the pipeline's own calls; <code>isInternalPrompt</code>
+        prefix-drops any pre-fix lines already in the log.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════ MEMORY ════════════════════════ -->
+  <section class="comp" id="memory">
+    <div class="comp-head">
+      <span class="icon">🧠</span>
+      <h2>Memory tab — Claude's cross-session notebook</h2>
+      <span class="files">Memory.tsx · MemoryNaturalPanel.tsx · memoryTool.cjs · agentMemory.cjs</span>
+    </div>
+    <p>The Memory tab is a persistent store of <em>facts Claude reads and writes between sessions</em>, surfaced as
+    an editable UI. It is not where <em>you</em> learn the project (that's this page) — it's where <em>Claude</em>
+    remembers things after the context window resets. Crucially, the tab is just a window onto the files Claude's
+    native auto-memory already uses, so what you edit here is what Claude actually reads next session.</p>
+
+    <div class="statline">
+      <div class="stat"><div class="v">2</div><div class="k">scopes (workspace · subagent)</div></div>
+      <div class="stat"><div class="v">1&nbsp;MiB</div><div class="k">cap per entry</div></div>
+      <div class="stat"><div class="v">1000</div><div class="k">workspace entries max</div></div>
+      <div class="stat"><div class="v">200</div><div class="k">subagent entries / agent</div></div>
+    </div>
+
+    <h3 id="what">What it's for &amp; when it's used</h3>
+    <p>Open it when you want Claude to <strong>carry a fact across sessions</strong> — a project convention, your
+    preferences, a hard-won gotcha — without re-explaining it every time. The tab has a scope toggle at the top
+    (<span class="loc">Memory.tsx:17-25</span>); the active scope is auto-derived from the current terminal tab's
+    working directory (<span class="loc">Memory.tsx:60-93</span>). It also watches the store directory, so memories
+    Claude writes mid-session appear live (<span class="loc">Memory.tsx:100-113</span>).</p>
+
+    <h3 id="scopes">Two scopes, two stores</h3>
+    <div class="scopes">
+      <div class="scope ws">
+        <h3><span class="proc disk">workspace</span> per-project</h3>
+        <p>Facts about <em>this codebase</em>, keyed by the working directory. Plain markdown files.</p>
+        <div class="path">~/.claude/projects/&lt;encodedCwd&gt;/memory/*.md</div>
+        <ul>
+          <li>Optional YAML frontmatter (<code>name</code>, <code>description</code>) + markdown body <span class="loc">memoryTool.cjs:172-192</span></li>
+          <li>A Claude-managed <code>MEMORY.md</code> index links the rest</li>
+          <li>This is Claude's <strong>real auto-memory location</strong> — see below</li>
+        </ul>
+      </div>
+      <div class="scope sa">
+        <h3><span class="proc disk">subagent</span> per-agent</h3>
+        <p>Facts that follow <em>one subagent</em> across all projects (e.g. "code-reviewer's preferred test runner"). JSON records.</p>
+        <div class="path">~/.claude/session-manager/agent-memory/&lt;agentId&gt;.json</div>
+        <ul>
+          <li>Entries with <code>id · body · category · createdAt · updatedAt</code> <span class="loc">agentMemory.cjs:11-19</span></li>
+          <li>Newest-first; auto-capped at 200 per agent <span class="loc">agentMemory.cjs:177</span></li>
+          <li>App-local — created on first write</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 id="populate">How it gets populated</h3>
+    <p>Two writers, one store. Either Claude writes during a session, or you write in the tab — both land in the
+    same files.</p>
+    <div class="flow">
+      <div class="box b-cc"><div class="bt">Claude, mid-session</div><div class="bd">calls the native memory tool to save a fact it should keep</div><div class="where">memory_20250818 → memory dir</div></div>
+      <div class="arrow">＋</div>
+      <div class="box b-you"><div class="bt">You, in the tab</div><div class="bd">“+ New memory”, the editor’s Save, or the “remember …” natural panel</div><div class="where">Memory.tsx:337,144 · MemoryNaturalPanel.tsx:292-327</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-main"><div class="bt">IPC handlers</div><div class="bd">list / read / write / delete / create — atomic writes</div><div class="where">memoryTool.cjs:194-201</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-disk"><div class="bt">Markdown / JSON</div><div class="bd">one file per memory; watched so the tab updates live</div><div class="where">~/.claude/projects/&lt;cwd&gt;/memory/</div></div>
+    </div>
+    <p>The "natural" panel is a chat-style shortcut: <code>remember &lt;text&gt;</code> either sends the note to Claude
+    in the terminal or adds it directly as a new memory (<span class="loc">MemoryNaturalPanel.tsx:392-418</span>).
+    Subagent entries are populated the same two ways via <code>agentMemory.set</code> (<span class="loc">SubagentMemoryView.tsx:384</span>).</p>
+
+    <h3 id="vs">Memory vs. HUMAN_LEARN — different audiences</h3>
+    <div class="callout ok">
+      <strong>The workspace scope IS Claude's auto-memory — not a separate copy.</strong> It reads and writes
+      <code>~/.claude/projects/&lt;encodedCwd&gt;/memory/</code>, the exact dir Claude's native memory looks in
+      (<span class="loc">memoryTool.cjs:39-51</span>). Editing here changes what Claude reads next session; the
+      <code>&lt;encodedCwd&gt;</code> slug is the same one <code>encodeCwd</code> produces for transcripts.
+    </div>
+    <div class="callout">
+      <strong>Memory is for the machine; HUMAN_LEARN is for you.</strong> Memory entries are terse, frontmattered
+      notes optimized for Claude's recall. This page is the opposite: a visual, narrative explainer for a person
+      catching up on the project. Same goal (don't re-learn things), different reader — which is exactly why
+      <code>/explain-to-me</code> writes here, not into Memory.
+    </div>
+
+    <details class="consts"><summary>Memory caps &amp; key references</summary>
+    <table>
+      <tr><th>Thing</th><th>Value</th><th>Where</th></tr>
+      <tr><td>workspace entry size cap</td><td>1 MiB</td><td><span class="loc">memoryTool.cjs:33-34</span></td></tr>
+      <tr><td>workspace entries max</td><td>1000</td><td><span class="loc">memoryTool.cjs:33-34</span></td></tr>
+      <tr><td>subagent entry cap / max</td><td>1 MiB / 200</td><td><span class="loc">agentMemory.cjs:43-44</span></td></tr>
+      <tr><td>workspace IPC (list/read/write/delete/create)</td><td>—</td><td><span class="loc">memoryTool.cjs:194-201</span></td></tr>
+      <tr><td>subagent IPC (list/set/delete/list-agents)</td><td>—</td><td><span class="loc">agentMemory.cjs:251-258</span></td></tr>
+      <tr><td>store path derivation</td><td><code>encodeCwd</code></td><td><span class="loc">memoryTool.cjs:39-51</span></td></tr>
+    </table>
+    </details>
+  </section>
+
+  <!-- ════════════════════════ WEB REMOTE V2 ════════════════════════ -->
+  <section class="comp" id="webremote">
+    <div class="comp-head">
+      <span class="icon">📱</span>
+      <h2>Web Remote v2 — the phone cockpit, end-to-end encrypted</h2>
+      <span class="files">webRemote.cjs · WebRemote.tsx · lib/e2eStateMachine.cjs · ipcSchemas.cjs</span>
+    </div>
+    <p>A read-mostly mirror of the desktop on your phone at <strong>bilko.run</strong>. The desktop is the source of record;
+    the relay in the middle is deliberately blind — it routes envelopes it cannot decrypt. The design assumes the relay
+    could be compromised and still leaks nothing but connection metadata.</p>
+
+    <div class="flow">
+      <div class="box b-pink"><div class="bt">📱 Phone</div><div class="bd">browser app, Clerk session (HttpOnly cookie)</div><div class="where">bilko.run/projects/session-manager</div></div>
+      <div class="arrow">⇄</div>
+      <div class="box b-blue"><div class="bt">☁ Relay</div><div class="bd">same-origin Fastify WS — routes opaque <code>e2e:box</code> envelopes, reads none of them</div><div class="where">wss://bilko.run/…/relay</div></div>
+      <div class="arrow">⇄</div>
+      <div class="box b-green"><div class="bt">🖥 Desktop</div><div class="bd"><strong>outbound-only</strong> connection, 256-bit device token (0600)</div><div class="where">webRemote.cjs:39-58</div></div>
+    </div>
+
+    <h3>1 · Topology <span class="proc net">network</span></h3>
+    <p>The desktop dials <em>out</em> to <code>wss://bilko.run/projects/session-manager/relay</code>
+    (<span class="loc">webRemote.cjs:41</span>) — nothing ever connects inbound to your machine, no port forwarding, no tunnel
+    daemon. "Same-origin" means the relay lives inside the bilko.run Fastify host, so the phone app's CSP stays
+    <code>connect-src 'self'</code>. Heartbeat: ping every 30 s, 3 missed pongs = reconnect with 1 s → 60 s backoff
+    (<span class="loc">webRemote.cjs:51-58</span>). Pairing: an 8-char OTP shown on the phone is typed into the desktop's
+    WebRemote tab (<span class="loc">WebRemote.tsx:379-452</span>); OTP verification invalidates after 3 failures.</p>
+
+    <h3>2 · The E2E state machine <span class="proc main">electron main</span></h3>
+    <pre><code>idle ──e2e:hello (browser P-256 pubkey)──▶ pending_sas ──user confirms 6-digit SAS──▶ authenticated
+  │                                            │
+  └── plaintext READS only                     └──key/SAS mismatch──▶ failed (reconnect to retry)</code></pre>
+    <ul class="tight">
+      <li><strong>Key agreement</strong> (<span class="loc">webRemote.cjs:78-113</span>): P-256 ECDH → HKDF-SHA256 (salt = deviceId, info = <code>sm-e2e-v1</code>) → 32-byte AES-256-GCM session key, held in memory only, reset on disconnect.</li>
+      <li><strong>SAS</strong> (<span class="loc">webRemote.cjs:120-137</span>): a second HKDF (info = <code>sm-sas-v1</code>) derives a 6-digit code shown on <em>both</em> screens; you visually compare and confirm on the desktop (<span class="loc">WebRemote.tsx:235-255</span>). This defeats a man-in-the-middle relay: a MITM'd ECDH produces different codes on each side.</li>
+      <li><strong>After auth</strong>, everything rides in <code>e2e:box</code> frames: 12-byte nonce + AES-GCM ciphertext + 16-byte tag (<span class="loc">webRemote.cjs:143-173</span>). Max message 256 KiB.</li>
+    </ul>
+
+    <h3>3 · What the phone sees <span class="proc sub">subprocess</span></h3>
+    <p>Session list pushed every 5 s; the selected session's transcript is polled at 1.5 s (initial tail capped at 512 KiB)
+    and classified with the same <code>transcripts.cjs</code> machinery the desktop uses (<span class="loc">webRemote.cjs:519-651</span>).
+    When an assistant turn completes, a <strong>Haiku summary</strong> is generated for the small screen —
+    "2 sentences max + up to 3 action items", last 24,000 chars as input, skipped entirely when the turn is under
+    280 chars (<span class="loc">webRemote.cjs:729-829</span>, model <code>claude-haiku-4-5</code> pinned).</p>
+
+    <h3>4 · Security posture <span class="proc main">electron main</span></h3>
+    <ul class="tight">
+      <li><strong>Command tiers</strong> (<span class="loc">ipcSchemas.cjs:412-445</span>): ungated reads (<code>app:version</code>) → SAS-gated reads (sessions, schedule, history) → <strong>mutates</strong> (save, pty input, schedule writes) which need BOTH the desktop kill-switch <code>remoteControlEnabled=true</code> (default <strong>false</strong>) AND <code>state === 'authenticated'</code> (<span class="loc">webRemote.cjs:1003-1018</span>). Out of the box the phone is read-only.</li>
+      <li><strong>Opaque rejections</strong>: every failure goes over the wire as just <code>{error: 'rejected'}</code> — the detailed reason lands only in the local audit log, so a probing attacker gets no oracle (<span class="loc">webRemote.cjs:992-1028</span>).</li>
+      <li><strong>Audit log</strong>: <code>~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log</code> (0600) — type, deviceId, msgId, result; never tokens or payloads (<span class="loc">webRemote.cjs:244-262</span>). Last 100 lines viewable in the tab.</li>
+      <li><strong>Rate limits</strong> (relay-side): 100 cmds/min per device, 60/min per browser, OTP generation 10/hour.</li>
+      <li><strong>Panic button</strong>: <code>revokeAll()</code> drops every paired device at once.</li>
+    </ul>
+
+    <details class="consts"><summary>All web-remote constants (15)</summary>
+    <table>
+      <tr><th>Constant</th><th>Value</th><th>Where</th></tr>
+      <tr><td><code>RELAY_WSS_URL</code></td><td>wss://bilko.run/projects/session-manager/relay</td><td><span class="loc">webRemote.cjs:41</span></td></tr>
+      <tr><td><code>PING_INTERVAL_MS</code> / <code>PONG_TIMEOUT_MS</code> / missed</td><td>30 s / 10 s / 3</td><td><span class="loc">webRemote.cjs:56-58</span></td></tr>
+      <tr><td>backoff init / max</td><td>1 s / 60 s</td><td><span class="loc">webRemote.cjs:51-52</span></td></tr>
+      <tr><td><code>MSG_MAX_BYTES</code></td><td>256 KiB</td><td><span class="loc">webRemote.cjs:64</span></td></tr>
+      <tr><td><code>SESSION_POLL_MS</code> / <code>LIST_PUSH_MS</code></td><td>1.5 s / 5 s</td><td><span class="loc">webRemote.cjs:519-520</span></td></tr>
+      <tr><td><code>SESSION_INIT_TAIL_BYTES</code></td><td>512 KiB</td><td><span class="loc">webRemote.cjs:521</span></td></tr>
+      <tr><td><code>SUMMARY_MIN_CHARS</code> / <code>MAX_INPUT</code></td><td>280 / 24,000</td><td><span class="loc">webRemote.cjs:731-733</span></td></tr>
+      <tr><td><code>SUMMARY_MODEL</code></td><td>claude-haiku-4-5 (pinned)</td><td><span class="loc">webRemote.cjs:732</span></td></tr>
+      <tr><td>E2E curve / cipher</td><td>P-256 ECDH / AES-256-GCM</td><td><span class="loc">webRemote.cjs:80-173</span></td></tr>
+      <tr><td>HKDF info (session / SAS)</td><td>sm-e2e-v1 / sm-sas-v1</td><td><span class="loc">webRemote.cjs:111, 133</span></td></tr>
+      <tr><td>OTP</td><td>8 chars [A-Z0-9], 3 fails = burn</td><td><span class="loc">ipcSchemas.cjs:258</span></td></tr>
+      <tr><td>config file</td><td>~/.claude/session-manager/web-remote.json (0600)</td><td><span class="loc">webRemote.cjs:43</span></td></tr>
+    </table>
+    </details>
+  </section>
+
+  <!-- ════════════════════════ BROWSER TAB ════════════════════════ -->
+  <section class="comp" id="browser">
+    <div class="comp-head">
+      <span class="icon">🌐</span>
+      <h2>Browser tab — a real embedded browser, not a sandboxed <code>&lt;webview&gt;</code></h2>
+      <span class="files">browserView.cjs · index.cjs · Browser.tsx · browser/*.tsx · state/browser.ts</span>
+    </div>
+    <p>A native, chrome-free browser sub-tab embedded directly in the Electron window — for handing a real page
+    (its DOM, a screenshot, or a recorded interaction) to the agent. The whole feature lives almost entirely in one
+    main-process file, <code>browserView.cjs</code>, plus the chrome that wraps it in the renderer.</p>
+
+    <div class="flow">
+      <div class="box b-cyan"><div class="bt">1 · WebContentsView</div><div class="bd">native layer, sibling of the window's DOM</div><div class="where">browserView.cjs:202-233</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-pink"><div class="bt">2 · Bounds sync</div><div class="bd">placeholder div + ResizeObserver</div><div class="where">Browser.tsx:96-116</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-green"><div class="bt">3 · Nav-lock exempt</div><div class="bd">only this webContents id may navigate anywhere</div><div class="where">index.cjs:789-802</div></div>
+      <div class="arrow">→</div>
+      <div class="box b-amber"><div class="bt">4 · Capture / Record / Observe</div><div class="bd">verb toggles a 344px side panel</div><div class="where">ActionBar.tsx · state/browser.ts</div></div>
+    </div>
+
+    <h3>1 · Why <code>WebContentsView</code>, not <code>&lt;webview&gt;</code> <span class="proc main">electron main</span></h3>
+    <p>Session Manager blocks Electron's <code>&lt;webview&gt;</code> tag app-wide (<code>will-attach-webview</code> denial)
+    and sets a CSP with no <code>frame-src</code>, so an <code>&lt;iframe&gt;</code> can't show remote content either
+    (<span class="loc">browserView.cjs:1-4</span>). A <strong><code>WebContentsView</code></strong> is a separate native
+    layer the main process positions directly <em>on top of</em> the renderer's <code>BrowserWindow</code>
+    (<span class="loc">browserView.cjs:202-233</span>) — created per sub-tab, keyed by a renderer-generated
+    <code>viewId</code>, with its own sandboxed/context-isolated <code>webPreferences</code> and a dedicated preload
+    (<span class="loc">browserView.cjs:206-215</span>, <code>src/preload/browserViewPreload.cjs</code>). Because the
+    native view sits <em>above</em> the DOM, mode overlays (the recording banner, the observe focus ring) can't be
+    full-cover divs — they render as chrome siblings around the webview column instead
+    (<span class="loc">Browser.tsx:14-17, 130-139</span>).</p>
+
+    <h3>2 · Bounds sync <span class="proc rend">renderer</span></h3>
+    <p><code>Browser.tsx</code> renders an empty placeholder <code>&lt;div ref={columnRef}&gt;</code>
+    (<span class="loc">Browser.tsx:137</span>) that shows nothing — the native view covers it. A
+    <code>ResizeObserver</code> plus a <code>window</code> resize listener re-reads that div's
+    <code>getBoundingClientRect()</code> and calls <code>browser:set-bounds</code> to reposition the native view over it
+    (<span class="loc">Browser.tsx:96-116</span>, <span class="loc">browserView.cjs:235-245</span>). Opening a side
+    panel adds a 344px flex sibling next to the column, which the same observer picks up automatically — no separate
+    bounds-shrink wiring (<span class="loc">Browser.tsx:9-12</span>). One effect shows the active sub-tab's view and
+    hides every other one, since the native layer only ever renders one sub-tab at a time
+    (<span class="loc">Browser.tsx:76-84</span>); unmounting the tab hides every view so it doesn't float over other
+    Session Manager tabs (<span class="loc">Browser.tsx:86-94</span>).</p>
+
+    <h3>3 · The nav-lock exemption <span class="proc main">electron main</span></h3>
+    <p>Every other <code>webContents</code> in the app is locked down: a global <code>will-navigate</code> handler
+    blocks navigation to anything outside the dev-server origin (<span class="loc">index.cjs:789-802</span>). The
+    embedded browser needs to go anywhere, so <code>browserView.cjs</code> tracks the <code>webContents.id</code> of
+    every view it creates in a <code>Set</code> (<span class="loc">browserView.cjs:66-71, 217</span>,
+    <code>isBrowserViewContents()</code>), and the global handler's first line exempts exactly those ids —
+    <code>if (browserView.isBrowserViewContents(wc.id)) return;</code> (<span class="loc">index.cjs:793</span>) — before
+    the origin allowlist check runs. The main window's own lock is unchanged for everything else. External links
+    (target=_blank) route to the OS browser via <code>shell.openExternal</code> and the view itself never opens a new
+    window (<span class="loc">browserView.cjs:182-187</span>); downloads are blocked outright
+    (<span class="loc">browserView.cjs:189-191</span>).</p>
+
+    <h3>4 · DOM capture — a raw grab, not a pipeline <span class="proc main">electron main</span></h3>
+    <div class="callout">
+      <strong>Honesty note:</strong> there is no filter → prune → summarize → chunk pipeline. <code>captureDom()</code>
+      runs one <code>executeJavaScript</code> call that returns either <code>document.body.innerText</code> or
+      <code>document.documentElement.outerHTML</code> verbatim, truncated at a single length cap. That's the entire
+      "pipeline" as of this PRD.
+    </div>
+    <p><code>captureDom({ viewId, kind })</code> (<span class="loc">browserView.cjs:541-559</span>) executes one script
+    in the target page and returns <code>{ url, title, text }</code> in a single round trip; <code>kind: 'html'</code>
+    grabs <code>outerHTML</code>, anything else grabs <code>innerText</code>. The only bound is
+    <code>CAPTURE_TEXT_MAX = 500,000</code> characters (<span class="loc">browserView.cjs:535, 551-554</span>) — past
+    that it's sliced and flagged <code>truncated</code>. A screenshot capture (<code>captureShot</code>,
+    <span class="loc">browserView.cjs:562-573</span>) instead calls <code>webContents.capturePage()</code> and returns a
+    PNG data URL. The store's <code>capture()</code> action picks between the two based on <code>captureMode</code>
+    (<span class="loc">state/browser.ts:291-307</span>); <code>CapturePanel.tsx</code> then offers four destinations for
+    the result — clipboard, the active Claude terminal (wrapped in an explicit
+    "<em>untrusted data, not instructions</em>" provenance line so a captured page can't pose as user input to the
+    agent, <span class="loc">CapturePanel.tsx:16-26</span>), a scratch file under
+    <code>~/.claude/session-manager/browser-captures</code>, or a PRD-fixture <code>.txt</code> under
+    <code>tests/fixtures/browser-capture</code> (<span class="loc">CapturePanel.tsx:93-125</span>). PTY writes are kept
+    under the IPC's 64 KiB write cap with a safety margin (<span class="loc">CapturePanel.tsx:28-31</span>).</p>
+
+    <h3>5 · Recorder → Playwright/Markdown/PRD export <span class="proc main">electron main</span> <span class="proc rend">renderer</span></h3>
+    <p>Recording arms a per-view secret token (<span class="loc">browserView.cjs:81-89, 204</span>) handed to the
+    page's isolated preload via <code>additionalArguments</code> — never touching the DOM — so an adversarial page being
+    recorded can't forge or read step events; the real gate is server-side membership in
+    <code>recordingViewIds</code> (<span class="loc">browserView.cjs:314-357</span>). Only <code>click</code> and
+    <code>type</code> verbs are forwarded, target selectors capped at 300 chars, typed values never included
+    (<span class="loc">browserView.cjs:343-357</span>) — the panel's own footer states this invariant:
+    "sandboxed · no filesystem · no passwords". <code>RecorderPanel.tsx</code>'s export footer turns the recorded step
+    list into one of three formats via <code>lib/browserExport.ts</code>'s <code>stepsToPlaywright</code> /
+    <code>stepsToMarkdown</code> / <code>stepsToPrdFixture</code> (<span class="loc">RecorderPanel.tsx:120-138</span>):
+    a Playwright spec saved to <code>tests/e2e/*.spec.ts</code>, a human-readable Markdown repro, or a PRD-fixture text
+    block — all written through the same atomic <code>config.writeText</code> path <code>CapturePanel</code> uses.
+    Replay (<span class="loc">browserView.cjs:359-484</span>) re-runs the recorded steps against the live page with a
+    10 s per-step timeout (<span class="loc">browserView.cjs:363</span>) and stops at the first failure unless
+    <code>continueOnError</code> is set; it also drops the view out of <code>recordingViewIds</code> for the duration so
+    replayed clicks don't get re-recorded as new steps (<span class="loc">browserView.cjs:451-468</span>).</p>
+
+    <h3>6 · Observe/act — panel slot only, gating not yet shipped <span class="proc rend">renderer</span></h3>
+    <div class="callout bad">
+      <strong>Not real yet:</strong> <code>ObservePanel.tsx</code> is a titled placeholder — "Claude session" — with a
+      single line of body copy ("The agent observe/act loop is coming in a later step"). There is no allow/deny action
+      gating in the shipped code; only the panel slot and layout exist
+      (<span class="loc">ObservePanel.tsx:1-20</span>).
+    </div>
+
+    <details class="consts"><summary>All browser-tab constants (6)</summary>
+    <table>
+      <tr><th>Constant</th><th>Value</th><th>Where</th></tr>
+      <tr><td><code>CAPTURE_TEXT_MAX</code></td><td>500,000 chars</td><td><span class="loc">browserView.cjs:535</span></td></tr>
+      <tr><td>record-step target length cap</td><td>300 chars</td><td><span class="loc">browserView.cjs:348</span></td></tr>
+      <tr><td><code>REPLAY_STEP_TIMEOUT_MS</code></td><td>10,000 ms</td><td><span class="loc">browserView.cjs:363</span></td></tr>
+      <tr><td><code>REPLAY_WAIT_POLL_MS</code></td><td>250 ms</td><td><span class="loc">browserView.cjs:364</span></td></tr>
+      <tr><td><code>PTY_WRITE_SAFE_MAX</code></td><td>60,000 bytes</td><td><span class="loc">CapturePanel.tsx:31</span></td></tr>
+      <tr><td>side-panel width</td><td>344 px</td><td><span class="loc">panel-primitives.tsx:24</span></td></tr>
+    </table>
+    </details>
+  </section>
+
+  <footer>
+    HUMAN_LEARN · session-manager · one combined page, generated 2026-06-13 from
+    <code>pty.cjs</code>, <code>transcripts.cjs</code>, <code>live.ts</code>, <code>scheduler.cjs</code>,
+    <code>supervisor.cjs</code>, <code>queueOps.cjs</code>, <code>kg.cjs</code>, <code>KnowledgeGraph.tsx</code>,
+    <code>Memory.tsx</code>, <code>memoryTool.cjs</code>, <code>agentMemory.cjs</code>, <code>webRemote.cjs</code>,
+    <code>WebRemote.tsx</code>, <code>browserView.cjs</code>, <code>Browser.tsx</code> + live on-disk state. The
+    development workflow (skills → PRDs → scheduler) lives in
+    <a href="SKILL_MAP.html">SKILL_MAP.html</a>. Written + maintained by <code>/explain-to-me</code>.
+  </footer>
 </div>
 </body>
 </html>

@@ -12,9 +12,14 @@
  * OOM that SIGKILLed a job on 2026-06-26.
  *
  * Public surface:
- *   run({ tabId, sessionId, prompt, cwd, resume }): void  — fire-and-forget enqueue
+ *   run({ tabId, sessionId, prompt, cwd, resume, silent }): void  — fire-and-forget enqueue.
+ *     `silent` (PRD 470) still goes through the same per-tab FIFO lane, but suppresses the
+ *     six turn-affecting broadcasts + recordExchange (see probeContextUsage below).
  *   cancel(tabId): void
  *   parseStopSignal(finalText): { questions: string[] } | null     — exported for reuse
+ *   parseContextUsageMarkdown(text): { usedTokens, totalTokens, usedPct, categories } | null
+ *                                                                    — pure parser for `/context`
+ *   probeContextUsage({ tabId, sessionId, cwd }): void  — fire-and-forget silent `/context` probe
  *   STOP_SENTINEL: string                                           — exported for tests
  *   __setExecutor(fn): void                                         — test seam
  *
@@ -27,6 +32,8 @@
  *   chat:run:needs-input { tabId, sessionId, questions, raw }
  *   chat:run:error      { tabId, sessionId, message }
  *   chat:run:notice     { tabId, sessionId, message }        — informational, not terminal
+ *   chat:context-usage  { tabId, sessionId, usedTokens, totalTokens, usedPct, categories }
+ *                                                             — result of a silent `/context` probe
  */
 
 const { spawn } = require('node:child_process');
@@ -70,6 +77,119 @@ function parseStopSignal(finalText) {
     // Malformed JSON — treat as complete, no crash
     return null;
   }
+}
+
+// ─── `/context` probe (PRD 470) ────────────────────────────────────────────
+// `claude -p "/context"` is answered entirely locally by the CLI (zero-cost,
+// no real API call) with markdown containing a summary line and a per-category
+// breakdown table. Parsed here so the app can mirror the CLI's own context-
+// window accounting without re-implementing the estimate itself.
+
+// "9k" -> 9000, "15.1k" -> 15100; bare "207" -> 207. Never throws — returns NaN
+// for genuinely malformed input, which callers treat as a parse failure.
+function parseTokenAmount(str) {
+  const suffixed = /^(\d+(?:\.\d+)?)k$/i.exec(str);
+  if (suffixed) return Math.round(parseFloat(suffixed[1]) * 1000);
+  return Number(str);
+}
+
+/**
+ * Parse the markdown produced by the CLI's own `/context` slash command into
+ * a structured summary. Pure, single line-by-line pass — O(n) over the lines
+ * of a small, bounded response, no nested scans.
+ *
+ * @param {string} text
+ * @returns {{ usedTokens: number, totalTokens: number, usedPct: number, categories: Array<{ category: string, tokens: number, pct: number }> } | null}
+ */
+function parseContextUsageMarkdown(text) {
+  if (typeof text !== 'string' || !text) return null;
+  const lines = text.split('\n');
+
+  let usedTokens = null;
+  let totalTokens = null;
+  let usedPct = null;
+  const tokensLineRe = /\*\*Tokens:\*\*\s*(\S+)\s*\/\s*(\S+)\s*\(([\d.]+)%\)/;
+
+  let inTable = false;
+  let foundHeading = false;
+  const categories = [];
+
+  for (const line of lines) {
+    if (usedTokens === null) {
+      const m = tokensLineRe.exec(line);
+      if (m) {
+        usedTokens = parseTokenAmount(m[1]);
+        totalTokens = parseTokenAmount(m[2]);
+        usedPct = Number(m[3]);
+      }
+    }
+
+    if (!inTable) {
+      if (line.trim() === '### Estimated usage by category') {
+        foundHeading = true;
+        inTable = true;
+      }
+      continue;
+    }
+    const trimmed = line.trim();
+    if (trimmed.startsWith('###')) { inTable = false; continue; }
+    if (!trimmed.startsWith('|')) continue;
+
+    const cells = trimmed.split('|').map((c) => c.trim()).filter((c) => c.length > 0);
+    if (cells.length !== 3) continue;
+    if (cells[0].toLowerCase() === 'category') continue; // header row
+    if (/^:?-+:?$/.test(cells[0])) continue; // separator row
+
+    const tokens = parseTokenAmount(cells[1]);
+    const pctMatch = /^([\d.]+)%$/.exec(cells[2]);
+    if (!pctMatch || Number.isNaN(tokens)) continue;
+    categories.push({ category: cells[0], tokens, pct: Number(pctMatch[1]) });
+  }
+
+  if (
+    usedTokens === null || totalTokens === null || usedPct === null ||
+    Number.isNaN(usedTokens) || Number.isNaN(totalTokens) || Number.isNaN(usedPct) ||
+    !foundHeading || categories.length === 0
+  ) {
+    return null;
+  }
+
+  return { usedTokens, totalTokens, usedPct, categories };
+}
+
+/**
+ * Fire-and-forget silent probe of the resumed session's context usage. Reuses
+ * the normal `run()` queue/lane (resume: true, silent: true) so it can never
+ * race a real chat run against the same `--resume sessionId`. Broadcasts
+ * `chat:context-usage` on success; logs (never throws/broadcasts) on a parse
+ * failure.
+ *
+ * @param {{ tabId: string, sessionId: string, cwd: string }} params
+ */
+function probeContextUsage({ tabId, sessionId, cwd }) {
+  run({
+    tabId,
+    sessionId,
+    prompt: '/context',
+    cwd,
+    resume: true,
+    silent: true,
+    onSilentResult: (text) => {
+      const parsed = parseContextUsageMarkdown(text);
+      if (!parsed) {
+        console.error('[chatRunner] parseContextUsageMarkdown failed to parse /context probe output');
+        return;
+      }
+      broadcast('chat:context-usage', {
+        tabId,
+        sessionId,
+        usedTokens: parsed.usedTokens,
+        totalTokens: parsed.totalTokens,
+        usedPct: parsed.usedPct,
+        categories: parsed.categories,
+      });
+    },
+  });
 }
 
 // ─── MCP consent-denial detection ──────────────────────────────────────────
@@ -121,7 +241,7 @@ const CONCURRENCY_CAP = Math.min(
 
 // tabId → cancel() for every ACTIVE run; FIFO list of WAITING runs; live count.
 const inFlight = new Map();
-const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume }]
+const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult }]
 let activeCount = 0;
 
 // Indirection so tests can stub the spawn without launching claude.
@@ -153,7 +273,7 @@ function broadcast(channel, payload) {
  * queue and are announced via chat:run:queued. De-dupes a tab already in the
  * pipeline (the UI disables input while running, but guard anyway).
  *
- * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean }} opts
+ * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void }} opts
  */
 function run(opts) {
   if (inFlight.has(opts.tabId) || waiting.some((w) => w.tabId === opts.tabId)) return;
@@ -186,10 +306,10 @@ function pump() {
  * for the run's lifetime so cancel() can reach it. Never rejects — the queue
  * pump relies on the returned promise always settling so the lane frees.
  *
- * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean }} opts
+ * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void }} opts
  * @returns {Promise<void>}
  */
-function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
+function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult }) {
   return new Promise((resolve) => {
     let settled = false;
     // Frees the lane exactly once: drops the cancel fn and resolves the promise
@@ -212,6 +332,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
     const emitTerminal = (channel, payload) => {
       if (terminalSent) return;
       terminalSent = true;
+      // Silent (probe) runs still need this bookkeeping so the lane frees
+      // correctly, but must never surface on the six turn-affecting channels.
+      if (silent) return;
       broadcast(channel, payload);
     };
 
@@ -254,7 +377,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
       args.push('--session-id', sessionId);
     }
 
-    broadcast('chat:run:started', { tabId, sessionId });
+    if (!silent) broadcast('chat:run:started', { tabId, sessionId });
 
     // Spawn with stdin closed (mirrors scheduler's 'ignore' — prevents the
     // "claude -p stdin must be closed" gotcha from kg.cjs). stdout is piped for
@@ -324,10 +447,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
         for (const block of content) {
           if (block.type === 'text' && typeof block.text === 'string') {
             finalAssistantText += block.text;
-            broadcast('chat:run:output', { tabId, delta: block.text });
+            if (!silent) broadcast('chat:run:output', { tabId, delta: block.text });
           } else if (block.type === 'tool_use' && typeof block.name === 'string') {
             const classified = classifyToolUse(block);
-            broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified });
+            if (!silent) broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified });
           }
         }
       } else if (event.type === 'user') {
@@ -351,20 +474,27 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume }) {
         const text = typeof event.result === 'string' ? event.result : finalAssistantText;
 
         if (event.subtype === 'success') {
-          const signal = parseStopSignal(text);
-          if (signal) {
-            emitTerminal('chat:run:needs-input', {
-              tabId,
-              sessionId,
-              questions: signal.questions,
-              raw: text,
-            });
-          } else {
+          if (silent) {
+            // Silent probe: no turn broadcast, no recordExchange — just hand
+            // the final text to whoever enqueued the probe (e.g. probeContextUsage).
             emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
-            // Record durable exchange off the hot path — UI must not wait on Haiku
-            recordExchange({ sessionId, cwd, prompt, result: text }).catch((err) => {
-              console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
-            });
+            if (typeof onSilentResult === 'function') onSilentResult(text);
+          } else {
+            const signal = parseStopSignal(text);
+            if (signal) {
+              emitTerminal('chat:run:needs-input', {
+                tabId,
+                sessionId,
+                questions: signal.questions,
+                raw: text,
+              });
+            } else {
+              emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
+              // Record durable exchange off the hot path — UI must not wait on Haiku
+              recordExchange({ sessionId, cwd, prompt, result: text }).catch((err) => {
+                console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
+              });
+            }
           }
         } else {
           emitTerminal('chat:run:error', {
@@ -470,6 +600,11 @@ function registerChatHandlers() {
     try { tabId = schemas.chatCancel.parse(payload).tabId; } catch { return; }
     cancel(tabId);
   });
+
+  ipcMain.handle('chat:probe-context', validated(schemas.chatProbeContext, async ({ tabId, sessionId, cwd }) => {
+    probeContextUsage({ tabId, sessionId, cwd });
+    return { ok: true };
+  }));
 }
 
 module.exports = {
@@ -478,6 +613,8 @@ module.exports = {
   attachWindow,
   registerChatHandlers,
   parseStopSignal,
+  parseContextUsageMarkdown,
+  probeContextUsage,
   STOP_SENTINEL,
   __setExecutor,
 };

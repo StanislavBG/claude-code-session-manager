@@ -382,6 +382,12 @@ const chatCancel = z.object({
   tabId: z.string().min(1).max(128),
 });
 
+const chatProbeContext = z.object({
+  tabId: z.string().min(1).max(128),
+  sessionId: z.string().min(1).max(128),
+  cwd: z.string().min(1).max(4096),
+});
+
 // ──────────────────────────────────────────── Web Remote
 // OTP is 8 uppercase alphanumeric chars (case-insensitive entry, normalised to upper in handler).
 const WEB_REMOTE_OTP_RE = /^[A-Z0-9]{8}$/i;
@@ -665,6 +671,7 @@ module.exports = {
     watchersKillTab,
     chatRun,
     chatCancel,
+    chatProbeContext,
     exchangesList,
   },
   validated,

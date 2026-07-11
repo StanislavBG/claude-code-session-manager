@@ -640,6 +640,7 @@ export function SchedulerPrdsView() {
             <p className="text-[14px] text-fg-dim leading-relaxed max-w-[560px]">
               PRDs are the source the scheduler runs from. Each one becomes a{' '}
               <code className="font-mono text-[13px]">claude -p</code> job when you queue it.
+              This is where you write and edit the source — to watch a run in progress, use the Queue tab.
             </p>
             <button
               type="button"

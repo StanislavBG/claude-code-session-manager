@@ -10,9 +10,16 @@ import { LegendItem } from './scheduler/sched-primitives'
 import { LearningPanel } from '../LearningPanel'
 
 /**
- * Scheduler — the single home for the claude -p batch workflow. Three tabs:
- *   • Queue   — run & monitor the job queue (fire policy, concurrency, ETAs, logs)
- *   • PRDs    — author & edit the .md PRDs the queue executes (the old "Plans")
+ * Scheduler — the single home for the claude -p batch workflow. Three tabs,
+ * split by operate vs. author rather than by item set — scheduler.cjs's
+ * reconcile() (src/main/scheduler.cjs:35, run on every scan/tick) walks
+ * prds/ and gives every .md a queue.json entry immediately, so Queue and
+ * PRDs always show the same underlying slugs; there is no "authored but not
+ * yet queued" state to distinguish them by:
+ *   • Queue   — OPERATE: monitor job execution (fire policy, concurrency,
+ *     per-job status/ETA/logs, reset/resume actions)
+ *   • PRDs    — AUTHOR: edit the .md source (structured frontmatter form +
+ *     body editor, lint, archive/retag) — the old "Plans"
  *   • History — last 50 completed/failed jobs with project + date-range filters
  *
  * Consolidates what used to be three separate nav destinations (Scheduler,
@@ -198,6 +205,17 @@ export function Scheduler() {
         <div className="flex items-center gap-3 pb-0">
           <SchedulerSubTabs options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
         </div>
+
+        {subView === 'queue' && (
+          <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
+            Live job status — pending, running, needs review, completed, failed.
+          </p>
+        )}
+        {subView === 'prds' && (
+          <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
+            Authored PRD source files on disk — edit, lint, archive, or queue them.
+          </p>
+        )}
       </div>
 
       {/* ── Content ──────────────────────────────────────────────── */}

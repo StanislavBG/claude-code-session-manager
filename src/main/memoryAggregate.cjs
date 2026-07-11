@@ -24,6 +24,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
+const { extractJson } = require('./lib/extractJson.cjs');
 const { writeJson } = require('./config.cjs');
 const config = require('./config.cjs');
 
@@ -74,27 +75,6 @@ function runClaude(prompt, { model = 'sonnet', timeoutMs = 180_000, systemPrompt
     child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: e?.message || 'spawn error' }); });
     child.on('close', (code) => { clearTimeout(timer); resolve({ ok: code === 0, code, out, err }); });
   });
-}
-
-/** Pull the first balanced {...} JSON object out of model output (handles prose/fences). */
-function extractJson(text) {
-  if (!text) return null;
-  const start = text.indexOf('{');
-  if (start === -1) return null;
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === '{') depth++;
-    else if (c === '}') { depth--; if (depth === 0) { try { return JSON.parse(text.slice(start, i + 1)); } catch { return null; } } }
-  }
-  return null;
 }
 
 // System prompt for clustering — sets the role server-side so the CLI treats

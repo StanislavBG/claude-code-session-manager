@@ -50,3 +50,40 @@ test('only the LAST sentinel occurrence is parsed', () => {
     `${STOP_SENTINEL}\n{"questions":["the real question"]}`;
   assert.deepEqual(parseStopSignal(text), { questions: ['the real question'] });
 });
+
+test('blank lines between sentinel and JSON → questions array', () => {
+  const text = `${STOP_SENTINEL}\n\n\n{"questions":["Which environment?"]}`;
+  assert.deepEqual(parseStopSignal(text), { questions: ['Which environment?'] });
+});
+
+test('JSON wrapped in a ```json code fence → questions array', () => {
+  const text =
+    `${STOP_SENTINEL}\n` +
+    '```json\n' +
+    '{"questions":["Overwrite existing config?"]}\n' +
+    '```';
+  assert.deepEqual(parseStopSignal(text), { questions: ['Overwrite existing config?'] });
+});
+
+test('pretty-printed multi-line JSON → questions array', () => {
+  const text =
+    `${STOP_SENTINEL}\n` +
+    '{\n' +
+    '  "questions": [\n' +
+    '    "Which environment?",\n' +
+    '    "Overwrite existing config?"\n' +
+    '  ]\n' +
+    '}';
+  assert.deepEqual(parseStopSignal(text), {
+    questions: ['Which environment?', 'Overwrite existing config?'],
+  });
+});
+
+test('trailing prose after the closing brace → questions array', () => {
+  const text =
+    `${STOP_SENTINEL}\n` +
+    '{"questions":["Which environment?"]}\n' +
+    '\n' +
+    'Let me know and I will continue.';
+  assert.deepEqual(parseStopSignal(text), { questions: ['Which environment?'] });
+});

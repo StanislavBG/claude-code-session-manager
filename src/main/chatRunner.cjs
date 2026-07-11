@@ -45,6 +45,7 @@ const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { recordExchange } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
+const { extractJson } = require('./lib/extractJson.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -55,10 +56,12 @@ const STOP_SENTINEL = '<<<SM_NEEDS_INPUT>>>';
 /**
  * Parse the final assistant text for the stop-signal protocol.
  *
- * Returns `{ questions: string[] }` when the sentinel is present with valid
- * JSON on the next line. Returns `null` when the sentinel is absent OR when
- * the JSON is malformed — both cases are treated as a completed run with no
- * crash.
+ * Returns `{ questions: string[] }` when the sentinel is present and a
+ * balanced JSON object with a `questions` array can be found anywhere in the
+ * text after it — tolerant of leading blank lines, code-fence wrapping,
+ * multi-line pretty-printing, and trailing prose after the closing `}`.
+ * Returns `null` when the sentinel is absent OR when no such JSON object is
+ * found — both cases are treated as a completed run with no crash.
  *
  * @param {string} finalText
  * @returns {{ questions: string[] } | null}
@@ -67,19 +70,12 @@ function parseStopSignal(finalText) {
   if (typeof finalText !== 'string') return null;
   const idx = finalText.lastIndexOf(STOP_SENTINEL);
   if (idx === -1) return null;
-  // Everything after the sentinel, stripped of leading whitespace
-  const after = finalText.slice(idx + STOP_SENTINEL.length).trimStart();
-  const firstLine = after.split('\n')[0].trim();
-  try {
-    const parsed = JSON.parse(firstLine);
-    if (parsed && Array.isArray(parsed.questions)) {
-      return { questions: parsed.questions };
-    }
-    return null;
-  } catch {
-    // Malformed JSON — treat as complete, no crash
-    return null;
+  const after = finalText.slice(idx + STOP_SENTINEL.length);
+  const parsed = extractJson(after);
+  if (parsed && Array.isArray(parsed.questions)) {
+    return { questions: parsed.questions };
   }
+  return null;
 }
 
 // ─── `/context` probe (PRD 470) ────────────────────────────────────────────

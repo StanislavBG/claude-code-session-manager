@@ -21,6 +21,15 @@ describe('resolveChatPaste', () => {
     expect(r.toast).toBeNull()
   })
 
+  it('falls through to text paste when pasteImage throws/rejects', async () => {
+    const pasteImage = vi.fn().mockRejectedValue(new Error('clipboard read failed'))
+    const readText = vi.fn().mockResolvedValue('recovered text')
+    const r = await resolveChatPaste({ pasteImage, readText }, 'ab', 1, 1)
+    expect(readText).toHaveBeenCalledTimes(1)
+    expect(r.value).toBe('arecovered textb')
+    expect(r.toast).toBeNull()
+  })
+
   it('spliceAtSelection replaces a selection range', () => {
     expect(spliceAtSelection('hello', 1, 4, 'X')).toEqual({ value: 'hXo', caret: 2 })
   })

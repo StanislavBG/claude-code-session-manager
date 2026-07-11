@@ -35,8 +35,13 @@ export async function resolveChatPaste(
   selStart: number,
   selEnd: number,
 ): Promise<PasteResult> {
-  const img = await deps.pasteImage()
-  if (img.ok) {
+  let img: Awaited<ReturnType<PasteDeps['pasteImage']>> | null = null
+  try {
+    img = await deps.pasteImage()
+  } catch {
+    img = null
+  }
+  if (img && img.ok) {
     const insert = img.path + ' '
     const { value, caret } = spliceAtSelection(draft, selStart, selEnd, insert)
     return { value, caret, toast: `Pasted image: ${img.path.split('/').pop()}` }

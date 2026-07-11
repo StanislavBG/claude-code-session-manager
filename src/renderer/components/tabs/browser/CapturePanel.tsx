@@ -162,15 +162,15 @@ export function CapturePanel() {
   const onScratch = async () => {
     if (!captured) return
     try {
-      const home = await window.api.app.homeDir()
+      const cwd = await window.api.app.cwd()
       if (captured.dataUrl) {
-        const path = destPath(`${home}/.claude/session-manager/browser-captures`, captured.mode, 'png')
+        const path = destPath(`${cwd}/session-manager-operations/browser/screenshots`, captured.mode, 'png')
         const base64 = captured.dataUrl.replace(/^data:image\/png;base64,/, '')
         const result = await window.api.browser.saveBinary(path, base64)
         if (!result.ok) throw new Error(result.error || 'save failed')
         toast.info(`Saved: ${path}`)
       } else {
-        const path = destPath(`${home}/.claude/session-manager/browser-captures`, captured.mode, 'txt')
+        const path = destPath(`${cwd}/session-manager-operations/browser/dom-captures`, captured.mode, 'txt')
         const result = await window.api.config.writeText(path, captured.text ?? '')
         if (!result.ok) throw new Error('save failed')
         toast.info(`Saved: ${path}`)

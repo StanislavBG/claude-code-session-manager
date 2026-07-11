@@ -127,6 +127,13 @@ function validateWrite(realAbs) {
       if (realAbs === e2eSub || realAbs.startsWith(e2eSub + path.sep)) {
         return;
       }
+      // Browser tab scratch saves (DOM captures, screenshots, recorded
+      // flows): narrowly scoped to session-manager-operations/browser/,
+      // this repo's existing per-project artifact-store convention.
+      const browserSub = path.join(realRoot, 'session-manager-operations', 'browser');
+      if (realAbs === browserSub || realAbs.startsWith(browserSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

@@ -125,8 +125,8 @@ export function RecorderPanel() {
         const cwd = await window.api.app.cwd()
         await saveExport(`${cwd}/tests/e2e`, 'spec.ts', stepsToPlaywright(recorderSteps, { title: 'Recorded flow' }))
       } else {
-        const home = await window.api.app.homeDir()
-        const dirBase = `${home}/.claude/session-manager/browser-captures`
+        const cwd = await window.api.app.cwd()
+        const dirBase = `${cwd}/session-manager-operations/browser/flow-recordings`
         if (id === 'md') await saveExport(dirBase, 'md', stepsToMarkdown(recorderSteps))
         else await saveExport(dirBase, 'txt', stepsToPrdFixture(recorderSteps))
       }

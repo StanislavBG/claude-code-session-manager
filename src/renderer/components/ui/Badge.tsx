@@ -5,13 +5,14 @@
  */
 import type { ReactNode } from 'react'
 
-export type BadgeTone = 'default' | 'accent' | 'warn' | 'dim'
+export type BadgeTone = 'default' | 'accent' | 'warn' | 'dim' | 'good'
 
 export const BADGE_TONE: Record<BadgeTone, string> = {
   default: 'bg-bg-hi text-fg-dim border-line',
   accent: 'bg-accent/15 text-accent border-accent/30',
   warn: 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30',
   dim: 'bg-bg-elev text-fg-faint border-line',
+  good: 'bg-green-500/15 text-green-300 border-green-500/30',
 }
 
 export function Badge({

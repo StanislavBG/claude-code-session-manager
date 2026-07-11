@@ -1,16 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
 import { EmptyState } from '../ui/EmptyState'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
+import { Badge } from '../ui/Badge'
+import { StatusDot } from '../ui/StatusDot'
 import type { ProvenanceInput } from '../../lib/provenance'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { Scope } from '../../lib/scopes'
 import { McpLibrary, ViewSwitcher } from './Library'
+import { toast } from '../../state/toast'
+import { deriveMcpConnectionState, type McpConnectionInfo } from '../../lib/mcpConnectionState'
+import type { McpStatusResult } from '../../../preload/api'
 
 /**
  * MCP servers are stored in ~/.claude.json (user scope) under `mcpServers`,
@@ -106,6 +111,35 @@ export function McpServers() {
 
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  const [probe, setProbe] = useState<McpStatusResult | null>(null)
+  const [probing, setProbing] = useState(false)
+  // Guards against an in-flight probe (mount fetch or a prior manual refresh)
+  // resolving after a newer one and clobbering fresher state; also skips
+  // setState once the tab has unmounted.
+  const probeRequestId = useRef(0)
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
+  const refreshStatus = async () => {
+    const requestId = ++probeRequestId.current
+    setProbing(true)
+    try {
+      const r = await window.api.mcp.status()
+      if (!mounted.current || requestId !== probeRequestId.current) return
+      setProbe(r)
+      if (!r.ok) toast.error(r.error ?? 'MCP status probe failed')
+    } catch (e) {
+      if (!mounted.current || requestId !== probeRequestId.current) return
+      setProbe(null)
+      toast.error((e as Error).message || 'MCP status probe failed')
+    } finally {
+      if (mounted.current && requestId === probeRequestId.current) setProbing(false)
+    }
+  }
+  useEffect(() => {
+    refreshStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   if (!home) return <EmptyState title="loading…" />
   if (view === 'library') {
     return (
@@ -174,11 +208,21 @@ export function McpServers() {
           <ViewSwitcher active={view} onChange={setView} />
           <span className="mx-2 text-fg-faint">·</span>
           <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
-          <span className="ml-3 text-fg-faint truncate">{path}</span>
+          <span className="ml-3 px-1.5 py-0.5 text-[10px] rounded border border-line text-fg-faint">
+            {names.length} server{names.length === 1 ? '' : 's'}
+          </span>
+          <span className="ml-2 text-fg-faint truncate">{path}</span>
           <div className="flex-1" />
           {selectedName && selected && (
             <ProvenanceBadge scope={scope} input={mcpProvInput(selectedName, selected)} className="mr-2" />
           )}
+          <button
+            onClick={refreshStatus}
+            disabled={probing}
+            className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50 mr-2"
+          >
+            {probing ? 'checking…' : '⟳ test connections'}
+          </button>
           <button
             onClick={addServer}
             className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
@@ -221,23 +265,30 @@ export function McpServers() {
             {names.length === 0 ? (
               <div className="px-3 py-1 text-xs text-fg-faint italic">no servers</div>
             ) : (
-              names.filter((n) => !filter || n.toLowerCase().includes(filter.toLowerCase())).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setSelectedName(n)}
-                  className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
-                    selectedName === n
-                      ? 'bg-bg-hi text-fg'
-                      : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                  }`}
-                >
-                  <span className="truncate">{n}</span>
-                  <span className="ml-2 flex items-center gap-2 shrink-0">
-                    <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
-                    <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
-                  </span>
-                </button>
-              ))
+              names.filter((n) => !filter || n.toLowerCase().includes(filter.toLowerCase())).map((n) => {
+                const conn = deriveMcpConnectionState(n, probe)
+                return (
+                  <button
+                    key={n}
+                    onClick={() => setSelectedName(n)}
+                    className={`w-full text-left px-3 py-1 text-xs flex items-center gap-2 justify-between ${
+                      selectedName === n
+                        ? 'bg-bg-hi text-fg'
+                        : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <StatusDot state={conn.dotState} title={conn.label} />
+                      <span className="truncate">{n}</span>
+                    </span>
+                    <span className="ml-2 flex items-center gap-2 shrink-0">
+                      <Badge tone={conn.badgeTone}>{conn.label}</Badge>
+                      <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
+                      <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
+                    </span>
+                  </button>
+                )
+              })
             )}
           </div>
         }
@@ -246,6 +297,9 @@ export function McpServers() {
             <McpServerEditor
               name={selectedName}
               server={selected}
+              connection={deriveMcpConnectionState(selectedName, probe)}
+              onTestConnection={refreshStatus}
+              testing={probing}
               onRename={(n) => renameServer(selectedName, n)}
               onChange={(s) => updateServer(selectedName, s)}
               onRemove={() => removeServer(selectedName)}
@@ -262,12 +316,18 @@ export function McpServers() {
 function McpServerEditor({
   name,
   server,
+  connection,
+  onTestConnection,
+  testing,
   onRename,
   onChange,
   onRemove,
 }: {
   name: string
   server: McpServer
+  connection: McpConnectionInfo
+  onTestConnection: () => void
+  testing: boolean
   onRename: (n: string) => void
   onChange: (s: McpServer) => void
   onRemove: () => void
@@ -290,6 +350,17 @@ function McpServerEditor({
 
   return (
     <div className="p-4 space-y-4 max-w-2xl">
+      <div className="flex items-center gap-2">
+        <StatusDot state={connection.dotState} size="md" title={connection.label} />
+        <Badge tone={connection.badgeTone}>{connection.label}</Badge>
+        <button
+          onClick={onTestConnection}
+          disabled={testing}
+          className="ml-auto px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-50"
+        >
+          {testing ? 'checking…' : 'test connection'}
+        </button>
+      </div>
       <div className="flex items-center gap-2">
         <label className="text-xs text-fg-faint w-20">name</label>
         <input

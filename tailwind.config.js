@@ -31,11 +31,22 @@ export default {
           muted: '#e8a988',
         },
         sage: '#6f7d52',
+        // sage-dark = readable text shade for `good`-tone badges (paired with
+        // sage as the tint/border, mirrors honey/honey-dark below).
+        'sage-dark': '#4e5739',
         butter: '#e4b85a',
         // Usage tier tones — caution (≥70%) band. honey = bar/dot color,
-        // honey-dark = readable text shade on the card background.
+        // honey-dark = readable text shade on the card background. Darkened
+        // from the original #9a6c12 — that shade only hit ~4.0:1 on this
+        // paper theme's card backgrounds, short of WCAG AA (4.5:1) for small
+        // text.
         honey: '#d3a23c',
-        'honey-dark': '#9a6c12',
+        'honey-dark': '#7b560e',
+        // accent-dark = readable text shade for `accent`-tone badges (paired
+        // with accent as the tint/border). Kept separate from `accent` (used
+        // app-wide for buttons/links/branding) so this fix doesn't ripple
+        // into unrelated accent-colored UI.
+        'accent-dark': '#814024',
         // Hive accent palette — three extra low-chroma tones to supplement
         // accent/sage/butter for the 6-slot hive card rotation.
         'hive-slate': '#5f6f86',

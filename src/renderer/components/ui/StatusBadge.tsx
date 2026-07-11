@@ -14,7 +14,7 @@ export const CLASSES: Record<JobStatus, string> = {
   completed:    'bg-green-950/50 text-green-200 border-green-800/60',
   failed:       'bg-red-950/50 text-red-200 border-red-800/60',
   needs_review: 'bg-orange-950/50 text-orange-200 border-orange-800/60',
-  unqueued:     'bg-bg-elev text-fg-faint border-dashed border-line',
+  unqueued:     'bg-bg-elev text-fg-dim border-dashed border-line',
 }
 
 interface StatusBadgeProps {

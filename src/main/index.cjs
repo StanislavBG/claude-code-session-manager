@@ -26,6 +26,13 @@ const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
 const { createAdminServer } = require('./adminServer.cjs');
 const adminServer = createAdminServer(scheduler.remote);
+const { createBrowserAgentServer } = require('./browserAgentServer.cjs');
+const browserAgentServer = createBrowserAgentServer({
+  listTabs: () => browserView.listViews(),
+  screenshot: ({ viewId }) => browserView.captureShotForAgent({ viewId }),
+  action: (params) => browserView.dispatchViewAction(params),
+  dom: ({ viewId }) => browserView.captureAgentDom({ viewId }),
+});
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const teams = require('./teams.cjs');
@@ -1059,6 +1066,9 @@ app.whenReady().then(async () => {
   adminServer.start().catch((e) => {
     logs.writeLine({ scope: 'admin-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
+  browserAgentServer.start().catch((e) => {
+    logs.writeLine({ scope: 'browser-agent-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
+  });
   // First-boot default: install the bundled session-manager-dev plugin (its 10
   // dev skills) from the app's own marketplace. One-shot + idempotent; never
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
@@ -1149,6 +1159,7 @@ app.on('before-quit', () => {
   transcripts.closeAll();
   watchers.manager.killAll();
   adminServer.stop().catch(() => {});
+  browserAgentServer.stop().catch(() => {});
   // Best-effort flush of any pending OTEL spans. shutdown() has its own 2s
   // ceiling so a wedged exporter can't hold quit.
   otel.shutdown().catch(() => {});

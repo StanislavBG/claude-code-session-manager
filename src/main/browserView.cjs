@@ -21,6 +21,11 @@ const crypto = require('crypto');
 const { WebContentsView } = require('electron');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { readJson, writeJson } = require('./config.cjs');
+const {
+  parseKeyCombo,
+  computeScrollDelta,
+  computeScreenshotScale,
+} = require('./lib/browserAgentActions.cjs');
 
 // ── History + zoom persistence (PRD 402) ──────────────────────────────
 // Both files live under ~/.claude/session-manager/browser/, inside
@@ -70,6 +75,10 @@ const views = new Map();
 // main-window nav lock without weakening the lock itself.
 const browserViewContentsIds = new Set();
 let win = null;
+// Last viewId shown via show() — the renderer's proxy for "which sub-tab is
+// active", since WebContentsView exposes setVisible() but no getter. Used to
+// default viewId-optional browser-agent-server routes to the active tab.
+let lastShownViewId = null;
 
 // ── Recorder engine (PRD 408) ─────────────────────────────────────────
 // viewId <-> webContents.id so the record-event channel (sent from the
@@ -248,6 +257,7 @@ function show({ viewId }) {
   const view = views.get(viewId);
   if (!view) return { ok: false };
   view.setVisible(true);
+  lastShownViewId = viewId;
   return { ok: true };
 }
 
@@ -266,6 +276,7 @@ function destroy({ viewId }) {
   recordingViewIds.delete(viewId);
   stepCounters.delete(viewId);
   lastFindText.delete(viewId);
+  if (lastShownViewId === viewId) lastShownViewId = null;
   if (win && !win.isDestroyed()) {
     try { win.contentView.removeChildView(view); } catch { /* already detached */ }
   }
@@ -576,6 +587,181 @@ function stop({ viewId }) {
   return { ok: true };
 }
 
+// ── On-demand single-action agent API (PRD 535 foundation) ────────────
+// Modeled on Anthropic's published computer_use tool schema. Reuses the same
+// dispatch primitives the Recorder replay engine already established above
+// (replayPositionedClick for coordinate clicks, normalizeUrl/withTimeout for
+// navigate) instead of forking a second copy — the difference from replay()
+// is that this drives ONE ad-hoc action at a time by raw coordinate, not a
+// recorded `steps` array by selector.
+function listViews() {
+  const result = [];
+  for (const [viewId, view] of views.entries()) {
+    if (view.webContents.isDestroyed()) continue;
+    result.push({
+      viewId,
+      url: view.webContents.getURL(),
+      title: view.webContents.getTitle(),
+      active: viewId === lastShownViewId,
+    });
+  }
+  return result;
+}
+
+function resolveViewId(viewId) {
+  return viewId || lastShownViewId;
+}
+
+async function dispatchAction(view, params) {
+  const wc = view.webContents;
+  switch (params.action) {
+    case 'left_click': {
+      const [x, y] = Array.isArray(params.coordinate) ? params.coordinate : [];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new Error('left_click requires coordinate: [x, y]');
+      }
+      await replayPositionedClick(wc, x, y);
+      return { ok: true };
+    }
+    case 'type': {
+      if (typeof params.text !== 'string') throw new Error('type requires text');
+      await wc.insertText(params.text);
+      return { ok: true };
+    }
+    case 'key': {
+      if (typeof params.key !== 'string' || !params.key) throw new Error('key requires key');
+      const { keyCode, modifiers } = parseKeyCombo(params.key);
+      wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+      if (keyCode.length === 1) wc.sendInputEvent({ type: 'char', keyCode, modifiers });
+      wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+      return { ok: true };
+    }
+    case 'scroll': {
+      const [x, y] = Array.isArray(params.coordinate) ? params.coordinate : [0, 0];
+      const { deltaX, deltaY } = computeScrollDelta(params);
+      wc.sendInputEvent({ type: 'mouseWheel', x: Number(x) || 0, y: Number(y) || 0, deltaX, deltaY });
+      return { ok: true };
+    }
+    case 'navigate': {
+      if (typeof params.url !== 'string' || !params.url) throw new Error('navigate requires url');
+      const normalized = normalizeUrl(params.url);
+      if (!normalized.ok) throw new Error(normalized.error);
+      await withTimeout(wc.loadURL(normalized.url), REPLAY_STEP_TIMEOUT_MS, 'navigate');
+      return { ok: true };
+    }
+    default:
+      throw new Error(`unsupported action: ${params.action}`);
+  }
+}
+
+// Single-action entry point (as opposed to replay()'s recorded-steps-array
+// entry point) — resolves viewId (defaulting to the active tab), dispatches
+// exactly one action, and normalizes errors into the { ok, error } shape the
+// rest of this module already uses.
+async function dispatchViewAction(params) {
+  const viewId = resolveViewId(params.viewId);
+  if (!viewId) return { ok: false, error: 'no viewId given and no active tab' };
+  const view = views.get(viewId);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  try {
+    return await dispatchAction(view, params);
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// On-demand screenshot for the agent API. Reuses wc.capturePage() (same call
+// captureShot() below already uses) but additionally resizes to a fixed
+// logical resolution — Anthropic's computer-use API silently downscales
+// oversized screenshots server-side, which breaks coordinate mapping unless
+// caller and model agree on one fixed max dimension. `scale` in the response
+// lets a caller map a coordinate clicked on the returned image back to the
+// real page: realX = clickedX / scale.
+async function captureShotForAgent({ viewId } = {}) {
+  const id = resolveViewId(viewId);
+  if (!id) return { ok: false, error: 'no viewId given and no active tab' };
+  const view = views.get(id);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  try {
+    const wc = view.webContents;
+    const image = await wc.capturePage();
+    const { width, height } = image.getSize();
+    const target = computeScreenshotScale(width, height);
+    const resized = target.scale < 1 ? image.resize({ width: target.width, height: target.height }) : image;
+    return {
+      ok: true,
+      viewId: id,
+      url: wc.getURL(),
+      title: wc.getTitle(),
+      dataUrl: resized.toDataURL(),
+      scale: target.scale,
+      width: target.width,
+      height: target.height,
+      originalWidth: width,
+      originalHeight: height,
+    };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Cheap text/accessibility-style snapshot for the agent API — an alternative
+// to vision-only driving since a real DOM is available here. Follows the
+// same executeJavaScript sandboxing pattern as captureDom() below (plain
+// IIFE returning a plain object, no new capability granted to the page).
+// Kept cheap on purpose: innerText + a capped list of interactive elements
+// with center-point coordinates, no full HTML serialization or computed
+// style walking.
+const AGENT_DOM_TEXT_MAX = 100_000;
+const AGENT_DOM_ELEMENT_LIMIT = 200;
+
+async function captureAgentDom({ viewId } = {}) {
+  const id = resolveViewId(viewId);
+  if (!id) return { ok: false, error: 'no viewId given and no active tab' };
+  const view = views.get(id);
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'unknown viewId' };
+  try {
+    const script = `(() => {
+      const SEL = 'button, a[href], input, textarea, select, [role="button"], [onclick]';
+      const els = Array.from(document.querySelectorAll(SEL)).slice(0, ${AGENT_DOM_ELEMENT_LIMIT});
+      const elements = els.map((el) => {
+        const rect = el.getBoundingClientRect();
+        const label = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().slice(0, 120);
+        return {
+          tag: el.tagName.toLowerCase(),
+          label,
+          x: Math.round(rect.left + rect.width / 2),
+          y: Math.round(rect.top + rect.height / 2),
+        };
+      }).filter((e) => e.x >= 0 && e.y >= 0 && Number.isFinite(e.x) && Number.isFinite(e.y));
+      return {
+        url: location.href,
+        title: document.title,
+        text: document.body ? document.body.innerText : '',
+        elements,
+      };
+    })()`;
+    const result = await view.webContents.executeJavaScript(script);
+    let text = typeof result?.text === 'string' ? result.text : '';
+    let truncated = false;
+    if (text.length > AGENT_DOM_TEXT_MAX) {
+      text = text.slice(0, AGENT_DOM_TEXT_MAX);
+      truncated = true;
+    }
+    return {
+      ok: true,
+      viewId: id,
+      url: result?.url || '',
+      title: result?.title || '',
+      text,
+      truncated,
+      elements: Array.isArray(result?.elements) ? result.elements : [],
+    };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 // Cap returned capture text so a huge DOM can't blow up the IPC channel.
 const CAPTURE_TEXT_MAX = 500_000;
 
@@ -655,4 +841,14 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   }));
 }
 
-module.exports = { registerBrowserView, attachWindow, views, isBrowserViewContents, getView };
+module.exports = {
+  registerBrowserView,
+  attachWindow,
+  views,
+  isBrowserViewContents,
+  getView,
+  listViews,
+  dispatchViewAction,
+  captureShotForAgent,
+  captureAgentDom,
+};

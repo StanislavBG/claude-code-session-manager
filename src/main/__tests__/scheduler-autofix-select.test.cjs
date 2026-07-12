@@ -153,6 +153,11 @@ test('isRescanCandidate: needs_review + runId + uncommitted_changes → false (g
   assert.strictEqual(isRescanCandidate(job), false);
 });
 
+test('isRescanCandidate: needs_review + runId + pass_no_commit → true (fix-plan exemption can flip the verdict on rescan)', () => {
+  const job = makeJob({ verifierVerdict: 'pass_no_commit' });
+  assert.strictEqual(isRescanCandidate(job), true);
+});
+
 // ---- investigationDepth bound (fix-plan-of-a-fix-plan recursion cap) ----
 
 test('depth-1 (ordinary, no investigationDepth field) needs_review job is eligible', () => {

@@ -636,7 +636,20 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     // silently accepting a bare sentinel as proof of work done. Mutually
     // exclusive with the no_verdict_sentinel case above (sentinel === null
     // vs sentinel === 'pass'), kept as a separate sibling check for clarity.
-    if (sentinel === 'pass' && !committedDuringRun) {
+    //
+    // EXEMPTION: fix-plan jobs (slug matches ^\d+-fix-) are investigations —
+    // "I checked, the original work already landed correctly, nothing to
+    // change" is a legitimate, correct, common outcome for them, not a
+    // silent no-op bug. Applying this check to fix-plan jobs the same way as
+    // original feature/bugfix PRDs produced a false-positive cascade
+    // (2026-07-12: 523-fix-bounded-fix-plan-retry re-verified PRD 523, found
+    // it already fully implemented and committed, correctly declined to make
+    // a no-op commit, and printed a truthful PASS — but still got flagged
+    // needs_review). Original PRDs are expected to build something new, so a
+    // bare PASS with no commit from one is still a strong silent-failure
+    // signal and stays covered by this check.
+    const isFixPlanJob = /^\d+-fix-/.test(queueEntry?.slug || '');
+    if (sentinel === 'pass' && !committedDuringRun && !isFixPlanJob) {
       issues.push({
         verdict: 'pass_no_commit',
         reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',

@@ -903,6 +903,25 @@ test('pass_no_commit: SCHEDULER_VERDICT: PASS but no commit landed → needs_rev
   }
 });
 
+test('pass_no_commit: fix-plan job (slug ^\\d+-fix-) with PASS but no commit is exempt → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '523-fix-bounded-fix-plan-retry';
+    writeLog(tmp, slug, noOpRunEvents('Verification complete — no code gap exists.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Fix: bounded fix-plan retry');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'clean', `expected clean (fix-plan exemption), got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
 // (e) halt + sentinel PASS → still halt (override must not apply to halt)
 test('halt result + sentinel PASS + committedDuringRun:true → still halt', async () => {
   const tmp = makeTmpDir();

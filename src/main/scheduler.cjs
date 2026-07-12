@@ -1938,8 +1938,14 @@ function selectHistoryJobs(jobs, limit) {
 // commit-detection, which committedInWindow() can fix retroactively (e.g. the
 // git-log --all scan added for missed non-HEAD commits) — rescanning lets a
 // job whose commit is now correctly detected clear on its own instead of
-// staying stuck in needs_review forever.
-const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel']);
+// staying stuck in needs_review forever. 'pass_no_commit' is included because
+// verifyRun now exempts fix-plan jobs (slug ^\d+-fix-) from that check — a
+// fix-plan job flagged before that exemption shipped gets a genuinely
+// different verdict on rescan (2026-07-12: false-positive cascade where
+// investigation jobs correctly found "nothing to fix" but were flagged
+// anyway). For non-fix-plan jobs the exemption never applies, so rescanning
+// their pass_no_commit verdict is a harmless no-op (same facts, same verdict).
+const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'pass_no_commit']);
 
 // Bounds fix-plan recursion: depth 1 = the original job, depth 2 = its fix
 // (gets exactly one follow-up investigation if it also lands in

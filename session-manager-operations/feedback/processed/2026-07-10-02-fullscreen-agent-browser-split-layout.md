@@ -80,3 +80,16 @@ user can enter a full-screen split view (agent left, browser right); a visible
 button toggles it on/off; while full-screen, the agent pane's action buttons
 (share/export, terminal, edit, run — whichever subset already exists elsewhere
 in this app's chrome) are anchored at the top of the agent pane, not lost.
+
+## RESOLUTION
+
+Ours, do it. Root-caused: no split layout or fullscreen concept exists anywhere in the renderer
+today (confirmed via grep, matching the original report). The report's file citations
+(`AgentView.tsx`, `SectionFrame.tsx:9`) don't match current code — the actual agent-chat surface
+is `src/renderer/components/TerminalChat.tsx` / `Terminal.tsx`, corrected in the queued PRD.
+
+Queued: `533-fullscreen-agent-browser-split-layout` (core split + fullscreen toggle mechanism,
+1/3 agent : 2/3 Browser). The anchored action-button row above the agent pane (share/export,
+terminal, edit, run icons from the reference screenshot) is explicitly deferred to a follow-up —
+not required for this PRD's AC, since the core layout mechanism is the higher-value, independently
+useful piece. Execution is the scheduler's job from here.

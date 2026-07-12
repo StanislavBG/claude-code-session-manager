@@ -76,7 +76,7 @@ take a different route if the codebase conventions say so.
 | 2026-06-27-01-high-quality-develop-and-find-opportunity | 🛠 partial | Ask 1 (`/find-opportunity` skill) shipped directly 2026-07-10 (instruction-file edit, no PRD needed). Asks 2 (`quality: high` tier) and 3 (conventions loop) deferred — genuine open design questions the filer left for bilko's call; not queued. |
 | 2026-07-03-url-browser-pane-with-dom-recording | 🛠 in flight | Already covered by the existing Browser-tab PRD chain (402–413: panel scaffold, picker/capture/screenshot, recorder engine/panel/replay, persistence, e2e+docs). No new PRD needed. Verification currently blocked on 2026-07-10-01's fix (403–406 falsely show completed). |
 | 2026-07-10-01-scheduler-marks-jobs-completed-without-landed-commit | 🛠 queued (PRD 1) | Root-caused: `runVerify.cjs`'s verdict scanner only flags positive pattern hits, never checks for "no sentinel + no commit" (a run that does nothing sails through as clean). PRD `1-verdict-scanner-require-sentinel-or-commit` queued at low parallelGroup (1) to preempt the queue. Manually resetting 403–406 is left to bilko (Scheduler tab UI, not automatable safely from outside the running app). |
-| 2026-07-10-02-fullscreen-agent-browser-split-layout | 🆕 | Enhancement: full-screen split view (agent transcript left, Browser tab right) with a toggle button and agent action buttons anchored to the pane's top edge. No existing split/fullscreen layout in the renderer today — `MainPane` shows one screen at a time. |
+| 2026-07-10-02-fullscreen-agent-browser-split-layout | 🛠 queued (PRD 533) | Core split + fullscreen toggle (agent left 1/3, Browser right 2/3) queued as `533-fullscreen-agent-browser-split-layout`. Report's `AgentView.tsx` citation didn't exist — corrected to `TerminalChat.tsx`/`Terminal.tsx` in the PRD. Anchored action-button row deferred to a follow-up. |
 
 ## Lessons for submitters (kept current)
 
@@ -92,6 +92,13 @@ take a different route if the codebase conventions say so.
 - **`queue.json` "completed" is not proof of "landed."** `2026-07-10-01` found the verifier can mark a run `completed, exitCode: 0` when the agent made zero changes and just asked a question. Before citing a PRD as done in a RESOLUTION (either to close an item or to say "already covered by X"), cross-check `git log` for a real commit — don't trust `status` alone. This applies retroactively to any item whose RESOLUTION only cites a PRD id without a commit hash.
 - **A queued PRD that's "already in flight" doesn't need a NEW PRD.** `2026-07-03` turned out to already be covered by an existing, unrelated-looking PRD chain (the Browser tab work). Before decomposing a fresh implementation, check whether the ask is already mid-flight under a different name/slug — grep `queue.json`/`prds/` for the feature area, not just the item's own suggested filenames.
 - **Open, filer-flagged design questions ("your call") are a reason to defer, not to guess.** `2026-06-27-01` had 2 of its 3 asks left genuinely undecided by the filer. Ship the independently-specified part (here: Ask 1, standalone-useful), defer the rest with the specific open questions named in the RESOLUTION rather than picking an answer during triage — a wrong guess on a whole new skill/mode costs more than the wait.
+- **Verify component names cited in a report actually exist before trusting them into a PRD.**
+  `2026-07-10-02` cited `AgentView.tsx` (per this README's own "name the surface precisely"
+  example, ironically) — that component doesn't exist in this codebase; the real surface is
+  `TerminalChat.tsx`/`Terminal.tsx`. A grep-before-trust pass on every file:line citation caught it
+  before it reached the headless executor as a dead reference. Filed reports describe the world as
+  the filer understood it, which can be stale or approximate — always re-verify against current
+  code during triage, not just for the root cause but for every specific name cited.
 - **Authoring a new SKILL.md is not "code" for `/develop` purposes.** A brand-new skill file with no build/test surface (`find-opportunity`) was authored directly as part of this triage pass, same as editing an existing `SKILL.md`/`CLAUDE.md` — routing pure-markdown skill authorship through the scheduler is overhead with no safety benefit. Application code (IPC, renderer, main-process logic) still always goes through `/develop`.
 
 ## Conventions the implementer will hold your suggestion to

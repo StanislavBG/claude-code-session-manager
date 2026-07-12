@@ -216,7 +216,7 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
     }
     set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }))
     subscribeNavState(viewId)
-    window.api.browser.create({ viewId, partition: `browser-${viewId}` }).then(() => {
+    window.api.browser.create({ viewId, partition: 'persist:browser' }).then(() => {
       if (opts?.url) {
         window.api.browser.navigate({ viewId, url: opts.url }).catch(() => {})
       }

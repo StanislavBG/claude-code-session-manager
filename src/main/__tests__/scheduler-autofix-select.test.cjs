@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const {
   selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate,
   healTargetForFix, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH,
+  isEligibleForImmediateAutoFix,
 } = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
@@ -211,6 +212,50 @@ test('healTargetForFix: depth-2 fix-of-a-fix slug resolves back to the depth-1 f
   assert.strictEqual(depth2FixSlug, '521-fix-fix-recorder-export-footer-redesign');
   const resolved = healTargetForFix(depth2FixSlug, jobs);
   assert.strictEqual(resolved, depth1FixJob);
+});
+
+// ---- isEligibleForImmediateAutoFix (spawnJob's same-tick auto-fix trigger,
+// PRD 2026-07-12: needs_review jobs no longer wait up to 10 min for
+// reverifyNeedsReview()'s periodic pass) ----
+
+test('isEligibleForImmediateAutoFix: fresh needs_review job (fresh from spawnJob, not reverifyNeedsReview) is eligible', () => {
+  const job = makeJob();
+  const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
+  assert.strictEqual(result, true);
+});
+
+test('isEligibleForImmediateAutoFix: job already autoFixAttempted is excluded (prevents double-spawn with the periodic pass)', () => {
+  const job = makeJob({ autoFixAttempted: true });
+  const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
+  assert.strictEqual(result, false);
+});
+
+test('isEligibleForImmediateAutoFix: fix sibling already on disk excludes the job', () => {
+  const job = makeJob();
+  // fixSlug = '05-fix-my-feature'
+  const result = isEligibleForImmediateAutoFix(job, [job], (s) => s === '05-fix-my-feature');
+  assert.strictEqual(result, false);
+});
+
+test('isEligibleForImmediateAutoFix: fix-plan job beyond the depth cap is excluded', () => {
+  const job = makeJob({ slug: '05-fix-foo', investigationDepth: 3 });
+  const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
+  assert.strictEqual(result, false);
+});
+
+test('isEligibleForImmediateAutoFix: a different job in the same queue does not affect this job\'s eligibility', () => {
+  const job = makeJob();
+  const other = { slug: '05-fix-my-feature', status: 'pending', runId: null };
+  const result = isEligibleForImmediateAutoFix(job, [job, other], noSiblingOnDisk);
+  // The fix sibling is already queued, so this job is excluded too (matches
+  // selectAutoFixTargets's "no fix sibling in queue" rule).
+  assert.strictEqual(result, false);
+});
+
+test('isEligibleForImmediateAutoFix: a job whose status is not needs_review (e.g. still pending) is excluded', () => {
+  const job = makeJob({ status: 'pending' });
+  const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
+  assert.strictEqual(result, false);
 });
 
 console.log('scheduler-autofix-select tests: PASS');

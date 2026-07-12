@@ -1525,6 +1525,8 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
 
     let actuallyFailed = false;
     let failedJobSnapshot = null;
+    let needsInvestigationNow = false;
+    let investigationJobSnapshot = null;
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       if (i2 >= 0) {
@@ -1574,6 +1576,30 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           if (effectiveStatus === 'failed') {
             actuallyFailed = true;
             failedJobSnapshot = { ...s.jobs[i2] };
+          } else if (effectiveStatus === 'needs_review') {
+            // Same-tick auto-fix (feedback 2026-07-12): rather than waiting up to
+            // 10 min for reverifyNeedsReview()'s periodic pass, check right here
+            // whether this job qualifies for auto-fix (same eligibility rule
+            // reverifyNeedsReview uses via selectAutoFixTargets) and, if so, spawn
+            // the investigation immediately. Stamp autoFixAttempted BEFORE the
+            // investigation fires (mirrors reverifyNeedsReview's auto-fix section)
+            // so the periodic pass 10 min later sees it already attempted and
+            // does not spawn a duplicate.
+            const fixSlugExists = (slug) => fs.existsSync(path.join(PRDS_DIR, `${slug}.md`));
+            if (
+              process.env.SM_AUTOFIX_DISABLE !== '1' &&
+              isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists)
+            ) {
+              const isNoPlanRetry = s.jobs[i2].autoFixAttempted && s.jobs[i2].autoFixOutcome === 'no-plan';
+              s.jobs[i2].autoFixAttempted = true;
+              if (!s.jobs[i2].runId) s.jobs[i2].runId = runId;
+              if (isNoPlanRetry) {
+                s.jobs[i2].autoFixRetries = (s.jobs[i2].autoFixRetries ?? 0) + 1;
+                delete s.jobs[i2].autoFixOutcome;
+              }
+              needsInvestigationNow = true;
+              investigationJobSnapshot = { ...s.jobs[i2] };
+            }
           }
           // Auto-promote: when a fix-* PRD completes successfully, the original
           // failed PRD's work is logically done. Flip its status to 'completed'
@@ -1632,6 +1658,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           console.error('[scheduler] spawnInvestigation error', job.slug, e);
         });
       }
+    } else if (needsInvestigationNow && investigationJobSnapshot) {
+      console.log(`[scheduler] needs_review ${job.slug} → immediate auto-fix investigation (not waiting for periodic reverify)`);
+      spawnInvestigation(investigationJobSnapshot, runDir).catch((e) => {
+        console.error('[scheduler] spawnInvestigation error', job.slug, e);
+      });
     }
   } catch (e) {
     console.error('[scheduler] spawnJob error', job.slug, e);
@@ -2094,6 +2125,24 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     if (slugsInQueue.has(fixSlug)) return false;
     return true;
   });
+}
+
+/**
+ * Pure helper — no I/O by default (fixSlugExists is injectable). Answers
+ * "does this single needs_review job qualify for an auto-fix investigation
+ * right now?" by delegating to selectAutoFixTargets's eligibility rules
+ * (same-1-attempt cap, depth cap, no fix sibling) against the full job list,
+ * then checking whether this job is among the returned targets. Shared by
+ * spawnJob's immediate same-tick path and (indirectly, via
+ * selectAutoFixTargets itself) reverifyNeedsReview's periodic path, so both
+ * use one eligibility definition rather than two divergent copies.
+ */
+function isEligibleForImmediateAutoFix(job, allJobs, fixSlugExists) {
+  const targets = selectAutoFixTargets(allJobs, {
+    fixSlugExists,
+    resolveJobRunId: () => job.runId,
+  });
+  return targets.some((t) => t.slug === job.slug);
 }
 
 async function reverifyNeedsReview() {
@@ -2776,4 +2825,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH };

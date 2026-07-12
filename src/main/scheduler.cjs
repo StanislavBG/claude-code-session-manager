@@ -1652,20 +1652,21 @@ function tickQueue() {
     const state = await readQueue();
     if (state.paused) {
       console.log('[scheduler] tickQueue skipped: paused');
-      return;
+      return { fired: false, reason: 'paused' };
     }
-    if (cancelToken.cancelled) return;
+    if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
     await reconcile(state);
     const cap = ENV_CAP ?? state.config.concurrencyCap;
-    const batch = pickNextBatch(state.jobs, runningSet, cap);
+    const { batch, reason: holdReason } = pickNextBatch(state.jobs, runningSet, cap);
     if (batch.length === 0) {
       // Queue drained — run the definition-of-done gate fire-and-forget.
       // Non-blocking: does not hold the mutate lock; errors are logged, not thrown.
       runDefinitionOfDoneOnDrain(state, { cancelToken }).catch((err) => {
         console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
       });
-      return;
+      if (holdReason) return { fired: false, reason: 'held', detail: holdReason };
+      return { fired: false, reason: 'drained' };
     }
 
     const availableMb = getAvailableMemMb();
@@ -1678,7 +1679,7 @@ function tickQueue() {
       const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
       console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1}) — deferring ${batch.length} job(s)`);
       lastMemGate = { availableMb, threshold, deferred: true, at: new Date().toISOString() };
-      return;
+      return { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold };
     }
     const gatedBatch = batch.slice(0, allowed);
     if (gatedBatch.length < batch.length) {
@@ -1699,22 +1700,50 @@ function tickQueue() {
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
       spawnJob(job, runId, runDir, state.config.defaultCwd).catch(() => {});
     }
+    return { fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup };
   });
   tickTail = next.catch(() => {});
   return next;
+}
+
+// Translates a tickQueue()/runDueJobs() outcome descriptor into a renderer-facing
+// ActionOutcome for the schedule:force-tick IPC handler.
+function forceTickOutcome(result) {
+  if (!result) return { ok: true, kind: 'info', message: 'No pending jobs' };
+  if (result.fired) {
+    const groupSuffix = result.group !== undefined ? ` (group g${result.group})` : '';
+    return { ok: true, kind: 'info', message: `Fired ${result.count} job(s)${groupSuffix}` };
+  }
+  switch (result.reason) {
+    case 'drained':
+      return { ok: true, kind: 'info', message: 'No pending jobs' };
+    case 'paused':
+      return { ok: true, kind: 'warn', message: 'Scheduler is paused' };
+    case 'cancelled':
+      return { ok: true, kind: 'warn', message: 'Batch cancelled — try again' };
+    case 'memory-deferred':
+      return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — low memory (${result.availableMb} MB available, need ${result.threshold} MB)` };
+    case 'held': {
+      const detail = String(result.detail ?? '').replace(/^\[scheduler\]\s*[\w-]+\s*(?:\[[^\]]*\])?:\s*/, '');
+      return { ok: true, kind: 'warn', message: detail || 'Batch held' };
+    }
+    default:
+      return { ok: true, kind: 'info', message: 'No pending jobs' };
+  }
 }
 
 async function runDueJobs() {
   const state = await readQueue();
   if (state.paused) {
     console.log('[scheduler] runDueJobs skipped: paused');
-    return;
+    return { fired: false, reason: 'paused' };
   }
   cancelToken = { cancelled: false };
-  await tickQueue();
+  const result = await tickQueue();
   // Clear the one-shot scheduledFor without waiting for jobs to settle.
   await mutate((s) => { s.scheduledFor = null; });
   await broadcast();
+  return result;
 }
 
 // ---------- when-available launch logic ----------
@@ -2263,8 +2292,13 @@ function registerScheduleHandlers() {
     // Bypass the billing-poll gate entirely — fire pending jobs immediately regardless of meter state.
     // Clears any existing pause first (same semantics as run-now).
     await clearPause('run-now');
-    runDueJobs().catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (force-tick)', meta: { error: e?.message } }));
-    return { ok: true };
+    try {
+      const result = await runDueJobs();
+      return forceTickOutcome(result);
+    } catch (e) {
+      logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (force-tick)', meta: { error: e?.message } });
+      return { ok: false, kind: 'error', message: `Failed to fire batch: ${e?.message ?? String(e)}` };
+    }
   });
 
   // .default({}) so callers may omit the payload entirely (same as the old `partial || {}`).
@@ -2310,12 +2344,21 @@ function registerScheduleHandlers() {
   // handler already reconciles on read, but this gives the renderer an
   // explicit refresh path that also broadcasts so all views update.
   ipcMain.handle('schedule:rescan', async () => {
-    await mutate(async (state) => {
+    const { added, removed } = await mutate(async (state) => {
+      const before = new Set(state.jobs.map((j) => j.slug));
       await reconcile(state);
-      return null;
+      const after = new Set(state.jobs.map((j) => j.slug));
+      const added = [...after].filter((slug) => !before.has(slug)).length;
+      const removed = [...before].filter((slug) => !after.has(slug)).length;
+      return { added, removed };
     });
     await broadcast();
-    return { ok: true };
+    let message;
+    if (added === 0 && removed === 0) message = 'Rescanned — no changes';
+    else if (added > 0 && removed === 0) message = `Rescanned — ${added} new PRD(s) picked up`;
+    else if (added === 0 && removed > 0) message = `Rescanned — ${removed} PRD(s) removed from disk`;
+    else message = `Rescanned — ${added} new PRD(s) picked up, ${removed} removed from disk`;
+    return { ok: true, kind: 'info', message };
   });
 
   // Archive every non-running PRD and drop its entry from queue.json.

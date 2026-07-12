@@ -120,7 +120,7 @@ function buildCommands(): Command[] {
       id: 'scheduler-force-tick',
       label: 'Scheduler — Force tick (bypass meter)',
       section: 'scheduler',
-      run: async () => { await window.api.schedule.forceTick() },
+      run: async () => { toast.fromOutcome(await window.api.schedule.forceTick()) },
     },
     {
       id: 'scheduler-resume',
@@ -132,7 +132,7 @@ function buildCommands(): Command[] {
       id: 'scheduler-rescan',
       label: 'Scheduler — Re-scan PRDs folder',
       section: 'scheduler',
-      run: async () => { await window.api.schedule.rescan() },
+      run: async () => { toast.fromOutcome(await window.api.schedule.rescan()) },
     },
     {
       id: 'scheduler-lint',

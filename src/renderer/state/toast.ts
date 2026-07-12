@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ActionOutcome } from '../../preload/api'
 
 /**
  * Lightweight toast store. Surfaces user-facing errors that previously
@@ -134,4 +135,6 @@ export const toast = {
   info: (message: string) => useToast.getState().show('info', message),
   warn: (message: string) => useToast.getState().show('warn', message),
   error: (message: string) => useToast.getState().show('error', message),
+  fromOutcome: (outcome: ActionOutcome) =>
+    useToast.getState().show(outcome.kind ?? (outcome.ok ? 'info' : 'warn'), outcome.message),
 }

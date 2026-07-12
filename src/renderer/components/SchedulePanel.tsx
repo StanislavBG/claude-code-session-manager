@@ -328,7 +328,7 @@ export function SchedulePanel() {
           <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              onClick={() => window.api.schedule.forceTick()}
+              onClick={() => window.api.schedule.forceTick().then(toast.fromOutcome).catch(() => toast.error('Failed to fire batch'))}
               disabled={counts.pending === 0 && counts.running === 0}
               className="bg-accent text-white rounded-lg px-4 py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
               title="Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress."
@@ -337,7 +337,7 @@ export function SchedulePanel() {
             </button>
             <button
               type="button"
-              onClick={() => window.api.schedule.rescan()}
+              onClick={() => window.api.schedule.rescan().then(toast.fromOutcome).catch(() => toast.error('Failed to rescan'))}
               className="bg-bg-hi border border-line text-fg-dim hover:text-fg rounded-lg px-3.5 py-2 text-[13px] font-medium"
               title="Re-scan the prds/ folder. Use when you've added or edited PRDs on disk and want the queue to reflect them immediately."
             >
@@ -588,7 +588,7 @@ function computeStatus({
       line2: 'click Fire next batch now to fire',
       action: {
         label: 'Fire next batch now',
-        onClick: () => window.api.schedule.forceTick(),
+        onClick: () => window.api.schedule.forceTick().then(toast.fromOutcome).catch(() => toast.error('Failed to fire batch')),
         title: 'Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress.',
       },
     }

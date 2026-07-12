@@ -1,3 +1,9 @@
+export interface ActionOutcome {
+  ok: boolean;
+  kind?: 'info' | 'warn' | 'error';
+  message: string;
+}
+
 export interface SpawnResult {
   pid: number;
   cwd: string;
@@ -1216,10 +1222,10 @@ export interface SessionManagerAPI {
     setConfig: (partial: Partial<ScheduleConfig & { supervisor?: Partial<SupervisorConfig> }>) => Promise<{ ok: boolean; config: ScheduleConfig }>;
     resetJob: (slug: string) => Promise<{ ok: boolean; error?: string }>;
     runNow: () => Promise<{ ok: boolean }>;
-    forceTick: () => Promise<{ ok: boolean }>;
+    forceTick: () => Promise<ActionOutcome>;
     resume: () => Promise<{ ok: boolean }>;
     /** Re-scan prds/ and merge into queue.json; broadcasts updated state. */
-    rescan: () => Promise<{ ok: boolean }>;
+    rescan: () => Promise<ActionOutcome>;
     /** Move all pending+failed PRDs to prds-archived/<ISO>/ and drop their
      *  queue entries. Completed/running entries are preserved. */
     clearQueue: () => Promise<{ ok: boolean; archived: number; archivedTo: string | null }>;

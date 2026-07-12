@@ -25,8 +25,9 @@ test('3 projects, 1 pending each, cap 6, nothing running → all 3 fire', () => 
     job('b-job', 'pending', '/b', 5),
     job('c-job', 'pending', '/c', 5),
   ];
-  const batch = pickNextBatch(jobs, new Set(), 6);
+  const { batch, reason } = pickNextBatch(jobs, new Set(), 6);
   assert.equal(batch.length, 3);
+  assert.equal(reason, null);
   const slugs = new Set(batch.map((j) => j.slug));
   assert.ok(slugs.has('a-job'));
   assert.ok(slugs.has('b-job'));
@@ -39,7 +40,7 @@ test('cap 2, 3 projects 1 pending each → exactly 2 fire', () => {
     job('b-job', 'pending', '/b', 5),
     job('c-job', 'pending', '/c', 5),
   ];
-  const batch = pickNextBatch(jobs, new Set(), 2);
+  const { batch } = pickNextBatch(jobs, new Set(), 2);
   assert.equal(batch.length, 2);
 });
 
@@ -50,7 +51,7 @@ test('1 project, pending in groups 5 and 6, cap 6 → only group-5 fires', () =>
     job('a-g5', 'pending', '/a', 5),
     job('a-g6', 'pending', '/a', 6),
   ];
-  const batch = pickNextBatch(jobs, new Set(), 6);
+  const { batch } = pickNextBatch(jobs, new Set(), 6);
   assert.equal(batch.length, 1);
   assert.equal(batch[0].slug, 'a-g5');
 });
@@ -60,7 +61,7 @@ test('1 project, two pending in same group 5, cap 6 → both fire', () => {
     job('a-g5-x', 'pending', '/a', 5),
     job('a-g5-y', 'pending', '/a', 5),
   ];
-  const batch = pickNextBatch(jobs, new Set(), 6);
+  const { batch } = pickNextBatch(jobs, new Set(), 6);
   assert.equal(batch.length, 2);
   const slugs = new Set(batch.map((j) => j.slug));
   assert.ok(slugs.has('a-g5-x'));
@@ -75,7 +76,7 @@ test('project /a: failed g5 blocks pending g6; project /b: fires anyway', () => 
     job('a-pending-g6', 'pending', '/a', 6),
     job('b-pending-g1', 'pending', '/b', 1),
   ];
-  const batch = pickNextBatch(jobs, new Set(), 6);
+  const { batch } = pickNextBatch(jobs, new Set(), 6);
   assert.equal(batch.length, 1);
   assert.equal(batch[0].slug, 'b-pending-g1');
 });
@@ -91,7 +92,7 @@ test('global cap respected: 2 already running + 3 pending across 3 projects → 
     job('p-c', 'pending', '/c', 1),
   ];
   const running = new Set(['r1', 'r2']);
-  const batch = pickNextBatch(jobs, running, 3);
+  const { batch } = pickNextBatch(jobs, running, 3);
   assert.equal(batch.length, 1);
 });
 
@@ -103,7 +104,8 @@ test('pickForProject: failure gate holds project', () => {
     job('pending', 'pending', '/x', 5),
   ];
   const result = pickForProject(pJobs, new Set(), 10);
-  assert.deepEqual(result, []);
+  assert.deepEqual(result.batch, []);
+  assert.match(result.reason, /failure-gate/);
 });
 
 test('pickForProject: backfills same group', () => {
@@ -114,7 +116,8 @@ test('pickForProject: backfills same group', () => {
   ];
   const running = new Set(['running']);
   const result = pickForProject(pJobs, running, 5);
-  assert.equal(result.length, 2);
+  assert.equal(result.batch.length, 2);
+  assert.equal(result.reason, null);
 });
 
 test('pickForProject: holds higher group while lower is running', () => {
@@ -124,5 +127,6 @@ test('pickForProject: holds higher group while lower is running', () => {
   ];
   const running = new Set(['running-g5']);
   const result = pickForProject(pJobs, running, 5);
-  assert.deepEqual(result, []);
+  assert.deepEqual(result.batch, []);
+  assert.match(result.reason, /concurrency/);
 });

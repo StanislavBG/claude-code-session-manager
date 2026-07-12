@@ -33,13 +33,15 @@ const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager
  *   runningSet that belong to this project.
  * @param {number} slots - Maximum jobs to return (global remaining slots;
  *   caller enforces the global cap across projects).
- * @returns {object[]} Jobs to spawn for this project this tick.
+ * @returns {{ batch: object[], reason: string | null }} Jobs to spawn for this
+ *   project this tick, plus (when batch is empty because a gate held it) the
+ *   human-readable reason text that would otherwise only reach console.log.
  */
 function pickForProject(projectJobs, runningSlugsInProject, slots) {
   const pending = projectJobs.filter(
     (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug),
   );
-  if (pending.length === 0) return [];
+  if (pending.length === 0) return { batch: [], reason: null };
 
   const projectCwd = (projectJobs.find((j) => j.cwd) || {}).cwd || DEFAULT_PROJECT_CWD;
 
@@ -57,12 +59,11 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   );
   if (blockingFailures.length > 0) {
     const slugs = blockingFailures.map((j) => j.slug).join(', ');
-    console.log(
-      `[scheduler] failure-gate [${projectCwd}]: holding g${lowestPendingGroup} — ` +
+    const reason = `[scheduler] failure-gate [${projectCwd}]: holding g${lowestPendingGroup} — ` +
       `${blockingFailures.length} failed job(s) in earlier groups [${slugs}]. ` +
-      `Reset to pending or archive to unblock.`,
-    );
-    return [];
+      `Reset to pending or archive to unblock.`;
+    console.log(reason);
+    return { batch: [], reason };
   }
 
   // Groups with at least one job in flight: either tracked in runningSlugsInProject
@@ -84,20 +85,18 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
     const lowestActive = Math.min(...activeGroups);
     if (lowestPendingGroup > lowestActive) {
       // Earlier group still running — wait for it to drain before advancing.
-      console.log(
-        `[scheduler] concurrency [${projectCwd}]: g${lowestActive} in flight, holding g${lowestPendingGroup}`,
-      );
-      return [];
+      const reason = `[scheduler] concurrency [${projectCwd}]: g${lowestActive} in flight, holding g${lowestPendingGroup}`;
+      console.log(reason);
+      return { batch: [], reason };
     }
     if (lowestPendingGroup < lowestActive) {
       // Late-arrival: a lower-numbered (higher-priority) PRD reconciled AFTER
       // a higher-numbered group was already picked. Fire it now in parallel
       // with the active group rather than starving it until drain.
       if (slots <= 0) {
-        console.log(
-          `[scheduler] concurrency [${projectCwd}]: no slots for late-arrival g${lowestPendingGroup}`,
-        );
-        return [];
+        const reason = `[scheduler] concurrency [${projectCwd}]: no slots for late-arrival g${lowestPendingGroup}`;
+        console.log(reason);
+        return { batch: [], reason };
       }
       const batch = pending
         .filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup)
@@ -106,12 +105,13 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
         `[scheduler] concurrency [${projectCwd}]: firing late-arrival g${lowestPendingGroup} ` +
         `(${batch.length} job(s)) alongside active g${lowestActive}`,
       );
-      return batch;
+      return { batch, reason: null };
     }
     // Backfill slots remaining in the current group.
     if (slots <= 0) {
-      console.log(`[scheduler] concurrency [${projectCwd}]: cap reached, no slots`);
-      return [];
+      const reason = `[scheduler] concurrency [${projectCwd}]: cap reached, no slots`;
+      console.log(reason);
+      return { batch: [], reason };
     }
     const batch = pending
       .filter((j) => (j.parallelGroup ?? 99) === lowestActive)
@@ -121,13 +121,14 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
         `[scheduler] concurrency [${projectCwd}]: backfilling ${batch.length} into g${lowestActive}`,
       );
     }
-    return batch;
+    return { batch, reason: null };
   }
 
   // No active group — start the next group fresh.
   if (slots <= 0) {
-    console.log(`[scheduler] concurrency [${projectCwd}]: cap reached, no slots`);
-    return [];
+    const reason = `[scheduler] concurrency [${projectCwd}]: cap reached, no slots`;
+    console.log(reason);
+    return { batch: [], reason };
   }
   const batch = pending
     .filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup)
@@ -135,7 +136,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   console.log(
     `[scheduler] concurrency [${projectCwd}]: starting g${lowestPendingGroup} with ${batch.length} job(s)`,
   );
-  return batch;
+  return { batch, reason: null };
 }
 
 /**
@@ -150,10 +151,14 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
  * @param {object[]} allJobs - Full queue.json job list.
  * @param {Set<string>} running - In-process running slugs (runningSet).
  * @param {number} cap - concurrencyCap.
- * @returns {object[]} Jobs to spawn this tick.
+ * @returns {{ batch: object[], reason: string | null }} Jobs to spawn this
+ *   tick, plus (when batch is empty because a gate held it) the human-readable
+ *   hold reason that would otherwise only reach console.log.
  */
 function pickNextBatch(allJobs, running, cap) {
-  if (!allJobs.some((j) => j.status === 'pending' && !running.has(j.slug))) return [];
+  if (!allJobs.some((j) => j.status === 'pending' && !running.has(j.slug))) {
+    return { batch: [], reason: null };
+  }
 
   // Global slot accounting: take the higher of in-process running count and
   // queue.json running count (handles orphaned running entries from a previous
@@ -162,10 +167,9 @@ function pickNextBatch(allJobs, running, cap) {
   const effectiveRunning = Math.max(running.size, queueRunningCount);
   let slots = cap - effectiveRunning;
   if (slots <= 0) {
-    console.log(
-      `[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`,
-    );
-    return [];
+    const reason = `[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`;
+    console.log(reason);
+    return { batch: [], reason };
   }
 
   // Group all jobs by project cwd.
@@ -198,15 +202,18 @@ function pickNextBatch(allJobs, running, cap) {
   // slot allocation ties across projects.
   projectCandidates.sort((a, b) => a.lowestPendingForProject - b.lowestPendingForProject);
 
-  // Aggregate batch across projects, consuming global slots as we go.
+  // Aggregate batch across projects, consuming global slots as we go. Track
+  // the first hold reason seen so callers can explain an empty overall batch.
   const batch = [];
+  let heldReason = null;
   for (const { projectJobs, runningSlugsInProject } of projectCandidates) {
     if (slots <= 0) break;
-    const projectBatch = pickForProject(projectJobs, runningSlugsInProject, slots);
-    batch.push(...projectBatch);
-    slots -= projectBatch.length;
+    const projectResult = pickForProject(projectJobs, runningSlugsInProject, slots);
+    batch.push(...projectResult.batch);
+    slots -= projectResult.batch.length;
+    if (heldReason === null && projectResult.reason) heldReason = projectResult.reason;
   }
-  return batch;
+  return { batch, reason: batch.length === 0 ? heldReason : null };
 }
 
 module.exports = { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD };

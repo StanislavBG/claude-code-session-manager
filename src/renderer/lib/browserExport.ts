@@ -135,3 +135,10 @@ export function stepsToPrdFixture(steps: RecordStep[]): string {
     '```\n'
   )
 }
+
+// Single-destination export combining the human-readable Markdown repro with
+// the machine-readable JSON fixture, for clipboard/session/file exports that
+// don't need a separate "PRD fixture" destination.
+export function stepsToCanonical(steps: RecordStep[]): string {
+  return `${stepsToMarkdown(steps)}\n\`\`\`json\n${JSON.stringify(steps, null, 2)}\n\`\`\`\n`
+}

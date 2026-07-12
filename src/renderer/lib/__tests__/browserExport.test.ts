@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stepsToPlaywright, stepsToMarkdown, stepsToPrdFixture } from '../browserExport'
+import { stepsToPlaywright, stepsToMarkdown, stepsToPrdFixture, stepsToCanonical } from '../browserExport'
 import type { RecordStep } from '../../../preload/api'
 
 const submitSelector = 'a[data-testid="submit"]'
@@ -80,5 +80,21 @@ describe('stepsToPrdFixture', () => {
     expect(fixture).toContain('```json')
     expect(fixture).toContain('"verb": "navigate"')
     expect(fixture.toLowerCase()).not.toContain('scheduled-plans')
+  })
+})
+
+describe('stepsToCanonical', () => {
+  it('contains the numbered Markdown steps and a json fence', () => {
+    const canonical = stepsToCanonical(STEPS)
+    expect(canonical).toContain('1. **Navigate to** `https://example.com`')
+    expect(canonical).toContain('```json')
+  })
+
+  it('round-trips the steps array through the fenced JSON block', () => {
+    const canonical = stepsToCanonical(STEPS)
+    const start = canonical.indexOf('```json\n') + '```json\n'.length
+    const end = canonical.indexOf('```', start)
+    const parsed = JSON.parse(canonical.slice(start, end))
+    expect(parsed).toEqual(STEPS)
   })
 })

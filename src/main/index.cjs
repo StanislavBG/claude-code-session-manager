@@ -434,6 +434,25 @@ ipcMain.handle('app:pick-directory', async () => {
 
 ipcMain.on('app:reboot-app', () => rebootApp());
 
+// Recorder export "Save to file…" (PRD 412) — native Save As dialog, written
+// directly since the path is user-chosen, not renderer input.
+ipcMain.handle('browser:save-recording', validated(schemas.browserSaveRecording, async ({ defaultName, text }) => {
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: defaultName,
+      filters: [
+        { name: 'Markdown', extensions: ['md'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    await fsp.writeFile(result.filePath, text, 'utf8');
+    return { ok: true, path: result.filePath };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}));
+
 // Image paste — Ctrl+V in the Terminal pane. Reads the OS clipboard via
 // Electron's native API (renderer's navigator.clipboard.read() doesn't expose
 // raw image MIME types under contextIsolation), saves the bitmap to a temp
@@ -468,6 +487,16 @@ ipcMain.handle('clipboard:paste-text', async () => {
     return { ok: false, error: e && e.message ? e.message : String(e) };
   }
 });
+
+// Recorder export "Copy to clipboard" (PRD 412) — write side.
+ipcMain.handle('clipboard:write-text', validated(schemas.clipboardWriteText, ({ text }) => {
+  try {
+    clipboard.writeText(text);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}));
 
 // PRD 407 Capture panel — write side of paste-image's read. Writes a
 // screenshot capture to the OS clipboard as an image.

@@ -1066,6 +1066,13 @@ export interface SessionManagerAPI {
       | { ok: false; error: string }
     >;
     saveBinary: (path: string, base64: string) => Promise<{ ok: boolean; error?: string }>;
+    /** Opens a native "Save As" dialog and writes `text` to the chosen path directly
+     *  (bypasses config.cjs's write-boundary check — the path is user-chosen via OS dialog). */
+    saveRecording: (payload: { defaultName: string; text: string }) => Promise<
+      | { ok: true; path: string }
+      | { ok: false; canceled: true }
+      | { ok: false; error: string }
+    >;
     replay: (payload: {
       viewId: string;
       steps: RecordStep[];
@@ -1271,6 +1278,8 @@ export interface SessionManagerAPI {
     >;
     /** Write side — copies a Capture-panel screenshot data URL to the OS clipboard. */
     copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>;
+    /** Write side — copies arbitrary text (e.g. a recorded flow export) to the OS clipboard. */
+    writeText: (text: string) => Promise<{ ok: boolean; error?: string }>;
   };
   memory: {
     /** List markdown memory entries for the given workspace (defaults to 'default'). */

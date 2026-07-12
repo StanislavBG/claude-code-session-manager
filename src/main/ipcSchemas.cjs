@@ -96,6 +96,19 @@ const browserCopyImage = z.object({
   dataUrl: z.string().min(1).max(50_000_000),
 });
 
+// Recorder export (PRD 412): write arbitrary recorded-flow text to the OS
+// clipboard, separate from the image-only browserCopyImage above.
+const clipboardWriteText = z.object({
+  text: z.string().max(1_000_000),
+});
+
+// Recorder export (PRD 412): native "Save As" dialog write, bypassing the
+// config.cjs write-boundary since the path is user-chosen via OS dialog.
+const browserSaveRecording = z.object({
+  defaultName: z.string().min(1).max(255),
+  text: z.string().max(1_000_000),
+});
+
 // PRD 407: binary-safe atomic write (browser:save-binary) for screenshot
 // captures — config:write-text is utf8-only.
 const browserSaveBinary = z.object({
@@ -621,6 +634,8 @@ module.exports = {
     browserCaptureSelection,
     browserCopyImage,
     browserSaveBinary,
+    clipboardWriteText,
+    browserSaveRecording,
     browserReplay,
     browserSetZoom,
     browserFind,

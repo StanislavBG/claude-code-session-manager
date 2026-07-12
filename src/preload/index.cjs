@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('api', {
     captureDom: (payload) => ipcRenderer.invoke('browser:capture-dom', payload),
     captureShot: (viewId) => ipcRenderer.invoke('browser:capture-shot', { viewId }),
     saveBinary: (path, base64) => ipcRenderer.invoke('browser:save-binary', { path, base64 }),
+    saveRecording: (payload) => ipcRenderer.invoke('browser:save-recording', payload),
     replay: (payload) => ipcRenderer.invoke('browser:replay', payload),
     onReplayStep: (viewId, handler) => {
       const channel = `browser:replay-step:${viewId}`;
@@ -289,6 +290,7 @@ contextBridge.exposeInMainWorld('api', {
     pasteImage: () => ipcRenderer.invoke('clipboard:paste-image'),
     pasteText: () => ipcRenderer.invoke('clipboard:paste-text'),
     copyImage: (dataUrl) => ipcRenderer.invoke('browser:copy-image', { dataUrl }),
+    writeText: (text) => ipcRenderer.invoke('clipboard:write-text', { text }),
   },
   memory: {
     list: (workspace) => ipcRenderer.invoke('memory:list', workspace ? { workspace } : {}),

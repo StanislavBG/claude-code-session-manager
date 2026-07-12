@@ -13,11 +13,16 @@
 import { useEffect, useState } from 'react'
 import { AlmanacIcon, type AlmanacIconName } from '../../layout/AlmanacIcon'
 import { useBrowserState } from '../../../state/browser'
+import { useSessions } from '../../../state/sessions'
 import { toast } from '../../../state/toast'
 import { destPath } from '../../../lib/captureDest'
-import { stepsToPlaywright, stepsToMarkdown, stepsToPrdFixture } from '../../../lib/browserExport'
+import { stepsToPlaywright, stepsToCanonical } from '../../../lib/browserExport'
 import type { ReplayStepResult } from '../../../../preload/api'
 import { PanelShell, SectionLabel } from './panel-primitives'
+
+// Mirrors ptyWrite's PTY_WRITE_MAX_BYTES cap in src/main/ipcSchemas.cjs:36
+// (main-only constant, not importable from the renderer).
+const PTY_WRITE_MAX_BYTES = 64 * 1024
 
 function IconBtn({
   name,
@@ -49,10 +54,11 @@ function IconBtn({
   )
 }
 
-const REC_EXPORTS: { id: 'pw' | 'md' | 'prd'; label: string; hint: string; primary?: boolean }[] = [
+const REC_EXPORTS: { id: 'clipboard' | 'session' | 'file' | 'pw'; label: string; hint: string; primary?: boolean }[] = [
+  { id: 'clipboard', label: 'Copy to clipboard', hint: 'Markdown + JSON fixture' },
+  { id: 'session', label: 'Send to session', hint: 'insert into active terminal' },
+  { id: 'file', label: 'Save to file…', hint: 'native Save As dialog' },
   { id: 'pw', label: 'Playwright spec', hint: 'tests/e2e/*.spec.ts', primary: true },
-  { id: 'md', label: 'Markdown steps', hint: 'human repro' },
-  { id: 'prd', label: 'PRD fixture', hint: 'paste into a PRD by hand' },
 ]
 
 function verbColor(verb: string) {
@@ -123,18 +129,39 @@ export function RecorderPanel() {
     toast.info(`Saved: ${path}`)
   }
 
-  const onExport = async (id: 'pw' | 'md' | 'prd') => {
+  const onExport = async (id: 'clipboard' | 'session' | 'file' | 'pw') => {
     if (recorderSteps.length === 0 || exporting) return
     setExporting(true)
     try {
       if (id === 'pw') {
         const cwd = await window.api.app.cwd()
         await saveExport(`${cwd}/tests/e2e`, 'spec.ts', stepsToPlaywright(recorderSteps, { title: 'Recorded flow' }))
-      } else {
-        const cwd = await window.api.app.cwd()
-        const dirBase = `${cwd}/session-manager-operations/browser/flow-recordings`
-        if (id === 'md') await saveExport(dirBase, 'md', stepsToMarkdown(recorderSteps))
-        else await saveExport(dirBase, 'txt', stepsToPrdFixture(recorderSteps))
+      } else if (id === 'clipboard') {
+        const result = await window.api.clipboard.writeText(stepsToCanonical(recorderSteps))
+        if (!result.ok) throw new Error(result.error || 'clipboard write failed')
+        toast.info('Copied to clipboard')
+      } else if (id === 'session') {
+        const activeTabId = useSessions.getState().activeTabId
+        if (!activeTabId) {
+          toast.error('No active terminal tab')
+          return
+        }
+        const payload = `Here is a recorded browser flow — turn it into what I ask next:\n\n${stepsToCanonical(recorderSteps)}`
+        if (payload.length > PTY_WRITE_MAX_BYTES) {
+          const result = await window.api.clipboard.writeText(payload)
+          if (!result.ok) throw new Error(result.error || 'clipboard write failed')
+          toast.info('Flow too large for the terminal — copied to clipboard, paste it in instead')
+        } else {
+          window.api.pty.write({ tabId: activeTabId, data: payload })
+          toast.info('Sent to session')
+        }
+      } else if (id === 'file') {
+        const result = await window.api.browser.saveRecording({
+          defaultName: 'recorded-flow.md',
+          text: stepsToCanonical(recorderSteps),
+        })
+        if (result.ok) toast.info(`Saved: ${result.path}`)
+        else if ('error' in result) toast.error(result.error || 'save failed')
       }
     } catch (e) {
       toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`)

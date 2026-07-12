@@ -15,6 +15,8 @@ function stripScheme(url: string): string {
   return url.replace(/^https?:\/\//i, '')
 }
 
+const MAX_SUGGESTIONS = 6
+
 export function AddressBar({ tab }: { tab: BrowserTab }) {
   const navigate = useBrowserState((s) => s.navigate)
   const back = useBrowserState((s) => s.back)
@@ -64,18 +66,20 @@ export function AddressBar({ tab }: { tab: BrowserTab }) {
   const isBookmarked = bookmarks.some((b) => b.url === tab.url)
 
   const suggestions = useMemo(() => {
+    if (!editing) return []
     const q = draft.trim().toLowerCase()
-    if (!editing || !q) return []
     const seen = new Set<string>()
     const out: { url: string; title: string }[] = []
     // Prefix match over the most recent 200 entries — no ranking engine.
+    // historyEntries is already most-recent-first (main process unshifts on visit),
+    // so an empty query just takes the first MAX_SUGGESTIONS distinct entries.
     for (const h of historyEntries.slice(0, 200)) {
       if (seen.has(h.url)) continue
-      const matches = stripScheme(h.url).toLowerCase().startsWith(q) || h.title.toLowerCase().startsWith(q)
+      const matches = !q || stripScheme(h.url).toLowerCase().startsWith(q) || h.title.toLowerCase().startsWith(q)
       if (!matches) continue
       seen.add(h.url)
       out.push({ url: h.url, title: h.title })
-      if (out.length >= 6) break
+      if (out.length >= MAX_SUGGESTIONS) break
     }
     return out
   }, [draft, editing, historyEntries])

@@ -2098,7 +2098,6 @@ async function reverifyNeedsReview() {
   }
   if (healed.length) {
     const healSet = new Set(healed);
-    const promoted = [];
     await mutate((s) => {
       for (const j of s.jobs) {
         if (j.status === 'needs_review' && healSet.has(j.slug)) {
@@ -2107,37 +2106,45 @@ async function reverifyNeedsReview() {
           delete j.verifierVerdict;
         }
       }
-      // Mirror the live-completion auto-promote (spawnJob, ~line 1583): a
-      // healed fix-plan job means its original's work is logically done too.
-      // Without this, a job healed here (boot/periodic reverify) never
-      // releases its original from needs_review — only a fix-plan job that
-      // completes during a live run gets promoted, leaving the boot-heal
-      // path unable to fully resolve the fix-plan lineages it just healed
-      // (2026-07-12: 521-fix-*/523-fix-* healed but their originals stayed
-      // stuck needs_review).
-      for (const slug of healed) {
-        if (!isFixPlanSlug(slug)) continue;
-        const orig = healTargetForFix(slug, s.jobs);
-        if (orig) {
-          const priorStatus = orig.status;
-          orig.status = 'completed';
-          orig.exitCode = 0;
-          orig.error = null;
-          orig.completedBy = slug;
-          if (priorStatus === 'needs_review') delete orig.verifierVerdict;
-          promoted.push(`${orig.slug} (was ${priorStatus})`);
-        }
-      }
     });
     console.log(`[scheduler] boot reverify: healed ${healed.length} stale needs_review → completed (${healed.join(', ')})`);
-    if (promoted.length) {
-      console.log(`[scheduler] boot reverify: auto-promoted ${promoted.length} original(s) via healed fix-plan job(s): ${promoted.join(', ')}`);
-    }
     await broadcast();
   }
   if (leftForReview.length) {
     const detail = leftForReview.map((e) => `${e.slug} (${e.reason})`).join(', ');
     console.log(`[scheduler] boot reverify: left for review: ${detail}`);
+  }
+
+  // Mirror the live-completion auto-promote (spawnJob, ~line 1583): ANY
+  // completed fix-plan job whose original is still needs_review/failed means
+  // the original's work is logically done. Runs every pass (not just against
+  // jobs healed THIS pass) and over ALL completed fix-plan jobs, not just
+  // ones just-healed above — a fix-plan job healed by a PRIOR boot/periodic
+  // pass, or completed via a live run, is just as valid a promotion source.
+  // Idempotent: an already-promoted original has status !== 'needs_review'/
+  // 'failed', so isPromotableOriginal excludes it on repeat passes — safe to
+  // re-run unconditionally. (2026-07-12: 521-fix-*/523-fix-* healed on one
+  // boot but their originals stayed stuck needs_review on every subsequent
+  // boot/tick, because the promotion only ran inside `if (healed.length)`
+  // scoped to that single pass's fresh heals.)
+  const promoted = [];
+  await mutate((s) => {
+    for (const job of s.jobs) {
+      if (job.status !== 'completed' || !isFixPlanSlug(job.slug)) continue;
+      const orig = healTargetForFix(job.slug, s.jobs);
+      if (!orig) continue;
+      const priorStatus = orig.status;
+      orig.status = 'completed';
+      orig.exitCode = 0;
+      orig.error = null;
+      orig.completedBy = job.slug;
+      if (priorStatus === 'needs_review') delete orig.verifierVerdict;
+      promoted.push(`${orig.slug} (was ${priorStatus}, via ${job.slug})`);
+    }
+  });
+  if (promoted.length) {
+    console.log(`[scheduler] boot reverify: auto-promoted ${promoted.length} original(s): ${promoted.join(', ')}`);
+    await broadcast();
   }
 
   // Surface needs_review jobs that can never self-heal or get an auto-fix

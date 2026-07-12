@@ -5,10 +5,13 @@
  * PRD-408 engine (`window.api.browser.recordStart/recordStop/onRecordStep`)
  * via the browser store's recorder slice.
  *
- * Replay (`window.api.browser.replay`/`onReplayStep`) and the three export
- * destinations (Playwright spec / Markdown repro / PRD fixture) are PRD 410
- * — replay drives the live view step-by-step and the exports are written
- * via the same atomic `config.writeText` path CapturePanel uses.
+ * Replay (`window.api.browser.replay`/`onReplayStep`) is PRD 410 — it drives
+ * the live view step-by-step. Export has four destinations: copy to
+ * clipboard, send to the active terminal session, save to file (native Save
+ * As dialog), and a Playwright spec written via the same atomic
+ * `config.writeText` path CapturePanel uses (PRD 522 replaced the earlier
+ * Markdown-repro/PRD-fixture exports, which broke outside a registered write
+ * boundary).
  */
 import { useEffect, useState } from 'react'
 import { AlmanacIcon, type AlmanacIconName } from '../../layout/AlmanacIcon'

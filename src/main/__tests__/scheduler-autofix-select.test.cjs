@@ -8,7 +8,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { selectAutoFixTargets, isUnresolvableNeedsReview } = require('../scheduler.cjs');
+const { selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate } = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
 const noRunDir = () => null;
@@ -138,6 +138,16 @@ test('defaults parallelGroup to 99 when absent', () => {
     fixSlugExists: (s) => { seen.push(s); return false; },
   });
   assert.strictEqual(seen[0], '99-fix-my-feature');
+});
+
+test('isRescanCandidate: needs_review + runId + no_verdict_sentinel → true (RESCANNABLE_VERDICTS includes it)', () => {
+  const job = makeJob({ verifierVerdict: 'no_verdict_sentinel' });
+  assert.strictEqual(isRescanCandidate(job), true);
+});
+
+test('isRescanCandidate: needs_review + runId + uncommitted_changes → false (git commit-guard verdict stays excluded)', () => {
+  const job = makeJob({ verifierVerdict: 'uncommitted_changes' });
+  assert.strictEqual(isRescanCandidate(job), false);
 });
 
 console.log('scheduler-autofix-select tests: PASS');

@@ -1924,8 +1924,13 @@ function selectHistoryJobs(jobs, limit) {
 // Transcript-scan verdicts that re-running verifyRun can re-evaluate. NOT
 // 'uncommitted_changes' — that comes from the git commit-guard, which verifyRun
 // does not inspect, so re-scanning it would always return 'clean' and wrongly
-// heal a genuinely-unfinished job.
-const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable']);
+// heal a genuinely-unfinished job. 'no_verdict_sentinel' is included because
+// its raising condition (sentinel === null && !committedDuringRun) depends on
+// commit-detection, which committedInWindow() can fix retroactively (e.g. the
+// git-log --all scan added for missed non-HEAD commits) — rescanning lets a
+// job whose commit is now correctly detected clear on its own instead of
+// staying stuck in needs_review forever.
+const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel']);
 
 /**
  * Backfill a job's missing runId by scanning RUNS_DIR for a run directory

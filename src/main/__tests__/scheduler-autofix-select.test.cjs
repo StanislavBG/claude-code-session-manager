@@ -8,7 +8,10 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate } = require('../scheduler.cjs');
+const {
+  selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate,
+  healTargetForFix, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH,
+} = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
 const noRunDir = () => null;
@@ -148,6 +151,61 @@ test('isRescanCandidate: needs_review + runId + no_verdict_sentinel → true (RE
 test('isRescanCandidate: needs_review + runId + uncommitted_changes → false (git commit-guard verdict stays excluded)', () => {
   const job = makeJob({ verifierVerdict: 'uncommitted_changes' });
   assert.strictEqual(isRescanCandidate(job), false);
+});
+
+// ---- investigationDepth bound (fix-plan-of-a-fix-plan recursion cap) ----
+
+test('depth-1 (ordinary, no investigationDepth field) needs_review job is eligible', () => {
+  const jobs = [makeJob({ slug: '05-my-feature' })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 1);
+});
+
+test('fix-plan job with investigationDepth: 2 is now ALSO eligible', () => {
+  const jobs = [makeJob({ slug: '05-fix-foo', investigationDepth: 2 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 1);
+});
+
+test('fix-plan job with investigationDepth: 3 is NOT eligible (bound holds)', () => {
+  const jobs = [makeJob({ slug: '05-fix-foo', investigationDepth: 3 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
+});
+
+test('legacy fix-plan job with no investigationDepth field defaults to excluded (back-compat)', () => {
+  const jobs = [makeJob({ slug: '05-fix-foo' })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
+});
+
+test('isFixPlanBeyondDepthCap: non-fix-plan slug is never capped regardless of depth', () => {
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-my-feature', 99), false);
+});
+
+test('isFixPlanBeyondDepthCap: fix-plan at depth 1 or 2 is not capped, depth 3 is', () => {
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', 1), false);
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH), false);
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH + 1), true);
+});
+
+test('healTargetForFix: depth-2 fix-of-a-fix slug resolves back to the depth-1 fix job (521-fix-recorder-export-footer-redesign)', () => {
+  // Depth-1 fix job: originally authored to fix job 521, itself in needs_review.
+  const depth1FixJob = {
+    slug: '521-fix-recorder-export-footer-redesign',
+    status: 'needs_review',
+    parallelGroup: 521,
+    investigationDepth: 2,
+  };
+  const jobs = [depth1FixJob];
+  // spawnInvestigation's fix-slug formula: baseSlug strips only the leading
+  // numeric prefix (not "fix-"), so investigating this depth-1 fix job
+  // produces a depth-2 fix slug of the form "<group>-fix-fix-<rest>".
+  const baseSlug = depth1FixJob.slug.replace(/^\d+-/, '');
+  const depth2FixSlug = `${String(depth1FixJob.parallelGroup).padStart(2, '0')}-fix-${baseSlug}`;
+  assert.strictEqual(depth2FixSlug, '521-fix-fix-recorder-export-footer-redesign');
+  const resolved = healTargetForFix(depth2FixSlug, jobs);
+  assert.strictEqual(resolved, depth1FixJob);
 });
 
 console.log('scheduler-autofix-select tests: PASS');

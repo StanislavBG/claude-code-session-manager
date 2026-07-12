@@ -616,7 +616,7 @@ async function reconcile(state) {
   }
   for (const [slug, p] of onDisk) {
     if (seen.has(slug)) continue;
-    next.push({
+    const entry = {
       slug,
       title: p.title,
       cwd: p.cwd,
@@ -629,7 +629,16 @@ async function reconcile(state) {
       finishedAt: null,
       exitCode: null,
       error: null,
-    });
+    };
+    // Newly-discovered fix-plan PRD: stamp its investigationDepth relative to
+    // the original job it heals, so selectAutoFixTargets/spawnInvestigation
+    // can bound the fix-of-a-fix recursion (see MAX_INVESTIGATION_DEPTH).
+    // Non-fix-plan jobs get no explicit field — they read as depth 1 via `?? 1`.
+    if (isFixPlanSlug(slug)) {
+      const parent = healTargetForFix(slug, state.jobs);
+      entry.investigationDepth = parent ? (parent.investigationDepth ?? 1) + 1 : 2;
+    }
+    next.push(entry);
   }
   state.jobs = next.sort((a, b) => b.slug.localeCompare(a.slug));
   return state;
@@ -1244,8 +1253,8 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
  * Skipped if the failed job is itself a fix-plan (avoids infinite recursion).
  */
 async function spawnInvestigation(failedJob, runDir) {
-  if (isFixPlanSlug(failedJob.slug)) {
-    console.log(`[scheduler] skip investigation: ${failedJob.slug} is itself a fix plan`);
+  if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth)) {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} is a fix plan at/beyond depth cap (depth=${failedJob.investigationDepth ?? 'none'})`);
     return { deferred: false };
   }
   if (investigationsInFlight >= MAX_CONCURRENT_INVESTIGATIONS) {
@@ -1932,6 +1941,27 @@ function selectHistoryJobs(jobs, limit) {
 // staying stuck in needs_review forever.
 const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel']);
 
+// Bounds fix-plan recursion: depth 1 = the original job, depth 2 = its fix
+// (gets exactly one follow-up investigation if it also lands in
+// needs_review), depth 3+ (a fix-of-a-fix-of-a-fix) is excluded. Shared by
+// selectAutoFixTargets and spawnInvestigation so both call sites agree on
+// one threshold.
+const MAX_INVESTIGATION_DEPTH = 2;
+
+/**
+ * True when a fix-plan job's investigationDepth is at or past the recursion
+ * cap and it must be excluded from auto-fix eligibility. A fix-plan job with
+ * no recorded investigationDepth (a job already in the queue before this
+ * depth tracking shipped) is treated as excluded too, preserving the
+ * pre-existing blanket-exclusion behavior for legacy jobs — no retroactive
+ * migration. Non-fix-plan slugs are never capped here. Exported for tests.
+ */
+function isFixPlanBeyondDepthCap(slug, investigationDepth) {
+  if (!isFixPlanSlug(slug)) return false;
+  if (investigationDepth == null) return true;
+  return investigationDepth >= MAX_INVESTIGATION_DEPTH + 1;
+}
+
 /**
  * Backfill a job's missing runId by scanning RUNS_DIR for a run directory
  * whose contents reference this job's slug (a '<slug>.log' file inside it).
@@ -2019,7 +2049,7 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     if (job.status !== 'needs_review') return false;
     const runId = job.runId || resolveJobRunId(job);
     if (!runId) return false;
-    if (isFixPlanSlug(job.slug)) return false;
+    if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth)) return false;
     if (job.autoFixAttempted) {
       if (job.autoFixOutcome !== 'no-plan') return false;
       if ((job.autoFixRetries ?? 0) >= 1) return false;
@@ -2665,4 +2695,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH };

@@ -21,7 +21,10 @@ export function PanelShell({
   foot?: ReactNode
 }) {
   return (
-    <aside className="flex w-[344px] flex-shrink-0 flex-col border-l border-line bg-bg-elev font-sans">
+    <aside
+      data-testid="browser-panel"
+      className="flex w-[344px] flex-shrink-0 flex-col border-l border-line bg-bg-elev font-sans"
+    >
       <div className="flex items-center gap-2.5 border-b border-rule px-4 py-3.5">
         <span className="inline-flex text-accent">
           <AlmanacIcon name={icon} size={16} />

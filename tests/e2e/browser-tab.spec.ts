@@ -36,34 +36,40 @@ test('Browser tab mounts, seeds a default sub-tab, and toggles verb panels', asy
     const observeBtn = win.getByRole('button', { name: 'Observe' })
     const screenshotBtn = win.getByRole('button', { name: 'Screenshot' })
 
+    // Scoped to the Browser tab's own contextual panel (panel-primitives.tsx
+    // PanelShell `data-testid="browser-panel"`) — NOT the bare `complementary`
+    // role, which also matches AlmanacSidebar's always-mounted `<aside
+    // aria-label="Primary navigation">` (baseline count 1, not 0).
+    const panel = win.locator('[data-testid="browser-panel"]')
+
     // Capture: open, assert title, click active verb again to close.
     // (PanelShell title AND the panel's first SectionLabel both render the
     // exact text "Capture" — CapturePanel.tsx renders the title span before
     // the "Capture" SectionLabel, so `.first()` deterministically selects
     // the title.)
     await captureBtn.click()
-    await expect(win.getByRole('complementary').getByText('Capture', { exact: true }).first()).toBeVisible()
+    await expect(panel.getByText('Capture', { exact: true }).first()).toBeVisible()
     await captureBtn.click()
-    await expect(win.getByRole('complementary')).toHaveCount(0)
+    await expect(panel).toHaveCount(0)
 
     // Record: open, assert title, close.
     await recordBtn.click()
-    await expect(win.getByRole('complementary').getByText('Recorder', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Recorder', { exact: true })).toBeVisible()
     await recordBtn.click()
-    await expect(win.getByRole('complementary')).toHaveCount(0)
+    await expect(panel).toHaveCount(0)
 
     // Observe: open, assert title (panel is titled "Claude session" per the
     // design — real allow/deny gating lands in a later PRD), close.
     await observeBtn.click()
-    await expect(win.getByRole('complementary').getByText('Claude session', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Claude session', { exact: true })).toBeVisible()
     await observeBtn.click()
-    await expect(win.getByRole('complementary')).toHaveCount(0)
+    await expect(panel).toHaveCount(0)
 
     // Screenshot routes into capture mode with captureMode 'shot' (state
     // browser.ts onVerb) rather than toggling a distinct panel/mode — it
     // reuses the Capture panel, so assert that instead of a toggle-close.
     await screenshotBtn.click()
-    await expect(win.getByRole('complementary').getByText('Capture', { exact: true }).first()).toBeVisible()
+    await expect(panel.getByText('Capture', { exact: true }).first()).toBeVisible()
 
     const real = errors.filter((e) => !/Autofill\.enable|Autofill\.setAddresses/.test(e))
     expect(real, `errors during Browser tab interaction: ${real.join(' | ')}`).toEqual([])

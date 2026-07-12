@@ -1697,6 +1697,20 @@ function tickQueue() {
         console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
       });
       if (holdReason) return { fired: false, reason: 'held', detail: holdReason };
+      // Distinguish "genuinely nothing to do" from "the batch was already
+      // fired by a concurrent tickQueue() call" (e.g. the periodic
+      // when-available poll winning a race against a manual force-tick —
+      // pickNextBatch correctly returns reason:null in both cases since
+      // neither is a hold; the caller-facing message needs to tell them
+      // apart so "No pending jobs" doesn't read as wrong next to a job
+      // that is visibly running).
+      const runningCount = Math.max(
+        runningSet.size,
+        state.jobs.filter((j) => j.status === 'running').length,
+      );
+      if (runningCount > 0) {
+        return { fired: false, reason: 'already-running', runningCount };
+      }
       return { fired: false, reason: 'drained' };
     }
 
@@ -1748,6 +1762,8 @@ function forceTickOutcome(result) {
   switch (result.reason) {
     case 'drained':
       return { ok: true, kind: 'info', message: 'No pending jobs' };
+    case 'already-running':
+      return { ok: true, kind: 'info', message: `Already running — ${result.runningCount} job(s) in flight` };
     case 'paused':
       return { ok: true, kind: 'warn', message: 'Scheduler is paused' };
     case 'cancelled':
@@ -2403,10 +2419,10 @@ function registerScheduleHandlers() {
     });
     await broadcast();
     let message;
-    if (added === 0 && removed === 0) message = 'Rescanned — no changes';
-    else if (added > 0 && removed === 0) message = `Rescanned — ${added} new PRD(s) picked up`;
-    else if (added === 0 && removed > 0) message = `Rescanned — ${removed} PRD(s) removed from disk`;
-    else message = `Rescanned — ${added} new PRD(s) picked up, ${removed} removed from disk`;
+    if (added === 0 && removed === 0) message = 'Rescanned — no new/removed PRD files';
+    else if (added > 0 && removed === 0) message = `Rescanned — ${added} new PRD file(s) picked up`;
+    else if (added === 0 && removed > 0) message = `Rescanned — ${removed} PRD file(s) removed from disk`;
+    else message = `Rescanned — ${added} new PRD file(s) picked up, ${removed} removed from disk`;
     return { ok: true, kind: 'info', message };
   });
 
@@ -2825,4 +2841,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome };

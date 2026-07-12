@@ -2098,6 +2098,7 @@ async function reverifyNeedsReview() {
   }
   if (healed.length) {
     const healSet = new Set(healed);
+    const promoted = [];
     await mutate((s) => {
       for (const j of s.jobs) {
         if (j.status === 'needs_review' && healSet.has(j.slug)) {
@@ -2106,8 +2107,32 @@ async function reverifyNeedsReview() {
           delete j.verifierVerdict;
         }
       }
+      // Mirror the live-completion auto-promote (spawnJob, ~line 1583): a
+      // healed fix-plan job means its original's work is logically done too.
+      // Without this, a job healed here (boot/periodic reverify) never
+      // releases its original from needs_review — only a fix-plan job that
+      // completes during a live run gets promoted, leaving the boot-heal
+      // path unable to fully resolve the fix-plan lineages it just healed
+      // (2026-07-12: 521-fix-*/523-fix-* healed but their originals stayed
+      // stuck needs_review).
+      for (const slug of healed) {
+        if (!isFixPlanSlug(slug)) continue;
+        const orig = healTargetForFix(slug, s.jobs);
+        if (orig) {
+          const priorStatus = orig.status;
+          orig.status = 'completed';
+          orig.exitCode = 0;
+          orig.error = null;
+          orig.completedBy = slug;
+          if (priorStatus === 'needs_review') delete orig.verifierVerdict;
+          promoted.push(`${orig.slug} (was ${priorStatus})`);
+        }
+      }
     });
     console.log(`[scheduler] boot reverify: healed ${healed.length} stale needs_review → completed (${healed.join(', ')})`);
+    if (promoted.length) {
+      console.log(`[scheduler] boot reverify: auto-promoted ${promoted.length} original(s) via healed fix-plan job(s): ${promoted.join(', ')}`);
+    }
     await broadcast();
   }
   if (leftForReview.length) {

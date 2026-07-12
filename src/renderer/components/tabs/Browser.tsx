@@ -15,6 +15,10 @@
  * bar, observe ring) can't be full-cover overlays — they're rendered as
  * chrome siblings around the webview-column placeholder instead (a banner
  * that pushes the column down, a border frame that insets it).
+ *
+ * Also rendered inside SplitAgentBrowser's narrower 2/3-width right pane
+ * (full-screen agent+browser split view) — the chrome (sub-tab strip,
+ * address bar, action bar) is unchanged, it just lays out in less width.
  */
 import { useEffect, useRef } from 'react'
 import { useBrowserState } from '../../state/browser'

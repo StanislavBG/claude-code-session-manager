@@ -4,6 +4,7 @@ import { type NavKey } from './components/LeftNav'
 import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { MainPane } from './components/MainPane'
+import { SplitAgentBrowser } from './components/SplitAgentBrowser'
 import { type SearchMode } from './components/modals/SearchModal'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
@@ -82,6 +83,7 @@ export function App() {
   const [searchMode, setSearchMode] = useState<SearchMode>('files')
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
+  const [splitView, setSplitView] = useState(false)
 
   // Every NavKey routes to MainPane. Used by CommandPalette nav:* entries,
   // AlmanacSidebar, and the Cmd-P / Cmd-Shift-F keyboard shortcuts.
@@ -485,6 +487,8 @@ export function App() {
         navigate('search')
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
+      } else if (e.key === 'Escape' && splitView) {
+        setSplitView(false)
       } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         // Alt+1..Alt+5 — activate tab at index 0..4. e.code is layout-stable
         // (e.key is the alt-modified char on some non-US layouts). Capture
@@ -508,7 +512,7 @@ export function App() {
     // textarea keeps other shortcuts (typing) from being affected.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [paletteOpen])
+  }, [paletteOpen, splitView])
 
   // F8 — read persisted turn-detector settings on mount, seed the store, and
   // (when opted-in and not in dictation mode) spawn the turn-detector worker
@@ -628,6 +632,18 @@ export function App() {
   // above (React rules), so background services still init the same way.
   if (simpleMode === true) return <SimpleShell />
 
+  if (splitView) {
+    return (
+      <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>
+        {/* Privacy invariant (CLAUDE.md): RecordingStatus must remain mounted
+            whenever isRecording === true, even in split view. */}
+        <RecordingStatus />
+        <SplitAgentBrowser onExit={() => setSplitView(false)} />
+        <Toast />
+      </div>
+    )
+  }
+
   return (
     <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>
       {/* Privacy invariant (CLAUDE.md): RecordingStatus must remain mounted
@@ -638,7 +654,7 @@ export function App() {
       <RecordingStatus />
       <SuperAgentStatusBar />
       <OrchestratorStatusPanel />
-      <TabBar />
+      <TabBar splitViewActive={splitView} onToggleSplitView={() => setSplitView(true)} />
       <div className="flex-1 flex min-h-0">
         <AlmanacSidebar
           active={activeNav}

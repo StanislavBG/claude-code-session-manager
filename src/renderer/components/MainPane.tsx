@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { NavKey } from './LeftNav'
-import { Terminal } from './Terminal'
-import { TerminalControls } from './TerminalControls'
+import { TerminalStage } from './TerminalStage'
 import { BroadcastBar } from './BroadcastBar'
 import { Home } from './tabs/Home'
 import { Skills } from './tabs/Skills'
@@ -28,7 +27,6 @@ import { SectionFrame } from './layout/SectionFrame'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
 import { WatchersPopover } from './WatchersPopover'
-import { LiveTranscript } from './LiveTranscript'
 
 /**
  * MainPane — Almanac-era full-page router. Every Workspace and Configure
@@ -211,36 +209,10 @@ export function MainPane({
          * Terminals stay mounted across nav switches — unmounting them drops
          * the IPC listeners while the PTY keeps running in the main process,
          * so a later remount tries to re-spawn the same tabId and fails with
-         * "session already exists." Render them in a persistent layer and
-         * toggle visibility only.
+         * "session already exists." TerminalStage renders them in a
+         * persistent layer and toggles visibility only.
          */}
-        <div
-          className="absolute inset-0"
-          style={{ visibility: active === 'terminal' ? 'visible' : 'hidden' }}
-        >
-          {activeTab ? (
-            tabs.map((t) => (
-              <div
-                key={`${t.id}-${t.generation}`}
-                className="absolute inset-0"
-                // 'inherit', not 'visible': an explicit `visible` on a child
-                // OVERRIDES the outer layer's `hidden` (CSS visibility is
-                // per-element), leaving the active tab focusable/"visible"
-                // underneath whatever non-terminal screen is painted on top.
-                style={{ visibility: t.id === activeTabId ? 'inherit' : 'hidden' }}
-              >
-                <Terminal tabId={t.id} cwd={t.cwd} />
-              </div>
-            ))
-          ) : (
-            <NoSession />
-          )}
-          <LiveTranscript />
-          {/* Terminal settings overlay — theme + font-size. Anchored to the
-           *  terminal viewport (not MainPane) so the gear sits well below the
-           *  TabBar's "v{__APP_VERSION__}" text. */}
-          {active === 'terminal' && <TerminalControls />}
-        </div>
+        <TerminalStage visible={active === 'terminal'} />
         {active !== 'terminal' && (
           <div className="absolute inset-0 bg-bg overflow-auto">
             <ErrorBoundary>
@@ -259,16 +231,5 @@ export function MainPane({
         </div>
       )}
     </main>
-  )
-}
-
-function NoSession() {
-  return (
-    <div className="h-full flex items-center justify-center text-fg-faint text-xs">
-      <div className="text-center">
-        <div className="mb-2">no active session</div>
-        <div>click <span className="text-fg-dim">+ new session</span> in the sidebar to start one</div>
-      </div>
-    </div>
   )
 }

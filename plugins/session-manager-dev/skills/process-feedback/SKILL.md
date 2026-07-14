@@ -1,16 +1,20 @@
 ---
 name: process-feedback
 description: >-
-  Process the current project's inbound feedback folder end-to-end: read every
-  open item, evaluate it against real code, and for work that belongs to this
+  Process the current project's inbound feedback folder end-to-end: first sync
+  any open GitHub issues on the project's repo into the intake as new feedback
+  files (deduped against already-tracked issues), then read every open item,
+  evaluate it against real code, and for work that belongs to this
   project queue it as scheduled PRDs via /develop (never implement inline),
   archive the item as processed **the moment it is queued** (the scheduler owns
   execution from there), and fold lessons back into the folder's README so
-  future feedback (written by other agents/projects) gets better. Use whenever the user says "/process-feedback",
+  future feedback (written by other agents/projects, or GitHub issue filers)
+  gets better. Use whenever the user says "/process-feedback",
   "review the feedback folder", "work through the feedback", "any open
-  feedback?", or drops new files into session-manager-operations/feedback/.
+  feedback?", "check the GitHub issues", "triage the GitHub repo", or drops
+  new files into session-manager-operations/feedback/.
   Keywords: feedback, intake, cross-project requests, process feedback, triage
-  feedback.
+  feedback, GitHub issues.
 model: opus
 ---
 
@@ -68,7 +72,49 @@ Before anything else, check for the pre-migration layout: if a legacy
 `git mv feedback session-manager-operations/feedback` when the repo is
 git-tracked, else a plain `mv`. This converges any project this skill runs in
 to the new layout even if its bulk-relocation PRD hasn't landed yet. Only then
-continue with step 0.
+continue with step 0b.
+
+### 0b. Sync open GitHub issues into the intake (source sync)
+
+For a project with a GitHub remote, pull open issues and materialize any not already tracked as a
+new feedback file — **before** the quick-exit check below evaluates what's open, since this step
+can create new open items that check needs to see. This lets a repo's GitHub issue tracker feed
+the same triage → queue pipeline without a human manually copying issues into the feedback folder.
+
+- Skip silently (no error, no report) if `gh repo view --json nameWithOwner -q .nameWithOwner`
+  fails — no GitHub remote or `gh` unauthenticated. This step is opportunistic, not required.
+- Fetch open issues via `gh api repos/<owner>/<repo>/issues --paginate --jq '...'` (per-issue
+  `number,title,body,labels`) rather than `gh issue list`/`gh issue view` — the latter two can hit
+  a known `gh` CLI bug on repos with legacy GitHub Projects (classic) boards
+  (`GraphQL: Projects (classic) is being deprecated ... (repository.issue.projectCards)`,
+  documented in `standards.md`'s Execution discipline section); `gh api` sidesteps it outright by
+  never touching the deprecated field. Note `gh api .../issues` also returns pull requests (they
+  have an `issue.pull_request` key) — filter those out, this step is issues only.
+- **Dedup before creating anything.** An issue already tracked has a feedback file (open OR
+  already in `processed/`) containing the token `gh-issue-<N>` — `grep -rl "gh-issue-<N>"
+  session-manager-operations/feedback/` (recursive, covers both the inbox and `processed/`) before
+  materializing issue `N`. Skip any issue that already has a match.
+- For each untracked open issue, create
+  `session-manager-operations/feedback/<yyyy-mm-dd>-gh-issue-<N>-<slug>.md` following the folder's
+  normal frontmatter convention (see `README.md`):
+  - `title`: the issue title, verbatim.
+  - `source`: `GitHub issue gh-issue-<N> (<issue URL>)` — the `gh-issue-<N>` token here is what
+    the dedup grep matches on next run; don't reword it out.
+  - `type`: infer from labels (`bug` label → `bug`; `enhancement`/no matching label → `enhancement`;
+    `security` → `security`; `performance` → `performance`).
+  - `severity`: `normal` unless the issue's own labels/title clearly indicate `blocker`/`high`
+    (data loss, crash, security hole, or an unusable feature with no workaround — same bar as the
+    README's own severity guidance; don't inflate).
+  - Body: `# What happens / what's missing` = the issue body (verbatim, or a faithful trim if very
+    long — don't paraphrase away specifics); `# Evidence` = the issue URL + number, plus any
+    screenshot/repro references already in the issue body; `# Suggested direction (optional)` =
+    any proposed-solution section already present in the issue body.
+- Synced files then flow through steps 1–6 below exactly like any other feedback file — no
+  special-casing after creation, same evaluate → queue → disposition → archive pipeline.
+- When step 4 dispositions a synced issue by queuing a PRD, the `## RESOLUTION` must also state
+  the originating issue number/URL. This skill does **not** auto-close or auto-comment on the
+  GitHub issue — that stays a human (or a later, deliberate step) decision once the fix actually
+  ships, not something this sync step does on queue.
 
 ### 0. Quick-exit — bail in milliseconds if there's nothing to do
 

@@ -173,12 +173,12 @@ export function Modal({
         aria-modal="true"
         aria-label={title ?? 'Dialog'}
         tabIndex={-1}
-        className={`bg-bg-elev border border-line rounded-lg shadow-xl w-full mx-4 outline-none flex flex-col ${SIZE_CLASS[size]} ${
+        className={`bg-bg-elev border border-line rounded-lg shadow-xl w-full mx-4 outline-none flex flex-col break-words ${SIZE_CLASS[size]} ${
           fillHeight ? 'max-h-[90vh] h-[90vh]' : ''
         } ${noPadding ? '' : 'p-6'}`}
         data-testid="modal-dialog"
       >
-        {title ? <h2 className={`text-base font-medium text-fg ${noPadding ? 'px-6 pt-6 pb-3' : 'mb-3'}`}>{title}</h2> : null}
+        {title ? <h2 className={`text-base font-medium text-fg break-words ${noPadding ? 'px-6 pt-6 pb-3' : 'mb-3'}`}>{title}</h2> : null}
         {/* When fillHeight is on, the dialog is a vertical flex container and
          *  children are expected to manage their own scroll. When off, no
          *  layout wrapper is added so existing small-dialog callers

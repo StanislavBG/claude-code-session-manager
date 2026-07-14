@@ -28,7 +28,7 @@ interface Props {
 }
 
 // Raw-markdown heuristic for "does this turn contain a list" — used only to add a
-// CSS class to the container; not a real markdown AST parse (see renderMd).
+// CSS class to the container; not a real markdown AST parse (see renderChatMarkdown).
 const HAS_LIST_RE = /^\s*(?:[-*+]\s+.+|\d+\.\s+.+)/m
 function hasMarkdownList(text: string): boolean {
   return HAS_LIST_RE.test(text)

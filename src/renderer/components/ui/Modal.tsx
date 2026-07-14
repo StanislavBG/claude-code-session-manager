@@ -67,7 +67,7 @@ export function Modal({
             {title}
           </h2>
         )}
-        <div className={`flex-1 min-h-0 flex flex-col ${noPadding ? '' : 'p-6 pt-0'}`}>
+        <div className={`flex-1 min-h-0 min-w-0 flex flex-col ${noPadding ? '' : 'p-6 pt-0'}`}>
           {children}
         </div>
       </div>
@@ -184,7 +184,7 @@ export function Modal({
          *  layout wrapper is added so existing small-dialog callers
          *  (MicWizard, BootBadDialog) keep behaving exactly as before. */}
         {fillHeight ? (
-          <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col">{children}</div>
         ) : (
           children
         )}

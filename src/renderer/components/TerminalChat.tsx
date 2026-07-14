@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
@@ -9,6 +7,7 @@ import { extractUrls } from '../lib/extractUrls'
 import { decideSubmitAction } from '../lib/slashCommand'
 import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
+import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import type { NavKey } from './LeftNav'
 
 /**
@@ -26,11 +25,6 @@ import type { NavKey } from './LeftNav'
 interface Props {
   tabId: string
   cwd: string
-}
-
-function renderMd(src: string): string {
-  // marked.parse is sync for string input; sanitize before injecting.
-  return DOMPurify.sanitize(marked.parse(src, { async: false }) as string)
 }
 
 // Raw-markdown heuristic for "does this turn contain a list" — used only to add a
@@ -322,9 +316,9 @@ function Turn({ turn }: { turn: ChatTurn }) {
       <div className="min-w-0 flex-1">
         <ToolUseTraceStrip items={turn.toolUses} />
         <div
-          className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg [&_p]:max-w-lg [&_pre]:max-w-none ${isPlan ? 'prose-chat--plan' : ''}`}
+          className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
           // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: renderMd(turn.text) }}
+          dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
         />
         {urls.map((url) => (
           <UrlCallout key={url} url={url} />

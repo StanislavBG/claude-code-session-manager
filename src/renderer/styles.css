@@ -54,9 +54,17 @@
 .markdown-body strong { font-weight: 600; }
 .markdown-body em     { font-style: italic; }
 .markdown-body img    { max-width: 100%; border-radius: 4px; }
-.markdown-body table  { border-collapse: collapse; margin: 0.7rem 0; font-size: 0.9em; }
-.markdown-body th, .markdown-body td { border: 1px solid #e0d3b8; padding: 0.35rem 0.6rem; text-align: left; }
-.markdown-body th { background: #f1e7d2; font-weight: 600; }
+/* Table styling is shared by the Editor's markdown preview (.markdown-body) and
+ * assistant chat turns (.prose-chat, TerminalChat.tsx) — one rule, two call
+ * sites. Tailwind's preflight resets tables to border-width:0, so without these
+ * a chat table renders as unreadable run-together text (issue #2). Extend this
+ * selector list rather than forking a second copy for a new surface. */
+.markdown-body table, .prose-chat table { border-collapse: collapse; margin: 0.7rem 0; font-size: 0.9em; }
+.markdown-body th, .markdown-body td, .prose-chat th, .prose-chat td { border: 1px solid #e0d3b8; padding: 0.35rem 0.6rem; text-align: left; }
+.markdown-body th, .prose-chat th { background: #f1e7d2; font-weight: 600; }
+/* Scroll container emitted around every chat table by renderChatMarkdown.ts, so
+ * a wide table scrolls itself instead of forcing the chat column to overflow. */
+.prose-chat-table-wrap { overflow-x: auto; }
 .markdown-body h1[id], .markdown-body h2[id], .markdown-body h3[id] { scroll-margin-top: 1rem; }
 
 /* PlanCard-style treatment for assistant chat turns whose markdown contains a list

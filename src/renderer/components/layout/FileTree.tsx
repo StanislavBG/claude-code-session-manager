@@ -38,6 +38,21 @@ function saveExpanded(cwd: string, set: Set<string>) {
 // Drop `path` and any descendant of it from the expanded set, so a deleted or
 // renamed folder doesn't leave a dead entry that fires a doomed files.list on
 // every project switch. Returns a new set only when something was removed.
+// Persist the hidden-files toggle the same way (localStorage), but globally —
+// it's a user preference, not a per-cwd browsing state. `null` (never set)
+// must be distinguished from an explicitly stored `false`, since the default
+// is now `true`.
+export const SHOW_HIDDEN_KEY = 'sm.fileTree.showHidden'
+export function loadShowHidden(): boolean {
+  try {
+    const raw = localStorage.getItem(SHOW_HIDDEN_KEY)
+    if (raw === null) return true
+    return JSON.parse(raw) === true
+  } catch { return true }
+}
+export function saveShowHidden(value: boolean) {
+  try { localStorage.setItem(SHOW_HIDDEN_KEY, JSON.stringify(value)) } catch { /* quota */ }
+}
 function pruneExpanded(set: Set<string>, path: string): Set<string> {
   const prefix = path + '/'
   let changed = false
@@ -132,7 +147,14 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
   const expandedRef = useRef(expanded)
   expandedRef.current = expanded
   const [search, setSearch] = useState('')
-  const [showHidden, setShowHidden] = useState(false)
+  const [showHidden, setShowHiddenState] = useState(loadShowHidden)
+  const setShowHidden = useCallback((updater: boolean | ((prev: boolean) => boolean)) => {
+    setShowHiddenState((prev) => {
+      const next = typeof updater === 'function' ? (updater as (prev: boolean) => boolean)(prev) : updater
+      saveShowHidden(next)
+      return next
+    })
+  }, [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [gitStatus, setGitStatus] = useState<GitStatusMap>({})

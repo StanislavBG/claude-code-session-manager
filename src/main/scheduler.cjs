@@ -709,6 +709,37 @@ let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
 let lastMemGate = null;
 
+/**
+ * Pure: applies clearPause()'s effect on the tick cancel-token.
+ *
+ * ROOT CAUSE (2026-07-14 stall, PRD 543/544): setPaused() cancels the
+ * in-flight tick batch by setting cancelToken.cancelled = true (e.g. when a
+ * job's run is rate-limited). That flag was previously only ever reset back
+ * to false inside runDueJobs() (used by the force-tick/run-now IPC handlers
+ * and the resume-timer callback). clearPause() itself — the function the
+ * poll-loop's auth/network auto-recovery and the manual "Resume" button
+ * actually call — never reset it. So once ANY pause fired and was later
+ * cleared through one of THOSE paths instead of runDueJobs(), cancelToken
+ * .cancelled stayed permanently true, and tickQueue()'s very first guard
+ * (`if (cancelToken.cancelled) return {fired:false, reason:'cancelled'}`)
+ * silently short-circuited every future tick — from spawnJob's own
+ * post-completion tick, from the when-available poll, and from the
+ * dead-process reaper — forever, even though queue.json's `paused` field
+ * was correctly null and every other gate (enabled, concurrency, memory)
+ * said go. This explains the full incident: lastRunAt froze at the last
+ * tick that got past the guard, new PRDs kept appearing as `pending`
+ * because reconcile() also runs independently from the `schedule:state` IPC
+ * read (unrelated to tickQueue), and only a manual force-tick (which goes
+ * through runDueJobs()) could ever unwedge it.
+ *
+ * Exported so this regression is unit-testable without touching the real
+ * scheduler's fs-backed queue.json.
+ */
+function applyPauseCleared(wasPaused, token) {
+  if (wasPaused) token.cancelled = false;
+  return token;
+}
+
 function attachWindow(w) { mainWindow = w; }
 
 /**
@@ -839,6 +870,8 @@ async function clearPause(source) {
     s.paused = null;
     return true;
   });
+  // Un-cancel the tick guard on every recovery path, not just runDueJobs().
+  applyPauseCleared(wasPaused, cancelToken);
   // Track manual clears for the auto-pause cooldown.
   if (source === 'manual' || source === 'run-now') {
     pauseClearedManuallyAt = Date.now();
@@ -2841,4 +2874,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared };

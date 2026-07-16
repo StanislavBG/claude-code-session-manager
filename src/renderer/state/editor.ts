@@ -42,6 +42,7 @@ interface EditorState {
   openFile: (path: string, opts?: { line?: number; col?: number }) => void
   closeFile: (path: string) => void
   closeOthers: (path: string) => void
+  closeToTheRight: (path: string) => void
   closeAll: () => void
   setActive: (path: string) => void
   /** Seed both buffer + baseline from disk (on load); clears dirty. */
@@ -113,6 +114,24 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       openFiles: keep ? [keep] : [],
       activeFilePath: keep ? path : null,
+      dirty: pick(get().dirty),
+      viewMode: pick(get().viewMode),
+      buffers: pick(get().buffers),
+      baselines: pick(get().baselines),
+    })
+  },
+
+  closeToTheRight: (path) => {
+    const { openFiles, activeFilePath } = get()
+    const i = openFiles.findIndex((f) => f.path === path)
+    if (i === -1) return
+    const keep = openFiles.slice(0, i + 1)
+    const keepPaths = new Set(keep.map((f) => f.path))
+    const pick = <T,>(m: Record<string, T>) =>
+      Object.fromEntries(Object.entries(m).filter(([p]) => keepPaths.has(p)))
+    set({
+      openFiles: keep,
+      activeFilePath: activeFilePath && keepPaths.has(activeFilePath) ? activeFilePath : path,
       dirty: pick(get().dirty),
       viewMode: pick(get().viewMode),
       buffers: pick(get().buffers),
@@ -215,4 +234,6 @@ export function smfileUrl(absPath: string): string {
 }
 
 // Test handle so e2e specs can drive the Editor scene without a live Claude session.
-;(window as unknown as Record<string, unknown>).__editor = useEditor
+if (typeof window !== 'undefined') {
+  ;(window as unknown as Record<string, unknown>).__editor = useEditor
+}

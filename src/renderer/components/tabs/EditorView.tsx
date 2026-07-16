@@ -73,6 +73,7 @@ export function EditorView() {
   const setActive = useEditor((s) => s.setActive)
   const closeFile = useEditor((s) => s.closeFile)
   const closeOthers = useEditor((s) => s.closeOthers)
+  const closeToTheRight = useEditor((s) => s.closeToTheRight)
   const closeAll = useEditor((s) => s.closeAll)
   const loadBuffer = useEditor((s) => s.loadBuffer)
   const setBuffer = useEditor((s) => s.setBuffer)
@@ -83,7 +84,7 @@ export function EditorView() {
 
   const [loadState, setLoadState] = useState<Record<string, LoadState>>({})
   const [reloadTokens, setReloadTokens] = useState<Record<string, number>>({})
-  const [confirmClose, setConfirmClose] = useState<{ kind: 'one' | 'others' | 'all'; path: string } | null>(null)
+  const [confirmClose, setConfirmClose] = useState<{ kind: 'one' | 'others' | 'right' | 'all'; path: string } | null>(null)
   const [cursor, setCursor] = useState<CursorInfo | null>(null)
   const [saving, setSaving] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
@@ -152,27 +153,6 @@ export function EditorView() {
     return () => window.clearTimeout(saveTimer.current)
   }, [prefs.autosave, activeFilePath, dirty, buffers, save])
 
-  // Scene-level Cmd/Ctrl-S + focus-mode toggle/exit. EditorView only mounts while
-  // the editor scene is active, so these listeners are naturally scoped to it.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
-        const path = useEditor.getState().activeFilePath
-        if (path && !isMediaPath(path)) {
-          e.preventDefault()
-          void save(path)
-        }
-      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault()
-        setFocusMode((v) => !v)
-      } else if (e.key === 'Escape' && focusMode) {
-        setFocusMode(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [save, focusMode])
-
   // Close guards — confirm before discarding unsaved edits.
   const requestClose = useCallback((path: string) => {
     if (dirty[path]) setConfirmClose({ kind: 'one', path })
@@ -185,6 +165,44 @@ export function EditorView() {
     else closeOthers(path)
   }, [openFiles, dirty, closeOthers])
 
+  const requestCloseToTheRight = useCallback((path: string) => {
+    const i = openFiles.findIndex((f) => f.path === path)
+    const anyRightDirty = i !== -1 && openFiles.slice(i + 1).some((f) => dirty[f.path])
+    if (anyRightDirty) setConfirmClose({ kind: 'right', path })
+    else closeToTheRight(path)
+  }, [openFiles, dirty, closeToTheRight])
+
+  // Scene-level Cmd/Ctrl-S + focus-mode toggle/exit + close-others shortcut.
+  // EditorView only mounts while the editor scene is active, so these
+  // listeners are naturally scoped to it. Ctrl/Cmd+Shift+W is not suppressed
+  // for Monaco focus (unlike App.tsx's Cmd-K family) — it mirrors the
+  // existing Cmd/Ctrl-S handler above, which also fires while typing, since
+  // tab-management shortcuts aren't typing input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        const path = useEditor.getState().activeFilePath
+        if (path && !isMediaPath(path)) {
+          e.preventDefault()
+          void save(path)
+        }
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        setFocusMode((v) => !v)
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'w' || e.key === 'W')) {
+        const active = useEditor.getState().activeFilePath
+        if (active && useEditor.getState().openFiles.length > 1) {
+          e.preventDefault()
+          requestCloseOthers(active)
+        }
+      } else if (e.key === 'Escape' && focusMode) {
+        setFocusMode(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [save, focusMode, requestCloseOthers])
+
   const requestCloseAll = useCallback(() => {
     const anyDirty = openFiles.some((f) => dirty[f.path])
     if (anyDirty) setConfirmClose({ kind: 'all', path: '' })
@@ -195,6 +213,7 @@ export function EditorView() {
     if (!confirmClose) return
     if (confirmClose.kind === 'one') closeFile(confirmClose.path)
     else if (confirmClose.kind === 'others') closeOthers(confirmClose.path)
+    else if (confirmClose.kind === 'right') closeToTheRight(confirmClose.path)
     else closeAll()
     setConfirmClose(null)
   }
@@ -246,6 +265,7 @@ export function EditorView() {
           onSelectFile={setActive}
           onCloseFile={requestClose}
           onCloseOthers={requestCloseOthers}
+          onCloseToTheRight={requestCloseToTheRight}
           onCloseAll={requestCloseAll}
         />
       )}
@@ -372,6 +392,8 @@ export function EditorView() {
               ? `Discard unsaved changes to ${basename(confirmClose.path)}?`
               : confirmClose.kind === 'others'
               ? 'Discard unsaved changes in the other open files?'
+              : confirmClose.kind === 'right'
+              ? 'Discard unsaved changes in the files to the right?'
               : 'Discard unsaved changes in all open files?'
           }
           onCancel={() => setConfirmClose(null)}

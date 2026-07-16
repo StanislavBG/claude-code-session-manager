@@ -24,6 +24,7 @@ interface FileTabBarProps {
   onSelectFile: (path: string) => void
   onCloseFile: (path: string) => void
   onCloseOthers?: (path: string) => void
+  onCloseToTheRight?: (path: string) => void
   onCloseAll?: () => void
 }
 
@@ -34,6 +35,7 @@ export function FileTabBar({
   onSelectFile,
   onCloseFile,
   onCloseOthers,
+  onCloseToTheRight,
   onCloseAll,
 }: FileTabBarProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null)
@@ -127,6 +129,14 @@ export function FileTabBar({
               className="w-full text-left px-3 py-1.5 text-fg-dim hover:text-fg hover:bg-bg-hi transition-colors"
             >
               Close Others
+            </button>
+          )}
+          {onCloseToTheRight && openFiles.findIndex((f) => f.path === menu.path) < openFiles.length - 1 && (
+            <button
+              onClick={() => { onCloseToTheRight(menu.path); setMenu(null) }}
+              className="w-full text-left px-3 py-1.5 text-fg-dim hover:text-fg hover:bg-bg-hi transition-colors"
+            >
+              Close to the Right
             </button>
           )}
           {onCloseAll && (

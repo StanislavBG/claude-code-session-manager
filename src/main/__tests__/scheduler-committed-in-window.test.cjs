@@ -1,11 +1,13 @@
 /**
  * scheduler-committed-in-window.test.cjs — unit tests for committedInWindow.
  *
- * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-committed-in-window.test.cjs
+ * Run: timeout 120 node --test src/main/__tests__/scheduler-committed-in-window.test.cjs
  */
 
 'use strict';
 
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -42,7 +44,7 @@ test('committedInWindow returns true for a commit landed on a non-checked-out br
     git(dir, ['checkout', '-q', '-b', 'other-branch-at-exit']);
 
     const result = await committedInWindow(dir, startedAt, finishedAt);
-    expect(result).toBe(true);
+    assert.strictEqual(result, true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -55,7 +57,7 @@ test('committedInWindow returns false when the window covers no commit', async (
     const farFutureEnd = new Date(Date.now() + 366 * 24 * 60 * 60 * 1000).toISOString();
 
     const result = await committedInWindow(dir, farFutureStart, farFutureEnd);
-    expect(result).toBe(false);
+    assert.strictEqual(result, false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

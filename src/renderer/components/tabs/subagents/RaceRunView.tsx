@@ -1,5 +1,6 @@
 import { Button } from '../../ui/Button'
 import type { RaceParticipant } from '../../../state/race'
+import { RunStatusBadge } from './hive-primitives'
 
 /**
  * Live grid for a running/finished Race dispatch — one panel per participant
@@ -67,10 +68,10 @@ function ParticipantPanel({
 }) {
   const statusBadge =
     participant.status === 'done'
-      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/20 text-accent">done</span>
+      ? <RunStatusBadge tone="done">done</RunStatusBadge>
       : participant.status === 'running'
-        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hi text-fg-dim">working…</span>
-        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hi text-fg-faint">waiting</span>
+        ? <RunStatusBadge tone="active">working…</RunStatusBadge>
+        : <RunStatusBadge tone="idle">waiting</RunStatusBadge>
 
   return (
     <div

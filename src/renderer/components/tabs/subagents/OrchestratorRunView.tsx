@@ -1,5 +1,6 @@
 import { Button } from '../../ui/Button'
 import type { OrchestratorTask } from '../../../state/orchestrator'
+import { RunStatusBadge } from './hive-primitives'
 
 /**
  * Live grid for a running Orchestrate dispatch — one panel per tab showing
@@ -60,12 +61,12 @@ export function OrchestratorRunView({
 function TaskPanel({ task }: { task: OrchestratorTask }) {
   const statusBadge =
     task.status === 'done'
-      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/20 text-accent">done</span>
+      ? <RunStatusBadge tone="done">done</RunStatusBadge>
       : task.status === 'working'
-        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hi text-fg-dim">working…</span>
+        ? <RunStatusBadge tone="active">working…</RunStatusBadge>
         : task.status === 'sent'
-          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hi text-fg-faint">sent</span>
-          : <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hi text-fg-faint">pending</span>
+          ? <RunStatusBadge tone="idle">sent</RunStatusBadge>
+          : <RunStatusBadge tone="idle">pending</RunStatusBadge>
 
   return (
     <div className="flex flex-col rounded border border-line bg-bg">

@@ -4,9 +4,11 @@ import { useHives } from '../../../state/hives'
 import { referencedAgentNames } from '../../../state/hives'
 import { useOrchestrator } from '../../../state/orchestrator'
 import { useDispatch } from '../../../state/dispatch'
+import { useSessions } from '../../../state/sessions'
 import { useActiveTab } from '../../../lib/useActiveTab'
 import { useAgentNames } from '../../../lib/useAgentNames'
 import { resolveRecipeRoles } from '../../../lib/resolveRecipeRoles'
+import { assignHiveRolesToRunningTabs } from '../../../lib/assignHiveRoles'
 import { toast } from '../../../state/toast'
 import { HiveManagerModal } from '../../modals/HiveManagerModal'
 
@@ -82,6 +84,25 @@ export function StatusPill({ state }: { state: 'running' | 'done' }) {
       done
     </span>
   )
+}
+
+// Small status badge for run-grid cells (OrchestratorRunView / RaceRunView task
+// panels) — a lower-emphasis sibling of StatusPill's full agent-row treatment.
+// tone: 'done' (accent-tinted), 'active' (working now), 'idle' (queued/waiting).
+export function RunStatusBadge({
+  tone,
+  children,
+}: {
+  tone: 'done' | 'active' | 'idle'
+  children: ReactNode
+}) {
+  const cls =
+    tone === 'done'
+      ? 'bg-accent/20 text-accent'
+      : tone === 'active'
+        ? 'bg-bg-hi text-fg-dim'
+        : 'bg-bg-hi text-fg-faint'
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded ${cls}`}>{children}</span>
 }
 
 // Stable tab definitions hoisted to module level to avoid re-allocation per render.
@@ -259,9 +280,12 @@ export function LaunchView({
 }) {
   const list = useHives((s) => s.list)
   const loadHives = useHives((s) => s.load)
-  const launchHive = useOrchestrator((s) => s.launchHive)
+  const configureOrchestrator = useOrchestrator((s) => s.configure)
+  const startOrchestrator = useOrchestrator((s) => s.start)
   const brief = useDispatch((s) => s.brief)
   const activeTab = useActiveTab()
+  const allTabs = useSessions((s) => s.tabs)
+  const runningTabs = useMemo(() => allTabs.filter((t) => t.status === 'running'), [allTabs])
 
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const [managerOpen, setManagerOpen] = useState(false)
@@ -341,11 +365,14 @@ export function LaunchView({
       return
     }
 
-    launchHive({
-      name: selectedHive.name,
-      defaultPlan: sharedBrief || undefined,
-      roles,
-    })
+    const assignment = assignHiveRolesToRunningTabs(roles, runningTabs)
+    if (!assignment.ok) {
+      toast.warn(assignment.error)
+      return
+    }
+
+    configureOrchestrator(sharedBrief || `Launch hive: ${selectedHive.name}`, assignment.picks)
+    startOrchestrator()
     onSwitchToLive()
   }
 

@@ -202,3 +202,25 @@ bugs a unit test would catch.
 - `npm run build` — clean.
 - Full NavKey sweep + CommandPalette + VoiceModal + TourOverlay exercised
   live against the built app under `xvfb-run` — zero console/page errors.
+
+## Re-verification pass (PRD 561 close-out, 2026-07-18)
+
+The family's fix set landed in `2fc1595` (CommandPalette dispatch, TourOverlay
+selectors, model/branch helper dedupe, regression specs). A prior headless run
+was externally SIGTERM'd mid-verification (exit 143) after the tree was already
+confirmed clean and `typecheck` had already passed — it parked in `needs_review`
+with nothing left to fix. This pass re-confirms the landed work is intact:
+
+- Working tree clean; `2fc1595` present with all 9 files listed above.
+- App.tsx `onCommand` switch spot-checked: all 10 previously-dead emit-only
+  cases (`new-tab-here`, `close-tab`, `restart-session`, `broadcast`,
+  `watchers`, `copy-cwd`, `copy-transcript`, `open-transcript`,
+  `reload-window`, `new-tab-pick`) resolve to real handlers.
+- NavKey sweep re-confirmed: all 22 `NavKey` literals in `LeftNav.tsx` route
+  correctly — 21 via `MainPane.tsx`'s `renderScreen` switch, `terminal`
+  via the dedicated `TerminalStage` branch outside that switch. No dead keys.
+- `npm run typecheck` — clean (final gate).
+- **Documentation drift (flagged, not fixed here):** this repo's `CLAUDE.md`
+  still references `components/AppStatusBar.tsx`; the real global chip-strip
+  component is `src/renderer/components/layout/SuperAgentStatusBar.tsx`. Out of
+  scope for this PRD — a docs refresh should update the two stale references.

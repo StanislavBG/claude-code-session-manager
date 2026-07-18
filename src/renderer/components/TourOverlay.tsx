@@ -81,9 +81,8 @@ export const TOUR_STEPS: ReadonlyArray<TourStep> = [
   {
     id: 'mainpane-actions',
     title: 'Session actions',
-    body: "Restart this session, broadcast a prompt to multiple tabs, or attach a long-running watcher command whose stdout streams back as toasts.",
-    target: '[data-testid="tour-mainpane-actions"]',
-    position: 'bottom',
+    body: "Press ⌘K / Ctrl+K to open the command palette — restart this session, broadcast a prompt to multiple tabs, or attach a long-running watcher command whose stdout streams back as toasts.",
+    position: 'center',
   },
   {
     id: 'statusbar',

@@ -13,6 +13,7 @@ import { useLiveTab } from '../../state/live'
 import type { TodoItem } from '../../state/live'
 import { useBilling, getBillingData } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
+import { useBranch } from '../../lib/useBranch'
 import type { NavKey } from '../LeftNav'
 
 interface AlmanacFooterProps {
@@ -27,22 +28,13 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const lastEventAt = live?.lastEventAt ?? 0
   const billing = useBilling((s) => s.data)
   const schedPaused = useScheduleState((s) => s.snapshot?.paused ?? null)
-  const [branch, setBranch] = useState<string | null>(null)
+  const branch = useBranch(tab?.cwd ?? null)
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 60_000)
     return () => clearInterval(id)
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!tab?.cwd) { setBranch(null); return }
-    window.api.app.gitBranch(tab.cwd)
-      .then((v) => { if (!cancelled) setBranch(v) })
-      .catch(() => { if (!cancelled) setBranch(null) })
-    return () => { cancelled = true }
-  }, [tab?.cwd])
 
   const todos = live?.todos ?? []
   const [todosOpen, setTodosOpen] = useState(false)

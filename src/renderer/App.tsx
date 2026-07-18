@@ -25,7 +25,7 @@ import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startTeamsPolling } from './state/teams'
 import { startSchedulePolling } from './state/scheduleState'
-import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
+import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd, shellQuote } from './lib/presets'
 import { createPickedSession } from './lib/createPickedSession'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
@@ -700,6 +700,64 @@ export function App() {
           setPaletteOpen(false)
           if (cmd.id.startsWith('nav:')) {
             navigate(cmd.id.slice(4) as NavKey)
+            return
+          }
+          const activeTab = useSessions.getState().tabs.find((t) => t.id === useSessions.getState().activeTabId) ?? null
+          switch (cmd.id) {
+            case 'new-tab-pick':
+              createPickedSession().catch((e) => {
+                console.error('[App] new tab (pick) failed:', e)
+                toast.error('Could not start new session. Is the claude CLI on PATH?')
+              })
+              return
+            case 'new-tab-here': {
+              if (!activeTab) return
+              const id = crypto.randomUUID()
+              const startupCommand = `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`
+              useSessions.getState().addTab({ cwd: activeTab.cwd, startupCommand })
+              setActiveNav('terminal')
+              return
+            }
+            case 'close-tab':
+              if (activeTab) useSessions.getState().closeTab(activeTab.id)
+              return
+            case 'restart-session':
+              restartActiveTab()
+              return
+            case 'broadcast':
+              toggleBroadcast()
+              return
+            case 'watchers':
+              toggleWatchers()
+              return
+            case 'copy-cwd':
+              if (activeTab) {
+                window.api.clipboard.writeText(activeTab.cwd).catch(() => toast.error('Copy failed'))
+              }
+              return
+            case 'copy-transcript':
+              if (activeTab) {
+                window.api.transcripts.pathFor(activeTab.cwd, activeTab.claudeSessionId)
+                  .then((p) => window.api.clipboard.writeText(p))
+                  .catch(() => toast.error('Copy failed'))
+              }
+              return
+            case 'open-transcript':
+              if (activeTab) {
+                window.api.transcripts.pathFor(activeTab.cwd, activeTab.claudeSessionId)
+                  .then((p) => window.api.shell.open({ as: 'openPath', path: p }))
+                  .catch(() => toast.error('Open failed'))
+              }
+              return
+            case 'reload-window':
+              window.location.reload()
+              return
+            default:
+              // scheduler-lint / add-allow-rule / test-fire-hook / devtools —
+              // require dialog-open state owned by other tabs (Scheduler /
+              // Permissions / Hooks) or a new main-process IPC (devtools).
+              // See frame-chrome-findings.md.
+              return
           }
         }}
       />

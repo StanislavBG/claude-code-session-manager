@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessions } from '../state/sessions'
 import { useVoice } from '../state/voice'
+import { useTour } from '../state/tour'
 import { toast } from '../state/toast'
 
 /**
@@ -158,6 +159,7 @@ function buildCommands(): Command[] {
     { id: 'test-fire-hook', label: 'Hooks — Test-fire a hook', section: 'config', emitOnly: true },
     { id: 'devtools', label: 'Toggle DevTools', section: 'config', emitOnly: true, hint: 'F12' },
     { id: 'reload-window', label: 'Reload window', section: 'config', emitOnly: true, hint: 'Ctrl+R' },
+    { id: 'tour:start', label: 'Restart guided tour', section: 'config', run: () => useTour.getState().start() },
 
     // ── nav ── (NavKey values from AlmanacSidebar.tsx — keep in sync when tabs are added/removed)
     { id: 'nav:overview', label: 'Go to Overview', section: 'nav', emitOnly: true },
@@ -178,6 +180,9 @@ function buildCommands(): Command[] {
     { id: 'nav:usage', label: 'Go to Usage', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
     { id: 'nav:remote', label: 'Go to Remote', section: 'nav', emitOnly: true },
+    { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },
+    { id: 'nav:repoviz', label: 'Go to Repo Viz', section: 'nav', emitOnly: true },
+    { id: 'nav:search', label: 'Go to Search', section: 'nav', emitOnly: true },
   ]
   return cmds
 }

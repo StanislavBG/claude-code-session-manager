@@ -20,6 +20,8 @@ import { useBilling } from '../../state/billing'
 import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { VoiceButton } from '../VoiceButton'
+import { prettyModel } from '../../lib/prettyModel'
+import { useBranch } from '../../lib/useBranch'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -369,37 +371,6 @@ function ProjectCaption({
   )
 }
 
-const branchCache = new Map<string, { value: string | null; ts: number }>()
-const BRANCH_TTL_MS = 30_000
-
-function useBranch(cwd: string | null): string | null {
-  const [branch, setBranch] = useState<string | null>(() => (cwd ? branchCache.get(cwd)?.value ?? null : null))
-  useEffect(() => {
-    if (!cwd) { setBranch(null); return }
-    let cancelled = false
-    const load = async () => {
-      const hit = branchCache.get(cwd)
-      if (hit && Date.now() - hit.ts < BRANCH_TTL_MS) {
-        if (!cancelled) setBranch(hit.value)
-        return
-      }
-      try {
-        const v = await window.api.app.gitBranch(cwd)
-        if (cancelled) return
-        branchCache.set(cwd, { value: v, ts: Date.now() })
-        setBranch(v)
-      } catch {
-        if (cancelled) return
-        branchCache.set(cwd, { value: null, ts: Date.now() })
-        setBranch(null)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [cwd])
-  return branch
-}
-
 function NavGroupHeader({
   label, collapsed, count, onToggle,
 }: { label: string; collapsed: boolean; count: number; onToggle: () => void }) {
@@ -434,6 +405,7 @@ function NavRow({
     <button
       onClick={onClick}
       title={item.hint}
+      data-testid={item.key === 'scheduler' ? 'tour-scheduler' : undefined}
       className={`relative w-full flex items-center rounded-[10px] text-left mb-0.5 transition-colors ${
         rail ? 'justify-center px-0 py-[9px]' : 'gap-3 px-3.5 py-[9px] text-[14px]'
       } ${
@@ -522,27 +494,9 @@ function SidebarFooter({ rail }: { rail: boolean }) {
         title={isRecording ? 'recording' : 'idle'}
       />
       <span className="truncate" title={model ?? ''}>
-        {isRecording ? 'recording…' : (model ? `Claude · ${shortModel(model)}` : 'Claude Code')}
+        {isRecording ? 'recording…' : (model ? `Claude · ${prettyModel(model)}` : 'Claude Code')}
       </span>
     </div>
   )
-}
-
-function shortModel(m: string): string {
-  // claude-opus-4-7 → Opus 4.7
-  const lower = m.toLowerCase()
-  if (lower.includes('opus')) {
-    const v = m.match(/(\d+[-.]?\d*)/)?.[1]?.replace('-', '.')
-    return v ? `Opus ${v}` : 'Opus'
-  }
-  if (lower.includes('sonnet')) {
-    const v = m.match(/(\d+[-.]?\d*)/)?.[1]?.replace('-', '.')
-    return v ? `Sonnet ${v}` : 'Sonnet'
-  }
-  if (lower.includes('haiku')) {
-    const v = m.match(/(\d+[-.]?\d*)/)?.[1]?.replace('-', '.')
-    return v ? `Haiku ${v}` : 'Haiku'
-  }
-  return m
 }
 

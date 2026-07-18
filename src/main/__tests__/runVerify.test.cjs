@@ -973,3 +973,149 @@ test('halt result + sentinel PASS + committedDuringRun:true → still halt', asy
     rmdir(tmp);
   }
 });
+
+// ─── -merge-main postcondition exemption tests (2026-07-18 feedback) ──────────
+
+const { isMergeMainSlug, extractMergeMainPrNumber } = require('../runVerify.cjs');
+
+test('isMergeMainSlug matches the NN-prXXX-merge-main and NN-fix-prXXX-merge-main conventions', () => {
+  assert.equal(isMergeMainSlug('565-pr188-merge-main'), true);
+  assert.equal(isMergeMainSlug('571-fix-pr141-merge-main'), true);
+  assert.equal(isMergeMainSlug('523-fix-bounded-fix-plan-retry'), false);
+  assert.equal(isMergeMainSlug('406-browser-capture-panel-ui'), false);
+  assert.equal(isMergeMainSlug(''), false);
+  assert.equal(isMergeMainSlug(undefined), false);
+});
+
+test('extractMergeMainPrNumber prefers "PR #<n>" in text, falls back to slug', () => {
+  assert.equal(extractMergeMainPrNumber('565-pr188-merge-main', 'title: Merge current main into sigma PR #188 (round 2)'), 188);
+  assert.equal(extractMergeMainPrNumber('565-pr188-merge-main', 'no pr mention here'), 188);
+  assert.equal(extractMergeMainPrNumber('non-standard-slug', 'no pr mention here'), null);
+});
+
+// (1) -merge-main + PASS + no commit + gh reports MERGEABLE/non-CONFLICTING → verified, no issue
+test('merge-main exemption: gh reports MERGEABLE → pass_no_commit_target_verified, no issue pushed', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '565-pr188-merge-main';
+    writeLog(tmp, slug, noOpRunEvents('PR #188 was already merged into main by another actor.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Merge current main into sigma PR #188');
+    let ghCalls = 0;
+    const ghExecImpl = (cmd, args, opts) => {
+      ghCalls++;
+      assert.equal(cmd, 'gh');
+      assert.deepEqual(args, ['pr', 'view', '188', '--json', 'mergeable,mergeStateStatus']);
+      assert.equal(opts.cwd, '/tmp/sigma');
+      return JSON.stringify({ mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' });
+    };
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: '/tmp/sigma' },
+      allJobs: [],
+      committedDuringRun: false,
+      ghExecImpl,
+    });
+    assert.equal(ghCalls, 1);
+    assert.equal(verdict.verdict, 'pass_no_commit_target_verified', `expected verified verdict, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+    assert.equal(verdict.verifiedPrNumber, 188);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (2) -merge-main + PASS + no commit + gh reports CONFLICTING → falls through to pass_no_commit
+test('merge-main exemption: gh reports CONFLICTING → falls through to pass_no_commit', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '565-pr188-merge-main';
+    writeLog(tmp, slug, noOpRunEvents('PR #188 needs no further work.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Merge current main into sigma PR #188');
+    const ghExecImpl = () => JSON.stringify({ mergeable: 'MERGEABLE', mergeStateStatus: 'CONFLICTING' });
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: '/tmp/sigma' },
+      allJobs: [],
+      committedDuringRun: false,
+      ghExecImpl,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (3) -merge-main + PASS + no commit + gh call fails/times out → falls through to pass_no_commit, never throws
+test('merge-main exemption: gh call throws → falls through to pass_no_commit, never throws', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '565-pr188-merge-main';
+    writeLog(tmp, slug, noOpRunEvents('PR #188 needs no further work.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Merge current main into sigma PR #188');
+    const ghExecImpl = () => { throw new Error('gh: command not found'); };
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: '/tmp/sigma' },
+      allJobs: [],
+      committedDuringRun: false,
+      ghExecImpl,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (4) non-merge-main slug, PASS + no commit → unchanged pass_no_commit behavior, zero gh invocations
+test('merge-main exemption: non-merge-main slug never attempts a gh call', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '406-browser-capture-panel-ui';
+    writeLog(tmp, slug, noOpRunEvents('All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
+    let ghCalls = 0;
+    const ghExecImpl = () => { ghCalls++; return JSON.stringify({ mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }); };
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: '/tmp/proj' },
+      allJobs: [],
+      committedDuringRun: false,
+      ghExecImpl,
+    });
+    assert.equal(ghCalls, 0, 'gh must never be invoked for a non-merge-main slug');
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected unchanged pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+// (5) -merge-main slug but a real commit DID land → unaffected, path unreachable, zero gh invocations
+test('merge-main exemption: commit landed → path unreachable, zero gh invocations, verdict clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '565-pr188-merge-main';
+    writeLog(tmp, slug, noOpRunEvents('Merged and pushed.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, '# Merge current main into sigma PR #188');
+    let ghCalls = 0;
+    const ghExecImpl = () => { ghCalls++; return JSON.stringify({ mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }); };
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: '/tmp/sigma' },
+      allJobs: [],
+      committedDuringRun: true,
+      ghExecImpl,
+    });
+    assert.equal(ghCalls, 0, 'gh must never be invoked when a commit already landed');
+    assert.equal(verdict.verdict, 'clean', `expected clean (commit landed, sentinel PASS), got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});

@@ -1646,7 +1646,14 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           let effectiveStatus;
           if (res.exitCode !== 0) {
             effectiveStatus = 'failed';
-          } else if (!verifyResult || verifyResult.verdict === 'clean') {
+          } else if (
+            !verifyResult
+            || verifyResult.verdict === 'clean'
+            // pass_no_commit_target_verified: -merge-main postcondition exemption
+            // (runVerify.cjs) — an independently gh-confirmed clean merge target,
+            // not a plain unsubstantiated PASS. Completed, same as 'clean'.
+            || verifyResult.verdict === 'pass_no_commit_target_verified'
+          ) {
             effectiveStatus = 'completed';
           } else if (verifyResult.downgradeTo === 'pending') {
             // HALT or deps_unmet: reset to pending so the job re-fires.
@@ -2335,7 +2342,10 @@ async function reverifyNeedsReview() {
         allowPreSentinelHeal: true,
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
-    if (v && v.verdict === 'clean') {
+    // pass_no_commit_target_verified: -merge-main postcondition exemption
+    // (runVerify.cjs) — same "heal it" treatment as 'clean', see spawnJob's
+    // effectiveStatus branch above for the primary-path equivalent.
+    if (v && (v.verdict === 'clean' || v.verdict === 'pass_no_commit_target_verified')) {
       healed.push(job.slug);
     } else {
       leftForReview.push({ slug: job.slug, reason: v ? `${v.verdict}: ${v.reason}` : 'null verdict' });

@@ -36,8 +36,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const VERDICTS_SCHEMA_VERSION = 1;
+
+// Bound on the `gh pr view` postcondition check below (§ merge-main exemption).
+const GH_CHECK_TIMEOUT_MS = 15_000;
 
 // ─── content pattern detectors ───────────────────────────────────────────────
 
@@ -445,6 +449,69 @@ function scanSentinel(resultEvent, events) {
   return null;
 }
 
+// ─── merge-main postcondition exemption ──────────────────────────────────────
+
+/**
+ * True for the `NN-prXXX-merge-main` / `NN-fix-prXXX-merge-main` slug
+ * convention already used dozens of times in this queue (merge-current-main
+ * PRDs targeting a shared repo's PR branch). Narrow, mechanical string check —
+ * this is the only slug shape exempted from the `pass_no_commit` flag below.
+ */
+function isMergeMainSlug(slug) {
+  return typeof slug === 'string' && /-merge-main$/.test(slug);
+}
+
+/**
+ * Extract the target PR number for a `-merge-main` PRD. The convention embeds
+ * it two ways: in the frontmatter title/body as "PR #<n>" (preferred — the
+ * human-authored, unambiguous source), and in the slug itself as "prNNN"
+ * (fallback, for PRD text that doesn't spell it out). Returns null if neither
+ * source yields a number.
+ */
+function extractMergeMainPrNumber(slug, prdFullText) {
+  if (typeof prdFullText === 'string') {
+    const m = prdFullText.match(/PR\s*#(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+  }
+  const sm = typeof slug === 'string' ? slug.match(/pr(\d+)-merge-main$/) : null;
+  if (sm) return parseInt(sm[1], 10);
+  return null;
+}
+
+/**
+ * Independently re-check a PR's mergeable state via `gh pr view`. Used only to
+ * decide whether a `-merge-main` PRD's unsubstantiated PASS (no commit landed
+ * during the run) reflects a target that was already satisfied by an
+ * out-of-band actor before this run started — see the 2026-07-18 false-positive
+ * feedback item.
+ *
+ * Bounded (15s) and fully fail-safe: ANY error (gh missing/unauthed, network,
+ * timeout, malformed JSON, non-existent PR) resolves `{ ok: false }` rather
+ * than throwing, so a failure here only ever falls back to today's behavior —
+ * it can never turn a real failure into a false "verified".
+ *
+ * `execImpl` is injectable (defaults to `child_process.execFileSync`) so unit
+ * tests can stub the subprocess call without shelling out to a real `gh`.
+ *
+ * @returns {{ ok: boolean, data?: { mergeable: string, mergeStateStatus: string }, error?: string }}
+ */
+function checkMergeablePr({ cwd, prNumber, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl = execFileSync }) {
+  try {
+    const out = execImpl(
+      'gh',
+      ['pr', 'view', String(prNumber), '--json', 'mergeable,mergeStateStatus'],
+      { cwd, timeout: timeoutMs, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const data = JSON.parse(out);
+    if (data && data.mergeable === 'MERGEABLE' && data.mergeStateStatus !== 'CONFLICTING') {
+      return { ok: true, data };
+    }
+    return { ok: false, data };
+  } catch (e) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
 // ─── main verifier ────────────────────────────────────────────────────────────
 
 /**
@@ -467,9 +534,13 @@ function scanSentinel(resultEvent, events) {
  *                                            even without a PASS sentinel. Only
  *                                            set by the boot reverify self-heal
  *                                            pass for pre-sentinel legacy runs.
+ * @param {Function} [params.ghExecImpl]      Test-only override for the `gh pr view`
+ *                                            subprocess call used by the -merge-main
+ *                                            postcondition exemption. Defaults to
+ *                                            child_process.execFileSync.
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
-async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false }) {
+async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false, ghExecImpl }) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
   const verdictsPath = path.join(runDir, `${slug}.verdicts.json`);
@@ -491,8 +562,10 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
   try {
     // ── Read PRD body (strip frontmatter) ──────────────────────────────────
     let prdBody = '';
+    let prdFullText = '';
     try {
       const prdText = fs.readFileSync(prdPath, 'utf8');
+      prdFullText = prdText;
       if (prdText.startsWith('---\n')) {
         const end = prdText.indexOf('\n---', 4);
         prdBody = end !== -1 ? prdText.slice(end + 4).trim() : prdText;
@@ -650,11 +723,48 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     // signal and stays covered by this check.
     const isFixPlanJob = /^\d+-fix-/.test(queueEntry?.slug || '');
     if (sentinel === 'pass' && !committedDuringRun && !isFixPlanJob) {
-      issues.push({
-        verdict: 'pass_no_commit',
-        reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
-        priority: 1,
-      });
+      // EXEMPTION: `-merge-main` PRDs (see isMergeMainSlug) can genuinely and
+      // correctly find nothing left to do when an out-of-band actor (a human,
+      // another agent, a sibling scheduler job) already merged/updated the
+      // target PR branch before this run started. Before flagging, independently
+      // re-check the PR's real mergeable state via `gh` — if it confirms the
+      // target is already clean, this is not a false PASS, it's a correct one.
+      // Fails safe: any `gh` error falls straight through to the pass_no_commit
+      // flag below, exactly as before this exemption existed.
+      let mergeMainVerified = false;
+      if (isMergeMainSlug(slug)) {
+        const prNumber = extractMergeMainPrNumber(slug, prdFullText);
+        if (prNumber != null) {
+          const ghResult = checkMergeablePr({
+            cwd: queueEntry?.cwd,
+            prNumber,
+            ...(ghExecImpl ? { execImpl: ghExecImpl } : {}),
+          });
+          if (ghResult.ok) {
+            mergeMainVerified = true;
+            return conclude(
+              'pass_no_commit_target_verified',
+              `SCHEDULER_VERDICT: PASS with no commit, but independently verified PR #${prNumber} is mergeable `
+                + `(mergeStateStatus: ${ghResult.data.mergeStateStatus}) — target was already satisfied by an `
+                + 'out-of-band actor before this run started',
+              null,
+              {
+                ...(annotations.length ? { annotations } : {}),
+                sentinel,
+                verifiedPrNumber: prNumber,
+                ghMergeState: ghResult.data,
+              },
+            );
+          }
+        }
+      }
+      if (!mergeMainVerified) {
+        issues.push({
+          verdict: 'pass_no_commit',
+          reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
+          priority: 1,
+        });
+      }
     }
 
     if (issues.length === 0) {
@@ -726,4 +836,7 @@ module.exports = {
   checkDeps,
   parseLog,
   scanSentinel,
+  isMergeMainSlug,
+  extractMergeMainPrNumber,
+  checkMergeablePr,
 };

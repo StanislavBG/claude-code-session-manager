@@ -317,11 +317,11 @@ const setConfigSchema = z.object({
 }).strict();
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
-// Workspace-scoped markdown store at ~/.claude/session-manager/memories/<ws>/.
-// Slug regex must match memoryTool.cjs SLUG_RE; workspace regex matches its
-// encodeWorkspace() output (alphanumeric + dash) plus 'default'.
+// Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
+// Slug regex is shared with memoryTool.cjs/memoryAggregate.cjs via lib/memorySlug.cjs;
+// workspace regex matches encodeWorkspace() output (alphanumeric + dash) plus 'default'.
 const MEMORY_WORKSPACE_RE = /^[a-zA-Z0-9-_]{1,256}$/;
-const MEMORY_SLUG_RE = /^[a-z0-9-_]+\.md$/;
+const { MEMORY_SLUG_RE } = require('./lib/memorySlug.cjs');
 // 1 MiB hard cap — matches MAX_FILE_BYTES in memoryTool.cjs.
 const MEMORY_MAX_BYTES = 1024 * 1024;
 

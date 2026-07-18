@@ -390,7 +390,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'memory': {
     headline: 'Memories Claude can read and write across sessions — by project or by subagent',
     intro:
-      'Two scopes share one tab, toggled by the Workspace / Subagent switch up top (your choice is remembered). Workspace is a cwd-scoped notebook at ~/.claude/session-manager/memories/<workspace>/ — plain markdown files with an optional description. Subagent is keyed by agent at ~/.claude/session-manager/agent-memory/<agentId>.json — facts about a specific agent (e.g. the "code-reviewer" agent\'s preferred test runner) that survive across projects. You can hand-edit either here; Claude writes to them during sessions when you ask it to remember things across context resets.',
+      'Two scopes share one tab, toggled by the Workspace / Subagent switch up top (your choice is remembered). Workspace is a cwd-scoped notebook at ~/.claude/projects/<workspace>/memory/ — plain markdown files with an optional description. Subagent is keyed by agent at ~/.claude/session-manager/agent-memory/<agentId>.json — facts about a specific agent (e.g. the "code-reviewer" agent\'s preferred test runner) that survive across projects. You can hand-edit either here; Claude writes to them during sessions when you ask it to remember things across context resets.',
     sections: [
       {
         title: 'Workspace memories',

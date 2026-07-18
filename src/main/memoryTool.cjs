@@ -30,9 +30,10 @@ const path = require('node:path');
 const os = require('node:os');
 const config = require('./config.cjs');
 
+const { MEMORY_SLUG_RE: SLUG_RE } = require('./lib/memorySlug.cjs');
+
 const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
 const MAX_ENTRIES = 1000;
-const SLUG_RE = /^[a-z0-9-_]+\.md$/;
 
 const { encodeCwd: encodeWorkspace } = require('./lib/encodeCwd.cjs');
 

@@ -9,6 +9,7 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { formatBytes } from '../../lib/formatBytes'
 import { formatMtimeMs } from '../../lib/formatTime'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
+import { MEMORY_SLUG_RE } from '../../lib/memorySlug'
 import type { MemoryEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
 import { MemoryNaturalPanel } from './MemoryNaturalPanel'
@@ -18,8 +19,6 @@ import { MemoryClustersPanel } from './memory/MemoryClustersPanel'
 type MemoryView = 'classic' | 'natural' | 'clusters'
 type MemoryScope = 'workspace' | 'subagent'
 
-const SLUG_RE = /^[a-z0-9-_]+$/
-
 const SCOPE_OPTIONS = [
   { key: 'workspace' as const, label: 'Workspace' },
   { key: 'subagent' as const, label: 'Subagent' },
@@ -28,7 +27,7 @@ const SCOPE_LS_KEY = 'sm.memoryTab.scope'
 
 /**
  * Memory — single home for both memory stores, split by scope:
- *   • Workspace — cwd-keyed .md memories (~/.claude/session-manager/memories/<cwd>/)
+ *   • Workspace — cwd-keyed .md memories (~/.claude/projects/<cwd>/memory/)
  *   • Subagent  — agentId-keyed JSON entries (the old "Agent Memory" tool)
  *
  * Consolidates two former nav destinations (Memory + Agent Memory) that were
@@ -100,7 +99,7 @@ function WorkspaceMemoryView() {
   // a re-list.
   useEffect(() => {
     if (!home) return
-    const workspaceDir = `${home}/.claude/session-manager/memories/${workspace}`
+    const workspaceDir = `${home}/.claude/projects/${workspace}/memory`
     window.api.config.watch([workspaceDir])
     const off = window.api.config.onChanged(({ path }) => {
       if (path === workspaceDir || path.startsWith(workspaceDir + '/')) {
@@ -197,12 +196,14 @@ function WorkspaceMemoryView() {
               + New memory
             </button>
           )}
-          <button
-            onClick={refresh}
-            className="ml-2 px-2 py-0.5 text-xs text-fg-faint hover:text-fg-dim border border-line hover:border-fg-faint rounded transition-colors"
-          >
-            Refresh
-          </button>
+          {view !== 'clusters' && (
+            <button
+              onClick={refresh}
+              className="ml-2 px-2 py-0.5 text-xs text-fg-faint hover:text-fg-dim border border-line hover:border-fg-faint rounded transition-colors"
+            >
+              Refresh
+            </button>
+          )}
         </>
       }
       footer={
@@ -334,7 +335,7 @@ function NewMemoryForm({
   const [error, setError] = useState<string | null>(null)
 
   const normalized = slug.trim().toLowerCase()
-  const valid = SLUG_RE.test(normalized)
+  const valid = MEMORY_SLUG_RE.test(normalized)
 
   const submit = async () => {
     if (!valid) {
@@ -370,7 +371,7 @@ function NewMemoryForm({
         </div>
         <div className="text-[10px] text-fg-faint">
           Lowercase letters, digits, dashes, underscores. The file is created at
-          <code className="ml-1 font-mono text-fg-dim">~/.claude/session-manager/memories/{workspace}/{normalized || '…'}.md</code>
+          <code className="ml-1 font-mono text-fg-dim">~/.claude/projects/{workspace}/memory/{normalized || '…'}.md</code>
         </div>
       </div>
       <div className="space-y-1">

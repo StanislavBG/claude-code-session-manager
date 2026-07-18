@@ -29,11 +29,10 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import { formatBytes } from '../../lib/formatBytes'
+import { MEMORY_SLUG_RE } from '../../lib/memorySlug'
 import { EmptyState } from '../ui/EmptyState'
 import { toast } from '../../state/toast'
 import type { MemoryEntry } from '../../../preload/api'
-
-const SLUG_RE = /^[a-z0-9-_]+$/
 
 type MessageRole = 'user' | 'system' | 'result'
 
@@ -146,11 +145,11 @@ function suggestSlug(text: string): string {
 
 function buildRememberPrompt(workspace: string, body: string): string {
   // Structured ask — explicit instruction so Claude uses the memory tool /
-  // writes to `~/.claude/session-manager/memories/<workspace>/…` rather than
+  // writes to `~/.claude/projects/<workspace>/memory/…` rather than
   // dropping a note in chat.
   return [
     `Please save this to my workspace memory (workspace: ${workspace}).`,
-    `Use the memory tool (or write a markdown file under ~/.claude/session-manager/memories/${workspace}/).`,
+    `Use the memory tool (or write a markdown file under ~/.claude/projects/${workspace}/memory/).`,
     `Pick a short kebab-case filename and add a one-line title at the top.`,
     ``,
     `Memory to save:`,
@@ -392,7 +391,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
   // Direct write via memory.create — only fires from an explicit user click.
   const addDirect = useCallback(
     async (slug: string, content: string) => {
-      if (!SLUG_RE.test(slug)) {
+      if (!MEMORY_SLUG_RE.test(slug)) {
         toast.error(`Invalid slug "${slug}" — must be [a-z0-9-_]+`)
         return
       }

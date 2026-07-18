@@ -321,11 +321,12 @@ function resetE2e(state = 'idle') {
 
 // ─── WebSocket lifecycle ──────────────────────────────────────────────────────
 
-function broadcastStatus() {
-  if (!_window || _window.isDestroyed()) return;
-  const cfg = loadConfigSync();
+// Single source of truth for the status payload shape shared by the
+// broadcast push (webRemote:status) and the get-status IPC pull — both must
+// report the same connected/e2e/device view of `cfg` + `_ws`/`_e2e` module state.
+function computeStatus(cfg) {
   const connected = _ws !== null && _ws.readyState === WebSocket.OPEN;
-  sendIfAlive(_window, 'webRemote:status', {
+  return {
     enabled: cfg.remoteEnabled,
     remoteControlEnabled: cfg.remoteControlEnabled ?? false,
     connected,
@@ -336,7 +337,13 @@ function broadcastStatus() {
     devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
       deviceId, deviceName, issuedAt, lastConnectedAt,
     })),
-  });
+  };
+}
+
+function broadcastStatus() {
+  if (!_window || _window.isDestroyed()) return;
+  const cfg = loadConfigSync();
+  sendIfAlive(_window, 'webRemote:status', computeStatus(cfg));
 }
 
 function stopHeartbeat() {
@@ -1214,19 +1221,7 @@ function registerRemoteHandlers() {
   // Returns current status without tokens — safe to expose to renderer.
   ipcMain.handle('webRemote:get-status', async () => {
     const cfg = await loadConfig();
-    const connected = _ws !== null && _ws.readyState === WebSocket.OPEN;
-    return {
-      enabled: cfg.remoteEnabled,
-      remoteControlEnabled: cfg.remoteControlEnabled ?? false,
-      connected,
-      e2eActive: connected && _e2e.sessionKey !== null,
-      e2eAuthenticated: connected && _e2e.state === 'authenticated',
-      e2eState: connected ? _e2e.state : 'idle',
-      pendingSas: connected && _e2e.state === 'pending_sas' ? _e2e.pendingSas : null,
-      devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
-        deviceId, deviceName, issuedAt, lastConnectedAt,
-      })),
-    };
+    return computeStatus(cfg);
   });
 
   // User confirmed that the SAS shown on both desktop and browser match.

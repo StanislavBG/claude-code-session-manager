@@ -27,10 +27,10 @@ const { encodeCwd } = require('./lib/encodeCwd.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { writeJson } = require('./config.cjs');
 const config = require('./config.cjs');
+const { MEMORY_SLUG_RE } = require('./lib/memorySlug.cjs');
 
 const HOME = os.homedir();
 const CLUSTERS_DIR = path.join(HOME, '.claude', 'session-manager', 'memory-clusters');
-const MEMORY_SLUG_RE = /^[a-z0-9-_]+\.md$/;
 
 function memoryDir(workspace) {
   return path.join(HOME, '.claude', 'projects', workspace, 'memory');

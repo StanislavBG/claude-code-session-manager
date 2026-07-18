@@ -159,7 +159,7 @@ function buildCommands(): Command[] {
     { id: 'devtools', label: 'Toggle DevTools', section: 'config', emitOnly: true, hint: 'F12' },
     { id: 'reload-window', label: 'Reload window', section: 'config', emitOnly: true, hint: 'Ctrl+R' },
 
-    // ── nav ── (17 tabs — same NavKey values used in LeftNav.tsx:12-29)
+    // ── nav ── (NavKey values from AlmanacSidebar.tsx — keep in sync when tabs are added/removed)
     { id: 'nav:overview', label: 'Go to Overview', section: 'nav', emitOnly: true },
     { id: 'nav:terminal', label: 'Go to Terminal', section: 'nav', emitOnly: true },
     { id: 'nav:browser', label: 'Go to Browser', section: 'nav', emitOnly: true },
@@ -177,6 +177,7 @@ function buildCommands(): Command[] {
     { id: 'nav:keybindings', label: 'Go to Keybindings', section: 'nav', emitOnly: true },
     { id: 'nav:usage', label: 'Go to Usage', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
+    { id: 'nav:remote', label: 'Go to Remote', section: 'nav', emitOnly: true },
   ]
   return cmds
 }

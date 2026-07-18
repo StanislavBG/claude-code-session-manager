@@ -15,6 +15,7 @@
 
 import { create } from 'zustand'
 import type { AgentMemoryEntry, AgentMemoryCategory } from '../../preload/api'
+import { toast } from './toast'
 
 interface AgentMemoryState {
   /** agentId -> entries (newest first). */
@@ -40,8 +41,12 @@ export const useAgentMemory = create<AgentMemoryState>((set, get) => ({
     const next = new Map(get().entriesByAgent)
     next.set(agentId, r.entries)
     const errs = new Map(get().errorByAgent)
-    if (r.error) errs.set(agentId, r.error)
-    else errs.delete(agentId)
+    if (r.error) {
+      errs.set(agentId, r.error)
+      toast.error(`Agent memory load failed: ${r.error}`)
+    } else {
+      errs.delete(agentId)
+    }
     set({ entriesByAgent: next, loading: null, errorByAgent: errs })
   },
 

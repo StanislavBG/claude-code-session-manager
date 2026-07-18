@@ -916,6 +916,69 @@ function detectRateLimitInLog(logPath) {
   }
 }
 
+/** Scan the tail of a job's log for a network-outage signal: the structured
+ *  `terminal_reason":"api_error"` field alongside a network-class error
+ *  string. This is NOT a real code defect — spawning an auto-fix
+ *  investigation for it just burns a second run diagnosing an outage (PRD
+ *  543's ENOTFOUND incident, 2026-07-14). Deliberately narrow: only fires on
+ *  the structured terminal_reason field, never on ad-hoc "error" text that
+ *  legitimately appears in TDD red-phase transcripts. */
+function detectNetworkErrorInLog(logPath) {
+  try {
+    const text = readTail(logPath, 16384);
+    if (!text) return false;
+    if (!/"terminal_reason":"api_error"/.test(text)) return false;
+    return /ENOTFOUND/.test(text)
+      || /ECONNREFUSED/.test(text)
+      || /ETIMEDOUT/.test(text)
+      || /EAI_AGAIN/.test(text)
+      || /network is unreachable/i.test(text);
+  } catch {
+    return false;
+  }
+}
+
+// Bounded retry cap for transient (signal-kill or network-outage) failures.
+// A small constant, not a config knob: the point is that it is impossible to
+// loop unboundedly (queueOps.cjs lints for unbounded loops; see the fizzpop
+// poll-hang in PRD_AUTHORING.md for why an unbounded retry is a real hazard).
+const TRANSIENT_RETRY_CAP = 2;
+
+/**
+ * Classify a failed job's outcome as one of: retry it (transient, bounded),
+ * fail it without auto-fix (transient but unsafe to retry, or the retry cap
+ * is exhausted), or investigate it (a genuine code failure). Pure/no I/O so
+ * the transient-vs-terminal boundary can be unit-tested directly rather than
+ * only through a live spawnJob run.
+ *
+ * A 143/137 exit within the idle-watchdog window is a signal-kill transient
+ * (external kill, not a real failure — see the call site's long-form
+ * rationale). A `terminal_reason:"api_error"` + network-class error
+ * (ENOTFOUND etc., detected by detectNetworkErrorInLog) is an outage
+ * transient (PRD 543/545 incident) — same bounded-retry treatment, not a
+ * second parallel classifier.
+ */
+function classifyFailureOutcome({ exitCode, networkError, durationMs, transientRetries, newlyDirtyCount }) {
+  const signalTransient = (exitCode === 143 || exitCode === 137) && durationMs < IDLE_OUTPUT_KILL_MS;
+  const networkTransient = networkError === true;
+  const transient = signalTransient || networkTransient;
+  if (!transient) return { action: 'investigate' };
+
+  const transientKind = networkTransient ? 'network' : `exit=${exitCode}`;
+  const retries = transientRetries ?? 0;
+  // A transient failure can still leave partial work on disk (the 543
+  // ENOTFOUND run wrote its renderer, then died before committing). Requeuing
+  // over that dirt would either re-implement on top of it or conflict with
+  // it — refuse and fail instead of silently re-running over orphaned edits.
+  if (newlyDirtyCount > 0) {
+    return { action: 'fail-dirty', transientKind, newlyDirtyCount };
+  }
+  if (retries >= TRANSIENT_RETRY_CAP) {
+    return { action: 'fail-cap', transientKind, retries };
+  }
+  return { action: 'retry', transientKind, retries };
+}
+
 // ---------- execution ----------
 
 function pickRunDir() {
@@ -1152,14 +1215,15 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
         sl(`\n[scheduler] exit code=${effectiveCode} (raw code=${exitCode} signal=${signal}) ` +
           `duration=${Math.round(durationMs / 1000)}s\n`);
         const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
+        const networkError = effectiveCode !== 0 && !rateLimited && detectNetworkErrorInLog(logPath);
         // Sync write: child 'exit' handler must flush meta before resolve()
         // so the spawnJob mutate() that follows sees the persisted exit code.
         config.writeJsonSync(metaPath, {
-          slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited,
+          slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited, networkError,
           startedAt, finishedAt: Date.now(), durationMs,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
         });
-        resolve({ exitCode: effectiveCode, durationMs, rateLimited, sessionId });
+        resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, sessionId });
       },
     });
 
@@ -1674,15 +1738,58 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       // 67 s.) Genuine watchdog kills (idle ≥20 min, deadman 4 h) run longer than
       // the threshold and still fall through to investigation.
       const ec = failedJobSnapshot.exitCode;
-      const transient = (ec === 143 || ec === 137) && res.durationMs < IDLE_OUTPUT_KILL_MS;
       const retries = failedJobSnapshot.transientRetries ?? 0;
-      if (transient && retries < 2) {
-        console.log(`[scheduler] transient failure (exit=${ec} dur=${res.durationMs}ms) — auto-retry ${retries + 1}/2 for ${job.slug}`);
+      // Only pay for the extra git status call when the failure is plausibly
+      // transient — a real code failure never needs the dirty-tree check.
+      const maybeTransient = (ec === 143 || ec === 137) || res.networkError === true;
+      let newlyDirtyCount = 0;
+      let dirtySample = '';
+      if (maybeTransient) {
+        const afterFailure = await uncommittedChanges(guardCwd);
+        const baseSet = new Set(guardBaseline || []);
+        const newlyDirty = (afterFailure || []).filter((p) => !baseSet.has(p));
+        newlyDirtyCount = newlyDirty.length;
+        dirtySample = newlyDirty.slice(0, 3).join(', ');
+      }
+      const decision = classifyFailureOutcome({
+        exitCode: ec,
+        networkError: res.networkError,
+        durationMs: res.durationMs,
+        transientRetries: retries,
+        newlyDirtyCount,
+      });
+
+      if (decision.action === 'retry') {
+        console.log(`[scheduler] transient failure (${decision.transientKind} dur=${res.durationMs}ms) — auto-retry ${decision.retries + 1}/${TRANSIENT_RETRY_CAP} for ${job.slug}`);
         await mutate((s) => {
           const i = s.jobs.findIndex((x) => x.slug === job.slug);
           if (i >= 0) {
             resetJobFields(s.jobs[i], null);
-            s.jobs[i].transientRetries = retries + 1;
+            s.jobs[i].transientRetries = decision.retries + 1;
+          }
+        });
+        await broadcast();
+      } else if (decision.action === 'fail-dirty') {
+        console.log(`[scheduler] transient failure (${decision.transientKind}) for ${job.slug} left ${newlyDirtyCount} uncommitted file(s) (e.g. ${dirtySample}) — not auto-requeuing`);
+        await mutate((s) => {
+          const i = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (i >= 0) {
+            s.jobs[i].status = 'failed';
+            s.jobs[i].error = `transient failure (${decision.transientKind}) left ${newlyDirtyCount} uncommitted file(s) in working tree (e.g. ${dirtySample}) — not auto-requeued to avoid overwriting partial work; review and commit or discard manually`;
+          }
+        });
+        await broadcast();
+        // No auto-fix investigation: this isn't a code defect, and the
+        // dirty tree needs a human, not a diagnosis run.
+      } else if (decision.action === 'fail-cap') {
+        // Retry cap exhausted: fail terminally, but a transient classification
+        // never spawns an auto-fix investigation — there is no code defect to
+        // diagnose, only a recurring outage.
+        console.log(`[scheduler] transient failure (${decision.transientKind}) for ${job.slug} exhausted retry cap (${decision.retries}/${TRANSIENT_RETRY_CAP}) — failing without auto-fix`);
+        await mutate((s) => {
+          const i = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (i >= 0) {
+            s.jobs[i].error = `transient failure (${decision.transientKind}) exhausted retry cap (${decision.retries}/${TRANSIENT_RETRY_CAP}) — marking failed without auto-fix investigation`;
           }
         });
         await broadcast();
@@ -2874,4 +2981,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP };

@@ -155,6 +155,95 @@ walkthrough.
   dead plumbing. Not touched: wiring it up is a new feature, not a bug in the
   existing surface.
 
+## 2026-07-18 follow-up pass (headless-safe re-run, PRD 561 fix-plan)
+
+The original interactive click-through pass above (this same file) already
+landed the substantive fixes. This follow-up re-ran as a **headless-safe
+static + unit-test pass** (no app launch, no Playwright) per the corrected
+PRD: read every file in the family fresh, confirmed the prior fixes are
+still in place (shared `extOf`/`IconBtn`, `pruneClosed` wiring, silent-queue
+broadcast skip, `ToolUseTraceStrip` on question turns, real `schemeOf`
+label), ran the full unit-test gate, and looked for anything new.
+
+### Fixed
+
+- `pty.cjs` `registerPtyHandlers()`'s `pty:kill` listener called
+  `superagent.dropTab(tabId)` directly, immediately after `manager.kill(tabId)`
+  — which already calls the same `dropTab(tabId)` internally (see `kill()`
+  above it). Harmless (idempotent, map-delete-if-present) but redundant.
+  Removed the duplicate call; `manager.kill()` remains the single call site.
+
+### New findings — noted only, not fixed
+
+- **`CapturePanel.tsx`'s pre-capture "Send to" segmented control (`dest`
+  state / `DESTS` buttons) has no effect.** Selecting `claude`/`scratch`/
+  `clip`/`prd` before capturing only toggles the button's own highlight —
+  `onCapture`/`capture()` never read `dest`, and once a capture completes,
+  all four destination buttons (`onClipboard`/`onClaudeSession`/`onScratch`/
+  `onPrdFixture`) render unconditionally regardless of which one was
+  pre-selected. Not a crash and not clearly wrong (the component's own header
+  comment frames "destination tracking" as scaffolding for a future PRD that
+  routes the Capture button straight to the picked destination), so left as a
+  finding rather than a fix — resolving it either way (wire it up, or drop
+  the pre-selection control) is a product decision, not a bug fix.
+- **`browser:capture-dom` (`captureDom` in `browserView.cjs` + its preload/
+  `api.d.ts` surface) is fully wired end-to-end but has zero callers.** It
+  was superseded by the PRD-404 selection-scoped `capture`/`captureSelection`
+  pipeline (`browserCapture.cjs`), confirmed via `grep -rn captureDom src/`
+  turning up only the main handler, the preload bridge, and the type decl —
+  no renderer call site, no test. Same class of dead plumbing as the
+  already-documented `/context` probe above. Not removed here — deleting an
+  IPC handler + preload API + type surface is a bigger structural change than
+  a headless bounded pass should make unilaterally; flagged for a deliberate
+  follow-up decision.
+- Re-confirmed `DocumentViewer.tsx` is still fully orphaned (no importer
+  anywhere under `src/renderer`) and still present, consistent with the note
+  above about the concurrent revert. No change made.
+
+### Verification run this pass
+
+- `timeout 180 npm run typecheck` — clean, both as the pre-edit baseline and
+  the post-edit final gate.
+- Named specs, run with `node --test` (not `vitest run` — these `.cjs` files
+  under `src/main/__tests__/` use Node's built-in test runner per their own
+  file-header `Run:` comments; `vitest.config.ts`'s `include` list does not
+  cover this directory except one unrelated scheduler file, so `vitest run
+  <path>` reports "No test files found" for them): `chat-stop-signal.test.cjs`,
+  `exchanges.test.cjs`, `files-reject-credentials.test.cjs` — 18/18 pass.
+- Additional family specs discovered via the step-3 grep and actually
+  relevant (import-checked, not just a substring hit on "Editor"/"Browser"):
+  `tests/unit/chatRunner.spec.ts`, `tests/unit/ipc-pty.spec.ts`,
+  `src/renderer/state/__tests__/editor.closeToTheRight.test.ts`,
+  `src/renderer/lib/__tests__/browserExport.test.ts`,
+  `tests/unit/pasteImageIntoChat.spec.ts` (vitest) — 63/63 pass.
+  `src/main/__tests__/browserAgentServer.test.cjs`, `chat-queue.test.cjs`,
+  `chat-cancel-terminal.test.cjs`, `chat-mcp-consent-notice.test.cjs`,
+  `extractJson.test.cjs` (node --test) — 39/39 pass.
+
+### Deferred to interactive session
+
+A headless `claude -p` run cannot safely launch the Electron app or drive it
+via Playwright (this project's own policy: session-manager's own app-launch/
+e2e must not run as a scheduled job — a worktree doesn't fix it, since the
+scheduler root is a fixed homedir path). The following needs a human (or a
+locally-run, non-scheduled Playwright pass) to actually exercise:
+
+- Terminal: send a chat command end-to-end, confirm streaming output +
+  `ToolUseTraceStrip` render live, confirm "Cancel" actually interrupts a
+  running `claude -p` child, confirm "Open raw session" correctly hands off
+  to the live xterm PTY.
+- Browser: click through AddressBar (back/forward/reload/bookmark/zoom/find
+  popovers), ActionBar verbs (Capture/Record/Observe/Screenshot), the
+  element picker's hover/click/⌘-click multi-select overlay inside a real
+  embedded page, and the Recorder's record → replay round-trip against a
+  live site.
+- Editor: open files of every dispatched type (image/PDF/binary/CSV/JSONL/
+  markdown in all four view modes/HTML preview/plain code) from the Files
+  sidebar and from a terminal file-link, confirm autosave, confirm the
+  close-guard modals actually block navigation away from unsaved edits, and
+  confirm the Wysiwyg (Tiptap) round-trip doesn't corrupt frontmatter on a
+  real file.
+
 ## Note on the working tree
 
 This review ran in the same shared checkout as at least two other concurrent

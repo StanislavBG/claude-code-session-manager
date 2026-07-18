@@ -245,8 +245,9 @@ function registerPtyHandlers() {
   ipcMain.on('pty:resize', (_e, payload) => { try { manager.resize(s.ptyResize.parse(payload)); } catch { /* ignore */ } });
   ipcMain.on('pty:kill', (_e, tabId) => {
     if (typeof tabId !== 'string') return;
+    // manager.kill() already drops superagent run state for tabId — see kill()
+    // above. Do not duplicate that call here.
     manager.kill(tabId);
-    try { require('./superagent.cjs').dropTab(tabId); } catch { /* superagent module not initialized (e2e) */ }
   });
 }
 

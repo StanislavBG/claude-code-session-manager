@@ -8,7 +8,7 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge } from './tabs/scheduler/sched-primitives'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd } from './tabs/scheduler/sched-primitives'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -51,7 +51,7 @@ function applyFilter(jobs: ScheduleJob[], filter: QueueFilter): ScheduleJob[] {
   return jobs.filter((j) => {
     if (filter.status !== 'all' && j.status !== filter.status) return false
     if (!q) return true
-    const tag = projectTag(j.cwd) ?? ''
+    const tag = projectNameFromCwd(j.cwd) ?? ''
     return (
       j.title.toLowerCase().includes(q) ||
       j.slug.toLowerCase().includes(q) ||
@@ -83,13 +83,6 @@ function loadHidden(): Set<string> {
 
 function saveHidden(set: Set<string>) {
   try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set])) } catch { /* */ }
-}
-
-/** Map a cwd to a short, human-recognizable project tag. */
-function projectTag(cwd: string | null | undefined): string | null {
-  if (!cwd) return null
-  const segs = cwd.replace(/\/+$/, '').split('/')
-  return segs[segs.length - 1] || cwd
 }
 
 /**
@@ -882,7 +875,7 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
                   view log →
                 </button>
               )}
-              {job.status !== 'pending' && (
+              {job.status !== 'pending' && job.status !== 'running' && (
                 <button
                   type="button"
                   onClick={() => window.api.schedule.resetJob(job.slug)}

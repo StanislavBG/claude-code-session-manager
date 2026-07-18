@@ -4,7 +4,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { formatTimingLabel } from '../../../lib/formatTime'
 import { FilterPills } from '../../ui/FilterPills'
 import { RunLogViewer } from './RunLogViewer'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine } from '../scheduler/sched-primitives'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine, projectNameFromCwd } from '../scheduler/sched-primitives'
 
 interface HistoryResult {
   ok: boolean
@@ -46,7 +46,7 @@ export function SchedulerHistoryView() {
     if (!result?.jobs) return []
     const seen = new Set<string>()
     for (const j of result.jobs) {
-      const name = j.cwd ? (j.cwd.replace(/\/+$/, '').split('/').pop() ?? '') : ''
+      const name = projectNameFromCwd(j.cwd)
       if (name) seen.add(name)
     }
     return [...seen].sort()
@@ -57,8 +57,7 @@ export function SchedulerHistoryView() {
     return result.jobs.filter((j) => {
       if (statusFilter !== 'all' && j.status !== statusFilter) return false
       if (projectFilter) {
-        const name = j.cwd ? (j.cwd.replace(/\/+$/, '').split('/').pop() ?? '') : ''
-        if (name !== projectFilter) return false
+        if (projectNameFromCwd(j.cwd) !== projectFilter) return false
       }
       if (fromDate && toDateStr(j.finishedAt) < fromDate) return false
       if (toDate && toDateStr(j.finishedAt) > toDate) return false

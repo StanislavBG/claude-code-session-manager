@@ -17,8 +17,19 @@ function hashStr(s: string): number {
   return h
 }
 
+// ─── projectNameFromCwd — canonical "last path segment" extraction ──────────
+// Single source for turning an absolute project cwd into a short display
+// name. Consumed by ProjectTag below plus every filter/list/group surface in
+// this family that needs to match or list projects by name (Queue filter
+// text search, History's project dropdown + filter, PRDs card list).
+export function projectNameFromCwd(cwd?: string | null): string | null {
+  if (!cwd) return null
+  const segs = cwd.replace(/\/+$/, '').split('/')
+  return segs[segs.length - 1] || cwd
+}
+
 function projectDot(cwd?: string | null, name?: string): string {
-  const base = cwd ? (cwd.split('/').filter(Boolean).pop() ?? '') : (name ?? '')
+  const base = cwd ? (projectNameFromCwd(cwd) ?? '') : (name ?? '')
   return PROJ_DOTS[hashStr(base) % PROJ_DOTS.length]
 }
 
@@ -58,7 +69,7 @@ export function SchBadge({ status }: { status: ScheduleJobStatus }) {
 
 // ─── ProjectTag ──────────────────────────────────────────────────────────────
 export function ProjectTag({ cwd, name }: { cwd?: string | null; name?: string }) {
-  const label = name ?? (cwd ? (cwd.split('/').filter(Boolean).pop() ?? cwd) : '—')
+  const label = name ?? (cwd ? projectNameFromCwd(cwd) ?? cwd : '—')
   const dot = projectDot(cwd, name)
   return (
     <span className="inline-flex items-center gap-1.5 font-mono text-xs text-fg-faint">
@@ -132,4 +143,31 @@ export const STATUS_TONE: Record<string, { bg: string; text: string; border: boo
   completed:    { bg: 'bg-sage/20',   text: 'text-sage',     border: false, label: 'completed' },
   failed:       { bg: 'bg-accent/15', text: 'text-accent',   border: false, label: 'failed' },
   needs_review: { bg: 'bg-butter/25', text: 'text-fg-dim',   border: false, label: 'needs review' },
+}
+
+export type PrdDisplayStatus = keyof typeof STATUS_TONE
+
+/**
+ * Derive a PRD's display status from its (possibly absent) queue.json job
+ * entry — the single source consumed by both the PRDs card list and the PRD
+ * editor toolbar, so a PRD's status word is never computed two different
+ * ways in the same view family.
+ */
+export function prdStatusFor(job: { status: ScheduleJobStatus } | null | undefined): PrdDisplayStatus {
+  if (!job) return 'ready'
+  return job.status === 'pending' ? 'queued' : job.status
+}
+
+// ─── PrdStatusPill — STATUS_TONE-backed status pill for PRD cards/editor ────
+export function PrdStatusPill({ status }: { status: PrdDisplayStatus }) {
+  const tone = STATUS_TONE[status]
+  return (
+    <span
+      role="status"
+      aria-label={`Status: ${tone.label}`}
+      className={`text-[11.5px] font-semibold px-[9px] py-0.5 rounded-full ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ''}`}
+    >
+      {tone.label}
+    </span>
+  )
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
-import { STATUS_TONE, ProjectTag, prdNumber, PrdNumberBadge } from '../scheduler/sched-primitives'
+import { ProjectTag, prdNumber, PrdNumberBadge, prdStatusFor, PrdStatusPill } from '../scheduler/sched-primitives'
 import { EmptyState } from '../../ui/EmptyState'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
@@ -11,14 +11,6 @@ import { formatAgo } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
 import { getLintQueueCached } from '../../../lib/lintQueueCache'
-import { StatusBadge } from '../../ui/StatusBadge'
-import type { JobStatus } from '../../ui/StatusBadge'
-
-function projectTag(cwd: string | null | undefined): string | null {
-  if (!cwd) return null
-  const segs = cwd.replace(/\/+$/, '').split('/')
-  return segs[segs.length - 1] || cwd
-}
 
 // ─── Real-time PRD linting ───────────────────────────────────────────────────
 
@@ -103,8 +95,6 @@ function LintPanel({ findings }: { findings: LintFinding[] }) {
     </div>
   )
 }
-
-type PrdStatus = JobStatus
 
 interface PrdMeta {
   slug: string
@@ -292,13 +282,7 @@ export function SchedulerPrdsView() {
     () => queueState?.jobs.find((j) => j.slug === selectedSlug) ?? null,
     [queueState, selectedSlug],
   )
-  const status: PrdStatus = job == null ? 'unqueued' : (job.status as PrdStatus)
-
-  const { frontmatter: fm, body: mdBody } = useMemo(() => parsePrdFile(body), [body])
-  const customFieldKeys = useMemo(
-    () => (fm.extras ? Object.keys(fm.extras) : []),
-    [fm.extras],
-  )
+  const status = prdStatusFor(job)
 
   // Build the text that would be written. Structured-mode work is rendered
   // back to YAML via serializePrdFile; raw mode uses draft verbatim.
@@ -544,7 +528,7 @@ export function SchedulerPrdsView() {
               ← PRDs
             </button>
             <span className="font-mono text-xs text-fg-dim truncate">{selectedSlug}</span>
-            <StatusBadge status={status} />
+            <PrdStatusPill status={status} />
             <div className="flex-1" />
             <TBtn
               label={editMode === 'structured' ? 'View raw' : 'View structured'}
@@ -685,8 +669,7 @@ export function SchedulerPrdsView() {
             <div className="grid gap-3">
               {sortedPrds.map((p) => {
                 const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
-                const prdStatus = !j ? 'ready' : j.status === 'pending' ? 'queued' : j.status
-                const tone = STATUS_TONE[prdStatus]
+                const prdStatus = prdStatusFor(j)
                 const isRunning = j?.status === 'running'
                 const isNeedsReview = j?.status === 'needs_review'
                 return (
@@ -710,11 +693,7 @@ export function SchedulerPrdsView() {
                         <span className="font-serif text-[18px] font-semibold text-fg leading-tight">
                           {p.title || p.slug}
                         </span>
-                        <span
-                          className={`text-[11.5px] font-semibold px-[9px] py-0.5 rounded-full ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ''}`}
-                        >
-                          {tone.label}
-                        </span>
+                        <PrdStatusPill status={prdStatus} />
                         {/* Hidden raw status for screen readers and testability */}
                         {j?.status && <span className="sr-only">{j.status}</span>}
                       </div>

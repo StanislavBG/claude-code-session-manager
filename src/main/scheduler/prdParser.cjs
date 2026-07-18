@@ -141,10 +141,98 @@ function _resetCache() {
   prdFileCache.clear();
 }
 
+// ────────────────────────────────────────────── group allocation
+//
+// `NN` (the filename prefix, parsed above by groupFromName) is both the
+// authoring counter AND the parallel-group key the scheduler groups by.
+// Two authors computing "max NN in prds/" concurrently can allocate the
+// same NN for unrelated PRDs, which silently merges two projects' work
+// into one parallel group (incident 2026-07-14/2026-07-15, PRDs 05-11 vs
+// 06-09, then 545 collided again). allocateParallelGroup() closes that
+// race with an O(n) full-directory scan (not a caller-narrowed glob — see
+// PRD_AUTHORING.md's `'^10[0-9]'` cautionary example) plus an O_EXCL
+// reservation file, so two concurrent callers can never walk away with
+// the same new NN.
+//
+// A reservation is a zero-byte `.reserved-<NN>` file created with the
+// 'wx' (O_CREAT|O_EXCL) flag — the OS guarantees only one of two racing
+// `open()` calls for the same path succeeds. Reservations are counted
+// alongside real `NN-slug.md` files when computing the next max, so a
+// crash between "reserve NN" and "author NN-slug.md" just permanently
+// retires that one NN rather than wedging future allocations. This keeps
+// the filesystem itself as the single source of truth (no separate
+// `.next-nn`/registry file that could drift out of sync with prds/).
+//
+// Callers who want an EXISTING group (deliberate parallel siblings, e.g.
+// three PRDs sharing 545) never call this — they just write the shared
+// `NN-` prefix directly, same as today. This function only mints NEW
+// group numbers.
+
+const RESERVATION_RE = /^\.reserved-(\d+)$/;
+const GROUP_PREFIX_RE = /^(\d+)-/;
+const MAX_RESERVE_ATTEMPTS = 1000;
+
+/**
+ * Highest `NN` currently in use under prdsDir, across real `NN-slug.md`
+ * PRD files (any digit count, unpadded or not — matches groupFromName
+ * above) AND in-flight `.reserved-NN` markers. Full directory scan, no
+ * narrowed glob. Returns 0 if the directory is empty/missing.
+ */
+async function maxParallelGroupInUse(prdsDir) {
+  let entries;
+  try {
+    entries = await fsp.readdir(prdsDir);
+  } catch {
+    return 0;
+  }
+  let max = 0;
+  for (const name of entries) {
+    if (name.startsWith('.')) {
+      const rm = name.match(RESERVATION_RE);
+      if (rm) max = Math.max(max, Number(rm[1]));
+      continue;
+    }
+    if (!name.endsWith('.md')) continue;
+    const m = name.match(GROUP_PREFIX_RE);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max;
+}
+
+/**
+ * Atomically allocate a brand-new parallel-group number under prdsDir.
+ * Returns the reserved NN. Reservation survives a crash mid-allocation
+ * (the `.reserved-NN` marker just sits there forever, retiring that one
+ * number) and never wedges future callers, since each attempt only needs
+ * the marker for its OWN candidate to not already exist.
+ */
+async function allocateParallelGroup(prdsDir) {
+  await fsp.mkdir(prdsDir, { recursive: true });
+  let candidate = (await maxParallelGroupInUse(prdsDir)) + 1;
+  for (let attempt = 0; attempt < MAX_RESERVE_ATTEMPTS; attempt += 1) {
+    const markerPath = path.join(prdsDir, `.reserved-${candidate}`);
+    let fh;
+    try {
+      fh = await fsp.open(markerPath, 'wx');
+    } catch (e) {
+      if (e && e.code === 'EEXIST') {
+        candidate += 1;
+        continue;
+      }
+      throw e;
+    }
+    await fh.close();
+    return candidate;
+  }
+  throw new Error(`allocateParallelGroup: exhausted ${MAX_RESERVE_ATTEMPTS} reservation attempts starting at ${candidate}`);
+}
+
 module.exports = {
   parsePrdRaw,
   parsePrd,
   listPrdFiles,
+  allocateParallelGroup,
+  maxParallelGroupInUse,
   PRD_READ_MAX_BYTES,
   _resetCache,
 };

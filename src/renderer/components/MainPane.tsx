@@ -27,6 +27,7 @@ import { SectionFrame } from './layout/SectionFrame'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { useSessions } from '../state/sessions'
 import { WatchersPopover } from './WatchersPopover'
+import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 
 /**
  * MainPane — Almanac-era full-page router. Every Workspace and Configure
@@ -54,33 +55,32 @@ interface MainPaneProps {
 }
 
 interface PageConfig {
-  eyebrow: string
   title: string
   intro?: string
 }
 
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
-  'skills':        { eyebrow: 'Workspace',  title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
+  'skills':        { title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
   // 'subagents' intentionally omitted: Subagents owns its own full-bleed editorial header
   // ("The hive" h1 + eyebrow + blurb). Adding it here would double-render the heading.
-  'history':       { eyebrow: 'Workspace',  title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
-  'usage':         { eyebrow: 'Workspace',  title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
+  'history':       { title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
+  'usage':         { title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
-  'plugins':       { eyebrow: 'Configure',  title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
-  'mcp':           { eyebrow: 'Configure',  title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
-  'hooks':         { eyebrow: 'Configure',  title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
-  'keybindings':   { eyebrow: 'Configure',  title: 'Keybindings',               intro: 'Shortcuts you can override. Bindings here apply to Claude Code itself, not the Session Manager chrome.' },
-  'memory':        { eyebrow: 'Configure',  title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
+  'plugins':       { title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
+  'mcp':           { title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
+  'hooks':         { title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
+  'keybindings':   { title: 'Keybindings',               intro: 'Shortcuts you can override. Bindings here apply to Claude Code itself, not the Session Manager chrome.' },
+  'memory':        { title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
-  'system-prompt': { eyebrow: 'Configure',  title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
-  'permissions':   { eyebrow: 'Configure',  title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
-  'settings':      { eyebrow: 'Configure',  title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
-  'remote':        { eyebrow: 'Configure',  title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
+  'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
+  'permissions':   { title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
+  'settings':      { title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
+  'remote':        { title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
   // Tools — promoted from modals in v0.13.1.
-  'voice':            { eyebrow: 'Tools', title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
-  'repoviz':          { eyebrow: 'Tools', title: 'Repo visualization',  intro: 'Language + directory map of the current project, computed locally.' },
-  'search':           { eyebrow: 'Tools', title: 'Search',              intro: 'Find by filename (⌘P) or by content (⌘⇧F) across the active cwd. The chosen path is inserted into the active terminal.' },
+  'voice':            { title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
+  'repoviz':          { title: 'Repo visualization',  intro: 'Language + directory map of the current project, computed locally.' },
+  'search':           { title: 'Search',              intro: 'Find by filename (⌘P) or by content (⌘⇧F) across the active cwd. The chosen path is inserted into the active terminal.' },
 }
 
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
@@ -138,8 +138,9 @@ function renderScreen(active: NavKey, ctx: {
     }
   })()
   if (!body) return null
-  return meta
-    ? <SectionFrame eyebrow={meta.eyebrow} title={meta.title} intro={meta.intro} learnKey={active}>{body}</SectionFrame>
+  const eyebrow = NAV_GROUP_BY_KEY[active]
+  return meta && eyebrow
+    ? <SectionFrame eyebrow={eyebrow} title={meta.title} intro={meta.intro} learnKey={active}>{body}</SectionFrame>
     : body
 }
 

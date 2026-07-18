@@ -22,6 +22,7 @@ import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { VoiceButton } from '../VoiceButton'
 import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
+import { NAV_ITEMS, type NavGroupItem } from '../../lib/navGroups'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -31,38 +32,10 @@ type ToolKey = Extract<NavKey,
 >
 void useBilling; void useMemo // (kept for future signal additions)
 
-
-interface NavGroupItem {
-  key: NavKey
-  label: string
-  icon: AlmanacIconName
-  liveKind?: 'subagents' | 'scheduler'
-  hint?: string
-}
-
-const WORKSPACE: NavGroupItem[] = [
-  { key: 'overview',   label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
-  { key: 'terminal',   label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
-  { key: 'browser',    label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences' },
-  { key: 'projects',   label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
-  { key: 'subagents',  label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Fan out work: Hive · Orchestrate · Race · Boss' },
-  { key: 'scheduler',  label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
-  { key: 'history',    label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
-  { key: 'usage',      label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
-]
-
-const CONFIGURE: NavGroupItem[] = [
-  { key: 'skills',        label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads' },
-  { key: 'plugins',       label: 'Plugins',        icon: 'plugins',        hint: 'Extensions for Claude Code' },
-  { key: 'mcp',           label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations' },
-  { key: 'hooks',         label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events' },
-  { key: 'keybindings',   label: 'Keybindings',    icon: 'keys',           hint: 'Shortcuts you can override' },
-  { key: 'memory',        label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store' },
-  { key: 'system-prompt', label: 'System Prompt',  icon: 'system-prompt',  hint: 'Personality and behavior' },
-  { key: 'permissions',   label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },
-  { key: 'settings',      label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window' },
-  { key: 'remote',        label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default' },
-]
+// Grouping is defined once in lib/navGroups.ts (shared with MainPane's
+// per-page eyebrow) — these are just filtered views over it.
+const WORKSPACE: NavGroupItem[] = NAV_ITEMS.filter((item) => item.group === 'Workspace')
+const CONFIGURE: NavGroupItem[] = NAV_ITEMS.filter((item) => item.group === 'Configure')
 
 interface ToolItem {
   key: ToolKey
@@ -71,11 +44,9 @@ interface ToolItem {
   hint?: string
 }
 
-const TOOLS: ToolItem[] = [
-  { key: 'voice',             label: 'Voice',             icon: 'mic',           hint: 'Whisper transcription + push-to-talk' },
-  { key: 'repoviz',           label: 'Repo Viz',          icon: 'repoviz',       hint: 'Language + directory map' },
-  { key: 'search',            label: 'Search',            icon: 'global-search', hint: '⌘P file · ⌘⇧F content' },
-]
+const TOOLS: ToolItem[] = NAV_ITEMS
+  .filter((item): item is NavGroupItem & { key: ToolKey } => item.group === 'Tools')
+  .map(({ key, label, icon, hint }) => ({ key, label, icon, hint }))
 
 // Resizable width — persisted per the user's drag, clamped to a sane range.
 const WIDTH_KEY = 'sm.almanac.sidebarWidth'

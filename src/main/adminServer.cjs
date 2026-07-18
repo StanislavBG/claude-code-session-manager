@@ -14,8 +14,17 @@
  *     ~/.claude/session-manager/admin-api.json with 0600 perms.
  *   - Token compared with crypto.timingSafeEqual to avoid a timing
  *     side-channel on the comparison itself.
- *   - Only two routes: reset-job (one narrow mutation) and jobs (read-only
- *     list). writePrd/pause/resume are intentionally NOT exposed here.
+ *   - Three routes: reset-job (flips fields on an already-vetted job),
+ *     jobs (read-only list), and create-prd (PRD 549 — authors a BRAND-NEW
+ *     file that the scheduler will later run as `claude -p
+ *     --dangerously-skip-permissions` in a caller-chosen, home-dir-bounded
+ *     cwd; a materially larger blast radius than reset-job, justified only
+ *     because it unblocks external automation with no other queueing path).
+ *     cwd is validated via config.cjs's validatePath; title/cwd are
+ *     newline-blocked at the zod boundary (ipcSchemas.cjs) to prevent
+ *     frontmatter injection into the hand-rolled PRD serializer
+ *     (prdCreate.cjs). pause/resume/cancel/update remain intentionally NOT
+ *     exposed here.
  */
 
 'use strict';
@@ -26,6 +35,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const config = require('./config.cjs');
+const { expandHome } = require('./lib/expandHome.cjs');
+const { schemas } = require('./ipcSchemas.cjs');
+const prdCreate = require('./lib/prdCreate.cjs');
 
 const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
 
@@ -121,6 +133,79 @@ function createAdminServer(remote) {
         }
         const result = await remote.resetJob(slug);
         sendJson(res, 200, result);
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/admin/scheduler/create-prd') {
+        const raw = await readBody(req);
+        let parsed;
+        try {
+          parsed = raw ? JSON.parse(raw) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+          return;
+        }
+
+        let input;
+        try {
+          input = schemas.schedulerCreatePrd.parse(parsed);
+        } catch (e) {
+          sendJson(res, 400, { ok: false, error: 'invalid PRD payload', details: e?.issues ?? e?.message });
+          return;
+        }
+
+        // cwd is untrusted: this is the first *creating* mutation on a
+        // token-authed API whose product is "a command that will later run
+        // with --dangerously-skip-permissions in a chosen cwd". Route it
+        // through config.cjs's validatePath (allowedRoots = home dir) —
+        // same boundary every other fs-touching IPC handler uses — never a
+        // bespoke check here.
+        try {
+          config.validatePath(expandHome(input.cwd));
+        } catch (e) {
+          sendJson(res, 400, { ok: false, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` });
+          return;
+        }
+
+        const slug = input.slug || prdCreate.deriveSlugFromTitle(input.title);
+        if (!slug || !prdCreate.PRD_CREATE_SLUG_RE.test(slug)) {
+          sendJson(res, 400, { ok: false, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' });
+          return;
+        }
+
+        // NN allocation is delegated to allocateParallelGroup() (PRD 548) via
+        // the injected remote — never re-derived here — unless the caller
+        // opted into an existing group explicitly.
+        const nn = input.parallelGroup ?? await remote.allocateParallelGroup();
+        const filenameSlug = `${nn}-${slug}`;
+
+        // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
+        // collision-proof reservation, so re-check for an existing file at
+        // this exact destination before writing — remote.writePrd itself has
+        // no existence guard (by design, it doubles as the edit-in-place
+        // path for Scheduler UI PRD edits), so "create" must not silently
+        // clobber an existing job's PRD.
+        const existing = await remote.readPrd(filenameSlug);
+        if (existing?.ok) {
+          sendJson(res, 409, { ok: false, error: `PRD already exists: ${filenameSlug}.md` });
+          return;
+        }
+
+        let standardsText;
+        try {
+          standardsText = await prdCreate.readStandards();
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: `could not read engineering standards: ${e?.message}` });
+          return;
+        }
+
+        const body = prdCreate.buildPrdBody(input, standardsText);
+        const writeResult = await remote.writePrd(filenameSlug, body);
+        if (!writeResult?.ok) {
+          sendJson(res, 500, { ok: false, error: writeResult?.error ?? 'write failed' });
+          return;
+        }
+
+        sendJson(res, 200, { nn, filename: `${filenameSlug}.md`, status: 'queued' });
         return;
       }
       sendJson(res, 404, { ok: false, error: 'not found' });

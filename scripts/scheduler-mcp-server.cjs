@@ -6,6 +6,8 @@
  *   scheduler_reset_job({ slug }) -> POST /admin/scheduler/reset-job
  *   scheduler_list_jobs()         -> GET  /admin/scheduler/jobs
  *
+ *   scheduler_create_prd({ ... })  -> POST /admin/scheduler/create-prd
+ *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
  * requiring scheduler.cjs/adminServer.cjs directly. The admin server IS the
@@ -79,6 +81,32 @@ const TOOLS = [
     description: "List scheduler jobs via the session-manager app's admin API.",
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'scheduler_create_prd',
+    description:
+      "Queue a new scheduled PRD via the session-manager app's admin API. Server-side "
+      + 'validates the frontmatter, atomically allocates the NN parallel-group number, '
+      + 'appends the engineering standards, and writes the PRD file. Falls back: if the '
+      + 'app is not running, author the PRD file by hand instead (see /develop).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'One-line human-readable title' },
+        cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run)' },
+        estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes' },
+        goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
+        acceptanceCriteria: {
+          type: 'array', items: { type: 'string' },
+          description: 'Each entry is one verifiable checklist line',
+        },
+        implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
+        outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
+        slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
+        parallelGroup: { type: 'number', description: 'Optional: opt into an existing NN group instead of allocating a new one' },
+      },
+      required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
+    },
+  },
 ];
 
 const server = new Server(
@@ -101,6 +129,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (name === 'scheduler_list_jobs') {
       const result = await adminRequest('GET', '/admin/scheduler/jobs');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_create_prd') {
+      const result = await adminRequest('POST', '/admin/scheduler/create-prd', args);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     return { content: [{ type: 'text', text: `unknown tool: ${name}` }], isError: true };

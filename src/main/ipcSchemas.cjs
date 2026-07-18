@@ -228,6 +228,33 @@ const scheduleWritePrd = z.object({
   ),
 });
 
+// PRD create (admin API — scheduler_create_prd, PRD 549). This slug is
+// deliberately STRICTER than SCHEDULE_SLUG_RE: it becomes a brand-new
+// filename segment written to disk by the create route, not a lookup key
+// for an existing file, so it excludes '.' and '_' too (matches
+// pluginInstall.cjs's slug precedent, minus '/' — this slug must never
+// introduce a subdirectory).
+const PRD_CREATE_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+// title/cwd become frontmatter VALUES (`title: ${title}`) in prdCreate.cjs's
+// hand-rolled `key: value` serializer, which — unlike a real YAML
+// library — has no escaping. A title/cwd containing '\n' could inject a
+// bare `\n---\n` that terminates the frontmatter block early (per
+// prdFrontmatter.cjs's `indexOf('\n---')` parse) and smuggle extra
+// frontmatter-shaped lines into the body. Block newlines at the boundary
+// instead of trying to escape them later.
+const NO_NEWLINE_RE = /^[^\r\n]*$/;
+const schedulerCreatePrd = z.object({
+  title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines'),
+  cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines'),
+  estimateMinutes: z.number().int().min(1).max(100000),
+  goal: z.string().min(1).max(20000),
+  acceptanceCriteria: z.array(z.string().min(1).max(2000)).min(1).max(100),
+  implementationNotes: z.string().min(1).max(20000),
+  outOfScope: z.array(z.string().min(1).max(2000)).max(100).optional(),
+  slug: z.string().min(1).max(60).regex(PRD_CREATE_SLUG_RE).optional(),
+  parallelGroup: z.number().int().min(1).max(999999).optional(),
+});
+
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
 const scheduleArchivePrd = z.object({
   slugs: z.array(z.string().regex(SCHEDULE_SLUG_RE)).min(1).max(500),
@@ -613,6 +640,7 @@ module.exports = {
   // direct test()/match() containment checks alongside the zod parses.
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
+  PRD_CREATE_SLUG_RE,
   READ_COMMANDS,
   SAS_GATED_READS,
   MUTATE_COMMANDS,
@@ -651,6 +679,7 @@ module.exports = {
     scheduleSlug,
     scheduleReadLog,
     scheduleWritePrd,
+    schedulerCreatePrd,
     scheduleArchivePrd,
     scheduleRetagPrd,
     setConfigSchema,

@@ -2969,6 +2969,12 @@ const remote = {
     return state.jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd }));
   },
 
+  // Exposes the module-level allocateParallelGroup (PRD 548) to callers that
+  // only hold the `remote` object (adminServer.cjs's create-prd route) —
+  // reuses the same allocator the file-based /develop authoring path relies
+  // on implicitly, rather than re-deriving NN here.
+  allocateParallelGroup,
+
   async runNow() {
     await clearPause('run-now');
     runDueJobs().catch((e) => logs.writeLine({

@@ -33,6 +33,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { z } = require('zod');
 const config = require('./config.cjs');
+const { kebabCase: sharedKebabCase } = require('./lib/kebabCase.cjs');
 
 // ──────────────────────────────────────────── caps
 const SLUG_RE = /^[a-z0-9-_]{1,64}$/;
@@ -89,7 +90,7 @@ async function ensureRoot() {
 
 // ──────────────────────────────────────────── helpers
 function kebabCase(s) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'agent';
+  return sharedKebabCase(s, { maxLen: 64, fallback: 'agent' });
 }
 
 // ──────────────────────────────────────────── legacy migration

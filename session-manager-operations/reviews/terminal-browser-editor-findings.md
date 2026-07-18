@@ -244,6 +244,34 @@ locally-run, non-scheduled Playwright pass) to actually exercise:
   confirm the Wysiwyg (Tiptap) round-trip doesn't corrupt frontmatter on a
   real file.
 
+## 2026-07-18 second re-verification pass (headless, duplicate PRD)
+
+This run's PRD body was effectively identical in scope to the two passes
+above (same file list, same test/typecheck gate, same click-through
+checklist). Rather than redo work already landed, this pass re-verified the
+prior fixes are still present and the gates are still green, without
+launching the app (unchanged: this project's own no-self-scheduled-e2e
+policy still applies to headless runs).
+
+Spot-checked via `grep` that every previously-landed fix is still in place:
+`pty.cjs` has exactly one `dropTab` call site (line 231, inside
+`manager.kill()`); `CodeEditorPane.tsx` imports the shared `extOf` from
+`state/editor.ts`; `RecorderPanel.tsx` imports the shared `IconBtn` from
+`browser-primitives.tsx`; `EditorView.tsx`'s `pruneClosed()` is wired into
+every close path; `chatRunner.cjs`'s silent-run FIFO doc comment (and the
+`chat-queue.test.cjs` coverage run below) confirm the queued-broadcast skip
+is intact.
+
+Verification run: `timeout 120 npm run typecheck` clean; the three named
+`node --test` specs 18/18; the additional family specs from the step-3 grep
+(`browserAgentServer.test.cjs`, `chat-mcp-consent-notice.test.cjs`,
+`extractJson.test.cjs`, `chat-queue.test.cjs`, `chat-cancel-terminal.test.cjs`
+via `node --test`; `browserExport.test.ts`,
+`editor.closeToTheRight.test.ts`, `tests/unit/chatRunner.spec.ts`,
+`tests/unit/ipc-pty.spec.ts`, `tests/unit/pasteImageIntoChat.spec.ts` via
+`vitest run`) all green (24 + 63 respectively). No new bugs found; no code
+changes made this pass — working tree stayed clean throughout.
+
 ## Note on the working tree
 
 This review ran in the same shared checkout as at least two other concurrent

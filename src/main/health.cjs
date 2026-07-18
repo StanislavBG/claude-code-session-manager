@@ -9,9 +9,26 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
+const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
+
+// tickQueue() only fires (and updates lastRunAt) when a batch is actually
+// spawned — it does not tick on a fixed cadence — but the poll loop that
+// *invokes* tickQueue backs off starting from POLL_INTERVAL_MS (scheduler.cjs
+// pollLoop). 3x gives the poll loop three chances to notice free capacity +
+// pending work before we call it a stall, absorbing normal jitter (backoff,
+// memory-gate deferrals, boot warmup) without waiting so long that a real
+// outage goes unnoticed for hours (the 2026-07-14 incident sat stalled for
+// 16.5h before anything asserted on it).
+const TICK_STALL_MULTIPLIER = 3;
+const TICK_STALL_THRESHOLD_MS = TICK_STALL_MULTIPLIER * POLL_INTERVAL_MS;
+// A heartbeat line older than this is treated as "the app isn't running /
+// we can't observe live utilization" rather than "utilization is low" —
+// scheduler-heartbeat.log is only appended to while Electron is running, so
+// a stale line here is silent-on-purpose, not evidence of anything.
+const HEARTBEAT_STALE_MS = 5 * 60_000;
 
 function runCheck(cmd, cwd = PROJECT_ROOT) {
   try {
@@ -24,6 +41,80 @@ function runCheck(cmd, cwd = PROJECT_ROOT) {
   } catch {
     return false;
   }
+}
+
+// Reads the last line of scheduler-heartbeat.log, if fresh enough to trust.
+// Returns null when the file is missing, empty, unparseable, or stale — all
+// of which mean "can't observe live utilization right now", not "utilization
+// is low".
+function readFreshHeartbeat(heartbeatPath) {
+  let lines;
+  try {
+    lines = fs.readFileSync(heartbeatPath, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return null;
+  }
+  if (lines.length === 0) return null;
+  let entry;
+  try {
+    entry = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    return null;
+  }
+  if (typeof entry.ts !== 'number' || Date.now() - entry.ts > HEARTBEAT_STALE_MS) return null;
+  return entry;
+}
+
+// Evaluates whether the scheduler tick looks stalled: pending work exists,
+// there's free capacity to run it, and nothing about the queue's own state
+// explains why it hasn't. Kept as a pure function of (queueState, heartbeat,
+// now) so it's testable without touching the filesystem.
+function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
+  const jobs = queueState.jobs || [];
+  const pending = jobs.filter((j) => j.status === 'pending');
+  const running = runningCount ?? jobs.filter((j) => j.status === 'running').length;
+  const config = queueState.config || {};
+  const concurrencyCap = config.concurrencyCap ?? Infinity;
+
+  if (pending.length === 0) return { stalled: false, reason: 'no-pending-jobs' };
+  if (queueState.paused) return { stalled: false, reason: 'paused' };
+  if (config.enabled === false) return { stalled: false, reason: 'disabled' };
+  if (running >= concurrencyCap) return { stalled: false, reason: 'at-capacity' };
+
+  const lastRunAt = queueState.lastRunAt ? Date.parse(queueState.lastRunAt) : null;
+  // No lastRunAt at all (fresh install, never ticked) — nothing to measure
+  // staleness against yet; don't manufacture a false positive.
+  if (lastRunAt == null || Number.isNaN(lastRunAt)) {
+    return { stalled: false, reason: 'no-lastRunAt', caveat: true };
+  }
+  const tickAgeMs = now - lastRunAt;
+  if (tickAgeMs <= TICK_STALL_THRESHOLD_MS) return { stalled: false, reason: 'recent-tick' };
+
+  // Candidate stall. The 'when-available' firePolicy legitimately holds
+  // pending jobs when billing utilization is at/above utilizationThreshold —
+  // rule that out before calling it a stall.
+  if (config.firePolicy === 'when-available' && typeof config.utilizationThreshold === 'number') {
+    if (!heartbeat) {
+      return {
+        stalled: false,
+        caveat: true,
+        reason: 'cannot-verify-utilization',
+        tickAgeMs,
+        oldestPendingSlug: pending[0]?.slug,
+      };
+    }
+    if (typeof heartbeat.utilization === 'number' && heartbeat.utilization >= config.utilizationThreshold) {
+      return { stalled: false, reason: 'utilization-at-threshold', utilization: heartbeat.utilization };
+    }
+  }
+
+  return {
+    stalled: true,
+    reason: 'stalled',
+    tickAgeMs,
+    oldestPendingSlug: pending[0]?.slug,
+    pendingCount: pending.length,
+  };
 }
 
 async function check() {
@@ -106,13 +197,33 @@ async function check() {
     const failedCount = Object.values(queueState.jobs || {}).filter(
       (j) => j.status === 'failed'
     ).length;
+    const heartbeatPath = path.join(
+      os.homedir(),
+      '.claude/session-manager/scheduler-heartbeat.log'
+    );
+    const heartbeat = readFreshHeartbeat(heartbeatPath);
+    const liveness = evaluateTickLiveness(queueState, heartbeat, Date.now(), runningCount);
     status.components.scheduler_queue = {
-      ok: true,
+      ok: !liveness.stalled,
       path: queuePath,
       jobs: Object.keys(queueState.jobs || {}).length,
       running: runningCount,
       failed: failedCount,
+      tickLiveness: liveness.reason,
     };
+    if (liveness.stalled) {
+      const ageMin = Math.round(liveness.tickAgeMs / 60_000);
+      status.components.scheduler_queue.stalledJob = liveness.oldestPendingSlug;
+      status.components.scheduler_queue.tickAgeMs = liveness.tickAgeMs;
+      status.issues.push(
+        `Scheduler tick appears stalled: "${liveness.oldestPendingSlug}" (and ${liveness.pendingCount - 1} other pending job(s)) has been waiting ~${ageMin}m with free capacity and no tick progress`
+      );
+    } else if (liveness.caveat) {
+      status.components.scheduler_queue.caveat =
+        liveness.reason === 'cannot-verify-utilization'
+          ? `Tick hasn't advanced in a while but scheduler-heartbeat.log is missing/stale, so current billing utilization can't be checked — cannot rule out a legitimate when-available hold`
+          : 'No lastRunAt recorded yet — cannot assess tick liveness';
+    }
   } catch (e) {
     if (e.code !== 'ENOENT') {
       status.issues.push(`Scheduler queue unreadable: ${e.message}`);
@@ -197,7 +308,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -213,4 +324,4 @@ if (require.main === module) {
   })();
 }
 
-module.exports = { check };
+module.exports = { check, evaluateTickLiveness, readFreshHeartbeat, TICK_STALL_THRESHOLD_MS, HEARTBEAT_STALE_MS };

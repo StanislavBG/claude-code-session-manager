@@ -17,10 +17,7 @@ export function tierTone(util: number): TierTone {
   return { dot: 'bg-sage', bar: 'bg-sage', track: 'bg-sage/15', text: 'text-sage' }
 }
 
-// Compact token-count formatting (1.2M / 340k / 12) — shared by TopologyHeader
-// and SessionMatrix so the two Usage-tab surfaces never drift apart.
-export function formatCompactCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
-  return String(n)
-}
+// Compact token-count formatting (1.2M / 340k / 12) — shared by TopologyHeader,
+// SessionMatrix, and HistoryDashboard so token-count displays never drift apart.
+// Thin re-export of the canonical implementation in lib/formatCompactCount.
+export { formatCompactCount } from '../../../lib/formatCompactCount'

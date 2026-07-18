@@ -4,6 +4,7 @@ import { EmptyState } from '../ui/EmptyState'
 import type { DayProjectRow, HistoryAggregateResult } from '../../../preload/api'
 import { CHART_CATEGORICAL, categoricalColor, HEAT_RAMP } from '../../lib/chartPalette'
 import { computeDelta, computeBudgetProjection, type Delta } from '../../lib/historyMath'
+import { formatCompactCount } from '../../lib/formatCompactCount'
 
 const BUDGET_CAP_STORAGE_KEY = 'sm.history.budgetCapUsd'
 const DEFAULT_BUDGET_CAP_USD = 50
@@ -368,7 +369,7 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
   function formatHeatValue(value: number): string {
     if (heatMetric === 'cost') return `$${value.toFixed(4)}`
     if (heatMetric === 'sessions') return `${value} session${value === 1 ? '' : 's'}`
-    return `${formatTokens(value)} tokens`
+    return `${formatCompactCount(value, { suffixCase: 'upper', kDecimals: 1 })} tokens`
   }
 
   const { chartData, projectKeys } = useMemo(() => {
@@ -625,8 +626,8 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
                 return (
                   <div className="bg-bg-elev border border-line rounded px-2 py-1 text-[10px] text-fg">
                     <div>{label}</div>
-                    <div>in {formatTokens(d.input)}</div>
-                    <div>out {formatTokens(d.output)}</div>
+                    <div>in {formatCompactCount(d.input, { suffixCase: 'upper', kDecimals: 1 })}</div>
+                    <div>out {formatCompactCount(d.output, { suffixCase: 'upper', kDecimals: 1 })}</div>
                     <div>${d.cost.toFixed(4)}</div>
                   </div>
                 )
@@ -637,8 +638,8 @@ export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectCli
           </BarChart>
         </ResponsiveContainer>
         <div className="flex justify-between mt-2 text-[10px] text-fg-faint">
-          <span>in {formatTokens(totals.inputTokens)}</span>
-          <span>out {formatTokens(totals.outputTokens)}</span>
+          <span>in {formatCompactCount(totals.inputTokens, { suffixCase: 'upper', kDecimals: 1 })}</span>
+          <span>out {formatCompactCount(totals.outputTokens, { suffixCase: 'upper', kDecimals: 1 })}</span>
           <span>est. cost ${totals.estimatedCostUsd.toFixed(2)}</span>
         </div>
       </div>
@@ -792,12 +793,6 @@ function BudgetCard({
       </div>
     </div>
   )
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toFixed(0)
 }
 
 function FreshnessIndicator({ lastFetchedAt }: { lastFetchedAt: number | null }) {

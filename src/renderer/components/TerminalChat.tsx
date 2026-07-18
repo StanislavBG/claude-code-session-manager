@@ -279,6 +279,7 @@ function Turn({ turn }: { turn: ChatTurn }) {
   if (turn.role === 'question') {
     return (
       <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
+        <ToolUseTraceStrip items={turn.toolUses} />
         <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
           <span aria-hidden>❓</span>
           Needs your answer
@@ -418,8 +419,8 @@ export function TerminalChat({ tabId, cwd }: Props) {
             /* detached */
           }
         })
-      } catch {
-        /* clipboard unavailable — leave draft unchanged */
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Paste failed — clipboard unavailable')
       }
     })()
   }
@@ -481,14 +482,16 @@ export function TerminalChat({ tabId, cwd }: Props) {
         <div ref={modelMenuRef} className="relative flex items-stretch">
           <button
             onClick={openRaw}
-            className="rounded-l border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
-            title="Drop into a live interactive claude session in this directory"
+            disabled={running}
+            className="rounded-l border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent"
+            title={running ? 'Cancel or wait for the current run before opening a raw session' : 'Drop into a live interactive claude session in this directory'}
           >
             Open raw session ⌃
           </button>
           <button
             onClick={() => setModelMenuOpen((v) => !v)}
-            className="rounded-r border border-l-0 border-line px-1.5 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
+            disabled={running}
+            className="rounded-r border border-l-0 border-line px-1.5 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent"
             title="Choose model for this raw session"
           >
             ▾

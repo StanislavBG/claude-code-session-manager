@@ -14,7 +14,7 @@
  * boundary).
  */
 import { useEffect, useState } from 'react'
-import { AlmanacIcon, type AlmanacIconName } from '../../layout/AlmanacIcon'
+import { AlmanacIcon } from '../../layout/AlmanacIcon'
 import { useBrowserState } from '../../../state/browser'
 import { useSessions } from '../../../state/sessions'
 import { toast } from '../../../state/toast'
@@ -22,40 +22,11 @@ import { destPath } from '../../../lib/captureDest'
 import { stepsToPlaywright, stepsToCanonical } from '../../../lib/browserExport'
 import type { ReplayStepResult } from '../../../../preload/api'
 import { PanelShell, SectionLabel } from './panel-primitives'
+import { IconBtn } from './browser-primitives'
 
 // Mirrors ptyWrite's PTY_WRITE_MAX_BYTES cap in src/main/ipcSchemas.cjs:36
 // (main-only constant, not importable from the renderer).
 const PTY_WRITE_MAX_BYTES = 64 * 1024
-
-function IconBtn({
-  name,
-  title,
-  onClick,
-  active,
-  disabled,
-  size = 16,
-}: {
-  name: AlmanacIconName
-  title: string
-  onClick?: () => void
-  active?: boolean
-  disabled?: boolean
-  size?: number
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={`grid h-8 w-8 place-items-center rounded-lg border ${
-        active ? 'border-accent bg-accent-muted/40 text-accent' : 'border-transparent text-fg-dim'
-      } ${disabled ? 'cursor-default text-fg-faint' : 'cursor-pointer'}`}
-    >
-      <AlmanacIcon name={name} size={size} />
-    </button>
-  )
-}
 
 const REC_EXPORTS: { id: 'clipboard' | 'session' | 'file' | 'pw'; label: string; hint: string; primary?: boolean }[] = [
   { id: 'clipboard', label: 'Copy to clipboard', hint: 'Markdown + JSON fixture' },

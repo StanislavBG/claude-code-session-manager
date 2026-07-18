@@ -310,8 +310,12 @@ function pump() {
       .catch(() => { /* executeRun never rejects; defensive */ })
       .finally(() => { activeCount -= 1; pump(); });
   }
-  // Anyone still waiting gets a 1-based position update.
+  // Anyone still waiting gets a 1-based position update. Silent (automated
+  // probe) runs must stay invisible to the renderer, same as every other
+  // broadcast in executeRun — otherwise a queued probe would flip a tab's
+  // `running`/`queuedPosition` UI state for a run the user never initiated.
   waiting.forEach((w, i) => {
+    if (w.silent) return;
     broadcast('chat:run:queued', { tabId: w.tabId, sessionId: w.sessionId, position: i + 1 });
   });
 }

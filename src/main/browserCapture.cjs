@@ -656,14 +656,21 @@ async function captureSelection({ viewId, selectors, mode }, getView) {
   }
 
   if (mode === 'a11y') {
-    const selector = selectors[0];
-    const tree = await captureA11y(wc, selector);
-    const text = tree ? formatA11yTree(tree) : '';
+    // captureA11y attaches/detaches the CDP debugger per call, so loop
+    // sequentially rather than firing selectors in parallel (mirrors the
+    // multi-select behavior of the html/selector modes above, which apply to
+    // the whole `selectors` array instead of only the first entry).
+    const trees = [];
+    for (const selector of selectors) {
+      const tree = await captureA11y(wc, selector);
+      if (tree) trees.push(tree);
+    }
+    const text = trees.map((t) => formatA11yTree(t)).join('\n\n');
     return { ok: true, mode, text, meta: {} };
   }
 
   // mode === 'agent'
-  const rawTree = await wc.executeJavaScript(
+  const rawTrees = await wc.executeJavaScript(
     `(function () {
       function serialize(el) {
         if (el.nodeType === 3) {
@@ -683,11 +690,18 @@ async function captureSelection({ viewId, selectors, mode }, getView) {
         }
         return { tag: el.tagName.toLowerCase(), attrs: attrs, style: { display: cs.display, visibility: cs.visibility }, children: children };
       }
-      var el = document.querySelector(${JSON.stringify(selectors[0])});
-      return el ? serialize(el) : null;
+      return (${JSON.stringify(selectors)}).map(function (sel) {
+        var el = document.querySelector(sel);
+        return el ? serialize(el) : null;
+      }).filter(Boolean);
     })()`,
   );
-  const { text, meta } = buildAgentCapture(capRawTree(rawTree));
+  const parts = (Array.isArray(rawTrees) ? rawTrees : []).map((t) => buildAgentCapture(capRawTree(t)));
+  const text = parts.map((p) => p.text).join('\n\n');
+  const meta = {
+    chunks: parts.reduce((a, p) => a + (p.meta.chunks || 0), 0),
+    tokens: parts.reduce((a, p) => a + (p.meta.tokens || 0), 0),
+  };
   return { ok: true, mode, text, meta };
 }
 

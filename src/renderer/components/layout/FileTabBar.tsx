@@ -1,9 +1,9 @@
 /**
  * FileTabBar — preview tabs strip above the terminal/preview area.
  *
- * Mirrors VS Code's open-files tab strip but is read-only (no dirty bit yet —
- * the DocumentViewer doesn't edit). Middle-click closes; right-click brings up
- * a tiny close/close-others/close-all menu.
+ * Mirrors VS Code's open-files tab strip, with a dirty-dot swapped for the ×
+ * on hover per tab. Middle-click closes; right-click brings up a tiny
+ * close/close-others/close-all menu.
  *
  * Layout: a single horizontally-scrolling row. The bar renders nothing when
  * `openFiles` is empty.

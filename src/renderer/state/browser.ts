@@ -220,7 +220,12 @@ export const useBrowserState = create<BrowserState>((set, get) => ({
       if (opts?.url) {
         window.api.browser.navigate({ viewId, url: opts.url }).catch(() => {})
       }
-    }).catch(() => {})
+    }).catch((err: unknown) => {
+      // Store convention: don't import toast here (see capture()'s comment) —
+      // log so a failed create isn't silently swallowed, leaving an unbacked tab.
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('browser', 'error', `browser:create failed for viewId ${viewId}: ${msg}`)
+    })
     return id
   },
 

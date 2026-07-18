@@ -3,7 +3,7 @@
  *
  * Raster (png/jpg/gif/webp/ico) loads over smfile:// (allowed by img-src in the
  * renderer CSP, works in dev and prod alike). SVG is read as text and rendered
- * inline, matching the app's existing DocumentViewer behavior.
+ * inline.
  */
 
 import { useEffect, useState } from 'react'

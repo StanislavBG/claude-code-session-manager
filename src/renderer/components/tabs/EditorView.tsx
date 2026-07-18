@@ -59,6 +59,16 @@ function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() || p
 }
 
+function omitKeys<T>(obj: Record<string, T>, keys: string[]): Record<string, T> {
+  if (!keys.length) return obj
+  const drop = new Set(keys)
+  const out: Record<string, T> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (!drop.has(k)) out[k] = v
+  }
+  return out
+}
+
 /** A file whose bytes the renderer never reads as text (own pane handles it). */
 function isMediaPath(p: string): boolean {
   return isImage(p) || isPdf(p)
@@ -153,24 +163,34 @@ export function EditorView() {
     return () => window.clearTimeout(saveTimer.current)
   }, [prefs.autosave, activeFilePath, dirty, buffers, save])
 
+  // Drop per-file UI state (load status, HtmlPreview reload token) for closed
+  // paths — otherwise these two maps grow for every file ever opened in the
+  // session, since closeFile/closeOthers/closeToTheRight/closeAll only prune
+  // the editor store's own buffers/dirty/viewMode.
+  const pruneClosed = useCallback((paths: string[]) => {
+    if (!paths.length) return
+    setLoadState((s) => omitKeys(s, paths))
+    setReloadTokens((t) => omitKeys(t, paths))
+  }, [])
+
   // Close guards — confirm before discarding unsaved edits.
   const requestClose = useCallback((path: string) => {
     if (dirty[path]) setConfirmClose({ kind: 'one', path })
-    else closeFile(path)
-  }, [dirty, closeFile])
+    else { closeFile(path); pruneClosed([path]) }
+  }, [dirty, closeFile, pruneClosed])
 
   const requestCloseOthers = useCallback((path: string) => {
     const anyOtherDirty = openFiles.some((f) => f.path !== path && dirty[f.path])
     if (anyOtherDirty) setConfirmClose({ kind: 'others', path })
-    else closeOthers(path)
-  }, [openFiles, dirty, closeOthers])
+    else { closeOthers(path); pruneClosed(openFiles.filter((f) => f.path !== path).map((f) => f.path)) }
+  }, [openFiles, dirty, closeOthers, pruneClosed])
 
   const requestCloseToTheRight = useCallback((path: string) => {
     const i = openFiles.findIndex((f) => f.path === path)
     const anyRightDirty = i !== -1 && openFiles.slice(i + 1).some((f) => dirty[f.path])
     if (anyRightDirty) setConfirmClose({ kind: 'right', path })
-    else closeToTheRight(path)
-  }, [openFiles, dirty, closeToTheRight])
+    else { closeToTheRight(path); pruneClosed(i !== -1 ? openFiles.slice(i + 1).map((f) => f.path) : []) }
+  }, [openFiles, dirty, closeToTheRight, pruneClosed])
 
   // Scene-level Cmd/Ctrl-S + focus-mode toggle/exit + close-others shortcut.
   // EditorView only mounts while the editor scene is active, so these
@@ -206,15 +226,28 @@ export function EditorView() {
   const requestCloseAll = useCallback(() => {
     const anyDirty = openFiles.some((f) => dirty[f.path])
     if (anyDirty) setConfirmClose({ kind: 'all', path: '' })
-    else closeAll()
+    else { closeAll(); setLoadState({}); setReloadTokens({}) }
   }, [openFiles, dirty, closeAll])
 
   const doConfirmedClose = () => {
     if (!confirmClose) return
-    if (confirmClose.kind === 'one') closeFile(confirmClose.path)
-    else if (confirmClose.kind === 'others') closeOthers(confirmClose.path)
-    else if (confirmClose.kind === 'right') closeToTheRight(confirmClose.path)
-    else closeAll()
+    if (confirmClose.kind === 'one') {
+      closeFile(confirmClose.path)
+      pruneClosed([confirmClose.path])
+    } else if (confirmClose.kind === 'others') {
+      const closed = openFiles.filter((f) => f.path !== confirmClose.path).map((f) => f.path)
+      closeOthers(confirmClose.path)
+      pruneClosed(closed)
+    } else if (confirmClose.kind === 'right') {
+      const i = openFiles.findIndex((f) => f.path === confirmClose.path)
+      const closed = i !== -1 ? openFiles.slice(i + 1).map((f) => f.path) : []
+      closeToTheRight(confirmClose.path)
+      pruneClosed(closed)
+    } else {
+      closeAll()
+      setLoadState({})
+      setReloadTokens({})
+    }
     setConfirmClose(null)
   }
 

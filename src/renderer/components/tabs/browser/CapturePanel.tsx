@@ -66,16 +66,17 @@ export function CapturePanel() {
   const [selected, setSelected] = useState<string[]>([])
   const [dest, setDest] = useState<'claude' | 'scratch' | 'clip' | 'prd'>('claude')
   const [capturing, setCapturing] = useState(false)
-  const [rawOpen, setRawOpen] = useState(false)
   const [shotDims, setShotDims] = useState<{ w: number; h: number } | null>(null)
 
-  const isShot = captured?.mode === 'shot'
+  const isShot = captureMode === 'shot'
 
   // Entering capture mode starts the picker; leaving it (mode change or
   // panel unmount) stops it — keeps the address bar's PICKING banner
   // (which reads the same `mode`) in sync with the picker lifecycle.
+  // Screenshot mode always captures the full view (browser.ts's capture()
+  // ignores selectors for captureMode 'shot'), so there's nothing to pick.
   useEffect(() => {
-    if (mode !== 'capture' || !viewId) return
+    if (mode !== 'capture' || !viewId || isShot) return
     window.api.browser.pickerStart(viewId).catch(() => {})
     const off = window.api.browser.onPickerEvent(viewId, (ev) => {
       if (ev.type === 'pick' && ev.selector) {
@@ -95,7 +96,7 @@ export function CapturePanel() {
       window.api.browser.pickerStop(viewId).catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, viewId])
+  }, [mode, viewId, isShot])
 
   useEffect(() => {
     setShotDims(null)
@@ -103,12 +104,14 @@ export function CapturePanel() {
 
   const label = capturing
     ? 'Capturing…'
-    : selected.length === 0
-      ? '— pick an element'
-      : `Capture ${selected.length} ${selected.length === 1 ? 'element' : 'elements'}`
+    : isShot
+      ? 'Capture full page'
+      : selected.length === 0
+        ? '— pick an element'
+        : `Capture ${selected.length} ${selected.length === 1 ? 'element' : 'elements'}`
 
   const onCapture = async () => {
-    if (!selected.length || capturing) return
+    if ((!isShot && !selected.length) || capturing) return
     setCapturing(true)
     try {
       await capture(selected)
@@ -266,7 +269,7 @@ export function CapturePanel() {
           <button
             type="button"
             onClick={onCapture}
-            disabled={!selected.length || capturing}
+            disabled={(!isShot && !selected.length) || capturing}
             className="w-full cursor-pointer rounded-lg border border-accent bg-accent px-3 py-2.5 text-[14px] font-bold text-white disabled:cursor-default disabled:border-rule disabled:bg-rule disabled:opacity-70"
           >
             {label}
@@ -299,7 +302,7 @@ export function CapturePanel() {
                 />
               </div>
               <div className="border-t border-line bg-bg-hi px-3 py-2 font-mono text-[11px] text-fg-faint">
-                element · {shotDims ? `${shotDims.w}×${shotDims.h}` : '…'} · PNG
+                full page · {shotDims ? `${shotDims.w}×${shotDims.h}` : '…'} · PNG
               </div>
             </div>
           ) : (
@@ -307,15 +310,6 @@ export function CapturePanel() {
               {captured.text}
             </pre>
           )}
-
-          <button
-            type="button"
-            onClick={() => setRawOpen((o) => !o)}
-            className="mt-2 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-fg-faint"
-          >
-            <AlmanacIcon name="chevron" size={12} className={rawOpen ? 'rotate-90' : ''} />
-            raw HTML
-          </button>
 
           <SectionLabel className="mt-4">Destination</SectionLabel>
           <div className="grid gap-1.5">

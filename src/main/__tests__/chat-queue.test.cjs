@@ -68,3 +68,30 @@ test('cancelling a queued run drops it without executing', async () => {
 
   cr.__setExecutor(null);
 });
+
+test('a queued silent run never broadcasts chat:run:queued (silent runs stay invisible to the renderer)', async () => {
+  const sent = [];
+  cr.attachWindow({
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: (channel, payload) => sent.push({ channel, payload }) },
+  });
+  cr.__setExecutor((j) => new Promise((res) => setImmediate(res)));
+
+  // P and Q take the two lanes under the default cap; R queues behind them —
+  // this is the only path that ever populates chatRunner's `waiting` list,
+  // and every job on it is silent (manual runs bypass the queue entirely).
+  cr.run(job('P'));
+  cr.run(job('Q'));
+  cr.run(job('R'));
+
+  for (let i = 0; i < 8; i++) await tick();
+
+  assert.equal(
+    sent.filter((s) => s.channel === 'chat:run:queued').length,
+    0,
+    'no chat:run:queued broadcast for a silent (automated probe) run',
+  );
+
+  cr.__setExecutor(null);
+  cr.attachWindow(null);
+});

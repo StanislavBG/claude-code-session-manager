@@ -19,6 +19,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileEntry } from '../../../preload/api'
+import { extOf, IMAGE_EXTS } from '../../state/editor'
+import { toast } from '../../state/toast'
 
 // Persist which folders are expanded, per-cwd, so browsing state survives
 // navigating away from the Files sidebar and back (the component unmounts, and
@@ -92,21 +94,24 @@ const GIT_BADGES: Record<GitStatusType, { color: string; label: string }> = {
   conflict: { color: '#f85149', label: '!' },
 }
 
-const PREVIEWABLE_EXTS = new Set([
+const PREVIEWABLE_TEXT_EXTS = new Set([
   'md', 'txt', 'json', 'jsonl', 'ndjson', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'rb',
   'c', 'cpp', 'h', 'hpp', 'java', 'sh', 'bash', 'css', 'scss', 'html', 'xml',
-  'yaml', 'yml', 'toml', 'ini', 'conf', 'env', 'log', 'sql', 'gitignore',
-  'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp',
+  'yaml', 'yml', 'toml', 'ini', 'conf', 'env', 'log', 'sql', 'gitignore', 'csv', 'tsv',
 ])
 
+// Media extensions the Editor scene owns a dedicated pane for — kept in sync
+// with editor.ts's IMAGE_EXTS/isPdf rather than a hand-maintained duplicate,
+// so a file type EditorView can render in-app doesn't silently fall through
+// to launching the OS's default viewer instead.
 function isPreviewable(name: string): boolean {
-  const ext = name.toLowerCase().split('.').pop() || ''
-  return PREVIEWABLE_EXTS.has(ext)
+  const ext = extOf(name)
+  return PREVIEWABLE_TEXT_EXTS.has(ext) || IMAGE_EXTS.has(ext) || ext === 'pdf'
 }
 
 function getExtColor(name: string, isDir: boolean): string {
   if (isDir) return '#d97757'
-  const ext = name.toLowerCase().split('.').pop() || ''
+  const ext = extOf(name)
   switch (ext) {
     case 'ts': case 'tsx': return '#3178c6'
     case 'js': case 'jsx': return '#f7df1e'
@@ -400,7 +405,9 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
       await refreshNode(parent || cwd)
       tryLoadGitStatus(cwd).then(setGitStatus)
     } else {
-      setError(result.error ?? 'rename failed')
+      const msg = result.error ?? 'rename failed'
+      setError(msg)
+      toast.error(msg)
     }
   }
 
@@ -417,7 +424,9 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
         persistExpanded((prev) => new Set(prev).add(createPrompt.parent))
       }
     } else {
-      setError(result.error ?? 'create failed')
+      const msg = result.error ?? 'create failed'
+      setError(msg)
+      toast.error(msg)
     }
   }
 
@@ -431,7 +440,9 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
       await refreshNode(parent || cwd)
       tryLoadGitStatus(cwd).then(setGitStatus)
     } else {
-      setError(result.error ?? 'delete failed')
+      const msg = result.error ?? 'delete failed'
+      setError(msg)
+      toast.error(msg)
     }
   }
 

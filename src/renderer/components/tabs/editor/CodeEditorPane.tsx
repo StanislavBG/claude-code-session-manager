@@ -16,7 +16,7 @@
 import { useEffect, useRef } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import { useEditor } from '../../../state/editor'
+import { useEditor, extOf } from '../../../state/editor'
 import { useEditorPrefs } from '../../../state/editorPrefs'
 
 interface Props {
@@ -43,10 +43,6 @@ const LANG: Record<string, string> = {
   graphql: 'graphql', dockerfile: 'dockerfile',
 }
 const PROSE = new Set(['md', 'mdx', 'markdown', 'txt', 'log'])
-
-function extOf(name: string): string {
-  return name.toLowerCase().split('.').pop() || ''
-}
 
 // Custom Monaco themes matching the app's paper-warm / dark palettes. Defined
 // once on first mount (guarded) so toggling theme is just setTheme.

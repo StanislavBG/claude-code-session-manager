@@ -15,6 +15,10 @@ function stripScheme(url: string): string {
   return url.replace(/^https?:\/\//i, '')
 }
 
+function schemeOf(url: string): string {
+  return /^http:\/\//i.test(url) ? 'http://' : 'https://'
+}
+
 const MAX_SUGGESTIONS = 6
 
 export function AddressBar({ tab }: { tab: BrowserTab }) {
@@ -133,7 +137,7 @@ export function AddressBar({ tab }: { tab: BrowserTab }) {
             <span className={`inline-flex ${tab.isSecure ? 'text-sage' : 'text-fg-faint'}`}>
               <AlmanacIcon name="lock" size={13} />
             </span>
-            <span className="text-fg-faint">https://</span>
+            <span className="text-fg-faint">{schemeOf(tab.url)}</span>
             <input
               value={editing ? draft : stripScheme(tab.url)}
               onFocus={() => setEditing(true)}
@@ -244,8 +248,6 @@ export function AddressBar({ tab }: { tab: BrowserTab }) {
           </div>
         )}
       </div>
-      <IconBtn name="terminal" title="DevTools" />
-      <IconBtn name="settings" title="Page settings" />
     </div>
   )
 }

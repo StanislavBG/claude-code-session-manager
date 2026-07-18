@@ -110,7 +110,7 @@ export function ProjectsWorkspace() {
           onClick={toggleCollapsed}
           data-testid="projects-file-tree-rail-toggle"
           title="Show file explorer"
-          className="shrink-0 flex flex-col items-center gap-2 py-2 border-r border-line text-fg-faint hover:text-fg hover:bg-surface-raised transition-colors"
+          className="shrink-0 flex flex-col items-center gap-2 py-2 border-r border-line text-fg-faint hover:text-fg hover:bg-bg-hi transition-colors"
           style={{ width: RAIL_WIDTH }}
         >
           <span className="text-[11px]">▸</span>
@@ -136,7 +136,7 @@ export function ProjectsWorkspace() {
           <button
             data-testid="projects-launcher-trigger"
             onClick={() => setLauncherOpen((v) => !v)}
-            className="flex-1 min-w-0 px-3 py-1.5 text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-surface-raised transition-colors"
+            className="flex-1 min-w-0 px-3 py-1.5 text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-bg-hi transition-colors"
           >
             <span className="flex-1 truncate text-left">
               {activeTab ? compactPath(activeTab.cwd) : 'Projects'}
@@ -147,14 +147,14 @@ export function ProjectsWorkspace() {
             onClick={toggleCollapsed}
             data-testid="projects-file-tree-collapse"
             title="Hide file explorer"
-            className="shrink-0 px-2 border-l border-line text-fg-faint hover:text-fg hover:bg-surface-raised transition-colors text-[11px]"
+            className="shrink-0 px-2 border-l border-line text-fg-faint hover:text-fg hover:bg-bg-hi transition-colors text-[11px]"
           >
             ◂
           </button>
           {launcherOpen && (
             <div
               data-testid="projects-launcher-list"
-              className="absolute left-0 right-0 top-full z-50 bg-surface border border-line shadow-lg max-h-60 overflow-auto"
+              className="absolute left-0 right-0 top-full z-50 bg-bg-elev border border-line shadow-lg max-h-60 overflow-auto"
             >
               {sortedRows.length === 0 ? (
                 <div className="px-3 py-2 text-[11.5px] text-fg-faint">No projects found.</div>
@@ -162,7 +162,7 @@ export function ProjectsWorkspace() {
                 sortedRows.map((row) => {
                   const label = compactPath(enriched[row.encoded]?.cwd ?? candidatePath(row.encoded))
                   return (
-                    <div key={row.encoded} data-testid="projects-launcher-row" className="flex items-center gap-1 px-2 py-1 hover:bg-surface-raised group">
+                    <div key={row.encoded} data-testid="projects-launcher-row" className="flex items-center gap-1 px-2 py-1 hover:bg-bg-hi group">
                       <Tooltip content={pinned[row.encoded] ? 'Unpin' : 'Pin to top'}>
                         <button
                           onClick={() => togglePin(row.encoded)}

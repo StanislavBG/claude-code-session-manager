@@ -459,10 +459,17 @@ export function App() {
       // if the binding steals it. xterm's hidden helper-textarea is NOT a
       // "real" input — terminals claim focus at boot, so excluding it
       // would leave these shortcuts unreachable in the most common state.
+      // The SearchModal's own query inputs (QuickOpenModal "Search files" /
+      // GlobalSearchModal "Search query") auto-focus on open, so they're
+      // also excluded — otherwise ⌘P / ⌘⇧F could never toggle Files↔Content
+      // mode while the search screen is already active, contradicting
+      // SearchModal's documented "bump mode even when already open" behavior.
       const target = e.target as HTMLElement | null
       const tag = target?.tagName?.toLowerCase() ?? ''
       const isXtermHelper = target?.classList?.contains('xterm-helper-textarea') ?? false
-      if ((tag === 'input' || tag === 'textarea') && !isXtermHelper) return true
+      const ariaLabel = target?.getAttribute?.('aria-label')
+      const isSearchInput = ariaLabel === 'Search files' || ariaLabel === 'Search query'
+      if ((tag === 'input' || tag === 'textarea') && !isXtermHelper && !isSearchInput) return true
       if (target?.closest('.monaco-editor')) return true
       return false
     }

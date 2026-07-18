@@ -28,6 +28,15 @@ test('projects launcher trigger opens list with at least one project', async () 
     // is async, so allow generous time for the first row to populate.
     const rows = list.locator('[data-testid="projects-launcher-row"]')
     await expect(rows.first()).toBeVisible({ timeout: 25_000 })
+
+    // Regression: the dropdown must paint an opaque panel background so it
+    // occludes the file tree / cwd label behind it. `bg-surface` was an
+    // undefined Tailwind token (only `bg`/`bg-elev`/`bg-hi` are registered in
+    // tailwind.config.js) so this list rendered fully transparent, letting
+    // the "current cwd" row underneath show through as overlapping text.
+    const bg = await list.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(bg).not.toBe('rgba(0, 0, 0, 0)')
+    expect(bg).not.toBe('transparent')
   } finally {
     await app.close()
   }

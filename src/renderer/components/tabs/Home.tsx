@@ -17,7 +17,8 @@ import { useBilling, getBillingData } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
 import { useHomeDir } from '../../lib/useHomeDir'
-import { findPreset, shellQuote } from '../../lib/presets'
+import { shellQuote } from '../../lib/presets'
+import { candidatePath } from '../../lib/useKnownProjects'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import type { DirEntry, ScheduleJob } from '../../../preload/api'
 
@@ -268,7 +269,7 @@ function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
   const { rows, loading } = useRecentSessions(4)
   const addTab = useSessions((s) => s.addTab)
   const resume = (r: RecentRow) => {
-    const decoded = '/' + r.projectEncoded.replace(/^-/, '').replace(/-/g, '/')
+    const decoded = candidatePath(r.projectEncoded)
     addTab({
       cwd: decoded,
       startupCommand: `claude --resume ${shellQuote(r.sessionId)}`,
@@ -328,9 +329,9 @@ function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
 }
 
 function decodeProject(encoded: string): string {
-  // ~/.claude/projects encodes cwd by replacing / with -; the leading "-"
-  // marks an absolute path. Show the last segment for compactness.
-  const parts = encoded.replace(/^-/, '').split('-')
+  // Show the last path segment for compactness. Reuses useKnownProjects'
+  // candidatePath so the encoded→path decode logic has one implementation.
+  const parts = candidatePath(encoded).split('/').filter(Boolean)
   return parts.length > 0 ? parts[parts.length - 1] : encoded
 }
 

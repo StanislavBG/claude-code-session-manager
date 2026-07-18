@@ -10,14 +10,16 @@ import type { SearchFileEntry } from '../../../preload/api'
  *
  * Lists files from the active tab's cwd (via `window.api.search.files`),
  * applies a renderer-side fuzzy ranker (substring + word-boundary scoring),
- * and on Enter writes `/file <path>` as a draft into the active tab's PTY.
+ * and on Enter writes the file's path (relative to cwd when possible) as a
+ * draft into the active tab's PTY — no submit, so the user can review/edit
+ * before pressing Enter in the terminal.
  *
  * Sits on z-[55] (above TabModal's z-50 but below RecordingStatus z-[60]) so
  * a user can keep the privacy banner visible if voice is recording.
  *
  * Keyboard:
  *   ↑ / ↓   move highlight
- *   Enter   open (write `/file <path>` to active PTY)
+ *   Enter   open (write path to active PTY)
  *   Esc     close
  *
  * Source-of-inspiration: ClaudeCodeUnleashed's QuickOpen.tsx (which ranks
@@ -241,7 +243,7 @@ export function QuickOpenModal({ open, onClose, variant = 'overlay' }: QuickOpen
       setRecent(next)
       localStorage.setItem(RECENT_KEY, JSON.stringify(next))
     } catch { /* ignore */ }
-    // Write `/file <relative-path>\n` to the active PTY (no submit — user
+    // Write the file path to the active PTY as a draft (no submit — user
     // can review before pressing Enter). Use the relative path when inside cwd
     // for ergonomics, else the absolute path.
     const tabId = activeTab?.id

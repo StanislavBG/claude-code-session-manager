@@ -157,3 +157,35 @@ noticed that would be worth flagging beyond what's above.
   `tests/e2e/search-mode-toggle.spec.ts` drives ⌘⇧F while the Search page's
   own input is focused (catches the keybinding self-exclusion class of
   bug).
+
+## Re-verification (fix-run for 561) — 2026-07-18
+
+PRD `561-fix-projects-search-tools-review` was terminated with exit 143 on its
+first scheduled run, despite the transcript running to a clean completion and
+printing `SCHEDULER_VERDICT: PASS`. Root cause: the entire deliverable above
+was already landed in commit `5fd9b15`, so that run's own diff was empty —
+there was nothing to commit, tripping the scheduler's no-commit exit path.
+This fix-run re-confirms the disposition against current source and lands one
+commit (this note) so the finish protocol has a real deliverable.
+
+Re-read and re-confirmed against current `HEAD`:
+
+- `src/renderer/components/MainPane.tsx` — `case 'search'` still routes to
+  `<SearchModal open={true} onClose={noop} variant="page" .../>` (line 136).
+  `QuickOpenModal` and `GlobalSearchModal` remain unreachable directly, only
+  rendered inside `SearchModal`'s Files/Content toggle — disposition intact.
+- `src/renderer/App.tsx` (~lines 456–471) — `skipForRealInput` still
+  explicitly excludes `aria-label === 'Search files'` and
+  `aria-label === 'Search query'` from the real-input skip, so ⌘P/⌘⇧F keep
+  working while either search input has focus — keybinding fix intact.
+- `src/renderer/components/modals/QuickOpenModal.tsx` (line 341) and
+  `src/renderer/components/modals/GlobalSearchModal.tsx` (line 227) — the
+  `aria-label`s ("Search files" / "Search query") referenced by `App.tsx`
+  still match exactly.
+- `src/main/search.cjs` — backend unchanged from the disposition described
+  above (`searchFiles` / `searchText`, distinct result shapes).
+
+No contradiction found; no code change was needed. Out-of-scope follow-ups
+from the "Also noted, not fixed" section above (`CommandPalette.tsx` missing
+`nav:*` entries for search/repoviz/voice; the dead `variant="overlay"`
+branches) remain untriaged and are not part of this PRD's scope.

@@ -72,11 +72,11 @@ function buildCommands(): Command[] {
     // ── session ──
     { id: 'new-tab-pick', label: 'New tab — pick directory', section: 'session', emitOnly: true },
     { id: 'new-tab-here', label: 'New tab in current cwd', section: 'session', emitOnly: true },
-    { id: 'close-tab', label: 'Close active tab', section: 'session', emitOnly: true, hint: 'Ctrl+W' },
-    { id: 'restart-session', label: 'Restart session', section: 'session', emitOnly: true, hint: 'Ctrl+Shift+R' },
+    { id: 'close-tab', label: 'Close active tab', section: 'session', emitOnly: true },
+    { id: 'restart-session', label: 'Restart session', section: 'session', emitOnly: true },
     { id: 'reboot-app', label: 'Reboot app', section: 'session', run: () => window.api.app.rebootApp() },
-    { id: 'broadcast', label: 'Broadcast prompt to all tabs', section: 'session', emitOnly: true, hint: 'Ctrl+Shift+B' },
-    { id: 'watchers', label: 'Attach a watcher', section: 'session', emitOnly: true, hint: 'Ctrl+Shift+W' },
+    { id: 'broadcast', label: 'Broadcast prompt to all tabs', section: 'session', emitOnly: true },
+    { id: 'watchers', label: 'Attach a watcher', section: 'session', emitOnly: true },
     { id: 'copy-cwd', label: 'Copy active tab cwd', section: 'session', emitOnly: true },
     { id: 'copy-transcript', label: 'Copy transcript path', section: 'session', emitOnly: true },
     { id: 'open-transcript', label: 'Open transcript JSONL', section: 'session', emitOnly: true },
@@ -103,7 +103,6 @@ function buildCommands(): Command[] {
       id: 'voice-cancel-submit',
       label: 'Voice — cancel auto-submit',
       section: 'voice',
-      hint: 'Esc',
       run: () => useVoice.getState().cancelSubmit(),
     },
 

@@ -32,11 +32,11 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `scripts/scheduler-watchdog.cjs` + `scripts/scheduler-watchdog.sh` — external check-and-exit watchdog running outside Electron via systemd user timer or cron (every 2–3 min). Heartbeat-gated `reconcileQueueOffline()` reaps orphaned jobs without Electron running; `activeProjectCwds()` detects open sessions; `sweep()` scans `~/.claude/session-manager/feedback/` and emits auto-PRDs. Install via `scripts/install-scheduler-watchdog.sh` (idempotent; `SM_WATCHDOG_DRYRUN=1` for preview).
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
-- `teams.cjs` — enumerates `~/.claude/teams/<name>/config.json`; gates the AppStatusBar team pill behind `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
+- `teams.cjs` — enumerates `~/.claude/teams/<name>/config.json`; gates the `TeamsCard` team chip behind `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
 - `queueOps.cjs` — scheduler PRD queue linter (unbounded-loop + post-AC overrun detection) + archive + retag.
 - `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9\-/]+$/`, 5 min kill ceiling, single in-flight per slug.
 - `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool.
-- `webRemoteServer.cjs` — same-origin relay server for web-remote mobile cockpit. Ping/auth/session state/summary RPC endpoints. Rate limits + audit log.
+- `webRemote.cjs` — same-origin relay server for web-remote mobile cockpit. Ping/auth/session state/summary RPC endpoints. Rate limits + audit log.
 - `adminServer.cjs` — loopback-only, token-authed HTTP admin API (127.0.0.1, OS-assigned port, token in `~/.claude/session-manager/admin-api.json`). Narrow surface: list scheduler jobs + reset one stuck job. Wrapped as MCP tools by `scripts/scheduler-mcp-server.cjs` (registered in this repo's `.mcp.json`) — `scheduler_reset_job`/`scheduler_list_jobs` only work while the Electron app is running, since that's what hosts the admin server.
 
 **Renderer** (`src/renderer/`):
@@ -57,11 +57,11 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `components/tabs/scheduler/sched-primitives.tsx` — Almanac design shared: SchBadge (status color/mark), ProjectTag, DetailBlock/Line (project dots hashed-color palette).
 - `components/tabs/subagents/hive-primitives.tsx` — Hive design shared: ToolChip (read/write tone), StatusPill, HiveCell, HIVE_PALETTE (6 accents), hiveEstimate cost/time.
 - `components/ui/` — shared primitives (Panel, ScopeSwitcher, SaveBar, JsonEditor, KVTable, ListDetail, Toggle, EmptyState).
-- `components/AppStatusBar.tsx` — global model / effort / team / voice / 5h-usage chip strip. Pills navigate to Settings / Voice / Usage on click.
+- `components/layout/AlmanacFooter.tsx` — global chip strip (connected dot, 5h-usage, conditional scheduler-paused pill, active tab + branch via `lib/useBranch.ts`, last-activity, todos, app version). Pills navigate to Settings / Usage / Scheduler on click. (Renamed/redesigned from the pre-Almanac `AppStatusBar.tsx`, which no longer exists — it had no model/effort/team/voice pills; the team chip lives only in `components/ui/TeamsCard.tsx` now.)
 - `components/CommandPalette.tsx` — Cmd-K palette with fuzzy filter + emit-only dispatch. Suppressed inside Monaco / text inputs.
 - `components/ui/Toast.tsx` — non-fatal error surfacing. `info / warn / error`. Mounted above modals, below RecordingStatus.
 - `lib/agentFrontmatter.ts` + `lib/prdFrontmatter.ts` — round-trip YAML preservation for Subagents and SchedulerPrdsView.
-- `components/tabs/agent/SchedulerDock.tsx` — per-running-job mini-bot strip rendered in AgentView.
+- `lib/prettyModel.ts` — single source of truth for model-name shortening (incl. `[1m]` context-suffix); every pill/chip that shows a model name imports it — don't reintroduce a local copy.
 
 ## Renderer data flow
 
@@ -94,13 +94,13 @@ Published as `claude-code-session-manager` on npm. Run via `npx claude-code-sess
 
 ## Web-remote v2 mobile cockpit
 
-Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). React Native web frontend talks to relay server (`webRemoteServer.cjs`) over WebSocket. Session state protocol: ping/auth → list-sessions → select → stream state/summary updates. Desktop session-manager is the SoR; mobile is a read-mostly mirror. Rate limits (auth: 5/min, api: 50/min). Audit log to `~/.claude/web-remote-audit.log`.
+Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). React Native web frontend talks to relay server (`webRemote.cjs`) over WebSocket. Session state protocol: ping/auth → list-sessions → select → stream state/summary updates. Desktop session-manager is the SoR; mobile is a read-mostly mirror. Rate limits (auth: 5/min, api: 50/min). Audit log to `~/.claude/web-remote-audit.log`.
 
 ## Conventions (extensions for v0.20+)
 
 - **Almanac design** (Scheduler): SchBadge status colors + project-dot palette. Single source of truth in `sched-primitives.tsx`.
 - **Hive design** (Subagents): 6-color palette (accent/sage/butter/hive-slate/hive-plum/hive-teal), ToolChip read/write tone, hiveEstimate. Single source of truth in `hive-primitives.tsx`.
-- **Launch-first editorial shell** (Subagents): Configured / Library / Live sub-tabs. Subagents.tsx is the conductor; Live feeds AgentView monitor rows + results digest.
+- **Launch-first editorial shell** (Subagents): Configured / Library / Live sub-tabs. Subagents.tsx is the conductor; Live feeds `OrchestratorRunView`/`RaceRunView` monitor rows + results digest (there is no separate `AgentView.tsx`/`SchedulerDock.tsx` — Subagents.tsx and its `tabs/subagents/*` children own this surface directly).
 - **Knowledge graph data pipeline**: Ingest → filter (automated patterns, length caps) → extract (with EXTRACTION_SYSTEM role to prevent prompt-injection refusals) → persist. Per-project entity vocab + rate-limiting.
 - **Renderer state stores** (zustand): separate concerns: `config.ts` (file-backed, dirty-tracked), `live.ts` (per-tab derived from transcripts), `voice.ts` (voice UI), `hives.ts` (subagent definitions), `orchestrator.ts` (running hive state), `scheduleState.ts` (queue + history), `toast.ts` (toast messages). Stores do NOT cross-subscribe; use composed selectors in components for multi-store queries.
 - **Modular pane pattern**: extracted panes (SchedulePanel: Queue/PRDs/History tabs) are reusable by multiple parent tabs (Scheduler, web-remote). Panes own local filter state + filtering logic; parents own scope/context state.

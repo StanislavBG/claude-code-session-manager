@@ -82,6 +82,23 @@ function serialize(full: Record<string, unknown>, servers: Record<string, McpSer
   return JSON.stringify({ ...full, mcpServers: servers }, null, 2) + '\n'
 }
 
+/**
+ * Next default name for a new server — `server-N` where N starts at
+ * count+1 and increments until it doesn't collide with an existing key.
+ * A plain count+1 can collide after a deletion (e.g. delete server-1 out
+ * of {server-1, server-2}; count+1 recomputes to server-2 and silently
+ * overwrites it), so this walks forward until it finds an unused name.
+ */
+export function nextServerName(servers: Record<string, McpServer>): string {
+  let n = Object.keys(servers).length + 1
+  let name = `server-${n}`
+  while (servers[name]) {
+    n += 1
+    name = `server-${n}`
+  }
+  return name
+}
+
 export function McpServers() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
@@ -180,7 +197,7 @@ export function McpServers() {
   }
 
   const addServer = () => {
-    const name = `server-${Object.keys(servers).length + 1}`
+    const name = nextServerName(servers)
     updateServers({ ...servers, [name]: { type: 'stdio', command: '', args: [] } })
     setSelectedName(name)
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -11,6 +11,7 @@ import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { mergeScopes, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
@@ -27,38 +28,14 @@ export function Settings() {
   const [scope, setScope] = useState<Scope>('user')
   const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'app'>('effective')
 
-  // Resolve paths for every scope so we can annotate existence on the switcher.
-  const scopePaths = useMemo(() => {
-    const out: Partial<Record<Scope, string>> = {}
-    for (const s of SETTINGS_SCOPES.scopes) {
-      const p = SETTINGS_SCOPES.resolve(s, home ?? '', cwd)
-      if (p) out[s] = p
-    }
-    return out
-  }, [home, cwd])
-
+  // Resolve + load + watch every scope path so the switcher annotations stay live.
+  const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
   const activePath = scopePaths[scope] ?? null
 
   const files = useConfig((s) => s.files)
-  const loadJson = useConfig((s) => s.loadJson)
   const setDraft = useConfig((s) => s.setDraft)
   const saveJson = useConfig((s) => s.saveJson)
   const revert = useConfig((s) => s.revert)
-  const watchFile = useConfig((s) => s.watchFile)
-  const unwatchFile = useConfig((s) => s.unwatchFile)
-
-  // Load + watch every resolvable scope path so the switcher annotations stay live.
-  useEffect(() => {
-    const paths = Object.values(scopePaths).filter(Boolean) as string[]
-    paths.forEach((p) => {
-      if (!files[p]) loadJson(p)
-      watchFile(p)
-    })
-    return () => {
-      paths.forEach((p) => unwatchFile(p))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(scopePaths)])
 
   const [saveError, setSaveError] = useState<string | null>(null)
 

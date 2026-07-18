@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -8,6 +8,7 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { PERMISSIONS_SCOPES, type Scope } from '../../lib/scopes'
 import { PermissionsPresetsLibrary } from './Library'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { ViewTabs } from '../ui/ViewTabs'
 import { EffectiveTree } from '../ui/EffectiveTree'
 import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
@@ -48,33 +49,12 @@ export function Permissions() {
   const [scope, setScope] = useState<Scope>('user')
   const [view, setView] = useState<'effective' | 'rules' | 'presets'>('effective')
 
-  const scopePaths = useMemo(() => {
-    const out: Partial<Record<Scope, string>> = {}
-    for (const s of PERMISSIONS_SCOPES.scopes) {
-      const p = PERMISSIONS_SCOPES.resolve(s, home ?? '', cwd)
-      if (p) out[s] = p
-    }
-    return out
-  }, [home, cwd])
-
+  const scopePaths = useScopedConfigFiles(PERMISSIONS_SCOPES, home, cwd)
   const activePath = scopePaths[scope] ?? null
   const files = useConfig((s) => s.files)
-  const loadJson = useConfig((s) => s.loadJson)
   const setDraft = useConfig((s) => s.setDraft)
   const saveJson = useConfig((s) => s.saveJson)
   const revert = useConfig((s) => s.revert)
-  const watchFile = useConfig((s) => s.watchFile)
-  const unwatchFile = useConfig((s) => s.unwatchFile)
-
-  useEffect(() => {
-    const paths = Object.values(scopePaths).filter(Boolean) as string[]
-    paths.forEach((p) => {
-      if (!files[p]) loadJson(p)
-      watchFile(p)
-    })
-    return () => paths.forEach((p) => unwatchFile(p))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(scopePaths)])
 
   const [saveError, setSaveError] = useState<string | null>(null)
 

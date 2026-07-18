@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
@@ -9,6 +9,7 @@ import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { HooksLibrary } from './Library'
 import { ViewTabs } from '../ui/ViewTabs'
@@ -157,33 +158,13 @@ export function Hooks() {
   const [selectedEvent, setSelectedEvent] = useState<HookEvent>('PreToolUse')
   const [view, setView] = useState<'effective' | 'events' | 'library'>('effective')
 
-  const scopePaths = useMemo(() => {
-    const out: Partial<Record<Scope, string>> = {}
-    for (const s of SETTINGS_SCOPES.scopes) {
-      const p = SETTINGS_SCOPES.resolve(s, home ?? '', cwd)
-      if (p) out[s] = p
-    }
-    return out
-  }, [home, cwd])
+  const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
   const path = scopePaths[scope] ?? null
 
   const files = useConfig((s) => s.files)
-  const loadJson = useConfig((s) => s.loadJson)
   const setDraft = useConfig((s) => s.setDraft)
   const saveJson = useConfig((s) => s.saveJson)
   const revert = useConfig((s) => s.revert)
-  const watchFile = useConfig((s) => s.watchFile)
-  const unwatchFile = useConfig((s) => s.unwatchFile)
-
-  useEffect(() => {
-    const paths = Object.values(scopePaths).filter(Boolean) as string[]
-    paths.forEach((p) => {
-      if (!files[p]) loadJson(p)
-      watchFile(p)
-    })
-    return () => paths.forEach((p) => unwatchFile(p))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(scopePaths)])
 
   const [saveError, setSaveError] = useState<string | null>(null)
   const [testFire, setTestFire] = useState<{

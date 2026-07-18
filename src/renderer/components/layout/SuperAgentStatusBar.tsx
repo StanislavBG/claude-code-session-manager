@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useSuperAgent } from '../../state/superagent'
 import { toast } from '../../state/toast'
+import { formatElapsedClock } from '../../lib/formatTime'
 
 /**
  * SuperAgentStatusBar — a slim banner under the Header that surfaces an
@@ -32,10 +33,7 @@ export function SuperAgentStatusBar() {
 
   if (!run || run.status !== 'running' || !activeTabId) return null
 
-  const elapsedSec = run.startedAt ? Math.max(0, Math.floor((now - run.startedAt) / 1000)) : 0
-  const mins = Math.floor(elapsedSec / 60)
-  const secs = elapsedSec % 60
-  const elapsedLabel = `${mins}:${secs.toString().padStart(2, '0')}`
+  const elapsedLabel = formatElapsedClock(run.startedAt ? now - run.startedAt : 0)
 
   const doneCount = specialists.filter((s) => s.state === 'done').length
   const pct = Math.round(progress * 100)

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TranscriptEvent } from '../../preload/api'
+import { digestFor, isDoneSignal } from './transcriptDigest'
 
 /**
  * Orchestrator — port of ClaudeCodeUnleashed's Orchestrator feature, slimmed
@@ -95,51 +96,7 @@ interface OrchestratorState {
 }
 
 const DIGEST_CAP = 5
-const DIGEST_LINE_MAX = 200
 const NUDGE_PROMPT = 'Are you stuck? Briefly summarize what you are blocked on, or continue with the next step.'
-
-/** Pull a readable snippet out of a transcript event for the grid preview. */
-function digestFor(ev: TranscriptEvent): string | null {
-  if (ev.kind === 'tool_use') {
-    const d = ev.data as { name?: string; input?: unknown } | null
-    if (!d?.name) return null
-    const input = d.input as Record<string, unknown> | null | undefined
-    const filePath = typeof input?.file_path === 'string' ? input.file_path : undefined
-    const command = typeof input?.command === 'string' ? input.command : undefined
-    const detail = filePath ? filePath.split('/').pop() ?? filePath : command ?? ''
-    return detail ? `${d.name} · ${detail}` : d.name
-  }
-  if (ev.kind === 'todo_write') {
-    const arr = Array.isArray(ev.data) ? (ev.data as { content?: string }[]) : []
-    return `Todos · ${arr.length} item${arr.length !== 1 ? 's' : ''}`
-  }
-  if (ev.kind === 'plan') {
-    return 'Plan revised'
-  }
-  if (ev.kind === 'agent_spawn') {
-    const d = ev.data as { subagent_type?: string } | null
-    return d?.subagent_type ? `Agent: ${d.subagent_type}` : 'Agent spawned'
-  }
-  if (ev.kind === 'assistant') {
-    const raw = ev.raw as { message?: { content?: unknown } } | null
-    const content = raw?.message?.content
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (block && typeof block === 'object' && (block as { type?: string }).type === 'text') {
-          const text = (block as { text?: string }).text
-          if (typeof text === 'string') return text.slice(0, DIGEST_LINE_MAX)
-        }
-      }
-    }
-    return 'assistant: (response)'
-  }
-  return null
-}
-
-/** "Done" detector: an assistant message arriving after a task is in flight. */
-function isDoneSignal(ev: TranscriptEvent): boolean {
-  return ev.kind === 'assistant'
-}
 
 function wireListener(tabId: string): () => void {
   return window.api.transcripts.onEvent(tabId, (ev) => {

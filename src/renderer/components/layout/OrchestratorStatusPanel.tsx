@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useOrchestrator } from '../../state/orchestrator'
+import { formatElapsedClock } from '../../lib/formatTime'
 
 /**
  * OrchestratorStatusPanel — slim banner under Header surfacing an active
@@ -27,10 +28,7 @@ export function OrchestratorStatusPanel() {
 
   if (status !== 'running' && status !== 'paused') return null
 
-  const elapsedSec = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0
-  const mins = Math.floor(elapsedSec / 60)
-  const secs = elapsedSec % 60
-  const elapsedLabel = `${mins}:${secs.toString().padStart(2, '0')}`
+  const elapsedLabel = formatElapsedClock(startedAt ? now - startedAt : 0)
 
   const doneCount = tasks.filter((t) => t.status === 'done').length
   const total = tasks.length

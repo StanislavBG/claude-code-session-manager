@@ -158,3 +158,54 @@ this pass) plus manual code-path tracing.
   The fix was instead verified via the extracted pure-function unit tests
   above plus confirming it mirrors `OrchestrateForm`'s already-working
   `configure()`+`start()` call pattern exactly.
+
+## Addendum (second pass on this PRD — concurrent-edit note)
+
+This repo's working tree was under active concurrent modification by another
+process for the duration of this review (unrelated files changing live:
+`Projects.tsx` deleted, `Usage.tsx`/`billing.ts` edited, etc., alongside this
+exact review). The findings above (items 1–2, the dead-code note, and the
+cross-family candidates) were landed by that concurrent pass. This addendum
+covers what a second, independent pass over the same scope found and fixed
+on top of that work, without re-doing it.
+
+3. **The dead "Launch the hive" button wasn't just inert — it was crashing
+   the whole tab.** Reproduced live: navigating to Subagents with the fix's
+   `LaunchView` selector written as
+   `useSessions((s) => s.tabs.filter((t) => t.status === 'running'))` (a
+   snapshot returning a *new array every render*) trips React's
+   `useSyncExternalStore` infinite-loop guard — `Maximum update depth
+   exceeded`, caught by the app's top-level `ErrorBoundary` (visible in the
+   console as `[ErrorBoundary] Error: Maximum update depth exceeded`), which
+   remounts the whole tree from scratch. The zustand `getSnapshot` warning
+   fires first (`"The result of getSnapshot should be cached to avoid an
+   infinite loop"`), then the hard crash. This is worse than a silent no-op:
+   it makes the entire Subagents tab briefly white-screen/remount on
+   navigation. Confirmed present in a locally-built `dist/` before the fix,
+   confirmed gone after. The final code in `LaunchView` (`useSessions((s) =>
+   s.tabs)` selected raw, filtered via `useMemo` keyed on that array — the
+   same pattern `DispatchLaunch.tsx`'s `OrchestrateForm`/`RaceForm` already
+   used) does not have this problem; noting the specific failure mode here
+   since it's a stronger signal than "dead button" for why any future
+   zustand selector in this family must not allocate inside the selector
+   function itself.
+
+4. **`digestFor()`/`isDoneSignal()` were byte-identical between
+   `orchestrator.ts` and `race.ts`** (both parse the same `TranscriptEvent`
+   shape into a run-grid snippet and the same end-of-turn "done" heuristic).
+   Consolidated into `src/renderer/state/transcriptDigest.ts`; both stores
+   now import from there instead of carrying their own copy.
+
+5. **`OrchestratorStatusPanel.tsx` and `SuperAgentStatusBar.tsx` each
+   independently computed an `M:SS` elapsed-time label** from a `startedAt`
+   ms timestamp with identical `Math.floor`/`padStart` logic. Added
+   `formatElapsedClock()` to `lib/formatTime.ts` (the repo's existing single
+   source for time-formatting helpers — its own header already documents
+   "three near-identical copies... unified here so a rounding fix in one
+   place reaches all") and pointed both call sites at it.
+
+Re-verified after these two consolidations: `npm run typecheck` clean,
+`vitest run src/renderer/state/__tests__` clean (17/17), full `npm run
+build` + a fresh Playwright/xvfb walkthrough of Launch → all 4 topology
+forms → zero-running-tabs guard → Live (empty) → Agents, zero console
+errors.

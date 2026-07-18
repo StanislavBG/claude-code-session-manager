@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TranscriptEvent } from '../../preload/api'
+import { digestFor, isDoneSignal } from './transcriptDigest'
 
 /**
  * Race feature — pick N existing tabs, send the same prompt to all of them,
@@ -68,7 +69,6 @@ interface RaceState {
 const HISTORY_KEY = 'sm.race.history'
 const HISTORY_CAP = 20
 const DIGEST_CAP = 8
-const DIGEST_LINE_MAX = 200
 
 /** Read recent races from localStorage. Safe against parse failures. */
 export function readRaceHistory(): RaceHistoryEntry[] {
@@ -90,55 +90,6 @@ function writeRaceHistory(entries: RaceHistoryEntry[]): void {
   } catch {
     // Quota / privacy mode — silently drop. Race itself still works.
   }
-}
-
-/** Pull a readable snippet out of a transcript event for the panel preview. */
-function digestFor(ev: TranscriptEvent): string | null {
-  if (ev.kind === 'tool_use') {
-    const d = ev.data as { name?: string; input?: unknown } | null
-    if (!d?.name) return null
-    const input = d.input as Record<string, unknown> | null | undefined
-    const filePath = typeof input?.file_path === 'string' ? input.file_path : undefined
-    const command = typeof input?.command === 'string' ? input.command : undefined
-    const detail = filePath ? filePath.split('/').pop() ?? filePath : command ?? ''
-    return detail ? `${d.name} · ${detail}` : d.name
-  }
-  if (ev.kind === 'todo_write') {
-    const arr = Array.isArray(ev.data) ? (ev.data as { content?: string }[]) : []
-    return `Todos · ${arr.length} item${arr.length !== 1 ? 's' : ''}`
-  }
-  if (ev.kind === 'plan') {
-    return 'Plan revised'
-  }
-  if (ev.kind === 'agent_spawn') {
-    const d = ev.data as { subagent_type?: string } | null
-    return d?.subagent_type ? `Agent: ${d.subagent_type}` : 'Agent spawned'
-  }
-  if (ev.kind === 'assistant') {
-    // The assistant message body lives in raw.message.content (array of blocks).
-    // Extract the first text block as a readable snippet.
-    const raw = ev.raw as { message?: { content?: unknown } } | null
-    const content = raw?.message?.content
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (block && typeof block === 'object' && (block as { type?: string }).type === 'text') {
-          const text = (block as { text?: string }).text
-          if (typeof text === 'string') return text.slice(0, DIGEST_LINE_MAX)
-        }
-      }
-    }
-    return 'assistant: (response)'
-  }
-  return null
-}
-
-/**
- * "Done" detector: an assistant message that arrives AFTER race startedAt.
- * Claude Code emits one final assistant message per turn after all tool calls
- * finish, so this matches the natural end-of-turn boundary.
- */
-function isDoneSignal(ev: TranscriptEvent): boolean {
-  return ev.kind === 'assistant'
 }
 
 export const useRace = create<RaceState>((set, get) => ({

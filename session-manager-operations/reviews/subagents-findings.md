@@ -190,6 +190,16 @@ on top of that work, without re-doing it.
    zustand selector in this family must not allocate inside the selector
    function itself.
 
+   **Commit-history note (added after code review, 2026-07-18):** this fix
+   landed via the concurrent pass referenced above, not via any single
+   commit in the `561` batch's own history — commit `ae42bca`'s message
+   narrates this crash as if it were part of that commit's diff, but
+   `ae42bca`'s actual changes only cover the `transcriptDigest`/elapsed-clock
+   dedupe (item 4 below). The working `useSessions((s) => s.tabs)` + `useMemo`
+   pattern was already present in `DispatchLaunch.tsx` at this PRD's base
+   commit (`58f6342`). `git blame`/`git bisect` on this specific crash should
+   not trust `ae42bca` as the fix commit.
+
 4. **`digestFor()`/`isDoneSignal()` were byte-identical between
    `orchestrator.ts` and `race.ts`** (both parse the same `TranscriptEvent`
    shape into a run-grid snippet and the same end-of-turn "done" heuristic).

@@ -115,6 +115,25 @@ export function LegendItem({ dotClass, n, label }: { dotClass: string; n: number
   )
 }
 
+// ─── VERDICT_LABELS — verifier verdict → human-readable label ───────────────
+// Single source consumed by the Queue job detail panel, PRDs needs_review
+// card, and History job detail panel — all three surfaces display a job's
+// verifierVerdict and must show the same human-readable text, not the raw
+// machine slug (e.g. "no_verdict_sentinel").
+export const VERDICT_LABELS: Record<string, string> = {
+  halt: 'verifier halted',
+  deps_unmet: 'dependencies unmet',
+  transcript_errors: 'transcript had errors',
+  verify_unavailable: 'verify unavailable',
+  uncommitted_changes: 'uncommitted changes',
+  no_verdict_sentinel: 'no commit or verdict sentinel',
+  pass_no_commit: 'PASS sentinel but no commit landed',
+}
+
+export function verdictLabel(verdict: string): string {
+  return VERDICT_LABELS[verdict] ?? verdict
+}
+
 // ─── prdNumber — extract leading numeric group from a slug ──────────────────
 export function prdNumber(slug: string): string | null {
   const m = slug.match(/^(\d+)-/)

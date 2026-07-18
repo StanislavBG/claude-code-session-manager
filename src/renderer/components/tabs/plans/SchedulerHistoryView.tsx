@@ -4,7 +4,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { formatTimingLabel } from '../../../lib/formatTime'
 import { FilterPills } from '../../ui/FilterPills'
 import { RunLogViewer } from './RunLogViewer'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine, projectNameFromCwd } from '../scheduler/sched-primitives'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine, projectNameFromCwd, verdictLabel } from '../scheduler/sched-primitives'
 
 interface HistoryResult {
   ok: boolean
@@ -206,7 +206,7 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
           <DetailBlock label="Status">
             <DetailLine k="result" v={exitStr} />
             <DetailLine k="state" v={job.status.replace('_', ' ')} />
-            {job.verifierVerdict && <DetailLine k="verifier" v={job.verifierVerdict} />}
+            {job.verifierVerdict && <DetailLine k="verifier" v={verdictLabel(job.verifierVerdict)} />}
           </DetailBlock>
           <DetailBlock label="Timing">
             <DetailLine k="started" v={startedStr} />

@@ -7,6 +7,12 @@ cross-checked against `preload/index.cjs` and `scheduler.cjs`'s
 Playwright/xvfb via a scratch spec (`tests/e2e/_scratch-scheduler-review.spec.ts`,
 deleted after this pass).
 
+> **Update (follow-up pass):** a second review pass picked up where this one left
+> off. It found the root cause of the Supervisor sub-panel crash documented below
+> under "Found, reproduced, NOT fixed" and landed the fix (see "Fixed" item 5),
+> plus one more small duplication fix (item 6). That section is retained below
+> for its diagnostic value but the crash itself is no longer open.
+
 ## Fixed
 
 1. **"reset to pending" was clickable on a genuinely running job** (`SchedulePanel.tsx`
@@ -66,6 +72,41 @@ deleted after this pass).
    the top of the component (its result was never read — `StructuredPrdEditor`
    recomputes the same thing from its own `fm` prop) and the `parsePrdFile(body)`
    destructure that only existed to feed it.
+
+5. **Supervisor sub-panel crash — root cause found and fixed.** This is the same
+   crash documented below under "Found, reproduced, NOT fixed" by the prior pass.
+   Root cause: `SchedulePanel.tsx`'s `handleJobListKeyDown` `useCallback` was
+   declared **after** two early returns (`if (!snap) return null` and
+   `if (panelView === 'supervisor') return <SupervisorPanel/>`). On the very
+   first render where `panelView` flips to `'supervisor'`, the component returns
+   before ever reaching that `useCallback` — so it executes one fewer hook than
+   every other render. That's a Rules-of-Hooks violation (React error #300/#310,
+   "Rendered fewer hooks than during the previous render"), caught by the app's
+   `ErrorBoundary`. The prior pass's diagnosis ("no hook-order violation — all
+   hooks in `SchedulePanel` run before either of its two early returns") was
+   the one false lead in an otherwise thorough investigation: the `useCallback`
+   for `handleJobListKeyDown` is declared well *after* both early returns
+   (originally at line ~190, ~50 lines below the `if (panelView ===
+   'supervisor')` return at line ~142), not before them.
+   Fix: hoisted `handleJobListKeyDown`'s `useCallback` above both early returns
+   so every render executes the same hooks in the same order regardless of
+   `panelView`/`snap`. Verified via a fresh `npm run build` + a new permanent
+   regression spec, `tests/e2e/scheduler-supervisor-panel.spec.ts` (passes:
+   clicking "supervisor" now renders the panel normally with zero console
+   errors, and navigating back to Queue still renders correctly).
+
+6. **`verifierVerdict` → human-readable label duplicated/inconsistent across 3
+   surfaces.** `SchedulePanel.tsx`'s Queue job detail panel mapped a job's raw
+   `verifierVerdict` (e.g. `"no_verdict_sentinel"`) through a local
+   `VERDICT_LABELS` table to human text ("no commit or verdict sentinel"), but
+   `SchedulerHistoryView.tsx`'s job detail panel and `SchedulerPrdsView.tsx`'s
+   needs_review card both displayed the raw machine-readable slug verbatim —
+   the same datum shown three different ways in the same view family, exactly
+   the "N display sites, one source" violation the engineering standards call
+   out. Moved `VERDICT_LABELS` (+ a `verdictLabel()` helper) into
+   `sched-primitives.tsx` and pointed all three call sites at it. Added a unit
+   test (`sched-primitives.test.ts`) covering the mapping, the unknown-verdict
+   fallback, and full `VERDICT_LABELS` coverage.
 
 ## Found, reproduced, NOT fixed (root cause not pinned down — see below)
 
@@ -187,3 +228,35 @@ deleted after this pass).
   above — confirmed on the very first attempt, then isolated across several
   further targeted repro runs, and excluded from the final clean pass so the
   rest of Queue/PRDs/History could be verified end-to-end.
+
+### Follow-up pass (Supervisor crash fix + verdict-label consolidation)
+
+- `timeout 120 npm run typecheck` — clean, before and after changes.
+- `node --test` on all 10 listed `dod-*`/`scheduler-*.test.cjs` files — 102/102
+  pass (same pre-existing vitest/`node:test` mismatch as above; unaffected by
+  this pass's renderer-only changes).
+- `timeout 150 npx vitest run` (full suite, including the new
+  `sched-primitives.test.ts`) — 753/753 pass; same pre-existing
+  `scheduler-committed-in-window.test.cjs` "failed suite" quirk (its 2
+  assertions still pass via `node:test`'s own runner as a side effect of being
+  required — see above).
+- Live app exercise: launched via Playwright `_electron` under `xvfb-run`
+  against the pre-review production `dist/` build first (root-caused and
+  reproduced the Supervisor crash: `console.error: Error: Minified React error
+  #300` fired in the exact ~300ms window covering one click on "supervisor",
+  matching the prior pass's own repro). After landing the hoisted-`useCallback`
+  fix, ran `npm run build` and added a permanent regression spec
+  (`tests/e2e/scheduler-supervisor-panel.spec.ts`) — passes clean against the
+  rebuilt `dist/`: the Supervisor panel now renders normally with zero
+  `Minified React error #300/#310` / `ErrorBoundary` console entries, and
+  navigating back to Queue still renders correctly.
+- A second attempt to get the un-minified error text via `SM_DEV=1` (pointed at
+  a Vite dev server already running from an unrelated concurrent scheduler job
+  on this same machine — confirmed via `lsof -i :5173` and `ps aux`) hung for
+  the full 170s bound with no output and was killed; not pursued further since
+  the production-build repro plus static hook-order analysis already gave a
+  certain root cause. No shared state was touched: the concurrent job's own
+  `dist`/Vite server were left untouched (confirmed still serving 200 OK
+  afterward), and `~/.claude/session-manager/scheduled-plans/prds/` was
+  confirmed to have no leftover `test-scheduler-review-walkthrough` fixture
+  after the aborted run's `afterEach` cleanup ran.

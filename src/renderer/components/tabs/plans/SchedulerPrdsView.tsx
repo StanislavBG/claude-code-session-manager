@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
-import { ProjectTag, prdNumber, PrdNumberBadge, prdStatusFor, PrdStatusPill } from '../scheduler/sched-primitives'
+import { ProjectTag, prdNumber, PrdNumberBadge, prdStatusFor, PrdStatusPill, verdictLabel } from '../scheduler/sched-primitives'
 import { EmptyState } from '../../ui/EmptyState'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
@@ -716,7 +716,7 @@ export function SchedulerPrdsView() {
                         <div className="mt-3 space-y-2">
                           {j?.verifierVerdict && (
                             <div className="text-xs text-fg-faint">
-                              verdict: <span className="font-mono">{j.verifierVerdict}</span>
+                              verdict: <span className="font-mono">{verdictLabel(j.verifierVerdict)}</span>
                             </div>
                           )}
                           <button

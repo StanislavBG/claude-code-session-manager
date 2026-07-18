@@ -8,7 +8,7 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd } from './tabs/scheduler/sched-primitives'
+import { SchBadge, ProjectTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -58,16 +58,6 @@ function applyFilter(jobs: ScheduleJob[], filter: QueueFilter): ScheduleJob[] {
       tag.toLowerCase().includes(q)
     )
   })
-}
-
-const VERDICT_LABELS: Record<string, string> = {
-  halt: 'verifier halted',
-  deps_unmet: 'dependencies unmet',
-  transcript_errors: 'transcript had errors',
-  verify_unavailable: 'verify unavailable',
-  uncommitted_changes: 'uncommitted changes',
-  no_verdict_sentinel: 'no commit or verdict sentinel',
-  pass_no_commit: 'PASS sentinel but no commit landed',
 }
 
 function loadHidden(): Set<string> {
@@ -147,6 +137,28 @@ export function SchedulePanel() {
     if (changed.length > 0) setAnnouncement(changed.join('; '))
   }, [snap])
 
+  // Hooks must run unconditionally on every render — declared here, before the
+  // panelView/snap early returns below, so switching to the supervisor
+  // sub-panel doesn't change the hook count between renders (React error #300:
+  // "Rendered fewer hooks than expected").
+  const handleJobListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const rows = jobListRef.current?.querySelectorAll<HTMLButtonElement>('[data-job-row]')
+    if (!rows || rows.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const next = Math.min(focusedJobIdx + 1, rows.length - 1)
+      setFocusedJobIdx(next)
+      try { localStorage.setItem(FOCUSED_IDX_KEY, String(next)) } catch { /* */ }
+      rows[next]?.focus()
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const prev = Math.max(focusedJobIdx - 1, 0)
+      setFocusedJobIdx(prev)
+      try { localStorage.setItem(FOCUSED_IDX_KEY, String(prev)) } catch { /* */ }
+      rows[prev]?.focus()
+    }
+  }, [focusedJobIdx])
+
   if (!snap) return null
 
   if (panelView === 'supervisor') {
@@ -196,24 +208,6 @@ export function SchedulePanel() {
     setShowAllCompleted(false)
   }
   const hasInlineCompleted = inline.some((j) => j.status === 'completed')
-
-  const handleJobListKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const rows = jobListRef.current?.querySelectorAll<HTMLButtonElement>('[data-job-row]')
-    if (!rows || rows.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      const next = Math.min(focusedJobIdx + 1, rows.length - 1)
-      setFocusedJobIdx(next)
-      try { localStorage.setItem(FOCUSED_IDX_KEY, String(next)) } catch { /* */ }
-      rows[next]?.focus()
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      const prev = Math.max(focusedJobIdx - 1, 0)
-      setFocusedJobIdx(prev)
-      try { localStorage.setItem(FOCUSED_IDX_KEY, String(prev)) } catch { /* */ }
-      rows[prev]?.focus()
-    }
-  }, [focusedJobIdx])
 
   return (
     <div className="overflow-y-auto h-full">
@@ -766,7 +760,7 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
   const note = isFailed && errorText
     ? errorText.split('\n')[0]
     : job.status === 'needs_review' && job.verifierVerdict
-      ? (VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict)
+      ? verdictLabel(job.verifierVerdict)
       : null
 
   // Progress fraction for running jobs (capped at 0.99 so it never "completes")
@@ -831,7 +825,7 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
             <DetailLine k="result" v={job.exitCode !== null ? `exit ${job.exitCode}` : '—'} />
             <DetailLine k="state" v={job.status.replace(/_/g, ' ')} />
             {job.verifierVerdict && (
-              <DetailLine k="verdict" v={VERDICT_LABELS[job.verifierVerdict] ?? job.verifierVerdict} />
+              <DetailLine k="verdict" v={verdictLabel(job.verifierVerdict)} />
             )}
             {errorText && (
               <DetailLine k="error" v={errorText.split('\n')[0]} wrap />

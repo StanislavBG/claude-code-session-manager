@@ -1,4 +1,4 @@
-import type { BillingData, BillingFetchResult, UsageWindow } from '../../../preload/api'
+import type { BillingFetchResult } from '../../../preload/api'
 
 function formatStaleDuration(since: number): string {
   const ms = Date.now() - since
@@ -7,70 +7,6 @@ function formatStaleDuration(since: number): string {
   if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60)
   return `${h}h ${m % 60}m ago`
-}
-
-function formatResetAt(iso: string | null): string {
-  if (!iso) return '—'
-  const t = new Date(iso)
-  if (Number.isNaN(t.getTime())) return '—'
-  const diffMs = t.getTime() - Date.now()
-  if (diffMs <= 0) return 'now'
-  const h = Math.floor(diffMs / 3_600_000)
-  const m = Math.floor((diffMs % 3_600_000) / 60_000)
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function barColor(utilization: number): string {
-  if (utilization >= 90) return 'bg-red-400'
-  if (utilization >= 70) return 'bg-yellow-400'
-  return 'bg-emerald-400'
-}
-
-export function UsageBar({ label, window: w, dimmed }: { label: string; window: UsageWindow | null; dimmed?: boolean }) {
-  if (!w) return null
-  const pct = Math.max(0, Math.min(100, w.utilization))
-  return (
-    <div className={`border border-line rounded p-3 bg-bg-elev ${dimmed ? 'opacity-50' : ''}`}>
-      <div className="flex items-baseline justify-between mb-2">
-        <div className="text-xs text-fg-faint uppercase tracking-wider">{label}</div>
-        <div className="text-xs text-fg-dim">resets in {formatResetAt(w.resets_at)}</div>
-      </div>
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-2 bg-bg rounded overflow-hidden">
-          <div className={`h-full ${barColor(w.utilization)}`} style={{ width: `${pct}%` }} />
-        </div>
-        <div className="text-sm font-mono text-fg tabular-nums w-14 text-right">
-          {w.utilization.toFixed(0)}%
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export function UsageBars({ data, dimmed }: { data: BillingData; dimmed?: boolean }) {
-  const { usage, subscriptionType, rateLimitTier } = data
-  return (
-    <>
-      {(subscriptionType || rateLimitTier) && (
-        <div className="flex items-baseline gap-2 mb-3">
-          {subscriptionType && <span className="text-xs text-fg-dim font-mono">{subscriptionType}</span>}
-          {rateLimitTier && <span className="text-xs text-fg-faint font-mono">{rateLimitTier}</span>}
-        </div>
-      )}
-      <div className="grid grid-cols-1 gap-3">
-        <UsageBar label="5-hour window" window={usage.five_hour} dimmed={dimmed} />
-        <UsageBar label="Weekly window (all)" window={usage.seven_day} dimmed={dimmed} />
-        <UsageBar label="Weekly — Sonnet" window={usage.seven_day_sonnet} dimmed={dimmed} />
-        <UsageBar label="Weekly — Opus" window={usage.seven_day_opus} dimmed={dimmed} />
-      </div>
-      {usage.extra_usage?.is_enabled && (
-        <div className={`mt-3 border border-line rounded p-3 bg-bg-elev text-xs text-fg-dim ${dimmed ? 'opacity-50' : ''}`}>
-          extra usage enabled · used {usage.extra_usage.used_credits ?? 0} /{' '}
-          {usage.extra_usage.monthly_limit ?? '—'} {usage.extra_usage.currency ?? ''}
-        </div>
-      )}
-    </>
-  )
 }
 
 export function StaleChip({ since, error: _error, onRetry }: { since: number; error: string; onRetry: () => void }) {
@@ -110,6 +46,15 @@ export function TransientChip() {
   )
 }
 
+export function MeterRateLimitedChip({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex items-center justify-between border border-yellow-800/40 rounded px-3 py-1.5 bg-yellow-950/20 text-xs text-yellow-300">
+      <span>usage meter is rate-limited — showing last known values</span>
+      <button onClick={onRetry} className="ml-3 underline hover:no-underline">Retry</button>
+    </div>
+  )
+}
+
 export function ConfigBanner({ message }: { message: string }) {
   const isMissing = message.includes('not found') || message.includes('ENOENT')
   return (
@@ -141,6 +86,8 @@ export function BillingStatusOverlay({
       return <AuthBanner message={result.message} expiredAt={result.expiredAt} onRetry={onRetry} />
     case 'transient':
       return <TransientChip />
+    case 'meter_rate_limited':
+      return <MeterRateLimitedChip onRetry={onRetry} />
     case 'config':
       return <ConfigBanner message={result.message} />
   }

@@ -42,7 +42,7 @@ async function tick(): Promise<void> {
     useBilling.setState({ data: r, refreshing: false })
     if (r.kind === 'transient') {
       next = lastKind === 'transient' ? 30_000 : 5_000
-    } else if (r.kind === 'auth') {
+    } else if (r.kind === 'auth' || r.kind === 'meter_rate_limited') {
       next = 30_000
     }
     lastKind = r.kind
@@ -68,7 +68,7 @@ export function startBillingPolling(): void {
 export function getBillingData(r: BillingFetchResult | null): BillingData | null {
   if (!r) return null
   if (r.kind === 'ok' || r.kind === 'ok-stale') return r.data
-  if (r.kind === 'auth' && r.cached) return r.cached
+  if ((r.kind === 'auth' || r.kind === 'meter_rate_limited') && r.cached) return r.cached
   return null
 }
 

@@ -1,4 +1,5 @@
 import type { UsageMatrixSnapshot } from '../../../../preload/api'
+import { formatCompactCount } from './usage-primitives'
 
 /**
  * Macro overview strip — renders as the top stat row inside the Almanac
@@ -24,7 +25,7 @@ export function TopologyHeader({ snap }: { snap: UsageMatrixSnapshot | null }) {
         value={t.combinedTokensPerMin > 0 ? `${formatRate(t.combinedTokensPerMin)}/min` : '—'}
         mono
       />
-      <TopStat label="Tokens today" value={formatTokens(t.tokensTotal)} mono last />
+      <TopStat label="Tokens today" value={formatCompactCount(t.tokensTotal)} mono last />
     </div>
   )
 }
@@ -52,12 +53,6 @@ function TopStat({
       </div>
     </div>
   )
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
-  return String(n)
 }
 
 function formatRate(n: number): string {

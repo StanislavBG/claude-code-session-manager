@@ -212,6 +212,7 @@ export type BillingFetchResult =
   | { kind: 'ok-stale'; data: BillingData; staleSince: number; lastError: string }
   | { kind: 'auth'; message: string; httpStatus: number; expiredAt?: number | null; cached?: BillingData; staleSince?: number }
   | { kind: 'transient'; message: string; httpStatus: number | null }
+  | { kind: 'meter_rate_limited'; message: string; httpStatus: number; cached?: BillingData; staleSince?: number }
   | { kind: 'config'; message: string };
 
 // ── MCP server live connection probe (`claude mcp list`)

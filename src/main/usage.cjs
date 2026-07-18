@@ -240,6 +240,10 @@ function registerBillingHandlers() {
       if (cache) return { kind: 'ok-stale', data: cache.data, staleSince: cache.fetchedAt, lastError: r.message };
       return r;
     }
+    if (r.kind === 'meter_rate_limited') {
+      if (cache) return { kind: 'meter_rate_limited', message: r.message, httpStatus: r.httpStatus, cached: cache.data, staleSince: cache.fetchedAt };
+      return r;
+    }
     return r; // config
   });
 }

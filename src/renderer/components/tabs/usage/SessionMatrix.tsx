@@ -1,4 +1,5 @@
 import type { UsageMatrixSnapshot, UsageMatrixTab } from '../../../../preload/api'
+import { formatCompactCount } from './usage-primitives'
 
 /**
  * Cross-workspace active-session matrix. One row per attached tab; columns
@@ -64,10 +65,10 @@ function Row({ r }: { r: UsageMatrixTab }) {
         )}
       </td>
       <td className="pr-3 py-2.5 text-right font-mono text-[13px] text-fg-dim">
-        {formatK(r.avgTokensPerTurn)}
+        {formatCompactCount(r.avgTokensPerTurn)}
       </td>
       <td className={`pr-3 py-2.5 text-right font-mono text-[13px] ${intensityColor(r.intensity)}`}>
-        {r.tokensPerMin > 0 ? formatK(r.tokensPerMin) : '—'}
+        {r.tokensPerMin > 0 ? formatCompactCount(r.tokensPerMin) : '—'}
       </td>
       <td className="pr-3 py-2.5">
         <CachePill state={r.cacheState} ageMs={r.cacheAgeMs} />
@@ -125,12 +126,6 @@ function intensityColor(i: UsageMatrixTab['intensity']): string {
     medium: 'text-honey-dark',
     critical: 'text-accent',
   }[i]
-}
-
-function formatK(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
-  return String(n)
 }
 
 function formatAge(ms: number): string {

@@ -314,3 +314,129 @@ bounded number of times (§1) rather than capping the foreground command.
 `timeout`-capped full-universe EDGAR ingest. Both committed correct, green, AC-complete work
 (77's cursor-hold fix; 80's 6 EDGAR rows + installed cron) yet were downgraded to `needs_review`
 on the incidental middle-of-run markers. 13a/13b keep the middle of the transcript clean.
+
+## §14 Queueing PRDs from external automation
+
+**Summary:** A downstream project (Connector Atlas, `gh-issue-5`) wanted a Slack-feedback → PRD
+loop but had no documented programmatic queueing path. This section is that path.
+
+**Decision, up front:** Is the session-manager Electron app running on this machine right now?
+- **Yes** → call the `scheduler_create_prd` MCP tool.
+- **No** → write the PRD file by hand into the prds directory, and accept the collision risk
+  described below.
+
+### The `scheduler_create_prd` MCP tool
+
+Wraps `POST /admin/scheduler/create-prd` on the loopback admin API
+(`src/main/adminServer.cjs`, PRD 549) via `scripts/scheduler-mcp-server.cjs`, registered in this
+repo's `.mcp.json` as the `session-manager-scheduler` MCP server. An external project wanting to
+call it from its own automation needs the equivalent MCP server registration pointing at this
+repo's `scripts/scheduler-mcp-server.cjs`, or can call the admin HTTP route directly (same
+request/response shape) using the token at `~/.claude/session-manager/admin-api.json`.
+
+**Input** (validated server-side by `ipcSchemas.cjs`'s `schemas.schedulerCreatePrd`):
+
+| field | type | required | notes |
+|---|---|---|---|
+| `title` | string | yes | one-line title, no newlines |
+| `cwd` | string | yes | absolute path to the target project; validated via `config.cjs`'s `validatePath` (allowedRoots = home dir) |
+| `estimateMinutes` | number | yes | integer wall-clock estimate |
+| `goal` | string | yes | 2–4 sentences: what the executor builds and why |
+| `acceptanceCriteria` | string[] | yes | 1–100 entries, each one verifiable checklist line |
+| `implementationNotes` | string | yes | file paths, patterns, constraints the executor needs |
+| `outOfScope` | string[] | no | what NOT to build |
+| `slug` | string | no | kebab-case; derived from `title` if omitted |
+| `parallelGroup` | number | no | opt into an existing `NN` group instead of allocating a new one |
+
+**Return** (`{nn, filename, status}`, per `adminServer.cjs`):
+```json
+{ "nn": 550, "filename": "550-my-feature.md", "status": "queued" }
+```
+On failure the tool returns `{ ok: false, error: "..." }` (e.g. `409` if `filename` already
+exists, `400` if `cwd` is rejected by `validatePath` or the payload fails schema validation).
+
+**Worked example** (MCP tool call, e.g. from Claude Code or any MCP client):
+```json
+{
+  "tool": "scheduler_create_prd",
+  "arguments": {
+    "title": "Sync Slack #feedback channel into feedback intake",
+    "cwd": "~/Projects/connector-atlas",
+    "estimateMinutes": 20,
+    "goal": "Pull unread messages from the #feedback Slack channel and materialize each as a feedback file, deduped against already-tracked message ts.",
+    "acceptanceCriteria": [
+      "New feedback files land in connector-atlas's own feedback intake folder, one per undeduped message",
+      "Each file's `source` field is `slack-<channel>-<ts>` for future dedup",
+      "timeout 300 npm run typecheck passes"
+    ],
+    "implementationNotes": "Use the Slack Web API conversations.history endpoint; token lives in connector-atlas's own secrets store, not session-manager's."
+  }
+}
+```
+Server-side, this atomically allocates the `NN` prefix (`allocateParallelGroup()`, PRD 548),
+appends the engineering standards block, and writes the PRD file — the same shape `/develop`
+produces by hand.
+
+### The app-must-be-running caveat (read this first)
+
+**`scheduler_create_prd` only works while the session-manager Electron app is running on this
+machine.** The admin server it depends on (`src/main/adminServer.cjs`) is hosted *inside* the
+Electron process — it binds a loopback port and writes its token to
+`~/.claude/session-manager/admin-api.json` on app boot (see `CLAUDE.md`'s `adminServer.cjs`
+architecture entry) and stops existing the moment the app quits — it is not a standalone daemon.
+If the app is closed, `scheduler-mcp-server.cjs` cannot read a live port/token and every call
+returns the error `session-manager app is not running (admin API unreachable) — start it first`.
+This is the single most likely point of confusion for an automation author who assumes the tool
+is a normal always-on API — it is not; it is a convenience surface hosted by a desktop app that
+the user may or may not have open.
+
+### Fallback: writing the PRD file directly
+
+When the app is not running, write `<NN>-<slug>.md` by hand into
+`~/.claude/session-manager/scheduled-plans/prds/` following the frontmatter rules in §6 and the
+body conventions the rest of this guide describes (`# Goal`, `# Acceptance criteria`,
+`# Implementation notes`, `## Engineering standards` inlined verbatim — see `/develop`'s output
+for the exact shape). **Trade-off:** this path has no atomic `NN` allocation. The tool's
+`allocateParallelGroup()` (PRD 548) exists specifically to close a race where two writers pick
+the same `NN` at once; a hand-written file bypasses that reservation entirely, so if another
+writer (a human, `/develop`, or another automation) picks the same `NN` around the same time, one
+file silently shadows or is shadowed by the other's parallel-group slot. Pick an `NN` by scanning
+the existing prds directory for the current max and incrementing, and treat a collision as
+possible, not merely theoretical.
+
+### Ownership boundary
+
+Projects own their own source adapters — Slack, GitHub, Linear, email, whatever inbound channel
+they read. Session-manager owns the queueing API (`scheduler_create_prd` / the admin route) and
+nothing upstream of it. Session-manager does not host, run, or import another project's adapter
+code; the adapter runs entirely inside the calling project (its own cron, its own credentials,
+its own filtering/triage logic) and only reaches into session-manager at the single, narrow
+`scheduler_create_prd` call.
+
+### Why project-supplied `automation-hooks.js` was declined
+
+Connector Atlas's third ask was a mechanism to drop a project-supplied `automation-hooks.js` file
+that session-manager would load and execute in-process on a timer. This was declined, and should
+not be re-proposed:
+
+- It would grant main-process privileges (full filesystem access, IPC, the admin server's own
+  token) to arbitrary code from any project directory, invoked on a schedule the *project*
+  controls rather than the *user*.
+- It inverts this project's core invariants: `config.cjs`'s `validatePath` gate on every
+  filesystem path, `ipcSchemas.cjs`'s zod-validated IPC boundary, and `CLAUDE.md`'s Avoid-list
+  ban on `shell: true` outside the two features that legitimately need it. A loaded-and-executed
+  project JS file has no equivalent boundary to pass through — it *is* the process.
+- The supported extension point is the MCP tool described above, called from *outside* the
+  session-manager process by the project's own cron/automation. That keeps the privilege boundary
+  where it already is (the loopback admin server, token-authed, narrow three-route surface) rather
+  than dissolving it.
+
+### Reference implementation of this exact loop
+
+`/process-feedback`'s step 0b (source → triage → `/develop` → queue) is a working example of this
+shape, landed 2026-07-14 (`feat(process-feedback): sync open GitHub issues into the feedback
+intake`, commit `352b89c`). It syncs open GitHub issues into `session-manager-operations/feedback/`
+(deduped on a `gh-issue-<N>` token), then processes each item through the same triage → `/develop`
+→ queue path the rest of this guide documents. An external project building a Slack (or any
+other) adapter should follow the same source → triage → queue shape, ending at
+`scheduler_create_prd` (app running) or a hand-written PRD file (app closed) as described above.

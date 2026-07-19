@@ -189,6 +189,11 @@ let _destroyed = false; // set at app shutdown to stop reconnect loops
 // E2E session state — reset on each new WS connection.
 // .state: 'idle' | 'pending_sas' | 'authenticated' | 'failed'
 let _e2e = makeState();
+// Browser SPKI pubkey (base64url) that produced the current _e2e session, and the
+// deviceId it was received on — tracked so a manual SAS confirmation can pin it to
+// that device's `verifiedPeerPubKey` for auto-trust on future reconnects.
+let _e2ePeerPubKey = null;
+let _e2eDeviceId = null;
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
@@ -317,6 +322,8 @@ async function getDeviceTicket(deviceToken) {
 
 function resetE2e(state = 'idle') {
   _e2e = makeState(state);
+  _e2ePeerPubKey = null;
+  _e2eDeviceId = null;
 }
 
 // ─── WebSocket lifecycle ──────────────────────────────────────────────────────
@@ -781,6 +788,19 @@ async function maybeSummarize(w) {
   });
 }
 
+/**
+ * Shared finish-up for any path that transitions _e2e into 'authenticated'
+ * (manual SAS confirmation or pinned-key auto-trust): log, broadcast the new
+ * status, and flush the session list immediately rather than waiting for the
+ * next SESSION_LIST_PUSH_MS tick.
+ */
+function finalizeE2eAuthenticated(logMessage) {
+  logs.writeLine({ scope: 'webRemote', level: 'info', message: logMessage });
+  broadcastStatus();
+  _lastSessionListJson = null;
+  pushSessionList().catch(() => {});
+}
+
 // ─── Message handling & command dispatch ─────────────────────────────────────
 
 async function handleMessage(raw, device) {
@@ -881,6 +901,18 @@ async function handleMessage(raw, device) {
         resetE2e('failed');
         logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'E2E SAS derivation failed — session marked failed', meta: { error: sasErr?.message } });
         broadcastStatus();
+        return;
+      }
+      _e2ePeerPubKey = browserPubKey;
+      _e2eDeviceId = device.deviceId;
+      // TOFU pinning: if this exact (deviceId, browserPubKey) pair was already
+      // manually SAS-confirmed once, skip pending_sas and auto-authenticate — the
+      // user already verified this browser. A different/first-seen pubKey always
+      // falls through to the manual pending_sas flow below, unchanged.
+      if (device.verifiedPeerPubKey && device.verifiedPeerPubKey === browserPubKey) {
+        _e2e = makeState('authenticated', sessionKey, null);
+        finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched');
+        respond(id, undefined, 'e2e:ready');
         return;
       }
       _e2e = makeState('pending_sas', sessionKey, pendingSas);
@@ -1166,6 +1198,9 @@ async function pair(otp) {
     deviceName: `Device (paired ${new Date().toISOString().slice(0, 10)})`,
     issuedAt: new Date().toISOString(),
     lastConnectedAt: null,
+    // Set once a browser's SAS is manually confirmed; TOFU-pinned for auto-trust
+    // on future reconnects from the same (deviceId, browserPubKey) pair.
+    verifiedPeerPubKey: null,
   }];
 
   await saveConfig({ ...cfg, devices });
@@ -1233,13 +1268,23 @@ function registerRemoteHandlers() {
       return { ok: false, error };
     }
     _e2e = next;
-    logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session authenticated — SAS confirmed by user' });
-    broadcastStatus();
+    // Pin this browser's pubkey to the device so future reconnects with the same
+    // key auto-authenticate (see e2e:hello above) instead of re-prompting forever.
+    if (_e2ePeerPubKey && _e2eDeviceId) {
+      try {
+        const cfg = await loadConfig();
+        const devices = (cfg.devices || []).map((d) =>
+          d.deviceId === _e2eDeviceId ? { ...d, verifiedPeerPubKey: _e2ePeerPubKey } : d
+        );
+        await saveConfig({ ...cfg, devices });
+      } catch (e) {
+        logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'failed to persist pinned peer pubkey', meta: { error: e?.message } });
+      }
+    }
     // Flush the session list immediately — the push loop was suppressed while
     // state !== 'authenticated', so the mobile app would otherwise wait up to
     // SESSION_LIST_PUSH_MS for the first useful data.
-    _lastSessionListJson = null;
-    pushSessionList().catch(() => {});
+    finalizeE2eAuthenticated('E2E session authenticated — SAS confirmed by user');
     return { ok: true };
   });
 
@@ -1333,4 +1378,11 @@ module.exports = {
   registerRemoteHandlers,
   init,
   destroy,
+  // Test-only internals — not part of the IPC surface. Lets unit tests drive
+  // e2e:hello / SAS-pinning transitions without a real relay WS connection.
+  _internal: {
+    handleMessage,
+    resetE2e,
+    getE2eState: () => _e2e,
+  },
 };

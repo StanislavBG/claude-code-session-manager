@@ -317,7 +317,7 @@ async function aggregate(req) {
   try {
     projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
   } catch {
-    return { rows: [], partial: false, truncated: false, scannedMs: Date.now() - t0 };
+    return { rows: [], partial: false, truncated: false, scannedMs: Date.now() - t0, cacheSavingsUsd: 0 };
   }
 
   outer:

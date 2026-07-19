@@ -14,17 +14,27 @@ const IcoLink = ({ size = 42 }: { size?: number }) => (
  * Shown when signed in but no paired device is online. Generates a pairing code
  * to enter in the desktop Session Manager's Remote tab.
  */
-export default function ConnectScreen({ socket: _socket }: { socket: RelaySocket | null }) {
+export default function ConnectScreen({
+  socket: _socket, onRefresh,
+}: { socket: RelaySocket | null; onRefresh: () => Promise<void> }) {
   const { devices, wsConnected } = useStore();
   const [code, setCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const generate = async () => {
     setLoading(true); setErr(null);
     try { setCode((await requestOtp()).code); }
     catch (e: any) { setErr(e?.message || 'Failed to generate code'); }
     finally { setLoading(false); }
+  };
+
+  const refresh = async () => {
+    setRefreshing(true); setErr(null);
+    try { await onRefresh(); }
+    catch (e: any) { setErr(e?.message || 'Failed to check for pairing'); }
+    finally { setRefreshing(false); }
   };
 
   // 8-char code → cells (last group split by a dash like the design).
@@ -90,23 +100,35 @@ export default function ConnectScreen({ socket: _socket }: { socket: RelaySocket
       {code && <p className="text-center text-xs text-ink-mute mt-1">Code expires in 5 minutes.</p>}
       {err && <div className="mt-3 text-xs text-accent text-center" role="alert">{err}</div>}
 
-      {devices.length > 0 && (
-        <div className="mt-7">
-          <div className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-ink-mute mb-2">Paired devices</div>
-          <div className="flex flex-col gap-1.5">
-            {devices.map((d) => (
-              <div key={d.deviceId} className="flex items-center gap-2.5 py-1.5 text-ink-soft">
-                <span className={`w-2 h-2 rounded-full ${d.isOnline ? 'bg-sage' : 'bg-ink-mute'}`} />
-                <span className="font-mono text-xs truncate flex-1">{d.deviceId.slice(0, 12)}…</span>
-                <span className="text-xs text-ink-mute">{d.isOnline ? 'online' : 'offline'}</span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-ink-mute">
-            {wsConnected ? 'Waiting for a device to come online…' : 'Connecting to relay…'}
-          </p>
-        </div>
-      )}
+      <div className="mt-7">
+        {devices.length > 0 && (
+          <>
+            <div className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-ink-mute mb-2">Paired devices</div>
+            <div className="flex flex-col gap-1.5 mb-2">
+              {devices.map((d) => (
+                <div key={d.deviceId} className="flex items-center gap-2.5 py-1.5 text-ink-soft">
+                  <span className={`w-2 h-2 rounded-full ${d.isOnline ? 'bg-sage' : 'bg-ink-mute'}`} />
+                  <span className="font-mono text-xs truncate flex-1">{d.deviceId.slice(0, 12)}…</span>
+                  <span className="text-xs text-ink-mute">{d.isOnline ? 'online' : 'offline'}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mb-2 text-xs text-ink-mute">
+              {wsConnected ? 'Waiting for a device to come online…' : 'Connecting to relay…'}
+            </p>
+          </>
+        )}
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="w-full h-10 rounded-xl border border-edge bg-card text-ink-soft text-sm font-medium flex items-center justify-center gap-2 active:opacity-80 disabled:opacity-50"
+        >
+          {refreshing
+            ? <span className="rm-spin w-3.5 h-3.5 rounded-full border-2 border-ink-mute/40 border-t-ink-mute" />
+            : null}
+          {refreshing ? 'Checking…' : 'Refresh'}
+        </button>
+      </div>
 
       <div className="flex-1" />
       <div className="flex items-center justify-center gap-2 mt-7 text-[11.5px] text-ink-mute">

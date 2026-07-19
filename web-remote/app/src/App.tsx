@@ -42,6 +42,33 @@ function AppInner() {
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
 
+  // Fetches /devices and re-applies TOFU key pinning. Shared by the mount-time
+  // bootstrap and the event-triggered refresh (device paired after initial load).
+  const refreshDevices = async (): Promise<void> => {
+    const r = await getDevices();
+    // TOFU key pinning: pin devicePubKey at first encounter per deviceId.
+    // On subsequent loads, a changed key for the same deviceId raises a
+    // visible alarm and the mismatched device is excluded from E2E.
+    const mismatchIds: string[] = [];
+    const safeDevices = r.devices.map((d) => {
+      if (!d.devicePubKey) return d;
+      const storageKey = `${PIN_PREFIX}${d.deviceId}`;
+      const pinned = localStorage.getItem(storageKey);
+      if (!pinned) {
+        localStorage.setItem(storageKey, d.devicePubKey);
+        return d;
+      }
+      if (pinned !== d.devicePubKey) {
+        // Relay-served key diverged from pinned value — possible substitution.
+        mismatchIds.push(d.deviceId);
+        return { ...d, devicePubKey: undefined }; // exclude from E2E
+      }
+      return d;
+    });
+    setDevices(safeDevices);
+    mismatchIds.forEach(addKeyMismatch);
+  };
+
   // Wire Clerk token into the relay API client, then bootstrap.
   useEffect(() => {
     setTokenGetter(() => getToken());
@@ -49,31 +76,10 @@ function AppInner() {
       .then((user) => {
         setMe(user);
         if (!user) return;
-        return getDevices().then((r) => {
-          // TOFU key pinning: pin devicePubKey at first encounter per deviceId.
-          // On subsequent loads, a changed key for the same deviceId raises a
-          // visible alarm and the mismatched device is excluded from E2E.
-          const mismatchIds: string[] = [];
-          const safeDevices = r.devices.map((d) => {
-            if (!d.devicePubKey) return d;
-            const storageKey = `${PIN_PREFIX}${d.deviceId}`;
-            const pinned = localStorage.getItem(storageKey);
-            if (!pinned) {
-              localStorage.setItem(storageKey, d.devicePubKey);
-              return d;
-            }
-            if (pinned !== d.devicePubKey) {
-              // Relay-served key diverged from pinned value — possible substitution.
-              mismatchIds.push(d.deviceId);
-              return { ...d, devicePubKey: undefined }; // exclude from E2E
-            }
-            return d;
-          });
-          setDevices(safeDevices);
-          mismatchIds.forEach(addKeyMismatch);
-        });
+        return refreshDevices();
       })
       .catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getToken, setMe, setDevices, addKeyMismatch]);
 
   // Connect the relay socket once.
@@ -82,16 +88,24 @@ function AppInner() {
     socketRef.current = socket;
     socket.connect().catch(console.error);
 
-    const offStatus = socket.on('event:device:status', (m: Envelope) => {
+    const offStatus = socket.on('event:device:status', async (m: Envelope) => {
       if (m.deviceId && m.status) {
+        const deviceId = m.deviceId;
+        // A device paired after the initial getDevices() fetch (the normal
+        // pair-on-desktop-while-phone-is-open flow) won't be in the store yet;
+        // refresh before relying on setDeviceOnline, which only updates existing entries.
+        const known = useStore.getState().devices.some((d) => d.deviceId === deviceId);
+        if (!known) {
+          await refreshDevices().catch(console.error);
+        }
         const online = m.status === 'connected';
-        setDeviceOnline(m.deviceId, online);
+        setDeviceOnline(deviceId, online);
         if (online) {
-          setActiveDevice(m.deviceId);
+          setActiveDevice(deviceId);
           // Negotiate E2E (P-256 ECDH → AES-256-GCM) so the relay only ever sees
           // ciphertext. Idempotent — initiateE2E no-ops if the session exists.
-          const dev = useStore.getState().devices.find((d) => d.deviceId === m.deviceId);
-          if (dev?.devicePubKey) socket.initiateE2E(m.deviceId, dev.devicePubKey).catch(console.warn);
+          const dev = useStore.getState().devices.find((d) => d.deviceId === deviceId);
+          if (dev?.devicePubKey) socket.initiateE2E(deviceId, dev.devicePubKey).catch(console.warn);
         }
       }
     });
@@ -186,5 +200,5 @@ function AppInner() {
   if (online) {
     return <>{banners}<Cockpit socket={socketRef.current} deviceId={activeDeviceId!} /></>;
   }
-  return <>{banners}<ConnectScreen socket={socketRef.current} /></>;
+  return <>{banners}<ConnectScreen socket={socketRef.current} onRefresh={refreshDevices} /></>;
 }

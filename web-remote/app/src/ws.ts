@@ -1,4 +1,5 @@
 import { getWsTicket, RELAY_WSS_URL } from './api';
+import { loadKeyPair, saveKeyPair } from './e2eKeyStore';
 import type { Envelope } from './types';
 
 type EventHandler = (envelope: Envelope) => void;
@@ -54,6 +55,46 @@ async function generateBrowserKeyPair(): Promise<{ privateKey: CryptoKey; public
     privateKey: keyPair.privateKey,
     publicKeyB64: uint8ToBase64url(new Uint8Array(spkiDer)),
   };
+}
+
+// Dedupes concurrent getOrCreateBrowserKeyPair calls for the same deviceId so
+// two overlapping initiateE2E calls can't generate/persist divergent keypairs
+// (last-write-wins on IndexedDB would otherwise desync the in-memory key from
+// the persisted one).
+const keyPairLoads = new Map<string, Promise<{ privateKey: CryptoKey; publicKeyB64: string }>>();
+
+/**
+ * Load a persisted browser keypair for this device, or generate + persist a
+ * fresh one. Falls back to an in-memory-only keypair (today's behavior) if
+ * IndexedDB is unavailable (private/incognito mode, quota errors, etc).
+ */
+function getOrCreateBrowserKeyPair(
+  deviceId: string,
+): Promise<{ privateKey: CryptoKey; publicKeyB64: string }> {
+  const inFlight = keyPairLoads.get(deviceId);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    try {
+      const persisted = await loadKeyPair(deviceId);
+      if (persisted) return persisted;
+    } catch (e) {
+      console.warn('[relay] E2E keypair load failed, generating fresh', e);
+    }
+
+    const generated = await generateBrowserKeyPair();
+    try {
+      await saveKeyPair(deviceId, generated.privateKey, generated.publicKeyB64);
+    } catch (e) {
+      console.warn('[relay] E2E keypair persist failed, using in-memory-only key', e);
+    }
+    return generated;
+  })().finally(() => {
+    keyPairLoads.delete(deviceId);
+  });
+
+  keyPairLoads.set(deviceId, promise);
+  return promise;
 }
 
 /**
@@ -285,7 +326,7 @@ export class RelaySocket {
     if (existing?.sessionKey) return;
 
     try {
-      const { privateKey, publicKeyB64 } = await generateBrowserKeyPair();
+      const { privateKey, publicKeyB64 } = await getOrCreateBrowserKeyPair(deviceId);
       const session: E2ESession = {
         privateKey,
         browserPubKeyB64: publicKeyB64,

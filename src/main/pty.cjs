@@ -188,19 +188,19 @@ class PtyManager {
       // Tab was removed or never existed — tell the renderer so it can surface
       // "skipped" feedback rather than silently dropping the write.
       sendIfAlive(this.window, 'pty:write-error', { tabId, reason: 'no-pty' });
-      return;
+      return { ok: false, reason: 'no-pty' };
     }
     try {
       s.proc.write(data);
+      return { ok: true };
     } catch (err) {
       // node-pty throws synchronously (or the underlying net.Socket emits an
       // error that node-pty re-throws) when writing to an exited process.
       // Catch here so the uncaught-exception handler never sees it, and notify
       // the renderer to surface "skipped" feedback.
-      sendIfAlive(this.window, 'pty:write-error', {
-        tabId,
-        reason: String(err?.message || 'write-failed'),
-      });
+      const reason = String(err?.message || 'write-failed');
+      sendIfAlive(this.window, 'pty:write-error', { tabId, reason });
+      return { ok: false, reason };
     }
   }
 

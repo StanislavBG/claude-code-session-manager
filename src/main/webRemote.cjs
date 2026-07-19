@@ -1047,8 +1047,7 @@ function getDispatchMap() {
 
     'cmd:pty:write': async (payload) => {
       const parsed = schemas.ptyWrite.parse(payload);
-      ptyManager.write(parsed);
-      return { ok: true };
+      return ptyManager.write(parsed);
     },
 
     'cmd:pty:resize': async (payload) => {

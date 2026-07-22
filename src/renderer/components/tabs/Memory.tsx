@@ -10,8 +10,9 @@ import { formatBytes } from '../../lib/formatBytes'
 import { formatMtimeMs } from '../../lib/formatTime'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import { MEMORY_SLUG_RE } from '../../lib/memorySlug'
-import type { MemoryEntry } from '../../../preload/api'
+import type { MemoryEntry, MemoryStaleEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
+import { filterEntries } from '../../lib/staleFilter'
 import { MemoryNaturalPanel } from './MemoryNaturalPanel'
 import { SubagentMemoryView } from './memory/SubagentMemoryView'
 import { MemoryClustersPanel } from './memory/MemoryClustersPanel'
@@ -67,6 +68,8 @@ function WorkspaceMemoryView() {
   const [entries, setEntries] = useState<MemoryEntry[]>([])
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
+  const [staleByName, setStaleByName] = useState<Record<string, MemoryStaleEntry>>({})
+  const [staleOnly, setStaleOnly] = useState(false)
 
   // Per-entry editor state. Keyed by entry name. Cleared on workspace switch.
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
@@ -83,7 +86,14 @@ function WorkspaceMemoryView() {
       if (prev && r.entries.some((e) => e.name === prev)) return prev
       return r.entries[0]?.name ?? null
     })
-  }, [home, workspace])
+    try {
+      const s = await window.api.memory.stale(workspace, cwd ?? undefined)
+      setStaleByName(Object.fromEntries(s.entries.map((e) => [e.name, e])))
+    } catch (err) {
+      setStaleByName({})
+      toast.error(`Memory staleness check failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [home, workspace, cwd])
 
   useEffect(() => {
     setDraftByName({})
@@ -132,8 +142,10 @@ function WorkspaceMemoryView() {
 
   if (!home) return <EmptyState title="loading…" />
 
-  const filtered = entries.filter((e) => !filter || e.name.toLowerCase().includes(filter.toLowerCase()))
+  const staleCount = entries.reduce((n, e) => n + (staleByName[e.name]?.stale ? 1 : 0), 0)
+  const filtered = filterEntries(entries, filter, staleOnly, staleByName)
   const selectedEntry = entries.find((e) => e.name === selectedName) ?? null
+  const selectedStale = selectedName ? staleByName[selectedName] : undefined
   const draft = selectedName ? draftByName[selectedName] ?? '' : ''
   const saved = selectedName ? savedByName[selectedName] ?? '' : ''
   const dirty = selectedName ? draft !== saved : false
@@ -188,6 +200,18 @@ function WorkspaceMemoryView() {
             {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
           </span>
           <div className="flex-1" />
+          {view === 'classic' && staleCount > 0 && (
+            <button
+              onClick={() => setStaleOnly((v) => !v)}
+              className={`px-2 py-0.5 text-xs border rounded transition-colors ${
+                staleOnly
+                  ? 'text-amber-400 border-amber-400/50 bg-amber-400/10'
+                  : 'text-fg-dim hover:text-fg border-line hover:border-fg-faint'
+              }`}
+            >
+              Stale only ({staleCount})
+            </button>
+          )}
           {view === 'classic' && (
             <button
               onClick={() => setCreatingOpen(true)}
@@ -223,6 +247,11 @@ function WorkspaceMemoryView() {
             >
               Delete
             </button>
+            {selectedStale?.stale && (
+              <span className="text-amber-400/90 truncate" title={selectedStale.reasons.join('; ')}>
+                stale · {selectedStale.reasons.join(', ')}
+              </span>
+            )}
             <span className="text-fg-faint truncate flex-1">{selectedEntry.path}</span>
             {dirty && <span className="text-accent">unsaved</span>}
           </div>
@@ -256,23 +285,34 @@ function WorkspaceMemoryView() {
                 {entries.length === 0 ? 'no memories yet' : 'no matches'}
               </div>
             ) : (
-              filtered.map((e) => (
-                <button
-                  key={e.name}
-                  onClick={() => setSelectedName(e.name)}
-                  className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
-                    selectedName === e.name
-                      ? 'bg-bg-hi text-fg'
-                      : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
-                  }`}
-                  title={e.path}
-                >
-                  <span className="truncate">{e.name.replace(/\.md$/, '')}</span>
-                  <span className="ml-2 text-fg-faint shrink-0 text-[10px]">
-                    {formatBytes(e.bytes)} · {formatMtimeMs(e.mtimeMs)}
-                  </span>
-                </button>
-              ))
+              filtered.map((e) => {
+                const staleInfo = staleByName[e.name]
+                const title = staleInfo?.stale ? `${e.path}\nstale: ${staleInfo.reasons.join(', ')}` : e.path
+                return (
+                  <button
+                    key={e.name}
+                    onClick={() => setSelectedName(e.name)}
+                    className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
+                      selectedName === e.name
+                        ? 'bg-bg-hi text-fg'
+                        : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+                    }`}
+                    title={title}
+                  >
+                    <span className="truncate flex items-center">
+                      <span className="truncate">{e.name.replace(/\.md$/, '')}</span>
+                      {staleInfo?.stale && (
+                        <span className="ml-1.5 shrink-0 px-1 rounded text-[9px] uppercase tracking-wide text-amber-400/90 border border-amber-400/30">
+                          stale
+                        </span>
+                      )}
+                    </span>
+                    <span className="ml-2 text-fg-faint shrink-0 text-[10px]">
+                      {formatBytes(e.bytes)} · {formatMtimeMs(e.mtimeMs)}
+                    </span>
+                  </button>
+                )
+              })
             )}
           </div>
         }

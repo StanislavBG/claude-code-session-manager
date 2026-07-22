@@ -307,6 +307,8 @@ contextBridge.exposeInMainWorld('api', {
     },
     aggregate: (workspace, refresh) =>
       ipcRenderer.invoke('memory:aggregate', refresh ? { workspace, refresh: true } : { workspace }),
+    stale: (workspace, cwd) =>
+      ipcRenderer.invoke('memory:stale', { ...(workspace ? { workspace } : {}), ...(cwd ? { cwd } : {}) }),
   },
   agentMemory: {
     list: (agentId) => ipcRenderer.invoke('agent-memory:list', { agentId }),

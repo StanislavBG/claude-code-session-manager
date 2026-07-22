@@ -796,6 +796,21 @@ export interface MemoryAggregateResult {
   error?: string;
 }
 
+export interface MemoryStaleEntry {
+  name: string;
+  ageDays: number;
+  inboundLinks: number;
+  deadRefs: string[];
+  stale: boolean;
+  reasons: string[];
+}
+
+export interface MemoryStaleResult {
+  entries: MemoryStaleEntry[];
+  workspace: string;
+  error: string | null;
+}
+
 // ────────────────────────────────────────────── Per-subagent memory
 // Stored at ~/.claude/session-manager/agent-memory/<agentId>.json. Keyed by
 // agent name (the .md filename in ~/.claude/agents/), not by workspace cwd.
@@ -1301,6 +1316,8 @@ export interface SessionManagerAPI {
     create: (name: string, description?: string, workspace?: string) => Promise<MemoryMutationResult>;
     /** Aggregate workspace memories into semantic clusters. `refresh:true` fires a cost-gated `claude -p` pass; otherwise returns the cache only. */
     aggregate: (workspace: string, refresh?: boolean) => Promise<MemoryAggregateResult>;
+    /** Deterministic, zero-LLM-cost staleness report. `cwd` (optional) scopes the dead-repo-ref check. */
+    stale: (workspace?: string, cwd?: string) => Promise<MemoryStaleResult>;
   };
   agentMemory: {
     /** List all memory entries for one subagent. Sorted newest first. */

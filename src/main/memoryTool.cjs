@@ -31,6 +31,7 @@ const os = require('node:os');
 const config = require('./config.cjs');
 
 const { MEMORY_SLUG_RE: SLUG_RE } = require('./lib/memorySlug.cjs');
+const { scoreMemories } = require('./lib/memoryStale.cjs');
 
 const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
 const MAX_ENTRIES = 1000;
@@ -192,6 +193,52 @@ async function create({ workspace, name, description }) {
   return await write({ workspace: ws, name, content: fm });
 }
 
+/**
+ * Deterministic, zero-LLM-cost staleness report for a workspace's memories.
+ * `cwd`, when supplied, is validated through config.validatePath (same
+ * home-boundary contract as every other path in this file) and used only for
+ * the dead-ref existence check. Absent/invalid cwd disables dead-ref
+ * detection entirely rather than mass-flagging memories.
+ */
+async function stale({ workspace, cwd }) {
+  const ws = validWorkspaceName(workspace) ? workspace : 'default';
+  const dir = workspaceDir(ws);
+  const r = await config.listDir(dir, { filesOnly: true });
+  if (!r.ok) {
+    return { entries: [], workspace: ws, error: r.error };
+  }
+  const names = r.entries.map((e) => e.name).filter((n) => SLUG_RE.test(n)).sort();
+
+  let baseDir = null;
+  if (typeof cwd === 'string' && cwd) {
+    try {
+      const validated = config.validatePath(cwd);
+      if (fs.existsSync(validated) && fs.statSync(validated).isDirectory()) {
+        baseDir = validated;
+      }
+    } catch {
+      baseDir = null;
+    }
+  }
+  const existsPath = baseDir
+    ? (relPath) => {
+        const full = path.resolve(baseDir, relPath);
+        if (full !== baseDir && !full.startsWith(baseDir + path.sep)) return false;
+        return fs.existsSync(full);
+      }
+    : () => true;
+
+  const entries = [];
+  for (const name of names) {
+    const abs = path.join(dir, name);
+    const r2 = await config.readText(abs);
+    if (!r2.exists) continue;
+    entries.push({ name, mtimeMs: r2.mtimeMs, body: r2.text });
+  }
+
+  return { entries: scoreMemories({ entries, now: Date.now(), existsPath }), workspace: ws, error: null };
+}
+
 function registerMemoryHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('memory:list', v(s.memoryList, list));
@@ -199,6 +246,7 @@ function registerMemoryHandlers() {
   ipcMain.handle('memory:write', v(s.memoryWrite, write));
   ipcMain.handle('memory:delete', v(s.memoryDelete, deleteEntry));
   ipcMain.handle('memory:create', v(s.memoryCreate, create));
+  ipcMain.handle('memory:stale', v(s.memoryStale, stale));
 }
 
 module.exports = {
@@ -207,4 +255,5 @@ module.exports = {
   // exported for tests
   memoryRoot,
   workspaceDir,
+  stale,
 };

@@ -351,6 +351,14 @@ const memoryCreate = z.object({
   description: z.string().max(2048).optional(),
 }).strict();
 
+// memory:stale — deterministic staleness scorer (PRD 601). `cwd`, when given,
+// is only used for the dead-ref existence check and is re-validated via
+// config.validatePath in memoryTool.cjs before use.
+const memoryStale = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  cwd: z.string().max(4096).optional(),
+}).strict();
+
 // memory:aggregate — Memory Clusters (PRD 356). `workspace` here is already
 // the encoded cwd slug (memoryAggregate.cjs reads directly from
 // ~/.claude/projects/<workspace>/memory/), same regex as the other memory:*
@@ -705,6 +713,7 @@ module.exports = {
     memoryDelete,
     memoryCreate,
     memoryAggregate,
+    memoryStale,
     agentMemoryList,
     agentMemoryGet,
     agentMemorySet,

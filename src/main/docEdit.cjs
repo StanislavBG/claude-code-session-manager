@@ -17,7 +17,6 @@
 const { ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
-const { z } = require('zod');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
@@ -97,12 +96,6 @@ function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemPrompt 
   });
 }
 
-const docEditRun = z.object({
-  path: z.string().min(1).max(4096),
-  before: z.string().min(1).max(8000),
-  instruction: z.string().min(1).max(2000),
-}).strict();
-
 async function runDocEdit({ path, before, instruction }) {
   // `path` isn't read from disk here (the renderer supplies `before` — the
   // selected span — directly), but it's validated up front so the same
@@ -123,13 +116,13 @@ async function runDocEdit({ path, before, instruction }) {
 let inFlight = null;
 
 function registerDocEditHandlers() {
-  ipcMain.handle('docedit:run', (_e, payload) => {
-    const parsed = docEditRun.parse(payload);
+  const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
+  ipcMain.handle('docedit:run', v(s.docEditRun, (parsed) => {
     if (inFlight) return { ok: false, error: 'busy' };
     const task = runDocEdit(parsed).finally(() => { inFlight = null; });
     inFlight = task;
     return task;
-  });
+  }));
 }
 
 module.exports = {

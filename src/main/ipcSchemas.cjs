@@ -414,6 +414,14 @@ const exchangesList = z.object({
 // this one lives here per PRD 638 so it's reusable without importing files.cjs.
 const filesDuplicate = z.object({ path: z.string().min(1).max(4096) });
 
+// ──────────────────────────────────────────── Doc Edit (PRD 638 rewrite runner)
+// docedit:run — consumed by docEdit.cjs's registerDocEditHandlers.
+const docEditRun = z.object({
+  path: z.string().min(1).max(4096),
+  before: z.string().min(1).max(8000),
+  instruction: z.string().min(1).max(2000),
+}).strict();
+
 // ──────────────────────────────────────────── Chat runner (PRD 319)
 // Prompt cap: 100 KiB. Matches a generous interactive message budget while
 // preventing accidental megabyte pastes from reaching claude -p.
@@ -728,6 +736,7 @@ module.exports = {
     watchersRemove,
     watchersKillTab,
     filesDuplicate,
+    docEditRun,
     chatRun,
     chatCancel,
     chatProbeContext,

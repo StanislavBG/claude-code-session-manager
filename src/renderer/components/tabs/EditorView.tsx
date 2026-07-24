@@ -44,6 +44,10 @@ import { PdfPane } from './editor/PdfPane'
 import { TablePane } from './editor/TablePane'
 import { JsonlPane } from './editor/JsonlPane'
 import { BinaryPane } from './editor/BinaryPane'
+import { useDocEdit } from './editor/useDocEdit'
+import { SelectionPopover } from './editor/SelectionPopover'
+import { DocumentMenu } from './editor/DocumentMenu'
+import { DisplayPopover } from './editor/DisplayPopover'
 
 // Lazy-loaded so Tiptap (~150 KB gz) is not bundled for users who never
 // switch a markdown file into Wysiwyg mode.
@@ -103,6 +107,14 @@ export function EditorView() {
   const monacoRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const previewScrollRef = useRef<HTMLDivElement>(null)
   const saveTimer = useRef<number | undefined>(undefined)
+  const previewWrapRef = useRef<HTMLDivElement>(null)
+  const docEditPopoverRef = useRef<HTMLDivElement>(null)
+
+  // Document Experience (PRD 639): select-to-rewrite over the markdown
+  // preview. One hook instance per EditorView — keyed loosely to the active
+  // path since only the active markdown file's preview can capture a
+  // selection at a time.
+  const docEdit = useDocEdit(activeFilePath ?? '')
 
   const registerEditor = useCallback((ed: editor.IStandaloneCodeEditor | null) => { monacoRef.current = ed }, [])
   const getEditor = useCallback(() => monacoRef.current, [])
@@ -173,6 +185,14 @@ export function EditorView() {
     setReloadTokens((t) => omitKeys(t, paths))
   }, [])
 
+  // Document menu → Rename moves a file's per-path UI state (load status,
+  // HtmlPreview reload token) to the new path, mirroring the editor store's
+  // own renameOpenFile — otherwise the renamed path would re-enter 'loading'.
+  const renameLoadState = useCallback((oldPath: string, newPath: string) => {
+    setLoadState((s) => (oldPath in s ? { ...omitKeys(s, [oldPath]), [newPath]: s[oldPath] } : s))
+    setReloadTokens((t) => (oldPath in t ? { ...omitKeys(t, [oldPath]), [newPath]: t[oldPath] } : t))
+  }, [])
+
   // Close guards — confirm before discarding unsaved edits.
   const requestClose = useCallback((path: string) => {
     if (dirty[path]) setConfirmClose({ kind: 'one', path })
@@ -215,13 +235,34 @@ export function EditorView() {
           e.preventDefault()
           requestCloseOthers(active)
         }
+      } else if (e.key === 'Escape' && docEdit.state.phase !== 'idle') {
+        docEdit.cancel()
       } else if (e.key === 'Escape' && focusMode) {
         setFocusMode(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, focusMode, requestCloseOthers])
+  }, [save, focusMode, requestCloseOthers, docEdit.state.phase, docEdit.cancel])
+
+  // Clicking anywhere outside the preview pane or the popover itself cancels
+  // the in-progress Document Experience flow — clicks *inside* the preview
+  // are handled by MarkdownPreview's own mouseup (re-select or dismiss).
+  useEffect(() => {
+    if (docEdit.state.phase === 'idle') return
+    const onMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (docEditPopoverRef.current?.contains(t)) return
+      if (previewWrapRef.current?.contains(t)) return
+      docEdit.cancel()
+    }
+    window.addEventListener('mousedown', onMouseDown)
+    return () => window.removeEventListener('mousedown', onMouseDown)
+  }, [docEdit.state.phase, docEdit.cancel])
+
+  // Switching the active file abandons any in-progress selection/edit for
+  // the file being left.
+  useEffect(() => { docEdit.cancel() }, [activeFilePath, docEdit.cancel])
 
   const requestCloseAll = useCallback(() => {
     const anyDirty = openFiles.some((f) => dirty[f.path])
@@ -303,7 +344,7 @@ export function EditorView() {
         />
       )}
 
-      {/* Header: name + path, save indicator, view toggle, prefs, escape hatches */}
+      {/* Header: name + path, save indicator, view toggle, Document/Display menus, escape hatches */}
       {path && !focusMode && (
         <div className="flex items-center px-3 h-8 border-b border-line shrink-0 bg-bg-elev">
           <span className="text-xs font-medium text-fg truncate">{name}</span>
@@ -311,34 +352,21 @@ export function EditorView() {
           {isTextFile && (
             <span className="ml-3 text-[10px] text-fg-faint shrink-0">· {savedLabel}</span>
           )}
-          <div className="flex-1" />
 
           {/* Outline toggle (markdown preview/split only) */}
           {isMarkdown(path) && (effMode === 'preview' || effMode === 'split') && (
             <button
               onClick={() => setShowOutline((v) => !v)}
-              className={`px-2 py-0.5 text-[10px] border border-line rounded mr-1 ${showOutline ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`}
+              className={`ml-3 px-2 py-0.5 text-[10px] border border-line rounded ${showOutline ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`}
               title="Toggle document outline"
             >
               Outline
             </button>
           )}
 
-          {/* Editor prefs — font zoom / wrap / minimap / theme (text files) */}
-          {isTextFile && (
-            <div className="flex items-center mr-2 rounded border border-line overflow-hidden">
-              <button onClick={() => prefs.bumpFontSize(-1)} className="px-1.5 py-0.5 text-[11px] text-fg-faint hover:text-fg" title="Zoom out">A−</button>
-              <button onClick={() => prefs.bumpFontSize(1)} className="px-1.5 py-0.5 text-[11px] text-fg-faint hover:text-fg" title="Zoom in">A+</button>
-              <button onClick={prefs.toggleWordWrap} className={`px-1.5 py-0.5 text-[10px] ${prefs.wordWrap ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`} title="Word wrap">Wrap</button>
-              <button onClick={prefs.toggleMinimap} className={`px-1.5 py-0.5 text-[10px] ${prefs.minimap ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`} title="Minimap">Map</button>
-              <button onClick={() => prefs.setTheme(prefs.theme === 'dark' ? 'paper' : 'dark')} className="px-1.5 py-0.5 text-[10px] text-fg-faint hover:text-fg" title="Toggle editor theme">{prefs.theme === 'dark' ? 'Dark' : 'Paper'}</button>
-              <button onClick={prefs.toggleAutosave} className={`px-1.5 py-0.5 text-[10px] ${prefs.autosave ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`} title="Autosave">Auto</button>
-            </div>
-          )}
-
           {/* View mode toggle (renderable types) */}
           {modes.length > 0 && (
-            <div className="flex items-center mr-2 rounded border border-line overflow-hidden">
+            <div className="flex items-center ml-2 rounded border border-line overflow-hidden">
               {modes.map((m) => (
                 <button
                   key={m}
@@ -353,9 +381,11 @@ export function EditorView() {
             </div>
           )}
 
-          <button onClick={() => setFocusMode(true)} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1" title="Focus mode (Cmd/Ctrl-Shift-F)">Focus</button>
-          <button onClick={() => window.api.shell.open({ as: 'openPath', path })} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded mr-1" title="Open in default app">Open</button>
-          <button onClick={() => window.api.shell.open({ as: 'revealPath', path })} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded" title="Reveal in OS">Reveal</button>
+          <div className="flex-1" />
+
+          <DocumentMenu path={path} onRenamed={renameLoadState} onDeleted={(p) => pruneClosed([p])} />
+          {isTextFile && <DisplayPopover />}
+          <button onClick={() => setFocusMode(true)} className="px-2 py-0.5 text-[10px] text-fg-faint hover:text-fg border border-line rounded" title="Focus mode (Cmd/Ctrl-Shift-F)">Focus</button>
         </div>
       )}
 
@@ -387,15 +417,28 @@ export function EditorView() {
                 <MarkdownToolbar getEditor={getEditor} />
                 <div className="flex-1 min-h-0">{codePane}</div>
               </div>
-              <div className="flex-1 min-w-0">
-                <MarkdownPreview ref={previewScrollRef} text={buffers[path] ?? ''} flush />
+              <div ref={previewWrapRef} className="flex-1 min-w-0">
+                <MarkdownPreview
+                  ref={previewScrollRef}
+                  text={buffers[path] ?? ''}
+                  flush
+                  wideMeasure={prefs.wideMeasure}
+                  onSelect={docEdit.select}
+                  onDismissSelection={docEdit.cancel}
+                />
               </div>
             </div>
           ) : effMode === 'preview' && isMarkdown(path) ? (
             <div className="flex h-full">
               {showOutline && <DocOutline text={buffers[path] ?? ''} scrollRef={previewScrollRef} />}
-              <div className="flex-1 min-w-0">
-                <MarkdownPreview ref={previewScrollRef} text={buffers[path] ?? ''} />
+              <div ref={previewWrapRef} className="flex-1 min-w-0">
+                <MarkdownPreview
+                  ref={previewScrollRef}
+                  text={buffers[path] ?? ''}
+                  wideMeasure={prefs.wideMeasure}
+                  onSelect={docEdit.select}
+                  onDismissSelection={docEdit.cancel}
+                />
               </div>
             </div>
           ) : effMode === 'preview' && isHtml(path) ? (
@@ -416,6 +459,26 @@ export function EditorView() {
 
       {showStatusBar && (
         <EditorStatusBar text={buffers[path] ?? ''} cursor={cursor} language={extOf(path) || undefined} />
+      )}
+
+      {path && isMarkdown(path) && (effMode === 'preview' || effMode === 'split') &&
+        docEdit.state.phase !== 'idle' && docEdit.state.selection && (
+        <div ref={docEditPopoverRef}>
+          <SelectionPopover
+            phase={docEdit.state.phase}
+            rect={docEdit.state.selection.rect}
+            diff={docEdit.state.diff}
+            onQuickAction={docEdit.run}
+            onRunCustom={docEdit.run}
+            onCancel={docEdit.cancel}
+            onReject={docEdit.cancel}
+            onRetry={docEdit.retry}
+            onAccept={() => {
+              const result = docEdit.accept(buffers[path] ?? '')
+              if (result.ok) setBuffer(path, result.next)
+            }}
+          />
+        </div>
       )}
 
       {confirmClose && (

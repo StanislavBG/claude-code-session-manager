@@ -17,9 +17,11 @@ export interface EditorPrefs {
   minimap: boolean
   theme: EditorTheme
   autosave: boolean
+  /** Markdown preview page canvas: widen the reading measure ~55%. */
+  wideMeasure: boolean
 }
 
-const DEFAULTS: EditorPrefs = { fontSize: 13, wordWrap: false, minimap: false, theme: 'paper', autosave: true }
+const DEFAULTS: EditorPrefs = { fontSize: 13, wordWrap: false, minimap: false, theme: 'paper', autosave: true, wideMeasure: false }
 const KEY = 'sm.editorPrefs.v1'
 const MIN_FONT = 9
 const MAX_FONT = 28
@@ -47,6 +49,7 @@ interface PrefsState extends EditorPrefs {
   toggleMinimap: () => void
   setTheme: (t: EditorTheme) => void
   toggleAutosave: () => void
+  toggleWideMeasure: () => void
 }
 
 export const useEditorPrefs = create<PrefsState>((set, get) => {
@@ -57,6 +60,7 @@ export const useEditorPrefs = create<PrefsState>((set, get) => {
       minimap: get().minimap,
       theme: get().theme,
       autosave: get().autosave,
+      wideMeasure: get().wideMeasure,
       ...patch,
     }
     persist(next)
@@ -71,5 +75,6 @@ export const useEditorPrefs = create<PrefsState>((set, get) => {
     toggleMinimap: () => save({ minimap: !get().minimap }),
     setTheme: (t) => save({ theme: t }),
     toggleAutosave: () => save({ autosave: !get().autosave }),
+    toggleWideMeasure: () => save({ wideMeasure: !get().wideMeasure }),
   }
 })

@@ -54,6 +54,9 @@ interface EditorState {
   hasBuffer: (path: string) => boolean
   setViewMode: (path: string, mode: ViewMode) => void
   consumeReveal: (path: string) => PendingReveal | null
+  /** Remap an open file from oldPath to newPath (Document menu → Rename), keeping
+   *  its buffer/baseline/dirty/viewMode and tab position instead of a close+reopen. */
+  renameOpenFile: (oldPath: string, newPath: string) => void
 }
 
 function basename(p: string): string {
@@ -73,6 +76,15 @@ function omit<T>(obj: Record<string, T>, key: string): Record<string, T> {
   if (!(key in obj)) return obj
   const next = { ...obj }
   delete next[key]
+  return next
+}
+
+/** Move `oldKey`'s value to `newKey` if present; otherwise return `obj` unchanged. */
+function rekey<T>(obj: Record<string, T>, oldKey: string, newKey: string): Record<string, T> {
+  if (!(oldKey in obj)) return obj
+  const next = { ...obj }
+  next[newKey] = next[oldKey]
+  delete next[oldKey]
   return next
 }
 
@@ -176,6 +188,22 @@ export const useEditor = create<EditorState>((set, get) => ({
       return pr
     }
     return null
+  },
+
+  renameOpenFile: (oldPath, newPath) => {
+    const { openFiles, activeFilePath } = get()
+    const i = openFiles.findIndex((f) => f.path === oldPath)
+    if (i === -1) return
+    const nextOpenFiles = [...openFiles]
+    nextOpenFiles[i] = { path: newPath, name: basename(newPath) }
+    set({
+      openFiles: nextOpenFiles,
+      activeFilePath: activeFilePath === oldPath ? newPath : activeFilePath,
+      buffers: rekey(get().buffers, oldPath, newPath),
+      baselines: rekey(get().baselines, oldPath, newPath),
+      dirty: rekey(get().dirty, oldPath, newPath),
+      viewMode: rekey(get().viewMode, oldPath, newPath),
+    })
   },
 }))
 

@@ -19,9 +19,11 @@ export interface EditorPrefs {
   autosave: boolean
   /** Markdown preview page canvas: widen the reading measure ~55%. */
   wideMeasure: boolean
+  /** Collapsible Assistant rail (Document Experience) — markdown preview/split only. */
+  assistantRail: boolean
 }
 
-const DEFAULTS: EditorPrefs = { fontSize: 13, wordWrap: false, minimap: false, theme: 'paper', autosave: true, wideMeasure: false }
+const DEFAULTS: EditorPrefs = { fontSize: 13, wordWrap: false, minimap: false, theme: 'paper', autosave: true, wideMeasure: false, assistantRail: true }
 const KEY = 'sm.editorPrefs.v1'
 const MIN_FONT = 9
 const MAX_FONT = 28
@@ -50,6 +52,7 @@ interface PrefsState extends EditorPrefs {
   setTheme: (t: EditorTheme) => void
   toggleAutosave: () => void
   toggleWideMeasure: () => void
+  toggleAssistantRail: () => void
 }
 
 export const useEditorPrefs = create<PrefsState>((set, get) => {
@@ -61,6 +64,7 @@ export const useEditorPrefs = create<PrefsState>((set, get) => {
       theme: get().theme,
       autosave: get().autosave,
       wideMeasure: get().wideMeasure,
+      assistantRail: get().assistantRail,
       ...patch,
     }
     persist(next)
@@ -76,5 +80,6 @@ export const useEditorPrefs = create<PrefsState>((set, get) => {
     setTheme: (t) => save({ theme: t }),
     toggleAutosave: () => save({ autosave: !get().autosave }),
     toggleWideMeasure: () => save({ wideMeasure: !get().wideMeasure }),
+    toggleAssistantRail: () => save({ assistantRail: !get().assistantRail }),
   }
 })

@@ -58,6 +58,18 @@ export type HotkeyMode = 'hold' | 'toggle'
 
 interface VoiceState {
   isRecording: boolean
+  /**
+   * Set by a non-terminal mic consumer (e.g. the Document Experience voice
+   * capture in `components/tabs/editor/useDocEdit.ts`) that owns its own
+   * `createRecognition` handle outside this store's `activeHandle`/hotkey
+   * machinery. Exists ONLY so the App-level `RecordingStatus` privacy banner
+   * (keyed off `isRecording || externalRecording`) covers that capture too.
+   * Deliberately NOT read by `startRecording`/`armHotkey`/`VoiceButton` —
+   * those gate on `isRecording` alone, which still reflects this store's own
+   * `activeHandle`, so a real terminal-dictation session is unaffected by
+   * (and doesn't fight with) an external capture in progress.
+   */
+  externalRecording: boolean
   ttsEnabled: boolean
   /**
    * When true (default), each `onFinal` arms a `submitDelayMs` timer that
@@ -154,6 +166,7 @@ interface VoiceState {
 
   startRecording: (tabId: string) => void
   stopRecording: () => void
+  setExternalRecording: (v: boolean) => void
   toggleTTS: () => void
   setAutoSubmit: (v: boolean) => void
   setSubmitDelayMs: (ms: number) => void
@@ -430,6 +443,7 @@ const ASR_HALLUCINATIONS = new Set([
 
 export const useVoice = create<VoiceState>((set, get) => ({
   isRecording: false,
+  externalRecording: false,
   ttsEnabled: false,
   autoSubmit: true,
   submitDelayMs: 8000,
@@ -752,6 +766,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
     if (id) get().startRecording(id)
   },
 
+  setExternalRecording: (v) => set({ externalRecording: v }),
   toggleTTS: () => set((s) => ({ ttsEnabled: !s.ttsEnabled })),
   setAutoSubmit: (v) => set({ autoSubmit: v }),
   setSubmitDelayMs: (ms) => set({ submitDelayMs: Math.max(500, Math.min(13_000, Math.floor(ms))) }),

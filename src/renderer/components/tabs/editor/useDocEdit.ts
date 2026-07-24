@@ -1,78 +1,155 @@
 /**
  * useDocEdit — phase machine driving the Document Experience inline rewrite
- * flow (PRD 639): select a preview span → popover → thinking → diff review.
+ * flow: select a preview span → popover → (optional voice: listening →
+ * review) → thinking → diff review.
  *
  * Owned by EditorView (not MarkdownPreview) so the same instance survives
  * across preview/split-mode remounts and can reach the buffer store on
  * Accept. `accept` is a pure computation over the buffer text handed in by
  * the caller — EditorView is the one that actually calls `setBuffer`.
+ *
+ * Pure phase transitions live in docEditReducer.ts (unit-tested there
+ * without DOM/audio); this hook only adds the IO: the docEdit.run IPC call
+ * and the voice capture path.
+ *
+ * Voice capture uses `createRecognition` directly (the same primitive
+ * state/voice.ts wraps) rather than going through the voice store's
+ * startRecording/onFinal — that path's onFinal is the app's ONE
+ * pty-submitting call site (voice.ts:~630) and must stay that way. We only
+ * borrow the voice store's `isRecording` flag (via setState) so the
+ * App-level RecordingStatus privacy banner — which is keyed off that same
+ * flag — mounts for this capture too.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { toast } from '../../../state/toast'
+import { useVoice } from '../../../state/voice'
+import { createRecognition, isRecognitionSupported } from '../../../lib/speechRecognition'
 import { applySpanEdit, type ApplySpanEditResult } from '../../../lib/applySpanEdit'
+import { docEditReducer, IDLE_STATE, LISTEN_FROM, type SelectionInfo } from './docEditReducer'
 
-export interface SelectionRect {
-  top: number
-  left: number
-  bottom: number
-  right: number
-}
+export type { SelectionRect, SelectionInfo, DocEditPhase } from './docEditReducer'
 
-export interface SelectionInfo {
-  text: string
-  rect: SelectionRect
-}
-
-export type DocEditPhase = 'idle' | 'popover' | 'thinking' | 'diff'
-
-interface DocEditDiff {
-  before: string
-  after: string
-}
-
-interface DocEditState {
-  phase: DocEditPhase
-  selection: SelectionInfo | null
-  instruction: string
-  diff: DocEditDiff | null
-}
-
-const IDLE_STATE: DocEditState = { phase: 'idle', selection: null, instruction: '', diff: null }
+/** Pinned by src/main/docEdit.cjs's runClaude default — single source of truth for the rail's model pill. */
+export const DOCEDIT_MODEL = 'sonnet'
 
 export function useDocEdit(path: string) {
-  const [state, setState] = useState<DocEditState>(IDLE_STATE)
-  // Bumped on every cancel/select/accept so an in-flight docEdit.run resolving
-  // after the user moved on (cancelled, re-selected) is a no-op — "Cancel
-  // abandons the result (ignore the resolved promise)".
+  const [state, dispatch] = useReducer(docEditReducer, IDLE_STATE)
+  // Bumped on every cancel/select/accept/listen so an in-flight async
+  // callback (docEdit.run resolving, recognition onFinal/onError firing)
+  // that lands after the user moved on is a no-op — "Cancel abandons the
+  // result (ignore the resolved promise)".
   const tokenRef = useRef(0)
+  const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(null)
+  const pathRef = useRef(path)
+
+  // Edits-this-session counter resets per file — this hook is one instance
+  // reused across the whole EditorView, so a change of `path` (not a remount)
+  // is what marks "new file".
+  useEffect(() => {
+    if (pathRef.current !== path) {
+      pathRef.current = path
+      tokenRef.current += 1
+      stopRecognition()
+      dispatch({ type: 'RESET_FILE' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path])
+
+  function stopRecognition() {
+    const handle = recognitionRef.current
+    if (!handle) return
+    recognitionRef.current = null
+    // Rejections here are drain-cleanup noise, not actionable — the handle
+    // is being torn down regardless (mirrors the same swallow in voice.ts).
+    handle.stop().catch(() => {})
+    handle.destroy()
+    useVoice.setState({ externalRecording: false })
+  }
 
   const select = useCallback((selection: SelectionInfo) => {
     tokenRef.current += 1
-    setState({ phase: 'popover', selection, instruction: '', diff: null })
+    stopRecognition()
+    dispatch({ type: 'SELECT', selection })
   }, [])
 
   const cancel = useCallback(() => {
     tokenRef.current += 1
-    setState(IDLE_STATE)
+    stopRecognition()
+    dispatch({ type: 'CANCEL' })
   }, [])
+
+  const listen = useCallback(() => {
+    if (!LISTEN_FROM.includes(state.phase)) return
+    if (useVoice.getState().isRecording) {
+      toast.error('Microphone is already in use')
+      return
+    }
+    if (!isRecognitionSupported()) {
+      toast.error('Microphone or Web Worker not available')
+      return
+    }
+    const myToken = ++tokenRef.current
+    dispatch({ type: 'LISTEN' })
+    useVoice.setState({ externalRecording: true })
+
+    const finish = () => {
+      if (recognitionRef.current === handle) recognitionRef.current = null
+      useVoice.setState({ externalRecording: false })
+    }
+
+    const handle = createRecognition({
+      onFinal: (text) => {
+        if (tokenRef.current !== myToken) return
+        handle.stop().catch(() => {})
+        handle.destroy()
+        finish()
+        const trimmed = text.trim()
+        if (!trimmed) {
+          dispatch({ type: 'CANCEL' })
+          return
+        }
+        dispatch({ type: 'HEARD', transcript: trimmed })
+      },
+      onError: (err) => {
+        if (tokenRef.current !== myToken) return
+        handle.destroy()
+        finish()
+        toast.error(`Microphone error: ${err}`)
+        dispatch({ type: 'CANCEL' })
+      },
+    })
+    recognitionRef.current = handle
+    handle.start().catch((e: unknown) => {
+      if (tokenRef.current !== myToken) return
+      handle.destroy()
+      finish()
+      toast.error(`Could not start mic: ${e instanceof Error ? e.message : String(e)}`)
+      dispatch({ type: 'CANCEL' })
+    })
+  }, [state.phase])
 
   const runInstruction = useCallback(async (instruction: string, recordInstruction: boolean) => {
     const selection = state.selection
     if (!selection) return
     const myToken = ++tokenRef.current
-    setState((s) => ({ ...s, phase: 'thinking', instruction: recordInstruction ? instruction : s.instruction }))
+    dispatch({ type: 'RUN', instruction, recordInstruction })
     const r = await window.api.docEdit.run({ path, before: selection.text, instruction })
     if (tokenRef.current !== myToken) return
     if (!r.ok) {
       toast.error(r.error || 'Edit failed')
-      setState((s) => ({ ...s, phase: 'popover' }))
+      dispatch({ type: 'RUN_ERR' })
       return
     }
-    setState((s) => ({ ...s, phase: 'diff', diff: { before: selection.text, after: r.after ?? '' } }))
+    dispatch({ type: 'RUN_OK', diff: { before: selection.text, after: r.after ?? '' } })
   }, [path, state.selection])
 
   const run = useCallback((instruction: string) => { void runInstruction(instruction, true) }, [runInstruction])
+
+  const sendHeard = useCallback(() => {
+    if (state.phase !== 'review') return
+    void runInstruction(state.transcript, true)
+  }, [runInstruction, state.phase, state.transcript])
 
   const retry = useCallback(() => {
     const instruction = state.instruction
@@ -86,7 +163,7 @@ export function useDocEdit(path: string) {
     const result = applySpanEdit(buffer, diff.before, diff.after)
     if (result.ok) {
       tokenRef.current += 1
-      setState(IDLE_STATE)
+      dispatch({ type: 'ACCEPT' })
     } else {
       toast.error(
         result.reason === 'ambiguous'
@@ -97,5 +174,5 @@ export function useDocEdit(path: string) {
     return result
   }, [state.diff])
 
-  return { state, select, cancel, run, retry, accept }
+  return { state, select, cancel, listen, sendHeard, run, retry, accept }
 }

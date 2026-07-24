@@ -46,6 +46,7 @@ import { JsonlPane } from './editor/JsonlPane'
 import { BinaryPane } from './editor/BinaryPane'
 import { useDocEdit } from './editor/useDocEdit'
 import { SelectionPopover } from './editor/SelectionPopover'
+import { AssistantRail } from './editor/AssistantRail'
 import { DocumentMenu } from './editor/DocumentMenu'
 import { DisplayPopover } from './editor/DisplayPopover'
 
@@ -364,6 +365,17 @@ export function EditorView() {
             </button>
           )}
 
+          {/* Assistant rail toggle (markdown preview/split only) */}
+          {isMarkdown(path) && (effMode === 'preview' || effMode === 'split') && (
+            <button
+              onClick={prefs.toggleAssistantRail}
+              className={`ml-1 px-2 py-0.5 text-[10px] border border-line rounded ${prefs.assistantRail ? 'bg-bg-hi text-fg' : 'text-fg-faint hover:text-fg'}`}
+              title="Toggle Assistant rail"
+            >
+              Assistant
+            </button>
+          )}
+
           {/* View mode toggle (renderable types) */}
           {modes.length > 0 && (
             <div className="flex items-center ml-2 rounded border border-line overflow-hidden">
@@ -427,6 +439,23 @@ export function EditorView() {
                   onDismissSelection={docEdit.cancel}
                 />
               </div>
+              {!focusMode && prefs.assistantRail && (
+                <AssistantRail
+                  phase={docEdit.state.phase}
+                  transcript={docEdit.state.transcript}
+                  diff={docEdit.state.diff}
+                  editCount={docEdit.state.editCount}
+                  onListen={docEdit.listen}
+                  onSendHeard={docEdit.sendHeard}
+                  onCancel={docEdit.cancel}
+                  onAccept={() => {
+                    const result = docEdit.accept(buffers[path] ?? '')
+                    if (result.ok) setBuffer(path, result.next)
+                  }}
+                  onReject={docEdit.cancel}
+                  onRetry={docEdit.retry}
+                />
+              )}
             </div>
           ) : effMode === 'preview' && isMarkdown(path) ? (
             <div className="flex h-full">
@@ -440,6 +469,23 @@ export function EditorView() {
                   onDismissSelection={docEdit.cancel}
                 />
               </div>
+              {!focusMode && prefs.assistantRail && (
+                <AssistantRail
+                  phase={docEdit.state.phase}
+                  transcript={docEdit.state.transcript}
+                  diff={docEdit.state.diff}
+                  editCount={docEdit.state.editCount}
+                  onListen={docEdit.listen}
+                  onSendHeard={docEdit.sendHeard}
+                  onCancel={docEdit.cancel}
+                  onAccept={() => {
+                    const result = docEdit.accept(buffers[path] ?? '')
+                    if (result.ok) setBuffer(path, result.next)
+                  }}
+                  onReject={docEdit.cancel}
+                  onRetry={docEdit.retry}
+                />
+              )}
             </div>
           ) : effMode === 'preview' && isHtml(path) ? (
             <HtmlPreview path={path} dirty={!!dirty[path]} reloadToken={reloadTokens[path] ?? 0} />
@@ -468,8 +514,11 @@ export function EditorView() {
             phase={docEdit.state.phase}
             rect={docEdit.state.selection.rect}
             diff={docEdit.state.diff}
+            transcript={docEdit.state.transcript}
             onQuickAction={docEdit.run}
             onRunCustom={docEdit.run}
+            onListen={docEdit.listen}
+            onSendHeard={docEdit.sendHeard}
             onCancel={docEdit.cancel}
             onReject={docEdit.cancel}
             onRetry={docEdit.retry}

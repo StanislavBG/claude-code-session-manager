@@ -4,9 +4,15 @@ import { useVoice } from '../state/voice'
  * F1 privacy invariant (PRD §Security): mounted whenever isRecording === true.
  * Single line, red dot + literal copy. Window-title prefix is the second leg
  * of the invariant; tray icon is split to F1a.
+ *
+ * Also covers `externalRecording` (non-terminal mic capture, e.g. the
+ * Document Experience voice edit in useDocEdit.ts) — that path owns its own
+ * recognition handle outside this store's activeHandle, so it can't set
+ * `isRecording` without corrupting startRecording/armHotkey's assumptions
+ * about who owns the handle. See the field comment in state/voice.ts.
  */
 export function RecordingStatus() {
-  const isRecording = useVoice((s) => s.isRecording)
+  const isRecording = useVoice((s) => s.isRecording || s.externalRecording)
   if (!isRecording) return null
   return (
     <div

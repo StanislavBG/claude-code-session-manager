@@ -2,10 +2,11 @@
  * SelectionPopover — the Document Experience quick-action popover + diff
  * review card, anchored above a captured preview selection (useDocEdit).
  *
- * Three phases render here: `popover` (quick-action chips + free-text
- * command box), `thinking` (pulsing status + Cancel), `diff` (old/new review
- * card with Accept/Reject/Retry). Positioning is viewport-fixed, clamped to
- * stay inside the pane.
+ * Five phases render here: `popover` (quick-action chips + free-text command
+ * box + Voice edit), `listening` (pulsing waveform, mic capturing), `review`
+ * (heard transcript + Send/Re-record/Cancel), `thinking` (pulsing status +
+ * Cancel), `diff` (old/new review card with Accept/Reject/Retry).
+ * Positioning is viewport-fixed, clamped to stay inside the pane.
  */
 
 import { useState } from 'react'
@@ -21,15 +22,29 @@ const POPOVER_WIDTH = 320
 const GAP = 8
 
 interface Props {
-  phase: 'popover' | 'thinking' | 'diff'
+  phase: 'popover' | 'listening' | 'review' | 'thinking' | 'diff'
   rect: SelectionRect
   diff: { before: string; after: string } | null
+  transcript: string
   onQuickAction: (instruction: string) => void
   onRunCustom: (instruction: string) => void
+  onListen: () => void
+  onSendHeard: () => void
   onCancel: () => void
   onAccept: () => void
   onReject: () => void
   onRetry: () => void
+}
+
+/** Pulsing dots used for both `listening` and `thinking` mic/status affordances. */
+function PulsingDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+      <span className="w-1 h-1 rounded-full bg-red-400 animate-pulse [animation-delay:0ms]" />
+      <span className="w-1 h-1 rounded-full bg-red-400 animate-pulse [animation-delay:150ms]" />
+      <span className="w-1 h-1 rounded-full bg-red-400 animate-pulse [animation-delay:300ms]" />
+    </span>
+  )
 }
 
 function clampedStyle(rect: SelectionRect): React.CSSProperties {
@@ -46,7 +61,7 @@ function clampedStyle(rect: SelectionRect): React.CSSProperties {
   }
 }
 
-export function SelectionPopover({ phase, rect, diff, onQuickAction, onRunCustom, onCancel, onAccept, onReject, onRetry }: Props) {
+export function SelectionPopover({ phase, rect, diff, transcript, onQuickAction, onRunCustom, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
   const [custom, setCustom] = useState('')
 
   const submitCustom = () => {
@@ -66,6 +81,14 @@ export function SelectionPopover({ phase, rect, diff, onQuickAction, onRunCustom
         <div className="p-2">
           <div className="flex items-center justify-between mb-2">
             <div className="flex flex-wrap gap-1">
+              <button
+                onClick={onListen}
+                data-testid="doc-edit-voice"
+                className="px-2 py-1 text-[11px] rounded border border-line bg-bg-hi text-fg hover:border-fg-faint font-medium"
+                title="Speak your edit instruction"
+              >
+                🎤 Voice edit
+              </button>
               {QUICK_ACTIONS.map((a) => (
                 <button
                   key={a.label}
@@ -91,6 +114,35 @@ export function SelectionPopover({ phase, rect, diff, onQuickAction, onRunCustom
             placeholder="tell Claude what to change…"
             className="w-full px-2 py-1 text-[11px] bg-bg border border-line rounded outline-none focus:border-fg-faint text-fg placeholder:text-fg-faint"
           />
+        </div>
+      )}
+
+      {phase === 'listening' && (
+        <div className="p-3 flex items-center justify-between" data-testid="doc-edit-listening">
+          <span className="flex items-center gap-2 text-fg-dim">
+            <PulsingDots />
+            Listening…
+          </span>
+          <button onClick={onCancel} className="px-2 py-0.5 text-[11px] text-fg-faint hover:text-fg border border-line rounded">
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {phase === 'review' && (
+        <div className="p-3" data-testid="doc-edit-review">
+          <p className="italic text-fg mb-2">«{transcript}»</p>
+          <div className="flex justify-end gap-1.5">
+            <button onClick={onCancel} className="px-2 py-1 text-[11px] text-fg-faint hover:text-fg border border-line rounded">
+              Cancel
+            </button>
+            <button onClick={onListen} className="px-2 py-1 text-[11px] text-fg-dim hover:text-fg border border-line rounded">
+              Re-record
+            </button>
+            <button onClick={onSendHeard} className="px-2 py-1 text-[11px] text-white rounded bg-accent hover:opacity-90">
+              Send
+            </button>
+          </div>
         </div>
       )}
 

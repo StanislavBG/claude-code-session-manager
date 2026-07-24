@@ -224,6 +224,10 @@ contextBridge.exposeInMainWorld('api', {
     create: (parentPath, name, kind) => ipcRenderer.invoke('files:create', { parentPath, name, kind }),
     rename: (path, newName) => ipcRenderer.invoke('files:rename', { path, newName }),
     delete: (path) => ipcRenderer.invoke('files:delete', { path }),
+    duplicate: (path) => ipcRenderer.invoke('files:duplicate', { path }),
+  },
+  docEdit: {
+    run: (payload) => ipcRenderer.invoke('docedit:run', payload),
   },
   // Consolidated shell open/reveal — see shell:open in index.cjs.
   // as: 'editor' | 'fileInEditor' | 'finder' | 'terminal' | 'external' | 'openPath' | 'revealPath'

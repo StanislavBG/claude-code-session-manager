@@ -9,6 +9,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-committed-in-window.test.cjs',
       'src/main/__tests__/pty-write-result.test.cjs',
       'src/main/__tests__/web-remote-e2e-pinning.test.cjs',
+      'src/main/__tests__/docEdit.test.cjs',
     ],
     globals: true,
   },

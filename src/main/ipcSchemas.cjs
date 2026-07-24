@@ -409,6 +409,11 @@ const exchangesList = z.object({
   offset: z.number().int().min(0).max(100000).optional(),
 }).strict();
 
+// ──────────────────────────────────────────── Files (duplicate)
+// files:duplicate — the rest of files:* keeps its schemas local to files.cjs;
+// this one lives here per PRD 638 so it's reusable without importing files.cjs.
+const filesDuplicate = z.object({ path: z.string().min(1).max(4096) });
+
 // ──────────────────────────────────────────── Chat runner (PRD 319)
 // Prompt cap: 100 KiB. Matches a generous interactive message budget while
 // preventing accidental megabyte pastes from reaching claude -p.
@@ -722,6 +727,7 @@ module.exports = {
     watchersList,
     watchersRemove,
     watchersKillTab,
+    filesDuplicate,
     chatRun,
     chatCancel,
     chatProbeContext,

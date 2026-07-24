@@ -14,6 +14,7 @@
  */
 
 const { ipcMain, shell } = require('electron');
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
@@ -21,6 +22,7 @@ const os = require('node:os');
 const { z } = require('zod');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
+const { schemas } = require('./ipcSchemas.cjs');
 
 /**
  * Validates that the path is under the home directory. Returns the realpath
@@ -238,6 +240,51 @@ async function renameEntry(oldPath, newName) {
   }
 }
 
+// Pure name generator for files:duplicate — `<stem>-copy<ext>`, then
+// `<stem>-copy-2<ext>`, `-copy-3`, … `exists(fullPath)` is injected so tests
+// can probe collisions without touching the filesystem.
+const DUPLICATE_MAX_ATTEMPTS = 20;
+function duplicateNameFor(dir, base, exists) {
+  const ext = path.extname(base);
+  const stem = base.slice(0, base.length - ext.length);
+  for (let i = 0; i < DUPLICATE_MAX_ATTEMPTS; i++) {
+    const candidate = i === 0 ? `${stem}-copy${ext}` : `${stem}-copy-${i + 1}${ext}`;
+    if (!exists(path.join(dir, candidate))) return { ok: true, name: candidate };
+  }
+  return { ok: false, error: 'Too many copies of this file already exist' };
+}
+
+async function duplicateEntry(filePath) {
+  let resolved;
+  try { resolved = validateHomePath(filePath); }
+  catch (e) { return { ok: false, error: e.message }; }
+  try { rejectCredentials(resolved); }
+  catch (e) { return { ok: false, error: e.message }; }
+
+  let st;
+  try { st = await fsp.stat(resolved); }
+  catch (e) { return { ok: false, error: e.message }; }
+  if (st.isDirectory()) return { ok: false, error: 'Cannot duplicate a directory' };
+
+  const dir = path.dirname(resolved);
+  const base = path.basename(resolved);
+  const nameResult = duplicateNameFor(dir, base, (full) => {
+    try { fs.accessSync(full); return true; } catch { return false; }
+  });
+  if (!nameResult.ok) return nameResult;
+
+  const target = path.join(dir, nameResult.name);
+  try { validateHomePath(target); } catch (e) { return { ok: false, error: e.message }; }
+  try { rejectCredentials(target); } catch (e) { return { ok: false, error: e.message }; }
+
+  try {
+    await fsp.copyFile(resolved, target, fs.constants.COPYFILE_EXCL);
+    return { ok: true, path: target, error: null };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 const CRITICAL_PATHS = new Set([os.homedir(), '/', '/usr', '/bin', '/etc', '/var', '/System', '/Applications']);
 
 async function deleteEntry(filePath) {
@@ -330,6 +377,10 @@ function registerFilesHandlers() {
     const { path: p, newName } = filesRename.parse(payload);
     return renameEntry(p, newName);
   });
+  ipcMain.handle('files:duplicate', (_e, payload) => {
+    const { path: p } = schemas.filesDuplicate.parse(payload);
+    return duplicateEntry(p);
+  });
   ipcMain.handle('files:delete', (_e, payload) => {
     const { path: p } = filesPath.parse(payload);
     return deleteEntry(p);
@@ -353,4 +404,6 @@ module.exports = {
   createEntry,
   renameEntry,
   deleteEntry,
+  duplicateEntry,
+  duplicateNameFor,
 };

@@ -583,6 +583,8 @@ export interface FilesWriteResult { ok: boolean; error: string | null }
 export interface FilesCreateResult { ok: boolean; path?: string; error: string | null }
 export interface FilesRenameResult { ok: boolean; newPath?: string; error: string | null }
 export interface FilesDeleteResult { ok: boolean; error: string | null }
+export interface FilesDuplicateResult { ok: boolean; path?: string; error?: string | null }
+export interface DocEditResult { ok: boolean; after?: string; error?: string }
 
 export interface SearchFileEntry {
   name: string;
@@ -1200,6 +1202,10 @@ export interface SessionManagerAPI {
     create: (parentPath: string, name: string, kind: 'file' | 'folder') => Promise<FilesCreateResult>;
     rename: (path: string, newName: string) => Promise<FilesRenameResult>;
     delete: (path: string) => Promise<FilesDeleteResult>;
+    duplicate: (path: string) => Promise<FilesDuplicateResult>;
+  };
+  docEdit: {
+    run: (payload: { path: string; before: string; instruction: string }) => Promise<DocEditResult>;
   };
   /** Consolidated shell open/reveal. One method, discriminated on `as`, replaces
    *  the former app.openIn* / app.openExternal / files.openExternal / files.showInFinder.

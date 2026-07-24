@@ -233,11 +233,16 @@ const STOP_SIGNAL_INSTRUCTION =
 // the `waiting` FIFO — see run() below.
 
 const DEFAULT_CAP = 2;
-// Clamp to [1, 3]; default 2 = "two loops at a time".
-const CONCURRENCY_CAP = Math.min(
-  3,
-  Math.max(1, parseInt(process.env.SM_CHAT_CONCURRENCY || String(DEFAULT_CAP), 10) || DEFAULT_CAP),
-);
+// Clamp to [1, 3]; default 2 = "two loops at a time". Read lazily (not
+// captured at module-load time) so tests can stub the env per-case without
+// vi.resetModules(); production behavior is unaffected since the env var
+// never changes mid-process.
+function getConcurrencyCap() {
+  return Math.min(
+    3,
+    Math.max(1, parseInt(process.env.SM_CHAT_CONCURRENCY || String(DEFAULT_CAP), 10) || DEFAULT_CAP),
+  );
+}
 
 // tabId → cancel() for every ACTIVE run; FIFO list of WAITING runs; live count.
 const inFlight = new Map();
@@ -302,7 +307,7 @@ function run(opts) {
 // Fill open lanes FIFO up to CONCURRENCY_CAP, then announce queue positions for
 // the remainder. O(n) over the waiting list (bounded by open tabs).
 function pump() {
-  while (activeCount < CONCURRENCY_CAP && waiting.length > 0) {
+  while (activeCount < getConcurrencyCap() && waiting.length > 0) {
     const job = waiting.shift();
     activeCount += 1;
     Promise.resolve()

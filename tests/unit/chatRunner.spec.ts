@@ -7,11 +7,25 @@
  * is simply `undefined` unless `registerChatHandlers()` is actually invoked) — this
  * spec never calls `registerChatHandlers()`, so the mock is defensive, not load-bearing.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRequire } from 'node:module'
 import { EventEmitter } from 'node:events'
 
 vi.mock('electron', () => ({ ipcMain: { handle: vi.fn(), on: vi.fn() } }))
+
+// chatRunner.cjs reads SM_CHAT_CONCURRENCY lazily (per pump() call), not at
+// module-load time, so deleting it here — before every test, restoring after
+// — is enough to make the "default cap = 2" assertions deterministic on any
+// machine whose shell exports SM_CHAT_CONCURRENCY (e.g. the dev's ~/.bashrc
+// sets 3). No vi.resetModules() / dynamic import needed.
+const ORIGINAL_SM_CHAT_CONCURRENCY = process.env.SM_CHAT_CONCURRENCY
+beforeEach(() => {
+  delete process.env.SM_CHAT_CONCURRENCY
+})
+afterEach(() => {
+  if (ORIGINAL_SM_CHAT_CONCURRENCY === undefined) delete process.env.SM_CHAT_CONCURRENCY
+  else process.env.SM_CHAT_CONCURRENCY = ORIGINAL_SM_CHAT_CONCURRENCY
+})
 
 const require = createRequire(import.meta.url)
 
@@ -235,6 +249,26 @@ describe('concurrency (default cap = 2)', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(captured).toHaveLength(3)
     expect(captured[2].tabId).toBe('tab-conc-z')
+
+    resolvers.slice(1).forEach((resolve) => resolve())
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('SM_CHAT_CONCURRENCY=1 clamps the silent lane to 1 (override still works)', async () => {
+    process.env.SM_CHAT_CONCURRENCY = '1'
+
+    chatRunner.run({ tabId: 'tab-conc-cap1-a', sessionId: 'sess-conc-cap1-a', prompt: 'a', cwd: '/tmp', resume: true, silent: true })
+    chatRunner.run({ tabId: 'tab-conc-cap1-b', sessionId: 'sess-conc-cap1-b', prompt: 'b', cwd: '/tmp', resume: true, silent: true })
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Only the 1st lane is filled; the 2nd silent probe queues behind it.
+    expect(captured).toHaveLength(1)
+    expect(captured[0].tabId).toBe('tab-conc-cap1-a')
+
+    resolvers[0]()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(captured).toHaveLength(2)
+    expect(captured[1].tabId).toBe('tab-conc-cap1-b')
 
     resolvers.slice(1).forEach((resolve) => resolve())
     await new Promise((r) => setTimeout(r, 0))

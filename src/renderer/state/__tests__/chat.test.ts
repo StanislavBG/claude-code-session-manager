@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 function installWindowApiMock(opts: { transcriptExists: boolean }) {
   const run = vi.fn().mockResolvedValue(undefined)
+  let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
   const api = {
     chat: {
       run,
@@ -19,7 +20,10 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
       onOutput: vi.fn(),
       onToolUse: vi.fn(),
       onComplete: vi.fn(),
-      onNeedsInput: vi.fn(),
+      onNeedsInput: vi.fn((handler) => {
+        needsInputHandler = handler
+        return () => { needsInputHandler = null }
+      }),
       onError: vi.fn(),
       onNotice: vi.fn(),
     },
@@ -32,7 +36,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
     logs: { write: vi.fn() },
   }
   vi.stubGlobal('window', { api })
-  return { api, run }
+  return { api, run, getNeedsInputHandler: () => needsInputHandler }
 }
 
 describe('chat.ts send() resume decision', () => {
@@ -138,5 +142,69 @@ describe('chat.ts pushNotice()', () => {
     expect(after.queuedPosition).toBe(2)
     expect(after.stream).toBe('partial')
     expect(after.liveToolUses).toEqual([{ id: 'u1', kind: 'tool', label: 'Bash' }])
+  })
+})
+
+describe('chat.ts onNeedsInput()', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('pushes an answer turn then a question turn when answerBody is non-empty', async () => {
+    const { getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.setState({
+      chats: {
+        't1': {
+          turns: [],
+          running: true,
+          queuedPosition: 0,
+          started: true,
+          stream: '',
+          liveToolUses: [{ id: 'u1', kind: 'tool', label: 'Bash' }],
+        },
+      },
+    })
+
+    getNeedsInputHandler()!({
+      tabId: 't1',
+      sessionId: 's1',
+      questions: ['Which env?'],
+      answerBody: '1. one\n2. two',
+      raw: 'raw text',
+    })
+
+    const after = useChat.getState().get('t1')
+    expect(after.turns).toHaveLength(2)
+    expect(after.turns[0]).toMatchObject({ role: 'assistant', text: '1. one\n2. two' })
+    expect(after.turns[0].toolUses).toEqual([{ id: 'u1', kind: 'tool', label: 'Bash' }])
+    expect(after.turns[1]).toMatchObject({ role: 'question', text: 'Which env?', questions: ['Which env?'] })
+    expect(after.turns[1].toolUses).toEqual([])
+    expect(after.running).toBe(false)
+  })
+
+  it('pushes only a question turn when answerBody is empty', async () => {
+    const { getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.setState({
+      chats: {
+        't1': { turns: [], running: true, queuedPosition: 0, started: true, stream: '', liveToolUses: [] },
+      },
+    })
+
+    getNeedsInputHandler()!({
+      tabId: 't1',
+      sessionId: 's1',
+      questions: ['What next?'],
+      answerBody: '',
+      raw: 'raw text',
+    })
+
+    const after = useChat.getState().get('t1')
+    expect(after.turns).toHaveLength(1)
+    expect(after.turns[0]).toMatchObject({ role: 'question', text: 'What next?' })
   })
 })

@@ -64,6 +64,9 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   } | null
   probeContextUsage: (opts: { tabId: string; sessionId: string; cwd: string }) => void
   __setExecutor: (fn: ((job: Record<string, unknown>) => Promise<void>) | null) => void
+  parseStopSignal: (text: string) => { questions: string[] } | null
+  splitStopSignal: (text: string) => { answerBody: string; questions: string[] } | null
+  STOP_SENTINEL: string
 }
 
 function emitResultLine(child: FakeChild, resultText: string) {
@@ -421,5 +424,84 @@ describe('recordExchange gating (real executeRun path via a faked child process)
     expect(recordExchangeCalls).toHaveLength(1)
     expect(sent.some((e) => e.channel === 'chat:run:output')).toBe(true)
     expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true)
+  })
+})
+
+describe('splitStopSignal', () => {
+  const SENTINEL = chatRunner.STOP_SENTINEL
+
+  it('splits body and questions when the sentinel is present', () => {
+    const text = `Here are the five steps:\n1. one\n2. two\n\n${SENTINEL}\n{"questions":["Which env?"]}`
+    const result = chatRunner.splitStopSignal(text)
+    expect(result).toEqual({ answerBody: 'Here are the five steps:\n1. one\n2. two', questions: ['Which env?'] })
+  })
+
+  it('returns an empty answerBody when the sentinel is the entire reply', () => {
+    const text = `${SENTINEL}\n{"questions":["What next?"]}`
+    const result = chatRunner.splitStopSignal(text)
+    expect(result).toEqual({ answerBody: '', questions: ['What next?'] })
+  })
+
+  it('uses the LAST sentinel occurrence when an earlier literal sentinel string appears in the body', () => {
+    const text = `The sentinel is literally ${SENTINEL} in my explanation.\n\n${SENTINEL}\n{"questions":["Continue?"]}`
+    const result = chatRunner.splitStopSignal(text)
+    expect(result?.answerBody).toBe(`The sentinel is literally ${SENTINEL} in my explanation.`)
+    expect(result?.questions).toEqual(['Continue?'])
+  })
+
+  it('supports multiple questions', () => {
+    const text = `Findings here.\n\n${SENTINEL}\n{"questions":["Q1?","Q2?","Q3?"]}`
+    const result = chatRunner.splitStopSignal(text)
+    expect(result?.questions).toEqual(['Q1?', 'Q2?', 'Q3?'])
+  })
+
+  it('returns null (treated as complete) when the JSON after the sentinel is malformed', () => {
+    const text = `Some output.\n\n${SENTINEL}\nnot json at all`
+    expect(chatRunner.splitStopSignal(text)).toBeNull()
+  })
+
+  it('returns null when the sentinel is absent', () => {
+    expect(chatRunner.splitStopSignal('just a normal completed reply')).toBeNull()
+  })
+
+  it('parseStopSignal stays a thin wrapper returning only questions', () => {
+    const text = `Body text.\n\n${SENTINEL}\n{"questions":["Q?"]}`
+    expect(chatRunner.parseStopSignal(text)).toEqual({ questions: ['Q?'] })
+  })
+})
+
+describe('needs-input payload (real executeRun path via a faked child process)', () => {
+  beforeEach(() => {
+    chatRunner.__setExecutor(null)
+    recordExchangeCalls.length = 0
+    nextChild = null
+  })
+
+  it('emits answerBody on chat:run:needs-input and records it durably', async () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.run({ tabId: 'tab-needs-input', sessionId: 'sess-needs-input', prompt: 'describe the five steps', cwd: '/tmp', resume: false })
+    await flush()
+    expect(nextChild).not.toBeNull()
+
+    const finalText = `1. one\n2. two\n3. three\n4. four\n5. five\n\n${chatRunner.STOP_SENTINEL}\n{"questions":["Proceed with step 6?"]}`
+    emitResultLine(nextChild!, finalText)
+    await flush()
+
+    const needsInput = sent.find((e) => e.channel === 'chat:run:needs-input')
+    expect(needsInput).toBeTruthy()
+    expect(needsInput?.payload.answerBody).toBe('1. one\n2. two\n3. three\n4. four\n5. five')
+    expect(needsInput?.payload.questions).toEqual(['Proceed with step 6?'])
+    expect(needsInput?.payload.raw).toBe(finalText)
+
+    expect(recordExchangeCalls).toHaveLength(1)
+    const [call] = recordExchangeCalls
+    const opts = call[0] as { result: string }
+    expect(opts.result).toContain('1. one\n2. two\n3. three\n4. four\n5. five')
+    expect(opts.result).toContain('[asked: Proceed with step 6?]')
   })
 })

@@ -54,28 +54,47 @@ const { extractJson } = require('./lib/extractJson.cjs');
 const STOP_SENTINEL = '<<<SM_NEEDS_INPUT>>>';
 
 /**
- * Parse the final assistant text for the stop-signal protocol.
+ * Split the final assistant text at the stop-signal sentinel.
  *
- * Returns `{ questions: string[] }` when the sentinel is present and a
- * balanced JSON object with a `questions` array can be found anywhere in the
- * text after it — tolerant of leading blank lines, code-fence wrapping,
- * multi-line pretty-printing, and trailing prose after the closing `}`.
+ * Returns `{ answerBody: string, questions: string[] }` when the sentinel is
+ * present and a balanced JSON object with a `questions` array can be found
+ * anywhere in the text after it (tolerant of leading blank lines, code-fence
+ * wrapping, multi-line pretty-printing, and trailing prose after the closing
+ * `}`). `answerBody` is everything before the LAST sentinel occurrence, with
+ * the trailing sentinel line and JSON line removed and whitespace trimmed —
+ * an earlier literal sentinel string embedded in the agent's own answer text
+ * is preserved as part of `answerBody` (lastIndexOf semantics).
  * Returns `null` when the sentinel is absent OR when no such JSON object is
- * found — both cases are treated as a completed run with no crash.
+ * found after it — both cases are treated as a completed run with no crash.
  *
  * @param {string} finalText
- * @returns {{ questions: string[] } | null}
+ * @returns {{ answerBody: string, questions: string[] } | null}
  */
-function parseStopSignal(finalText) {
+function splitStopSignal(finalText) {
   if (typeof finalText !== 'string') return null;
   const idx = finalText.lastIndexOf(STOP_SENTINEL);
   if (idx === -1) return null;
   const after = finalText.slice(idx + STOP_SENTINEL.length);
   const parsed = extractJson(after);
   if (parsed && Array.isArray(parsed.questions)) {
-    return { questions: parsed.questions };
+    const answerBody = finalText.slice(0, idx).trim();
+    return { answerBody, questions: parsed.questions };
   }
   return null;
+}
+
+/**
+ * Parse the final assistant text for the stop-signal protocol.
+ *
+ * Thin wrapper over `splitStopSignal` — kept for existing callers that only
+ * need the questions, not the pre-sentinel answer body.
+ *
+ * @param {string} finalText
+ * @returns {{ questions: string[] } | null}
+ */
+function parseStopSignal(finalText) {
+  const split = splitStopSignal(finalText);
+  return split ? { questions: split.questions } : null;
 }
 
 // ─── `/context` probe (PRD 470) ────────────────────────────────────────────
@@ -220,10 +239,14 @@ function hasMcpConsentDenial(text) {
 // Instruction prepended to every prompt. Tells the agent how to signal that
 // it needs clarification vs. having completed the task.
 const STOP_SIGNAL_INSTRUCTION =
-  `IMPORTANT: If you need clarification from the user before you can continue, ` +
-  `do NOT guess — finish your turn by emitting, as the very last line, exactly:\n` +
+  `IMPORTANT: First deliver everything you CAN answer or produce right now — findings, ` +
+  `the requested content, work already completed — as normal output. Only THEN, if ` +
+  `something still blocks you from finishing, end your turn by emitting, as the very ` +
+  `last line, exactly:\n` +
   `${STOP_SENTINEL}\n` +
   `followed on the next line by a single-line JSON object {"questions":["..."]}. ` +
+  `Never make the question your entire reply when the user asked for content — do NOT ` +
+  `guess on what's genuinely blocked, but always answer what you can first. ` +
   `Otherwise complete the task and end with a concise summary of what you did.\n\n`;
 
 // ─── Serial run queue (v0.34) ───────────────────────────────────────────────
@@ -507,13 +530,23 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
             if (typeof onSilentResult === 'function') onSilentResult(text);
           } else {
-            const signal = parseStopSignal(text);
+            const signal = splitStopSignal(text);
             if (signal) {
               emitTerminal('chat:run:needs-input', {
                 tabId,
                 sessionId,
                 questions: signal.questions,
+                answerBody: signal.answerBody,
                 raw: text,
+              });
+              // Record durable exchange off the hot path — UI must not wait on Haiku
+              recordExchange({
+                sessionId,
+                cwd,
+                prompt,
+                result: `${signal.answerBody}\n\n[asked: ${signal.questions.join(' | ')}]`,
+              }).catch((err) => {
+                console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
               });
             } else {
               emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
@@ -640,6 +673,7 @@ module.exports = {
   attachWindow,
   registerChatHandlers,
   parseStopSignal,
+  splitStopSignal,
   parseContextUsageMarkdown,
   probeContextUsage,
   STOP_SENTINEL,

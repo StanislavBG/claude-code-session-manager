@@ -227,7 +227,28 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   window.api.chat.onComplete(({ tabId, finalMessage }) => {
     pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now() })
   })
-  window.api.chat.onNeedsInput(({ tabId, questions }) => {
+  window.api.chat.onNeedsInput(({ tabId, questions, answerBody }) => {
+    if (answerBody && answerBody.trim()) {
+      // Two turns: the answer body renders as a normal assistant bubble
+      // (with the run's accumulated tool-use trace), the question card
+      // beneath it carries no tool-use trace of its own.
+      patch(tabId, (c) => ({
+        ...c,
+        turns: [
+          ...c.turns,
+          { id: turnId(), role: 'assistant', text: answerBody, at: Date.now(), toolUses: c.liveToolUses },
+        ],
+        liveToolUses: [],
+      }))
+      pushTurn(tabId, {
+        id: turnId(),
+        role: 'question',
+        text: questions.join('\n'),
+        questions,
+        at: Date.now(),
+      })
+      return
+    }
     pushTurn(tabId, {
       id: turnId(),
       role: 'question',

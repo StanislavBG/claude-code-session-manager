@@ -1018,7 +1018,9 @@ export interface ChatRunNeedsInputEvent {
   sessionId: string;
   /** Questions the agent is blocked on. */
   questions: string[];
-  /** Full raw assistant text including the stop-signal sentinel. */
+  /** Everything the agent produced before the stop-signal sentinel, trimmed. */
+  answerBody: string;
+  /** Full raw assistant text including the stop-signal sentinel. @deprecated use answerBody */
   raw: string;
 }
 

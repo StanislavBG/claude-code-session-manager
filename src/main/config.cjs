@@ -134,6 +134,14 @@ function validateWrite(realAbs) {
       if (realAbs === browserSub || realAbs.startsWith(browserSub + path.sep)) {
         return;
       }
+      // Feedback inbox writes (scheduler RCA hook — rcaFeedbackHook.cjs — and
+      // any interactive feedback filing): narrowly scoped to
+      // session-manager-operations/feedback/, this repo's existing
+      // per-project intake convention.
+      const feedbackSub = path.join(realRoot, 'session-manager-operations', 'feedback');
+      if (realAbs === feedbackSub || realAbs.startsWith(feedbackSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

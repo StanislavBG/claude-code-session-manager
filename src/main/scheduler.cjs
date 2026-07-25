@@ -71,6 +71,7 @@ const {
 } = require('./lib/schedulerConfig.cjs');
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
+const { fileRcaFeedback, extractRcaBlock } = require('./lib/rcaFeedbackHook.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
 const queueOps = require('./queueOps.cjs');
 
@@ -1458,6 +1459,17 @@ ${logTail}
 1. Read the full failure log at ${failedLogPath} if the tail above isn't sufficient.
 2. Read source files in ${cwd} as needed to understand the context.
 3. Identify the root cause of the failure.
+3.5. Before writing the fix-plan PRD file, print a block summarizing the root
+   cause in 15 lines or fewer, in exactly this form (plain text between the
+   tags, no markdown fences):
+
+   <RCA>
+   <your root-cause summary here>
+   </RCA>
+
+   This is parsed out of your transcript and folded into the RCA feedback item
+   already filed for this job, so it must stand alone (the reader won't have
+   your reasoning, only this block).
 4. Write a NEW fix-plan PRD file at exactly this path:
 
    ${fixPath}
@@ -1628,6 +1640,21 @@ async function spawnInvestigation(failedJob, runDir) {
         return;
       }
       sl(`\n[scheduler] investigation exit code=${exitCode}\n`);
+      // Fold the investigation's <RCA> summary into the RCA feedback item already
+      // filed for this job (needs_review jobs only — fileRcaFeedback no-ops when
+      // failedJob has no verifierVerdict, e.g. plain 'failed' jobs never got one).
+      const investigationText = extractRcaBlock(readTail(investigationLogPath, 64 * 1024));
+      if (investigationText) {
+        fileRcaFeedback({
+          job: failedJob,
+          runDir,
+          verdict: failedJob.verifierVerdict,
+          annotations: failedJob.verifierAnnotations,
+          investigationText,
+        }).catch((e) => {
+          console.error('[scheduler] fileRcaFeedback (investigation enrichment) error', failedJob.slug, e);
+        });
+      }
       if (fs.existsSync(fixPath)) {
         console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
       } else {
@@ -1781,6 +1808,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     let failedJobSnapshot = null;
     let needsInvestigationNow = false;
     let investigationJobSnapshot = null;
+    let needsReviewRcaSnapshot = null;
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       if (i2 >= 0) {
@@ -1838,6 +1866,12 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             actuallyFailed = true;
             failedJobSnapshot = { ...s.jobs[i2] };
           } else if (effectiveStatus === 'needs_review') {
+            // Snapshot for the RCA feedback hook (fired outside mutate(), below).
+            // Every needs_review transition gets an RCA — including uncommitted_changes,
+            // the least self-healing verdict — but never a rate-limit pause (that
+            // takes the treatAsPending branch above and never reaches here).
+            needsReviewRcaSnapshot = { ...s.jobs[i2] };
+
             // Same-tick auto-fix (feedback 2026-07-12): rather than waiting up to
             // 10 min for reverifyNeedsReview()'s periodic pass, check right here
             // whether this job qualifies for auto-fix (same eligibility rule
@@ -1885,6 +1919,19 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       }
     });
     await broadcast({ flush: true });
+
+    if (needsReviewRcaSnapshot) {
+      // Fire-and-forget, mirroring the DoD drain hook: never blocks the status
+      // transition, never throws to this caller.
+      fileRcaFeedback({
+        job: needsReviewRcaSnapshot,
+        runDir,
+        verdict: needsReviewRcaSnapshot.verifierVerdict,
+        annotations: needsReviewRcaSnapshot.verifierAnnotations,
+      }).catch((e) => {
+        console.error('[scheduler] fileRcaFeedback error', job.slug, e);
+      });
+    }
 
     if (actuallyFailed && failedJobSnapshot) {
       // Transient-failure detector. A 143/137 exit is ALWAYS a signal kill — the

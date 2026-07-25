@@ -67,6 +67,7 @@ const {
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
+const queueOps = require('./queueOps.cjs');
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -666,8 +667,41 @@ async function reconcile(state) {
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     });
   }
+  // Slugs on disk with no matching state.jobs row are normally brand-new
+  // PRDs — but once queueHistory.partitionJobs (above, later this same
+  // function) has been dropping terminal jobs into history.jsonl across
+  // prior reconcile passes, an old completed/failed job's row can ALSO be
+  // "unmatched" simply because it already left jobs[]. Without this check
+  // it would get resurrected below as a fresh 'pending' entry and the
+  // scheduler would genuinely re-execute an already-completed PRD — the
+  // exact backlog this auto-archive feature exists to clean up. Only pay
+  // the history lookup when there's actually an unmatched slug to resolve.
+  const unmatchedSlugs = [];
+  for (const [slug] of onDisk) {
+    if (!seen.has(slug)) unmatchedSlugs.push(slug);
+  }
+  const historyBySlug = unmatchedSlugs.length > 0
+    ? await queueHistory.historyTerminalBySlug()
+    : new Map();
+
+  // Terminal-in-history slugs whose .md file is still on disk: fed into the
+  // auto-archive selection pass below (as synthetic completed entries) so
+  // their file can still be swept, without ever creating a live job row
+  // for them (that row already exists, durably, in history.jsonl).
+  const historyArchiveCandidates = [];
+
   for (const [slug, p] of onDisk) {
     if (seen.has(slug)) continue;
+    const hist = historyBySlug.get(slug);
+    if (hist) {
+      if (hist.status === 'completed') {
+        historyArchiveCandidates.push({ slug, status: hist.status, finishedAt: hist.finishedAt });
+      }
+      // 'failed' (or any other terminal status found in history) is left
+      // alone entirely: not resurrected, not archived — matches "needs_
+      // review and failed PRD files are NEVER auto-archived."
+      continue;
+    }
     const entry = {
       slug,
       title: p.title,
@@ -699,7 +733,8 @@ async function reconcile(state) {
   // small. Append BEFORE dropping so a crash between the two can't lose a
   // record — appendHistory dedupes by slug+runId, so a replay of the same
   // batch on next boot is a safe no-op.
-  const { hot, toArchive } = queueHistory.partitionJobs(sorted, Date.now());
+  const nowMs = Date.now();
+  const { hot, toArchive } = queueHistory.partitionJobs(sorted, nowMs);
   if (toArchive.length > 0) {
     await queueHistory.appendHistory(toArchive);
     console.log(`[scheduler] queue history: archived ${toArchive.length} job(s), jobs[] ${sorted.length} -> ${hot.length}`);
@@ -707,6 +742,28 @@ async function reconcile(state) {
   } else {
     state.jobs = sorted;
   }
+
+  // Auto-archive completed PRDs' .md files out of the live prds/ dir. Runs
+  // AFTER the history append above (which is awaited) so a job's queue row
+  // is always durably in history.jsonl before its file can be moved — a
+  // file is never removed ahead of its queue row. `sorted` (not `hot`) is
+  // passed so a job that just crossed retention THIS pass is eligible for
+  // file-archiving in the same pass, per its already-persisted history row.
+  // `historyArchiveCandidates` adds slugs whose row left jobs[] on an
+  // EARLIER pass (or before this feature shipped) — same predicate applies
+  // via selectAutoArchivable, they just don't get a live job row.
+  try {
+    const archiveInput = historyArchiveCandidates.length > 0
+      ? sorted.concat(historyArchiveCandidates)
+      : sorted;
+    const archiveResult = await queueOps.autoArchiveCompleted({ jobs: archiveInput }, { nowMs });
+    if (archiveResult.archived > 0) {
+      console.log(`[scheduler] auto-archived ${archiveResult.archived} completed PRD file(s) -> ${archiveResult.archivedTo}`);
+    }
+  } catch (e) {
+    console.warn('[scheduler] autoArchiveCompleted failed', e?.message);
+  }
+
   return state;
 }
 

@@ -172,6 +172,48 @@ const RESERVATION_RE = /^\.reserved-(\d+)$/;
 const GROUP_PREFIX_RE = /^(\d+)-/;
 const MAX_RESERVE_ATTEMPTS = 1000;
 
+// Auto-archiving completed PRDs (see queueOps.cjs's autoArchiveCompleted)
+// moves old `NN-*.md` files out of prdsDir into prds-archived/, which would
+// let maxParallelGroupInUse's directory scan regress once the highest-NN
+// files age out — a later allocation could then reissue an already-used NN
+// and collide with an archived group. A high-water-mark sidecar closes that:
+// once a scan or allocation has seen NN, the allocator never returns
+// anything ≤ NN again, even if every file at or above NN is later archived.
+// Sidecar (not queue.json) so this module stays self-contained and testable
+// against a bare tmp dir, matching the `.reserved-NN` marker convention.
+const MAX_GROUP_FILE = '.max-allocated-group';
+
+async function readHighWaterMark(prdsDir) {
+  try {
+    const raw = await fsp.readFile(path.join(prdsDir, MAX_GROUP_FILE), 'utf8');
+    const n = Number(raw.trim());
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeHighWaterMark(prdsDir, n) {
+  // Re-read immediately before writing so two concurrent allocations that
+  // both raced past the caller's earlier read can't have the smaller `n`
+  // land last and regress the persisted mark below the larger one. Narrows
+  // (does not fully eliminate) the race; the reservation markers remain the
+  // authoritative concurrency guard, this file is a best-effort backstop
+  // for after files are archived away.
+  const current = await readHighWaterMark(prdsDir);
+  if (n <= current) return;
+
+  const dest = path.join(prdsDir, MAX_GROUP_FILE);
+  // `n` itself is unique per concurrent caller (the reservation marker each
+  // caller holds guarantees no two callers ever share a candidate), so it
+  // doubles as a collision-free tmp-file suffix — process.pid + Date.now()
+  // is NOT safe here since concurrent allocateParallelGroup calls in the
+  // same process can land in the same millisecond.
+  const tmp = `${dest}.tmp-${n}-${process.pid}`;
+  await fsp.writeFile(tmp, String(n), 'utf8');
+  await fsp.rename(tmp, dest);
+}
+
 /**
  * Highest `NN` currently in use under prdsDir, across real `NN-slug.md`
  * PRD files (any digit count, unpadded or not — matches groupFromName
@@ -208,7 +250,10 @@ async function maxParallelGroupInUse(prdsDir) {
  */
 async function allocateParallelGroup(prdsDir) {
   await fsp.mkdir(prdsDir, { recursive: true });
-  let candidate = (await maxParallelGroupInUse(prdsDir)) + 1;
+  const scanMax = await maxParallelGroupInUse(prdsDir);
+  const highWater = await readHighWaterMark(prdsDir);
+  const floor = Math.max(scanMax, highWater);
+  let candidate = floor + 1;
   for (let attempt = 0; attempt < MAX_RESERVE_ATTEMPTS; attempt += 1) {
     const markerPath = path.join(prdsDir, `.reserved-${candidate}`);
     let fh;
@@ -222,6 +267,12 @@ async function allocateParallelGroup(prdsDir) {
       throw e;
     }
     await fh.close();
+    // Persist the new floor before returning so a later archive of every
+    // NN-*.md file (including this one) can never regress the allocator
+    // below it.
+    if (candidate > highWater) {
+      await writeHighWaterMark(prdsDir, candidate);
+    }
     return candidate;
   }
   throw new Error(`allocateParallelGroup: exhausted ${MAX_RESERVE_ATTEMPTS} reservation attempts starting at ${candidate}`);

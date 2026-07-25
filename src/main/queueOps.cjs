@@ -38,6 +38,7 @@ const { SCHEDULE_SLUG_RE: SLUG_RE, schemas } = require('./ipcSchemas.cjs');
 const logs = require('./logs.cjs');
 const config = require('./config.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
+const { HISTORY_RETENTION_MS } = require('./lib/schedulerConfig.cjs');
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
@@ -243,6 +244,95 @@ async function archiveMany(slugs) {
   return { ok: true, archived, archivedTo: archiveDir, results };
 }
 
+// ────────────────────────────────────────────── auto-archive completed PRDs
+//
+// PRDS_DIR grows monotonically (738+ .md files, ~100% long-completed) because
+// nothing ever moves a finished PRD's .md out of the live directory — every
+// allocateParallelGroup scan, reconcile listing, and lint pass walks all of
+// them. Once a job is durably 'completed' (queueHistory.cjs's same retention
+// window has already judged it safe to leave jobs[]) and nothing still needs
+// its file in place, move the .md to prds-archived/ alongside it.
+//
+// 'needs_review' and 'failed' PRDs are NEVER selected here — humans and the
+// auto-fix loop (scheduler.cjs's healTargetForFix) still need those files on
+// disk. Same fix-plan-protection regex as queueHistory.cjs's partitionJobs,
+// duplicated (not shared) because the two modules intentionally stay
+// decoupled — kept in sync by comment, same convention queueHistory.cjs uses
+// against scheduler.cjs's healTargetForFix.
+
+const FIX_PLAN_RE = /^\d+-fix-/;
+
+function protectedByPendingFix(jobs) {
+  const protectedSlugs = new Set();
+  for (const j of jobs) {
+    if (!j || !FIX_PLAN_RE.test(j.slug || '')) continue;
+    if (j.status !== 'pending' && j.status !== 'running') continue;
+    protectedSlugs.add(j.slug.replace(/^(\d+)-fix-/, '$1-'));
+  }
+  return protectedSlugs;
+}
+
+/**
+ * Pure predicate: which slugs are safe to move to prds-archived/. O(n) over
+ * `jobs`. A slug qualifies only when ALL of:
+ *   - its job status is 'completed' (never 'needs_review'/'failed'/
+ *     'pending'/'running' — the completed check alone also covers "not
+ *     itself a pending/running job")
+ *   - finishedAt parses and is older than retentionMs (default
+ *     HISTORY_RETENTION_MS, the same constant queueHistory.cjs's
+ *     partitionJobs uses — by the time a file is archive-eligible its queue
+ *     row has already left jobs[] into history.jsonl)
+ *   - no pending/running `NN-fix-<slug>` sibling still needs it in place
+ */
+function selectAutoArchivable(jobs, { nowMs, retentionMs } = {}) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const retention = retentionMs ?? HISTORY_RETENTION_MS;
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const protectedSlugs = protectedByPendingFix(list);
+
+  const slugs = [];
+  for (const j of list) {
+    if (!j || !j.slug) continue;
+    if (j.status !== 'completed') continue;
+    const finishedMs = j.finishedAt ? Date.parse(j.finishedAt) : NaN;
+    if (!Number.isFinite(finishedMs)) continue;
+    if ((now - finishedMs) <= retention) continue;
+    if (protectedSlugs.has(j.slug)) continue;
+    slugs.push(j.slug);
+  }
+  return slugs;
+}
+
+/**
+ * Selects and moves eligible completed PRDs' .md files to prds-archived/.
+ * Reuses archiveMany (no second mover) so moves stay atomic fsp.rename with
+ * the same path-containment. No-op (without touching disk) when
+ * SM_PRD_AUTOARCHIVE_DISABLE=1. Each successful move is logged one line
+ * (slug -> dest).
+ */
+async function autoArchiveCompleted(state, { nowMs } = {}) {
+  if (process.env.SM_PRD_AUTOARCHIVE_DISABLE === '1') {
+    return { ok: true, archived: 0, archivedTo: null, results: [], skipped: 'disabled' };
+  }
+  const jobs = Array.isArray(state?.jobs) ? state.jobs : [];
+  const slugs = selectAutoArchivable(jobs, { nowMs });
+  if (slugs.length === 0) {
+    return { ok: true, archived: 0, archivedTo: null, results: [] };
+  }
+  const result = await archiveMany(slugs);
+  for (const r of result.results) {
+    if (r.ok) {
+      logs.writeLine({
+        level: 'info',
+        scope: 'queueOps',
+        message: `auto-archived completed PRD: ${r.slug} -> ${r.archivedTo}`,
+        meta: { slug: r.slug, dest: r.archivedTo },
+      });
+    }
+  }
+  return result;
+}
+
 // ────────────────────────────────────────────── retag
 
 /**
@@ -398,6 +488,8 @@ module.exports = {
   lintAll,
   lintOneAsync,
   archiveMany,
+  selectAutoArchivable,
+  autoArchiveCompleted,
   retagMany,
   PRDS_DIR,
   PRDS_ARCHIVE_DIR,

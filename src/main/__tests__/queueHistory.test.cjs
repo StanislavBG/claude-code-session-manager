@@ -193,3 +193,41 @@ test('selectHistoryJobs: default historyEntries=[] preserves old call shape', ()
   const merged = selectHistoryJobs([fresh()], 10);
   expect(merged.map((j) => j.slug)).toEqual(['01-fresh']);
 });
+
+// ---------- historyTerminalBySlug ----------
+//
+// Guards against scheduler.cjs's reconcile() resurrecting an already-
+// archived-to-history job as a fresh 'pending' entry (and the scheduler
+// then genuinely re-executing an already-completed PRD) just because its
+// job row already left jobs[]. reconcile() consults this map before
+// treating an unmatched on-disk PRD slug as brand-new.
+
+test('historyTerminalBySlug: returns status + finishedAt for every archived slug', async () => {
+  const a = old({ slug: 'term-completed', status: 'completed', runId: 'rc' });
+  const b = old({ slug: 'term-failed', status: 'failed', runId: 'rf' });
+  await queueHistory.appendHistory([a, b]);
+
+  const map = await queueHistory.historyTerminalBySlug();
+  expect(map.get('term-completed')).toEqual({ status: 'completed', finishedAt: a.finishedAt });
+  expect(map.get('term-failed')).toEqual({ status: 'failed', finishedAt: b.finishedAt });
+  expect(map.has('never-archived-slug')).toBe(false);
+});
+
+test('historyTerminalBySlug: returns an empty map when history.jsonl is absent', async () => {
+  const map = await queueHistory.historyTerminalBySlug();
+  expect(map.size).toBe(0);
+});
+
+test('historyTerminalBySlug: cache invalidates after a new appendHistory call (mtime changes)', async () => {
+  const a = old({ slug: 'cache-1', runId: 'rca' });
+  await queueHistory.appendHistory([a]);
+  const first = await queueHistory.historyTerminalBySlug();
+  expect(first.has('cache-1')).toBe(true);
+  expect(first.has('cache-2')).toBe(false);
+
+  const b = old({ slug: 'cache-2', runId: 'rcb' });
+  await queueHistory.appendHistory([b]);
+  const second = await queueHistory.historyTerminalBySlug();
+  expect(second.has('cache-1')).toBe(true);
+  expect(second.has('cache-2')).toBe(true);
+});

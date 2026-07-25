@@ -159,9 +159,58 @@ async function readHistory({ limit } = {}) {
   }
 }
 
+// mtime-gated cache, same convention as scheduler/prdParser.cjs's dirCache —
+// repeated reconcile() calls between appends hit the cache instead of
+// re-reading/re-parsing a JSONL file that only grows over time.
+let historyCacheMtime = -1;
+let historyCacheMap = null;
+
+/**
+ * Full-file scan of history.jsonl, returning slug -> { status, finishedAt }
+ * for the most recently appended record of each slug. O(H) where H is the
+ * line count of history.jsonl; cached by the file's mtime so a reconcile()
+ * pass with no new archives since the last call is O(1).
+ *
+ * Exists so reconcile() can tell "this on-disk PRD's job row already left
+ * jobs[] into history — do not resurrect it as a fresh pending job" apart
+ * from "this is a genuinely brand-new PRD nobody has ever queued."
+ */
+async function historyTerminalBySlug() {
+  let mtime;
+  try {
+    mtime = (await fsp.stat(HISTORY_PATH)).mtimeMs;
+  } catch {
+    mtime = -1;
+  }
+  if (mtime === historyCacheMtime && historyCacheMap) return historyCacheMap;
+
+  const map = new Map();
+  let text = '';
+  try {
+    text = await fsp.readFile(HISTORY_PATH, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  if (text) {
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const j = JSON.parse(line);
+        if (j?.slug) map.set(j.slug, { status: j.status, finishedAt: j.finishedAt });
+      } catch {
+        // corrupt/partial line — ignore
+      }
+    }
+  }
+  historyCacheMtime = mtime;
+  historyCacheMap = map;
+  return map;
+}
+
 module.exports = {
   HISTORY_PATH,
   partitionJobs,
   appendHistory,
   readHistory,
+  historyTerminalBySlug,
 };

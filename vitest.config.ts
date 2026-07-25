@@ -10,6 +10,7 @@ export default defineConfig({
       'src/main/__tests__/pty-write-result.test.cjs',
       'src/main/__tests__/web-remote-e2e-pinning.test.cjs',
       'src/main/__tests__/docEdit.test.cjs',
+      'src/main/__tests__/queueHistory.test.cjs',
     ],
     globals: true,
   },

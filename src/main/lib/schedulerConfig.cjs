@@ -21,4 +21,8 @@ module.exports = {
   MAX_JOB_DURATION_MS: 4 * 60 * 60_000,
   SUPERVISOR_INTERVAL_MS: 15 * 60_000,
   SUPERVISOR_PROBE_STALE_MS: 10 * 60_000,
+  // Terminal (completed/failed) jobs older than this move from queue.json's
+  // hot jobs[] into the append-only history.jsonl sidecar. See
+  // src/main/lib/queueHistory.cjs.
+  HISTORY_RETENTION_MS: 7 * 24 * 60 * 60_000,
 };

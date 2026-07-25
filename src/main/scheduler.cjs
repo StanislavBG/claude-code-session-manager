@@ -66,6 +66,7 @@ const {
 } = require('./lib/schedulerConfig.cjs');
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
+const queueHistory = require('./lib/queueHistory.cjs');
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -361,6 +362,46 @@ function ensureDirs() {
   } catch { /* non-fatal: the guide is a convenience, not load-bearing for a run */ }
 }
 
+// Matches only numbered timestamp backups (queue.json.bak-<epoch>), not the
+// bare `queue.json.bak` single-shot copy some older code paths left behind.
+const QUEUE_BAK_RE = /^queue\.json\.bak-\d+$/;
+const QUEUE_BAK_KEEP = 5;
+
+/**
+ * Sweeps accumulated queue.json.bak-<epoch> files down to the newest
+ * QUEUE_BAK_KEEP, deleting the rest. Runs at boot. `entries` comes from
+ * fs.readdir(ROOT), so every candidate path is already contained in ROOT.
+ */
+async function sweepQueueBackups() {
+  let entries;
+  try {
+    entries = await fsp.readdir(ROOT);
+  } catch {
+    return;
+  }
+  const baks = entries.filter((f) => QUEUE_BAK_RE.test(f));
+  if (baks.length <= QUEUE_BAK_KEEP) return;
+
+  baks.sort((a, b) => {
+    const ta = Number(a.slice('queue.json.bak-'.length));
+    const tb = Number(b.slice('queue.json.bak-'.length));
+    return tb - ta; // newest (largest epoch) first
+  });
+  const toDelete = baks.slice(QUEUE_BAK_KEEP);
+  let removed = 0;
+  for (const f of toDelete) {
+    try {
+      await fsp.unlink(path.join(ROOT, f));
+      removed++;
+    } catch (e) {
+      console.warn('[scheduler] backup sweep: unlink failed', f, e?.message);
+    }
+  }
+  if (removed > 0) {
+    console.log(`[scheduler] backup sweep: removed ${removed} old queue.json.bak-* file(s), kept ${QUEUE_BAK_KEEP}`);
+  }
+}
+
 // Atomic JSON write helpers delegate to config.cjs's shared implementation.
 // Sync variant is required for the executeJob exit handler (Promise resolver
 // callback that must flush meta.json before resolving) — replacing with async
@@ -651,7 +692,21 @@ async function reconcile(state) {
     }
     next.push(entry);
   }
-  state.jobs = next.sort((a, b) => b.slug.localeCompare(a.slug));
+  const sorted = next.sort((a, b) => b.slug.localeCompare(a.slug));
+
+  // Move terminal jobs past the retention window out to history.jsonl so
+  // queue.json (mutation cost, broadcast payload, pickNextBatch scan) stays
+  // small. Append BEFORE dropping so a crash between the two can't lose a
+  // record — appendHistory dedupes by slug+runId, so a replay of the same
+  // batch on next boot is a safe no-op.
+  const { hot, toArchive } = queueHistory.partitionJobs(sorted, Date.now());
+  if (toArchive.length > 0) {
+    await queueHistory.appendHistory(toArchive);
+    console.log(`[scheduler] queue history: archived ${toArchive.length} job(s), jobs[] ${sorted.length} -> ${hot.length}`);
+    state.jobs = hot;
+  } else {
+    state.jobs = sorted;
+  }
   return state;
 }
 
@@ -2149,13 +2204,26 @@ async function pollLoop() {
 
 // ---------- IPC ----------
 
-// Pure helper: filter to completed/failed, sort newest-finished first, cap to
-// limit clamped to [1, 500] (default 50). O(n log n) on queue size (small).
-// Exported for unit testing.
-function selectHistoryJobs(jobs, limit) {
+// Pure helper: filter to completed/failed, merge with archived history
+// entries (now that terminal jobs age out of jobs[] into history.jsonl —
+// see queueHistory.cjs), dedupe by slug+runId (jobs[] wins on overlap —
+// it's the fresher copy in the append-before-drop crash window), sort
+// newest-finished first, cap to limit clamped to [1, 500] (default 50).
+// O(n log n) on queue+history size (small at any realistic scale).
+// Exported for unit testing. `historyEntries` defaults to [] so existing
+// callers/tests that only pass `jobs` are unaffected.
+function selectHistoryJobs(jobs, limit, historyEntries = []) {
   const cap = Math.max(1, Math.min(500, Number.isFinite(limit) ? Math.floor(limit) : 50));
-  return (Array.isArray(jobs) ? jobs : [])
-    .filter((j) => j && (j.status === 'completed' || j.status === 'failed'))
+  const hot = (Array.isArray(jobs) ? jobs : []).filter((j) => j && (j.status === 'completed' || j.status === 'failed'));
+  const seen = new Set(hot.map((j) => `${j.slug}|${j.runId ?? ''}`));
+  const archived = (Array.isArray(historyEntries) ? historyEntries : []).filter((j) => {
+    if (!j) return false;
+    const key = `${j.slug}|${j.runId ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...hot, ...archived]
     .sort((a, b) => {
       const at = a.finishedAt ? Date.parse(a.finishedAt) : 0;
       const bt = b.finishedAt ? Date.parse(b.finishedAt) : 0;
@@ -2713,7 +2781,8 @@ function registerScheduleHandlers() {
     const limit = (payload && typeof payload.limit === 'number') ? payload.limit : 50;
     try {
       const state = await readQueue();
-      return { ok: true, jobs: selectHistoryJobs(state.jobs, limit) };
+      const historyEntries = await queueHistory.readHistory({ limit });
+      return { ok: true, jobs: selectHistoryJobs(state.jobs, limit, historyEntries) };
     } catch (e) {
       return { ok: false, jobs: [], error: e?.message ?? 'read failed' };
     }
@@ -2722,6 +2791,7 @@ function registerScheduleHandlers() {
 
 async function init() {
   ensureDirs();
+  sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
 
   // Hydrate cached state from the sidecar before any scheduling decisions.
   loadSchedulerState();

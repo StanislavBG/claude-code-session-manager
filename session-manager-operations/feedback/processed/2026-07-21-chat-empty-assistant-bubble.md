@@ -26,3 +26,18 @@ This happened at the tail of the same incident: after the user typed "whats goin
 - When a turn *finishes* with empty final text, either suppress the bubble entirely or show an explicit "(no textual reply — see tool activity above)" placeholder, so an empty balloon is never presented as a completed answer.
 
 Root-cause companion filed separately: `2026-07-21-chat-background-shell-false-promise.md` (why the resume/dead-air happened in the first place).
+
+## RESOLUTION
+
+Shipped. `src/renderer/lib/assistantTurnPresentation.ts` extracts the branch decision as a pure
+helper (`'text' | 'working' | 'placeholder' | 'suppress'`), unit-tested for all four states plus
+whitespace-only text (`src/renderer/lib/__tests__/assistantTurnPresentation.test.ts`, 5 cases).
+`Turn()`'s assistant branch (`src/renderer/components/TerminalChat.tsx`) now switches on it:
+empty text + run still active for this turn → trace strip + pulsing "working…" affordance
+(reuses the existing `animate-pulse` dot idiom already used elsewhere in this file, not a new
+spinner); empty text + finished + has toolUses → trace strip + muted italic
+"(no textual reply — see tool activity above)"; empty text + finished + no toolUses → bubble
+suppressed entirely (returns `null`); non-empty text → unchanged existing markdown/UrlCallout/
+plan render. `runActive` is derived by the caller as `running && i === turns.length - 1` (the
+chat store's per-tab `running` flag from `state/chat.ts`, applied only to the last turn).
+`npm run typecheck` and `npm run test:unit` both pass (873 tests, 78 files).

@@ -8,6 +8,7 @@ import { decideSubmitAction } from '../lib/slashCommand'
 import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
+import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import type { NavKey } from './LeftNav'
 
 /**
@@ -259,7 +260,7 @@ function ChatSessionRail({
   )
 }
 
-function Turn({ turn }: { turn: ChatTurn }) {
+function Turn({ turn, runActive = false }: { turn: ChatTurn; runActive?: boolean }) {
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -306,7 +307,13 @@ function Turn({ turn }: { turn: ChatTurn }) {
       </div>
     )
   }
-  // assistant — render the run's final message verbatim (markdown).
+  // assistant — render the run's final message verbatim (markdown), guarded
+  // against empty text (e.g. a resumed turn that opens with a non-rendered
+  // thinking block before any visible text arrives — see
+  // session-manager-operations/feedback/2026-07-21-chat-empty-assistant-bubble.md).
+  const presentation = assistantTurnPresentation(turn, runActive)
+  if (presentation === 'suppress') return null
+
   const urls = extractUrls(turn.text)
   const isPlan = hasMarkdownList(turn.text)
   return (
@@ -315,15 +322,30 @@ function Turn({ turn }: { turn: ChatTurn }) {
         C
       </div>
       <div className="min-w-0 flex-1">
-        <ToolUseTraceStrip items={turn.toolUses} />
-        <div
-          className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
-        />
-        {urls.map((url) => (
-          <UrlCallout key={url} url={url} />
-        ))}
+        <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
+        {presentation === 'working' ? (
+          <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
+            <span className="inline-flex items-center gap-2">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+              working…
+            </span>
+          </div>
+        ) : presentation === 'placeholder' ? (
+          <div className="rounded-lg bg-elev px-3 py-2 text-sm italic text-fg-dim">
+            (no textual reply — see tool activity above)
+          </div>
+        ) : (
+          <>
+            <div
+              className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
+              // eslint-disable-next-line react/no-danger
+              dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
+            />
+            {urls.map((url) => (
+              <UrlCallout key={url} url={url} />
+            ))}
+          </>
+        )}
       </div>
     </div>
   )
@@ -520,8 +542,8 @@ export function TerminalChat({ tabId, cwd }: Props) {
               Type a command to start a session. It runs, reports back, and asks if it needs you.
             </div>
           )}
-          {turns.map((t) => (
-            <Turn key={t.id} turn={t} />
+          {turns.map((t, i) => (
+            <Turn key={t.id} turn={t} runActive={running && t.role === 'assistant' && i === turns.length - 1} />
           ))}
           {running && (
             <div className="max-w-[90%]">

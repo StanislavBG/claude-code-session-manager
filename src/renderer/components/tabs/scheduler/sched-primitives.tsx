@@ -4,18 +4,7 @@
  */
 import type { ReactNode } from 'react'
 import type { ScheduleJobStatus } from '../../../../preload/api'
-
-// ─── Project dot palette ────────────────────────────────────────────────────
-// Values are exact Tailwind theme token colors (sage, accent, fg-faint, butter,
-// hive-slate, hive-teal, hive-plum) kept inline so the dot <span> can use
-// style={{ backgroundColor }} without a runtime class-lookup.
-const PROJ_DOTS = ['#6f7d52', '#b85c34', '#8a7a60', '#e4b85a', '#5f6f86', '#4f7d72', '#8a5a6e']
-
-function hashStr(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = ((h * 31) + s.charCodeAt(i)) >>> 0
-  return h
-}
+import { projectColorFor } from '../../../lib/projectColor'
 
 // ─── projectNameFromCwd — canonical "last path segment" extraction ──────────
 // Single source for turning an absolute project cwd into a short display
@@ -30,7 +19,7 @@ export function projectNameFromCwd(cwd?: string | null): string | null {
 
 function projectDot(cwd?: string | null, name?: string): string {
   const base = cwd ? (projectNameFromCwd(cwd) ?? '') : (name ?? '')
-  return PROJ_DOTS[hashStr(base) % PROJ_DOTS.length]
+  return projectColorFor(base)
 }
 
 // ─── SchBadge ────────────────────────────────────────────────────────────────

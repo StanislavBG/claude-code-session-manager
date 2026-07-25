@@ -1,814 +1,254 @@
 import { useEffect, useMemo, useState } from 'react'
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { EmptyState } from '../ui/EmptyState'
-import type { DayProjectRow, HistoryAggregateResult } from '../../../preload/api'
-import { CHART_CATEGORICAL, categoricalColor, HEAT_RAMP } from '../../lib/chartPalette'
-import { computeDelta, computeBudgetProjection, type Delta } from '../../lib/historyMath'
-import { formatCompactCount } from '../../lib/formatCompactCount'
+import type { HistoryDashboardDay, HistoryDashboardResult, HistoryDashboardTotals } from '../../../preload/api'
+import { facetSlice } from '../../lib/historyFacet'
+import { buildHeadline, buildProjectRows, measureValue, type Measure } from '../../lib/analyticsViewModel'
+import { buildUsageCsv } from '../../lib/usageCsv'
+import { toast } from '../../state/toast'
+import { ControlBar, type RangeDays } from './history/analytics/ControlBar'
+import { Headline } from './history/analytics/Headline'
+import { BudgetStrip } from './history/analytics/BudgetStrip'
+import { ProjectFacet } from './history/analytics/ProjectFacet'
+import { StackedTrend } from './history/analytics/StackedTrend'
+import { Ranking } from './history/analytics/Ranking'
+import { ProjectDrill, type DrillModelBucket } from './history/analytics/ProjectDrill'
+import { ModelMix } from './history/analytics/panels/ModelMix'
+import { Concentration } from './history/analytics/panels/Concentration'
+import { CachePanel } from './history/analytics/panels/CachePanel'
+import { Rhythm } from './history/analytics/panels/Rhythm'
 
-const BUDGET_CAP_STORAGE_KEY = 'sm.history.budgetCapUsd'
-const DEFAULT_BUDGET_CAP_USD = 50
+const MEASURE_KEY = 'sm.history.analytics.measure'
+const RANGE_KEY = 'sm.history.analytics.range'
+const MEASURES: Measure[] = ['in', 'out', 'total', 'prompts', 'sessions', 'time', 'spend']
+const RANGES: RangeDays[] = [30, 60, 90, 0]
 
-type MetricKey = 'promptCount' | 'inputTokens' | 'outputTokens' | 'sessionCount' | 'errorCount' | 'estimatedCostUsd'
-type SortDir = 'asc' | 'desc'
-
-const METRIC_LABELS: Record<MetricKey, string> = {
-  promptCount: 'Prompt count',
-  inputTokens: 'Input tokens',
-  outputTokens: 'Output tokens',
-  sessionCount: 'Sessions',
-  errorCount: 'Errors',
-  estimatedCostUsd: 'Est. cost',
+function loadMeasure(): Measure {
+  try {
+    const v = localStorage.getItem(MEASURE_KEY)
+    if (v && (MEASURES as string[]).includes(v)) return v as Measure
+  } catch { /* quota / private mode — ignore */ }
+  return 'spend'
 }
 
-// Fixed per-model accent so a model's color is stable across renders/filters,
-// not index-derived like the project palette. 'other' covers unmapped ids.
-const MODEL_COLOR: Record<string, string> = {
-  opus: 'bg-accent',
-  sonnet: 'bg-sage',
-  haiku: 'bg-butter',
-  other: 'bg-hive-slate',
+function loadRange(): RangeDays {
+  try {
+    const v = Number(localStorage.getItem(RANGE_KEY))
+    if ((RANGES as number[]).includes(v)) return v as RangeDays
+  } catch { /* quota / private mode — ignore */ }
+  return 30
 }
 
-function modelColorFor(modelId: string): string {
-  const id = modelId.toLowerCase()
-  if (id.includes('opus')) return MODEL_COLOR.opus
-  if (id.includes('sonnet')) return MODEL_COLOR.sonnet
-  if (id.includes('haiku')) return MODEL_COLOR.haiku
-  return MODEL_COLOR.other
+function emptyTotals(): HistoryDashboardTotals {
+  return {
+    promptCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+    toolCallCount: 0, sessionCount: 0, errorCount: 0, activeMinutes: 0, estimatedCostUsd: 0,
+  }
 }
 
-const TABLE_COLS = [
-  { key: 'project', label: 'project' },
-  { key: 'daysActive', label: 'days' },
-  { key: 'totalSessions', label: 'sessions' },
-  { key: 'totalPrompts', label: 'prompts' },
-  { key: 'totalInput', label: 'input tok' },
-  { key: 'totalOutput', label: 'output tok' },
-  { key: 'topTool', label: 'top tool' },
-  { key: 'estimatedCostUsd', label: 'est. cost' },
-] as const
-
-type TableColKey = typeof TABLE_COLS[number]['key']
-
-interface ProjectAgg {
-  projectCwd: string
-  daysActive: Set<string>
-  totalSessions: number
-  totalPrompts: number
-  totalInput: number
-  totalOutput: number
-  topTool: string
-  toolBreakdown: Record<string, number>
-  estimatedCostUsd: number
-}
-
-interface Props {
-  fromDate: string
-  toDate: string
-  projectFilter: string
-  onProjectClick: (cwd: string) => void
-}
-
-// Auto-refresh interval — long enough to avoid hammering the aggregator
-// (which walks every JSONL on disk) but short enough that an active session
-// shows up in the dashboard without the user reaching for the refresh button.
-const REFRESH_INTERVAL_MS = 30_000
-
-export function HistoryDashboard({ fromDate, toDate, projectFilter, onProjectClick }: Props) {
-  const [result, setResult] = useState<HistoryAggregateResult | null>(null)
+export function HistoryDashboard() {
+  const [measure, setMeasure] = useState<Measure>(loadMeasure)
+  const [range, setRange] = useState<RangeDays>(loadRange)
+  const [keep, setKeep] = useState<Set<string> | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [raw, setRaw] = useState<HistoryDashboardResult | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [metric, setMetric] = useState<MetricKey>('estimatedCostUsd')
-  const [sortCol, setSortCol] = useState<TableColKey>('estimatedCostUsd')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
-  // `tick` bumps to force a refetch — incremented by the manual refresh button
-  // and by a 30s interval so a live session's numbers eventually flow in
-  // without the user having to do anything.
   const [tick, setTick] = useState(0)
-  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null)
-  const [heatMetric, setHeatMetric] = useState<'cost' | 'sessions' | 'tokens'>('cost')
-  const [prevResult, setPrevResult] = useState<HistoryAggregateResult | null>(null)
-  const [budgetCapUsd, setBudgetCapUsd] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem(BUDGET_CAP_STORAGE_KEY)
-      const parsed = raw === null ? NaN : Number(raw)
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BUDGET_CAP_USD
-    } catch {
-      return DEFAULT_BUDGET_CAP_USD
-    }
-  })
+
+  useEffect(() => { try { localStorage.setItem(MEASURE_KEY, measure) } catch { /* ignore */ } }, [measure])
+  useEffect(() => { try { localStorage.setItem(RANGE_KEY, String(range)) } catch { /* ignore */ } }, [range])
 
   useEffect(() => {
     let cancelled = false
-    // Suppress the full-screen "scanning…" empty state on background
-    // refreshes — only show it on the first load or when the user changed
-    // the date range. Otherwise auto-refresh would flash the empty state
-    // every 30s.
-    if (lastFetchedAt === null) setLoading(true)
-    setError(null)
-    window.api.history.aggregate({ fromDate, toDate })
-      .then((r) => {
+    setLoading(true)
+    window.api.history.dashboard({ rangeDays: range })
+      .then((r) => { if (!cancelled) { setRaw(r); setLoading(false) } })
+      .catch((e: unknown) => {
         if (cancelled) return
-        setResult(r)
-        setLastFetchedAt(Date.now())
         setLoading(false)
+        toast.error(`History analytics failed to load: ${String(e)}`)
+        // Deliberately does not clear `raw` — the last good payload stays on screen.
       })
-      .catch((e: unknown) => { if (!cancelled) { setError(String(e)); setLoading(false) } })
     return () => { cancelled = true }
-    // lastFetchedAt is intentionally omitted: it's a derived effect output,
-    // not an input. Including it would re-fire the effect after every fetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromDate, toDate, tick])
+  }, [range, tick])
 
-  // Prior-period fetch for the delta chips — same aggregate() call, shifted
-  // back by the current range's length (inclusive day count) so a 30-day
-  // range compares against the 30 days immediately preceding it. Mirrors the
-  // primary fetch's cancellation guard so a fast date-range change doesn't
-  // leave a stale previous-period result rendered.
-  useEffect(() => {
-    let cancelled = false
-    const [fy, fm, fd] = fromDate.split('-').map(Number)
-    const [ty, tm, td] = toDate.split('-').map(Number)
-    const start = new Date(fy, fm - 1, fd)
-    const end = new Date(ty, tm - 1, td)
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
-      setPrevResult(null)
-      return
-    }
-    const rangeDays = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1
-    const prevEnd = new Date(start)
-    prevEnd.setDate(prevEnd.getDate() - 1)
-    const prevStart = new Date(start)
-    prevStart.setDate(prevStart.getDate() - rangeDays)
-    window.api.history.aggregate({
-      fromDate: prevStart.toLocaleDateString('en-CA'),
-      toDate: prevEnd.toLocaleDateString('en-CA'),
-    })
-      .then((r) => { if (!cancelled) setPrevResult(r) })
-      .catch(() => { if (!cancelled) setPrevResult(null) })
-    return () => { cancelled = true }
-  }, [fromDate, toDate])
+  // Reset facet + selection when the range changes so a stale project key from
+  // a prior range doesn't linger in `keep`.
+  useEffect(() => { setKeep(null); setSelected(null) }, [range])
 
-  // Persist the user-set monthly budget cap across sessions.
-  useEffect(() => {
-    try { localStorage.setItem(BUDGET_CAP_STORAGE_KEY, String(budgetCapUsd)) } catch { /* quota / private mode — ignore */ }
-  }, [budgetCapUsd])
+  const facet = useMemo(() => (raw ? facetSlice(raw, keep) : null), [raw, keep])
 
-  // Reset the first-load gate when the date range changes so the user sees
-  // a "scanning…" affordance, not a stale chart, while the new range fetches.
-  useEffect(() => {
-    setLastFetchedAt(null)
-  }, [fromDate, toDate])
+  const filteredDays = useMemo<HistoryDashboardDay[]>(() => {
+    if (!raw) return []
+    if (keep === null) return raw.days
+    return raw.days.map((d) => ({
+      date: d.date,
+      byProject: Object.fromEntries(Object.entries(d.byProject).filter(([p]) => keep.has(p))),
+    }))
+  }, [raw, keep])
 
-  // Auto-refresh tick.
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), REFRESH_INTERVAL_MS)
-    return () => window.clearInterval(id)
-  }, [])
+  const allProjectRows = useMemo(() => (raw ? buildProjectRows(raw.days, measure) : []), [raw, measure])
+  const projectRows = useMemo(() => buildProjectRows(filteredDays, measure), [filteredDays, measure])
 
-  const filteredRows = useMemo<DayProjectRow[]>(() => {
-    if (!result) return []
-    if (!projectFilter.trim()) return result.rows
-    const q = projectFilter.toLowerCase()
-    return result.rows.filter((r) => r.projectCwd.toLowerCase().includes(q))
-  }, [result, projectFilter])
+  const stackedDays = useMemo(() => filteredDays.map((d) => ({
+    date: d.date,
+    values: Object.fromEntries(Object.entries(d.byProject).map(([p, row]) => [p, measureValue(row, measure)])),
+  })), [filteredDays, measure])
 
-  const projectAggs = useMemo<ProjectAgg[]>(() => {
-    const map = new Map<string, ProjectAgg>()
-    for (const row of filteredRows) {
-      if (!map.has(row.projectCwd)) {
-        map.set(row.projectCwd, {
-          projectCwd: row.projectCwd,
-          daysActive: new Set(),
-          totalSessions: 0,
-          totalPrompts: 0,
-          totalInput: 0,
-          totalOutput: 0,
-          topTool: '',
-          toolBreakdown: {},
-          estimatedCostUsd: 0,
-        })
+  const headline = useMemo(() => (facet ? buildHeadline(facet, measure) : null), [facet, measure])
+
+  const selectedDrill = useMemo(() => {
+    if (!raw || !selected) return null
+    const totals = emptyTotals()
+    const byModel: Record<string, DrillModelBucket> = {}
+    const toolBreakdown: Record<string, number> = {}
+    for (const day of raw.days) {
+      const row = day.byProject[selected]
+      if (!row) continue
+      totals.promptCount += row.promptCount
+      totals.inputTokens += row.inputTokens
+      totals.outputTokens += row.outputTokens
+      totals.cacheReadTokens += row.cacheReadTokens
+      totals.cacheCreationTokens += row.cacheCreationTokens
+      totals.toolCallCount += row.toolCallCount
+      totals.sessionCount += row.sessionCount
+      totals.errorCount += row.errorCount
+      totals.activeMinutes += row.activeMinutes
+      totals.estimatedCostUsd += row.estimatedCostUsd
+      for (const [modelId, mb] of Object.entries(row.byModel)) {
+        const dst = byModel[modelId] ?? (byModel[modelId] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 })
+        dst.inputTokens += mb.inputTokens
+        dst.outputTokens += mb.outputTokens
+        dst.cacheReadTokens += mb.cacheReadTokens
+        dst.cacheCreationTokens += mb.cacheCreationTokens
+        dst.costUsd += mb.costUsd
       }
-      const agg = map.get(row.projectCwd)!
-      agg.daysActive.add(row.date)
-      agg.totalSessions += row.sessionCount
-      agg.totalPrompts += row.promptCount
-      agg.totalInput += row.inputTokens
-      agg.totalOutput += row.outputTokens
-      agg.estimatedCostUsd += row.estimatedCostUsd
       for (const [tool, cnt] of Object.entries(row.toolBreakdown)) {
-        agg.toolBreakdown[tool] = (agg.toolBreakdown[tool] ?? 0) + cnt
+        toolBreakdown[tool] = (toolBreakdown[tool] ?? 0) + cnt
       }
     }
-    for (const agg of map.values()) {
-      let top = ''
-      let topCnt = 0
-      for (const [tool, cnt] of Object.entries(agg.toolBreakdown)) {
-        if (cnt > topCnt) { topCnt = cnt; top = tool }
-      }
-      agg.topTool = top
-    }
-    return Array.from(map.values())
-  }, [filteredRows])
+    return { totals, byModel, toolBreakdown }
+  }, [raw, selected])
 
-  const totals = useMemo(() => {
-    let promptCount = 0, inputTokens = 0, outputTokens = 0, sessionCount = 0, estimatedCostUsd = 0, cacheReadTokens = 0
-    for (const r of filteredRows) {
-      promptCount += r.promptCount
-      inputTokens += r.inputTokens
-      outputTokens += r.outputTokens
-      sessionCount += r.sessionCount
-      estimatedCostUsd += r.estimatedCostUsd
-      cacheReadTokens += r.cacheReadTokens
-    }
-    return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd, cacheReadTokens }
-  }, [filteredRows])
-
-  // Previous-period rows, filtered the same way as the primary range's
-  // filteredRows, so the delta chips compare apples to apples under the
-  // active project filter.
-  const prevFilteredRows = useMemo<DayProjectRow[]>(() => {
-    if (!prevResult) return []
-    if (!projectFilter.trim()) return prevResult.rows
-    const q = projectFilter.toLowerCase()
-    return prevResult.rows.filter((r) => r.projectCwd.toLowerCase().includes(q))
-  }, [prevResult, projectFilter])
-
-  const prevTotals = useMemo(() => {
-    let promptCount = 0, inputTokens = 0, outputTokens = 0, sessionCount = 0, estimatedCostUsd = 0
-    for (const r of prevFilteredRows) {
-      promptCount += r.promptCount
-      inputTokens += r.inputTokens
-      outputTokens += r.outputTokens
-      sessionCount += r.sessionCount
-      estimatedCostUsd += r.estimatedCostUsd
-    }
-    return { promptCount, inputTokens, outputTokens, sessionCount, estimatedCostUsd }
-  }, [prevFilteredRows])
-
-  const deltas = useMemo(() => ({
-    promptCount: computeDelta(totals.promptCount, prevTotals.promptCount),
-    inputTokens: computeDelta(totals.inputTokens, prevTotals.inputTokens),
-    outputTokens: computeDelta(totals.outputTokens, prevTotals.outputTokens),
-    sessionCount: computeDelta(totals.sessionCount, prevTotals.sessionCount),
-    estimatedCostUsd: computeDelta(totals.estimatedCostUsd, prevTotals.estimatedCostUsd),
-  }), [totals, prevTotals])
-
-  // Month-to-date spend + run-rate projection for the Monthly budget card.
-  // Computed client-side from already-fetched filteredRows — no new IPC call.
-  const budget = useMemo(() => {
-    const now = new Date()
-    const monthPrefix = now.toLocaleDateString('en-CA').slice(0, 7)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-    const daysElapsed = now.getDate()
-    let mtdSpend = 0
-    for (const r of filteredRows) {
-      if (r.date.startsWith(monthPrefix)) mtdSpend += r.estimatedCostUsd
-    }
-    const projectedSpend = computeBudgetProjection(mtdSpend, daysElapsed, daysInMonth)
-    return { mtdSpend, projectedSpend, daysElapsed, daysInMonth }
-  }, [filteredRows])
-
-  // Per-model spend + cache-hit totals across all filtered rows. Follows the
-  // same reduce-into-map-then-sort pattern as projectAggs above.
-  const modelTotals = useMemo(() => {
-    const map = new Map<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd: number }>()
-    for (const row of filteredRows) {
-      for (const [modelId, bucket] of Object.entries(row.byModel ?? {})) {
-        const cur = map.get(modelId) ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 }
-        cur.inputTokens += bucket.inputTokens
-        cur.outputTokens += bucket.outputTokens
-        cur.cacheReadTokens += bucket.cacheReadTokens
-        cur.costUsd += bucket.costUsd
-        map.set(modelId, cur)
-      }
-    }
-    const entries = Array.from(map.entries())
-      .map(([modelId, t]) => ({ modelId, ...t }))
-      .sort((a, b) => b.costUsd - a.costUsd)
-    const totalCostUsd = entries.reduce((sum, e) => sum + e.costUsd, 0)
-    let cacheRead = 0, inputPlusCacheRead = 0
-    for (const e of entries) {
-      cacheRead += e.cacheReadTokens
-      inputPlusCacheRead += e.inputTokens + e.cacheReadTokens
-    }
-    const cacheHitPct = inputPlusCacheRead > 0 ? (cacheRead / inputPlusCacheRead) * 100 : 0
-    return { entries, totalCostUsd, cacheHitPct }
-  }, [filteredRows])
-
-  // Per-date input/output token sums for the stacked-bar chart below. O(rows).
-  const stackedBars = useMemo(() => {
-    const byDate = new Map<string, { date: string; input: number; output: number; cost: number }>()
-    for (const r of filteredRows) {
-      let cur = byDate.get(r.date)
-      if (!cur) { cur = { date: r.date, input: 0, output: 0, cost: 0 }; byDate.set(r.date, cur) }
-      cur.input += r.inputTokens
-      cur.output += r.outputTokens
-      cur.cost += r.estimatedCostUsd
-    }
-    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
-  }, [filteredRows])
-
-  // Per-day totals across ALL filtered projects (summed, unlike per-project chartData). O(rows).
-  const dailyTotals = useMemo<Map<string, { cost: number; sessions: number; tokens: number }>>(() => {
-    const m = new Map<string, { cost: number; sessions: number; tokens: number }>()
-    for (const r of filteredRows) {
-      const cur = m.get(r.date) ?? { cost: 0, sessions: 0, tokens: 0 }
-      cur.cost += r.estimatedCostUsd
-      cur.sessions += r.sessionCount
-      cur.tokens += r.inputTokens + r.outputTokens
-      m.set(r.date, cur)
-    }
-    return m
-  }, [filteredRows])
-
-  // Full inclusive fromDate→toDate calendar grid, grouped into Sunday-start week
-  // columns. O(days-in-range) — range is bounded to ~365 days by the date picker,
-  // so this is not a complexity hazard.
-  const heatWeeks = useMemo<{ date: string | null; value: number }[][]>(() => {
-    const [fy, fm, fd] = fromDate.split('-').map(Number)
-    const [ty, tm, td] = toDate.split('-').map(Number)
-    const start = new Date(fy, fm - 1, fd)
-    const end = new Date(ty, tm - 1, td)
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return []
-
-    const days: { date: string; value: number }[] = []
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      const totals = dailyTotals.get(key)
-      const value = !totals ? 0
-        : heatMetric === 'cost' ? totals.cost
-        : heatMetric === 'sessions' ? totals.sessions
-        : totals.tokens
-      days.push({ date: key, value })
-    }
-    if (!days.length) return []
-
-    const leadingBlanks = start.getDay()
-    const cells: { date: string | null; value: number }[] = [
-      ...Array.from({ length: leadingBlanks }, () => ({ date: null, value: 0 })),
-      ...days,
-    ]
-    const weeks: { date: string | null; value: number }[][] = []
-    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
-    return weeks
-  }, [fromDate, toDate, dailyTotals, heatMetric])
-
-  const heatMax = useMemo(() => {
-    let max = 0
-    for (const week of heatWeeks) for (const cell of week) if (cell.date) max = Math.max(max, cell.value)
-    return max
-  }, [heatWeeks])
-
-  function heatBucket(value: number): number {
-    if (value <= 0 || heatMax === 0) return 0
-    return 1 + Math.min(3, Math.max(0, Math.floor((value / heatMax) * 4 - 1e-9)))
-  }
-
-  function formatHeatValue(value: number): string {
-    if (heatMetric === 'cost') return `$${value.toFixed(4)}`
-    if (heatMetric === 'sessions') return `${value} session${value === 1 ? '' : 's'}`
-    return `${formatCompactCount(value, { suffixCase: 'upper', kDecimals: 1 })} tokens`
-  }
-
-  const { chartData, projectKeys } = useMemo(() => {
-    const projects = [...new Set(filteredRows.map((r) => r.projectCwd))]
-    const byDate = new Map<string, Record<string, number | string>>()
-    for (const row of filteredRows) {
-      if (!projects.includes(row.projectCwd)) continue
-      if (!byDate.has(row.date)) byDate.set(row.date, { date: row.date })
-      const entry = byDate.get(row.date)!
-      const cur = typeof entry[row.projectCwd] === 'number' ? (entry[row.projectCwd] as number) : 0
-      entry[row.projectCwd] = cur + (row[metric] as number)
-    }
-    const data = Array.from(byDate.values()).sort((a, b) =>
-      String(a.date).localeCompare(String(b.date))
-    )
-    return { chartData: data, projectKeys: projects.slice(0, 10) }
-  }, [filteredRows, metric])
-
-  const sortedProjects = useMemo<ProjectAgg[]>(() => {
-    return [...projectAggs].sort((a, b) => {
-      let cmp = 0
-      switch (sortCol) {
-        case 'project': cmp = a.projectCwd.localeCompare(b.projectCwd); break
-        case 'daysActive': cmp = a.daysActive.size - b.daysActive.size; break
-        case 'totalSessions': cmp = a.totalSessions - b.totalSessions; break
-        case 'totalPrompts': cmp = a.totalPrompts - b.totalPrompts; break
-        case 'totalInput': cmp = a.totalInput - b.totalInput; break
-        case 'totalOutput': cmp = a.totalOutput - b.totalOutput; break
-        case 'estimatedCostUsd': cmp = a.estimatedCostUsd - b.estimatedCostUsd; break
-        default: cmp = 0
-      }
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-  }, [projectAggs, sortCol, sortDir])
-
-  const handleSort = (col: TableColKey) => {
-    if (col === 'topTool') return
-    if (sortCol === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortCol(col); setSortDir('desc') }
-  }
-
-  const refresh = () => setTick((t) => t + 1)
-
-  if (loading) return <EmptyState title="scanning transcripts…" />
-  if (error) return <EmptyState title="scan failed" hint={error} />
-  if (!filteredRows.length) return (
-    <EmptyState
-      title="no sessions in range"
-      hint="Widen the date range, clear the project filter, or click ↻ to rescan."
-    />
-  )
-
-  return (
-    <div data-testid="history-dashboard" className="p-4 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-fg">History</h1>
-          <p className="text-xs text-fg-faint mt-0.5 max-w-2xl">
-            Usage analytics across every project you have ever run Claude Code in — cost,
-            tokens, and activity, trended over time.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-fg-faint shrink-0 pt-1">
-          <FreshnessIndicator lastFetchedAt={lastFetchedAt} />
-          <button
-            onClick={refresh}
-            className="px-2 py-0.5 border border-line rounded hover:text-fg hover:bg-bg-hi"
-            title="Rescan transcripts"
-          >
-            ↻ refresh
-          </button>
-        </div>
-      </div>
-
-      {result?.partial && (
-        <div className="flex items-center gap-2 text-xs text-fg-faint border border-line bg-bg-elev rounded px-3 py-2">
-          <span className="text-accent">↻</span>
-          Still scanning — showing partial results so far. Numbers will settle as the scan finishes.
-        </div>
-      )}
-
-      <div className="grid grid-cols-6 gap-3">
-        <Stat label="total prompts" value={totals.promptCount.toLocaleString()} delta={deltas.promptCount} />
-        <Stat label="input tokens" value={totals.inputTokens.toLocaleString()} delta={deltas.inputTokens} />
-        <Stat label="output tokens" value={totals.outputTokens.toLocaleString()} delta={deltas.outputTokens} />
-        <Stat label="cache tokens" value={totals.cacheReadTokens.toLocaleString()} />
-        <Stat label="sessions" value={totals.sessionCount.toLocaleString()} delta={deltas.sessionCount} />
-        <Stat
-          label="est. cost"
-          value={`$${totals.estimatedCostUsd.toFixed(4)}`}
-          highlight
-          delta={deltas.estimatedCostUsd}
-          goodDirection="down"
-        />
-      </div>
-
-      <BudgetCard
-        mtdSpend={budget.mtdSpend}
-        projectedSpend={budget.projectedSpend}
-        capUsd={budgetCapUsd}
-        onCapChange={setBudgetCapUsd}
-      />
-
-      <div className="border border-line rounded bg-bg-elev p-4">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs text-fg-faint uppercase tracking-wider">daily metric</span>
-          <select
-            value={metric}
-            onChange={(e) => setMetric(e.target.value as MetricKey)}
-            className="bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg"
-          >
-            {(Object.entries(METRIC_LABELS) as [MetricKey, string][]).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-        </div>
-        {projectKeys.length >= 10 && (
-          <div className="text-xs text-fg-faint mb-2">10 projects shown</div>
-        )}
-        <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={chartData}>
-            <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} width={60} />
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: 10 }} />
-            {projectKeys.map((proj, i) => (
-              <Line
-                key={proj}
-                type="monotone"
-                dataKey={proj}
-                name={proj.length > 30 ? '…' + proj.slice(-28) : proj}
-                stroke={categoricalColor(i)}
-                dot={false}
-                strokeWidth={1.5}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="border border-line rounded bg-bg-elev p-4">
-          <div className="flex items-baseline justify-between mb-3">
-            <h3 className="text-xs uppercase tracking-wider text-fg">Spend by model</h3>
-            <span className="text-xs font-mono text-fg-faint">${modelTotals.totalCostUsd.toFixed(4)} total</span>
-          </div>
-          {modelTotals.entries.length === 0 ? (
-            <div className="text-xs text-fg-faint">no model data in range</div>
-          ) : (
-            <div className="space-y-2">
-              {modelTotals.entries.map((e) => {
-                const pct = modelTotals.totalCostUsd > 0 ? (e.costUsd / modelTotals.totalCostUsd) * 100 : 0
-                return (
-                  <div key={e.modelId}>
-                    <div className="flex items-center justify-between text-xs mb-0.5">
-                      <span className="flex items-center gap-1.5 font-mono text-fg-dim truncate">
-                        <span className={`w-2 h-2 rounded-sm shrink-0 ${modelColorFor(e.modelId)}`} />
-                        {e.modelId}
-                      </span>
-                      <span className="text-fg-faint whitespace-nowrap ml-2">
-                        ${e.costUsd.toFixed(4)} · {pct.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
-                      <div className={`h-full ${modelColorFor(e.modelId)}`} style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="border border-line rounded bg-bg-elev p-4">
-          <div className="flex items-baseline justify-between mb-3">
-            <h3 className="text-xs uppercase tracking-wider text-fg">Cache savings</h3>
-            <span className="text-xs font-mono text-accent">${(result?.cacheSavingsUsd ?? 0).toFixed(4)} saved</span>
-          </div>
-          <div className="mb-2">
-            <div className="flex items-center justify-between text-xs mb-0.5">
-              <span className="text-fg-faint">hit rate</span>
-              <span className="font-mono text-fg-dim">{modelTotals.cacheHitPct.toFixed(1)}%</span>
-            </div>
-            <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
-              <div
-                className="h-full bg-sage"
-                style={{ width: `${Math.max(modelTotals.cacheHitPct, modelTotals.cacheHitPct > 0 ? 2 : 0)}%` }}
-              />
-            </div>
-          </div>
-          {/* cacheSavingsUsd is a top-level, date-range-scoped figure computed
-              server-side (historyAggregator.cjs) since only it has the
-              per-model pricing table; it isn't re-scoped by the project
-              text filter the way modelTotals is. */}
-          <p className="text-[10px] text-fg-faint">
-            Cache reads billed at a discount vs. full input pricing — the saved figure reflects
-            that discount across every session in range.
-          </p>
-        </div>
-      </div>
-
-      <div className="border border-line rounded bg-bg-elev p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs uppercase tracking-wider text-fg">Activity heatmap</h3>
-          <div className="flex border border-line rounded overflow-hidden text-[10px]">
-            {(['cost', 'sessions', 'tokens'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setHeatMetric(m)}
-                className={`px-2 py-0.5 ${heatMetric === m ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg'}`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex gap-1 overflow-x-auto">
-          <div className="flex flex-col gap-[2px] pr-1 text-[9px] text-fg-faint justify-between">
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <span key={i}>{d}</span>)}
-          </div>
-          <div className="flex gap-[2px]">
-            {heatWeeks.map((week, wi) => (
-              <div key={wi} className="flex flex-col gap-[2px]">
-                {week.map((cell, di) => (
-                  <div
-                    key={di}
-                    className="w-[10px] h-[10px] rounded-[2px]"
-                    style={{ background: cell.date ? HEAT_RAMP[heatBucket(cell.value)] : 'transparent' }}
-                    title={cell.date ? `${cell.date} · ${formatHeatValue(cell.value)}` : undefined}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="border border-line rounded bg-bg-elev p-4">
-        <div className="flex items-baseline justify-between mb-3">
-          <h3 className="text-xs uppercase tracking-wider text-fg">Input vs output tokens</h3>
-          <div className="flex items-center gap-3 text-[10px] text-fg-faint">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: CHART_CATEGORICAL[0] }} />input</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: CHART_CATEGORICAL[4] }} />output</span>
-          </div>
-        </div>
-        <ResponsiveContainer width="100%" height={128}>
-          <BarChart data={stackedBars}>
-            <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} width={60} />
-            <Tooltip
-              content={({ active, payload, label }) => {
-                if (!active || !payload || !payload.length) return null
-                const d = payload[0]?.payload as { date: string; input: number; output: number; cost: number }
-                return (
-                  <div className="bg-bg-elev border border-line rounded px-2 py-1 text-[10px] text-fg">
-                    <div>{label}</div>
-                    <div>in {formatCompactCount(d.input, { suffixCase: 'upper', kDecimals: 1 })}</div>
-                    <div>out {formatCompactCount(d.output, { suffixCase: 'upper', kDecimals: 1 })}</div>
-                    <div>${d.cost.toFixed(4)}</div>
-                  </div>
-                )
-              }}
-            />
-            <Bar dataKey="input" stackId="tok" fill={CHART_CATEGORICAL[0]} />
-            <Bar dataKey="output" stackId="tok" fill={CHART_CATEGORICAL[4]} />
-          </BarChart>
-        </ResponsiveContainer>
-        <div className="flex justify-between mt-2 text-[10px] text-fg-faint">
-          <span>in {formatCompactCount(totals.inputTokens, { suffixCase: 'upper', kDecimals: 1 })}</span>
-          <span>out {formatCompactCount(totals.outputTokens, { suffixCase: 'upper', kDecimals: 1 })}</span>
-          <span>est. cost ${totals.estimatedCostUsd.toFixed(2)}</span>
-        </div>
-      </div>
-
-      <div className="border border-line rounded overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-bg-elev sticky top-0">
-            <tr>
-              {TABLE_COLS.map(({ key, label }) => (
-                <th
-                  key={key}
-                  onClick={() => handleSort(key)}
-                  className={`text-left px-3 py-2 text-fg-faint uppercase tracking-wider whitespace-nowrap ${key !== 'topTool' ? 'cursor-pointer hover:text-fg' : ''}`}
-                >
-                  {label}
-                  {sortCol === key && (
-                    <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedProjects.map((agg) => (
-              <tr
-                key={agg.projectCwd}
-                onClick={() => onProjectClick(agg.projectCwd)}
-                className="border-t border-line hover:bg-bg-elev cursor-pointer"
-              >
-                <td
-                  className="px-3 py-2 font-mono text-fg-dim max-w-xs"
-                  title={agg.projectCwd}
-                >
-                  <span className="block truncate">
-                    {agg.projectCwd.length > 40 ? '…' + agg.projectCwd.slice(-38) : agg.projectCwd}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-fg-faint">{agg.daysActive.size}</td>
-                <td className="px-3 py-2 text-fg-faint">{agg.totalSessions}</td>
-                <td className="px-3 py-2 text-fg-faint">{agg.totalPrompts.toLocaleString()}</td>
-                <td className="px-3 py-2 text-fg-faint">{agg.totalInput.toLocaleString()}</td>
-                <td className="px-3 py-2 text-fg-faint">{agg.totalOutput.toLocaleString()}</td>
-                <td className="px-3 py-2 text-fg-faint font-mono">{agg.topTool || '—'}</td>
-                <td className="px-3 py-2 text-accent">${agg.estimatedCostUsd.toFixed(4)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="text-xs text-fg-faint">
-        path shown is path at session time — renames create separate rows.
-        cost estimate uses per-model pricing (Opus/Sonnet/Haiku); unrecognized models are estimated at Sonnet rates; actual cost may differ from billing.
-      </div>
-    </div>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  highlight,
-  delta,
-  goodDirection = 'neutral',
-}: {
-  label: string
-  value: string
-  highlight?: boolean
-  delta?: Delta
-  /** Which direction counts as "good" for coloring the delta chip. 'neutral' renders an uncolored chip. */
-  goodDirection?: 'up' | 'down' | 'neutral'
-}) {
-  return (
-    <div className="border border-line rounded p-3 bg-bg-elev">
-      <div className="text-xs text-fg-faint uppercase tracking-wider mb-1">{label}</div>
-      <div className={`text-lg font-mono ${highlight ? 'text-accent' : 'text-fg'}`}>{value}</div>
-      {delta && <DeltaChip delta={delta} goodDirection={goodDirection} />}
-    </div>
-  )
-}
-
-// Prior-period % change indicator. Only the `cost` tile passes a non-neutral
-// goodDirection (decreasing cost is "good") — prompts/tokens/sessions render
-// an uncolored, purely informational chip per the mockup's goodDown semantics.
-function DeltaChip({ delta, goodDirection }: { delta: Delta; goodDirection: 'up' | 'down' | 'neutral' }) {
-  if (delta.pct === null) {
-    return <div className="text-[10px] text-fg-faint mt-1">— vs prior period</div>
-  }
-  const isGood = goodDirection !== 'neutral' && delta.direction === goodDirection
-  const isBad = goodDirection !== 'neutral' && delta.direction !== 'flat' && delta.direction !== goodDirection
-  const tone = isGood ? 'text-sage-dark' : isBad ? 'text-red-400' : 'text-fg-faint'
-  const arrow = delta.direction === 'up' ? '▲' : delta.direction === 'down' ? '▼' : '·'
-  return (
-    <div className={`text-[10px] mt-1 font-mono ${tone}`}>
-      {arrow} {Math.abs(delta.pct).toFixed(1)}% vs prior period
-    </div>
-  )
-}
-
-function BudgetCard({
-  mtdSpend,
-  projectedSpend,
-  capUsd,
-  onCapChange,
-}: {
-  mtdSpend: number
-  projectedSpend: number
-  capUsd: number
-  onCapChange: (cap: number) => void
-}) {
-  const overBudget = projectedSpend > capUsd
-  const pctOfCap = capUsd > 0 ? Math.min(100, (mtdSpend / capUsd) * 100) : 0
-  return (
-    <div className="border border-line rounded bg-bg-elev p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs uppercase tracking-wider text-fg">Monthly budget</h3>
-        <label className="flex items-center gap-1.5 text-[10px] text-fg-faint">
-          cap
-          <span className="text-fg-faint">$</span>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={capUsd}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              if (Number.isFinite(v) && v > 0) onCapChange(v)
-            }}
-            className="w-16 bg-bg border border-line rounded px-1.5 py-0.5 text-xs text-fg font-mono"
-          />
-        </label>
-      </div>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <Stat label="month-to-date" value={`$${mtdSpend.toFixed(4)}`} />
-        <Stat
-          label="projected (run-rate)"
-          value={`$${projectedSpend.toFixed(4)}`}
-          highlight={!overBudget}
-        />
-      </div>
-      <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
-        <div
-          className={`h-full ${overBudget ? 'bg-red-400' : 'bg-sage'}`}
-          style={{ width: `${Math.max(pctOfCap, pctOfCap > 0 ? 2 : 0)}%` }}
-        />
-      </div>
-      <div className={`text-[10px] mt-1.5 font-mono ${overBudget ? 'text-red-400' : 'text-fg-faint'}`}>
-        {overBudget
-          ? `projected to exceed $${capUsd.toFixed(0)} cap`
-          : `${pctOfCap.toFixed(0)}% of $${capUsd.toFixed(0)} cap`}
-      </div>
-    </div>
-  )
-}
-
-function FreshnessIndicator({ lastFetchedAt }: { lastFetchedAt: number | null }) {
-  // Ticks once per second so the displayed age stays current without
-  // forcing the dashboard to re-render every tick.
-  const [now, setNow] = useState(() => Date.now())
+  // Clear selection if its project gets faceted out.
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-  if (lastFetchedAt === null) return null
-  const age = Math.max(0, now - lastFetchedAt)
-  const text =
-    age < 5_000 ? 'just now'
-    : age < 60_000 ? `updated ${Math.floor(age / 1000)}s ago`
-    : age < 3_600_000 ? `updated ${Math.floor(age / 60_000)}m ago`
-    : `updated ${Math.floor(age / 3_600_000)}h ago`
-  return <span className="font-mono tabular-nums">{text}</span>
+    if (selected && keep !== null && !keep.has(selected)) setSelected(null)
+  }, [selected, keep])
+
+  function toggleProject(projectDir: string) {
+    setKeep((prev) => {
+      const all = new Set(allProjectRows.map((r) => r.projectDir))
+      const cur = prev ?? new Set(all)
+      const next = new Set(cur)
+      if (next.has(projectDir)) next.delete(projectDir)
+      else next.add(projectDir)
+      return next.size >= all.size ? null : next
+    })
+  }
+  function isolateProject(projectDir: string) {
+    setKeep(new Set([projectDir]))
+  }
+  function showAll() {
+    setKeep(null)
+  }
+
+  function handleExport() {
+    if (!raw) return
+    const csvDays = filteredDays.map((d) => {
+      let costUsd = 0, inputTokens = 0, outputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0
+      const byModel: Record<string, DrillModelBucket> = {}
+      for (const row of Object.values(d.byProject)) {
+        costUsd += row.estimatedCostUsd
+        inputTokens += row.inputTokens
+        outputTokens += row.outputTokens
+        cacheCreationTokens += row.cacheCreationTokens
+        cacheReadTokens += row.cacheReadTokens
+        for (const [modelId, mb] of Object.entries(row.byModel)) {
+          const dst = byModel[modelId] ?? (byModel[modelId] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 })
+          dst.inputTokens += mb.inputTokens
+          dst.outputTokens += mb.outputTokens
+          dst.cacheReadTokens += mb.cacheReadTokens
+          dst.cacheCreationTokens += mb.cacheCreationTokens
+        }
+      }
+      return { date: d.date, costUsd, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, byModel }
+    })
+    const csv = buildUsageCsv(csvDays)
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `usage-history-${raw.from}-${raw.to}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (loading && !raw) return <HistorySkeleton />
+  if (raw && raw.days.length === 0) {
+    return <EmptyState title="no sessions in range" hint="Widen the range or check back after your next session." />
+  }
+  if (!raw || !facet || !headline) return <HistorySkeleton />
+
+  return (
+    <div data-testid="history-dashboard" className="flex flex-col h-full">
+      <ControlBar
+        measure={measure}
+        onMeasure={setMeasure}
+        range={range}
+        onRange={setRange}
+        projectsShown={keep === null ? allProjectRows.length : keep.size}
+        projectsTotal={allProjectRows.length}
+        fromDate={raw.from}
+        toDate={raw.to}
+        onRefresh={() => setTick((t) => t + 1)}
+        onExport={handleExport}
+        exportDisabled={filteredDays.length === 0}
+      />
+      <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
+        <Headline
+          measure={measure}
+          headline={headline}
+          activeDays={facet.activeDays}
+          projectsTouched={projectRows.length}
+          totalSessions={facet.totals.sessionCount}
+        />
+        <BudgetStrip days={raw.days} />
+        <ProjectFacet
+          chips={allProjectRows.map((r) => ({ projectDir: r.projectDir, value: r.value }))}
+          keep={keep}
+          onToggle={toggleProject}
+          onIsolate={isolateProject}
+          onShowAll={showAll}
+        />
+        <StackedTrend days={stackedDays} measure={measure} selected={selected} onSelect={setSelected} />
+        <Ranking rows={projectRows} measure={measure} selected={selected} onSelect={setSelected} />
+        {selected && selectedDrill && (
+          <ProjectDrill
+            projectDir={selected}
+            totals={selectedDrill.totals}
+            byModel={selectedDrill.byModel}
+            toolBreakdown={selectedDrill.toolBreakdown}
+            onClear={() => setSelected(null)}
+          />
+        )}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <ModelMix byModelTotals={facet.byModelTotals} />
+          <Concentration rows={projectRows} />
+          <CachePanel totals={facet.totals} />
+          <Rhythm days={facet.days} measure={measure} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="p-4 space-y-4 animate-pulse">
+      <div className="h-24 bg-bg-elev rounded" />
+      <div className="h-16 bg-bg-elev rounded" />
+      <div className="h-8 bg-bg-elev rounded" />
+      <div className="h-56 bg-bg-elev rounded" />
+      <div className="h-40 bg-bg-elev rounded" />
+    </div>
+  )
 }

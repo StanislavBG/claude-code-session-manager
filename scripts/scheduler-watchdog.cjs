@@ -17,6 +17,8 @@ const {
   readLastHeartbeatTs,
   reconcileQueueOffline,
   sweep,
+  localDateStr,
+  maybeFinalizeHistory,
   DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
 } = require('./lib/watchdogHelpers.cjs');
@@ -25,17 +27,8 @@ const {
 
 const LOGS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'logs');
 
-function todayStr() {
-  // YYYY-MM-DD in local time
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 function logPath() {
-  return path.join(LOGS_DIR, `watchdog-${todayStr()}.log`);
+  return path.join(LOGS_DIR, `watchdog-${localDateStr()}.log`);
 }
 
 // ---------- logging ----------
@@ -49,9 +42,27 @@ function appendLog(entry) {
   }
 }
 
+// ---------- history rollup finalize ----------
+
+/**
+ * Runs the once-per-day History rollup finalize step. Never allowed to
+ * throw or block: wrapped in try/catch and only ever called after the
+ * heartbeat-gated reconcile/sweep work above has already completed, so a
+ * slow or failing finalize pass can't delay them.
+ */
+async function runHistoryFinalize() {
+  try {
+    const result = await maybeFinalizeHistory();
+    const status = result.ran ? (result.reason === 'partial' ? 'partial' : 'finalized') : 'skipped';
+    return { status, reason: result.reason, date: result.date, finalizedDates: result.finalizedDates };
+  } catch (e) {
+    return { status: 'error', error: e?.message };
+  }
+}
+
 // ---------- main ----------
 
-function main() {
+async function main() {
   const now = Date.now();
 
   // Single read: derive both heartbeatAgeMs (for the log) and fresh (for
@@ -64,18 +75,23 @@ function main() {
   const logEntry = { ts: now, decision, heartbeatAgeMs, maxAgeMs: DEFAULT_MAX_AGE_MS };
 
   if (fresh) {
-    appendLog(logEntry);
     // Alive branch: do nothing that touches queue.json. Let the in-app
     // scheduler manage its own queue to avoid races.
+    const history = await runHistoryFinalize();
+    appendLog({ ...logEntry, history });
     process.exit(0);
   }
 
   // Stale branch: app is absent or not updating heartbeat.
   const reconcileResult = reconcileQueueOffline();
   const sweepResult = sweep();
+  const history = await runHistoryFinalize();
 
-  appendLog({ ...logEntry, reconcile: reconcileResult, sweep: sweepResult });
+  appendLog({ ...logEntry, reconcile: reconcileResult, sweep: sweepResult, history });
   process.exit(0);
 }
 
-main();
+main().catch((e) => {
+  process.stderr.write(`[watchdog] fatal: ${e?.message}\n`);
+  process.exit(1);
+});

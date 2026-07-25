@@ -438,23 +438,46 @@ function rollupMapToRows(map, finalizedDates) {
  * for it — never re-touching the underlying .jsonl files — so it survives
  * both process restarts and transcript deletion/retention cleanup.
  *
- * O(total transcript bytes) — bounded by the shared parseJSONL LRU cache, not
- * budget-limited (this is a background job, not a request-latency path).
+ * O(total transcript bytes) — bounded by the shared parseJSONL LRU cache.
+ *
+ * opts.budgetMs (optional): caps the wall-clock time spent walking project
+ * directories. Project directories are visited in a stable sorted order and
+ * are each read to completion once started (never split mid-directory) so a
+ * date's bucket is only ever built from directories that were fully walked.
+ * If the budget runs out before every project directory has been visited,
+ * NO date is stamped `finalizedAt` this call (a date isn't safe to trust as
+ * complete until every directory has contributed) — the caller can invoke
+ * finalizeClosedDays() again later and it will redo the (idempotent) walk.
+ * Partial results are still persisted as plain (non-finalized) rollup lines
+ * so aggregate() benefits from them immediately.
+ *
+ * opts.dryRun (optional): computes what would be finalized without writing
+ * anything to the rollup file.
  */
-async function finalizeClosedDays() {
+async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
+  const deadline = typeof budgetMs === 'number' ? Date.now() + budgetMs : null;
   const today = localDate(new Date());
 
   let projectDirs;
   try {
     projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
   } catch {
-    return { finalizedDates: [] };
+    return { finalizedDates: [], partial: false };
   }
 
+  projectDirs = projectDirs
+    .filter((e) => e.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const buckets = new Map();
+  let partial = false;
 
   for (const projEntry of projectDirs) {
-    if (!projEntry.isDirectory()) continue;
+    if (deadline !== null && Date.now() >= deadline) {
+      partial = true;
+      break;
+    }
+
     const encodedCwd = projEntry.name;
     const projectDir = path.join(PROJECTS_DIR, encodedCwd);
 
@@ -486,10 +509,17 @@ async function finalizeClosedDays() {
     dates.add(b.date);
     entries.push(...bucketToRollupLines(b));
   }
-  for (const date of dates) entries.push(finalizedMarkerLine(date));
+  // Only stamp dates as finalized (safe to trust with no live re-scan) when
+  // the walk visited every project directory within budget — a partial walk
+  // may be missing contributions from directories not yet visited.
+  if (!partial) {
+    for (const date of dates) entries.push(finalizedMarkerLine(date));
+  }
 
-  await historyRollup.appendRollupDays(entries);
-  return { finalizedDates: Array.from(dates) };
+  if (!dryRun) {
+    await historyRollup.appendRollupDays(entries);
+  }
+  return { finalizedDates: partial ? [] : Array.from(dates), partial };
 }
 
 // ── aggregate ─────────────────────────────────────────────────────────────────

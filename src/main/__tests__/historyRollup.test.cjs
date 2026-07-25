@@ -205,6 +205,57 @@ test('backfill fold-in: aggregate() folds a rollup-missing past day into the rol
   expect(after.size).toBeGreaterThan(0);
 });
 
+test('finalizeClosedDays: budgetMs exceeded before any dir is walked → no dates finalized, partial=true', async () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const yStr = yesterday.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projbudgetcap';
+  writeTranscript(cwd, 'sess-budgetcap', [
+    userLine(yesterday.toISOString()),
+    assistantLine(yesterday.toISOString(), 'claude-sonnet-5', { in: 11, out: 4 }),
+  ]);
+
+  const result = await historyAggregator.finalizeClosedDays({ budgetMs: -1 });
+  expect(result.partial).toBe(true);
+  expect(result.finalizedDates).toEqual([]);
+
+  const map = await historyRollup.readRollup('2000-01-01', yStr);
+  expect(historyRollup.isDateFinalized(map, yStr)).toBe(false);
+});
+
+test('finalizeClosedDays: unbounded budgetMs finalizes normally (partial=false)', async () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const yStr = yesterday.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projbudgetok';
+  writeTranscript(cwd, 'sess-budgetok', [
+    userLine(yesterday.toISOString()),
+    assistantLine(yesterday.toISOString(), 'claude-sonnet-5', { in: 9, out: 2 }),
+  ]);
+
+  const result = await historyAggregator.finalizeClosedDays({ budgetMs: 60_000 });
+  expect(result.partial).toBe(false);
+  expect(result.finalizedDates).toContain(yStr);
+
+  const map = await historyRollup.readRollup('2000-01-01', yStr);
+  expect(historyRollup.isDateFinalized(map, yStr)).toBe(true);
+});
+
+test('finalizeClosedDays: dryRun computes finalizedDates but writes nothing', async () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const yStr = yesterday.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projdryrun';
+  writeTranscript(cwd, 'sess-dryrun', [
+    userLine(yesterday.toISOString()),
+    assistantLine(yesterday.toISOString(), 'claude-sonnet-5', { in: 5, out: 1 }),
+  ]);
+
+  const result = await historyAggregator.finalizeClosedDays({ dryRun: true });
+  expect(result.partial).toBe(false);
+  expect(result.finalizedDates).toContain(yStr);
+
+  const map = await historyRollup.readRollup('2000-01-01', yStr);
+  expect(map.size).toBe(0);
+});
+
 test('history:aggregate PARSE_BUDGET_MS truncation only affects today; finalized closed days come back complete', async () => {
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const yStr = yesterday.toLocaleDateString('en-CA');

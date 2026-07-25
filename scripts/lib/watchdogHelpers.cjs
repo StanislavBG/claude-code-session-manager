@@ -22,6 +22,16 @@ const DEFAULT_HEARTBEAT_PATH = path.join(
 // The in-app heartbeat ticks every 60 s; 3 missed ticks = stale.
 const DEFAULT_MAX_AGE_MS = 180_000;
 
+/** Local-TZ 'YYYY-MM-DD' for `d` (default now). Single source of truth for
+ *  the watchdog's notion of "today" — used for both the log filename and the
+ *  history-rollup once-per-day gate. */
+function localDateStr(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // Tail bytes to read — enough to hold several JSON heartbeat lines without
 // loading a potentially 1 MB file. O(1) in file size.
 const TAIL_BYTES = 4096;
@@ -526,6 +536,148 @@ function sweep({
   return { scanned, emitted, skipped };
 }
 
+// ── maybeFinalizeHistory ─────────────────────────────────────────────────────
+//
+// Precomputes closed History-dashboard days outside Electron, so the app's
+// first paint after a boot (possibly weeks after the app was last open) is
+// instant, and old transcripts stay safe to age out without losing analytics.
+// See src/main/historyAggregator.cjs's finalizeClosedDays() for the actual
+// walk/persist logic — this is just the once-per-day scheduling + lock
+// wrapper around it, tailored to being invoked repeatedly by a systemd timer.
+
+const DEFAULT_STAMP_PATH = path.join(
+  os.homedir(), '.claude', 'session-manager', 'history-rollup.stamp',
+);
+const DEFAULT_LOCK_PATH = path.join(
+  os.homedir(), '.claude', 'session-manager', 'history-rollup.lock',
+);
+const DEFAULT_LOCK_STALE_MS = 10 * 60 * 1000; // 10 min
+const DEFAULT_FINALIZE_BUDGET_MS = 60_000;
+
+function readStampDate(stampPath) {
+  try {
+    return fs.readFileSync(stampPath, 'utf8').trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync). */
+function writeStampDate(stampPath, date) {
+  fs.mkdirSync(path.dirname(stampPath), { recursive: true });
+  const tmpPath = `${stampPath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, date, 'utf8');
+  fs.renameSync(tmpPath, stampPath);
+}
+
+/**
+ * tryAcquireLock(lockPath, staleMs) → boolean
+ *
+ * O_EXCL ('wx') lock file so the in-app Electron boot pass and this cron
+ * pass never interleave writes to the rollup. A lock older than staleMs is
+ * assumed abandoned (a crashed holder) and reclaimed; otherwise the caller
+ * loses the race and must skip silently.
+ */
+function tryAcquireLock(lockPath, staleMs = DEFAULT_LOCK_STALE_MS) {
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  try {
+    fs.writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+
+  let st;
+  try {
+    st = fs.statSync(lockPath);
+  } catch {
+    st = null; // lock vanished between our failed create and this stat
+  }
+
+  if (st !== null && Date.now() - st.mtimeMs <= staleMs) {
+    return false; // held by a live (or at least recent) owner — loser skips
+  }
+
+  // Stale (or already gone) — reclaim. The unlink+wx pair isn't atomic, so
+  // two concurrent reclaimers could theoretically both win here — but that
+  // only happens when the prior holder already crashed/vanished, and the
+  // resulting "both run finalize" outcome is benign: appendRollupDays is
+  // append-only + last-write-wins-deduped, so a redundant concurrent pass
+  // costs extra work, not corrupted data.
+  try {
+    if (st !== null) fs.unlinkSync(lockPath);
+    fs.writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseLock(lockPath) {
+  try { fs.unlinkSync(lockPath); } catch { /* already gone / never created */ }
+}
+
+/** Lazily require historyAggregator.cjs — deferred so a missing PRD-650
+ *  dependency fails inside maybeFinalizeHistory's try/catch, not at require
+ *  time for the whole watchdog script. */
+function defaultFinalizeClosedDays(opts) {
+  const { finalizeClosedDays } = require('../../src/main/historyAggregator.cjs');
+  return finalizeClosedDays(opts);
+}
+
+/**
+ * maybeFinalizeHistory(opts?) → Promise<{ ran, reason, date, finalizedDates? }>
+ *
+ * Runs at most once per local day (stamp-file gated, O(1) same-day skip).
+ * Guards against interleaving with the in-app Electron boot pass via an
+ * O_EXCL lock file. Bounded by opts.budgetMs so a huge transcript corpus
+ * can't make a single watchdog tick run long; a budget-partial pass does
+ * NOT stamp the day complete, so a later tick resumes/retries.
+ *
+ * opts:
+ *   stampPath   — override for testing (default ~/.claude/session-manager/history-rollup.stamp)
+ *   lockPath    — override for testing (default ~/.claude/session-manager/history-rollup.lock)
+ *   staleLockMs — lock staleness threshold (default 10 min)
+ *   budgetMs    — cap forwarded to finalizeClosedDays (default 60_000)
+ *   dryRun      — compute without writing (default SM_WATCHDOG_DRYRUN === '1')
+ *   finalizeFn  — injectable finalizeClosedDays for testing
+ */
+async function maybeFinalizeHistory({
+  stampPath = DEFAULT_STAMP_PATH,
+  lockPath = DEFAULT_LOCK_PATH,
+  staleLockMs = DEFAULT_LOCK_STALE_MS,
+  budgetMs = DEFAULT_FINALIZE_BUDGET_MS,
+  dryRun = process.env.SM_WATCHDOG_DRYRUN === '1',
+  finalizeFn = defaultFinalizeClosedDays,
+} = {}) {
+  const today = localDateStr();
+
+  if (readStampDate(stampPath) === today) {
+    return { ran: false, reason: 'already-finalized-today', date: today };
+  }
+
+  if (!tryAcquireLock(lockPath, staleLockMs)) {
+    return { ran: false, reason: 'lock-contended', date: today };
+  }
+
+  try {
+    const result = await finalizeFn({ budgetMs, dryRun });
+
+    if (dryRun) {
+      return { ran: false, reason: 'dry-run', date: today, finalizedDates: result.finalizedDates };
+    }
+
+    if (!result.partial) {
+      writeStampDate(stampPath, today);
+      return { ran: true, reason: 'finalized', date: today, finalizedDates: result.finalizedDates };
+    }
+
+    return { ran: true, reason: 'partial', date: today, finalizedDates: result.finalizedDates };
+  } finally {
+    releaseLock(lockPath);
+  }
+}
+
 module.exports = {
   readLastHeartbeat,
   readLastHeartbeatTs,
@@ -534,6 +686,14 @@ module.exports = {
   hasOpenFeedback,
   emitFeedbackPRD,
   sweep,
+  localDateStr,
+  maybeFinalizeHistory,
+  tryAcquireLock,
+  releaseLock,
   DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
+  DEFAULT_STAMP_PATH,
+  DEFAULT_LOCK_PATH,
+  DEFAULT_LOCK_STALE_MS,
+  DEFAULT_FINALIZE_BUDGET_MS,
 };

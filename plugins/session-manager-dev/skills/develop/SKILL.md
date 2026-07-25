@@ -189,7 +189,11 @@ single definition of "tracked to done" for both entry paths.
    - **Failed / errored / `needs_review` / timed out / killed by the watchdog or supervisor /
      overran its estimate badly** — STOP waiting and surface it now: which PRD, the failure
      signal, the relevant log tail, and the likely cause (a stuck poll-loop or post-AC overrun
-     per `PRD_AUTHORING.md`). Don't silently retry forever. A `rateLimited` exit-1 is the
+     per `PRD_AUTHORING.md`). Don't silently retry forever. For `needs_review`, the scheduler
+     auto-files a Root Cause Analysis into the target project's feedback inbox
+     (`rcaFeedbackHook`, filename `<date>-rca-<slug>-<runId>.md`) — reference that file in
+     your report rather than re-deriving the analysis, and let `/process-feedback` fold its
+     prevention hint back into future PRD authoring. A `rateLimited` exit-1 is the
      scheduler's benign auto-pause (auto-resumes next window) — keep waiting, don't escalate.
    - **All PRDs completed successfully** — go to step 7.
 

@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { FacetedDay } from '../../../../../lib/historyFacet'
 import type { Measure } from '../../../../../lib/analyticsViewModel'
 import { measureValue } from '../../../../../lib/analyticsViewModel'
+import { CARD, SectionHead } from '../analytics-primitives'
 
 interface Props {
   days: FacetedDay[]
@@ -28,19 +29,16 @@ export function Rhythm({ days, measure }: Props) {
   const max = Math.max(...buckets, 1)
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-xs uppercase tracking-wider text-fg">Rhythm</h3>
-        <span className="text-xs font-mono text-fg-faint">weekend {weekendShare.toFixed(0)}%</span>
-      </div>
+    <div className={`${CARD} p-4`}>
+      <SectionHead kicker="05 · composition" title="Rhythm" right={<span className="text-xs font-mono text-fg-faint">weekend {weekendShare.toFixed(0)}%</span>} />
       <div className="flex items-end gap-2 h-24">
         {buckets.map((v, i) => (
           <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 h-full">
             <div
-              className={`w-full rounded-t ${i === peakIdx ? 'bg-accent' : 'bg-hive-slate'}`}
+              className={`w-full rounded-t ${i === peakIdx ? 'bg-accent' : 'bg-rhythm'}`}
               style={{ height: `${max > 0 ? (v / max) * 100 : 0}%`, minHeight: v > 0 ? 2 : 0 }}
             />
-            <span className="text-[9px] text-fg-faint">{WEEKDAY_LABELS[i]}</span>
+            <span className="text-[9px] text-fg-faint font-mono">{WEEKDAY_LABELS[i]}</span>
           </div>
         ))}
       </div>

@@ -2,6 +2,7 @@ import type { ModelBucket } from '../../../../../lib/historyFacet'
 import { usd } from '../../../../../lib/analyticsFormat'
 import { prettyModel } from '../../../../../lib/prettyModel'
 import { projectColorFor } from '../../../../../lib/projectColor'
+import { CARD, SectionHead } from '../analytics-primitives'
 
 interface Props {
   byModelTotals: Record<string, ModelBucket>
@@ -12,11 +13,8 @@ export function ModelMix({ byModelTotals }: Props) {
   const total = entries.reduce((sum, [, b]) => sum + b.costUsd, 0)
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-xs uppercase tracking-wider text-fg">Model mix</h3>
-        <span className="text-xs font-mono text-fg-faint">{usd(total)} total</span>
-      </div>
+    <div className={`${CARD} p-4`}>
+      <SectionHead kicker="05 · composition" title="Model mix" right={<span className="text-xs font-mono text-fg-faint">{usd(total)} total</span>} />
       {entries.length === 0 ? (
         <div className="text-xs text-fg-faint">no model data in range</div>
       ) : (

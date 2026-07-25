@@ -4,6 +4,7 @@ import { formatMeasureValue } from './Headline'
 import { pct, int } from '../../../../lib/analyticsFormat'
 import { projectColorFor } from '../../../../lib/projectColor'
 import { projectNameFromCwd } from '../../scheduler/sched-primitives'
+import { CARD, SectionHead } from './analytics-primitives'
 
 interface Props {
   rows: ProjectRankRow[]
@@ -14,10 +15,18 @@ interface Props {
 
 export function Ranking({ rows, measure, selected, onSelect }: Props) {
   if (!rows.length) {
-    return <div className="border border-line rounded bg-bg-elev p-4 text-xs text-fg-faint">no projects in range</div>
+    return (
+      <div className={`${CARD} p-4`}>
+        <SectionHead kicker="03 · by project" title="Ranking" />
+        <div className="text-xs text-fg-faint">no projects in range</div>
+      </div>
+    )
   }
   return (
-    <div className="border border-line rounded overflow-hidden">
+    <div className={`${CARD} overflow-hidden`}>
+      <div className="p-4 pb-0">
+        <SectionHead kicker="03 · by project" title="Ranking" />
+      </div>
       <table className="w-full text-xs">
         <thead className="bg-bg-elev">
           <tr>
@@ -53,7 +62,7 @@ export function Ranking({ rows, measure, selected, onSelect }: Props) {
                   {row.trend.pct === null ? (
                     <span className="text-fg-faint">—</span>
                   ) : (
-                    <span className={row.trend.direction === 'up' ? 'text-sage-dark' : row.trend.direction === 'down' ? 'text-red-400' : 'text-fg-faint'}>
+                    <span className={row.trend.direction === 'up' ? 'text-delta-good' : row.trend.direction === 'down' ? 'text-delta-bad' : 'text-fg-faint'}>
                       {row.trend.direction === 'up' ? '▲' : row.trend.direction === 'down' ? '▼' : '·'} {pct(Math.abs(row.trend.pct))}
                     </span>
                   )}

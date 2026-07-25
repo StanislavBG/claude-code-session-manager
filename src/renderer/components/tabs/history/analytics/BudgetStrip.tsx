@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { HistoryDashboardDay } from '../../../../../preload/api'
 import { computeBudgetProjection } from '../../../../lib/historyMath'
 import { usd } from '../../../../lib/analyticsFormat'
+import { CARD } from './analytics-primitives'
 
 // Preserved verbatim from the pre-rewrite HistoryDashboard.tsx so a user's
 // saved cap survives this rewrite.
@@ -45,9 +46,9 @@ export function BudgetStrip({ days }: Props) {
   const pctOfCap = capUsd > 0 ? Math.min(100, (mtdSpend / capUsd) * 100) : 0
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-3">
+    <div className={`${CARD} p-3`}>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[11px] uppercase tracking-wider text-fg-faint">Monthly budget</h3>
+        <h3 className="text-[10.5px] uppercase tracking-wider text-fg-faint font-mono">Monthly budget</h3>
         <label className="flex items-center gap-1.5 text-[10px] text-fg-faint">
           cap
           <span>$</span>
@@ -66,17 +67,17 @@ export function BudgetStrip({ days }: Props) {
       </div>
       <div className="flex items-center gap-4 text-xs font-mono mb-1.5">
         <span className="text-fg">{usd(mtdSpend)} <span className="text-fg-faint">month-to-date</span></span>
-        <span className={overBudget ? 'text-red-400' : 'text-fg-dim'}>
+        <span className={overBudget ? 'text-delta-bad' : 'text-fg-dim'}>
           {usd(projectedSpend)} <span className="text-fg-faint">projected</span>
         </span>
       </div>
       <div className="h-1.5 rounded bg-bg-hi overflow-hidden">
         <div
-          className={`h-full ${overBudget ? 'bg-red-400' : 'bg-sage'}`}
+          className={`h-full ${overBudget ? 'bg-delta-bad' : 'bg-sage'}`}
           style={{ width: `${Math.max(pctOfCap, pctOfCap > 0 ? 2 : 0)}%` }}
         />
       </div>
-      <div className={`text-[10px] mt-1 font-mono ${overBudget ? 'text-red-400' : 'text-fg-faint'}`}>
+      <div className={`text-[10px] mt-1 font-mono ${overBudget ? 'text-delta-bad' : 'text-fg-faint'}`}>
         {overBudget ? `projected to exceed $${capUsd.toFixed(0)} cap` : `${pctOfCap.toFixed(0)}% of $${capUsd.toFixed(0)} cap`}
       </div>
     </div>

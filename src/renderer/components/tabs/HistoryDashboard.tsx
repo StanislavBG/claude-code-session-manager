@@ -190,6 +190,9 @@ export function HistoryDashboard() {
 
   return (
     <div data-testid="history-dashboard" className="flex flex-col h-full">
+      <h1 className="font-serif text-[42px] leading-tight tracking-tight text-fg px-4 pt-4">
+        Where your <em className="italic text-accent">Claude time</em> goes
+      </h1>
       <ControlBar
         measure={measure}
         onMeasure={setMeasure}

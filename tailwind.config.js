@@ -52,6 +52,14 @@ export default {
         'hive-slate': '#5f6f86',
         'hive-plum': '#8a5a6e',
         'hive-teal': '#4f7d72',
+        // History analytics dashboard — single source for delta/band tones so
+        // no component hardcodes these hexes (see HistoryDashboard analytics/).
+        delta: {
+          good: '#566b34',
+          bad: '#a3441f',
+        },
+        muteband: '#ded2bd',
+        rhythm: '#cfc0a2',
       },
       fontFamily: {
         // Almanac trio: Geist for UI, Newsreader for editorial serif display
@@ -60,6 +68,9 @@ export default {
         sans: ['Geist', 'system-ui', 'sans-serif'],
         serif: ['Newsreader', 'Georgia', 'serif'],
         mono: ['IBM Plex Mono', 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
+      borderRadius: {
+        card: '14px',
       },
     },
   },

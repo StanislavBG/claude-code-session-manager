@@ -4,6 +4,7 @@ import { measureValue } from '../../../../lib/analyticsViewModel'
 import { prettyModel } from '../../../../lib/prettyModel'
 import { projectColorFor } from '../../../../lib/projectColor'
 import { projectNameFromCwd } from '../../scheduler/sched-primitives'
+import { CARD, SectionHead } from './analytics-primitives'
 
 export interface DrillModelBucket {
   inputTokens: number
@@ -29,13 +30,14 @@ export function ProjectDrill({ projectDir, totals, byModel, toolBreakdown, onCle
   const maxToolCount = toolEntries[0]?.[1] ?? 0
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs uppercase tracking-wider text-fg flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: projectColorFor(projectDir) }} />
-          {projectNameFromCwd(projectDir) ?? projectDir}
-        </h3>
-        <button onClick={onClear} className="text-[11px] text-fg-faint hover:text-fg">clear ✕</button>
+    <div className={`${CARD} p-4`}>
+      <SectionHead
+        kicker="04 · drill in"
+        title={projectNameFromCwd(projectDir) ?? projectDir}
+        right={<button onClick={onClear} className="text-[11px] text-fg-faint hover:text-fg font-mono">clear ✕</button>}
+      />
+      <div className="flex items-center gap-1.5 -mt-2 mb-3">
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: projectColorFor(projectDir) }} />
       </div>
 
       <div className="grid grid-cols-6 gap-3 mb-4">
@@ -90,7 +92,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[10px] text-fg-faint uppercase tracking-wider">{label}</div>
-      <div className="text-sm font-mono text-fg">{value}</div>
+      <div className="text-[17px] font-mono tracking-tight text-fg">{value}</div>
     </div>
   )
 }

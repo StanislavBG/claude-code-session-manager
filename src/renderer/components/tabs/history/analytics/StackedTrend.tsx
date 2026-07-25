@@ -4,6 +4,7 @@ import { projectColorFor } from '../../../../lib/projectColor'
 import { projectNameFromCwd } from '../../scheduler/sched-primitives'
 import { tok, usd } from '../../../../lib/analyticsFormat'
 import type { Measure } from '../../../../lib/analyticsViewModel'
+import { CARD, MUTEBAND_HEX, SectionHead } from './analytics-primitives'
 
 interface Props {
   days: StackedDayInput[]
@@ -45,21 +46,24 @@ export function StackedTrend({ days, measure, selected, onSelect }: Props) {
   const gridlines = Array.from({ length: gridlineCount + 1 }, (_, i) => (maxY / gridlineCount) * i)
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs uppercase tracking-wider text-fg">Trend by project</h3>
-        <div className="flex border border-line rounded overflow-hidden text-[10px]">
-          {(['absolute', 'share'] as StackedMode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`px-2 py-0.5 ${mode === m ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg'}`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className={`${CARD} p-4`}>
+      <SectionHead
+        kicker="02 · over time"
+        title="Trend by project"
+        right={(
+          <div className="flex border border-line rounded overflow-hidden text-[10px] font-mono">
+            {(['absolute', 'share'] as StackedMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`px-2 py-0.5 ${mode === m ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg'}`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+      />
       <svg width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="overflow-visible">
         {gridlines.map((gv, i) => (
           <g key={i}>
@@ -75,7 +79,7 @@ export function StackedTrend({ days, measure, selected, onSelect }: Props) {
           return day.bands.map((band, bi) => {
             const prevBand = prev.bands[bi]
             const dimmed = selected !== null && selected !== band.projectDir
-            const color = projectColorFor(band.projectDir)
+            const color = dimmed ? MUTEBAND_HEX : projectColorFor(band.projectDir)
             const points = [
               `${xFor(i - 1)},${yFor(prevBand.y0)}`,
               `${xFor(i)},${yFor(band.y0)}`,
@@ -87,7 +91,7 @@ export function StackedTrend({ days, measure, selected, onSelect }: Props) {
                 key={`${band.projectDir}-${i}`}
                 points={points}
                 fill={color}
-                opacity={dimmed ? 0.12 : 0.75}
+                opacity={dimmed ? 0.6 : 0.75}
                 className="cursor-pointer"
                 onClick={() => onSelect(selected === band.projectDir ? null : band.projectDir)}
               >

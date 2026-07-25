@@ -1,6 +1,7 @@
 import type { ProjectRankRow } from '../../../../../lib/analyticsViewModel'
 import { projectColorFor } from '../../../../../lib/projectColor'
 import { projectNameFromCwd } from '../../../scheduler/sched-primitives'
+import { CARD, SectionHead } from '../analytics-primitives'
 
 interface Props {
   rows: ProjectRankRow[]
@@ -13,11 +14,8 @@ export function Concentration({ rows }: Props) {
   const longTailShare = longTail.reduce((sum, r) => sum + r.sharePct, 0)
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-xs uppercase tracking-wider text-fg">Concentration</h3>
-        <span className="text-xs font-mono text-fg-faint">top 3 = {top3Share.toFixed(0)}%</span>
-      </div>
+    <div className={`${CARD} p-4`}>
+      <SectionHead kicker="05 · composition" title="Concentration" right={<span className="text-xs font-mono text-fg-faint">top 3 = {top3Share.toFixed(0)}%</span>} />
       {rows.length === 0 ? (
         <div className="text-xs text-fg-faint">no projects in range</div>
       ) : (

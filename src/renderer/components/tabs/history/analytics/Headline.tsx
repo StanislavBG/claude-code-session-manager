@@ -2,6 +2,7 @@ import type { Measure } from '../../../../lib/analyticsViewModel'
 import { MEASURE_LABELS } from '../../../../lib/analyticsViewModel'
 import type { Headline as HeadlineData } from '../../../../lib/analyticsViewModel'
 import { usd, tok, int, min, pct } from '../../../../lib/analyticsFormat'
+import { CARD, SectionHead } from './analytics-primitives'
 
 export function formatMeasureValue(measure: Measure, value: number): string {
   switch (measure) {
@@ -27,20 +28,20 @@ export function Headline({ measure, headline, activeDays, projectsTouched, total
   // Spend is inverted: a lower spend is the "good" direction.
   const isGood = delta && (measure === 'spend' ? delta.direction === 'down' : delta.direction === 'up')
   const isBad = delta && delta.direction !== 'flat' && (measure === 'spend' ? delta.direction === 'up' : delta.direction === 'down')
-  const tone = isGood ? 'text-sage-dark' : isBad ? 'text-red-400' : 'text-fg-faint'
+  const tone = isGood ? 'text-delta-good' : isBad ? 'text-delta-bad' : 'text-fg-faint'
 
   return (
-    <div className="border border-line rounded bg-bg-elev p-4">
+    <div className={`${CARD} p-4`}>
+      <SectionHead kicker="01 · overview" title={MEASURE_LABELS[measure]} />
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs text-fg-faint uppercase tracking-wider mb-1">{MEASURE_LABELS[measure]}</div>
-          <div className="text-3xl font-mono text-fg">{formatMeasureValue(measure, headline.value)}</div>
+          <div className="text-[52px] leading-none font-mono tracking-tight text-fg">{formatMeasureValue(measure, headline.value)}</div>
           {delta ? (
-            <div className={`text-xs font-mono mt-1 ${tone}`}>
+            <div className={`text-xs font-mono mt-2 ${tone}`}>
               {delta.direction === 'up' ? '▲' : delta.direction === 'down' ? '▼' : '·'} {pct(Math.abs(delta.pct ?? 0))} vs prior period
             </div>
           ) : (
-            <div className="text-xs text-fg-faint mt-1">no prior window to compare</div>
+            <div className="text-xs text-fg-faint mt-2">no prior window to compare</div>
           )}
         </div>
         <Sparkline series={headline.series} />
@@ -59,7 +60,7 @@ function SubStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[10px] text-fg-faint uppercase tracking-wider">{label}</div>
-      <div className="text-sm font-mono text-fg-dim">{value}</div>
+      <div className="text-[17px] font-mono tracking-tight text-fg-dim">{value}</div>
     </div>
   )
 }

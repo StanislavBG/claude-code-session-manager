@@ -31,12 +31,12 @@ function Segmented<T extends string | number>({ value, options, onChange }: {
   onChange: (v: T) => void
 }) {
   return (
-    <div className="flex border border-line rounded overflow-hidden text-[11px]">
+    <div className="flex gap-0.5 p-0.5 rounded bg-bg-elev shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] text-[11px]">
       {options.map((opt) => (
         <button
           key={String(opt.value)}
           onClick={() => onChange(opt.value)}
-          className={`px-2 py-1 whitespace-nowrap ${value === opt.value ? 'bg-accent text-white' : 'text-fg-faint hover:text-fg hover:bg-bg-hi'}`}
+          className={`px-2 py-1 rounded whitespace-nowrap font-mono ${value === opt.value ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-faint hover:text-fg'}`}
         >
           {opt.label}
         </button>
@@ -50,7 +50,10 @@ export function ControlBar({
   fromDate, toDate, onRefresh, onExport, exportDisabled,
 }: Props) {
   return (
-    <div className="sticky top-0 z-10 bg-bg border-b border-line px-4 py-2.5 flex flex-wrap items-center gap-3">
+    <div
+      className="sticky top-0 z-10 border-b border-line px-4 py-2.5 flex flex-wrap items-center gap-3 backdrop-blur-sm"
+      style={{ backgroundColor: 'rgba(246,239,225,0.93)' }}
+    >
       <Segmented
         value={measure}
         options={MEASURES.map((m) => ({ value: m, label: MEASURE_LABELS[m] }))}

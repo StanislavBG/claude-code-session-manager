@@ -20,7 +20,7 @@ export function ProjectFacet({ chips, keep, onToggle, onIsolate, onShowAll }: Pr
     <div className="flex flex-wrap items-center gap-1.5">
       <button
         onClick={onShowAll}
-        className={`px-2 py-1 rounded text-[11px] border ${allShown ? 'bg-accent text-white border-accent' : 'border-line text-fg-faint hover:text-fg hover:bg-bg-hi'}`}
+        className={`px-2 py-1 rounded text-[11px] font-mono border ${allShown ? 'bg-accent text-white border-accent' : 'border-line text-fg-faint hover:text-fg hover:bg-bg-hi'}`}
       >
         show all ({chips.length})
       </button>
@@ -31,7 +31,7 @@ export function ProjectFacet({ chips, keep, onToggle, onIsolate, onShowAll }: Pr
             key={chip.projectDir}
             onClick={(e) => (e.shiftKey ? onIsolate(chip.projectDir) : onToggle(chip.projectDir))}
             title={chip.projectDir}
-            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border ${active ? 'border-line text-fg-dim bg-bg-elev' : 'border-line text-fg-faint opacity-40 hover:opacity-70'}`}
+            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono border ${active ? 'border-line text-fg-dim bg-bg-hi' : 'border-line text-fg-faint opacity-40 hover:opacity-70'}`}
           >
             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: projectColorFor(chip.projectDir) }} />
             {projectNameFromCwd(chip.projectDir) ?? chip.projectDir}

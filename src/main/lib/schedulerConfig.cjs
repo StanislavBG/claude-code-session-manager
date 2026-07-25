@@ -21,6 +21,14 @@ module.exports = {
   MAX_JOB_DURATION_MS: 4 * 60 * 60_000,
   SUPERVISOR_INTERVAL_MS: 15 * 60_000,
   SUPERVISOR_PROBE_STALE_MS: 10 * 60_000,
+  // Trailing-edge debounce window for schedule:state broadcasts. A burst of
+  // mutations (boot reverify healing several rows, poll-loop refreshes,
+  // queue-linter fixups) arms one timer and sends a single push with the
+  // latest state, instead of one full-payload IPC broadcast per mutation.
+  // Lone mutations still arrive promptly (~200ms). State-machine transitions
+  // (pause/resume, job start/finish/reap/reset) bypass this via
+  // broadcast({ flush: true }).
+  BROADCAST_COALESCE_MS: 200,
   // Terminal (completed/failed) jobs older than this move from queue.json's
   // hot jobs[] into the append-only history.jsonl sidecar. See
   // src/main/lib/queueHistory.cjs.

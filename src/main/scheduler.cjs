@@ -36,8 +36,11 @@
  *     Orphaned entries (.md gone) are pruned.
  *
  * Renderer events:
- *   - 'schedule:state' broadcasts the full state on any change. Keeps the
- *     panel UI dead simple — no diff machinery.
+ *   - 'schedule:state' broadcasts the full state on mutation. Keeps the
+ *     panel UI dead simple — no diff machinery. Sends are trailing-edge
+ *     debounced (~BROADCAST_COALESCE_MS) by default so a burst of mutations
+ *     collapses into one push; state-machine transitions (pause/resume, job
+ *     start/finish) call broadcast({ flush: true }) to bypass the window.
  */
 
 const fs = require('node:fs');
@@ -55,6 +58,7 @@ const { readTail } = require('./lib/fileTail.cjs');
 const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP } = require('./lib/reaperHelpers.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const logs = require('./logs.cjs');
@@ -63,6 +67,7 @@ const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
   MAX_JOB_DURATION_MS,
+  BROADCAST_COALESCE_MS,
 } = require('./lib/schedulerConfig.cjs');
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
@@ -894,12 +899,32 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
   return payload;
 }
 
-async function broadcast() {
+// Trailing-edge debounce for the `schedule:state` IPC push: a burst of
+// broadcast() calls (boot reverify healing several rows, poll-loop refreshes,
+// queue-linter fixups) arms one BROADCAST_COALESCE_MS timer and sends a
+// single payload built fresh at fire time, instead of one full-payload push
+// per mutation. Callers where latency matters (pause/resume, job
+// start/finish/reap/reset) pass `{ flush: true }` to bypass the window and
+// send immediately.
+const broadcastCoalescer = createBroadcastCoalescer({
+  delayMs: BROADCAST_COALESCE_MS,
+  send: (payload) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    sendIfAlive(mainWindow, 'schedule:state', payload);
+  },
+  getPayload: async () => buildScheduleStatePayload(await readQueue()),
+});
+
+async function broadcast(opts = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const state = await readQueue();
   await reconcile(state);
   await writeQueue(state);
-  sendIfAlive(mainWindow, 'schedule:state', buildScheduleStatePayload(state));
+  if (opts.flush) {
+    await broadcastCoalescer.flush();
+  } else {
+    broadcastCoalescer.schedule();
+  }
 }
 
 function clearFireTimer() {
@@ -967,7 +992,7 @@ async function setPaused(reason, resumeAtIso) {
       s.paused = { reason, since: new Date().toISOString(), resumeAt: effectiveResumeAt || null };
     }
   });
-  await broadcast();
+  await broadcast({ flush: true });
   cancelToken.cancelled = true;
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   if (!effectiveResumeAt) return;
@@ -1009,7 +1034,7 @@ async function clearPause(source) {
     lastFailureKind = null;
     persistSchedulerState();
   }
-  if (wasPaused) await broadcast();
+  if (wasPaused) await broadcast({ flush: true });
 }
 
 /** Mutate a job in place to "pending" with cleared run metadata. */
@@ -1634,7 +1659,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         s.jobs[idx].startedAt = new Date().toISOString();
       }
     });
-    await broadcast();
+    await broadcast({ flush: true });
 
     // Commit-guard baseline: snapshot the working tree BEFORE the run so the
     // post-run check flags only paths THIS job left dirty, not pre-existing WIP.
@@ -1650,7 +1675,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
         }
       });
-      await broadcast();
+      await broadcast({ flush: true });
     });
 
     if (res.rateLimited) {
@@ -1850,7 +1875,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         }
       }
     });
-    await broadcast();
+    await broadcast({ flush: true });
 
     if (actuallyFailed && failedJobSnapshot) {
       // Transient-failure detector. A 143/137 exit is ALWAYS a signal kill — the
@@ -1898,7 +1923,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             s.jobs[i].transientRetries = decision.retries + 1;
           }
         });
-        await broadcast();
+        await broadcast({ flush: true });
       } else if (decision.action === 'fail-dirty') {
         console.log(`[scheduler] transient failure (${decision.transientKind}) for ${job.slug} left ${newlyDirtyCount} uncommitted file(s) (e.g. ${dirtySample}) — not auto-requeuing`);
         await mutate((s) => {
@@ -1908,7 +1933,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             s.jobs[i].error = `transient failure (${decision.transientKind}) left ${newlyDirtyCount} uncommitted file(s) in working tree (e.g. ${dirtySample}) — not auto-requeued to avoid overwriting partial work; review and commit or discard manually`;
           }
         });
-        await broadcast();
+        await broadcast({ flush: true });
         // No auto-fix investigation: this isn't a code defect, and the
         // dirty tree needs a human, not a diagnosis run.
       } else if (decision.action === 'fail-cap') {
@@ -1922,7 +1947,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             s.jobs[i].error = `transient failure (${decision.transientKind}) exhausted retry cap (${decision.retries}/${TRANSIENT_RETRY_CAP}) — marking failed without auto-fix investigation`;
           }
         });
-        await broadcast();
+        await broadcast({ flush: true });
       } else {
         spawnInvestigation(failedJobSnapshot, runDir).catch((e) => {
           console.error('[scheduler] spawnInvestigation error', job.slug, e);
@@ -2121,7 +2146,7 @@ async function reapDeadRunningJobs() {
       }
     });
 
-    await broadcast();
+    await broadcast({ flush: true });
     tickQueue().catch(() => {});
   } catch (e) {
     console.warn('[scheduler] reapDeadRunningJobs error', e?.message);
@@ -2675,7 +2700,7 @@ function registerScheduleHandlers() {
       return true;
     });
     if (!found) return { ok: false, error: 'not found' };
-    await broadcast();
+    await broadcast({ flush: true });
     return { ok: true };
   }));
 
@@ -3097,7 +3122,7 @@ const remote = {
       return true;
     });
     if (!found) return { ok: false, error: 'not found' };
-    await broadcast();
+    await broadcast({ flush: true });
     return { ok: true, slug, status: 'pending' };
   },
 

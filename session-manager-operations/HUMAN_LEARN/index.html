@@ -91,17 +91,131 @@ through to <code>--session-id</code> and to transcript lookup — no separate ID
 
 <h2 id="scheduler">Scheduler — unattended PRD execution</h2>
 <div class="feature">
-<p>Runs written task specs ("PRDs") as headless <code>claude -p</code> jobs, on a schedule or
-when API usage frees up. Policies: <code>manual</code>, <code>on-reset</code>, or
-<code>when-available</code> (default), which polls billing usage every minute to decide when
-to start/stop jobs around the 5-hour usage window. Concurrency is capped at 3 simultaneous
-jobs to avoid overloading the machine. A boot-time reconciler reaps jobs orphaned by a crash,
-and a periodic supervisor probe kills stuck poll-loops without killing the agent itself.</p>
-<div class="refs">
-<span class="loc">src/main/scheduler.cjs:253</span>
-<span class="loc">src/main/lib/schedulerConfig.cjs:10</span>
-<span class="loc">src/main/supervisor.cjs</span>
+<p>The scheduler is the app's execution engine: it runs written task specs ("PRDs") as
+headless <code>claude -p</code> jobs around the rolling 5-hour billing window, so implementation
+work happens unattended on a cheaper executor model while the interactive session stays free
+for planning. Everything below is the current pipeline, end to end.</p>
+
+<div class="statline" style="display:flex;gap:14px;flex-wrap:wrap;margin:14px 0">
+  <span class="stat" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 16px"><span style="font-size:20px;font-weight:700">3</span><br><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)">concurrency cap</span></span>
+  <span class="stat" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 16px"><span style="font-size:20px;font-weight:700">60&thinsp;s</span><br><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)">billing poll</span></span>
+  <span class="stat" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 16px"><span style="font-size:20px;font-weight:700">4&thinsp;h</span><br><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)">job deadman</span></span>
+  <span class="stat" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 16px"><span style="font-size:20px;font-weight:700">90%</span><br><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)">utilization gate</span></span>
+  <span class="stat" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 16px"><span style="font-size:20px;font-weight:700">2&thinsp;min</span><br><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)">external watchdog</span></span>
 </div>
+
+<p style="margin-top:14px"><b style="color:var(--fg);font-size:13.5px">How a PRD becomes a running job</b></p>
+<ol class="stage">
+<li><b>A PRD file lands in the queue directory</b> — <code>~/.claude/session-manager/scheduled-plans/prds/&lt;NN&gt;-&lt;slug&gt;.md</code>.
+Anything can write one: the <code>/develop</code> skill, the admin API, an MCP tool, or a hand edit.
+<div class="d">Frontmatter carries <code>title</code>, <code>cwd</code> (with <code>~</code> expanded to the home dir), and
+<code>estimateMinutes</code>. The filename's <code>NN-</code> prefix is the <b>parallel group</b>: PRDs sharing a
+number may run together; a higher number waits for the lower ones in the same project. New group
+numbers are allocated race-proof via <code>O_EXCL</code> reservation-marker files.</div>
+<div class="refs"><span class="loc">src/main/lib/prdParser.cjs:50</span> <span class="loc">src/main/lib/prdParser.cjs:181</span></div></li>
+
+<li><b>Reconcile mirrors disk into <code>queue.json</code></b> — every pass re-reads the directory
+(mtime+inode cached), refreshes each job's metadata, drops jobs whose file vanished, and adds new
+files as <code>pending</code>.
+<div class="d">queue.json top-level: <code>config · jobs · scheduledFor · lastRunAt · paused</code>. History is not
+a second store — it is simply the completed/failed jobs filtered out of <code>jobs</code>, newest first.</div>
+<div class="refs"><span class="loc">src/main/scheduler.cjs:599</span> <span class="loc">src/main/scheduler.cjs:2155</span></div></li>
+
+<li><b>A fire policy decides when to tick</b> — <code>when-available</code> (default) polls the billing
+endpoint every 60&thinsp;s (<code>GET api.anthropic.com/api/oauth/usage</code>, OAuth token from
+<code>~/.claude/.credentials.json</code>) and fires whenever pending&gt;0, not paused, and five-hour
+utilization is below the 90% threshold. <code>on-reset</code> arms one timer at
+<code>resets_at + 15&thinsp;min</code>; <code>manual</code> fires only from the UI.
+<div class="refs"><span class="loc">src/main/scheduler.cjs:1956</span> <span class="loc">src/main/lib/schedulerConfig.cjs:11</span> <span class="loc">src/main/usage.cjs</span></div></li>
+
+<li><b><code>pickNextBatch</code> fills free slots</b> — jobs group by project (<code>cwd</code>); parallel groups
+serialize <i>within</i> a project while different projects run concurrently up to the cap
+(<code>concurrencyCap</code> 3, env-overridable). A project holds if an earlier group has <code>failed</code>
+jobs — <code>needs_review</code> deliberately does not block. A memory gate additionally clamps the batch:
+each job is budgeted 2.5&thinsp;GB against <code>MemAvailable</code> minus a 3&thinsp;GB host reserve.
+<div class="refs"><span class="loc">src/main/lib/schedulerBatch.cjs:158</span> <span class="loc">src/main/scheduler.cjs:1849</span> <span class="loc">src/main/scheduler.cjs:1875</span></div></li>
+
+<li><b>The job spawns</b> — <code>claude -p &lt;prd + finish protocol&gt; --model sonnet
+--dangerously-skip-permissions --output-format stream-json --verbose --session-id &lt;uuid&gt;</code>,
+detached in its own process group, env scrubbed of <code>CLAUDE_*</code> so nothing overrides the pinned
+model, and OOM-biased (<code>oom_score_adj=500</code>) so the kernel kills the job before Electron.
+<div class="d">Output streams to <code>runs/&lt;ts&gt;/&lt;slug&gt;.log</code> with a <code>.meta.json</code> sidecar.
+Watchdogs per job: 4&thinsp;h deadman SIGKILL · 20&thinsp;min no-output stall kill · a 90&thinsp;s grace tail
+after the final result event so a lingering process can't idle forever.</div>
+<div class="refs"><span class="loc">src/main/scheduler.cjs:1175</span> <span class="loc">src/main/scheduler.cjs:1068</span> <span class="loc">src/main/scheduler.cjs:1244</span></div></li>
+
+<li><b>Finish protocol + verifier decide the outcome</b> — every prompt ends with an appended
+protocol: run <code>/code-review --fix</code>, <code>/security-review</code>, verify project checks, commit,
+then print <code>SCHEDULER_VERDICT: PASS</code> (or <code>FAIL &lt;reason&gt;</code>) as the literal last line.
+A post-run verifier reads the transcript and maps verdicts to status:
+<div class="d"><b>completed</b> — clean, or PASS with the commit verified elsewhere ·
+<b>pending again</b> — HALT / unmet dependencies (auto re-fires) ·
+<b>needs_review</b> — transcript errors, no sentinel, PASS without a commit, or new uncommitted
+files left behind · <b>failed</b> — non-zero exit. Rate-limit exits are none of these: they pause
+the whole queue instead.</div>
+<div class="refs"><span class="loc">src/main/scheduler.cjs:112</span> <span class="loc">src/main/scheduler.cjs:1645</span> <span class="loc">src/main/scheduler.cjs:1583</span></div></li>
+</ol>
+
+<p style="margin-top:16px"><b style="color:var(--fg);font-size:13.5px">Self-healing, five layers deep</b></p>
+<table class="kv">
+<tr><th>Layer</th><th>Cadence</th><th>What it does</th><th>Where</th></tr>
+<tr><td>rate-limit pause</td><td>on detection</td><td>Log tail matching a five-hour limit pauses the queue and arms a resume timer for the next window reset (+30&thinsp;s); auth failures pause hard; 30&thinsp;min of network failures pause for 30&thinsp;min.</td><td><span class="loc">scheduler.cjs:918</span> <span class="loc">scheduler.cjs:837</span></td></tr>
+<tr><td>dead-process reaper</td><td>every poll (60&thinsp;s)</td><td>Any <code>running</code> job whose PID is gone gets its log classified into completed/failed — no zombie rows.</td><td><span class="loc">scheduler.cjs:1979</span></td></tr>
+<tr><td>boot reconciliation</td><td>app start</td><td>Jobs orphaned by a crash are outcome-classified from their logs; genuinely lost runs re-queue (bounded retries), stray <code>claude</code> PIDs are group-killed.</td><td><span class="loc">scheduler.cjs:2723</span> <span class="loc">scheduler.cjs:532</span></td></tr>
+<tr><td>supervisor probe</td><td>15&thinsp;min</td><td>For running jobs stale ≥10&thinsp;min: an Opus probe (budget-capped $0.10, 2&thinsp;min ceiling) inspects the process tree + log tail and may SIGTERM a stuck descendant bash — or, for a childless job stale &gt;60&thinsp;min, the agent itself. Never its own PID; kill targets must descend from the job root.</td><td><span class="loc">supervisor.cjs:363</span> <span class="loc">supervisor.cjs:295</span></td></tr>
+<tr><td>external watchdog</td><td>2&thinsp;min (systemd user timer)</td><td>Outside Electron entirely: if the scheduler heartbeat file is stale, it reaps orphans offline and sweeps the feedback inbox into auto-PRDs. Heartbeat fresh → exits touching nothing.</td><td><span class="loc">scripts/scheduler-watchdog.cjs:54</span></td></tr>
+</table>
+
+<p style="margin-top:16px"><b style="color:var(--fg);font-size:13.5px">Recovery beyond restarting: verdict healing and auto-fix</b></p>
+<p>Four <code>needs_review</code> verdicts (<code>transcript_errors</code>, <code>verify_unavailable</code>,
+<code>no_verdict_sentinel</code>, <code>pass_no_commit</code>) are <i>rescannable</i>: a periodic re-verify
+re-runs the current verifier over them and heals jobs to <code>completed</code> — including retroactive
+commit detection via <code>git log --since/--until</code> over the run window. Unhealable jobs can get one
+bounded auto-fix: an Opus investigation (max 1 concurrent, depth-capped at fix-of-fix) authors a
+<code>NN-fix-&lt;slug&gt;.md</code> PRD that queues like any other. <code>uncommitted_changes</code> is deliberately
+not rescannable — a human decides.</p>
+<div class="refs"><span class="loc">scheduler.cjs:2182</span> <span class="loc">scheduler.cjs:2322</span> <span class="loc">scheduler.cjs:202</span></div>
+
+<p style="margin-top:16px"><b style="color:var(--fg);font-size:13.5px">Definition-of-done gate at queue drain</b></p>
+<p>When a tick finds nothing left to launch, a fire-and-forget hook re-verifies the completed
+batch's acceptance criteria live, flags risky surfaces, and writes
+<code>runs/&lt;ts&gt;/definition-of-done-&lt;key&gt;.md</code>. It is watermarked and batch-keyed so a re-drain
+over the same completed set is a single fs-stat no-op, and it skips entirely while paused or
+cancelled. Kill-switch <code>SM_DOD_DISABLE=1</code>.</p>
+<div class="refs"><span class="loc">src/main/lib/dodDrainHook.cjs:59</span></div>
+
+<p style="margin-top:16px"><b style="color:var(--fg);font-size:13.5px">Control surfaces — how it gets called</b></p>
+<table class="kv">
+<tr><th>Surface</th><th>Transport</th><th>Can do</th></tr>
+<tr><td>Scheduler tab (renderer)</td><td>one push channel <code>schedule:state</code> + 15 invoke channels (<code>schedule:*</code>)</td><td>Queue/PRDs/History sub-tabs; policy + cap + threshold editing, force-tick, run-now, reset, resume, clear-queue, PRD read/write, log viewer, lint. The zustand store subscribes to the single broadcast; health/lint/supervisor-log are imperative pulls.</td></tr>
+<tr><td>Admin API</td><td>loopback HTTP, OS-assigned port, per-boot bearer token in <code>admin-api.json</code> (0600), timing-safe compare</td><td>Exactly three endpoints: list jobs, reset a job, create a PRD (NN auto-allocated, standards appended). Pause/resume/cancel deliberately not exposed.</td></tr>
+<tr><td>MCP tools</td><td><code>scripts/scheduler-mcp-server.cjs</code> (stdio) → admin API</td><td><code>scheduler_list_jobs</code> · <code>scheduler_reset_job</code> · <code>scheduler_create_prd</code>. Works only while the app runs — the Electron process hosts the admin server.</td></tr>
+<tr><td>Web remote (mobile)</td><td>relay commands → in-process <code>scheduler.remote.*</code> facade</td><td>Reads gated behind E2E auth; mutations (write-prd, reset, run-now, set-config) additionally require <code>remoteControlEnabled</code>, default off.</td></tr>
+<tr><td>PRD queue linter</td><td><code>schedule:lint-queue</code></td><td>Static rules over every queued PRD: unbounded <code>until</code>/<code>while true</code> loops and <code>seq</code> ranges ≥500 are errors; missing cwd-on-disk is an error; missing estimate is a warning.</td></tr>
+</table>
+
+<details><summary>Key constants</summary>
+<table class="kv">
+<tr><th>Constant</th><th>Value</th><th>Bounds</th></tr>
+<tr><td>POLL_INTERVAL_MS</td><td>60_000</td><td>billing-usage poll cadence <span class="loc">schedulerConfig.cjs:11</span></td></tr>
+<tr><td>concurrencyCap</td><td>3 (env SM_SCHEDULER_MAX_CONCURRENCY, clamp 1–20)</td><td>simultaneous claude -p jobs <span class="loc">scheduler.cjs:255</span></td></tr>
+<tr><td>utilizationThreshold</td><td>90</td><td>% of five-hour window above which when-available holds <span class="loc">scheduler.cjs:262</span></td></tr>
+<tr><td>MAX_JOB_DURATION_MS</td><td>4&thinsp;h</td><td>deadman SIGKILL <span class="loc">schedulerConfig.cjs</span></td></tr>
+<tr><td>IDLE_OUTPUT_KILL_MS</td><td>20&thinsp;min</td><td>no-output stall kill <span class="loc">scheduler.cjs</span></td></tr>
+<tr><td>MIN_FREE_MB_PER_JOB / RESERVED_HOST_MB</td><td>2500 / 3000</td><td>memory admission gate <span class="loc">scheduler.cjs:251</span></td></tr>
+<tr><td>TRANSIENT_RETRY_CAP</td><td>2</td><td>transient-failure re-queues per job</td></tr>
+<tr><td>MAX_CONCURRENT_INVESTIGATIONS / MAX_INVESTIGATION_DEPTH</td><td>1 / 2</td><td>auto-fix fan-out <span class="loc">scheduler.cjs:706</span> <span class="loc">scheduler.cjs:2189</span></td></tr>
+<tr><td>kill-switches</td><td>SM_DOD_DISABLE · SM_SUPERVISOR_DISABLE · SM_AUTOFIX_DISABLE · SM_REVERIFY_PERIODIC_DISABLE</td><td>each disables one autonomous layer</td></tr>
+</table>
+</details>
+
+<div class="callout" style="margin-top:14px"><b>Why it's shaped this way:</b> one machine, one shared
+five-hour token budget, jobs that each can exceed 1&thinsp;GB. So admission is budget-aware (utilization
+gate) and memory-aware (per-job reserve), the cap is small and global across every claude-spawning
+surface, and every autonomous layer — reaper, supervisor, watchdog, auto-fix — exists so a stuck
+job costs minutes of one layer's cadence rather than a human's attention. The single
+<code>schedule:state</code> push channel keeps the renderer a dumb mirror: state lives in queue.json,
+and every UI is a projection of it.</div>
 </div>
 
 <h2 id="dom-capture">DOM Capture — pull page content into a Claude session</h2>
@@ -330,7 +444,11 @@ src/renderer/components/tabs/browser/RecorderPanel.tsx, src/main/browserCapture.
 src/main/browserView.cjs, src/renderer/state/browser.ts, src/renderer/lib/captureDest.ts,
 src/renderer/lib/browserExport.ts, src/main/config.cjs, src/renderer/state/voice.ts,
 src/renderer/components/LeftNav.tsx, src/main/memoryAggregate.cjs, src/main/webRemote.cjs,
-src/main/adminServer.cjs · generated 2026-07-11
+src/main/adminServer.cjs, src/main/lib/prdParser.cjs, src/main/lib/schedulerBatch.cjs,
+src/main/lib/dodDrainHook.cjs, src/main/queueOps.cjs, scripts/scheduler-watchdog.cjs,
+scripts/scheduler-mcp-server.cjs, src/renderer/state/scheduleState.ts,
+src/renderer/components/SchedulePanel.tsx, src/renderer/components/tabs/Scheduler.tsx ·
+generated 2026-07-24
 </footer>
 
 </div>

@@ -13,6 +13,7 @@ export default defineConfig({
       'src/main/__tests__/queueHistory.test.cjs',
       'src/main/__tests__/queueOpsAutoArchive.test.cjs',
       'src/main/__tests__/prdParserHighWater.test.cjs',
+      'src/main/__tests__/broadcastCoalescer.test.cjs',
     ],
     globals: true,
   },

@@ -500,6 +500,12 @@ export interface SchedulePollHealth {
   lastFailureKind: string | null;
 }
 
+export interface ScheduleEffectiveConcurrency {
+  cap: number;
+  /** 'env' when SM_SCHEDULER_MAX_CONCURRENCY pins the cap; 'config' when concurrencyCap governs. */
+  source: 'env' | 'config';
+}
+
 export interface ScheduleStateSnapshot {
   config: ScheduleConfig & { supervisor?: SupervisorConfig };
   jobs: ScheduleJob[];
@@ -512,6 +518,8 @@ export interface ScheduleStateSnapshot {
   utilization: number | null;
   /** Poll health — last billing poll result; used to detect stale utilization. */
   pollHealth?: SchedulePollHealth;
+  /** Effective concurrency cap and whether it's env-pinned or config-driven. */
+  effectiveConcurrency: ScheduleEffectiveConcurrency;
   /** Returned only by the initial state() call, not the broadcast event. */
   paths?: SchedulePaths;
 }

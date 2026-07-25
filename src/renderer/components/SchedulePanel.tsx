@@ -171,7 +171,7 @@ export function SchedulePanel() {
     )
   }
 
-  const { config, jobs, paused, lastRunAt, nextReset } = snap
+  const { config, jobs, paused, lastRunAt, nextReset, effectiveConcurrency } = snap
   const counts = { pending: 0, running: 0, completed: 0, needs_review: 0, failed: 0 }
   for (const j of jobs) {
     if (j.status in counts) counts[j.status as keyof typeof counts]++
@@ -282,14 +282,27 @@ export function SchedulePanel() {
           {/* Concurrency cap */}
           <div className="flex items-center gap-2">
             <span className="text-[13px] text-fg-dim">Up to</span>
+            {effectiveConcurrency?.source === 'env' && (
+              <span
+                className="text-[10px] font-semibold uppercase tracking-wide text-amber-400/90 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5"
+                title="Pinned by SM_SCHEDULER_MAX_CONCURRENCY — unset the env var to edit"
+              >
+                env
+              </span>
+            )}
             <input
               type="number"
               min={1}
               max={20}
-              value={config.concurrencyCap}
+              value={effectiveConcurrency?.source === 'env' ? effectiveConcurrency.cap : config.concurrencyCap}
+              disabled={effectiveConcurrency?.source === 'env'}
               onChange={(e) => window.api.schedule.setConfig({ concurrencyCap: Number(e.target.value) })}
-              className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg"
-              title="Max simultaneous jobs within a parallel group"
+              className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                effectiveConcurrency?.source === 'env'
+                  ? 'pinned by SM_SCHEDULER_MAX_CONCURRENCY — unset the env var to edit'
+                  : 'Max simultaneous jobs within a parallel group'
+              }
             />
             <span className="text-[13px] text-fg-dim">at once</span>
           </div>

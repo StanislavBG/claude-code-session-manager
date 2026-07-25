@@ -231,9 +231,14 @@ const HEARTBEAT_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'sc
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 // DEFAULT_PROJECT_CWD imported from lib/schedulerBatch.cjs (single source of truth).
 
-const ENV_CAP = process.env.SM_SCHEDULER_MAX_CONCURRENCY
-  ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 3))
-  : null;
+// Read lazily (not captured at module-load time) so tests can stub the env
+// per-case without vi.resetModules(); production behavior is unaffected
+// since the env var never changes mid-process.
+function getEnvCap() {
+  return process.env.SM_SCHEDULER_MAX_CONCURRENCY
+    ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 3))
+    : null;
+}
 
 // Each headless claude -p job can shell out to tsc/vite/pytest and grow well
 // past 1 GB at peak; reserve 2.5 GB per running+pending slot. Raised from 1.5 GB
@@ -259,7 +264,7 @@ const OOM_SCORE_ADJ_JOB = 500;
 
 const DEFAULT_CONFIG = {
   offsetMinutes: 15,
-  concurrencyCap: ENV_CAP ?? 3,
+  concurrencyCap: getEnvCap() ?? 3,
   defaultCwd: DEFAULT_PROJECT_CWD,
   // 'when-available' = poll usage and fire whenever utilization < threshold.
   // 'on-reset'        = fire offsetMinutes after the next 5h reset (legacy).
@@ -892,6 +897,10 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
       lastFailureKind,
     },
     memGate: lastMemGate,
+    effectiveConcurrency: {
+      cap: getEnvCap() ?? state.config.concurrencyCap,
+      source: getEnvCap() != null ? 'env' : 'config',
+    },
   };
   if (withPaths) {
     payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: QUEUE_PATH };
@@ -1983,7 +1992,7 @@ function tickQueue() {
     if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
     await reconcile(state);
-    const cap = ENV_CAP ?? state.config.concurrencyCap;
+    const cap = getEnvCap() ?? state.config.concurrencyCap;
     const { batch, reason: holdReason } = pickNextBatch(state.jobs, runningSet, cap);
     if (batch.length === 0) {
       // Queue drained — run the definition-of-done gate fire-and-forget.
@@ -3160,4 +3169,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload };

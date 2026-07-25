@@ -575,6 +575,63 @@ export interface SessionScanResult {
   scannedMs: number;
 }
 
+export interface HistoryDashboardRequest {
+  rangeDays: 30 | 60 | 90 | 0;
+}
+
+export interface HistoryDashboardTotals {
+  promptCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  toolCallCount: number;
+  sessionCount: number;
+  errorCount: number;
+  activeMinutes: number;
+  estimatedCostUsd: number;
+}
+
+export interface HistoryDashboardProjectRow extends HistoryDashboardTotals {
+  date: string;
+  projectDir: string;
+  toolBreakdown: Record<string, number>;
+  byModel: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    costUsd: number;
+    estimated?: boolean;
+  }>;
+}
+
+export interface HistoryDashboardDay {
+  date: string;
+  byProject: Record<string, HistoryDashboardProjectRow>;
+}
+
+export interface HistoryDashboardResult {
+  from: string;
+  to: string;
+  days: HistoryDashboardDay[];
+  prevTotals: HistoryDashboardTotals;
+  totals: HistoryDashboardTotals;
+  byProjectTotals: Record<string, HistoryDashboardTotals>;
+  byModelTotals: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    costUsd: number;
+    estimated?: boolean;
+  }>;
+  toolsByProject: Record<string, Record<string, number>>;
+  generatedAt: number;
+  /** Dates included in `days` that are NOT yet finalized (typically just today). */
+  provisionalDates: string[];
+}
+
 
 export interface FileEntry {
   name: string;
@@ -1248,6 +1305,7 @@ export interface SessionManagerAPI {
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
     scanProjects: () => Promise<SessionScanResult>;
+    dashboard: (req: HistoryDashboardRequest) => Promise<HistoryDashboardResult>;
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;

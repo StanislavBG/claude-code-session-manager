@@ -33,4 +33,8 @@ module.exports = {
   // hot jobs[] into the append-only history.jsonl sidecar. See
   // src/main/lib/queueHistory.cjs.
   HISTORY_RETENTION_MS: 7 * 24 * 60 * 60_000,
+  // Cadence for the in-app intraday refresher that keeps TODAY's History
+  // rollup line current (see historyAggregator.cjs's refreshIntradayToday).
+  // Cheap: LRU-warm live parse, no full transcript re-read.
+  HISTORY_INTRADAY_REFRESH_MS: 5 * 60_000,
 };

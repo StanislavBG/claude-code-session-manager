@@ -474,6 +474,10 @@ const historyAggregate = z.object({
   toDate: z.string().regex(DATE_YYYY_MM_DD).optional(),
 }).nullish();
 
+const historyDashboard = z.object({
+  rangeDays: z.union([z.literal(30), z.literal(60), z.literal(90), z.literal(0)]),
+}).strict();
+
 // ──────────────────────────────────────────── Voice (F1/F5/F7/F8)
 // Mirrors voiceSettings.cjs isValidConfig / isValidDevicePref / isValid…
 // validators (ad-hoc on disk). Schemas here gate the IPC boundary so a
@@ -707,6 +711,7 @@ module.exports = {
     shellOpen,
     archiveProject,
     historyAggregate,
+    historyDashboard,
     voiceSetHotkey,
     voiceSetDevicePref,
     voiceSetTurnDetector,

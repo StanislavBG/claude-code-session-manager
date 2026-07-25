@@ -41,7 +41,10 @@ const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
-const { registerHistoryAggregatorHandlers, finalizeClosedDays } = require('./historyAggregator.cjs');
+const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
+const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
+const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('../../scripts/lib/watchdogHelpers.cjs');
+const schedulerConfig = require('./lib/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const agentMemory = require('./agentMemory.cjs');
@@ -150,6 +153,20 @@ ipcMain.handle = function trackedHandle(channel, listener) {
 };
 
 const REBOOT_LOG = path.join(os.homedir(), '.claude', 'session-manager-reboot.log');
+
+// Guards refreshIntradayToday() with the same O_EXCL lock file the external
+// watchdog's finalize pass uses, so an in-app refresh tick and an offline
+// finalize pass never interleave writes to the rollup file. A contended lock
+// just means this tick is skipped — the next timer tick (or the next boot)
+// retries, so skipping is always safe.
+function runIntradayRefresh() {
+  if (!tryAcquireLock(DEFAULT_LOCK_PATH)) return;
+  refreshIntradayToday()
+    .catch((e) => {
+      logs.writeLine({ scope: 'history-rollup', level: 'error', message: 'refreshIntradayToday failed', meta: { error: e?.message } });
+    })
+    .finally(() => releaseLock(DEFAULT_LOCK_PATH));
+}
 
 function logReboot(line) {
   try {
@@ -743,6 +760,7 @@ watchers.registerWatcherHandlers();
 teams.registerTeamsHandlers();
 queueOps.registerQueueOpsHandlers();
 registerHistoryAggregatorHandlers();
+registerHistoryDashboardHandlers();
 pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 registerMemoryAggregateIpc();
@@ -1087,7 +1105,15 @@ app.whenReady().then(async () => {
     finalizeClosedDays().catch((e) => {
       logs.writeLine({ scope: 'history-rollup', level: 'error', message: 'finalizeClosedDays failed', meta: { error: e?.message } });
     });
+    runIntradayRefresh();
   }, 30_000);
+  // Keep TODAY's rollup line current so the History dashboard never needs to
+  // fall back to a live transcript scan. Shares the same O_EXCL lock file as
+  // the external watchdog's finalize pass (scripts/lib/watchdogHelpers.cjs)
+  // so the two never interleave writes to the rollup; a contended lock just
+  // means this tick's refresh is skipped (harmless — the next tick retries).
+  const intradayTimer = setInterval(runIntradayRefresh, schedulerConfig.HISTORY_INTRADAY_REFRESH_MS);
+  if (intradayTimer.unref) intradayTimer.unref();
   // Keep the machine awake while the app is open. The scheduler polls billing
   // usage every 2 min and runs `claude -p` jobs that must survive an idle
   // laptop — a system suspend (GNOME/Pop!_OS idle or lid timeout) would freeze

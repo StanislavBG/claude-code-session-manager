@@ -256,6 +256,64 @@ test('finalizeClosedDays: dryRun computes finalizedDates but writes nothing', as
   expect(map.size).toBe(0);
 });
 
+test('computeActiveMinutes: clamps to [0, 24h] and handles missing/invalid timestamps', () => {
+  const { computeActiveMinutes } = historyAggregator;
+  expect(computeActiveMinutes(null, '2026-07-01T00:10:00Z')).toBe(0);
+  expect(computeActiveMinutes('2026-07-01T00:00:00Z', null)).toBe(0);
+  expect(computeActiveMinutes('not-a-date', '2026-07-01T00:10:00Z')).toBe(0);
+  expect(computeActiveMinutes('2026-07-01T00:00:00Z', '2026-07-01T00:10:00Z')).toBeCloseTo(10, 5);
+  // Out-of-order (last before first) clamps to 0, not negative.
+  expect(computeActiveMinutes('2026-07-01T00:10:00Z', '2026-07-01T00:00:00Z')).toBe(0);
+  // A 30h span clamps to the 24h ceiling.
+  expect(computeActiveMinutes('2026-07-01T00:00:00Z', '2026-07-02T06:00:00Z')).toBe(24 * 60);
+});
+
+test('rollup v1 lines default activeMinutes to 0 and v to 1 at read time', async () => {
+  await historyRollup.appendRollupDays([
+    // v1-shaped line: no activeMinutes, no v field.
+    { date: '2026-07-01', projectDir: 'p', modelId: historyRollup.TOTALS_MODEL_ID, promptCount: 5 },
+  ]);
+  const map = await historyRollup.readRollup('2026-07-01', '2026-07-01');
+  const bucket = map.get(historyRollup.rollupKey('2026-07-01', 'p', historyRollup.TOTALS_MODEL_ID));
+  expect(bucket.activeMinutes).toBe(0);
+});
+
+test('refreshIntradayToday: upserts a provisional (non-finalized) line for today; a second run replaces it after compact', async () => {
+  const now = new Date();
+  const today = now.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projintraday';
+
+  writeTranscript(cwd, 'sess-intraday', [
+    userLine(new Date(now.getTime() - 5 * 60_000).toISOString()),
+    assistantLine(new Date(now.getTime() - 5 * 60_000).toISOString(), 'claude-sonnet-5', { in: 10, out: 5 }),
+    assistantLine(now.toISOString(), 'claude-sonnet-5', { in: 3, out: 1 }),
+  ]);
+
+  const first = await historyAggregator.refreshIntradayToday();
+  expect(first.date).toBe(today);
+  expect(first.projectsUpdated).toBeGreaterThanOrEqual(1);
+
+  let map = await historyRollup.readRollup(today, today);
+  expect(historyRollup.isDateFinalized(map, today)).toBe(false);
+  const totalsKey = historyRollup.rollupKey(today, encodeCwd(cwd), historyRollup.TOTALS_MODEL_ID);
+  const firstBucket = map.get(totalsKey);
+  expect(firstBucket).toBeTruthy();
+  expect(firstBucket.promptCount).toBeGreaterThanOrEqual(1);
+  expect(firstBucket.activeMinutes).toBeGreaterThan(0);
+
+  // A second refresh (e.g. 5 min later, more activity) replaces — not
+  // duplicates — today's line for the same key once the file is compacted.
+  await historyAggregator.refreshIntradayToday();
+  await historyRollup.compact();
+  const raw = fs.readFileSync(historyRollup.ROLLUP_PATH, 'utf8');
+  const matchingLines = raw.split('\n').filter((l) => {
+    if (!l.trim()) return false;
+    const obj = JSON.parse(l);
+    return obj.date === today && obj.projectDir === encodeCwd(cwd) && obj.modelId === historyRollup.TOTALS_MODEL_ID;
+  });
+  expect(matchingLines.length).toBe(1);
+});
+
 test('history:aggregate PARSE_BUDGET_MS truncation only affects today; finalized closed days come back complete', async () => {
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const yStr = yesterday.toLocaleDateString('en-CA');

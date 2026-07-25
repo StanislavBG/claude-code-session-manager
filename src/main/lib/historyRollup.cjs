@@ -35,6 +35,12 @@ const COMPACT_THRESHOLD_BYTES = 5 * 1024 * 1024;
 const TOTALS_MODEL_ID = '';
 const FINALIZED_MODEL_ID = '__finalized__';
 const FINALIZED_PROJECT_ID = '';
+// Bumped when a bucket/finalized-marker line's shape changes in a way that
+// requires re-deriving it from transcripts (v1 → v2 added `activeMinutes`).
+// isDateFinalized() gates on this so old-shape finalized days get re-scanned
+// by the existing finalizeClosedDays() budget/resume loop instead of a new
+// migration path.
+const ROLLUP_VERSION = 2;
 
 function rollupKey(date, projectDir, modelId) {
   return `${date}|${projectDir}|${modelId}`;
@@ -55,6 +61,8 @@ function mergeRollupLines(lines) {
     if (!obj || typeof obj.date !== 'string') continue;
     const projectDir = typeof obj.projectDir === 'string' ? obj.projectDir : '';
     const modelId = typeof obj.modelId === 'string' ? obj.modelId : '';
+    // v1 lines predate activeMinutes — default so every reader sees a number.
+    if (typeof obj.activeMinutes !== 'number') obj.activeMinutes = 0;
     map.set(rollupKey(obj.date, projectDir, modelId), obj);
   }
   return map;
@@ -77,10 +85,17 @@ async function readRollup(fromDate, toDate) {
   return filtered;
 }
 
-/** True if `date` (< today, by convention) has a finalized marker on disk. */
+/**
+ * True if `date` (< today, by convention) has a finalized marker on disk
+ * written at ROLLUP_VERSION or later. A marker written under an older schema
+ * (no `v`, or v < ROLLUP_VERSION) is treated as NOT finalized so the existing
+ * finalizeClosedDays() budget/resume pass re-scans and upgrades it in place —
+ * no separate migration machinery needed.
+ */
 function isDateFinalized(mergedMap, date) {
   const bucket = mergedMap.get(rollupKey(date, FINALIZED_PROJECT_ID, FINALIZED_MODEL_ID));
-  return !!bucket?.finalizedAt;
+  if (!bucket?.finalizedAt) return false;
+  return (bucket.v ?? 1) >= ROLLUP_VERSION;
 }
 
 /**
@@ -123,6 +138,7 @@ module.exports = {
   TOTALS_MODEL_ID,
   FINALIZED_MODEL_ID,
   FINALIZED_PROJECT_ID,
+  ROLLUP_VERSION,
   rollupKey,
   mergeRollupLines,
   readRollup,

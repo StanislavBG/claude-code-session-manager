@@ -216,6 +216,7 @@ contextBridge.exposeInMainWorld('api', {
   history: {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
     scanProjects: () => ipcRenderer.invoke('history:scan-projects'),
+    dashboard: (req) => ipcRenderer.invoke('history:dashboard', req),
   },
   files: {
     list: (path, showHidden) => ipcRenderer.invoke('files:list', { path, showHidden }),

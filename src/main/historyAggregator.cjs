@@ -116,19 +116,23 @@ async function readSlice(filePath, from, to) {
 
 /**
  * Scan JSONL lines into an aggregate accumulator (mutates acc).
- * Returns the first timestamp seen when captureFirst=true, else null.
+ * Returns { firstTs, lastTs } — firstTs is only captured when
+ * captureFirst=true (else null); lastTs is the most recent event timestamp
+ * seen in this batch of lines (file order, so simply "last one wins").
  */
 function scanAggrLines(lines, acc, captureFirst) {
   let firstTs = null;
+  let lastTs = null;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
 
-    if (captureFirst && firstTs === null) {
-      const ts = obj.ts ?? obj.timestamp;
-      if (ts) firstTs = ts;
+    const ts = obj.ts ?? obj.timestamp;
+    if (ts) {
+      if (captureFirst && firstTs === null) firstTs = ts;
+      lastTs = ts;
     }
 
     const role = obj.role ?? obj.message?.role;
@@ -179,7 +183,21 @@ function scanAggrLines(lines, acc, captureFirst) {
       acc.errorCount++;
     }
   }
-  return firstTs;
+  return { firstTs, lastTs };
+}
+
+/**
+ * Per-file activeMinutes = elapsed wall-clock time between the file's first
+ * and last event, clamped to [0, 24h] so a corrupt/out-of-order timestamp
+ * pair can't blow up a day's total. O(1).
+ */
+function computeActiveMinutes(firstTs, lastTs) {
+  if (!firstTs || !lastTs) return 0;
+  const a = Date.parse(firstTs);
+  const b = Date.parse(lastTs);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+  const minutes = (b - a) / 60000;
+  return Math.max(0, Math.min(24 * 60, minutes));
 }
 
 // ── cached file parsers ───────────────────────────────────────────────────────
@@ -205,6 +223,8 @@ async function parseJSONL(filePath, stat) {
     byModel: {},
     errorCount: 0,
     sessionDate: null,
+    firstEventTs: null,
+    lastEventTs: null,
     skipped: false,
   });
 
@@ -214,7 +234,11 @@ async function parseJSONL(filePath, stat) {
 
   const cached = aggrCache.get(filePath);
   if (cached) {
-    if (cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
+    // cached.result.lastEventTs !== undefined guards against pre-activeMinutes
+    // cache entries (shape: no firstEventTs/lastEventTs fields) — those must
+    // fall through to a full reparse so activeMinutes gets backfilled, rather
+    // than being served as a stale exact hit.
+    if (cached.size === stat.size && cached.mtimeMs === stat.mtimeMs && cached.result.lastEventTs !== undefined) {
       return { result: cached.result, cacheHit: true };
     }
 
@@ -231,7 +255,7 @@ async function parseJSONL(filePath, stat) {
           const readFrom = cached.readOffset ?? cached.size;
           const tail = await readSlice(filePath, readFrom, stat.size);
           const delta = emptyAcc();
-          scanAggrLines(tail.split('\n'), delta, false);
+          const { lastTs: deltaLastTs } = scanAggrLines(tail.split('\n'), delta, false);
           const prev = cached.result;
           const merged = {
             promptCount: prev.promptCount + delta.promptCount,
@@ -244,6 +268,8 @@ async function parseJSONL(filePath, stat) {
             byModel: {},
             errorCount: prev.errorCount + delta.errorCount,
             sessionDate: prev.sessionDate, // firstTs doesn't change on appends
+            firstEventTs: prev.firstEventTs ?? null,
+            lastEventTs: deltaLastTs ?? (prev.lastEventTs ?? null),
             skipped: false,
           };
           for (const [k, v] of Object.entries(delta.toolBreakdown)) {
@@ -283,7 +309,9 @@ async function parseJSONL(filePath, stat) {
   }
 
   const acc = emptyAcc();
-  const firstTs = scanAggrLines(text.split('\n'), acc, true);
+  const { firstTs, lastTs } = scanAggrLines(text.split('\n'), acc, true);
+  acc.firstEventTs = firstTs;
+  acc.lastEventTs = lastTs;
 
   try {
     acc.sessionDate = firstTs
@@ -319,6 +347,7 @@ function emptyBucket(sessionDate, encodedCwd) {
     byModel: {},
     sessionCount: 0,
     errorCount: 0,
+    activeMinutes: 0,
   };
 }
 
@@ -344,6 +373,7 @@ function foldParsedIntoBucket(b, parsed) {
   }
   b.sessionCount++;
   b.errorCount += parsed.errorCount;
+  b.activeMinutes += computeActiveMinutes(parsed.firstEventTs, parsed.lastEventTs);
 }
 
 /** One accumulator bucket → its rollup lines (one totals line + one per model). */
@@ -361,6 +391,8 @@ function bucketToRollupLines(b) {
     toolBreakdown: b.toolBreakdown,
     errorCount: b.errorCount,
     sessionCount: b.sessionCount,
+    activeMinutes: b.activeMinutes,
+    v: historyRollup.ROLLUP_VERSION,
   }];
   for (const [modelId, mb] of Object.entries(b.byModel)) {
     lines.push({
@@ -376,6 +408,8 @@ function bucketToRollupLines(b) {
       toolBreakdown: {},
       errorCount: 0,
       sessionCount: 0,
+      activeMinutes: 0,
+      v: historyRollup.ROLLUP_VERSION,
     });
   }
   return lines;
@@ -387,6 +421,7 @@ function finalizedMarkerLine(date) {
     projectDir: historyRollup.FINALIZED_PROJECT_ID,
     modelId: historyRollup.FINALIZED_MODEL_ID,
     finalizedAt: Date.now(),
+    v: historyRollup.ROLLUP_VERSION,
   };
 }
 
@@ -411,6 +446,7 @@ function rollupMapToRows(map, finalizedDates) {
       row.toolCallCount += bucket.toolCallCount || 0;
       row.errorCount += bucket.errorCount || 0;
       row.sessionCount += bucket.sessionCount || 0;
+      row.activeMinutes += bucket.activeMinutes || 0;
       for (const [tool, cnt] of Object.entries(bucket.toolBreakdown || {})) {
         row.toolBreakdown[tool] = (row.toolBreakdown[tool] ?? 0) + cnt;
       }
@@ -520,6 +556,65 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
     await historyRollup.appendRollupDays(entries);
   }
   return { finalizedDates: partial ? [] : Array.from(dates), partial };
+}
+
+/**
+ * Refresh TODAY's rollup buckets from a live (LRU-warm, cheap) parse of every
+ * transcript touched today, and upsert them as provisional lines (v2, no
+ * finalizedAt) so the History dashboard's "today" row stays current without
+ * the renderer ever triggering a transcript scan itself. Meant to be called
+ * on a timer (HISTORY_INTRADAY_REFRESH_MS) plus once at app start.
+ *
+ * readRollup/appendRollupDays last-write-wins per (date, projectDir, modelId)
+ * key, so re-running this simply replaces today's previous provisional lines
+ * with fresher ones — no separate "clear provisional" step needed.
+ */
+async function refreshIntradayToday() {
+  const today = localDate(new Date());
+
+  let projectDirs;
+  try {
+    projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
+  } catch {
+    return { date: today, projectsUpdated: 0 };
+  }
+
+  const buckets = new Map();
+  for (const projEntry of projectDirs) {
+    if (!projEntry.isDirectory()) continue;
+    const encodedCwd = projEntry.name;
+    const projectDir = path.join(PROJECTS_DIR, encodedCwd);
+
+    let files;
+    try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { continue; }
+
+    for (const fileEntry of files) {
+      if (!fileEntry.name.endsWith('.jsonl')) continue;
+      const filePath = path.join(projectDir, fileEntry.name);
+
+      let stat;
+      try { stat = await fsp.stat(filePath); } catch { continue; }
+
+      // A file whose mtime is before today can't have been touched today —
+      // skip it without even reading it (matches aggregate()'s fast-skip).
+      const mtimeDate = localDate(new Date(stat.mtimeMs));
+      if (mtimeDate < today) continue;
+
+      const { result: parsed } = await parseJSONL(filePath, stat);
+      if (parsed.skipped) continue;
+      if (parsed.sessionDate !== today) continue;
+
+      const key = `${today}|${encodedCwd}`;
+      if (!buckets.has(key)) buckets.set(key, emptyBucket(today, encodedCwd));
+      foldParsedIntoBucket(buckets.get(key), parsed);
+    }
+  }
+
+  const entries = [];
+  for (const b of buckets.values()) entries.push(...bucketToRollupLines(b));
+  if (entries.length) await historyRollup.appendRollupDays(entries);
+
+  return { date: today, projectsUpdated: buckets.size };
 }
 
 // ── aggregate ─────────────────────────────────────────────────────────────────
@@ -725,10 +820,16 @@ module.exports = {
   remote,
   MODEL_PRICING,
   finalizeClosedDays,
+  refreshIntradayToday,
   // exported for tests
   scanAggrLines,
   parseJSONL,
   resolvePricingKey,
   CACHE_MAX,
   LRUCache,
+  computeActiveMinutes,
+  // exported for historyDashboard.cjs (pure, no I/O at require-time; reused
+  // rather than re-implemented so date-range math stays in one place)
+  localDate,
+  subtractDays,
 };

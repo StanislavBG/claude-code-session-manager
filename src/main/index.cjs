@@ -41,7 +41,7 @@ const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
-const { registerHistoryAggregatorHandlers } = require('./historyAggregator.cjs');
+const { registerHistoryAggregatorHandlers, finalizeClosedDays } = require('./historyAggregator.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const agentMemory = require('./agentMemory.cjs');
@@ -1080,6 +1080,14 @@ app.whenReady().then(async () => {
   webRemote.init().catch((e) => {
     logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
+  // History rollup finalize pass: deferred 30s past boot so it never competes
+  // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this
+  // is just the one-shot in-app pass).
+  setTimeout(() => {
+    finalizeClosedDays().catch((e) => {
+      logs.writeLine({ scope: 'history-rollup', level: 'error', message: 'finalizeClosedDays failed', meta: { error: e?.message } });
+    });
+  }, 30_000);
   // Keep the machine awake while the app is open. The scheduler polls billing
   // usage every 2 min and runs `claude -p` jobs that must survive an idle
   // laptop — a system suspend (GNOME/Pop!_OS idle or lid timeout) would freeze

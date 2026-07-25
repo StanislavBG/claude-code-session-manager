@@ -1,0 +1,224 @@
+/**
+ * historyRollup.test.cjs — unit tests for src/main/lib/historyRollup.cjs
+ * (durable daily rollup) and its integration into historyAggregator.cjs
+ * (rollup-first closed-day aggregation, finalize pass, backfill, deleted-file
+ * immunity).
+ *
+ * Run: timeout 300 npx vitest run src/main/__tests__/historyRollup.test.cjs
+ */
+
+'use strict';
+
+import { test, expect, beforeEach, afterEach } from 'vitest';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+let tmpHome;
+let realHome;
+let historyRollup;
+let historyAggregator;
+
+function encodeCwd(cwd) {
+  return cwd.replace(/\//g, '-');
+}
+
+function writeTranscript(projectCwd, sessionId, lines, mtime) {
+  const encoded = encodeCwd(projectCwd);
+  const dir = path.join(tmpHome, '.claude', 'projects', encoded);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${sessionId}.jsonl`);
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+  if (mtime) fs.utimesSync(file, mtime, mtime);
+  return file;
+}
+
+function userLine(ts) {
+  return { role: 'user', ts };
+}
+
+function assistantLine(ts, model, tokens = {}) {
+  return {
+    ts,
+    message: {
+      role: 'assistant',
+      model,
+      usage: {
+        input_tokens: tokens.in ?? 10,
+        output_tokens: tokens.out ?? 5,
+        cache_read_input_tokens: tokens.cacheR ?? 0,
+        cache_creation_input_tokens: tokens.cacheC ?? 0,
+      },
+    },
+  };
+}
+
+// These modules are required via Node's own require() (this is a .cjs file,
+// not transformed ESM), so vi.resetModules() — which only resets vitest's
+// ESM module graph — does NOT clear them. Each module also bakes os.homedir()
+// into a top-level const (ROLLUP_PATH, config.cjs's allowedRoots/
+// WRITE_PREFIXES) at first require. Without purging Node's require.cache here,
+// every test after the first would keep writing to the FIRST test's tmpHome.
+const MODULES_TO_RELOAD = [
+  '../lib/historyRollup.cjs',
+  '../historyAggregator.cjs',
+  '../config.cjs',
+];
+
+function purgeRequireCache() {
+  for (const m of MODULES_TO_RELOAD) {
+    try { delete require.cache[require.resolve(m)]; } catch { /* not loaded yet */ }
+  }
+}
+
+beforeEach(() => {
+  realHome = process.env.HOME;
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'history-rollup-test-'));
+  process.env.HOME = tmpHome;
+  purgeRequireCache();
+  historyRollup = require('../lib/historyRollup.cjs');
+  historyAggregator = require('../historyAggregator.cjs');
+});
+
+afterEach(() => {
+  process.env.HOME = realHome;
+  purgeRequireCache();
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
+
+test('rollupKey is stable and distinguishes date/project/model', () => {
+  const a = historyRollup.rollupKey('2026-07-01', 'proj-a', 'sonnet');
+  const b = historyRollup.rollupKey('2026-07-01', 'proj-a', 'opus');
+  const c = historyRollup.rollupKey('2026-07-02', 'proj-a', 'sonnet');
+  expect(a).not.toBe(b);
+  expect(a).not.toBe(c);
+  expect(historyRollup.rollupKey('2026-07-01', 'proj-a', 'sonnet')).toBe(a);
+});
+
+test('mergeRollupLines: last-write-wins per key', () => {
+  const lines = [
+    JSON.stringify({ date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 10 }),
+    JSON.stringify({ date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 99 }),
+    JSON.stringify({ date: '2026-07-01', projectDir: 'p', modelId: 'opus', inputTokens: 5 }),
+  ];
+  const merged = historyRollup.mergeRollupLines(lines);
+  expect(merged.size).toBe(2);
+  const key = historyRollup.rollupKey('2026-07-01', 'p', 'sonnet');
+  expect(merged.get(key).inputTokens).toBe(99);
+});
+
+test('mergeRollupLines: skips malformed lines without throwing', () => {
+  const lines = ['not json', '', JSON.stringify({ date: '2026-07-01', projectDir: 'p', modelId: '' })];
+  expect(() => historyRollup.mergeRollupLines(lines)).not.toThrow();
+  expect(historyRollup.mergeRollupLines(lines).size).toBe(1);
+});
+
+test('appendRollupDays + readRollup: date-range read only returns in-range buckets', async () => {
+  await historyRollup.appendRollupDays([
+    { date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 1 },
+    { date: '2026-07-05', projectDir: 'p', modelId: 'sonnet', inputTokens: 2 },
+    { date: '2026-07-10', projectDir: 'p', modelId: 'sonnet', inputTokens: 3 },
+  ]);
+  const map = await historyRollup.readRollup('2026-07-02', '2026-07-09');
+  expect(map.size).toBe(1);
+  const only = Array.from(map.values())[0];
+  expect(only.date).toBe('2026-07-05');
+});
+
+test('appendRollupDays: compacts (dedupes) once file exceeds threshold', async () => {
+  // Force a tiny threshold isn't exposed, so just verify repeated appends of
+  // the SAME key collapse to one line on disk after a compact() call.
+  await historyRollup.appendRollupDays([
+    { date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 1 },
+  ]);
+  await historyRollup.appendRollupDays([
+    { date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 2 },
+  ]);
+  await historyRollup.compact();
+  const raw = fs.readFileSync(historyRollup.ROLLUP_PATH, 'utf8');
+  const nonEmptyLines = raw.split('\n').filter((l) => l.trim());
+  expect(nonEmptyLines.length).toBe(1);
+  expect(JSON.parse(nonEmptyLines[0]).inputTokens).toBe(2);
+});
+
+test('finalizeClosedDays: skips today, only finalizes days strictly before today', async () => {
+  const today = new Date().toLocaleDateString('en-CA');
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString('en-CA');
+  const cwd = '/tmp/projfinalize';
+
+  writeTranscript(cwd, 'sess-today', [
+    userLine(new Date().toISOString()),
+    assistantLine(new Date().toISOString(), 'claude-sonnet-5'),
+  ]);
+  writeTranscript(cwd, 'sess-yesterday', [
+    userLine(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+    assistantLine(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), 'claude-sonnet-5'),
+  ]);
+
+  await historyAggregator.finalizeClosedDays();
+
+  const map = await historyRollup.readRollup('2000-01-01', today);
+  const todayFinalized = historyRollup.isDateFinalized(map, today);
+  const yesterdayFinalized = historyRollup.isDateFinalized(map, yesterday);
+  expect(todayFinalized).toBe(false);
+  expect(yesterdayFinalized).toBe(true);
+});
+
+test('deleted-transcript immunity: aggregate returns a finalized day even after its .jsonl is deleted', async () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const cwd = '/tmp/projdeleted';
+  const file = writeTranscript(cwd, 'sess-del', [
+    userLine(yesterday.toISOString()),
+    assistantLine(yesterday.toISOString(), 'claude-sonnet-5', { in: 100, out: 50 }),
+  ]);
+
+  await historyAggregator.finalizeClosedDays();
+  fs.rmSync(file);
+
+  const yStr = yesterday.toLocaleDateString('en-CA');
+  const result = await historyAggregator.remote.aggregate({ fromDate: yStr, toDate: yStr });
+  const row = result.rows.find((r) => r.encodedCwd === encodeCwd(cwd));
+  expect(row).toBeTruthy();
+  expect(row.inputTokens).toBeGreaterThanOrEqual(100);
+  expect(result.rollupDays).toBeGreaterThanOrEqual(1);
+});
+
+test('backfill fold-in: aggregate() folds a rollup-missing past day into the rollup', async () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const yStr = yesterday.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projbackfill';
+  writeTranscript(cwd, 'sess-backfill', [
+    userLine(yesterday.toISOString()),
+    assistantLine(yesterday.toISOString(), 'claude-sonnet-5', { in: 7, out: 3 }),
+  ]);
+
+  // No finalize pass has run — the rollup has nothing for this day yet.
+  const before = await historyRollup.readRollup(yStr, yStr);
+  expect(before.size).toBe(0);
+
+  const result = await historyAggregator.remote.aggregate({ fromDate: yStr, toDate: yStr });
+  const row = result.rows.find((r) => r.encodedCwd === encodeCwd(cwd));
+  expect(row).toBeTruthy();
+  expect(row.inputTokens).toBeGreaterThanOrEqual(7);
+
+  const after = await historyRollup.readRollup(yStr, yStr);
+  expect(after.size).toBeGreaterThan(0);
+});
+
+test('history:aggregate PARSE_BUDGET_MS truncation only affects today; finalized closed days come back complete', async () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const yStr = yesterday.toLocaleDateString('en-CA');
+  const cwd = '/tmp/projbudget';
+  writeTranscript(cwd, 'sess-budget', [
+    userLine(yesterday.toISOString()),
+    assistantLine(yesterday.toISOString(), 'claude-sonnet-5', { in: 42, out: 21 }),
+  ]);
+
+  await historyAggregator.finalizeClosedDays();
+
+  const result = await historyAggregator.remote.aggregate({ fromDate: yStr, toDate: yStr });
+  expect(result.truncated).toBe(false);
+  const row = result.rows.find((r) => r.encodedCwd === encodeCwd(cwd));
+  expect(row).toBeTruthy();
+  expect(row.inputTokens).toBeGreaterThanOrEqual(42);
+});

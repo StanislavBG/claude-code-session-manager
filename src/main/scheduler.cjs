@@ -203,10 +203,10 @@ function gitHead(cwd) {
 
 // Returns true if ≥1 commit landed on any ref (branch, remote-tracking branch,
 // or tag) in cwd between startedAt and finishedAt (with 60s slack) — not just
-// the currently checked-out branch. Used by the self-heal pass to derive
-// committedDuringRun from the recorded run window — the live commit-guard uses
-// gitHead() instead. Never throws; git-unavailable → false (no override, job
-// stays as-is).
+// the currently checked-out branch. Used both by the self-heal pass and by the
+// live commit-guard's fallback (see computeCommittedDuringRun) to derive
+// committedDuringRun from the recorded run window. Never throws;
+// git-unavailable → false (no override, job stays as-is).
 function committedInWindow(cwd, startedAt, finishedAt) {
   return new Promise((resolve) => {
     if (!cwd || !startedAt) { resolve(false); return; }
@@ -220,6 +220,16 @@ function committedInWindow(cwd, startedAt, finishedAt) {
       (err, stdout) => { resolve(!err && String(stdout || '').trim().length > 0); },
     );
   });
+}
+
+// Live commit-guard: cheap HEAD-diff fast path, falling back to the
+// git-log --all scan when HEAD didn't move on the starting branch. A PRD that
+// checks out other branches, commits real work on each, then checks its
+// starting branch back out before exit leaves HEAD unchanged even though
+// commits landed — the fallback catches that case. Never throws.
+async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, untilIso) {
+  if (headBefore && headAfter && headBefore !== headAfter) return true;
+  return committedInWindow(cwd, startedAt, untilIso);
 }
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
@@ -1730,7 +1740,13 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       // Used by the sentinel override: SCHEDULER_VERDICT: PASS + a landed
       // commit together override incidental transcript noise verdicts.
       const headAtExit = await gitHead(guardCwd);
-      const committedDuringRun = !!(guardHeadBefore && headAtExit && guardHeadBefore !== headAtExit);
+      const committedDuringRun = await computeCommittedDuringRun(
+        guardCwd,
+        guardHeadBefore,
+        headAtExit,
+        job.startedAt,
+        new Date().toISOString(),
+      );
 
       const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
       const stateForDeps = await readQueue();
@@ -3216,4 +3232,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload };

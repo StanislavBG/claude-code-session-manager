@@ -47,3 +47,8 @@ nothing, reusing the existing helper rather than forking its logic — exactly t
 direction, with both a positive (cross-branch commit correctly detected) and negative (no
 commit anywhere still correctly flags `pass_no_commit`) regression test required in the PRD's
 acceptance criteria.
+
+Landed in this same commit (see the `fix(scheduler): fall back to committedInWindow ...` commit
+this file was moved in) — introduces `computeCommittedDuringRun()` in `scheduler.cjs`, used by
+the live commit-guard at `spawnJob`, with regression coverage in
+`tests/unit/schedulerFinish.spec.ts`.

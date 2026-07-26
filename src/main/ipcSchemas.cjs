@@ -426,6 +426,15 @@ const docEditRun = z.object({
   documentText: z.string().max(60100).optional(),
 }).strict();
 
+// docedit:run-in-session — consumed by docEdit.cjs's docEditViaSession (PRD 680: route a doc
+// edit into an already-open, currently-idle chat session instead of an isolated claude -p).
+const docEditRunInSession = docEditRun.omit({ path: true }).extend({
+  tabId: z.string().min(1).max(128),
+  sessionId: z.string().min(1).max(128),
+  cwd: z.string().min(1).max(4096),
+  requestId: z.string().min(1).max(128),
+}).strict();
+
 // ──────────────────────────────────────────── Chat runner (PRD 319)
 // Prompt cap: 100 KiB. Matches a generous interactive message budget while
 // preventing accidental megabyte pastes from reaching claude -p.
@@ -746,6 +755,7 @@ module.exports = {
     watchersKillTab,
     filesDuplicate,
     docEditRun,
+    docEditRunInSession,
     chatRun,
     chatCancel,
     chatProbeContext,

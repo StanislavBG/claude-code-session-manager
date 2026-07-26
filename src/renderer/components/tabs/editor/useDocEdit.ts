@@ -24,10 +24,15 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { toast } from '../../../state/toast'
 import { useVoice } from '../../../state/voice'
+import { useSessions } from '../../../state/sessions'
+import { useLive } from '../../../state/live'
+import { useChat } from '../../../state/chat'
 import { createRecognition, isRecognitionSupported } from '../../../lib/speechRecognition'
 import { applySpanEdit, type ApplySpanEditResult } from '../../../lib/applySpanEdit'
 import { truncateDocumentText } from '../../../lib/truncateDocumentText'
 import { docEditReducer, IDLE_STATE, LISTEN_FROM, type SelectionInfo } from './docEditReducer'
+import { resolveProjectCwd, findBackgroundSession } from './findBackgroundSession'
+import type { DocEditSessionResult } from '../../../../preload/api'
 
 export type { SelectionRect, SelectionInfo, DocEditPhase } from './docEditReducer'
 
@@ -43,6 +48,18 @@ export function useDocEdit(path: string, documentText: string) {
   const tokenRef = useRef(0)
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(null)
   const pathRef = useRef(path)
+  // Pending docedit:run-in-session requests awaiting their async
+  // docedit:session-result broadcast, keyed by requestId.
+  const pendingSessionRequestsRef = useRef(new Map<string, (result: DocEditSessionResult) => void>())
+
+  useEffect(() => {
+    return window.api.docEdit.onSessionResult((result) => {
+      const resolve = pendingSessionRequestsRef.current.get(result.requestId)
+      if (!resolve) return
+      pendingSessionRequestsRef.current.delete(result.requestId)
+      resolve(result)
+    })
+  }, [])
 
   // Edits-this-session counter resets per file — this hook is one instance
   // reused across the whole EditorView, so a change of `path` (not a remount)
@@ -138,13 +155,38 @@ export function useDocEdit(path: string, documentText: string) {
     })
   }, [state.phase])
 
+  // Resolve a dormant, same-project background chat session to append this
+  // edit onto instead of spawning an isolated claude -p (PRD 680). Never
+  // targets a running/spawning tab's claudeSessionId — only a dormant tab's
+  // chatSessionId, and only when that tab isn't already mid-run.
+  const findIdleBackgroundSession = useCallback(() => {
+    const targetCwd = resolveProjectCwd(path, useSessions.getState().tabs)
+    if (!targetCwd) return null
+    const candidate = findBackgroundSession(targetCwd, useSessions.getState().tabs, useLive.getState().tabs)
+    if (!candidate) return null
+    if (useChat.getState().get(candidate.id).running) return null
+    return candidate
+  }, [path])
+
+  const runViaSession = useCallback((tabId: string, sessionId: string, cwd: string, before: string, instruction: string, docText: string) => {
+    const requestId = `docedit-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    return new Promise<DocEditSessionResult>((resolve) => {
+      pendingSessionRequestsRef.current.set(requestId, resolve)
+      void window.api.docEdit.runInSession({ tabId, sessionId, cwd, before, instruction, documentText: docText, requestId })
+    })
+  }, [])
+
   const runInstruction = useCallback(async (instruction: string, recordInstruction: boolean) => {
     const selection = state.selection
     if (!selection) return
     const myToken = ++tokenRef.current
     dispatch({ type: 'RUN', instruction, recordInstruction })
+    const docText = truncateDocumentText(documentText)
     try {
-      const r = await window.api.docEdit.run({ path, before: selection.text, instruction, documentText: truncateDocumentText(documentText) })
+      const backgroundSession = findIdleBackgroundSession()
+      const r = backgroundSession
+        ? await runViaSession(backgroundSession.id, backgroundSession.chatSessionId, backgroundSession.cwd, selection.text, instruction, docText)
+        : await window.api.docEdit.run({ path, before: selection.text, instruction, documentText: docText })
       if (tokenRef.current !== myToken) return
       if (!r.ok) {
         toast.error(r.error || 'Edit failed')
@@ -157,7 +199,7 @@ export function useDocEdit(path: string, documentText: string) {
       toast.error(e instanceof Error ? e.message : 'Edit failed')
       dispatch({ type: 'RUN_ERR' })
     }
-  }, [path, state.selection, documentText])
+  }, [path, state.selection, documentText, findIdleBackgroundSession, runViaSession])
 
   const run = useCallback((instruction: string) => { void runInstruction(instruction, true) }, [runInstruction])
 

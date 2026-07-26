@@ -6,9 +6,26 @@
 
 'use strict';
 
-import { test, expect, describe } from 'vitest';
-const { parseDocEdit, editPrompt, truncateDocumentText, MAX_DOC_CONTEXT } = require('../docEdit.cjs');
+import { test, expect, describe, beforeEach, vi } from 'vitest';
+
+// docEdit.cjs requires chatRunner.cjs at module scope and calls `chatRunner.run(...)`
+// as a property access, so patching `run` on the already-required (cached) module
+// object — before docEdit.cjs's own require resolves to the same singleton — is
+// enough to intercept it, mirroring the exchanges.cjs patch pattern in chatRunner.spec.ts.
+const chatRunnerModule = require('../chatRunner.cjs');
+const runCalls = [];
+beforeEach(() => { runCalls.length = 0; });
+chatRunnerModule.run = (opts) => { runCalls.push(opts); };
+
+const { parseDocEdit, editPrompt, truncateDocumentText, MAX_DOC_CONTEXT, docEditViaSession, attachWindow } = require('../docEdit.cjs');
 const { duplicateNameFor } = require('../files.cjs');
+
+const broadcasts = [];
+attachWindow({
+  isDestroyed: () => false,
+  webContents: { isDestroyed: () => false, send: (channel, payload) => broadcasts.push({ channel, payload }) },
+});
+beforeEach(() => { broadcasts.length = 0; });
 
 describe('parseDocEdit', () => {
   test('valid JSON', () => {
@@ -89,6 +106,116 @@ describe('truncateDocumentText', () => {
     const result = truncateDocumentText(head + middle + tail);
     expect(result).toBe(`${head}\n\n[...document truncated for length...]\n\n${tail}`);
     expect(result).not.toContain('M');
+  });
+});
+
+describe('docEditViaSession', () => {
+  test('builds its prompt via the shared editPrompt and calls chatRunner.run with resume+silent', () => {
+    docEditViaSession({
+      tabId: 'tab-1',
+      sessionId: 'chat-session-1',
+      cwd: '/home/user/project',
+      before: 'old text',
+      instruction: 'make it punchier',
+      documentText: 'the whole document',
+      requestId: 'req-1',
+    });
+
+    expect(runCalls).toHaveLength(1);
+    const call = runCalls[0];
+    expect(call.tabId).toBe('tab-1');
+    expect(call.sessionId).toBe('chat-session-1');
+    expect(call.cwd).toBe('/home/user/project');
+    expect(call.resume).toBe(true);
+    expect(call.silent).toBe(true);
+    expect(typeof call.onSilentResult).toBe('function');
+
+    // The prompt is the shared editPrompt's output (nonce-tagged, so compare
+    // structurally rather than byte-for-byte) prefixed with the anti-injection
+    // system framing — not a second, forked prompt builder.
+    expect(call.prompt).toContain('Rewrite the SELECTION below per the INSTRUCTION');
+    expect(call.prompt).toMatch(/<selection_[0-9a-f]+>\nold text\n<\/selection_[0-9a-f]+>/);
+    expect(call.prompt).toContain('deterministic document-rewrite assistant');
+  });
+
+  test('onSilentResult parses the reply and broadcasts docedit:session-result', () => {
+    docEditViaSession({
+      tabId: 'tab-2',
+      sessionId: 'chat-session-2',
+      cwd: '/home/user/project',
+      before: 'old text',
+      instruction: 'shorten it',
+      requestId: 'req-2',
+    });
+
+    const { onSilentResult } = runCalls[runCalls.length - 1];
+    onSilentResult('{"after":"new text"}');
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0]).toEqual({
+      channel: 'docedit:session-result',
+      payload: { tabId: 'tab-2', requestId: 'req-2', ok: true, after: 'new text' },
+    });
+  });
+
+  test('onSilentResult reports a parse failure as ok:false', () => {
+    docEditViaSession({
+      tabId: 'tab-3',
+      sessionId: 'chat-session-3',
+      cwd: '/home/user/project',
+      before: 'old text',
+      instruction: 'shorten it',
+      requestId: 'req-3',
+    });
+
+    const { onSilentResult } = runCalls[runCalls.length - 1];
+    onSilentResult('not json at all');
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0].payload.ok).toBe(false);
+    expect(broadcasts[0].payload.error).toBeTruthy();
+  });
+
+  test('splits off the stop-signal protocol and reports it as a clarification request', () => {
+    docEditViaSession({
+      tabId: 'tab-4',
+      sessionId: 'chat-session-4',
+      cwd: '/home/user/project',
+      before: 'old text',
+      instruction: 'shorten it',
+      requestId: 'req-4',
+    });
+
+    const { onSilentResult } = runCalls[runCalls.length - 1];
+    onSilentResult('<<<SM_NEEDS_INPUT>>>\n{"questions":["which section?"]}');
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0].payload.ok).toBe(false);
+    expect(broadcasts[0].payload.error).toContain('which section?');
+  });
+
+  test('times out and broadcasts a failure if chatRunner never calls onSilentResult (error/timeout/cancel/collision on the silent lane)', () => {
+    vi.useFakeTimers();
+    try {
+      docEditViaSession({
+        tabId: 'tab-5',
+        sessionId: 'chat-session-5',
+        cwd: '/home/user/project',
+        before: 'old text',
+        instruction: 'shorten it',
+        requestId: 'req-5',
+      });
+
+      // chatRunner.run() is a no-op stub in this test (never invokes
+      // onSilentResult) — nothing should broadcast until the bound elapses.
+      expect(broadcasts).toHaveLength(0);
+
+      vi.advanceTimersByTime(120_000);
+      expect(broadcasts).toHaveLength(1);
+      expect(broadcasts[0]).toEqual({
+        channel: 'docedit:session-result',
+        payload: { tabId: 'tab-5', requestId: 'req-5', ok: false, error: 'timed out waiting on the background session' },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

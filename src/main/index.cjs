@@ -51,7 +51,7 @@ const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const superagent = require('./superagent.cjs');
 const filesIpc = require('./files.cjs');
-const { registerDocEditHandlers } = require('./docEdit.cjs');
+const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
 const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
@@ -304,6 +304,7 @@ async function rebootApp() {
     pluginInstall.attachWindow(mainWindow);
     superagent.attachWindow(mainWindow);
     chatRunner.attachWindow(mainWindow);
+    attachDocEditWindow(mainWindow);
     rebooting = false;
     return;
   }
@@ -1080,6 +1081,7 @@ app.whenReady().then(async () => {
   superagent.attachWindow(mainWindow);
   webRemote.attachWindow(mainWindow);
   chatRunner.attachWindow(mainWindow);
+  attachDocEditWindow(mainWindow);
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });

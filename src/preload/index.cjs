@@ -229,6 +229,12 @@ contextBridge.exposeInMainWorld('api', {
   },
   docEdit: {
     run: (payload) => ipcRenderer.invoke('docedit:run', payload),
+    runInSession: (payload) => ipcRenderer.invoke('docedit:run-in-session', payload),
+    onSessionResult: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('docedit:session-result', listener);
+      return () => ipcRenderer.removeListener('docedit:session-result', listener);
+    },
   },
   // Consolidated shell open/reveal — see shell:open in index.cjs.
   // as: 'editor' | 'fileInEditor' | 'finder' | 'terminal' | 'external' | 'openPath' | 'revealPath'

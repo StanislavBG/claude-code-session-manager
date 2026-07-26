@@ -650,6 +650,7 @@ export interface FilesRenameResult { ok: boolean; newPath?: string; error: strin
 export interface FilesDeleteResult { ok: boolean; error: string | null }
 export interface FilesDuplicateResult { ok: boolean; path?: string; error?: string | null }
 export interface DocEditResult { ok: boolean; after?: string; error?: string }
+export interface DocEditSessionResult { tabId: string; requestId: string; ok: boolean; after?: string; error?: string }
 
 export interface SearchFileEntry {
   name: string;
@@ -1273,6 +1274,16 @@ export interface SessionManagerAPI {
   };
   docEdit: {
     run: (payload: { path: string; before: string; instruction: string; documentText?: string }) => Promise<DocEditResult>;
+    runInSession: (payload: {
+      tabId: string;
+      sessionId: string;
+      cwd: string;
+      before: string;
+      instruction: string;
+      documentText?: string;
+      requestId: string;
+    }) => Promise<{ ok: boolean }>;
+    onSessionResult: (handler: (payload: DocEditSessionResult) => void) => () => void;
   };
   /** Consolidated shell open/reveal. One method, discriminated on `as`, replaces
    *  the former app.openIn* / app.openExternal / files.openExternal / files.showInFinder.

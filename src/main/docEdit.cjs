@@ -21,6 +21,7 @@ const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
+const chatRunner = require('./chatRunner.cjs');
 
 // System prompt sets the role server-side so the selection is treated as
 // inert data, never as instructions to follow — mirrors memoryAggregate.cjs's
@@ -138,6 +139,94 @@ async function runDocEdit({ path, before, instruction, documentText }) {
 // inside the machine-wide 3-concurrent-`claude -p` cap.
 let inFlight = null;
 
+// ─── Window reference for docedit:session-result broadcasts ───────────────
+// Mirrors chatRunner.cjs's own attachWindow/broadcast — docEditViaSession's
+// result arrives asynchronously via chatRunner's fire-and-forget onSilentResult
+// callback, so it can't just be the resolved value of the initiating IPC call.
+let mainWindow = null;
+
+function attachWindow(win) { mainWindow = win; }
+
+function broadcast(channel, payload) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  } catch { /* render frame may be gone */ }
+}
+
+// `chatRunner.run()`'s silent lane only ever invokes `onSilentResult` on its
+// success path (`chatRunner.cjs`'s `emitTerminal` no-ops every OTHER terminal
+// event — error/timeout/spawn-failure/cancel — for `silent` runs, since those
+// six broadcasts are deliberately suppressed for probes). `run()` is also a
+// silent no-op if the tabId already has an active/queued run (its per-tab
+// exclusivity guard). Neither case is reachable from here without a local
+// timeout: chatRunner's core queue/exclusivity/timeout logic is out of scope
+// to modify (PRD 680), so this bounds the wait itself and reports a timeout
+// error rather than leaving the renderer's pending promise unresolved forever.
+const SESSION_EDIT_TIMEOUT_MS = 120_000;
+
+/**
+ * Route a doc edit into an already-open, currently-idle chat session (PRD 680)
+ * instead of an isolated one-shot `claude -p`. Reuses chatRunner.cjs's silent/
+ * resumed run path verbatim (the same mechanism `probeContextUsage` uses) so
+ * the edit lands as one more turn of the session's own transcript.
+ *
+ * Fire-and-forget: the result reaches the renderer via a `docedit:session-result`
+ * broadcast (tagged with `requestId`) once chatRunner's onSilentResult fires, or
+ * once SESSION_EDIT_TIMEOUT_MS elapses without one (see above) — the same
+ * indirection probeContextUsage uses for `chat:context-usage`, plus the bound.
+ *
+ * @param {{ tabId: string, sessionId: string, cwd: string, before: string, instruction: string, documentText?: string, requestId: string }} params
+ */
+function docEditViaSession({ tabId, sessionId, cwd, before, instruction, documentText, requestId }) {
+  // Same anti-injection framing as the isolated path (runDocEdit) — chatRunner
+  // has no systemPrompt/--append-system-prompt mechanism for a resumed one-shot
+  // turn, so DOC_EDIT_SYSTEM is prepended to the prompt text itself, the same
+  // way chatRunner.cjs prepends its own STOP_SIGNAL_INSTRUCTION/CHAT_MODE_TRUTH
+  // instructions.
+  const prompt = `${DOC_EDIT_SYSTEM}\n\n${editPrompt(before, instruction, documentText)}`;
+
+  let settled = false;
+  const settleOnce = (payload) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeoutTimer);
+    broadcast('docedit:session-result', { tabId, requestId, ...payload });
+  };
+
+  const timeoutTimer = setTimeout(() => {
+    settleOnce({ ok: false, error: 'timed out waiting on the background session' });
+  }, SESSION_EDIT_TIMEOUT_MS);
+  if (timeoutTimer.unref) timeoutTimer.unref();
+
+  chatRunner.run({
+    tabId,
+    sessionId,
+    cwd,
+    prompt,
+    resume: true,
+    silent: true,
+    onSilentResult: (text) => {
+      // chatRunner.cjs prepends its own stop-signal protocol instruction to
+      // every prompt (including this resumed one) — unlike the isolated
+      // one-shot path, this session may legitimately take that off-ramp if
+      // the model considers itself blocked. Split it off so that case reports
+      // as a clear "needs clarification" error instead of a confusing
+      // "missing after field" parse failure.
+      const signal = chatRunner.splitStopSignal(text);
+      const parsed = parseDocEdit(signal ? signal.answerBody : text);
+      if (parsed.ok) {
+        settleOnce({ ok: true, after: parsed.after });
+      } else if (signal && signal.questions.length > 0) {
+        settleOnce({ ok: false, error: `Needs clarification: ${signal.questions.join(' | ')}` });
+      } else {
+        settleOnce({ ok: false, error: parsed.error });
+      }
+    },
+  });
+}
+
 function registerDocEditHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('docedit:run', v(s.docEditRun, (parsed) => {
@@ -146,13 +235,19 @@ function registerDocEditHandlers() {
     inFlight = task;
     return task;
   }));
+  ipcMain.handle('docedit:run-in-session', v(s.docEditRunInSession, (parsed) => {
+    docEditViaSession(parsed);
+    return { ok: true };
+  }));
 }
 
 module.exports = {
   registerDocEditHandlers,
+  attachWindow,
   parseDocEdit,
   editPrompt,
   runDocEdit,
+  docEditViaSession,
   MAX_DOC_CONTEXT,
   truncateDocumentText,
 };

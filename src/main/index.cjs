@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { terminateLosingInstance } = require('./lib/singleInstanceGuard.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
 const browserView = require('./browserView.cjs');
 const browserCapture = require('./browserCapture.cjs');
@@ -842,7 +843,7 @@ const isDev = process.env.SM_DEV === '1' || process.env.SM_E2E === '1';
 if (!isDev) {
   const gotLock = app.requestSingleInstanceLock();
   if (!gotLock) {
-    app.quit();
+    terminateLosingInstance(app);
   } else {
     app.on('second-instance', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {

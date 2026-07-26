@@ -45,3 +45,21 @@ Two complementary guards (suggestions — implementer picks the route that fits 
 2. **Fail loud instead of silent.** When a Chat turn ends while a `run_in_background` shell is still live (or a wake-up was requested), surface a visible banner in the composer/thread — "⏳ background CI poll won't resume on its own in Chat — reply to check it" — rather than letting the thread sit silent until the user guesses something is wrong.
 
 Related rendering symptom of the same incident filed separately: `2026-07-21-chat-empty-assistant-bubble.md`.
+
+## Resolution
+
+Ask 1 (tell the agent the truth about the mode) queued as scheduler PRD
+`673-chat-background-shell-mode-truth-preamble` — adds a new instruction constant prepended to
+every Chat-tab prompt in `src/main/chatRunner.cjs`, alongside the existing
+`STOP_SIGNAL_INSTRUCTION`, stating plainly that no process survives between turns so
+`run_in_background`/wake-later plans are impossible and any polling must happen synchronously
+within the current turn.
+
+Ask 2 (a visible "⏳ background poll won't resume" banner in the composer/thread) deferred —
+it's a separate, larger renderer feature with its own design tradeoffs (where it renders, how
+long it persists, whether it needs its own dismiss state); the root-cause fix (ask 1) is
+independently sufficient and ships first. Re-file ask 2 separately if the prompt-level fix
+proves insufficient in practice.
+
+The related empty-assistant-bubble rendering symptom from the same incident is tracked
+separately as PRD `649-chat-empty-assistant-bubble-guard` (already queued before this pass).

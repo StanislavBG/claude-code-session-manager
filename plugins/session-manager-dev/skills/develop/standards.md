@@ -50,6 +50,30 @@
 - (Interactive sessions: the `test-driven-development` skill has the full red-green-refactor
   workflow. Headless PRD runs can't load it — the three rules above are the load-bearing core.)
 
+## Visual design (UI/visual acceptance criteria)
+
+When a PRD's acceptance criteria touch UI or visual output and no design brief is given,
+resolve the visual direction in this priority order — never substitute a generic default when
+a higher-priority source exists:
+
+1. **User-supplied design.** If the PRD or the conversation that spawned it includes a design
+   brief, mockup, brand palette, or explicit visual direction, use it verbatim.
+2. **Existing project design system.** Before reaching for any external skill, check the repo
+   itself for an existing theme — CSS custom-property blocks, `tailwind.config.js`, a
+   design-tokens file, a component library already in use. Reuse and extend what's there
+   rather than introducing a second visual language into the same project.
+3. **Only if neither exists**, invoke a design-oriented skill rather than eyeballing colors
+   from memory or hand-picking hex values (e.g. the bundled `dataviz` skill for
+   chart/table/dashboard work, or a `frontend-design`-class skill for overall aesthetic
+   direction) — and **render + screenshot both light and dark color-scheme modes** before
+   calling the work done. A palette validator that checks categorical/series colors does not
+   cover surrounding chrome tokens (panel/page/border) — those need their own contrast check
+   (WCAG relative luminance) and a visual look in each mode. "I checked light mode" is not "I
+   checked dark mode"; verify both, don't assume palette-reference hex values are safe by
+   construction. (Incident: a dashboard shipped with panel/page background contrast of
+   1.12:1 and a border at 1.34:1 in dark mode — both invisible — because only light mode was
+   ever rendered before the work was marked done.)
+
 ## Execution discipline (headless runs)
 
 Data-driven from 400+ scheduler runs: long hangs (not bad code) are the dominant real failure, and "exited clean but left a red test" is the top verifier downgrade. These rules run at execution time — they are inlined into every PRD because the headless executor reads nothing else.

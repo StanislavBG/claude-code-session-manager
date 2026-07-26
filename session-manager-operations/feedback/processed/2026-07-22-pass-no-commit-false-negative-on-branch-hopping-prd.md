@@ -34,3 +34,16 @@ as having committed real work.
 
 **Repro conditions:** any PRD whose `cwd` is a shared multi-branch repo, that checks out one or
 more non-starting branches to commit work, and returns to its starting branch before exit.
+
+## Resolution
+
+Queued as scheduler PRD `674-commit-guard-cross-branch-fallback`. Confirmed live against
+current code: the live commit-guard (`src/main/scheduler.cjs:1702-1733`) computes
+`committedDuringRun` from a `gitHead()` before/after diff on the job's starting branch only,
+while the re-verify path (`scheduler.cjs:2539`) already uses the more thorough
+`committedInWindow()` helper (`git log --all --since/--until`, scans every ref). The fix wires
+the live guard to fall back to `committedInWindow()` when the fast HEAD-diff check finds
+nothing, reusing the existing helper rather than forking its logic — exactly the suggested
+direction, with both a positive (cross-branch commit correctly detected) and negative (no
+commit anywhere still correctly flags `pass_no_commit`) regression test required in the PRD's
+acceptance criteria.

@@ -98,3 +98,17 @@ This closes the exact gap that caused this incident: nothing today tells the
 executor to (a) look for a brief or existing theme first, or (b) actually verify
 dark mode rather than assuming palette-reference hex values are safe by
 construction.
+
+## Resolution
+
+Shipped directly as an instruction-file edit — no PRD needed. Added a new "Visual design
+(UI/visual acceptance criteria)" section to
+`plugins/session-manager-dev/skills/develop/standards.md` (inserted before "Execution
+discipline"), codifying the exact three-tier priority order this item proposed: user-supplied
+design > existing project design system > design-oriented skill as last resort, with an
+explicit requirement to render + screenshot **both** light and dark modes (not just the
+categorical/series palette validator) before calling UI work done. Since `standards.md` is
+inlined verbatim into every PRD `/develop` emits, this reaches every future headless UI PRD
+automatically — same rationale the README's own lesson gives for why a bare `SKILL.md`
+authoring pass doesn't need to route through the scheduler (no build/test surface, pure
+markdown).

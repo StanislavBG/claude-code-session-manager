@@ -85,3 +85,20 @@ boundary.
 
 Open question for the implementer: where the list of "persona repos to watch" is configured —
 a field in the existing project prefs, or a new top-level config. I don't have a strong view.
+
+## Resolution
+
+Piece 1 (drift + integrity check) queued as scheduler PRD
+`675-persona-import-drift-health-check` — adds a `checkPersonaImports()` component to
+`src/main/health.cjs` that parses `~/.claude/CLAUDE.md`'s `@import` chain recursively, asserts
+every resolved target exists and is non-empty, and reports git ahead/behind for each unique
+repo those imports live in. Surfaced as an informational `persona_imports` component (not
+gating `status.ok`) in the existing `npm run health` rollup — no new config surface needed,
+since the target list is derived entirely by parsing the loader file itself.
+
+Pieces 2 (scheduled `git pull --ff-only` before queue drain) and 3 (persona revision stamped
+on job metadata) deferred, per the filer's own framing ("piece 1 alone would be worth
+shipping without 2 or 3") — both are larger changes session-manager doesn't have an open
+design for yet (where would the pull run relative to concurrent jobs touching the same
+worktree; what job-metadata shape would carry a persona SHA). Re-file as separate items if/when
+there's a concrete design to build against.

@@ -10,6 +10,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
+const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -302,6 +303,20 @@ async function check() {
       path: smLogsDir,
       note: 'logs directory not yet created (normal for fresh installs)',
     };
+  }
+
+  // 6.5. Check ~/.claude/CLAUDE.md's @import chain resolves cleanly.
+  // Informational only — a broken/stale persona import degrades instruction
+  // fidelity, not app health, so it never flips status.ok to false. See
+  // personaImportHealth.cjs.
+  const personaImports = checkPersonaImports();
+  status.components.persona_imports = personaImports;
+  if (!personaImports.ok) {
+    for (const broken of personaImports.brokenImports) {
+      status.issues.push(
+        `Persona import broken: "${broken.importPath}" ${broken.exists ? 'is empty' : 'does not exist'}`
+      );
+    }
   }
 
   // 7. Summary scoring: ok if all critical components pass.

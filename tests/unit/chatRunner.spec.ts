@@ -36,13 +36,15 @@ const require = createRequire(import.meta.url)
 const cp = require('node:child_process') as { spawn: (...args: unknown[]) => unknown }
 type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: (sig?: string) => void }
 let nextChild: FakeChild | null = null
-cp.spawn = () => {
+let lastSpawnArgs: string[] | null = null
+cp.spawn = (...spawnCallArgs: unknown[]) => {
   const child = new EventEmitter() as FakeChild
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
   child.pid = 12345
   child.kill = () => {}
   nextChild = child
+  lastSpawnArgs = spawnCallArgs[1] as string[]
   return child
 }
 
@@ -67,6 +69,7 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   parseStopSignal: (text: string) => { questions: string[] } | null
   splitStopSignal: (text: string) => { answerBody: string; questions: string[] } | null
   STOP_SENTINEL: string
+  CHAT_MODE_TRUTH_INSTRUCTION: string
 }
 
 function emitResultLine(child: FakeChild, resultText: string) {
@@ -424,6 +427,31 @@ describe('recordExchange gating (real executeRun path via a faked child process)
     expect(recordExchangeCalls).toHaveLength(1)
     expect(sent.some((e) => e.channel === 'chat:run:output')).toBe(true)
     expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true)
+  })
+})
+
+describe('prompt-prepended instructions (real executeRun path via a faked child process)', () => {
+  beforeEach(() => {
+    chatRunner.__setExecutor(null) // restore the real executeRun (earlier tests stub it)
+    nextChild = null
+    lastSpawnArgs = null
+  })
+
+  it('prepends both STOP_SIGNAL_INSTRUCTION and CHAT_MODE_TRUTH_INSTRUCTION to the -p argv value', async () => {
+    chatRunner.run({ tabId: 'tab-truth', sessionId: 'sess-truth', prompt: 'hello', cwd: '/tmp', resume: false })
+    await flush()
+    expect(nextChild).not.toBeNull()
+    expect(lastSpawnArgs).not.toBeNull()
+
+    const pIndex = lastSpawnArgs!.indexOf('-p')
+    expect(pIndex).toBeGreaterThanOrEqual(0)
+    const fullPrompt = lastSpawnArgs![pIndex + 1]
+
+    expect(fullPrompt).toContain(chatRunner.STOP_SENTINEL)
+    expect(fullPrompt).toContain(chatRunner.CHAT_MODE_TRUTH_INSTRUCTION)
+    expect(fullPrompt.indexOf(chatRunner.CHAT_MODE_TRUTH_INSTRUCTION)).toBeLessThan(fullPrompt.indexOf('hello'))
+    expect(fullPrompt).toMatch(/one-shot|no process (survives|resumes)/i)
+    expect(fullPrompt.endsWith('hello')).toBe(true)
   })
 })
 

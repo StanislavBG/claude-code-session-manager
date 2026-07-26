@@ -63,3 +63,7 @@ proves insufficient in practice.
 
 The related empty-assistant-bubble rendering symptom from the same incident is tracked
 separately as PRD `649-chat-empty-assistant-bubble-guard` (already queued before this pass).
+
+PRD `673-chat-background-shell-mode-truth-preamble` landed: added `CHAT_MODE_TRUTH_INSTRUCTION`
+to `src/main/chatRunner.cjs`, prepended to `fullPrompt` alongside `STOP_SIGNAL_INSTRUCTION`.
+Committed in `fix(chatRunner): tell the agent the truth about one-shot headless chat mode`.

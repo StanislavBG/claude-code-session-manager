@@ -249,6 +249,23 @@ const STOP_SIGNAL_INSTRUCTION =
   `guess on what's genuinely blocked, but always answer what you can first. ` +
   `Otherwise complete the task and end with a concise summary of what you did.\n\n`;
 
+// Instruction prepended to every prompt. Tells the agent the truth about this
+// execution mode: this Chat tab is a one-shot headless `claude -p` run — no
+// process survives after this turn ends, so background shells, scheduled
+// wake-ups, or "I'll get back to you" plans are impossible here.
+const CHAT_MODE_TRUTH_INSTRUCTION =
+  `IMPORTANT: This is a one-shot headless run. No process survives after this ` +
+  `turn ends — when you stop producing output, the session is torn down and ` +
+  `nothing will resume it. Do NOT launch a run_in_background shell to poll ` +
+  `something long-running, do NOT schedule a wake-up, and do NOT say "I'll ` +
+  `report back once X finishes" or "I'll keep watching and let you know" — ` +
+  `there is no later turn in which that could happen, so that promise would ` +
+  `go unfulfilled and leave the user waiting with no explanation. If you need ` +
+  `to poll something, do it synchronously within this turn with a bounded ` +
+  `timeout, then report the actual result. End this turn with either a real ` +
+  `result or an explicit statement that the user needs to reply for the work ` +
+  `to continue.\n\n`;
+
 // ─── Serial run queue (v0.34) ───────────────────────────────────────────────
 // CONCURRENCY_CAP=2 (default) governs SILENT (automated probe) runs only —
 // two probes can run at once before a 3rd queues. SM_CHAT_CONCURRENCY still
@@ -409,8 +426,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     const claudeBin = resolveClaudeBin();
     const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
 
-    // Prepend the stop-signal protocol instruction to every prompt
-    const fullPrompt = STOP_SIGNAL_INSTRUCTION + prompt;
+    // Prepend the stop-signal protocol instruction and the chat-mode truth
+    // instruction to every prompt
+    const fullPrompt = STOP_SIGNAL_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + prompt;
 
     // Build argv as an array — no shell: true, no string interpolation
     const args = [
@@ -677,5 +695,6 @@ module.exports = {
   parseContextUsageMarkdown,
   probeContextUsage,
   STOP_SENTINEL,
+  CHAT_MODE_TRUTH_INSTRUCTION,
   __setExecutor,
 };

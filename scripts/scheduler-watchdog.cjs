@@ -19,6 +19,7 @@ const {
   sweep,
   localDateStr,
   maybeFinalizeHistory,
+  maybeRelaunchApp,
   DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
 } = require('./lib/watchdogHelpers.cjs');
@@ -85,9 +86,10 @@ async function main() {
   // Stale branch: app is absent or not updating heartbeat.
   const reconcileResult = reconcileQueueOffline();
   const sweepResult = sweep();
+  const relaunch = maybeRelaunchApp();
   const history = await runHistoryFinalize();
 
-  appendLog({ ...logEntry, reconcile: reconcileResult, sweep: sweepResult, history });
+  appendLog({ ...logEntry, reconcile: reconcileResult, sweep: sweepResult, relaunch, history });
   process.exit(0);
 }
 

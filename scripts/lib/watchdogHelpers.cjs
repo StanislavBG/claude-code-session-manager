@@ -192,6 +192,29 @@ function resolveSkillFile(cwd, skillName, fileName, pluginCacheRoot = PLUGIN_CAC
 }
 
 /**
+ * isPidAlive(pid) → boolean
+ *
+ * Plain liveness check via process.kill(pid, 0) (no signal sent). Single
+ * source of truth for the "is this recorded pid still alive" check used by
+ * both reconcileQueueOffline's stale-heartbeat guard and checkAppLiveness's
+ * defense-in-depth relaunch gate.
+ *
+ * EPERM (pid exists, owned by another user) counts as alive — only ESRCH
+ * (no such process) means dead. Watchdog and app run as the same user in
+ * practice, so this distinction rarely matters here, but treating EPERM as
+ * "dead" would be wrong on its face (the process demonstrably exists).
+ */
+function isPidAlive(pid) {
+  if (typeof pid !== 'number' || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e?.code === 'EPERM';
+  }
+}
+
+/**
  * reconcileQueueOffline(opts?) → { reconciled: boolean, reapedCount: number, errors: string[] }
  *
  * Safe offline reconciliation of queue.json when the in-app scheduler is down.
@@ -226,14 +249,9 @@ function reconcileQueueOffline({
   // is running — do not reap. Backward-compat: if no pid field, fall through
   // to the classic age-only behavior so pre-existing orphan cleanup still works.
   const lastHeartbeat = readLastHeartbeat(heartbeatPath);
-  if (lastHeartbeat !== null && typeof lastHeartbeat.pid === 'number') {
-    try {
-      process.kill(lastHeartbeat.pid, 0); // liveness check only — no signal
-      // pid is alive → app is running; abort reap.
-      return { reconciled: false, reapedCount: 0, errors: [] };
-    } catch {
-      // ESRCH → process is gone; proceed with reap.
-    }
+  if (lastHeartbeat !== null && typeof lastHeartbeat.pid === 'number' && isPidAlive(lastHeartbeat.pid)) {
+    // pid is alive → app is running; abort reap.
+    return { reconciled: false, reapedCount: 0, errors: [] };
   }
 
   let state;
@@ -578,6 +596,158 @@ function emitFeedbackPRD(cwd, {
   return { emitted: true, slug, prdPath };
 }
 
+// ── app liveness + auto-relaunch ─────────────────────────────────────────────
+//
+// The watchdog's one supervision job: is session-manager itself running, and
+// if not, start it. Reuses the existing scheduler heartbeat (written every
+// 60 s by scheduler.cjs's heartbeatInterval regardless of pause state) as the
+// liveness signal — no second heartbeat file.
+
+const DEFAULT_RELAUNCH_STATE_PATH = path.join(
+  os.homedir(), '.claude', 'session-manager', 'watchdog-relaunch-state.json',
+);
+const DEFAULT_RELAUNCH_LOG_PATH = path.join(
+  os.homedir(), '.claude', 'logs', 'scheduler-watchdog-relaunch.log',
+);
+const DEFAULT_RELAUNCH_DEBOUNCE_MS = 90_000;
+const DEFAULT_MAX_RELAUNCH_ATTEMPTS = 3;
+
+/**
+ * checkAppLiveness(opts?) → { alive: boolean, reason: string }
+ *
+ * Primary signal: heartbeatFresh() within the existing max-age window.
+ * Defense-in-depth: if the heartbeat is stale, but the pid it last recorded
+ * is still alive (app under heavy load, tick just missed), treat as alive
+ * rather than relaunching on top of a live process.
+ */
+function checkAppLiveness({
+  heartbeatPath = DEFAULT_HEARTBEAT_PATH,
+  maxAgeMs = DEFAULT_MAX_AGE_MS,
+} = {}) {
+  if (heartbeatFresh(heartbeatPath, maxAgeMs)) {
+    return { alive: true, reason: 'heartbeat-fresh' };
+  }
+  const last = readLastHeartbeat(heartbeatPath);
+  if (last !== null && typeof last.pid === 'number' && isPidAlive(last.pid)) {
+    return { alive: true, reason: 'pid-alive-heartbeat-stale' };
+  }
+  return { alive: false, reason: 'stale-and-dead' };
+}
+
+/** Default { lastAttemptTs: null, attemptCount: 0 } on missing/unparseable state file. */
+function readRelaunchState(statePath = DEFAULT_RELAUNCH_STATE_PATH) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return {
+      lastAttemptTs: typeof raw.lastAttemptTs === 'number' ? raw.lastAttemptTs : null,
+      attemptCount: typeof raw.attemptCount === 'number' ? raw.attemptCount : 0,
+    };
+  } catch {
+    return { lastAttemptTs: null, attemptCount: 0 };
+  }
+}
+
+/** Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync). */
+function writeRelaunchState(statePath, state) {
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  const tmpPath = `${statePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + '\n', 'utf8');
+  fs.renameSync(tmpPath, statePath);
+}
+
+function logRelaunchLine(logPath, message) {
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
+  } catch (e) {
+    process.stderr.write(`[watchdog-relaunch] log write failed: ${e?.message}\n`);
+  }
+}
+
+/**
+ * defaultSpawnRelaunch(opts?) — launches a new session-manager instance the
+ * same way a user would: `npx claude-code-session-manager@latest` (the
+ * documented distribution method — CLAUDE.md's "Distribution" section), so
+ * this keeps working across npm publishes with no local path to maintain.
+ *
+ * Detached + stdio redirected to logPath + unref()'d so the watchdog's own
+ * (short-lived) process doesn't block on the launched app and the app
+ * survives the watchdog exiting.
+ */
+function defaultSpawnRelaunch({ logPath = DEFAULT_RELAUNCH_LOG_PATH } = {}) {
+  const { spawn } = require('node:child_process');
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const fd = fs.openSync(logPath, 'a');
+  try {
+    const child = spawn('npx', ['claude-code-session-manager@latest'], {
+      detached: true,
+      stdio: ['ignore', fd, fd],
+    });
+    child.on('error', (e) => {
+      logRelaunchLine(logPath, `spawn error: ${e?.message}`);
+    });
+    child.unref();
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * maybeRelaunchApp(opts?) → { relaunched: boolean, reason: string, attemptCount: number }
+ *
+ * Debounced, capped auto-relaunch:
+ *   - alive (heartbeat fresh or pid alive)             → no-op, reset attempt state.
+ *   - dead + attemptCount already at maxAttempts         → skip, log diagnostic (give up).
+ *   - dead + last attempt < debounceMs ago                → skip (still booting).
+ *   - dead + debounce elapsed + under cap               → spawn, bump attemptCount, log.
+ *
+ * attemptCount only resets to 0 once a fresh heartbeat is observed (i.e. a
+ * relaunch actually succeeded), so 3 relaunch attempts that each fail to
+ * produce a fresh heartbeat permanently cap further attempts until a human
+ * intervenes or the app comes up some other way.
+ */
+function maybeRelaunchApp({
+  heartbeatPath = DEFAULT_HEARTBEAT_PATH,
+  maxAgeMs = DEFAULT_MAX_AGE_MS,
+  statePath = DEFAULT_RELAUNCH_STATE_PATH,
+  logPath = DEFAULT_RELAUNCH_LOG_PATH,
+  debounceMs = DEFAULT_RELAUNCH_DEBOUNCE_MS,
+  maxAttempts = DEFAULT_MAX_RELAUNCH_ATTEMPTS,
+  now = Date.now(),
+  spawnFn = defaultSpawnRelaunch,
+} = {}) {
+  const liveness = checkAppLiveness({ heartbeatPath, maxAgeMs });
+  const state = readRelaunchState(statePath);
+
+  if (liveness.alive) {
+    if (state.attemptCount !== 0 || state.lastAttemptTs !== null) {
+      writeRelaunchState(statePath, { lastAttemptTs: null, attemptCount: 0 });
+    }
+    return { relaunched: false, reason: 'alive', attemptCount: 0 };
+  }
+
+  if (state.attemptCount >= maxAttempts) {
+    logRelaunchLine(
+      logPath,
+      `giving up: ${state.attemptCount} relaunch attempt(s) already made and heartbeat is still stale — manual intervention required`,
+    );
+    return { relaunched: false, reason: 'capped', attemptCount: state.attemptCount };
+  }
+
+  if (state.lastAttemptTs !== null && (now - state.lastAttemptTs) < debounceMs) {
+    return { relaunched: false, reason: 'debounce', attemptCount: state.attemptCount };
+  }
+
+  const attemptCount = state.attemptCount + 1;
+  spawnFn({ logPath });
+  writeRelaunchState(statePath, { lastAttemptTs: now, attemptCount });
+  logRelaunchLine(
+    logPath,
+    `relaunch attempt ${attemptCount}/${maxAttempts}: spawning "npx claude-code-session-manager@latest" (heartbeat stale, last-known pid dead)`,
+  );
+  return { relaunched: true, reason: 'launched', attemptCount };
+}
+
 // ── sweep ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -784,6 +954,7 @@ module.exports = {
   readLastHeartbeat,
   readLastHeartbeatTs,
   heartbeatFresh,
+  isPidAlive,
   reconcileQueueOffline,
   hasOpenFeedback,
   resolveSkillFile,
@@ -794,10 +965,19 @@ module.exports = {
   maybeFinalizeHistory,
   tryAcquireLock,
   releaseLock,
+  checkAppLiveness,
+  readRelaunchState,
+  writeRelaunchState,
+  defaultSpawnRelaunch,
+  maybeRelaunchApp,
   DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
   DEFAULT_STAMP_PATH,
   DEFAULT_LOCK_PATH,
   DEFAULT_LOCK_STALE_MS,
   DEFAULT_FINALIZE_BUDGET_MS,
+  DEFAULT_RELAUNCH_STATE_PATH,
+  DEFAULT_RELAUNCH_LOG_PATH,
+  DEFAULT_RELAUNCH_DEBOUNCE_MS,
+  DEFAULT_MAX_RELAUNCH_ATTEMPTS,
 };

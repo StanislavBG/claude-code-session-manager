@@ -8,6 +8,7 @@ import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from './TerminalControls'
 import { TerminalChat } from './TerminalChat'
+import { fetchTerminalDigest } from '../lib/terminalDigest'
 
 // Matches plausible source-path tokens: optional ./ or ../ prefix, dotted name
 // with extension, optional :line[:col] suffix. Word-boundary on the front
@@ -176,32 +177,43 @@ export function Terminal({ tabId, cwd }: Props) {
     term.onData((data) => writeInChunks(tabId, data))
     term.onResize(({ cols, rows }) => window.api.pty.resize({ tabId, cols, rows }))
 
-    console.log('[Terminal] calling pty.spawn', { tabId, cwd, cols, rows })
-    window.api.pty
-      .spawn({ tabId, cwd, cols, rows })
-      .then(({ pid, reattached }) => {
-        console.log('[Terminal] pty.spawn resolved, pid=', pid, 'tabId=', tabId, 'reattached=', reattached)
-        useSessions.getState().setTabRunning(tabId, pid)
-        // Auto-run the per-tab startup command in the fresh shell. Presets that
-        // embed --session-id pin the transcript UUID to this tab so live tabs
-        // can map deterministically. The shell buffers input so writing ahead
-        // of the first prompt is safe. startupCommand=null means "bare shell".
-        // Skip on reattach: the shell + claude are already running from the
-        // previous renderer-load, so re-writing the startup command would
-        // type it as input into the live claude session.
-        if (reattached) return
-        const { startupCommand } = useSessions.getState().tabs.find((t) => t.id === tabId) ?? {}
-        if (startupCommand) {
-          setTimeout(() => {
-            writeInChunks(tabId, `${startupCommand}\n`)
-          }, 350)
-        }
+    // Best-effort: write a readable digest of the prior transcript before the
+    // pty spawns/reattaches, so a reload doesn't read as data loss even though
+    // the live PTY bytes that used to fill this scrollback can't be replayed
+    // (see pty.cjs's reattach comment). Never blocks or fails the spawn below.
+    fetchTerminalDigest({ tabId, cwd })
+      .then((digest) => {
+        if (digest) term.write(digest)
       })
-      .catch((err) => {
-        console.error('[Terminal] pty.spawn rejected for tabId=', tabId, err)
-        term.write(`\r\n\x1b[31mfailed to spawn: ${err.message}\x1b[0m\r\n`)
-        toast.error(`Terminal failed to start: ${err.message ?? 'spawn failed'}`)
-        useSessions.getState().setTabExited(tabId, -1)
+      .catch(() => { /* best-effort only */ })
+      .finally(() => {
+        console.log('[Terminal] calling pty.spawn', { tabId, cwd, cols, rows })
+        window.api.pty
+          .spawn({ tabId, cwd, cols, rows })
+          .then(({ pid, reattached }) => {
+            console.log('[Terminal] pty.spawn resolved, pid=', pid, 'tabId=', tabId, 'reattached=', reattached)
+            useSessions.getState().setTabRunning(tabId, pid)
+            // Auto-run the per-tab startup command in the fresh shell. Presets that
+            // embed --session-id pin the transcript UUID to this tab so live tabs
+            // can map deterministically. The shell buffers input so writing ahead
+            // of the first prompt is safe. startupCommand=null means "bare shell".
+            // Skip on reattach: the shell + claude are already running from the
+            // previous renderer-load, so re-writing the startup command would
+            // type it as input into the live claude session.
+            if (reattached) return
+            const { startupCommand } = useSessions.getState().tabs.find((t) => t.id === tabId) ?? {}
+            if (startupCommand) {
+              setTimeout(() => {
+                writeInChunks(tabId, `${startupCommand}\n`)
+              }, 350)
+            }
+          })
+          .catch((err) => {
+            console.error('[Terminal] pty.spawn rejected for tabId=', tabId, err)
+            term.write(`\r\n\x1b[31mfailed to spawn: ${err.message}\x1b[0m\r\n`)
+            toast.error(`Terminal failed to start: ${err.message ?? 'spawn failed'}`)
+            useSessions.getState().setTabExited(tabId, -1)
+          })
       })
 
     const onWinResize = () => fit.fit()

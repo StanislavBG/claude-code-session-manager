@@ -115,7 +115,7 @@ export function EditorView() {
   // preview. One hook instance per EditorView — keyed loosely to the active
   // path since only the active markdown file's preview can capture a
   // selection at a time.
-  const docEdit = useDocEdit(activeFilePath ?? '')
+  const docEdit = useDocEdit(activeFilePath ?? '', buffers[activeFilePath ?? ''] ?? '')
 
   const registerEditor = useCallback((ed: editor.IStandaloneCodeEditor | null) => { monacoRef.current = ed }, [])
   const getEditor = useCallback(() => monacoRef.current, [])
@@ -445,6 +445,7 @@ export function EditorView() {
                   transcript={docEdit.state.transcript}
                   diff={docEdit.state.diff}
                   editCount={docEdit.state.editCount}
+                  modelStatus={docEdit.state.modelStatus}
                   onListen={docEdit.listen}
                   onSendHeard={docEdit.sendHeard}
                   onCancel={docEdit.cancel}
@@ -475,6 +476,7 @@ export function EditorView() {
                   transcript={docEdit.state.transcript}
                   diff={docEdit.state.diff}
                   editCount={docEdit.state.editCount}
+                  modelStatus={docEdit.state.modelStatus}
                   onListen={docEdit.listen}
                   onSendHeard={docEdit.sendHeard}
                   onCancel={docEdit.cancel}
@@ -515,6 +517,7 @@ export function EditorView() {
             rect={docEdit.state.selection.rect}
             diff={docEdit.state.diff}
             transcript={docEdit.state.transcript}
+            modelStatus={docEdit.state.modelStatus}
             onQuickAction={docEdit.run}
             onRunCustom={docEdit.run}
             onListen={docEdit.listen}

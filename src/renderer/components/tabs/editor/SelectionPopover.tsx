@@ -26,6 +26,7 @@ interface Props {
   rect: SelectionRect
   diff: { before: string; after: string } | null
   transcript: string
+  modelStatus: string | null
   onQuickAction: (instruction: string) => void
   onRunCustom: (instruction: string) => void
   onListen: () => void
@@ -61,7 +62,7 @@ function clampedStyle(rect: SelectionRect): React.CSSProperties {
   }
 }
 
-export function SelectionPopover({ phase, rect, diff, transcript, onQuickAction, onRunCustom, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
+export function SelectionPopover({ phase, rect, diff, transcript, modelStatus, onQuickAction, onRunCustom, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
   const [custom, setCustom] = useState('')
 
   const submitCustom = () => {
@@ -119,9 +120,12 @@ export function SelectionPopover({ phase, rect, diff, transcript, onQuickAction,
 
       {phase === 'listening' && (
         <div className="p-3 flex items-center justify-between" data-testid="doc-edit-listening">
-          <span className="flex items-center gap-2 text-fg-dim">
-            <PulsingDots />
-            Listening…
+          <span className="flex flex-col gap-0.5 text-fg-dim">
+            <span className="flex items-center gap-2">
+              <PulsingDots />
+              Listening…
+            </span>
+            {modelStatus && <span className="text-[10px] text-fg-faint">{modelStatus}</span>}
           </span>
           <button onClick={onCancel} className="px-2 py-0.5 text-[11px] text-fg-faint hover:text-fg border border-line rounded">
             Cancel

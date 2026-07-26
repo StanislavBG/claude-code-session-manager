@@ -14,6 +14,7 @@ interface Props {
   transcript: string
   diff: { before: string; after: string } | null
   editCount: number
+  modelStatus: string | null
   onListen: () => void
   onSendHeard: () => void
   onCancel: () => void
@@ -32,7 +33,7 @@ function PulsingDots() {
   )
 }
 
-export function AssistantRail({ phase, transcript, diff, editCount, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
+export function AssistantRail({ phase, transcript, diff, editCount, modelStatus, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
   return (
     <div
       data-testid="assistant-rail"
@@ -59,10 +60,11 @@ export function AssistantRail({ phase, transcript, diff, editCount, onListen, on
 
         {phase === 'listening' && (
           <div>
-            <p className="flex items-center gap-2 text-fg-dim mb-3">
+            <p className="flex items-center gap-2 text-fg-dim mb-1">
               <PulsingDots />
               Listening…
             </p>
+            {modelStatus && <p className="text-[10px] text-fg-faint mb-3">{modelStatus}</p>}
             <button onClick={onCancel} className="px-2 py-0.5 text-[11px] text-fg-faint hover:text-fg border border-line rounded">
               Cancel
             </button>

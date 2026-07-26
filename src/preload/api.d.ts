@@ -1272,7 +1272,7 @@ export interface SessionManagerAPI {
     duplicate: (path: string) => Promise<FilesDuplicateResult>;
   };
   docEdit: {
-    run: (payload: { path: string; before: string; instruction: string }) => Promise<DocEditResult>;
+    run: (payload: { path: string; before: string; instruction: string; documentText?: string }) => Promise<DocEditResult>;
   };
   /** Consolidated shell open/reveal. One method, discriminated on `as`, replaces
    *  the former app.openIn* / app.openExternal / files.openExternal / files.showInFinder.

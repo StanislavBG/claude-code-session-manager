@@ -7,7 +7,7 @@
 'use strict';
 
 import { test, expect, describe } from 'vitest';
-const { parseDocEdit } = require('../docEdit.cjs');
+const { parseDocEdit, editPrompt, truncateDocumentText, MAX_DOC_CONTEXT } = require('../docEdit.cjs');
 const { duplicateNameFor } = require('../files.cjs');
 
 describe('parseDocEdit', () => {
@@ -54,6 +54,41 @@ describe('parseDocEdit', () => {
   test('empty/null input', () => {
     expect(parseDocEdit('').ok).toBe(false);
     expect(parseDocEdit(null).ok).toBe(false);
+  });
+});
+
+describe('editPrompt', () => {
+  test('omits the document block when documentText is absent', () => {
+    const prompt = editPrompt('selected text', 'make it concise');
+    expect(prompt).not.toMatch(/<document_/);
+  });
+
+  test('includes a nonce-tagged document block when documentText is provided', () => {
+    const prompt = editPrompt('selected text', 'make it concise', 'the whole document');
+    expect(prompt).toMatch(/<document_[0-9a-f]+>/);
+    expect(prompt).toContain('the whole document');
+  });
+
+  test('truncates an oversized documentText before embedding it', () => {
+    const huge = 'x'.repeat(MAX_DOC_CONTEXT + 5000);
+    const prompt = editPrompt('selected text', 'make it concise', huge);
+    expect(prompt).toContain('[...document truncated for length...]');
+    expect(prompt.length).toBeLessThan(huge.length + 2000);
+  });
+});
+
+describe('truncateDocumentText', () => {
+  test('passes short text through unchanged', () => {
+    expect(truncateDocumentText('short')).toBe('short');
+  });
+
+  test('truncates to the documented head+tail scheme rather than dropping or erroring', () => {
+    const head = 'H'.repeat(40000);
+    const tail = 'T'.repeat(20000);
+    const middle = 'M'.repeat(10000);
+    const result = truncateDocumentText(head + middle + tail);
+    expect(result).toBe(`${head}\n\n[...document truncated for length...]\n\n${tail}`);
+    expect(result).not.toContain('M');
   });
 });
 

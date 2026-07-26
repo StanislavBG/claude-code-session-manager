@@ -26,6 +26,7 @@ import { toast } from '../../../state/toast'
 import { useVoice } from '../../../state/voice'
 import { createRecognition, isRecognitionSupported } from '../../../lib/speechRecognition'
 import { applySpanEdit, type ApplySpanEditResult } from '../../../lib/applySpanEdit'
+import { truncateDocumentText } from '../../../lib/truncateDocumentText'
 import { docEditReducer, IDLE_STATE, LISTEN_FROM, type SelectionInfo } from './docEditReducer'
 
 export type { SelectionRect, SelectionInfo, DocEditPhase } from './docEditReducer'
@@ -33,7 +34,7 @@ export type { SelectionRect, SelectionInfo, DocEditPhase } from './docEditReduce
 /** Pinned by src/main/docEdit.cjs's runClaude default — single source of truth for the rail's model pill. */
 export const DOCEDIT_MODEL = 'sonnet'
 
-export function useDocEdit(path: string) {
+export function useDocEdit(path: string, documentText: string) {
   const [state, dispatch] = useReducer(docEditReducer, IDLE_STATE)
   // Bumped on every cancel/select/accept/listen so an in-flight async
   // callback (docEdit.run resolving, recognition onFinal/onError firing)
@@ -118,6 +119,14 @@ export function useDocEdit(path: string) {
         toast.error(`Microphone error: ${err}`)
         dispatch({ type: 'CANCEL' })
       },
+      onModelStatus: (status, message) => {
+        if (tokenRef.current !== myToken) return
+        dispatch({ type: 'MODEL_STATUS', status, message })
+      },
+      onProgress: (pct) => {
+        if (tokenRef.current !== myToken) return
+        dispatch({ type: 'MODEL_STATUS', status: 'loading', message: `${pct}%` })
+      },
     })
     recognitionRef.current = handle
     handle.start().catch((e: unknown) => {
@@ -134,15 +143,21 @@ export function useDocEdit(path: string) {
     if (!selection) return
     const myToken = ++tokenRef.current
     dispatch({ type: 'RUN', instruction, recordInstruction })
-    const r = await window.api.docEdit.run({ path, before: selection.text, instruction })
-    if (tokenRef.current !== myToken) return
-    if (!r.ok) {
-      toast.error(r.error || 'Edit failed')
+    try {
+      const r = await window.api.docEdit.run({ path, before: selection.text, instruction, documentText: truncateDocumentText(documentText) })
+      if (tokenRef.current !== myToken) return
+      if (!r.ok) {
+        toast.error(r.error || 'Edit failed')
+        dispatch({ type: 'RUN_ERR' })
+        return
+      }
+      dispatch({ type: 'RUN_OK', diff: { before: selection.text, after: r.after ?? '' } })
+    } catch (e: unknown) {
+      if (tokenRef.current !== myToken) return
+      toast.error(e instanceof Error ? e.message : 'Edit failed')
       dispatch({ type: 'RUN_ERR' })
-      return
     }
-    dispatch({ type: 'RUN_OK', diff: { before: selection.text, after: r.after ?? '' } })
-  }, [path, state.selection])
+  }, [path, state.selection, documentText])
 
   const run = useCallback((instruction: string) => { void runInstruction(instruction, true) }, [runInstruction])
 

@@ -420,6 +420,10 @@ const docEditRun = z.object({
   path: z.string().min(1).max(4096),
   before: z.string().min(1).max(8000),
   instruction: z.string().min(1).max(2000),
+  // 60000 is the intended document-context budget; the extra headroom
+  // accommodates truncateDocumentText's head+tail+marker overhead (~60041
+  // chars worst case) so an already-truncated payload never gets rejected.
+  documentText: z.string().max(60100).optional(),
 }).strict();
 
 // ──────────────────────────────────────────── Chat runner (PRD 319)

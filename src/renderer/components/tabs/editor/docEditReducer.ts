@@ -41,6 +41,7 @@ export interface DocEditState {
   transcript: string
   diff: DocEditDiff | null
   editCount: number
+  modelStatus: string | null
 }
 
 export const IDLE_STATE: DocEditState = {
@@ -50,6 +51,7 @@ export const IDLE_STATE: DocEditState = {
   transcript: '',
   diff: null,
   editCount: 0,
+  modelStatus: null,
 }
 
 export type DocEditAction =
@@ -62,6 +64,7 @@ export type DocEditAction =
   | { type: 'RUN_ERR' }
   | { type: 'ACCEPT' }
   | { type: 'RESET_FILE' }
+  | { type: 'MODEL_STATUS'; status: string; message: string }
 
 const RUN_FROM: DocEditPhase[] = ['popover', 'review', 'diff']
 /** Exported so useDocEdit's listen() can early-return without duplicating this list. */
@@ -77,11 +80,11 @@ export function docEditReducer(state: DocEditState, action: DocEditAction): DocE
 
     case 'LISTEN':
       if (!LISTEN_FROM.includes(state.phase)) return state
-      return { ...state, phase: 'listening', transcript: '' }
+      return { ...state, phase: 'listening', transcript: '', modelStatus: null }
 
     case 'HEARD':
       if (state.phase !== 'listening') return state
-      return { ...state, phase: 'review', transcript: action.transcript }
+      return { ...state, phase: 'review', transcript: action.transcript, modelStatus: null }
 
     case 'RUN':
       if (!RUN_FROM.includes(state.phase)) return state
@@ -105,6 +108,10 @@ export function docEditReducer(state: DocEditState, action: DocEditAction): DocE
 
     case 'RESET_FILE':
       return { ...IDLE_STATE, editCount: 0 }
+
+    case 'MODEL_STATUS':
+      if (state.phase !== 'listening') return state
+      return { ...state, modelStatus: `${action.status}: ${action.message}` }
 
     default:
       return state

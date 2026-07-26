@@ -79,6 +79,42 @@ describe('docEditReducer', () => {
     expect(stillListening.phase).toBe('listening')
   })
 
+  it('MODEL_STATUS sets modelStatus without changing phase', () => {
+    let s: DocEditState = docEditReducer(IDLE_STATE, { type: 'SELECT', selection })
+    s = docEditReducer(s, { type: 'LISTEN' })
+    expect(s.modelStatus).toBeNull()
+
+    s = docEditReducer(s, { type: 'MODEL_STATUS', status: 'loading', message: '42%' })
+    expect(s.phase).toBe('listening')
+    expect(s.modelStatus).toBe('loading: 42%')
+  })
+
+  it('resets modelStatus to null on LISTEN, HEARD, and CANCEL', () => {
+    let s: DocEditState = docEditReducer(IDLE_STATE, { type: 'SELECT', selection })
+    s = docEditReducer(s, { type: 'LISTEN' })
+    s = docEditReducer(s, { type: 'MODEL_STATUS', status: 'loading', message: '10%' })
+    expect(s.modelStatus).toBe('loading: 10%')
+
+    s = docEditReducer(s, { type: 'HEARD', transcript: 'hello' })
+    expect(s.modelStatus).toBeNull()
+
+    s = docEditReducer(s, { type: 'LISTEN' })
+    s = docEditReducer(s, { type: 'MODEL_STATUS', status: 'loading', message: '10%' })
+    expect(s.modelStatus).toBe('loading: 10%')
+    s = docEditReducer(s, { type: 'CANCEL' })
+    expect(s.modelStatus).toBeNull()
+
+    s = docEditReducer(IDLE_STATE, { type: 'SELECT', selection })
+    s = docEditReducer(s, { type: 'LISTEN' })
+    expect(s.modelStatus).toBeNull()
+  })
+
+  it('MODEL_STATUS is a no-op outside the listening phase', () => {
+    const popover = docEditReducer(IDLE_STATE, { type: 'SELECT', selection })
+    const unchanged = docEditReducer(popover, { type: 'MODEL_STATUS', status: 'loading', message: '1%' })
+    expect(unchanged).toEqual(popover)
+  })
+
   it('RESET_FILE zeroes the edit counter', () => {
     let s = docEditReducer(IDLE_STATE, { type: 'SELECT', selection })
     s = docEditReducer(s, { type: 'RUN', instruction: 'x', recordInstruction: true })

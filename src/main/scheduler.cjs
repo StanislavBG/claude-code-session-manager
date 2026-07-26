@@ -74,6 +74,12 @@ const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { fileRcaFeedback, extractRcaBlock } = require('./lib/rcaFeedbackHook.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
 const queueOps = require('./queueOps.cjs');
+// Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
+// while the app was down (PRD 686 moved it in-app so it also runs while alive).
+// Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
+// match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
+// home-dir layout.
+const { sweep: sweepFeedback } = require('../../scripts/lib/watchdogHelpers.cjs');
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -827,6 +833,17 @@ let resumeTimer = null;
 let pollLoopTimer = null;
 let rescheduleInterval = null;
 let heartbeatInterval = null;
+// Feedback sweep piggybacks on the 60s heartbeat tick but runs far less often —
+// every Nth tick — since it's a readdir-per-active-project scan, not free.
+// 5 ticks = 5 minutes; well inside sweep()/activeProjectCwds()'s 90-minute
+// active-session window, so no active project can be missed between sweeps.
+const FEEDBACK_SWEEP_TICK_INTERVAL = 5;
+let feedbackSweepTickCount = 0;
+/** Pure gate for the tick counter above — exported so the wiring is testable
+ *  without waiting on real setInterval timers. */
+function feedbackSweepDue(tickCount, interval = FEEDBACK_SWEEP_TICK_INTERVAL) {
+  return tickCount >= interval;
+}
 // In-memory set of slugs currently spawned in this process. Prevents
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
@@ -1067,6 +1084,79 @@ function resetJobFields(job, errorMsg) {
   job.error = errorMsg ?? null;
   delete job.runtime;
   delete job.verifierVerdict;
+}
+
+// Grace period between a boot orphan's SIGTERM and reading its log to
+// classify the outcome — matches killOrphanClaudePid's own internal 5s
+// SIGKILL follow-up delay, plus a small margin so classification always runs
+// after that SIGKILL has had a chance to land.
+const BOOT_ORPHAN_KILL_GRACE_MS = 6000;
+
+/**
+ * partitionBootOrphans(jobs, isAlive?) → { immediate: string[], deferred: string[] }
+ *
+ * Pure decision split for boot reconciliation. A 'running' job whose recorded
+ * pid is still alive must NOT be classified from its log yet — the orphaned
+ * process may still be writing to it, so reading now risks misclassifying a
+ * job that is about to emit result:success as no_result and double-running it.
+ * Ported from reconcileQueueOffline's cross-tick escalation (see
+ * scripts/lib/watchdogHelpers.cjs) — here it's a single deferred window since
+ * this process stays up to revisit it, rather than a separate short-lived
+ * watchdog process needing another tick.
+ */
+function partitionBootOrphans(jobs, isAlive = claudePidAlive) {
+  const immediate = [];
+  const deferred = [];
+  for (const j of jobs) {
+    if (j.status !== 'running') continue;
+    const pid = j.runtime?.pid;
+    if (pid && isAlive(pid)) {
+      deferred.push(j.slug);
+    } else {
+      immediate.push(j.slug);
+    }
+  }
+  return { immediate, deferred };
+}
+
+/**
+ * applyOrphanOutcome(job, outcome, killNote?) → void
+ *
+ * Mutates `job` in place to finalize a boot-orphaned 'running' job given its
+ * classified run outcome: success/failed finalize terminally; no_result/unknown
+ * re-queues to pending bounded by ORPHAN_REQUEUE_CAP. The status-mutation
+ * semantics (and the cap-exhaustion boundary) match the now-deleted
+ * reconcileQueueOffline (scripts/lib/watchdogHelpers.cjs) verbatim; killNote
+ * plumbing differs slightly (see call sites) since this path always knows
+ * pid liveness up front rather than re-checking per tick.
+ */
+function applyOrphanOutcome(job, outcome, killNote = '') {
+  const now = new Date().toISOString();
+  if (outcome === 'success') {
+    job.status = 'completed';
+    job.exitCode = 0;
+    job.error = null;
+    job.finishedAt = now;
+    delete job.runtime;
+  } else if (outcome === 'failed') {
+    job.status = 'failed';
+    job.exitCode = job.exitCode ?? 1;
+    job.error = `orphaned: app restarted while running${killNote}`;
+    job.finishedAt = now;
+    delete job.runtime;
+  } else {
+    const tries = job.orphanRetries ?? 0;
+    if (tries < ORPHAN_REQUEUE_CAP) {
+      resetJobFields(job, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`);
+      job.orphanRetries = tries + 1;
+    } else {
+      job.status = 'failed';
+      job.exitCode = job.exitCode ?? 1;
+      job.error = `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`;
+      job.finishedAt = now;
+      delete job.runtime;
+    }
+  }
 }
 
 /** Scan the tail of a job's log for the canonical rate-limit signal. We look
@@ -2960,64 +3050,59 @@ async function init() {
   // classifyRunOutcome calls readTail → fs.readFileSync (up to 64 KB per job).
   // Pre-compute all outcomes BEFORE entering the mutate lock so the blocking I/O
   // does not stall the event loop or hold the mutateTail chain during startup.
+  //
+  // Jobs whose recorded pid is still alive are deferred (not classified here) —
+  // see partitionBootOrphans. Everything else (dead pid or no pid) is safe to
+  // classify immediately below.
   const bootSnap = readQueueSync();
+  const { immediate: immediateSlugs, deferred: deferredSlugs } = partitionBootOrphans(bootSnap.jobs);
   const bootOutcomes = new Map();
   for (const j of bootSnap.jobs) {
-    if (j.status !== 'running') continue;
+    if (!immediateSlugs.includes(j.slug)) continue;
     const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
     bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
   }
   await mutate((state) => {
     for (const j of state.jobs) {
-      if (j.status !== 'running') continue;
-      const pid = j.runtime?.pid;
-      let killNote = '';
-      if (pid) {
-        const result = killOrphanClaudePid(pid);
-        killNote = ` (orphan pid=${pid}: ${result})`;
-        if (result === 'killed') {
-          console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${j.slug}`);
-        }
-      }
+      if (j.status !== 'running' || !immediateSlugs.includes(j.slug)) continue;
       const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
-      if (outcome === 'success') {
-        // Job finished cleanly before the crash — keep the win.
-        j.status = 'completed';
-        j.exitCode = 0;
-        j.error = null;
-        j.finishedAt = new Date().toISOString();
-        delete j.runtime;
-        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=success → completed`);
-      } else if (outcome === 'failed') {
-        // The log carries a real failure result event — a genuine failure, keep it.
-        j.status = 'failed';
-        j.exitCode = j.exitCode ?? 1;
-        j.error = `orphaned: app restarted while running${killNote}`;
-        j.finishedAt = new Date().toISOString();
-        delete j.runtime;
-        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=failed → failed`);
-      } else {
-        // no_result / unknown: the run was interrupted (host died / app restarted)
-        // with NO evidence it failed on its own merits. Punishing the PRD here is
-        // the wrong call — it demands a manual flip and burns an Opus fix-plan on a
-        // job that never actually failed. Re-queue it (bounded) so an app restart
-        // self-recovers. Mirrors the transient-kill auto-retry on the live path.
-        const tries = j.orphanRetries ?? 0;
-        if (tries < ORPHAN_REQUEUE_CAP) {
-          resetJobFields(j, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`);
-          j.orphanRetries = tries + 1;
-          console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → re-queued (${tries + 1}/${ORPHAN_REQUEUE_CAP})`);
-        } else {
-          j.status = 'failed';
-          j.exitCode = j.exitCode ?? 1;
-          j.error = `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`;
-          j.finishedAt = new Date().toISOString();
-          delete j.runtime;
-          console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → failed (orphan retries exhausted)`);
-        }
-      }
+      const pid = j.runtime?.pid;
+      const killNote = pid ? ` (orphan pid=${pid}: dead)` : '';
+      applyOrphanOutcome(j, outcome, killNote);
+      console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → status=${j.status}`);
     }
   });
+
+  // Still-alive orphans: SIGTERM (+ killOrphanClaudePid's own deferred SIGKILL
+  // follow-up) now, but classification waits until BOOT_ORPHAN_KILL_GRACE_MS
+  // later — reading the log while the orphan might still be writing to it
+  // could misclassify an about-to-succeed run as no_result and double-run the
+  // same PRD (2026-05-21 incident this guard exists for).
+  for (const slug of deferredSlugs) {
+    const j = bootSnap.jobs.find((x) => x.slug === slug);
+    const pid = j?.runtime?.pid;
+    const bootRunId = j?.runId ?? null; // captured now — guards against reconciling a DIFFERENT later run of the same slug
+    if (!pid) continue;
+    const result = killOrphanClaudePid(pid);
+    const killNote = ` (orphan pid=${pid}: ${result})`;
+    if (result === 'killed') {
+      console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${slug} — deferring finalize ${BOOT_ORPHAN_KILL_GRACE_MS}ms`);
+    }
+    setTimeout(() => {
+      const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
+      const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
+      mutate((state) => {
+        const cur = state.jobs.find((x) => x.slug === slug);
+        // Race guard: bail if the job already resolved, OR if it's already been
+        // re-picked into a NEW run (different runId) within the grace window —
+        // that new run is not the boot orphan we SIGTERM'd and must not be
+        // touched by this stale classification.
+        if (!cur || cur.status !== 'running' || cur.runId !== bootRunId) return;
+        applyOrphanOutcome(cur, outcome, killNote);
+        console.log(`[scheduler] boot reconcile (deferred): slug=${slug} outcome=${outcome} → status=${cur.status}`);
+      }).catch((e) => console.error(`[scheduler] deferred boot reconcile failed for ${slug}:`, e?.message));
+    }, BOOT_ORPHAN_KILL_GRACE_MS).unref?.();
+  }
 
   // If we boot up while paused with a resumeAt in the past, clear it. This
   // happens when the app was closed across the reset window.
@@ -3090,6 +3175,16 @@ async function init() {
       utilization: cachedUtilization,
       consecutiveFailures,
     });
+
+    feedbackSweepTickCount++;
+    if (feedbackSweepDue(feedbackSweepTickCount, FEEDBACK_SWEEP_TICK_INTERVAL)) {
+      feedbackSweepTickCount = 0;
+      try {
+        sweepFeedback();
+      } catch (e) {
+        console.warn('[scheduler] feedback sweep failed', e?.message);
+      }
+    }
   }, 60_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
 
@@ -3232,4 +3327,4 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback };

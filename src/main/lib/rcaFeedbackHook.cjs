@@ -38,8 +38,8 @@ const PRDS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'schedule
 const SM_REPO_ROOT = path.join(os.homedir(), 'Projects', 'session-manager');
 const SM_REPO_FEEDBACK_DIR = path.join(SM_REPO_ROOT, 'session-manager-operations', 'feedback');
 
-// NEVER write here: ~/.claude/session-manager/feedback/ is the external
-// watchdog's auto-PRD intake (scripts/scheduler-watchdog.cjs `sweep()`) — it
+// NEVER write here: ~/.claude/session-manager/feedback/ is the scheduler's
+// auto-PRD intake (src/main/scheduler.cjs's periodic feedback sweep) — it
 // converts anything dropped there into a scheduled PRD automatically. Filing
 // an RCA there would create an RCA → auto-PRD → run → needs_review → RCA
 // cycle with no human in the loop. Both real destinations below are project

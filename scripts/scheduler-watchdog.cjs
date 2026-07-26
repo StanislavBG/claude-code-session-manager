@@ -1,13 +1,23 @@
 'use strict';
 
-// scheduler-watchdog.cjs — external check-and-exit watchdog for the scheduler.
+// scheduler-watchdog.cjs — external check-and-exit watchdog for session-manager.
 //
 // Designed to run from a systemd user timer (or cron) independently of the
-// Electron app. Reads the scheduler heartbeat, decides alive vs stale, dispatches
-// to the appropriate branch, and exits 0.
+// Electron app. Its ONE supervision job (post PRD 685 + PRD 686): read the
+// scheduler heartbeat, decide alive vs stale, and if stale-and-dead, relaunch
+// the app. Nothing else — queue.json reconciliation (orphaned 'running' jobs)
+// and the feedback-auto-PRD sweep both moved into scheduler.cjs's own boot
+// path / poll loop (PRD 686), since that in-process code is the single owner
+// of queue.json and can now run continuously instead of only while the app is
+// down. Do not reintroduce queue-mutating or feedback-scanning logic here —
+// extend scheduler.cjs instead.
 //
 // Alive  (heartbeat fresh) → exit immediately; do not touch queue.json.
-// Stale/absent             → reconcileQueueOffline() + sweep(), then exit.
+// Stale/absent             → maybeRelaunchApp(), then exit.
+//
+// (History-rollup finalize below is a separate, older concern (PRD 650) —
+// precomputing closed History-dashboard days outside Electron — unrelated to
+// queue/feedback ownership and out of scope for PRD 686's consolidation.)
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -15,8 +25,6 @@ const path = require('node:path');
 
 const {
   readLastHeartbeatTs,
-  reconcileQueueOffline,
-  sweep,
   localDateStr,
   maybeFinalizeHistory,
   maybeRelaunchApp,
@@ -83,13 +91,12 @@ async function main() {
     process.exit(0);
   }
 
-  // Stale branch: app is absent or not updating heartbeat.
-  const reconcileResult = reconcileQueueOffline();
-  const sweepResult = sweep();
+  // Stale branch: app is absent or not updating heartbeat. Relaunch it —
+  // reconciliation and feedback sweep are scheduler.cjs's own job now (PRD 686).
   const relaunch = maybeRelaunchApp();
   const history = await runHistoryFinalize();
 
-  appendLog({ ...logEntry, reconcile: reconcileResult, sweep: sweepResult, relaunch, history });
+  appendLog({ ...logEntry, relaunch, history });
   process.exit(0);
 }
 

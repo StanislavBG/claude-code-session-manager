@@ -112,12 +112,84 @@ const DEFAULT_RUNS_DIR = path.join(
 const DEFAULT_PRDS_DIR = path.join(
   os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds',
 );
-const DEFAULT_SKILL_PATH = path.join(
-  os.homedir(), '.claude', 'skills', 'process-feedback', 'SKILL.md',
+const PLUGIN_CACHE_ROOT = path.join(
+  os.homedir(), '.claude', 'plugins', 'cache', 'session-manager', 'session-manager-dev',
 );
-const DEFAULT_STANDARDS_PATH = path.join(
-  os.homedir(), '.claude', 'skills', 'develop', 'standards.md',
-);
+
+/**
+ * compareVersionsDesc(a, b) → number
+ *
+ * Numeric per-segment version compare (descending) for plugin-cache version
+ * dirs like "0.1.0" / "0.2.0" / "0.10.0". Plain lexicographic sort is wrong
+ * here — "0.10.0" < "0.2.0" as strings even though 10 > 2 numerically. Falls
+ * back to a string compare for any non-numeric segment (e.g. a stray dir name
+ * that isn't a version) so listSkillCandidates never throws on garbage input.
+ */
+function compareVersionsDesc(a, b) {
+  const as = a.split('.');
+  const bs = b.split('.');
+  const len = Math.max(as.length, bs.length);
+  for (let i = 0; i < len; i++) {
+    const an = Number(as[i]);
+    const bn = Number(bs[i]);
+    if (Number.isFinite(an) && Number.isFinite(bn)) {
+      if (an !== bn) return bn - an;
+    } else if (as[i] !== bs[i]) {
+      return (as[i] ?? '') < (bs[i] ?? '') ? 1 : -1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * listSkillCandidates(cwd, skillName, fileName, pluginCacheRoot?) → string[]
+ *
+ * Ordered candidate paths for an inlined skill/standards file, most-specific
+ * first — the process-feedback SKILL.md and develop standards.md moved out of
+ * the legacy ~/.claude/skills/ location into the session-manager-dev plugin:
+ *
+ *   1. <cwd>/plugins/session-manager-dev/skills/<skillName>/<fileName>  — repo-local
+ *      copy, correct when the swept project vendors the plugin (e.g. session-manager itself).
+ *   2. <pluginCacheRoot>/<newest-version>/skills/<skillName>/<fileName> — the installed
+ *      plugin cache (default ~/.claude/plugins/cache/session-manager/session-manager-dev).
+ *      Enumerates every version dir present, newest (lexicographically-highest) first.
+ *   3. ~/.claude/skills/<skillName>/<fileName> — legacy location, kept last so an
+ *      old install still works.
+ *
+ * pluginCacheRoot is overridable for tests; defaults to the real plugin cache.
+ */
+function listSkillCandidates(cwd, skillName, fileName, pluginCacheRoot = PLUGIN_CACHE_ROOT) {
+  const candidates = [
+    path.join(cwd, 'plugins', 'session-manager-dev', 'skills', skillName, fileName),
+  ];
+
+  let entries = [];
+  try {
+    entries = fs.readdirSync(pluginCacheRoot, { withFileTypes: true });
+  } catch { /* plugin cache not installed */ }
+  const versions = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort(compareVersionsDesc);
+  for (const version of versions) {
+    candidates.push(path.join(pluginCacheRoot, version, 'skills', skillName, fileName));
+  }
+
+  candidates.push(path.join(os.homedir(), '.claude', 'skills', skillName, fileName));
+  return candidates;
+}
+
+/**
+ * resolveSkillFile(cwd, skillName, fileName, pluginCacheRoot?) → string | null
+ *
+ * Returns the first candidate from listSkillCandidates() that is a readable
+ * file, or null if none resolve.
+ */
+function resolveSkillFile(cwd, skillName, fileName, pluginCacheRoot = PLUGIN_CACHE_ROOT) {
+  for (const candidate of listSkillCandidates(cwd, skillName, fileName, pluginCacheRoot)) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch { /* try next candidate */ }
+  }
+  return null;
+}
 
 /**
  * reconcileQueueOffline(opts?) → { reconciled: boolean, reapedCount: number, errors: string[] }
@@ -360,9 +432,21 @@ function hasOpenFeedback(cwd) {
 function emitFeedbackPRD(cwd, {
   prdsDir = DEFAULT_PRDS_DIR,
   queuePath = DEFAULT_QUEUE_PATH,
-  skillPath = DEFAULT_SKILL_PATH,
-  standardsPath = DEFAULT_STANDARDS_PATH,
+  skillPath,
+  standardsPath,
+  pluginCacheRoot = PLUGIN_CACHE_ROOT,
 } = {}) {
+  // Explicit overrides (used by tests) are honored verbatim and skip the
+  // candidate search entirely — only resolve via candidates when the caller
+  // didn't pass a path.
+  const skillPathExplicit = skillPath !== undefined;
+  const standardsPathExplicit = standardsPath !== undefined;
+  if (!skillPathExplicit) {
+    skillPath = resolveSkillFile(cwd, 'process-feedback', 'SKILL.md', pluginCacheRoot);
+  }
+  if (!standardsPathExplicit) {
+    standardsPath = resolveSkillFile(cwd, 'develop', 'standards.md', pluginCacheRoot);
+  }
   const project = slugify(path.basename(cwd));
 
   // De-dup: check queue.json for pending/running feedback job for this project.
@@ -407,21 +491,39 @@ function emitFeedbackPRD(cwd, {
 
   // Read and inline skill content.
   let rawSkill = '';
-  try {
-    rawSkill = fs.readFileSync(skillPath, 'utf8');
-  } catch {
-    process.stderr.write(`[emitFeedbackPRD] warning: skill file not readable: ${skillPath}\n`);
+  if (skillPath) {
+    try {
+      rawSkill = fs.readFileSync(skillPath, 'utf8');
+    } catch { /* handled by the empty-body guard below */ }
   }
   const skillBody = stripFrontmatter(rawSkill).trim();
 
   // Read and inline standards — strip H1 so our ## heading is the section anchor.
   let rawStandards = '';
-  try {
-    rawStandards = fs.readFileSync(standardsPath, 'utf8');
-  } catch {
-    process.stderr.write(`[emitFeedbackPRD] warning: standards file not readable: ${standardsPath}\n`);
+  if (standardsPath) {
+    try {
+      rawStandards = fs.readFileSync(standardsPath, 'utf8');
+    } catch { /* handled by the empty-body guard below */ }
   }
   const standardsBody = stripLeadingH1(stripFrontmatter(rawStandards)).trim();
+
+  // Hard-fail rather than silently ship a hollow PRD: if either inline is
+  // empty/unreadable, refuse to write anything and name every candidate tried
+  // so a future relocation shows up loudly in the watchdog log instead of
+  // queueing a template with no procedure and no standards in it.
+  if (!skillBody || !standardsBody) {
+    const missing = [];
+    if (!skillBody) {
+      const tried = skillPathExplicit ? [skillPath] : listSkillCandidates(cwd, 'process-feedback', 'SKILL.md', pluginCacheRoot);
+      missing.push(`process-feedback SKILL.md (tried: ${tried.join(', ')})`);
+    }
+    if (!standardsBody) {
+      const tried = standardsPathExplicit ? [standardsPath] : listSkillCandidates(cwd, 'develop', 'standards.md', pluginCacheRoot);
+      missing.push(`develop standards.md (tried: ${tried.join(', ')})`);
+    }
+    process.stderr.write(`[emitFeedbackPRD] refusing to emit for ${cwd}: missing inline(s) — ${missing.join('; ')}\n`);
+    return { emitted: false, reason: 'missing-inline' };
+  }
 
   const projectName = path.basename(cwd);
   const body = [
@@ -499,8 +601,8 @@ function sweep({
   projectsDir,
   prdsDir = DEFAULT_PRDS_DIR,
   queuePath = DEFAULT_QUEUE_PATH,
-  skillPath = DEFAULT_SKILL_PATH,
-  standardsPath = DEFAULT_STANDARDS_PATH,
+  skillPath,
+  standardsPath,
 } = {}) {
   const activeOpts = {};
   if (projectsDir !== undefined) activeOpts.projectsDir = projectsDir;
@@ -684,6 +786,8 @@ module.exports = {
   heartbeatFresh,
   reconcileQueueOffline,
   hasOpenFeedback,
+  resolveSkillFile,
+  listSkillCandidates,
   emitFeedbackPRD,
   sweep,
   localDateStr,

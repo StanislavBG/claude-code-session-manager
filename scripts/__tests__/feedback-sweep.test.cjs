@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { hasOpenFeedback, emitFeedbackPRD, sweep } = require('../lib/watchdogHelpers.cjs');
+const { hasOpenFeedback, emitFeedbackPRD, sweep, resolveSkillFile } = require('../lib/watchdogHelpers.cjs');
 
 const FAKE_SKILL = [
   '---',
@@ -231,6 +231,143 @@ test('NN selection picks next after highest existing in prdsDir', () => {
     assert.equal(result.emitted, true);
     // NN should be 08 (max is 07)
     assert.ok(result.slug.startsWith('08-'), `slug should start with 08-, got: ${result.slug}`);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── resolver: repo-local plugin fixtures → PRD emitted with both bodies ──────
+
+test('resolver: repo-local plugins/session-manager-dev fixtures → PRD populated from both', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
+    fs.mkdirSync(feedbackDir, { recursive: true });
+    fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
+
+    const skillDir = path.join(projectDir, 'plugins', 'session-manager-dev', 'skills', 'process-feedback');
+    const standardsDir = path.join(projectDir, 'plugins', 'session-manager-dev', 'skills', 'develop');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.mkdirSync(standardsDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), FAKE_SKILL);
+    fs.writeFileSync(path.join(standardsDir, 'standards.md'), FAKE_STANDARDS);
+
+    const prdsDir = path.join(base, 'prds');
+    fs.mkdirSync(prdsDir);
+    const queuePath = makeQueue(base);
+    const pluginCacheRoot = path.join(base, 'no-cache-here'); // absent — forces repo-local + legacy only
+
+    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
+    assert.equal(result.emitted, true, 'PRD should be emitted from repo-local plugin fixtures');
+
+    const prdContent = fs.readFileSync(result.prdPath, 'utf8');
+    assert.ok(prdContent.includes('Quick-exit'), 'PRD must contain the fixture skill body');
+    assert.ok(prdContent.includes('Bound every command'), 'PRD must contain the fixture standards body');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── resolver: neither inline resolves → refusal, no file written ────────────
+
+test('resolver: no candidate resolves → emitted false, reason missing-inline, no file written', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
+    fs.mkdirSync(feedbackDir, { recursive: true });
+    fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
+
+    const prdsDir = path.join(base, 'prds');
+    fs.mkdirSync(prdsDir);
+    const queuePath = makeQueue(base);
+    const pluginCacheRoot = path.join(base, 'no-cache-here');
+
+    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
+    assert.equal(result.emitted, false, 'should refuse to emit when no inline resolves');
+    assert.equal(result.reason, 'missing-inline');
+
+    const prdFiles = fs.readdirSync(prdsDir);
+    assert.equal(prdFiles.length, 0, 'no PRD file should be written on refusal');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── resolver: skill resolves, standards does not → refusal ──────────────────
+
+test('resolver: standards missing only → refusal with no file written', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
+    fs.mkdirSync(feedbackDir, { recursive: true });
+    fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
+
+    const skillDir = path.join(projectDir, 'plugins', 'session-manager-dev', 'skills', 'process-feedback');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), FAKE_SKILL);
+    // No develop/standards.md anywhere.
+
+    const prdsDir = path.join(base, 'prds');
+    fs.mkdirSync(prdsDir);
+    const queuePath = makeQueue(base);
+    const pluginCacheRoot = path.join(base, 'no-cache-here');
+
+    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
+    assert.equal(result.emitted, false, 'should refuse to emit when standards inline is missing');
+    assert.equal(result.reason, 'missing-inline');
+
+    const prdFiles = fs.readdirSync(prdsDir);
+    assert.equal(prdFiles.length, 0, 'no PRD file should be written on refusal');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── resolver: plugin-cache candidate picks the newest version dir ───────────
+
+test('resolver: plugin-cache candidate picks highest version when two exist', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    fs.mkdirSync(projectDir, { recursive: true }); // no repo-local plugins/ dir
+
+    const pluginCacheRoot = path.join(base, 'cache', 'session-manager', 'session-manager-dev');
+    const oldSkillDir = path.join(pluginCacheRoot, '0.1.0', 'skills', 'process-feedback');
+    const newSkillDir = path.join(pluginCacheRoot, '0.2.0', 'skills', 'process-feedback');
+    fs.mkdirSync(oldSkillDir, { recursive: true });
+    fs.mkdirSync(newSkillDir, { recursive: true });
+    fs.writeFileSync(path.join(oldSkillDir, 'SKILL.md'), 'old version body — should not be picked');
+    fs.writeFileSync(path.join(newSkillDir, 'SKILL.md'), 'new version body — should be picked');
+
+    const resolved = resolveSkillFile(projectDir, 'process-feedback', 'SKILL.md', pluginCacheRoot);
+    assert.equal(resolved, path.join(newSkillDir, 'SKILL.md'), 'should resolve to the 0.2.0 (newest) version dir');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── resolver: version compare is numeric, not lexicographic ──────────────────
+
+test('resolver: plugin-cache version pick is numeric — 0.10.0 beats 0.2.0', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const pluginCacheRoot = path.join(base, 'cache', 'session-manager', 'session-manager-dev');
+    const v2Dir = path.join(pluginCacheRoot, '0.2.0', 'skills', 'process-feedback');
+    const v10Dir = path.join(pluginCacheRoot, '0.10.0', 'skills', 'process-feedback');
+    fs.mkdirSync(v2Dir, { recursive: true });
+    fs.mkdirSync(v10Dir, { recursive: true });
+    fs.writeFileSync(path.join(v2Dir, 'SKILL.md'), '0.2.0 body — should not be picked');
+    fs.writeFileSync(path.join(v10Dir, 'SKILL.md'), '0.10.0 body — should be picked');
+
+    const resolved = resolveSkillFile(projectDir, 'process-feedback', 'SKILL.md', pluginCacheRoot);
+    assert.equal(resolved, path.join(v10Dir, 'SKILL.md'),
+      '0.10.0 must numerically outrank 0.2.0, not lose to it lexicographically');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

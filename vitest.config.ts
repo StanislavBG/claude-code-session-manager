@@ -18,6 +18,7 @@ export default defineConfig({
       'src/main/__tests__/historyRollup.test.cjs',
       'src/main/__tests__/historyDashboard.test.cjs',
       'src/main/__tests__/rcaFeedbackHook.test.cjs',
+      'src/main/__tests__/classifyTranscriptLine.test.cjs',
     ],
     globals: true,
   },

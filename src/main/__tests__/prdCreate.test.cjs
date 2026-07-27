@@ -19,6 +19,7 @@ const {
   deriveSlugFromTitle,
   buildPrdBody,
   readStandards,
+  STANDARDS_PATH,
   PRD_CREATE_SLUG_RE,
   registerAdminRoute,
 } = require('../lib/prdCreate.cjs');
@@ -42,7 +43,6 @@ test('readStandards reads the real standards.md and returns non-empty text', asy
 });
 
 test('buildPrdBody emits required frontmatter keys and body sections in order', async () => {
-  const standards = await readStandards();
   const body = buildPrdBody({
     title: 'Do the thing',
     cwd: '~/Projects/session-manager',
@@ -51,7 +51,7 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
     acceptanceCriteria: ['thing exists', 'tests pass'],
     implementationNotes: 'See file.cjs:10.',
     outOfScope: ['not this'],
-  }, standards);
+  });
 
   expect(body.startsWith('---\n')).toBeTruthy();
   expect(body).toMatch(/title: Do the thing/);
@@ -69,15 +69,19 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
   expect(body).toMatch(/- \[ \] thing exists/);
   expect(body).toMatch(/- \[ \] tests pass/);
   expect(body).toMatch(/- not this/);
-  // must inline the standards.md content verbatim
-  expect(body.includes('Execution discipline')).toBeTruthy();
+  // must point at STANDARDS_PATH rather than inline the standards.md content
+  expect(body.includes(STANDARDS_PATH)).toBeTruthy();
+  expect(body).toMatch(/Before writing any code, read/);
+  // the pointer block mentions "Execution discipline" by name, but must not
+  // inline the full standards.md prose (e.g. its Performance-section rules)
+  expect(body.includes('Lay out hot data contiguously')).toBeFalsy();
 });
 
 test('buildPrdBody omits parallelGroup frontmatter key when not supplied', () => {
   const body = buildPrdBody({
     title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
     acceptanceCriteria: ['a'], implementationNotes: 'n',
-  }, 'standards text');
+  });
   expect(!/parallelGroup:/.test(body)).toBeTruthy();
 });
 
@@ -216,8 +220,9 @@ test('POST /admin/scheduler/create-prd with a valid payload writes a file with f
     expect(written).toMatch(/# Implementation notes/);
     expect(written).toMatch(/# Out of scope/);
     expect(written).toMatch(/## Engineering standards/);
-    // must inline standards.md verbatim
-    expect(written.includes('Execution discipline')).toBeTruthy();
+    // must point at STANDARDS_PATH rather than inline standards.md
+    expect(written.includes(STANDARDS_PATH)).toBeTruthy();
+    expect(written.includes('Lay out hot data contiguously')).toBeFalsy();
   } finally {
     await admin.stop();
   }

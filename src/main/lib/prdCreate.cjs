@@ -7,10 +7,12 @@
  * via config.cjs's validatePath, NN allocation via the injected remote,
  * writing via remote.writePrd -> config.cjs's writeTextAtomic).
  *
- * Standards are read fresh from disk on every call (no in-process caching)
- * so a live edit to standards.md is picked up by the next create-prd call
- * without an app restart — same one-concept-one-implementation reasoning
- * that keeps the /develop skill re-reading it fresh per PRD (see SKILL.md).
+ * Neither this route nor the /develop skill embeds standards.md's contents
+ * anymore — both just point the headless executor at STANDARDS_PATH with an
+ * instruction to read it before starting. There's nothing to go stale: the
+ * executor always reads the live file at run time, same one-concept-one-
+ * implementation reasoning that keeps the two PRD-creation paths in sync
+ * (see SKILL.md).
  */
 'use strict';
 
@@ -37,12 +39,13 @@ function deriveSlugFromTitle(title) {
 }
 
 /**
- * Build the full PRD markdown body (frontmatter + required sections +
- * verbatim engineering standards), matching the structure `/develop`'s
- * SKILL.md documents: frontmatter, then Goal / Acceptance criteria /
- * Implementation notes / Out of scope / Engineering standards, in order.
+ * Build the full PRD markdown body (frontmatter + required sections + a
+ * pointer at the engineering standards file), matching the structure
+ * `/develop`'s SKILL.md documents: frontmatter, then Goal / Acceptance
+ * criteria / Implementation notes / Out of scope / Engineering standards,
+ * in order.
  */
-function buildPrdBody(input, standardsText) {
+function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
     implementationNotes, outOfScope,
@@ -57,12 +60,19 @@ function buildPrdBody(input, standardsText) {
   const oosSource = outOfScope && outOfScope.length ? outOfScope : ['(none)'];
   const oosLines = oosSource.map((line) => `- ${line}`).join('\n');
 
+  const standardsPointer = [
+    `Before writing any code, read \`${STANDARDS_PATH}\` — it has the Performance, Debugging,`,
+    'API-reuse, TDD, and Execution-discipline rules that apply to this PRD. Every rule in it is',
+    'mandatory, especially Execution discipline (bounded commands, verify before done, the',
+    'finish-protocol sentinel).',
+  ].join('\n');
+
   const bodyLines = [
     '# Goal', '', goal, '',
     '# Acceptance criteria', '', acLines, '',
     '# Implementation notes', '', implementationNotes, '',
     '# Out of scope', '', oosLines, '',
-    '## Engineering standards', '', standardsText.trimEnd(), '',
+    '## Engineering standards', '', standardsPointer, '',
   ];
 
   return `${fmLines.join('\n')}${bodyLines.join('\n')}`;
@@ -132,15 +142,7 @@ function registerAdminRoute(adminHttp, remote) {
       return;
     }
 
-    let standardsText;
-    try {
-      standardsText = await readStandards();
-    } catch (e) {
-      sendJson(res, 500, { ok: false, error: `could not read engineering standards: ${e?.message}` });
-      return;
-    }
-
-    const body = buildPrdBody(input, standardsText);
+    const body = buildPrdBody(input);
     const writeResult = await remote.writePrd(filenameSlug, body);
     if (!writeResult?.ok) {
       sendJson(res, 500, { ok: false, error: writeResult?.error ?? 'write failed' });

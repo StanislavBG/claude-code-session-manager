@@ -25,8 +25,11 @@ crashDiagnostics.startCrashReporter();
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
-const { createAdminServer } = require('./adminServer.cjs');
-const adminServer = createAdminServer(scheduler.remote);
+const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
+const prdCreate = require('./lib/prdCreate.cjs');
+const adminHttp = createAdminHttp();
+scheduler.registerAdminRoutes(adminHttp);
+prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
 const { createBrowserAgentServer } = require('./browserAgentServer.cjs');
 const browserAgentServer = createBrowserAgentServer({
   listTabs: () => browserView.listViews(),
@@ -1086,7 +1089,7 @@ app.whenReady().then(async () => {
   scheduler.init().catch((e) => {
     logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
-  adminServer.start().catch((e) => {
+  adminHttp.start().catch((e) => {
     logs.writeLine({ scope: 'admin-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
   browserAgentServer.start().catch((e) => {
@@ -1197,7 +1200,7 @@ app.on('before-quit', () => {
   configMgr.closeAllWatchers();
   transcripts.closeAll();
   watchers.manager.killAll();
-  adminServer.stop().catch(() => {});
+  adminHttp.stop().catch(() => {});
   browserAgentServer.stop().catch(() => {});
   // Best-effort flush of any pending OTEL spans. shutdown() has its own 2s
   // ceiling so a wedged exporter can't hold quit.

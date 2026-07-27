@@ -1,36 +1,44 @@
 /**
  * prdCreate.test.cjs — unit tests for the create-PRD body builder (PRD 549,
- * gh-issue-6). Pure-function tests only; the HTTP route + auth/cwd-boundary
- * behavior is covered by adminServer.test.cjs.
+ * gh-issue-6) and, since PRD 689, its registerAdminRoute create-prd HTTP
+ * route (moved verbatim out of the former standalone admin HTTP server
+ * module's handleRequest).
  *
- * Run: timeout 120 node --test src/main/__tests__/prdCreate.test.cjs
+ * Run: timeout 120 npx vitest run src/main/__tests__/prdCreate.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
+import { test, expect } from 'vitest';
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
 const {
   deriveSlugFromTitle,
   buildPrdBody,
   readStandards,
   PRD_CREATE_SLUG_RE,
+  registerAdminRoute,
 } = require('../lib/prdCreate.cjs');
+const { createAdminHttp } = require('../lib/localAdminHttp.cjs');
+const config = require('../config.cjs');
+const prdParser = require('../scheduler/prdParser.cjs');
 
 test('deriveSlugFromTitle lowercases, kebab-cases, and strips non-alnum runs', () => {
-  assert.strictEqual(deriveSlugFromTitle('Add Foo Bar!! Baz'), 'add-foo-bar-baz');
-  assert.strictEqual(deriveSlugFromTitle('  leading/trailing  '), 'leading-trailing');
+  expect(deriveSlugFromTitle('Add Foo Bar!! Baz')).toBe('add-foo-bar-baz');
+  expect(deriveSlugFromTitle('  leading/trailing  ')).toBe('leading-trailing');
 });
 
 test('deriveSlugFromTitle output always satisfies PRD_CREATE_SLUG_RE', () => {
   const slug = deriveSlugFromTitle('Some Title 123');
-  assert.ok(PRD_CREATE_SLUG_RE.test(slug));
+  expect(PRD_CREATE_SLUG_RE.test(slug)).toBeTruthy();
 });
 
 test('readStandards reads the real standards.md and returns non-empty text', async () => {
   const text = await readStandards();
-  assert.ok(text.includes('Execution discipline'));
+  expect(text.includes('Execution discipline')).toBeTruthy();
 });
 
 test('buildPrdBody emits required frontmatter keys and body sections in order', async () => {
@@ -45,23 +53,24 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
     outOfScope: ['not this'],
   }, standards);
 
-  assert.ok(body.startsWith('---\n'));
-  assert.match(body, /title: Do the thing/);
-  assert.match(body, /cwd: ~\/Projects\/session-manager/);
-  assert.match(body, /estimateMinutes: 15/);
+  expect(body.startsWith('---\n')).toBeTruthy();
+  expect(body).toMatch(/title: Do the thing/);
+  expect(body).toMatch(/cwd: ~\/Projects\/session-manager/);
+  expect(body).toMatch(/estimateMinutes: 15/);
 
   const goalIdx = body.indexOf('# Goal');
   const acIdx = body.indexOf('# Acceptance criteria');
   const implIdx = body.indexOf('# Implementation notes');
   const oosIdx = body.indexOf('# Out of scope');
   const standardsIdx = body.indexOf('## Engineering standards');
-  assert.ok(goalIdx > 0 && goalIdx < acIdx && acIdx < implIdx && implIdx < oosIdx && oosIdx < standardsIdx,
-    'sections must appear in Goal -> AC -> Implementation notes -> Out of scope -> Engineering standards order');
+  // sections must appear in Goal -> AC -> Implementation notes -> Out of scope -> Engineering standards order
+  expect(goalIdx > 0 && goalIdx < acIdx && acIdx < implIdx && implIdx < oosIdx && oosIdx < standardsIdx).toBeTruthy();
 
-  assert.match(body, /- \[ \] thing exists/);
-  assert.match(body, /- \[ \] tests pass/);
-  assert.match(body, /- not this/);
-  assert.ok(body.includes('Execution discipline'), 'must inline the standards.md content verbatim');
+  expect(body).toMatch(/- \[ \] thing exists/);
+  expect(body).toMatch(/- \[ \] tests pass/);
+  expect(body).toMatch(/- not this/);
+  // must inline the standards.md content verbatim
+  expect(body.includes('Execution discipline')).toBeTruthy();
 });
 
 test('buildPrdBody omits parallelGroup frontmatter key when not supplied', () => {
@@ -69,14 +78,240 @@ test('buildPrdBody omits parallelGroup frontmatter key when not supplied', () =>
     title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
     acceptanceCriteria: ['a'], implementationNotes: 'n',
   }, 'standards text');
-  assert.ok(!/parallelGroup:/.test(body));
+  expect(!/parallelGroup:/.test(body)).toBeTruthy();
 });
 
 test('readStandards result is byte-identical to the on-disk file (single source of truth)', async () => {
-  const path = require('node:path');
   const onDisk = fs.readFileSync(
     path.join(__dirname, '..', '..', '..', 'plugins', 'session-manager-dev', 'skills', 'develop', 'standards.md'),
     'utf8',
   );
-  assert.strictEqual(await readStandards(), onDisk);
+  expect(await readStandards()).toBe(onDisk);
+});
+
+// ──────────────────────────────────────────── create-prd admin route
+
+function request(port, { method = 'GET', path: reqPath, token, body }) {
+  return new Promise((resolve, reject) => {
+    const headers = {};
+    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+    let payload;
+    if (body !== undefined) {
+      payload = JSON.stringify(body);
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(payload);
+    }
+    const req = http.request({ hostname: '127.0.0.1', port, method, path: reqPath, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* leave null for non-JSON bodies */ }
+        resolve({ status: res.statusCode, json, text });
+      });
+    });
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+// config.cjs's validateWrite only allows writes under a registered non-home
+// allowedRoot's `.claude/` subtree (mirrors the real ROOT layout, which is
+// $HOME/.claude/session-manager/...) — so the temp prdsDir must live under
+// `<root>/.claude/...`, not directly under the temp root itself.
+async function mkTmpPrdsDir() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-admin-create-prd-'));
+  config.addAllowedRoot(root);
+  const prdsDir = path.join(root, '.claude', 'prds');
+  await fsp.mkdir(prdsDir, { recursive: true });
+  return prdsDir;
+}
+
+// Mirrors scheduler.cjs's real `remote.allocateParallelGroup` / `remote.writePrd`
+// (same underlying prdParser.allocateParallelGroup + config.writeTextAtomic
+// calls) but pointed at a throwaway temp dir instead of the user's real
+// scheduled-plans/prds — so these tests never touch $HOME/.claude.
+function makeFakeRemoteWithPrdsDir(prdsDir) {
+  return {
+    async allocateParallelGroup() {
+      return prdParser.allocateParallelGroup(prdsDir);
+    },
+    async readPrd(slug) {
+      try {
+        const text = await fsp.readFile(path.join(prdsDir, `${slug}.md`), 'utf8');
+        return { ok: true, text };
+      } catch (e) {
+        return { ok: false, error: e?.message };
+      }
+    },
+    async writePrd(slug, body) {
+      try {
+        const filePath = path.join(prdsDir, `${slug}.md`);
+        await config.writeTextAtomic(filePath, body);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e?.message };
+      }
+    },
+  };
+}
+
+function validCreateBody(overrides = {}) {
+  return {
+    title: 'Add widget frobnication',
+    cwd: os.homedir(),
+    estimateMinutes: 15,
+    goal: 'Add frobnication to the widget subsystem.',
+    acceptanceCriteria: ['widget frobnicates on click', 'timeout 300 npm run typecheck passes'],
+    implementationNotes: 'See src/widget.cjs:10.',
+    outOfScope: ['not touching gadgets'],
+    ...overrides,
+  };
+}
+
+async function startWithRemote(remote) {
+  const admin = createAdminHttp();
+  registerAdminRoute(admin, remote);
+  const { port, token } = await admin.start();
+  return { admin, port, token };
+}
+
+test('POST /admin/scheduler/create-prd without token returns 401', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', body: validCreateBody(),
+    });
+    expect(res.status).toBe(401);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd with a valid payload writes a file with frontmatter + standards appended, returns {nn, filename, status}', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token, body: validCreateBody(),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.status).toBe('queued');
+    expect(typeof res.json.nn).toBe('number');
+    expect(res.json.filename).toMatch(/^\d+-add-widget-frobnication\.md$/);
+
+    const written = await fsp.readFile(path.join(prdsDir, res.json.filename), 'utf8');
+    expect(written).toMatch(/^---\n/);
+    expect(written).toMatch(/title: Add widget frobnication/);
+    expect(written).toMatch(/cwd: .+/);
+    expect(written).toMatch(/estimateMinutes: 15/);
+    expect(written).toMatch(/# Goal/);
+    expect(written).toMatch(/# Acceptance criteria/);
+    expect(written).toMatch(/- \[ \] widget frobnicates on click/);
+    expect(written).toMatch(/# Implementation notes/);
+    expect(written).toMatch(/# Out of scope/);
+    expect(written).toMatch(/## Engineering standards/);
+    // must inline standards.md verbatim
+    expect(written.includes('Execution discipline')).toBeTruthy();
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd with malformed frontmatter (missing acceptanceCriteria) is rejected and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const body = validCreateBody();
+    delete body.acceptanceCriteria;
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token, body,
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
+    const entries = await fsp.readdir(prdsDir);
+    expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd with cwd outside allowed roots is rejected and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token,
+      body: validCreateBody({ cwd: '/etc/passwd-adjacent-outside-home' }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
+    const entries = await fsp.readdir(prdsDir);
+    expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd rejects a title containing a newline (frontmatter-injection guard) and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token,
+      body: validCreateBody({ title: 'Legit title\n---\nEvil: injected' }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
+    const entries = await fsp.readdir(prdsDir);
+    expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd with an explicit parallelGroup+slug that already exists on disk returns 409 and does not clobber the file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    await fsp.writeFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'ORIGINAL CONTENT\n');
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token,
+      body: validCreateBody({ slug: 'my-explicit-slug', parallelGroup: 777 }),
+    });
+    expect(res.status).toBe(409);
+    expect(res.json.ok).toBe(false);
+    const stillThere = await fsp.readFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'utf8');
+    // existing PRD file must not be overwritten
+    expect(stillThere).toBe('ORIGINAL CONTENT\n');
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd honors an explicit slug + parallelGroup instead of deriving/allocating', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token,
+      body: validCreateBody({ slug: 'my-explicit-slug', parallelGroup: 777 }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.nn).toBe(777);
+    expect(res.json.filename).toBe('777-my-explicit-slug.md');
+    expect(fs.existsSync(path.join(prdsDir, '777-my-explicit-slug.md'))).toBeTruthy();
+  } finally {
+    await admin.stop();
+  }
 });

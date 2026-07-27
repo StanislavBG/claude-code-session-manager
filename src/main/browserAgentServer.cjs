@@ -2,16 +2,17 @@
  * browserAgentServer.cjs — loopback-only HTTP API for driving the Browser
  * tab one ad-hoc action at a time (PRD 535 foundation).
  *
- * Deliberately a SEPARATE server from adminServer.cjs, not a route added to
- * it: adminServer.cjs documents itself as intentionally narrow ("Only two
- * routes... writePrd/pause/resume are intentionally NOT exposed here").
- * Arbitrary click/type/navigate/screenshot control of a live browser is a
- * materially larger capability surface than "reset one scheduler job" and
- * deserves its own security boundary, not creeping scope onto the existing
- * narrow one. A future MCP server (PRD 536) wraps this HTTP API the same way
- * scripts/scheduler-mcp-server.cjs wraps adminServer.cjs.
+ * Deliberately a SEPARATE server from the scheduler's admin HTTP API
+ * (src/main/lib/localAdminHttp.cjs + scheduler.cjs's registerAdminRoutes),
+ * not a route added to it: that admin API documents itself as intentionally
+ * narrow ("Only two routes... writePrd/pause/resume are intentionally NOT
+ * exposed here"). Arbitrary click/type/navigate/screenshot control of a live
+ * browser is a materially larger capability surface than "reset one
+ * scheduler job" and deserves its own security boundary, not creeping scope
+ * onto the existing narrow one. A future MCP server (PRD 536) wraps this
+ * HTTP API the same way scripts/scheduler-mcp-server.cjs wraps the admin API.
  *
- * Security posture (mirrors adminServer.cjs exactly):
+ * Security posture (mirrors the scheduler's admin API exactly):
  *   - Binds 127.0.0.1 only, OS-assigned ephemeral port. Never reachable
  *     off-box.
  *   - Bearer token, regenerated every app boot, written to
@@ -39,7 +40,7 @@ const fsp = require('node:fs/promises');
 const config = require('./config.cjs');
 
 const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'browser-agent-api.json');
-// Screenshots are base64 PNG data URLs — bigger cap than adminServer's 1MB,
+// Screenshots are base64 PNG data URLs — bigger cap than the admin API's 1MB,
 // still bounded so a malformed/malicious body can't exhaust memory.
 const BODY_MAX_BYTES = 8 * 1024 * 1024;
 

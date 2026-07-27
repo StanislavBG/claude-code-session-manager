@@ -63,6 +63,7 @@ const prdParser = require('./scheduler/prdParser.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated } = require('./ipcSchemas.cjs');
+const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
 const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
@@ -3299,7 +3300,7 @@ const remote = {
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that
-  // only hold the `remote` object (adminServer.cjs's create-prd route) —
+  // only hold the `remote` object (lib/prdCreate.cjs's create-prd route) —
   // reuses the same allocator the file-based /develop authoring path relies
   // on implicitly, rather than re-deriving NN here.
   allocateParallelGroup,
@@ -3327,4 +3328,36 @@ const remote = {
   },
 };
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback };
+// Registers the two job-management admin HTTP routes (PRD 689 — moved
+// verbatim out of the former standalone admin HTTP server module's
+// handleRequest, no behavior change) against an injected localAdminHttp.cjs
+// transport. `remoteObj` is accepted as a parameter (defaults to this
+// module's own `remote`) so the route logic stays testable in isolation
+// without booting Electron, matching that former module's original
+// dependency-injection pattern.
+function registerAdminRoutes(adminHttp, remoteObj = remote) {
+  adminHttp.registerRoute('GET', '/admin/scheduler/jobs', async (req, res) => {
+    const jobs = await remoteObj.listJobs();
+    sendJson(res, 200, jobs);
+  });
+
+  adminHttp.registerRoute('POST', '/admin/scheduler/reset-job', async (req, res) => {
+    const raw = await readBody(req);
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    const slug = typeof parsed.slug === 'string' ? parsed.slug : null;
+    if (!slug) {
+      sendJson(res, 400, { ok: false, error: 'missing slug' });
+      return;
+    }
+    const result = await remoteObj.resetJob(slug);
+    sendJson(res, 200, result);
+  });
+}
+
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes };

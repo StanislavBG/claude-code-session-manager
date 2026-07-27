@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * scheduler-mcp-server.cjs — stdio MCP server wrapping PRD 448's loopback
- * admin HTTP API (src/main/adminServer.cjs). Exposes two tools:
+ * admin HTTP API (src/main/lib/localAdminHttp.cjs). Exposes two tools:
  *
  *   scheduler_reset_job({ slug }) -> POST /admin/scheduler/reset-job
  *   scheduler_list_jobs()         -> GET  /admin/scheduler/jobs
@@ -10,7 +10,7 @@
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
- * requiring scheduler.cjs/adminServer.cjs directly. The admin server IS the
+ * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin server IS the
  * security boundary; this file stays on the client side of it.
  */
 

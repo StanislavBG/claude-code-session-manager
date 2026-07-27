@@ -46,9 +46,12 @@
 .markdown-body li { margin: 0.2rem 0; line-height: 1.6; }
 .markdown-body li > input[type="checkbox"] { margin-right: 0.4rem; }
 .markdown-body blockquote { border-left: 3px solid #d9c9a8; padding-left: 0.85rem; color: #5b4a36; margin: 0.6rem 0; font-style: italic; }
-.markdown-body code { background: #fbf6ec; color: #b85c34; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: 'IBM Plex Mono', ui-monospace, monospace; border: 1px solid #e0d3b8; }
-.markdown-body pre  { background: #fbf6ec; color: #2a221a; padding: 0.8rem 1rem; border-radius: 6px; overflow-x: auto; margin: 0.7rem 0; font-size: 0.85em; font-family: 'IBM Plex Mono', ui-monospace, monospace; border: 1px solid #e0d3b8; }
-.markdown-body pre code { background: none; padding: 0; color: inherit; font-size: inherit; border: 0; }
+/* Inline code / code blocks are shared by the Editor's markdown preview
+ * (.markdown-body) and assistant chat turns (.prose-chat, TerminalChat.tsx) —
+ * one rule, two call sites, same pattern as the table rule below. */
+.markdown-body code, .prose-chat code { background: #fbf6ec; color: #b85c34; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: 'IBM Plex Mono', ui-monospace, monospace; border: 1px solid #e0d3b8; }
+.markdown-body pre, .prose-chat pre  { background: #fbf6ec; color: #2a221a; padding: 0.8rem 1rem; border-radius: 6px; overflow-x: auto; margin: 0.7rem 0; font-size: 0.85em; font-family: 'IBM Plex Mono', ui-monospace, monospace; border: 1px solid #e0d3b8; }
+.markdown-body pre code, .prose-chat pre code { background: none; padding: 0; color: inherit; font-size: inherit; border: 0; }
 .markdown-body a   { color: #b85c34; text-decoration: underline; }
 .markdown-body hr  { border: none; border-top: 1px solid #d9c9a8; margin: 1rem 0; }
 .markdown-body strong { font-weight: 600; }
@@ -66,6 +69,10 @@
  * a wide table scrolls itself instead of forcing the chat column to overflow. */
 .prose-chat-table-wrap { overflow-x: auto; }
 .markdown-body h1[id], .markdown-body h2[id], .markdown-body h3[id] { scroll-margin-top: 1rem; }
+/* Bare file-path mentions linkified by chatFileLinks.ts's post-process DOM walk
+ * (TerminalChat.tsx) — dotted underline distinguishes them from marked's real
+ * <a> links (solid underline, .markdown-body a above). */
+.prose-chat .chat-file-link { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; color: #b85c34; }
 
 /* PlanCard-style treatment for assistant chat turns whose markdown contains a list
  * (TerminalChat.tsx Turn()) — read-only presentational weight, no interactive state. */

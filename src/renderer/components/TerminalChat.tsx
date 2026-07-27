@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { linkifyFilePaths } from '../lib/chatFileLinks'
 import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
@@ -261,7 +262,26 @@ function ChatSessionRail({
   )
 }
 
-function Turn({ turn, runActive = false }: { turn: ChatTurn; runActive?: boolean }) {
+function Turn({
+  turn,
+  cwd,
+  runActive = false,
+}: {
+  turn: ChatTurn
+  cwd: string
+  runActive?: boolean
+}) {
+  // Declared unconditionally (rules of hooks) even though only the assistant
+  // 'text' branch below uses them — the early returns for other turn roles
+  // happen after these hooks run.
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const presentation = turn.role === 'assistant' ? assistantTurnPresentation(turn, runActive) : null
+  useEffect(() => {
+    if (turn.role === 'assistant' && presentation === 'text' && bodyRef.current) {
+      linkifyFilePaths(bodyRef.current)
+    }
+  }, [turn.role, presentation, turn.text])
+
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -312,7 +332,6 @@ function Turn({ turn, runActive = false }: { turn: ChatTurn; runActive?: boolean
   // against empty text (e.g. a resumed turn that opens with a non-rendered
   // thinking block before any visible text arrives — see
   // session-manager-operations/feedback/2026-07-21-chat-empty-assistant-bubble.md).
-  const presentation = assistantTurnPresentation(turn, runActive)
   if (presentation === 'suppress') return null
 
   const urls = extractUrls(turn.text)
@@ -338,8 +357,9 @@ function Turn({ turn, runActive = false }: { turn: ChatTurn; runActive?: boolean
         ) : (
           <>
             <div
+              ref={bodyRef}
               className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
-              onClick={handleChatLinkClick}
+              onClick={(e) => { void handleChatLinkClick(e, cwd) }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
             />
@@ -545,7 +565,12 @@ export function TerminalChat({ tabId, cwd }: Props) {
             </div>
           )}
           {turns.map((t, i) => (
-            <Turn key={t.id} turn={t} runActive={running && t.role === 'assistant' && i === turns.length - 1} />
+            <Turn
+              key={t.id}
+              turn={t}
+              cwd={cwd}
+              runActive={running && t.role === 'assistant' && i === turns.length - 1}
+            />
           ))}
           {running && (
             <div className="max-w-[90%]">

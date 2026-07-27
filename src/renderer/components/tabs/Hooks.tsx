@@ -349,14 +349,25 @@ export function Hooks() {
                     <button
                       onClick={() => setSelectedEvent(ev)}
                       title={doc?.when}
-                      className={`w-full text-left px-3 py-1 text-xs flex items-center justify-between ${
+                      className={`w-full text-left px-3 py-1 text-xs ${
                         selectedEvent === ev
                           ? 'bg-bg-hi text-fg'
                           : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
                       }`}
                     >
-                      <span className="truncate">{ev}</span>
-                      {count > 0 && <span className="text-accent shrink-0 ml-2">{count}</span>}
+                      <div className="flex items-center justify-between">
+                        <span className="truncate">{ev}</span>
+                        {count > 0 && <span className="text-accent shrink-0 ml-2">{count}</span>}
+                      </div>
+                      {doc ? (
+                        <span className="block text-[11px] leading-[1.3] text-fg-faint/80 font-normal truncate">
+                          {doc.when}
+                        </span>
+                      ) : (
+                        <span className="block text-[11px] leading-[1.3] text-fg-faint/80 italic font-normal truncate">
+                          no documentation yet
+                        </span>
+                      )}
                     </button>
                   </Tooltip>
                 </div>

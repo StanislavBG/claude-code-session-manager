@@ -36,6 +36,8 @@ interface McpServer {
   headers?: Record<string, string>
   /** v2.1.121: bypass tool-search deferral, always load the server. */
   alwaysLoad?: boolean
+  /** Not a Claude Code config field — session-manager-only, user-set purpose blurb. */
+  description?: string
   /** Hide this server without removing it. */
   enabled?: boolean
   /** Per-server tool denylist surfaced in /mcp. */
@@ -284,25 +286,33 @@ export function McpServers() {
             ) : (
               names.filter((n) => !filter || n.toLowerCase().includes(filter.toLowerCase())).map((n) => {
                 const conn = deriveMcpConnectionState(n, probe)
+                const description = servers[n].description?.trim()
                 return (
                   <button
                     key={n}
                     onClick={() => setSelectedName(n)}
-                    className={`w-full text-left px-3 py-1 text-xs flex items-center gap-2 justify-between ${
+                    className={`w-full text-left px-3 py-1 text-xs flex flex-col gap-0.5 ${
                       selectedName === n
                         ? 'bg-bg-hi text-fg'
                         : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
                     }`}
                   >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <StatusDot state={conn.dotState} title={conn.label} />
-                      <span className="truncate">{n}</span>
+                    <span className="flex items-center gap-2 justify-between w-full">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <StatusDot state={conn.dotState} title={conn.label} />
+                        <span className="truncate">{n}</span>
+                      </span>
+                      <span className="ml-2 flex items-center gap-2 shrink-0">
+                        <Badge tone={conn.badgeTone}>{conn.label}</Badge>
+                        <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
+                        <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
+                      </span>
                     </span>
-                    <span className="ml-2 flex items-center gap-2 shrink-0">
-                      <Badge tone={conn.badgeTone}>{conn.label}</Badge>
-                      <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
-                      <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>
-                    </span>
+                    {description ? (
+                      <span className="pl-5 text-fg-faint truncate" title={description}>
+                        {description}
+                      </span>
+                    ) : null}
                   </button>
                 )
               })
@@ -392,6 +402,12 @@ function McpServerEditor({
           delete
         </button>
       </div>
+      <Field
+        label="description"
+        value={server.description ?? ''}
+        onChange={(v) => onChange({ ...server, description: v || undefined })}
+        placeholder="what this server does…"
+      />
       {isReserved ? (
         <div className="text-xs px-2 py-1 border border-red-500/50 rounded text-red-300 bg-red-500/5">
           ⚠ <span className="font-mono">{name}</span> is a reserved name — Claude Code will refuse to load this server (v2.1.128+).

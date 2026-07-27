@@ -122,7 +122,21 @@ export function Plugins() {
   }, [home])
 
   const columns: Column<PluginRow>[] = [
-    { key: 'name', header: 'name', render: (r) => r.name, width: '12rem' },
+    {
+      key: 'name',
+      header: 'name',
+      render: (r) => (
+        <div style={{ maxWidth: '16rem' }}>
+          <div className="truncate">{r.name}</div>
+          {r.manifest?.description ? (
+            <div className="truncate text-fg-faint" title={r.manifest.description}>
+              {r.manifest.description}
+            </div>
+          ) : null}
+        </div>
+      ),
+      width: '16rem',
+    },
     {
       key: 'origin',
       header: 'origin',

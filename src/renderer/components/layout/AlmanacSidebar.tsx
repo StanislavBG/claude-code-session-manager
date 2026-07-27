@@ -22,7 +22,7 @@ import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { VoiceButton } from '../VoiceButton'
 import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
-import { NAV_ITEMS, type NavGroupItem } from '../../lib/navGroups'
+import { NAV_ITEMS, NAV_GROUP_DESCRIPTIONS, type NavGroupItem } from '../../lib/navGroups'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -190,6 +190,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
           {!rail && (
             <NavGroupHeader
               label="Workspace"
+              desc={NAV_GROUP_DESCRIPTIONS.Workspace}
               collapsed={collapsed.has('Workspace')}
               count={WORKSPACE.length}
               onToggle={() => toggleGroup('Workspace')}
@@ -209,6 +210,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
           {!rail && (
             <NavGroupHeader
               label="Configure"
+              desc={NAV_GROUP_DESCRIPTIONS.Configure}
               collapsed={collapsed.has('Configure')}
               count={CONFIGURE.length}
               onToggle={() => toggleGroup('Configure')}
@@ -228,6 +230,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
           {!rail && (
             <NavGroupHeader
               label="Tools"
+              desc={NAV_GROUP_DESCRIPTIONS.Tools}
               collapsed={collapsed.has('Tools')}
               count={TOOLS.length}
               onToggle={() => toggleGroup('Tools')}
@@ -343,29 +346,36 @@ function ProjectCaption({
 }
 
 function NavGroupHeader({
-  label, collapsed, count, onToggle,
-}: { label: string; collapsed: boolean; count: number; onToggle: () => void }) {
+  label, desc, collapsed, count, onToggle,
+}: { label: string; desc: string; collapsed: boolean; count: number; onToggle: () => void }) {
   return (
-    <button
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-      title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
-      className="group w-full flex items-center gap-1.5 px-3 pt-3.5 pb-1.5 font-serif italic text-[11px] font-bold tracking-[0.07em] uppercase text-fg-faint hover:text-fg-dim transition-colors text-left"
-    >
-      <span
-        aria-hidden
-        className="inline-block w-2 text-[9px] not-italic transition-transform"
-        style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+    <div className="px-3 pt-3.5 pb-1.5">
+      <button
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+        className="group w-full flex items-center gap-1.5 font-serif italic text-[11px] font-bold tracking-[0.07em] uppercase text-fg-faint hover:text-fg-dim transition-colors text-left"
       >
-        ▾
-      </span>
-      <span className="flex-1">{label}</span>
-      {collapsed && (
-        <span className="not-italic text-[10px] font-mono text-fg-faint/70 normal-case tracking-normal">
-          {count}
+        <span
+          aria-hidden
+          className="inline-block w-2 text-[9px] not-italic transition-transform"
+          style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+        >
+          ▾
         </span>
+        <span className="flex-1">{label}</span>
+        {collapsed && (
+          <span className="not-italic text-[10px] font-mono text-fg-faint/70 normal-case tracking-normal">
+            {count}
+          </span>
+        )}
+      </button>
+      {!collapsed && (
+        <p className="mt-0.5 pl-3.5 text-[11px] leading-[1.35] text-fg-faint/80 normal-case tracking-normal font-sans not-italic line-clamp-2">
+          {desc}
+        </p>
       )}
-    </button>
+    </div>
   )
 }
 
@@ -388,13 +398,22 @@ function NavRow({
       {active && (
         <span
           aria-hidden
-          className={`absolute top-3 bottom-3 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
+          className={`absolute top-2 bottom-2 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
         />
       )}
       <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
         <AlmanacIcon name={item.icon} size={17} stroke={1.6} />
       </span>
-      {!rail && <span className="flex-1 truncate">{item.label}</span>}
+      {!rail && (
+        <span className="flex-1 min-w-0">
+          <span className="block truncate">{item.label}</span>
+          {item.hint && (
+            <span className="block text-[11px] leading-[1.3] text-fg-faint/80 font-normal truncate">
+              {item.hint}
+            </span>
+          )}
+        </span>
+      )}
       {!rail && live && (
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="live activity" />
       )}
@@ -421,13 +440,22 @@ function ToolRow({ tool, active, onClick, rail }: { tool: ToolItem; active: bool
       {active && (
         <span
           aria-hidden
-          className={`absolute top-2 bottom-2 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
+          className={`absolute top-1.5 bottom-1.5 w-[3px] rounded-sm bg-accent ${rail ? '-left-[4px]' : '-left-[10px]'}`}
         />
       )}
       <span className={`inline-flex ${active ? 'text-accent' : 'text-fg-faint'}`}>
         <AlmanacIcon name={tool.icon} size={15} stroke={1.6} />
       </span>
-      {!rail && <span className="flex-1 truncate">{tool.label}</span>}
+      {!rail && (
+        <span className="flex-1 min-w-0">
+          <span className="block truncate">{tool.label}</span>
+          {tool.hint && (
+            <span className="block text-[11px] leading-[1.3] text-fg-faint/80 font-normal truncate">
+              {tool.hint}
+            </span>
+          )}
+        </span>
+      )}
     </button>
   )
 }

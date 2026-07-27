@@ -54,3 +54,9 @@ export const NAV_ITEMS: NavGroupItem[] = [
 export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = Object.fromEntries(
   NAV_ITEMS.map((item) => [item.key, item.group]),
 )
+
+export const NAV_GROUP_DESCRIPTIONS: Record<NavGroupLabel, string> = {
+  Workspace: 'Where you do the work — sessions, files, and everything currently running.',
+  Configure: 'How Claude behaves — changes here apply to every session you start.',
+  Tools: 'One-off utilities — not configuration, just things you reach for sometimes.',
+}

@@ -236,3 +236,27 @@ export function planGroups(allKeys: Set<string>): GroupPlan[] {
   }
   return plans
 }
+
+/** One row of the Guided view's group-map rail: identity + a "set/total" count. */
+export interface GroupRailEntry {
+  id: string
+  title: string
+  advanced: boolean
+  total: number
+  setCount: number
+}
+
+/**
+ * Rail entries for the Guided view's persistent group-map — one per group
+ * plan (see planGroups), with a count of how many of that group's keys are
+ * actually configured (present in `presentKeys`) out of its total.
+ */
+export function planGroupRail(allKeys: Set<string>, presentKeys: Set<string>): GroupRailEntry[] {
+  return planGroups(allKeys).map((g) => ({
+    id: g.id,
+    title: g.title,
+    advanced: g.advanced,
+    total: g.keys.length,
+    setCount: g.keys.filter((k) => presentKeys.has(k)).length,
+  }))
+}

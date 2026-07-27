@@ -1,9 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Scope } from '../../lib/scopes'
 import { SCOPE_LABELS } from '../../lib/scopes'
 import type { EffectiveNode, LeafNode } from '../../lib/mergeScopes'
 import type { SchemaResolver, SchemaInfo } from '../../lib/schemaLookup'
-import { planGroups, humanizeKey } from '../../lib/settingsGroups'
+import { planGroups, planGroupRail, humanizeKey, type GroupRailEntry } from '../../lib/settingsGroups'
+import { resolveSettingDescription } from '../../lib/settingsDescriptionFallbacks'
+import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
+
+/** Judgment-call icon per settings group id; 'other' is planGroups' dynamic fallback bucket. */
+const GROUP_ICONS: Record<string, AlmanacIconName> = {
+  essentials: 'star',
+  git: 'link',
+  memory: 'memory',
+  model: 'sparkle',
+  interface: 'eye',
+  updates: 'reload',
+  env: 'keys',
+  hooks: 'hooks',
+  mcp: 'mcp',
+  plugins: 'plugins',
+  filesystem: 'folder',
+  login: 'lock',
+  feedback: 'send',
+  advanced: 'shield',
+  other: 'dot',
+}
 
 type OnOverride = (path: string[], value: unknown, intoScope?: Scope) => void
 
@@ -46,6 +67,28 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
   const allKeys = new Set<string>([...presentKeys, ...knownKeys])
 
   const groups = useMemo(() => planGroups(allKeys), [Array.from(allKeys).sort().join(',')])
+
+  const railGroups = useMemo(
+    () => planGroupRail(allKeys, new Set(presentKeys)),
+    [Array.from(allKeys).sort().join(','), presentKeys.join(',')],
+  )
+
+  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null)
+
+  const jumpToGroup = (id: string) => {
+    const target = groups.find((g) => g.id === id)
+    if (target?.advanced && !showAdvanced) setShowAdvanced(true)
+    setPendingScrollId(id)
+  }
+
+  useEffect(() => {
+    if (!pendingScrollId) return
+    const el = document.getElementById(`settings-group-${pendingScrollId}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setPendingScrollId(null)
+    }
+  })
 
   const visibleGroups = useMemo(() => {
     return groups
@@ -97,48 +140,87 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
           className="bg-bg border border-line rounded px-2 py-1 text-xs text-fg w-64"
         />
       </div>
-      <div className="flex-1 overflow-auto">
-        {visibleGroups.map((g) => (
-          <Section
-            key={g.id}
-            title={g.title}
-            summary={g.summary}
-            advanced={g.advanced}
-          >
-            {g.keys.map((k) => {
-              const child = rootNode?.children[k]
-              const info = schema.at([k])
-              return (
-                <SettingCard
-                  key={k}
-                  keyName={k}
-                  node={child}
-                  info={info}
-                  targetScope={targetScope}
-                  onOverride={(v, intoScope) => onOverride([k], v, intoScope)}
-                />
-              )
-            })}
-          </Section>
-        ))}
-        {visibleGroups.length === 0 && (
-          <div className="px-6 py-12 text-center text-fg-faint text-sm">
-            no settings match "{filter}"
-          </div>
-        )}
+      <div className="flex-1 flex overflow-hidden">
+        <GroupRail groups={railGroups} onJump={jumpToGroup} />
+        <div className="flex-1 overflow-auto py-3">
+          {visibleGroups.map((g) => (
+            <Section
+              key={g.id}
+              id={g.id}
+              title={g.title}
+              summary={g.summary}
+              advanced={g.advanced}
+            >
+              {g.keys.map((k) => {
+                const child = rootNode?.children[k]
+                const info = schema.at([k])
+                return (
+                  <SettingCard
+                    key={k}
+                    keyName={k}
+                    node={child}
+                    info={info}
+                    targetScope={targetScope}
+                    onOverride={(v, intoScope) => onOverride([k], v, intoScope)}
+                  />
+                )
+              })}
+            </Section>
+          ))}
+          {visibleGroups.length === 0 && (
+            <div className="px-6 py-12 text-center text-fg-faint text-sm">
+              no settings match "{filter}"
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  )
+}
+
+/* ------------------------------------------------------------- GroupRail */
+
+function GroupRail({
+  groups,
+  onJump,
+}: {
+  groups: GroupRailEntry[]
+  onJump: (id: string) => void
+}) {
+  return (
+    <nav className="shrink-0 w-48 border-r border-line bg-bg-elev/30 overflow-y-auto py-3">
+      {groups.map((g) => (
+        <button
+          key={g.id}
+          onClick={() => onJump(g.id)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-hi transition-colors"
+          title={`jump to ${g.title}`}
+        >
+          <AlmanacIcon
+            name={GROUP_ICONS[g.id] ?? 'dot'}
+            size={15}
+            className="text-fg-faint shrink-0"
+          />
+          <span className="flex-1 min-w-0 truncate text-xs text-fg-dim">{g.title}</span>
+          <span className="text-[10px] text-fg-faint font-mono shrink-0">
+            {g.setCount}/{g.total}
+          </span>
+        </button>
+      ))}
+    </nav>
   )
 }
 
 /* ---------------------------------------------------------------- Section */
 
 function Section({
+  id,
   title,
   summary,
   advanced,
   children,
 }: {
+  id: string
   title: string
   summary: string
   advanced?: boolean
@@ -146,22 +228,25 @@ function Section({
 }) {
   const [open, setOpen] = useState(true)
   return (
-    <section className="border-b border-line">
+    <section
+      id={`settings-group-${id}`}
+      className="mx-4 mb-4 rounded-lg border border-line shadow-sm bg-bg-elev/50 overflow-hidden"
+    >
       <header
-        className="px-4 py-2.5 bg-bg-elev/40 cursor-pointer hover:bg-bg-elev flex items-center gap-3"
+        className="px-4 py-3 bg-bg-elev cursor-pointer hover:bg-bg-hi flex items-center gap-3 border-b border-line"
         onClick={() => setOpen(!open)}
       >
         <span className="text-fg-faint w-3">{open ? '▾' : '▸'}</span>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-fg text-sm font-medium">{title}</h2>
+            <h2 className="text-fg text-base font-semibold">{title}</h2>
             {advanced && (
               <span className="text-[9px] px-1.5 py-0 rounded border border-yellow-900/40 bg-yellow-950/30 text-yellow-500/80 uppercase tracking-wide">
                 advanced
               </span>
             )}
           </div>
-          <p className="text-fg-faint text-xs">{summary}</p>
+          <p className="text-fg-dim text-sm mt-0.5">{summary}</p>
         </div>
       </header>
       {open && <div className="divide-y divide-line/60">{children}</div>}
@@ -208,6 +293,8 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
   // that's the winner. Only show when effective != default (otherwise the
   // value already matches the schema default).
   const canReset = !!leafNode && !isDefault
+
+  const description = resolveSettingDescription(keyName, info?.description)
 
   return (
     <div className="px-4 py-3 hover:bg-bg-elev/20">
@@ -262,9 +349,18 @@ function SettingCard({ keyName, node, info, targetScope, onOverride }: CardProps
               </span>
             )}
           </div>
-          {info?.description && (
-            <p className="text-fg-dim text-xs mt-0.5 leading-relaxed">
-              {firstSentence(info.description)}
+          {description && (
+            <p
+              className={`text-fg-dim text-xs mt-0.5 leading-relaxed ${
+                description.authored ? 'inline-block border-b border-dotted border-fg-faint/70 cursor-help' : ''
+              }`}
+              title={
+                description.authored
+                  ? 'In-app-authored description — not from the official Claude Code schema'
+                  : undefined
+              }
+            >
+              {firstSentence(description.text)}
             </p>
           )}
           {expanded && driftOpen && leafNode && (
@@ -391,10 +487,22 @@ function CardDetails({
 }) {
   const isLeaf = node?.kind === 'leaf'
   const leaf = isLeaf ? (node as LeafNode) : null
+  const description = resolveSettingDescription(keyName, info?.description)
   return (
     <div className="mt-3 space-y-2 text-xs">
-      {info?.description && (
-        <p className="text-fg-dim leading-relaxed whitespace-pre-wrap">{info.description}</p>
+      {description && (
+        <p
+          className={`text-fg-dim leading-relaxed whitespace-pre-wrap ${
+            description.authored ? 'inline-block border-b border-dotted border-fg-faint/70 cursor-help' : ''
+          }`}
+          title={
+            description.authored
+              ? 'In-app-authored description — not from the official Claude Code schema'
+              : undefined
+          }
+        >
+          {description.text}
+        </p>
       )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-fg-faint">
         {info?.type && (

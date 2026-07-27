@@ -13,7 +13,7 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { SkillsLibrary, ViewSwitcher } from './Library'
-import { readSkillDisabled, setSkillDisabled } from '../../lib/skillFrontmatter'
+import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
 
 type Kind = 'skills' | 'commands'
@@ -35,6 +35,8 @@ interface Item {
   dir: string | null
   /** Skills only: `disable-model-invocation: true` in frontmatter. */
   disabled: boolean
+  /** Skills only: `description` frontmatter field, if present. */
+  description?: string
 }
 
 export function Skills() {
@@ -78,6 +80,7 @@ export function Skills() {
             path: `${e.path}/SKILL.md`,
             dir: e.path,
             disabled: readSkillDisabled(directSkill.text),
+            description: parseSkillMeta(directSkill.text).description ?? undefined,
           })
         } else {
           // Namespace dir — scan one level deeper.
@@ -92,6 +95,7 @@ export function Skills() {
                 path: `${ne.path}/SKILL.md`,
                 dir: ne.path,
                 disabled: readSkillDisabled(nestedSkill.text),
+                description: parseSkillMeta(nestedSkill.text).description ?? undefined,
               })
             }
           }
@@ -294,13 +298,18 @@ export function Skills() {
                         >
                           <button
                             onClick={() => setSelectedPath(i.path)}
-                            className={`flex-1 min-w-0 text-left truncate ${
-                              i.disabled ? 'line-through opacity-50' : ''
-                            }`}
-                            title={i.disabled ? 'Disabled — Claude will not auto-invoke this skill' : undefined}
+                            className="flex-1 min-w-0 text-left"
                           >
-                            {i.kind === 'commands' ? '/' : ''}
-                            {i.name}
+                            <div
+                              className={`truncate ${i.disabled ? 'line-through opacity-50' : ''}`}
+                              title={i.disabled ? 'Disabled — Claude will not auto-invoke this skill' : undefined}
+                            >
+                              {i.kind === 'commands' ? '/' : ''}
+                              {i.name}
+                            </div>
+                            {i.description && (
+                              <div className="truncate text-fg-faint">{i.description}</div>
+                            )}
                           </button>
                           <div className="flex items-center gap-2 shrink-0">
                             <ProvenanceBadge

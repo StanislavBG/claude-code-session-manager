@@ -8,6 +8,7 @@ import { decideSubmitAction } from '../lib/slashCommand'
 import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
+import { handleChatLinkClick } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import type { NavKey } from './LeftNav'
 
@@ -338,6 +339,7 @@ function Turn({ turn, runActive = false }: { turn: ChatTurn; runActive?: boolean
           <>
             <div
               className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
+              onClick={handleChatLinkClick}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
             />

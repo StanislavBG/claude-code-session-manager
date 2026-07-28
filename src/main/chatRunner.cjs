@@ -607,7 +607,13 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       settle();
     });
 
-    child.on('exit', (code, signal) => {
+    // 'close' (not 'exit') so this fallback only runs after Node guarantees
+    // every buffered stdout 'data' chunk has been delivered — 'exit' can fire
+    // before the final chunk (last assistant text + terminating `result`
+    // line) reaches the 'data' handler above, which raced this fallback into
+    // firing first and dropping the real chat:run:complete behind the
+    // terminalSent latch.
+    child.on('close', (code, signal) => {
       clearTimeout(killTimer);
       // Flush any partial line that didn't end with \n
       if (lineBuffer.trim()) processLine(lineBuffer.trim());

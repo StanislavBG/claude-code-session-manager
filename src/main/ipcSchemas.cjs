@@ -26,7 +26,7 @@ const ptyTabId = z.object({ tabId: z.string().min(1).max(128) });
 const sessionSubscribe = z.object({
   // tabId becomes a transcript FILENAME (`<tabId>.jsonl`) — restrict to a
   // session-id charset (no '/', no '.', so it can't traverse out of the project
-  // transcript dir). claudeSessionId is a UUID, which satisfies this.
+  // transcript dir). sessionId is a UUID, which satisfies this.
   tabId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
   cwd: z.string().min(1).max(4096),
 });
@@ -196,8 +196,7 @@ const configWatch = z.array(z.string().min(1).max(4096));
 const sessionsPayload = z.object({
   tabs: z.array(z.object({
     id: z.string().min(1).max(128),
-    claudeSessionId: z.string().min(1).max(128),
-    chatSessionId: z.string().min(1).max(128).optional(),
+    sessionId: z.string().min(1).max(128),
     cwd: z.string().min(1).max(4096),
     label: z.string().max(256),
     presetId: z.string().max(128).nullable(),

@@ -18,7 +18,7 @@ describe('sessionsPayload schema', () => {
     expect(schemas.sessionsPayload.safeParse({
       tabs: [{
         id: 'tab-1',
-        claudeSessionId: 'session-abc',
+        sessionId: 'session-abc',
         cwd: '/home/user/project',
         label: 'My Tab',
         presetId: null,
@@ -29,43 +29,43 @@ describe('sessionsPayload schema', () => {
 
   it('accepts multiple tabs', () => {
     const tabs = [
-      { id: 'tab-1', claudeSessionId: 'sess-1', cwd: '/home/user/a', label: 'A', presetId: null },
-      { id: 'tab-2', claudeSessionId: 'sess-2', cwd: '/home/user/b', label: 'B', presetId: 'preset-x' },
+      { id: 'tab-1', sessionId: 'sess-1', cwd: '/home/user/a', label: 'A', presetId: null },
+      { id: 'tab-2', sessionId: 'sess-2', cwd: '/home/user/b', label: 'B', presetId: 'preset-x' },
     ]
     expect(schemas.sessionsPayload.safeParse({ tabs, activeTabId: 'tab-1' }).success).toBe(true)
   })
 
   it('accepts tab with non-null presetId', () => {
     expect(schemas.sessionsPayload.safeParse({
-      tabs: [{ id: 'tab-1', claudeSessionId: 'sess-1', cwd: '/home/user', label: 'A', presetId: 'my-preset' }],
+      tabs: [{ id: 'tab-1', sessionId: 'sess-1', cwd: '/home/user', label: 'A', presetId: 'my-preset' }],
       activeTabId: null,
     }).success).toBe(true)
   })
 
   it('rejects tab with id exceeding 128 chars', () => {
     expect(schemas.sessionsPayload.safeParse({
-      tabs: [{ id: 'a'.repeat(129), claudeSessionId: 'sess-1', cwd: '/home/user', label: 'A', presetId: null }],
+      tabs: [{ id: 'a'.repeat(129), sessionId: 'sess-1', cwd: '/home/user', label: 'A', presetId: null }],
       activeTabId: null,
     }).success).toBe(false)
   })
 
   it('rejects tab with empty id', () => {
     expect(schemas.sessionsPayload.safeParse({
-      tabs: [{ id: '', claudeSessionId: 'sess-1', cwd: '/home/user', label: 'A', presetId: null }],
+      tabs: [{ id: '', sessionId: 'sess-1', cwd: '/home/user', label: 'A', presetId: null }],
       activeTabId: null,
     }).success).toBe(false)
   })
 
   it('rejects tab with label exceeding 256 chars', () => {
     expect(schemas.sessionsPayload.safeParse({
-      tabs: [{ id: 'tab-1', claudeSessionId: 'sess-1', cwd: '/home/user', label: 'x'.repeat(257), presetId: null }],
+      tabs: [{ id: 'tab-1', sessionId: 'sess-1', cwd: '/home/user', label: 'x'.repeat(257), presetId: null }],
       activeTabId: null,
     }).success).toBe(false)
   })
 
   it('rejects tab with cwd exceeding 4096 chars', () => {
     expect(schemas.sessionsPayload.safeParse({
-      tabs: [{ id: 'tab-1', claudeSessionId: 'sess-1', cwd: '/home/' + 'a'.repeat(4091), label: 'A', presetId: null }],
+      tabs: [{ id: 'tab-1', sessionId: 'sess-1', cwd: '/home/' + 'a'.repeat(4091), label: 'A', presetId: null }],
       activeTabId: null,
     }).success).toBe(false)
   })

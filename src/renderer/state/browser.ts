@@ -3,7 +3,7 @@
  * project convention). Owns the sub-tab strip's tabs plus the active tab,
  * and folds `browser:nav-state:<viewId>` broadcasts into per-tab nav state.
  *
- * viewId = tab id, mirroring the "Tab ID = claudeSessionId" convention:
+ * viewId = tab id, mirroring the "Tab ID = sessionId" convention:
  * one crypto.randomUUID() generated per sub-tab is used both as the store's
  * `id` and as the main-process WebContentsView key.
  */

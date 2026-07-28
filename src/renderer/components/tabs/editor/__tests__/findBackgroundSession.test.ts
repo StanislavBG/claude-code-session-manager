@@ -5,8 +5,7 @@ import type { SessionTab } from '../../../../state/sessions'
 function makeTab(overrides: Partial<SessionTab>): SessionTab {
   return {
     id: overrides.id ?? 't1',
-    claudeSessionId: overrides.claudeSessionId ?? 'claude-1',
-    chatSessionId: overrides.chatSessionId ?? 'chat-1',
+    sessionId: overrides.sessionId ?? 'session-1',
     label: overrides.label ?? 'tab',
     cwd: overrides.cwd ?? '/home/user/project',
     pid: overrides.pid ?? null,

@@ -156,9 +156,8 @@ export function useDocEdit(path: string, documentText: string) {
   }, [state.phase])
 
   // Resolve a dormant, same-project background chat session to append this
-  // edit onto instead of spawning an isolated claude -p (PRD 680). Never
-  // targets a running/spawning tab's claudeSessionId — only a dormant tab's
-  // chatSessionId, and only when that tab isn't already mid-run.
+  // edit onto instead of spawning an isolated claude -p (PRD 680). Only a
+  // dormant tab's sessionId, and only when that tab isn't already mid-run.
   const findIdleBackgroundSession = useCallback(() => {
     const targetCwd = resolveProjectCwd(path, useSessions.getState().tabs)
     if (!targetCwd) return null
@@ -185,7 +184,7 @@ export function useDocEdit(path: string, documentText: string) {
     try {
       const backgroundSession = findIdleBackgroundSession()
       const r = backgroundSession
-        ? await runViaSession(backgroundSession.id, backgroundSession.chatSessionId, backgroundSession.cwd, selection.text, instruction, docText)
+        ? await runViaSession(backgroundSession.id, backgroundSession.sessionId, backgroundSession.cwd, selection.text, instruction, docText)
         : await window.api.docEdit.run({ path, before: selection.text, instruction, documentText: docText })
       if (tokenRef.current !== myToken) return
       if (!r.ok) {

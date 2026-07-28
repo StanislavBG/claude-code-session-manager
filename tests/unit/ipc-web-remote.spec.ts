@@ -211,7 +211,7 @@ describe('cmd:sessions:save payload schema', () => {
   it('accepts valid sessions payload', () => {
     expect(
       schemas.sessionsPayload.safeParse({
-        tabs: [{ id: 't1', claudeSessionId: 'cs1', cwd: '/home/user', label: 'Tab', presetId: null }],
+        tabs: [{ id: 't1', sessionId: 'cs1', cwd: '/home/user', label: 'Tab', presetId: null }],
         activeTabId: 't1',
       }).success
     ).toBe(true)
@@ -221,7 +221,7 @@ describe('cmd:sessions:save payload schema', () => {
     const longCwd = '/' + 'a'.repeat(4096)
     expect(
       schemas.sessionsPayload.safeParse({
-        tabs: [{ id: 't1', claudeSessionId: 'cs1', cwd: longCwd, label: 'Tab', presetId: null }],
+        tabs: [{ id: 't1', sessionId: 'cs1', cwd: longCwd, label: 'Tab', presetId: null }],
         activeTabId: 't1',
       }).success
     ).toBe(false)

@@ -84,7 +84,7 @@ export function SessionPlansView() {
     <Panel
       toolbar={
         <>
-          <span className="text-fg-faint">session {activeTab.claudeSessionId.slice(0, 8)}</span>
+          <span className="text-fg-faint">session {activeTab.sessionId.slice(0, 8)}</span>
           <span className="ml-3 text-fg-faint">{plans.length} plans</span>
           <div className="flex-1" />
           <Toggle

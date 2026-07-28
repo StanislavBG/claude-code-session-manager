@@ -343,7 +343,7 @@ export const useLive = create<LiveState>((set, get) => ({
 
 /**
  * Bind a SessionTab to the live store: subscribe on mount, unsubscribe on
- * unmount, and re-bind whenever the tab's identity (id/cwd/claudeSessionId)
+ * unmount, and re-bind whenever the tab's identity (id/cwd/sessionId)
  * changes. Returns the LiveTab slice for the given tab, or undefined if
  * `tab` is null/undefined or no slice exists yet.
  *
@@ -360,9 +360,9 @@ export function useLiveTab(tab: SessionTab | null | undefined): LiveTab | undefi
 
   useEffect(() => {
     if (!tab) return
-    subscribe(tab.id, tab.cwd, tab.claudeSessionId)
+    subscribe(tab.id, tab.cwd, tab.sessionId)
     return () => unsubscribe(tab.id)
-  }, [tab?.id, tab?.cwd, tab?.claudeSessionId, subscribe, unsubscribe])
+  }, [tab?.id, tab?.cwd, tab?.sessionId, subscribe, unsubscribe])
 
   return live
 }

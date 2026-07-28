@@ -48,7 +48,7 @@ export function Usage() {
     <Panel
       toolbar={
         <>
-          <span className="text-fg-faint">session {activeTab.claudeSessionId.slice(0, 8)}</span>
+          <span className="text-fg-faint">session {activeTab.sessionId.slice(0, 8)}</span>
           <div className="flex-1" />
           <ResetCountdown fiveHour={fiveHour} />
           <button

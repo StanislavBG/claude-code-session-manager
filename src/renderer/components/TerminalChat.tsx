@@ -375,10 +375,7 @@ function Turn({
 
 export function TerminalChat({ tabId, cwd }: Props) {
   const tab = useSessions((s) => s.tabs.find((t) => t.id === tabId))
-  // Chat uses its own dedicated session id, never the raw PTY's claudeSessionId
-  // (see the comment on SessionTab.chatSessionId — sharing it caused a
-  // create-collision on the first send after reload).
-  const sessionId = tab?.chatSessionId ?? tabId
+  const sessionId = tab?.sessionId ?? tabId
   const chat = useChat((s) => s.chats[tabId])
   const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
@@ -496,7 +493,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
       setConfirmingNewThread(true)
       return
     }
-    useSessions.getState().newChatThread(tabId)
+    useSessions.getState().newSession(tabId)
     resetThread(tabId)
     setConfirmingNewThread(false)
   }
@@ -516,12 +513,12 @@ export function TerminalChat({ tabId, cwd }: Props) {
           onClick={newThread}
           onBlur={() => setConfirmingNewThread(false)}
           disabled={running}
-          title="Start a brand-new chat thread (clears this conversation's context)"
+          title="Start a brand-new session (clears this conversation's context; shared by both Chat and Raw)"
           className={`rounded border px-2 py-1 text-xs hover:bg-elev disabled:opacity-40 disabled:hover:bg-transparent ${
             confirmingNewThread ? 'border-accent/60 text-accent' : 'border-line text-fg-dim hover:text-fg'
           }`}
         >
-          {confirmingNewThread ? 'Confirm new thread?' : 'New thread'}
+          {confirmingNewThread ? 'Confirm new session?' : 'New session'}
         </button>
         <div ref={modelMenuRef} className="relative flex items-stretch">
           <button

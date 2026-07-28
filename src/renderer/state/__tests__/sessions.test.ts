@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 /**
- * chatSessionId is minted separately from claudeSessionId so chat's
- * --session-id never collides with the raw PTY's lock (see the comment at
- * SessionTab.chatSessionId in sessions.ts). newChatThread() must mint a
- * fresh id without touching claudeSessionId.
+ * newSession() mints a fresh sessionId for the tab, shared by both Chat and
+ * the raw PTY (there is a single unified session id per tab).
  */
 
 function installWindowApiMock() {
@@ -25,26 +23,24 @@ function installWindowApiMock() {
   return api
 }
 
-describe('sessions.ts newChatThread()', () => {
+describe('sessions.ts newSession()', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.unstubAllGlobals()
   })
 
-  it('mints a fresh chatSessionId without changing claudeSessionId', async () => {
+  it('mints a fresh sessionId for the tab', async () => {
     installWindowApiMock()
     const { useSessions } = await import('../sessions')
 
     const id = useSessions.getState().addTab({ cwd: '/proj', startupCommand: null })
     const before = useSessions.getState().tabs.find((t) => t.id === id)!
-    const prevChatId = before.chatSessionId
-    const prevClaudeId = before.claudeSessionId
-    expect(prevChatId).toBeTruthy()
+    const prevSessionId = before.sessionId
+    expect(prevSessionId).toBeTruthy()
 
-    useSessions.getState().newChatThread(id)
+    useSessions.getState().newSession(id)
 
     const after = useSessions.getState().tabs.find((t) => t.id === id)!
-    expect(after.chatSessionId).not.toBe(prevChatId)
-    expect(after.claudeSessionId).toBe(prevClaudeId)
+    expect(after.sessionId).not.toBe(prevSessionId)
   })
 })

@@ -6,18 +6,14 @@ import { transcriptExists } from '../lib/transcriptExists'
 
 export interface SessionTab {
   id: string
-  /** UUID used as --session-id when launching claude; same as tab id by default. */
-  claudeSessionId: string
   /**
-   * UUID chat mode uses as its own --session-id, separate from
-   * claudeSessionId. Chat and the raw ("Open raw session") PTY must never
-   * share an id: the raw session holds a live process lock on its
-   * claudeSessionId, and reusing it for chat's `claude -p --session-id`
-   * produced the "Session ID <uuid> is already in use" create-collision
-   * (chat.ts's first send after reload, or once the raw session's
-   * transcript already exists on disk).
+   * UUID used as --session-id when launching claude, by both Chat mode
+   * (headless `claude -p --session-id/--resume`) and the raw pty (`claude
+   * --session-id/--resume`). Same tab id by default. Toggling between Chat
+   * and Raw is purely a presentation choice — both resume the same
+   * underlying claude session/transcript.
    */
-  chatSessionId: string
+  sessionId: string
   label: string
   cwd: string
   pid: number | null
@@ -53,8 +49,8 @@ interface SessionsState {
   wakeTab: (id: string, modelOverride?: RawModel) => Promise<void>
   /** Kill the running PTY and return a tab to dormant/chat mode, preserving the tab row. */
   sleepTab: (id: string) => void
-  /** Mint a fresh chatSessionId for the tab, starting a brand-new chat thread. */
-  newChatThread: (id: string) => void
+  /** Mint a fresh sessionId for the tab, starting a brand-new session. */
+  newSession: (id: string) => void
 }
 
 function labelFromCwd(cwd: string): string {
@@ -64,32 +60,32 @@ function labelFromCwd(cwd: string): string {
 
 /**
  * Resolves whether a tab should resume an existing transcript or start fresh,
- * returning the definitive claudeSessionId and the startup command string.
+ * returning the definitive sessionId and the startup command string.
  *
  * When freshStart=true (first-ever boot or sync'd tabs.json on a new machine):
  *   all tabs skip the resume check and get a new UUID assigned.
  * When freshStart=false (normal case, including wakeTab calls):
  *   checks if the JSONL transcript exists; resumes if it does, starts fresh
- *   with the same claudeSessionId otherwise (no new UUID generated — the id
+ *   with the same sessionId otherwise (no new UUID generated — the id
  *   is already definitive from hydration).
  */
 async function resolveStartupCommand(
-  p: { cwd: string; claudeSessionId: string },
+  p: { cwd: string; sessionId: string },
   freshStart = false,
   model: RawModel = getRawSessionModel(),
-): Promise<{ claudeSessionId: string; startupCommand: string }> {
+): Promise<{ sessionId: string; startupCommand: string }> {
   let useResume = !freshStart
   if (useResume) {
-    useResume = await transcriptExists(p.cwd, p.claudeSessionId)
+    useResume = await transcriptExists(p.cwd, p.sessionId)
   }
   // Only generate a new UUID on a fresh-start with no JSONL; otherwise the
-  // existing claudeSessionId is already authoritative (avoids UUID churn on
+  // existing sessionId is already authoritative (avoids UUID churn on
   // repeated wakeTab calls for tabs that never had a transcript).
-  const claudeSessionId = freshStart && !useResume ? crypto.randomUUID() : p.claudeSessionId
+  const sessionId = freshStart && !useResume ? crypto.randomUUID() : p.sessionId
   const startupCommand = useResume
-    ? `claude --dangerously-skip-permissions --resume ${shellQuote(claudeSessionId)} --model ${model}`
-    : `claude --dangerously-skip-permissions --session-id ${shellQuote(claudeSessionId)} --model ${model}`
-  return { claudeSessionId, startupCommand }
+    ? `claude --dangerously-skip-permissions --resume ${shellQuote(sessionId)} --model ${model}`
+    : `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)} --model ${model}`
+  return { sessionId, startupCommand }
 }
 
 export const useSessions = create<SessionsState>((set, get) => ({
@@ -108,8 +104,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     }
     const tab: SessionTab = {
       id,
-      claudeSessionId: id,
-      chatSessionId: crypto.randomUUID(),
+      sessionId: id,
       label: label ?? labelFromCwd(cwd),
       cwd,
       pid: null,
@@ -153,7 +148,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
           t.id === id
             ? {
                 ...t,
-                claudeSessionId: newSessionId,
+                sessionId: newSessionId,
                 pid: null,
                 status: 'spawning' as const,
                 exitCode: null,
@@ -190,15 +185,15 @@ export const useSessions = create<SessionsState>((set, get) => ({
   wakeTab: async (id, modelOverride) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab || tab.status !== 'dormant') return
-    const { claudeSessionId, startupCommand } = await resolveStartupCommand(
-      { cwd: tab.cwd, claudeSessionId: tab.claudeSessionId },
+    const { sessionId, startupCommand } = await resolveStartupCommand(
+      { cwd: tab.cwd, sessionId: tab.sessionId },
       false,
       modelOverride ?? getRawSessionModel(),
     )
     set({
       tabs: get().tabs.map((t) =>
         t.id === id
-          ? { ...t, claudeSessionId, status: 'spawning' as const, startupCommand, generation: t.generation + 1 }
+          ? { ...t, sessionId, status: 'spawning' as const, startupCommand, generation: t.generation + 1 }
           : t
       ),
     })
@@ -213,18 +208,18 @@ export const useSessions = create<SessionsState>((set, get) => ({
       ),
     })
   },
-  newChatThread: (id) => {
+  newSession: (id) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab) return
     set({
-      tabs: get().tabs.map((t) => (t.id === id ? { ...t, chatSessionId: crypto.randomUUID() } : t)),
+      tabs: get().tabs.map((t) => (t.id === id ? { ...t, sessionId: crypto.randomUUID() } : t)),
     })
   },
 }))
 
 /**
  * Hydrate the store from disk on boot, then wire up autosave. Persists only
- * the durable fields (id, claudeSessionId, cwd, label, presetId) — pid,
+ * the durable fields (id, sessionId, cwd, label, presetId) — pid,
  * status, startupCommand, exitCode are runtime-only.
  *
  * Restored tabs hydrate in a dormant state (no PTY, no claude process). The
@@ -236,30 +231,34 @@ export async function hydrateSessions(): Promise<void> {
   try {
     const { tabs: persisted, activeTabId, freshStart } = await window.api.sessions.load()
     if (persisted.length > 0) {
-      // Resolve the definitive claudeSessionId for each tab (resume vs fresh-UUID).
+      // Resolve the definitive sessionId for each tab (resume vs fresh-UUID).
       // startupCommand is NOT set here — that happens in wakeTab when the user
       // activates the session.
-      const restored: SessionTab[] = await Promise.all(
-        persisted.map(async (p: PersistedTab) => {
-          const { claudeSessionId } = await resolveStartupCommand(p, freshStart)
-          return {
-            id: p.id,
-            claudeSessionId,
-            // Backwards-compat: older persisted tabs predate chatSessionId.
-            // Mint a fresh one rather than reusing claudeSessionId, which
-            // would reintroduce the raw/chat session-lock collision.
-            chatSessionId: p.chatSessionId ?? crypto.randomUUID(),
-            cwd: p.cwd,
-            label: p.label,
-            presetId: p.presetId,
-            pid: null,
-            status: 'dormant' as const,
-            exitCode: null,
-            startupCommand: null,
-            generation: 0,
+      // Isolate each tab's resolution: one malformed persisted row (e.g. a
+      // stale pre-unification entry) must not throw away every other tab.
+      const settled = await Promise.all(
+        persisted.map(async (p: PersistedTab): Promise<SessionTab | null> => {
+          try {
+            const { sessionId } = await resolveStartupCommand(p, freshStart)
+            return {
+              id: p.id,
+              sessionId,
+              cwd: p.cwd,
+              label: p.label,
+              presetId: p.presetId,
+              pid: null,
+              status: 'dormant' as const,
+              exitCode: null,
+              startupCommand: null,
+              generation: 0,
+            }
+          } catch (e) {
+            console.warn('[sessions] dropping malformed persisted tab:', p?.id, e)
+            return null
           }
         }),
       )
+      const restored: SessionTab[] = settled.filter((t): t is SessionTab => t !== null)
       const active = activeTabId && restored.find((t) => t.id === activeTabId)
         ? activeTabId
         : restored[0]?.id ?? null
@@ -278,8 +277,7 @@ export async function hydrateSessions(): Promise<void> {
     const { tabs, activeTabId } = useSessions.getState()
     const persisted: PersistedTab[] = tabs.map((t) => ({
       id: t.id,
-      claudeSessionId: t.claudeSessionId,
-      chatSessionId: t.chatSessionId,
+      sessionId: t.sessionId,
       cwd: t.cwd,
       label: t.label,
       presetId: t.presetId,

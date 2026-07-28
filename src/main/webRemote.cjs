@@ -729,13 +729,13 @@ async function pushSessionList() {
     if (_e2e.state !== 'authenticated') return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
-    // Normalize persisted tabs → SessionMeta. tabId === claudeSessionId so it
+    // Normalize persisted tabs → SessionMeta. tabId === sessionId so it
     // matches the transcript JSONL name used by cmd:session:subscribe.
     const sessions = (data?.tabs ?? []).map((t) => ({
-      tabId: t.claudeSessionId,
+      tabId: t.sessionId,
       cwd: t.cwd,
       title: t.label || t.cwd,
-      state: _sessionWatchers.get(t.claudeSessionId)?.state ?? null,
+      state: _sessionWatchers.get(t.sessionId)?.state ?? null,
     }));
     const payload = { sessions, activeTabId: data?.activeTabId ?? null };
     const json = JSON.stringify(payload);

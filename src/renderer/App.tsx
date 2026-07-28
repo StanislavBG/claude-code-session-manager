@@ -240,8 +240,7 @@ export function App() {
           ...s.tabs,
           {
             id,
-            claudeSessionId: id,
-            chatSessionId: crypto.randomUUID(),
+            sessionId: id,
             label: cwd.split('/').filter(Boolean).pop() || cwd,
             cwd,
             pid: null,
@@ -266,8 +265,7 @@ export function App() {
           ...s.tabs,
           {
             id,
-            claudeSessionId: id,
-            chatSessionId: crypto.randomUUID(),
+            sessionId: id,
             label: cwd.split('/').filter(Boolean).pop() || cwd,
             cwd,
             pid: null,
@@ -737,14 +735,14 @@ export function App() {
               return
             case 'copy-transcript':
               if (activeTab) {
-                window.api.transcripts.pathFor(activeTab.cwd, activeTab.claudeSessionId)
+                window.api.transcripts.pathFor(activeTab.cwd, activeTab.sessionId)
                   .then((p) => window.api.clipboard.writeText(p))
                   .catch(() => toast.error('Copy failed'))
               }
               return
             case 'open-transcript':
               if (activeTab) {
-                window.api.transcripts.pathFor(activeTab.cwd, activeTab.claudeSessionId)
+                window.api.transcripts.pathFor(activeTab.cwd, activeTab.sessionId)
                   .then((p) => window.api.shell.open({ as: 'openPath', path: p }))
                   .catch(() => toast.error('Open failed'))
               }

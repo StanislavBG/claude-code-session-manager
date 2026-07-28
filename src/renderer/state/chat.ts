@@ -58,9 +58,9 @@ interface ChatState {
   hydratedTabs: Record<string, true>
   /** Read (or lazily create) the chat slice for a tab. */
   get: (tabId: string) => TabChat
-  /** Submit a user command for a tab. sessionId is the tab's chatSessionId. */
+  /** Submit a user command for a tab. sessionId is the tab's sessionId. */
   send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string }) => void
-  /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newChatThread). */
+  /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newSession). */
   resetThread: (tabId: string) => void
   /**
    * Push an ephemeral, in-session-only notice turn (e.g. a slash-nav shortcut

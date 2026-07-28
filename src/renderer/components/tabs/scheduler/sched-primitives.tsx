@@ -151,6 +151,11 @@ export const STATUS_TONE: Record<string, { bg: string; text: string; border: boo
   completed:    { bg: 'bg-sage/20',   text: 'text-sage',     border: false, label: 'completed' },
   failed:       { bg: 'bg-accent/15', text: 'text-accent',   border: false, label: 'failed' },
   needs_review: { bg: 'bg-butter/25', text: 'text-fg-dim',   border: false, label: 'needs review' },
+  // A chat PromptTicket (PRD 750) that classified 'develop' and handed off to
+  // /develop's PRD-authoring flow — distinct from 'queued'/'running' so the
+  // chat queue panel can tell "still in this run's queue" apart from
+  // "became scheduler work".
+  dispatched:   { bg: 'bg-accent/15', text: 'text-accent',   border: true,  label: 'dispatched to PRD' },
 }
 
 export type PrdDisplayStatus = keyof typeof STATUS_TONE

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { linkifyFilePaths } from '../lib/chatFileLinks'
 import { useSessions } from '../state/sessions'
-import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
+import { useChat, type ChatTurn, type PromptTicket, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 import { LearningPanel } from './LearningPanel'
 import { extractUrls } from '../lib/extractUrls'
@@ -11,6 +11,9 @@ import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import { handleChatLinkClick } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
+import { mergeTicketsForDisplay, ticketDisplayStatus } from '../lib/ticketDisplay'
+import { setPendingPrdSlug } from '../lib/prdDeepLink'
+import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
 import type { NavKey } from './LeftNav'
 
 /**
@@ -262,6 +265,59 @@ function ChatSessionRail({
   )
 }
 
+// Navigates to Scheduler and selects a PRD there, reusing AlmanacFooter's
+// pill-click plumbing (dispatch a CustomEvent, App.tsx's window listener
+// routes it) rather than inventing a new cross-tab routing mechanism.
+// 'sm:navigate' already switches tabs (also used by the slash-nav shortcut
+// below); the slug itself goes through prdDeepLink.ts (not a second bare
+// CustomEvent) since SchedulerPrdsView may not be mounted yet to receive it.
+function openPrdSlug(slug: string): void {
+  setPendingPrdSlug(slug)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'scheduler' }))
+}
+
+// Side panel showing a tab's PromptTicket queue (PRD 750): the in-flight
+// ticket plus anything queued behind it, and — folded into the same list —
+// recently finished tickets (done/failed/dispatched-to-prd) so a ticket
+// doesn't vanish from view the instant it leaves the "queued/running" state.
+function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
+  if (tickets.length === 0) return null
+  return (
+    <div
+      className="w-[260px] shrink-0 overflow-y-auto border-l border-rule px-3 py-4"
+      data-testid="chat-queue-panel"
+    >
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+        Prompt queue
+      </div>
+      <ul className="space-y-2">
+        {tickets.map((t) => (
+          <li key={t.id} className="rounded-lg border border-line bg-elev px-2.5 py-2" data-testid="chat-queue-ticket">
+            <PrdStatusPill status={ticketDisplayStatus(t.status)} />
+            <div className="mt-1.5 truncate text-xs text-fg-dim" title={t.text}>
+              {t.text}
+            </div>
+            {t.status === 'dispatched-to-prd' && !!t.prdSlugs?.length && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {t.prdSlugs.map((slug) => (
+                  <button
+                    key={slug}
+                    onClick={() => openPrdSlug(slug)}
+                    title={`Open PRD "${slug}" in Scheduler`}
+                    className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-accent hover:bg-hi"
+                  >
+                    #{slug}
+                  </button>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function Turn({
   turn,
   cwd,
@@ -393,6 +449,11 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const stream = chat?.stream ?? ''
   const queuedPosition = chat?.queuedPosition ?? 0
   const liveToolUses = chat?.liveToolUses ?? []
+  const displayTickets = mergeTicketsForDisplay(
+    chat?.ticketHistory ?? [],
+    chat?.activeTicket,
+    chat?.queue ?? [],
+  )
 
   // One-shot history rehydration from the durable exchanges store.
   useEffect(() => {
@@ -590,6 +651,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
             </div>
           )}
         </div>
+        <QueueTicketPanel tickets={displayTickets} />
         {showRail && (
           <ChatSessionRail
             cwd={cwd}

@@ -11,6 +11,7 @@ import { formatAgo } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
 import { getLintQueueCached } from '../../../lib/lintQueueCache'
+import { takePendingPrdSlug } from '../../../lib/prdDeepLink'
 
 // ─── Real-time PRD linting ───────────────────────────────────────────────────
 
@@ -236,6 +237,19 @@ export function SchedulerPrdsView() {
   useEffect(() => {
     if (!selectedSlug && sortedPrds.length > 0) setSelectedSlug(sortedPrds[0].slug)
   }, [sortedPrds, selectedSlug])
+
+  // Cross-tab deep link: TerminalChat's queue panel (PRD 750) navigates here
+  // to jump straight to a dispatched-to-prd ticket's PRD. `takePendingPrdSlug`
+  // covers the common case — this component wasn't mounted yet when the link
+  // was clicked, so it missed the live event — by checking once on mount;
+  // the listener below covers the case where Scheduler was already open.
+  useEffect(() => {
+    const pendingSlug = takePendingPrdSlug()
+    if (pendingSlug) setSelectedSlug(pendingSlug)
+    const h = (e: Event) => setSelectedSlug((e as CustomEvent<string>).detail)
+    window.addEventListener('sm:select-prd', h)
+    return () => window.removeEventListener('sm:select-prd', h)
+  }, [])
 
   // Load body when selection changes
   useEffect(() => {

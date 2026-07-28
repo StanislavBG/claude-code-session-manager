@@ -363,3 +363,95 @@ describe('chat.ts prompt queue', () => {
     expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: 'second' }))
   })
 })
+
+describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps a queued ticket visible in queue (status queued) while another turn is running', async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
+
+    const state = useChat.getState().get('t1')
+    expect(state.running).toBe(true)
+    expect(state.queue).toHaveLength(1)
+    expect(state.queue[0]).toMatchObject({ text: 'second', status: 'queued' })
+  })
+
+  it("promotes a dequeued ticket's status queued -> running -> done as the store transitions it, and keeps it visible in ticketHistory afterward", async () => {
+    const { run, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'inline',
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
+    expect(useChat.getState().get('t1').queue[0].status).toBe('queued')
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    // Dequeued: now the in-flight ticket, status updated to 'running'.
+    await vi.waitFor(() => expect(useChat.getState().get('t1').activeTicket?.status).toBe('running'))
+    expect(useChat.getState().get('t1').activeTicket?.text).toBe('second')
+    expect(useChat.getState().get('t1').queue).toHaveLength(0)
+
+    // Completing its run finalizes it as 'done' — folded into ticketHistory,
+    // not dropped, so it stays visible in the queue panel post-completion.
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with second' })
+    await vi.waitFor(() => expect(useChat.getState().get('t1').activeTicket).toBeNull())
+    const history = useChat.getState().get('t1').ticketHistory ?? []
+    expect(history.some((t) => t.text === 'second' && t.status === 'done')).toBe(true)
+  })
+
+  it('finalizes the in-flight ticket as "failed" (not "done") when the run errors', async () => {
+    const run = vi.fn().mockResolvedValue(undefined)
+    const classifyTicket = vi.fn(async () => 'inline' as const)
+    let errorHandler: ((e: { tabId: string; sessionId: string; message: string }) => void) | null = null
+    let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
+    vi.stubGlobal('window', {
+      api: {
+        chat: {
+          run,
+          cancel: vi.fn(),
+          onQueued: vi.fn(),
+          onRunStarted: vi.fn(),
+          onOutput: vi.fn(),
+          onToolUse: vi.fn(),
+          onComplete: vi.fn((h) => { completeHandler = h; return () => { completeHandler = null } }),
+          onNeedsInput: vi.fn(),
+          onError: vi.fn((h) => { errorHandler = h; return () => { errorHandler = null } }),
+          onNotice: vi.fn(),
+          classifyTicket,
+        },
+        transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+        config: { exists: vi.fn().mockResolvedValue(true) },
+        logs: { write: vi.fn() },
+      },
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
+    completeHandler!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(useChat.getState().get('t1').activeTicket?.status).toBe('running'))
+
+    errorHandler!({ tabId: 't1', sessionId: 's1', message: 'boom' })
+
+    await vi.waitFor(() => expect(useChat.getState().get('t1').activeTicket).toBeNull())
+    const history = useChat.getState().get('t1').ticketHistory ?? []
+    expect(history.some((t) => t.text === 'second' && t.status === 'failed')).toBe(true)
+  })
+})

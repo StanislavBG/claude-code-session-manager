@@ -71,6 +71,24 @@ interface TabChat {
   liveToolUses: ToolUseTrace[]
   /** Prompts submitted while `running` was true, FIFO — dispatched one at a time on completion. */
   queue: PromptTicket[]
+  /**
+   * The ticket currently dequeued and in flight — 'queued' while its
+   * classification round-trip is pending, 'running' once dispatched inline.
+   * null/undefined when idle, or when the active run is a fresh manual
+   * send() that never went through the queue (no ticket to represent it).
+   * Finalization (pushTurn/applyError) assumes chatRunner's per-tab
+   * concurrency-1 lane: no event for a later ticket can arrive before this
+   * one's terminal event, so tabId alone is enough to identify which ticket
+   * a completion/error belongs to.
+   */
+  activeTicket?: PromptTicket | null
+  /**
+   * Terminal-status tickets (done/failed/dispatched-to-prd), oldest first,
+   * capped at TICKET_HISTORY_CAP — keeps a ticket visible through its full
+   * lifecycle for the chat queue panel (PRD 750) instead of vanishing the
+   * moment it's dispatched or completes.
+   */
+  ticketHistory?: PromptTicket[]
 }
 
 interface ChatState {
@@ -105,6 +123,17 @@ const EMPTY: TabChat = {
   stream: '',
   liveToolUses: [],
   queue: [],
+  activeTicket: null,
+  ticketHistory: [],
+}
+
+// Bounds ticketHistory's growth for a long-lived tab — the panel only ever
+// needs the recent tail, not an unbounded audit log.
+const TICKET_HISTORY_CAP = 20
+
+function appendTicketHistory(history: PromptTicket[], ticket: PromptTicket): PromptTicket[] {
+  const next = [...history, ticket]
+  return next.length > TICKET_HISTORY_CAP ? next.slice(next.length - TICKET_HISTORY_CAP) : next
 }
 
 let seq = 0
@@ -201,15 +230,22 @@ function patch(tabId: string, fn: (c: TabChat) => TabChat): void {
 }
 
 function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): void {
-  patch(tabId, (c) => ({
-    ...c,
-    turns: [...c.turns, { ...turn, toolUses: c.liveToolUses }],
-    running: false,
-    queuedPosition: 0,
-    stream: '',
-    liveToolUses: [],
-    ...extra,
-  }))
+  patch(tabId, (c) => {
+    const ticketHistory = c.activeTicket
+      ? appendTicketHistory(c.ticketHistory ?? [], { ...c.activeTicket, status: 'done', completedAt: Date.now() })
+      : (c.ticketHistory ?? [])
+    return {
+      ...c,
+      turns: [...c.turns, { ...turn, toolUses: c.liveToolUses }],
+      running: false,
+      queuedPosition: 0,
+      stream: '',
+      liveToolUses: [],
+      activeTicket: null,
+      ticketHistory,
+      ...extra,
+    }
+  })
   dequeueNext(tabId)
 }
 
@@ -267,23 +303,42 @@ function dequeueNext(tabId: string): void {
   // failure) so a manual send() during that window queues behind this
   // ticket instead of reading running:false and racing a second dispatch
   // for the same tabId, which chatRunner's per-tab exclusivity guard would
-  // then silently drop.
-  patch(tabId, (c) => ({ ...c, queue: rest, running: true, queuedPosition: 0 }))
+  // then silently drop. `activeTicket` mirrors that in-flight ticket so the
+  // queue panel can show it (status still 'queued' during classification).
+  patch(tabId, (c) => ({ ...c, queue: rest, running: true, queuedPosition: 0, activeTicket: next }))
 
   classifyPromptTicket(next.text).then((verdict) => {
     if (verdict === 'develop') {
       const dispatched: PromptTicket = { ...next, status: 'dispatched-to-prd', completedAt: Date.now() }
       applyNotice(tabId, dispatched.sessionId, `→ dispatched to /develop for PRD decomposition (ticket ${dispatched.id})`)
-      patch(tabId, (c) => ({ ...c, running: false, queuedPosition: 0 }))
+      patch(tabId, (c) => ({
+        ...c,
+        running: false,
+        queuedPosition: 0,
+        activeTicket: null,
+        ticketHistory: appendTicketHistory(c.ticketHistory ?? [], dispatched),
+      }))
       dequeueNext(tabId)
       return
     }
     const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
+    patch(tabId, (c) => ({ ...c, activeTicket: running }))
     dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id })
   })
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {
+  // Finalize the in-flight ticket as 'failed' before pushTurn's own (generic,
+  // 'done') finalization runs — pushTurn sees activeTicket already cleared
+  // and no-ops, so the ticket lands in history exactly once.
+  patch(tabId, (c) => {
+    if (!c.activeTicket) return c
+    return {
+      ...c,
+      activeTicket: null,
+      ticketHistory: appendTicketHistory(c.ticketHistory ?? [], { ...c.activeTicket, status: 'failed', completedAt: Date.now() }),
+    }
+  })
   pushTurn(tabId, { id: turnId(), role: 'error', text: message, at: Date.now() })
   toast.error(message)
 }

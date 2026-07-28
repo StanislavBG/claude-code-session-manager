@@ -15,3 +15,4 @@ playwright-report
 
 # Generated scheduler skill-discovery output (not source)
 skill-proposals/
+.playwright-mcp/

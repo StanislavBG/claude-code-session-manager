@@ -1041,6 +1041,9 @@ export interface ChatRunPayload {
   cwd: string;
   /** When true, use --resume <sessionId> instead of --session-id. */
   resume?: boolean;
+  /** Originating PromptTicket.id (PRD 748) when dequeued from a tab's
+   *  prompt queue — absent for a fresh manual send. */
+  promptId?: string;
 }
 
 export interface ChatRunQueuedEvent {
@@ -1472,6 +1475,10 @@ export interface SessionManagerAPI {
     onComplete: (handler: (e: ChatRunCompleteEvent) => void) => () => void;
     onError: (handler: (e: ChatRunErrorEvent) => void) => () => void;
     onNotice: (handler: (e: ChatRunNoticeEvent) => void) => () => void;
+    /** Classify a queued PromptTicket's text as 'inline' (run through
+     *  chatRunner) or 'develop' (dispatch to /develop for PRD decomposition).
+     *  A single bounded `claude -p` call, never a scheduler job. */
+    classifyTicket: (payload: { text: string }) => Promise<'inline' | 'develop'>;
   };
   exchanges: {
     /** Durable per-exchange log entries for a project, newest-first (max 100 by default). */
@@ -1503,6 +1510,10 @@ export interface Exchange {
   model?: string;
   /** Set when summarization failed — `result` is available but `summary` may be empty. */
   degraded?: boolean;
+  /** Originating PromptTicket.id (PRD 748) when this exchange was dispatched
+   *  from a queued ticket — absent on historical records and fresh manual
+   *  sends with no ticket (PRD 749; never backfilled). */
+  promptId?: string;
 }
 
 declare global {

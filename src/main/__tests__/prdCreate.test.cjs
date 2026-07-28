@@ -85,6 +85,23 @@ test('buildPrdBody omits parallelGroup frontmatter key when not supplied', () =>
   expect(!/parallelGroup:/.test(body)).toBeTruthy();
 });
 
+test('buildPrdBody writes sourcePromptId into frontmatter when supplied (PRD 749 traceability)', () => {
+  const body = buildPrdBody({
+    title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
+    acceptanceCriteria: ['a'], implementationNotes: 'n',
+    sourcePromptId: 'ticket-abc-123',
+  });
+  expect(body).toMatch(/sourcePromptId: ticket-abc-123/);
+});
+
+test('buildPrdBody omits sourcePromptId frontmatter key when not supplied', () => {
+  const body = buildPrdBody({
+    title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
+    acceptanceCriteria: ['a'], implementationNotes: 'n',
+  });
+  expect(!/sourcePromptId:/.test(body)).toBeTruthy();
+});
+
 test('readStandards result is byte-identical to the on-disk file (single source of truth)', async () => {
   const onDisk = fs.readFileSync(
     path.join(__dirname, '..', '..', '..', 'plugins', 'session-manager-dev', 'skills', 'develop', 'standards.md'),
@@ -316,6 +333,23 @@ test('POST /admin/scheduler/create-prd honors an explicit slug + parallelGroup i
     expect(res.json.nn).toBe(777);
     expect(res.json.filename).toBe('777-my-explicit-slug.md');
     expect(fs.existsSync(path.join(prdsDir, '777-my-explicit-slug.md'))).toBeTruthy();
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the created PRD frontmatter', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token,
+      body: validCreateBody({ slug: 'from-a-ticket', parallelGroup: 888, sourcePromptId: 'ticket-xyz-789' }),
+    });
+    expect(res.status).toBe(200);
+    const written = fs.readFileSync(path.join(prdsDir, '888-from-a-ticket.md'), 'utf8');
+    expect(written).toMatch(/sourcePromptId: ticket-xyz-789/);
   } finally {
     await admin.stop();
   }

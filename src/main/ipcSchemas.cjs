@@ -252,6 +252,11 @@ const schedulerCreatePrd = z.object({
   outOfScope: z.array(z.string().min(1).max(2000)).max(100).optional(),
   slug: z.string().min(1).max(60).regex(PRD_CREATE_SLUG_RE).optional(),
   parallelGroup: z.number().int().min(1).max(999999).optional(),
+  // Originating PromptTicket.id (PRD 748) when this PRD was authored from a
+  // ticket classified 'develop' (PRD 749) — traces the PRD back to the
+  // prompt that spawned it. Same newline-injection guard as title/cwd since
+  // it also becomes a frontmatter value.
+  sourcePromptId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
@@ -449,6 +454,9 @@ const chatRun = z.object({
   ),
   cwd: z.string().min(1).max(4096),
   resume: z.boolean().optional().default(false),
+  // Originating PromptTicket.id (PRD 748) when this run was dequeued from a
+  // tab's prompt queue — absent for a fresh manual send with no ticket.
+  promptId: z.string().min(1).max(128).optional(),
 });
 
 const chatCancel = z.object({
@@ -459,6 +467,13 @@ const chatProbeContext = z.object({
   tabId: z.string().min(1).max(128),
   sessionId: z.string().min(1).max(128),
   cwd: z.string().min(1).max(4096),
+});
+
+const chatClassifyTicket = z.object({
+  text: z.string().min(1).refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
+    `text must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
+  ),
 });
 
 // ──────────────────────────────────────────── Web Remote
@@ -758,6 +773,7 @@ module.exports = {
     chatRun,
     chatCancel,
     chatProbeContext,
+    chatClassifyTicket,
     exchangesList,
   },
   validated,

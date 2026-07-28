@@ -8,8 +8,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * mocked here since vitest runs this suite in a node environment.
  */
 
-function installWindowApiMock(opts: { transcriptExists: boolean }) {
+function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?: (payload: { text: string }) => Promise<'inline' | 'develop'> }) {
   const run = vi.fn().mockResolvedValue(undefined)
+  const classifyTicket = vi.fn(opts.classifyTicket ?? (async () => 'inline' as const))
   let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
   const api = {
@@ -30,6 +31,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
       }),
       onError: vi.fn(),
       onNotice: vi.fn(),
+      classifyTicket,
     },
     transcripts: {
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
@@ -43,6 +45,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
   return {
     api,
     run,
+    classifyTicket,
     getNeedsInputHandler: () => needsInputHandler,
     getCompleteHandler: () => completeHandler,
   }
@@ -277,5 +280,86 @@ describe('chat.ts prompt queue', () => {
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(3))
     expect(run).toHaveBeenNthCalledWith(3, expect.objectContaining({ tabId: 't1', sessionId: 's1', prompt: 'third' }))
     expect(useChat.getState().get('t1').queue).toHaveLength(0)
+  })
+
+  it('dispatches a dequeued ticket inline with its ticket id as promptId when classified "inline"', async () => {
+    const { run, classifyTicket, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'inline',
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'quick one' })
+    const queuedId = useChat.getState().get('t1').queue[0].id
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'quick one' }))
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: 'quick one', promptId: queuedId }))
+    expect(useChat.getState().get('t1').running).toBe(true)
+  })
+
+  it('transitions a dequeued ticket to dispatched-to-prd and skips inline dispatch when classified "develop"', async () => {
+    const { run, classifyTicket, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build a whole feature' })
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build a whole feature' }))
+
+    // Never dispatched inline: chat.run only ever called once (for "first").
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      expect(after.running).toBe(false)
+      expect(after.queue).toHaveLength(0)
+    })
+    expect(run).toHaveBeenCalledTimes(1)
+
+    // A notice turn records the dispatch-to-prd transition.
+    const after = useChat.getState().get('t1')
+    expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('dispatched to /develop'))).toBe(true)
+  })
+
+  it('stays "running" during the classification round-trip so a send() during that window queues instead of racing a second dispatch', async () => {
+    let resolveClassify!: (v: 'inline' | 'develop') => void
+    const classifyGate = new Promise<'inline' | 'develop'>((resolve) => { resolveClassify = resolve })
+    const { run, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: () => classifyGate,
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    // Classification is now pending (classifyGate unresolved) — the store
+    // must still report running:true, not drop back to false.
+    await vi.waitFor(() => expect(useChat.getState().get('t1').queue).toHaveLength(0))
+    expect(useChat.getState().get('t1').running).toBe(true)
+
+    // A send() arriving during this window must queue, not fire a second
+    // concurrent chat.run for the same tab.
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'third' })
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(useChat.getState().get('t1').queue.map((t) => t.text)).toEqual(['third'])
+
+    resolveClassify('inline')
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: 'second' }))
   })
 })

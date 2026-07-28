@@ -8,6 +8,10 @@
  *   - cwd: string (required, absolute path)
  *   - estimateMinutes: number (required)
  *   - parallelGroup: number (optional, matches NN- slug prefix)
+ *   - sourcePromptId: string (optional) — traces this PRD back to the
+ *     PromptTicket.id (PRD 748) it was authored from when classified
+ *     'develop' (PRD 749). Additive only; absent on every PRD authored
+ *     before this field existed.
  *
  * Round-trip invariant: keys not in `PrdFrontmatter` are preserved verbatim
  * in their original line range via `extras`. Edits only touch lines that own
@@ -19,6 +23,7 @@ export type PrdFrontmatter = {
   cwd?: string
   estimateMinutes?: number
   parallelGroup?: number
+  sourcePromptId?: string
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -44,6 +49,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'cwd',
   'estimateMinutes',
   'parallelGroup',
+  'sourcePromptId',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -52,6 +58,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'cwd',
   'estimateMinutes',
   'parallelGroup',
+  'sourcePromptId',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -162,6 +169,9 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       return
     case 'cwd':
       fm.cwd = String(v)
+      return
+    case 'sourcePromptId':
+      fm.sourcePromptId = String(v)
       return
   }
 }

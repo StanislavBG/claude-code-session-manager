@@ -48,13 +48,17 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope,
+    implementationNotes, outOfScope, sourcePromptId,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
   // filename prefix is the single source of truth for grouping; adding a
   // second one here would let the two drift out of sync.
-  const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`, `estimateMinutes: ${estimateMinutes}`, '---', ''];
+  const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`, `estimateMinutes: ${estimateMinutes}`];
+  // Optional, additive: traces this PRD back to the PromptTicket (PRD 748)
+  // that was classified 'develop' and spawned it (PRD 749).
+  if (sourcePromptId) fmLines.push(`sourcePromptId: ${sourcePromptId}`);
+  fmLines.push('---', '');
 
   const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');
   const oosSource = outOfScope && outOfScope.length ? outOfScope : ['(none)'];

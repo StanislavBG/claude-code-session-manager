@@ -715,6 +715,7 @@ async function reconcile(state) {
       cwd: p.cwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
+      sourcePromptId: p.sourcePromptId,
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     });
   }
@@ -759,6 +760,7 @@ async function reconcile(state) {
       cwd: p.cwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
+      sourcePromptId: p.sourcePromptId,
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       status: 'pending',
       runId: null,
@@ -3033,6 +3035,7 @@ function registerScheduleHandlers() {
           title: parsed.title,
           cwd: parsed.cwd || '',
           estimateMinutes: parsed.estimateMinutes,
+          sourcePromptId: parsed.sourcePromptId,
           mtimeMs: stat.mtimeMs,
         });
       } catch (e) {

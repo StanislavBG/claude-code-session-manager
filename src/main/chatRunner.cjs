@@ -48,6 +48,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { recordExchange } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
+const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -326,7 +327,7 @@ function broadcast(channel, payload) {
  * per-tab prompt queue in chat.ts only ever calls this once per tab at a
  * time, but the guard holds regardless).
  *
- * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void }} opts
+ * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, promptId?: string }} opts
  */
 function run(opts) {
   // Per-tab exclusivity guard — unrelated to the cross-tab cap; must hold for
@@ -372,10 +373,10 @@ function pump() {
  * for the run's lifetime so cancel() can reach it. Never rejects — the queue
  * pump relies on the returned promise always settling so the lane frees.
  *
- * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void }} opts
+ * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, promptId?: string }} opts
  * @returns {Promise<void>}
  */
-function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult }) {
+function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, promptId }) {
   return new Promise((resolve) => {
     let settled = false;
     // Frees the lane exactly once: drops the cancel fn and resolves the promise
@@ -564,13 +565,14 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
                 cwd,
                 prompt,
                 result: `${signal.answerBody}\n\n[asked: ${signal.questions.join(' | ')}]`,
+                promptId,
               }).catch((err) => {
                 console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
               });
             } else {
               emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
               // Record durable exchange off the hot path — UI must not wait on Haiku
-              recordExchange({ sessionId, cwd, prompt, result: text }).catch((err) => {
+              recordExchange({ sessionId, cwd, prompt, result: text, promptId }).catch((err) => {
                 console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
               });
             }
@@ -680,9 +682,16 @@ function cancel(tabId) {
 function registerChatHandlers() {
   const { schemas, validated } = require('./ipcSchemas.cjs');
 
-  ipcMain.handle('chat:run', validated(schemas.chatRun, async ({ tabId, sessionId, prompt, cwd, resume }) => {
-    run({ tabId, sessionId, prompt, cwd, resume: !!resume });
+  ipcMain.handle('chat:run', validated(schemas.chatRun, async ({ tabId, sessionId, prompt, cwd, resume, promptId }) => {
+    run({ tabId, sessionId, prompt, cwd, resume: !!resume, promptId });
     return { ok: true };
+  }));
+
+  // Classification for a queued PromptTicket reaching the front of its
+  // per-tab queue (PRD 749) — a direct bounded call, never a scheduler job
+  // (see classifyPromptTicket.cjs's docblock for why that would be circular).
+  ipcMain.handle('chat:classify-ticket', validated(schemas.chatClassifyTicket, async ({ text }) => {
+    return classifyPromptTicket(text);
   }));
 
   ipcMain.handle('chat:cancel', async (_e, payload) => {

@@ -64,6 +64,10 @@ async function parsePrdRaw(filePath) {
     cwd: expandCwd(fm.cwd || null),
     estimateMinutes: fm.estimateMinutes ? Number(fm.estimateMinutes) || null : null,
     parallelGroup: (fm.parallelGroup ? Number(fm.parallelGroup) || null : null) ?? groupFromName ?? 99,
+    // Optional traceability back to the PromptTicket.id (PRD 748) that was
+    // classified 'develop' and spawned this PRD (PRD 749). Additive — absent
+    // on every PRD authored before this field existed.
+    sourcePromptId: fm.sourcePromptId || null,
     body: body.trim(),
   };
 }

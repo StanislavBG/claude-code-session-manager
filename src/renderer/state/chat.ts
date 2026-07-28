@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { toast } from './toast'
 import { transcriptExists } from '../lib/transcriptExists'
+import { classifyPromptTicket } from '../lib/promptClassifier'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -215,10 +216,12 @@ function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): 
 /**
  * Push a user turn and hand the prompt to chatRunner — the single path both
  * a fresh manual send() and a dequeued PromptTicket run through, so a queued
- * prompt executes exactly like an immediate one.
+ * prompt executes exactly like an immediate one. `promptId` is set only when
+ * this dispatch originated from a queued ticket (undefined for a fresh
+ * manual send with no ticket) — threaded through to recordExchange.
  */
-function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string }): void {
-  const { tabId, sessionId, cwd, text } = args
+function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string; promptId?: string }): void {
+  const { tabId, sessionId, cwd, text, promptId } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
   useChat.setState({
@@ -237,21 +240,47 @@ function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; tex
       window.api?.logs?.write('chat', 'warn', `transcript-exists check failed for tab ${tabId}: ${msg}`)
       return cur.started
     })
-    .then((resume) => window.api.chat.run({ tabId, sessionId, prompt: text, cwd, resume }))
+    .then((resume) => window.api.chat.run({ tabId, sessionId, prompt: text, cwd, resume, promptId }))
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       applyError(tabId, sessionId, msg)
     })
 }
 
-/** Dequeue the oldest queued ticket (if any) and dispatch it, FIFO. */
+/**
+ * Dequeue the oldest queued ticket (if any), FIFO. Runs classification
+ * immediately as the ticket reaches the front of the queue — an in-session
+ * judgment call, not a scheduled hop (see promptClassifier.ts) — then either
+ * dispatches it inline through chatRunner or transitions it to
+ * 'dispatched-to-prd' and moves on to the next queued ticket.
+ *
+ * TODO(PRD 749 follow-up): actually invoking /develop's PRD-authoring flow
+ * from here needs renderer-side orchestration beyond this store (out of
+ * scope for this PRD) — this is the hook point for that call once it exists.
+ */
 function dequeueNext(tabId: string): void {
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   if (cur.queue.length === 0) return
   const [next, ...rest] = cur.queue
-  const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
-  patch(tabId, (c) => ({ ...c, queue: rest }))
-  dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text })
+  // `running` must stay true across the classification round-trip (it can
+  // take seconds — a real claude -p spawn, up to CLASSIFY_TIMEOUT_MS on
+  // failure) so a manual send() during that window queues behind this
+  // ticket instead of reading running:false and racing a second dispatch
+  // for the same tabId, which chatRunner's per-tab exclusivity guard would
+  // then silently drop.
+  patch(tabId, (c) => ({ ...c, queue: rest, running: true, queuedPosition: 0 }))
+
+  classifyPromptTicket(next.text).then((verdict) => {
+    if (verdict === 'develop') {
+      const dispatched: PromptTicket = { ...next, status: 'dispatched-to-prd', completedAt: Date.now() }
+      applyNotice(tabId, dispatched.sessionId, `→ dispatched to /develop for PRD decomposition (ticket ${dispatched.id})`)
+      patch(tabId, (c) => ({ ...c, running: false, queuedPosition: 0 }))
+      dequeueNext(tabId)
+      return
+    }
+    const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
+    dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id })
+  })
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {

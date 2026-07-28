@@ -436,6 +436,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('chat:run:notice', listener);
       return () => ipcRenderer.removeListener('chat:run:notice', listener);
     },
+    /** Classify a queued PromptTicket's text as 'inline' or 'develop'. */
+    classifyTicket: (payload) => ipcRenderer.invoke('chat:classify-ticket', payload),
   },
   exchanges: {
     /** List exchanges for a project (durable chat-run log), newest-first.

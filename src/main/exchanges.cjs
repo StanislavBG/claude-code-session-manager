@@ -7,11 +7,16 @@
  *   ~/.claude/knowledge-log/exchanges/<encodeCwd(cwd)>.jsonl
  *
  * Record shape (contract for PRDs 324 + 325):
- *   { ts, sessionId, cwd, prompt, result, summary, degraded? }
+ *   { ts, sessionId, cwd, prompt, result, summary, degraded?, promptId? }
  *
  * Summary is produced by the shared Haiku summarizer (summarize.cjs). On
  * summarization failure the record is still written with `degraded` set — the
  * exchange is never lost due to an API call failing.
+ *
+ * `promptId` (PRD 749) is the originating PromptTicket.id when the exchange
+ * was dispatched from a queued ticket (chat.ts's per-tab queue, PRD 748) —
+ * omitted for a fresh manual send with no ticket. Forward-only: existing
+ * historical records simply lack the field, never backfilled/synthesized.
  */
 
 const fsp = require('node:fs/promises');
@@ -31,10 +36,10 @@ const EXCHANGES_DIR = path.join(HOME, '.claude', 'knowledge-log', 'exchanges');
  * processes are safe (each line is a single write, POSIX O_APPEND atomic for
  * pipe-sized payloads).
  *
- * @param {{ sessionId: string, cwd: string, prompt: string, result: string }} opts
+ * @param {{ sessionId: string, cwd: string, prompt: string, result: string, promptId?: string }} opts
  * @returns {Promise<void>}
  */
-async function recordExchange({ sessionId, cwd, prompt, result }) {
+async function recordExchange({ sessionId, cwd, prompt, result, promptId }) {
   const encoded = encodeCwd(cwd);
   const filePath = path.join(EXCHANGES_DIR, `${encoded}.jsonl`);
 
@@ -53,6 +58,7 @@ async function recordExchange({ sessionId, cwd, prompt, result }) {
     summary,
     model,
     ...(degraded ? { degraded } : {}),
+    ...(promptId ? { promptId } : {}),
   };
 
   const line = JSON.stringify(record) + '\n';

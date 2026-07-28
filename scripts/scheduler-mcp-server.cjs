@@ -103,6 +103,7 @@ const TOOLS = [
         outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
         parallelGroup: { type: 'number', description: 'Optional: opt into an existing NN group instead of allocating a new one' },
+        sourcePromptId: { type: 'string', description: 'Optional: PromptTicket.id this PRD was authored from, for traceability' },
       },
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
     },

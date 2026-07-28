@@ -208,15 +208,38 @@ function gitHead(cwd) {
   });
 }
 
+// Best-effort `git fetch --all --prune` in cwd, bounded and never throwing.
+// A PRD that does its work in a separate `git worktree add` checkout (per
+// standards.md's own recommended pattern for shared repos) commits and pushes
+// from THAT worktree, then removes it — the commit never touches job.cwd's
+// own refs, so job.cwd's remote-tracking branches can be stale relative to
+// what was actually pushed. Refreshing them here is what lets the git log
+// --all scan below see a worktree-pushed commit. Resolves once fetch settles
+// (or times out / errors) — callers don't need the result, just the refresh.
+function fetchAllRefs(cwd) {
+  return new Promise((resolve) => {
+    if (!cwd) { resolve(); return; }
+    execFile(
+      'git',
+      ['-C', cwd, 'fetch', '--all', '--prune'],
+      { timeout: 20_000, windowsHide: true },
+      () => resolve(),
+    );
+  });
+}
+
 // Returns true if ≥1 commit landed on any ref (branch, remote-tracking branch,
 // or tag) in cwd between startedAt and finishedAt (with 60s slack) — not just
 // the currently checked-out branch. Used both by the self-heal pass and by the
 // live commit-guard's fallback (see computeCommittedDuringRun) to derive
-// committedDuringRun from the recorded run window. Never throws;
-// git-unavailable → false (no override, job stays as-is).
-function committedInWindow(cwd, startedAt, finishedAt) {
+// committedDuringRun from the recorded run window. Fetches remotes first (see
+// fetchAllRefs) so a commit pushed from a separate worktree checkout that was
+// since removed is still visible via job.cwd's remote-tracking refs. Never
+// throws; git-unavailable → false (no override, job stays as-is).
+async function committedInWindow(cwd, startedAt, finishedAt) {
+  if (!cwd || !startedAt) return false;
+  await fetchAllRefs(cwd);
   return new Promise((resolve) => {
-    if (!cwd || !startedAt) { resolve(false); return; }
     const until = finishedAt
       ? new Date(Date.parse(finishedAt) + 60_000).toISOString()
       : new Date().toISOString();

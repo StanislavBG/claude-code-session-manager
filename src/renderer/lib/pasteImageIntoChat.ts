@@ -16,6 +16,9 @@ export interface PasteResult {
   caret: number
   // Toast message to show, or null when none (plain text paste).
   toast: string | null
+  // Path of the pasted image, set only on a successful image paste — lets the
+  // caller show a thumbnail preview without re-parsing the toast string.
+  imagePath?: string
 }
 
 // insert `text` into `value`, replacing [selStart, selEnd).
@@ -44,7 +47,7 @@ export async function resolveChatPaste(
   if (img && img.ok) {
     const insert = img.path + ' '
     const { value, caret } = spliceAtSelection(draft, selStart, selEnd, insert)
-    return { value, caret, toast: `Pasted image: ${img.path.split('/').pop()}` }
+    return { value, caret, toast: `Pasted image: ${img.path.split('/').pop()}`, imagePath: img.path }
   }
   const text = await deps.readText()
   const { value, caret } = spliceAtSelection(draft, selStart, selEnd, text)

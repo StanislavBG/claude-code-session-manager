@@ -14,6 +14,7 @@ import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { mergeTicketsForDisplay, ticketDisplayStatus } from '../lib/ticketDisplay'
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
+import { PasteThumbnail } from './PasteThumbnail'
 import type { NavKey } from './LeftNav'
 
 /**
@@ -439,6 +440,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const pushNotice = useChat((s) => s.pushNotice)
   const [draft, setDraft] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [pastedImage, setPastedImage] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const viewportWidth = useViewportWidth()
@@ -485,6 +487,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
     }
     send({ tabId, sessionId, cwd, prompt: draft })
     setDraft('')
+    setPastedImage(null)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -513,6 +516,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
         )
         setDraft(r.value)
         if (r.toast) toast.info(r.toast)
+        if (r.imagePath) setPastedImage(r.imagePath)
         // Restore caret after React re-renders the controlled value.
         requestAnimationFrame(() => {
           try {
@@ -665,6 +669,9 @@ export function TerminalChat({ tabId, cwd }: Props) {
       </div>
 
       <div className="border-t border-rule p-3">
+        {pastedImage && (
+          <PasteThumbnail key={pastedImage} path={pastedImage} onDismiss={() => setPastedImage(null)} />
+        )}
         <div className="flex items-end gap-2">
           <textarea
             value={draft}

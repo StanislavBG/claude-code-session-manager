@@ -9,6 +9,7 @@ describe('resolveChatPaste', () => {
     expect(r.value).toBe('hi /tmp/foo.png ')
     expect(r.caret).toBe('hi /tmp/foo.png '.length)
     expect(r.toast).toBe('Pasted image: foo.png')
+    expect(r.imagePath).toBe('/tmp/foo.png')
     expect(readText).not.toHaveBeenCalled()
   })
 
@@ -19,6 +20,7 @@ describe('resolveChatPaste', () => {
     expect(readText).toHaveBeenCalledTimes(1)
     expect(r.value).toBe('apasted textb')
     expect(r.toast).toBeNull()
+    expect(r.imagePath).toBeUndefined()
   })
 
   it('falls through to text paste when pasteImage throws/rejects', async () => {

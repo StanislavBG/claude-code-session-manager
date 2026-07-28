@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm, type ILinkProvider, type IBufferRange } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -9,6 +9,7 @@ import { toast } from '../state/toast'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from './TerminalControls'
 import { TerminalChat } from './TerminalChat'
 import { fetchTerminalDigest } from '../lib/terminalDigest'
+import { PasteThumbnail } from './PasteThumbnail'
 
 // Matches plausible source-path tokens: optional ./ or ../ prefix, dotted name
 // with extension, optional :line[:col] suffix. Word-boundary on the front
@@ -38,6 +39,7 @@ export function Terminal({ tabId, cwd }: Props) {
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const spawnedRef = useRef(false)
+  const [pastedImage, setPastedImage] = useState<string | null>(null)
 
   useEffect(() => {
     console.log('[Terminal] mount effect running, tabId=', tabId, 'cwd=', cwd, 'alreadySpawned=', spawnedRef.current)
@@ -152,6 +154,7 @@ export function Terminal({ tabId, cwd }: Props) {
             if (img.ok) {
               writeInChunks(tabId, img.path + ' ')
               toast.info(`Pasted image: ${img.path.split('/').pop()}`)
+              setPastedImage(img.path)
               return
             }
             const pasted = await window.api.clipboard.pasteText()
@@ -248,6 +251,11 @@ export function Terminal({ tabId, cwd }: Props) {
       >
         ← Back to chat
       </button>
+      {pastedImage && (
+        <div className="absolute bottom-2 left-2 z-20">
+          <PasteThumbnail key={pastedImage} path={pastedImage} onDismiss={() => setPastedImage(null)} />
+        </div>
+      )}
       <div
         ref={hostRef}
         onMouseDown={() => xtermRef.current?.focus()}

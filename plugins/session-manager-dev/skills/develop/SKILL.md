@@ -2,9 +2,9 @@
 name: develop
 description: >-
   Lead a software-development task by decomposing a feature/refactor/bugfix prompt into a
-  series of self-contained PRDs queued for the session-manager scheduler, each carrying the
-  engineering standards inline so the headless executor honors them — then track those PRDs
-  to completion, verify them against their acceptance criteria, and report back. Use whenever
+  series of self-contained PRDs queued for the session-manager scheduler, each pointing the
+  headless executor at the engineering standards file to read at runtime — then track those
+  PRDs to completion, verify them against their acceptance criteria, and report back. Use whenever
   the user says "/develop", "develop X", "build me X", "implement X", "let's code X", or
   otherwise starts dev work that should run as scheduled PRDs rather than inline now. This
   skill is the home for the developer-only guidance (performance, debugging, API-reuse, TDD)
@@ -41,16 +41,18 @@ The engineering standards (Performance, Debugging, API reuse / single source of 
 and the executor-facing Execution discipline) live in **`standards.md`** beside this file, in
 the same skill directory (`.../skills/develop/standards.md` — NOT `~/.claude/skills/develop/`,
 which is a different, non-existent path; resolve it relative to wherever this SKILL.md itself
-was loaded from). **Re-read that file fresh with the Read tool immediately before pasting it
-into each PRD (Phase 1 step 4) — never reuse a copy cached earlier in the same conversation.**
-A long authoring session can span an edit to `standards.md` (including one autonomously applied
-by a prior incident's fix-plan) without the model noticing; pasting a stale in-context copy
-silently ships PRDs missing the latest execution-discipline rules. This is exactly the
-single-source-of-truth violation the standards themselves warn against — don't let it happen to
-the standards block itself. (Incident: PRDs 467/468 authored late in a long session carried a
-standards.md snapshot from before the "You ARE the executor" guard was added earlier that same
-session, so PRD 467's headless run repeated the exact anti-pattern the guard exists to prevent.)
-Never restate or fork its content — one concept, one implementation.
+was loaded from).
+
+**Reference it, don't embed it.** The headless executor (`claude -p`) runs on the same
+filesystem this authoring session does, with full tool access — so a PRD only needs to name
+`standards.md`'s absolute path (resolved once, at authoring time, the same way this file already
+resolves it) and instruct the executor to `Read` it before starting. There is now exactly one
+copy of this text on disk, ever — no pasted snapshot to go stale, and nothing to re-read fresh
+before writing (an earlier version of this skill pasted the full contents into every PRD and had
+to warn authors to re-read it fresh each time to avoid shipping a stale in-context copy — PRDs
+467/468 did exactly that and repeated an anti-pattern a guard added earlier the same session was
+meant to prevent. Referencing by path removes the failure mode instead of warning against it).
+Never restate or fork its content — one concept, one implementation, one location.
 
 For interactive dev work, also apply the `test-driven-development` and `systematic-debugging`
 skills; the headless PRDs get the distilled core from `standards.md` instead, since they
@@ -64,21 +66,85 @@ can't load skills.
    caller is `/process-feedback`, scope is already established by its evaluation — don't
    re-ask; build from the brief it hands you.)
 
-2. **Explore the target repo.** Identify the absolute `cwd`, existing patterns/utilities to
-   reuse (per the API-reuse standard — search before writing new code), the test command, and
-   any constraints. Capture exact file paths and signatures; they go straight into the PRDs.
+2. **Explore the target repo — broadly, not just the obvious file.** Identify the absolute
+   `cwd`, existing patterns/utilities to reuse (per the API-reuse standard — search before
+   writing new code), the test command, and any constraints. Capture exact file paths and
+   signatures; they go straight into the PRDs. Don't stop at the first component that looks
+   relevant — check its siblings too (does the same pattern appear in 2-3 similar components?
+   do they actually share the same shape, or only look similar — confirm by reading, don't
+   assume: a wrong assumption here means an inaccurate PRD, discovered only after the executor
+   runs it), check existing tests for the area, and check whether a prior PRD already touched
+   this subsystem (`ls ~/.claude/session-manager/scheduled-plans/prds/` for related slugs) —
+   duplicating or contradicting a still-queued PRD is a real failure mode, not a hypothetical one.
 
-3. **Decompose into a series of SMALL, bounded PRDs.** Split a large ask into multiple PRDs and
-   sequence them. To pick each PRD's `NN` (parallel group), **compute the highest in-use number
-   deterministically — never eyeball or narrow-grep the `ls`** (a narrowed pattern like
-   `'^10[0-9]'` silently misses `110+` and collides):
+3. **Draft a candidate decomposition, then run a completeness pass before finalizing it.** This
+   step exists because small, bounded individual PRDs (step 4) are correct and non-negotiable —
+   but a *set* of small PRDs can still be incomplete if the upfront decomposition missed
+   something. Keeping PRDs small is not a substitute for getting the decomposition right; it's a
+   separate concern, and this step is where decomposition quality gets checked.
+   - For a **genuinely trivial ask** (one obvious PRD, no cross-file consequences) — skip
+     straight to step 4, no ceremony needed.
+   - For anything **larger than one or two obvious PRDs, or touching more than one
+     component/subsystem** — before finalizing, dispatch a second, independent agent (the Agent
+     tool, `subagent_type: "Explore"` or `"general-purpose"` — this is a single extra dispatch,
+     not the full multi-agent Workflow tool, and needs no special opt-in) with: the original ask
+     verbatim, your draft PRD list (titles + one-line goals), and the instruction to find what's
+     missing — uncovered edge cases, error-handling paths, tests, cross-file consequences,
+     components that share the same pattern but weren't included, anything the draft assumed
+     without verifying. Treat its findings as a second opinion to weigh, not an automatic
+     addition — fold real, concrete gaps into the PRD set (add, split, or adjust a PRD); dismiss
+     vague or speculative ones. For a large, multi-subsystem ask, it's fine to repeat this once
+     more after folding in the first round's findings (a second completeness pass on the revised
+     set) — stop once a pass turns up nothing new, don't loop indefinitely.
+   - **Check each drafted PRD against explicit concern dimensions, not just "does the feature
+     work"**: missing features/edge cases beyond the happy path, tests, security, and quality
+     (perf, error handling). This is where depth actually comes from — a decomposition that only
+     ever asks "what file does this touch" produces exactly the narrow, single-concern PRDs this
+     step exists to catch.
+     - **Tests and security are NOT separate follow-up PRDs — they are mandatory AC lines inside
+       the SAME PRD as the feature they belong to.** This is non-negotiable: `standards.md`'s TDD
+       rule requires the test before/with the implementation, not after, and a security concern
+       (input validation at a boundary, auth checks, no string-built queries) is a decision made
+       while writing the code — a later "security review PRD" would just end up re-touching the
+       same lines, doubling work and leaving the shipped code insecure in the meantime. Every
+       feature PRD's own Acceptance Criteria must include its test command AND, when it touches
+       input/auth/data, the relevant security checks — don't spin these out.
+     - **Genuinely separable work MAY become its own sibling PRD**: deeper edge-case coverage
+       beyond what the core AC needs to prove correctness, performance/observability hardening,
+       docs. Splitting these out is exactly the "more isolated, narrower PRDs" instinct — apply
+       it here, where a dedicated PRD adds real value, not to tests/security where it subtracts
+       from correctness.
+   - This is a planning-quality step, not an execution step — it happens entirely in the
+     interactive main-loop session, before anything gets written to disk or queued.
+
+4. **Decompose into a series of SMALL, bounded PRDs.** Split the (now completeness-checked)
+   decomposition into individually small PRDs and sequence them.
+
+   **Prefer creating each PRD via the `scheduler_create_prd` MCP tool**
+   (`mcp__session-manager-scheduler__scheduler_create_prd`) over hand-writing the file. Its input
+   (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
+   `outOfScope[]`) maps directly onto the sections below — pass them straight through. It
+   allocates the parallel-group `NN` atomically (no read-then-write race against another
+   concurrent `/develop`/`/process-feedback` invocation), derives and collision-checks the slug,
+   and embeds the standards pointer for you. Set `parallelGroup` explicitly only when this PRD
+   must share an existing sibling's `NN` (a logically independent PRD that can run in parallel
+   with one already queued); omit it to get the next free `NN` atomically.
+
+   **Fallback — only when the tool errors with "app not running" / admin API unreachable**
+   (the session-manager Electron app must be running for this MCP tool to work; if it isn't,
+   don't block on it): compute the highest in-use number deterministically yourself — never
+   eyeball or narrow-grep the `ls` (a narrowed pattern like `'^10[0-9]'` silently misses `110+`
+   and collides):
    ```bash
    ls ~/.claude/session-manager/scheduled-plans/prds/ | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
    ```
    The last line is the current max. Then: same `NN` as a logically independent sibling that
    can run in parallel; **next free `NN` = max+1** when this PRD hard-depends on prior work or
-   is unrelated to every existing group. Record each cross-PRD dependency in the dependent
-   PRD's notes.
+   is unrelated to every existing group. This manual path has a small, accepted race (two
+   concurrent authors could compute the same "next free" `NN`) — cosmetic (two unrelated groups
+   end up sharing a number) rather than destructive, and only reachable when the atomic tool
+   path above isn't available. Record each cross-PRD dependency in the dependent PRD's notes
+   either way.
 
    ### PRD structure and location
 
@@ -166,12 +232,24 @@ can't load skills.
    failure** — it's the scheduler's designed auto-pause; the job auto-resumes at the next
    window reset. Don't add retry logic for it.
 
-4. **Emit each PRD** to the canonical path and structure above, then **append `## Engineering
-   standards` and paste the full contents of `standards.md` verbatim.** This is the
-   load-bearing step — it's the only way the standards (incl. Execution discipline) reach the
-   headless run. Honor the `PRD_AUTHORING.md` §10 pre-queue checklist.
+5. **Emit each PRD.** If you used `scheduler_create_prd`, this step is already done — the tool
+   wrote the file to the canonical path with the standards pointer included; skip to step 5.
+   **Fallback path only:** write to the canonical path and structure above, then **append `##
+   Engineering standards` with a one-line pointer**, not the file's contents:
+   ```markdown
+   ## Engineering standards
 
-5. **Confirm to the user**, per emitted PRD: filename, chosen `NN` + rationale
+   Before writing any code, read `<absolute path to standards.md, resolved above>` — it has the
+   Performance, Debugging, API-reuse, TDD, and Execution-discipline rules that apply to this PRD.
+   Every rule in it is mandatory, especially Execution discipline (bounded commands, verify
+   before done, the finish-protocol sentinel).
+   ```
+   This is the load-bearing step — it's the only way the standards (incl. Execution discipline)
+   reach the headless run, and it now stays current automatically since the executor reads the
+   live file rather than a snapshot taken at authoring time. Honor the `PRD_AUTHORING.md` §10
+   pre-queue checklist.
+
+6. **Confirm to the user**, per emitted PRD: filename, chosen `NN` + rationale
    (parallel-with-X / serial-after-Y), `cwd`, and an ETA + token-cost ballpark. Note they can
    "Run now" in the SchedulePanel or wait for `when-available` polling.
 
@@ -181,7 +259,7 @@ The queued PRDs run headlessly and can take a while. Don't fire-and-forget, and 
 hand off to a recurring check. `/process-feedback` delegates to this exact phase, so it is the
 single definition of "tracked to done" for both entry paths.
 
-6. **Watch the scheduler every ~30 min.** Start a 30-minute monitoring loop (`/loop 30m` over
+7. **Watch the scheduler every ~30 min.** Start a 30-minute monitoring loop (`/loop 30m` over
    this watch step, or a `ScheduleWakeup` at 1800s if self-pacing) scoped to the PRD ids you
    emitted. On each tick, read the scheduler's job status (queue + run history under
    `~/.claude/session-manager/scheduled-plans/`, or the SchedulePanel) and branch:
@@ -195,22 +273,42 @@ single definition of "tracked to done" for both entry paths.
      your report rather than re-deriving the analysis, and let `/process-feedback` fold its
      prevention hint back into future PRD authoring. A `rateLimited` exit-1 is the
      scheduler's benign auto-pause (auto-resumes next window) — keep waiting, don't escalate.
-   - **All PRDs completed successfully** — go to step 7.
+   - **All PRDs completed successfully** — go to step 8.
 
-7. **Gate: definition of done** (same for both entry paths). Once the code has landed:
+8. **Gate: definition of done** (same for both entry paths). Once the code has landed:
    - **Verify live against each PRD's acceptance criteria** — run the health check, hit the
      endpoint, show before/after. The headless run asserted its own test command; this is the
      interactive confirmation it actually does what was asked.
-   - For a **major feature or risky change**, dispatch a review via the
-     `requesting-code-review` skill before calling it done; fix Critical/Important findings.
-   - **Report back**: what landed, PRD/commit refs, verification result, anything left open.
+   - **Route to the specialist that actually matches what changed** — not always the generic
+     reviewer. This environment has dedicated agents that sit unused unless explicitly called;
+     match the PRD's surface to the right one before calling a major/risky change done:
+     - Touches an API's request/response shape, REST/GraphQL contract, or endpoint design →
+       dispatch `api-designer` (Agent tool).
+     - Touches auth, input handling, secrets, or data storage → dispatch `security-auditor` in
+       addition to the mandatory security AC the PRD's own execution already required — the
+       auditor catches what the executor's self-check might miss.
+     - Is a structural refactor (no behavior change intended) → dispatch `refactorer`.
+     - Is performance-sensitive or touches a hot path → dispatch `perf-profiler`.
+     - Adds or updates a dependency → dispatch `dependency-auditor`.
+     - Touches a database schema, migration, or table design → **no specialist exists for this
+       in this environment today.** Don't silently let the generic code-reviewer stand in for a
+       schema review it isn't specialized for — say so explicitly in your report ("schema change,
+       no dedicated reviewer available, manual review recommended") rather than implying coverage
+       that isn't there.
+     - Anything else, or a **major feature/risky change** not covered above — dispatch the
+       generic `requesting-code-review` skill (`code-reviewer` agent) as the default.
+     Fix Critical/Important findings from whichever specialist(s) ran before calling it done.
+   - **Report back**: what landed, PRD/commit refs, which specialist(s) reviewed it (or the
+     explicit "no specialist available" note), verification result, anything left open.
 
 ## References (reuse, don't duplicate)
 
 - `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` — the §1–§10 safety rules.
-- `standards.md` beside this file — the engineering + execution-discipline rules inlined into every PRD. Re-read fresh each time (see "Standards" above) — don't reuse a cached copy.
+- `standards.md` beside this file — the engineering + execution-discipline rules. Every PRD points the executor at its absolute path (see "Standards" above) rather than embedding a copy.
 - `test-driven-development`, `systematic-debugging` — interactive dev sessions.
-- `requesting-code-review` — the Phase-2 review gate.
+- `requesting-code-review` — the Phase-2 default review gate; `api-designer`, `security-auditor`,
+  `refactorer`, `perf-profiler`, `dependency-auditor` — specialist agents routed to by surface
+  area (see step 8) rather than always defaulting to the generic reviewer.
 
 ## Notes
 

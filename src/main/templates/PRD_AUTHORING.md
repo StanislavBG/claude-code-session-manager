@@ -328,7 +328,7 @@ loop but had no documented programmatic queueing path. This section is that path
 ### The `scheduler_create_prd` MCP tool
 
 Wraps `POST /admin/scheduler/create-prd` on the loopback admin API
-(`src/main/adminServer.cjs`, PRD 549) via `scripts/scheduler-mcp-server.cjs`, registered in this
+(`src/main/lib/localAdminHttp.cjs` + `src/main/lib/prdCreate.cjs`, PRD 549/688) via `scripts/scheduler-mcp-server.cjs`, registered in this
 repo's `.mcp.json` as the `session-manager-scheduler` MCP server. An external project wanting to
 call it from its own automation needs the equivalent MCP server registration pointing at this
 repo's `scripts/scheduler-mcp-server.cjs`, or can call the admin HTTP route directly (same
@@ -348,7 +348,7 @@ request/response shape) using the token at `~/.claude/session-manager/admin-api.
 | `slug` | string | no | kebab-case; derived from `title` if omitted |
 | `parallelGroup` | number | no | opt into an existing `NN` group instead of allocating a new one |
 
-**Return** (`{nn, filename, status}`, per `adminServer.cjs`):
+**Return** (`{nn, filename, status}`, per `prdCreate.cjs`'s registerAdminRoute):
 ```json
 { "nn": 550, "filename": "550-my-feature.md", "status": "queued" }
 ```
@@ -380,9 +380,9 @@ produces by hand.
 ### The app-must-be-running caveat (read this first)
 
 **`scheduler_create_prd` only works while the session-manager Electron app is running on this
-machine.** The admin server it depends on (`src/main/adminServer.cjs`) is hosted *inside* the
+machine.** The admin server it depends on (`src/main/lib/localAdminHttp.cjs`) is hosted *inside* the
 Electron process — it binds a loopback port and writes its token to
-`~/.claude/session-manager/admin-api.json` on app boot (see `CLAUDE.md`'s `adminServer.cjs`
+`~/.claude/session-manager/admin-api.json` on app boot (see `CLAUDE.md`'s `localAdminHttp.cjs`
 architecture entry) and stops existing the moment the app quits — it is not a standalone daemon.
 If the app is closed, `scheduler-mcp-server.cjs` cannot read a live port/token and every call
 returns the error `session-manager app is not running (admin API unreachable) — start it first`.

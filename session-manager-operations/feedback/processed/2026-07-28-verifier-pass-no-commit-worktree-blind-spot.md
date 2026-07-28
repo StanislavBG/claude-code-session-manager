@@ -29,3 +29,7 @@ This looks like the same class of bug as `2026-07-22-pass-no-commit-false-negati
 2. Treat a `vcs_state_changed`/push transcript event (already emitted in this run's stream-json log at 01:36:04Z) plus a `code_change_published` event as independent commit evidence, OR-ed into `committedDuringRun` the same way PRD 674 OR'd in `committedInWindow`'s result — this doesn't depend on `job.cwd`'s ref state at all.
 
 Either way, keep the existing "no commit anywhere → still correctly flag `pass_no_commit`" regression case from PRD 674 green.
+
+## RESOLUTION
+
+Ours, do it. Root-caused and confirmed live against current code: `committedInWindow()` (src/main/scheduler.cjs:217-230) scopes its `git log --all` scan to `job.cwd`'s local refs only, which never see a commit made+pushed from an isolated `git worktree add` checkout after that worktree is removed — neither PRD 674's cross-branch fallback nor PRD 575's `-merge-main` exemption cover this case. Queued as `715-commit-guard-fetch-fallback-for-worktree-remote-pushed-commi` (PRD 715): add a bounded `git fetch`/OR'd commit-evidence signal so the guard sees worktree-pushed commits, while keeping the existing "no commit anywhere" regression path from PRD 674 green. This is the systemic fix for the 10 duplicate needs_review instances (672, 688, 690, 704 x2, 713 x6) also archived in this pass.

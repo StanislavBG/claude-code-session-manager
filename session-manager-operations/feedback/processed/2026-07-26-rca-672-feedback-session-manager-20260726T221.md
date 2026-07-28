@@ -99,3 +99,8 @@ invented "the skill's quick-exit rule (step 0)", did an `ls`, found no open item
 criterion — a truthless PASS costing $0.34. Not a self-delegation failure (no Skill/ScheduleWakeup
 call). Fix = resolve the skill/standards paths correctly AND hard-fail the emit when either inline
 resolves empty, so a broken template can never reach the queue again.
+
+## RESOLUTION
+
+Duplicate instance of the systemic verifier bug documented in `2026-07-28-verifier-pass-no-commit-worktree-blind-spot.md`: `committedInWindow()` (src/main/scheduler.cjs:217) only scans refs already present in `job.cwd`'s local `.git`, so a commit made and pushed from an isolated worktree, another repo, or a remote a job doesn't normally fetch stays invisible until something fetches it — producing a false `pass_no_commit`/`transcript_errors` verdict on work that actually landed. This instance was already self-resolved individually by the scheduler's own auto-fix-PRD pipeline (its companion `-fix-` PRD is `completed` in `queue.json` as of this triage pass). The one systemic fix is queued as `715-commit-guard-fetch-fallback-for-worktree-remote-pushed-commi` — no separate PRD needed for this instance. Declining to re-litigate; archived as duplicate evidence.
+

@@ -149,3 +149,8 @@ that fixes exactly this class (`git log --all --since/--until`) landed in sessio
 source as ae84cfc on 2026-07-26 15:24 but is NOT in the installed 0.37.1 package, and the
 app has not been restarted onto it. So the guard reported "no commit", and runVerify.cjs:725
 downgraded a fully-green run to needs_review.
+
+## RESOLUTION
+
+Duplicate instance of the systemic verifier bug documented in `2026-07-28-verifier-pass-no-commit-worktree-blind-spot.md`: `committedInWindow()` (src/main/scheduler.cjs:217) only scans refs already present in `job.cwd`'s local `.git`, so a commit made and pushed from an isolated worktree, another repo, or a remote a job doesn't normally fetch stays invisible until something fetches it — producing a false `pass_no_commit`/`transcript_errors` verdict on work that actually landed. This instance was already self-resolved individually by the scheduler's own auto-fix-PRD pipeline (its companion `-fix-` PRD is `completed` in `queue.json` as of this triage pass). The one systemic fix is queued as `715-commit-guard-fetch-fallback-for-worktree-remote-pushed-commi` — no separate PRD needed for this instance. Declining to re-litigate; archived as duplicate evidence.
+

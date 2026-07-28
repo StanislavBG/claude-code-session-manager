@@ -79,3 +79,7 @@ pipeline to confirm it.
 3. Acceptance test: a chat turn ending in a plain-text (non-empty, no-tool-call) assistant
    message of a few hundred words renders completely in the chat pane, every time, without
    requiring a follow-up prompt to re-surface it.
+
+## RESOLUTION
+
+Ours, do it. Root-caused via an Explore-agent investigation of `src/main/chatRunner.cjs`: the terminal-event fallback is wired to `child.on('exit', ...)` (chatRunner.cjs:610-639) instead of `child.on('close', ...)`, so a turn whose final assistant text + terminating `result` line flush in the same last stdout write can race the exit fallback — the fallback fires first, sets the one-shot `terminalSent` latch, and broadcasts a misleading `chat:run:error`, silently dropping the real `chat:run:complete` when it arrives moments later. Explains the tool-call asymmetry: tool-call-bearing turns have real wall-clock gaps between stdout writes, so no race; a pure-text final turn has the tightest possible race window. Renderer side (`state/chat.ts`, `assistantTurnPresentation.ts`) checked and has no exclusionary logic — main-process bug only. Queued as `716-fix-chatrunner-exit-close-race-dropping-final-text-only-turn` (PRD 716).

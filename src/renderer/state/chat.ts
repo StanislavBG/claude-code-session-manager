@@ -38,6 +38,24 @@ export interface ChatTurn {
   toolUses?: ToolUseTrace[]
 }
 
+/**
+ * A user prompt submitted while a tab's turn is already running. Queued
+ * client-side (chat.ts) and dispatched one at a time through the same
+ * chatRunner FIFO lane a fresh manual send uses — never a second queue.
+ */
+export interface PromptTicket {
+  id: string
+  tabId: string
+  sessionId: string
+  cwd: string
+  text: string
+  status: 'queued' | 'running' | 'dispatched-to-prd' | 'done' | 'failed'
+  createdAt: number
+  startedAt?: number
+  completedAt?: number
+  prdSlugs?: string[]
+}
+
 interface TabChat {
   turns: ChatTurn[]
   /** A run is in flight OR waiting in the queue — input is disabled. */
@@ -50,6 +68,8 @@ interface TabChat {
   stream: string
   /** Tool/skill/MCP calls accumulated for the in-flight run (mirrors `stream`). */
   liveToolUses: ToolUseTrace[]
+  /** Prompts submitted while `running` was true, FIFO — dispatched one at a time on completion. */
+  queue: PromptTicket[]
 }
 
 interface ChatState {
@@ -83,6 +103,7 @@ const EMPTY: TabChat = {
   started: false,
   stream: '',
   liveToolUses: [],
+  queue: [],
 }
 
 let seq = 0
@@ -135,31 +156,28 @@ export const useChat = create<ChatState>((set, get) => ({
     const trimmed = prompt.trim()
     if (!trimmed) return
     const cur = get().chats[tabId] ?? EMPTY
-    if (cur.running) return
-    const userTurn: ChatTurn = { id: turnId(), role: 'user', text: trimmed, at: Date.now() }
-    set({
-      chats: {
-        ...get().chats,
-        [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, queuedPosition: 0, stream: '' },
-      },
-    })
-    // Durable resume-vs-create decision: check the on-disk transcript (same
-    // check the raw session uses) instead of the ephemeral `started` flag,
-    // which goes stale across an app reload and produced the "Session ID
-    // <uuid> is already in use" error on the first send after restart.
-    transcriptExists(cwd, sessionId)
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err)
-        window.api?.logs?.write('chat', 'warn', `transcript-exists check failed for tab ${tabId}: ${msg}`)
-        return cur.started
+    if (cur.running) {
+      // A turn is already in flight (or queued behind one) — queue this
+      // prompt instead of dropping it. dequeueNext() dispatches it, in FIFO
+      // order, once the current turn completes.
+      const ticket: PromptTicket = {
+        id: crypto.randomUUID(),
+        tabId,
+        sessionId,
+        cwd,
+        text: trimmed,
+        status: 'queued',
+        createdAt: Date.now(),
+      }
+      set({
+        chats: {
+          ...get().chats,
+          [tabId]: { ...cur, queue: [...cur.queue, ticket] },
+        },
       })
-      .then((resume) =>
-        window.api.chat.run({ tabId, sessionId, prompt: trimmed, cwd, resume }),
-      )
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err)
-        applyError(tabId, sessionId, msg)
-      })
+      return
+    }
+    dispatchSend({ tabId, sessionId, cwd, text: trimmed })
   },
   resetThread: (tabId) => {
     set({
@@ -191,6 +209,49 @@ function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): 
     liveToolUses: [],
     ...extra,
   }))
+  dequeueNext(tabId)
+}
+
+/**
+ * Push a user turn and hand the prompt to chatRunner — the single path both
+ * a fresh manual send() and a dequeued PromptTicket run through, so a queued
+ * prompt executes exactly like an immediate one.
+ */
+function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string }): void {
+  const { tabId, sessionId, cwd, text } = args
+  const cur = useChat.getState().chats[tabId] ?? EMPTY
+  const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
+  useChat.setState({
+    chats: {
+      ...useChat.getState().chats,
+      [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, queuedPosition: 0, stream: '' },
+    },
+  })
+  // Durable resume-vs-create decision: check the on-disk transcript (same
+  // check the raw session uses) instead of the ephemeral `started` flag,
+  // which goes stale across an app reload and produced the "Session ID
+  // <uuid> is already in use" error on the first send after restart.
+  transcriptExists(cwd, sessionId)
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('chat', 'warn', `transcript-exists check failed for tab ${tabId}: ${msg}`)
+      return cur.started
+    })
+    .then((resume) => window.api.chat.run({ tabId, sessionId, prompt: text, cwd, resume }))
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      applyError(tabId, sessionId, msg)
+    })
+}
+
+/** Dequeue the oldest queued ticket (if any) and dispatch it, FIFO. */
+function dequeueNext(tabId: string): void {
+  const cur = useChat.getState().chats[tabId] ?? EMPTY
+  if (cur.queue.length === 0) return
+  const [next, ...rest] = cur.queue
+  const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
+  patch(tabId, (c) => ({ ...c, queue: rest }))
+  dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text })
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {

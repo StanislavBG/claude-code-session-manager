@@ -89,6 +89,7 @@ describe('sessions.ts wakeTab() vs. an in-flight chat run', () => {
           started: true,
           stream: '',
           liveToolUses: [],
+          queue: [],
         },
       },
     })

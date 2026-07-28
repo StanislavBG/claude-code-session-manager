@@ -76,7 +76,12 @@ function emitResultLine(child: FakeChild, resultText: string) {
   const assistantLine = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: resultText }] } })
   const resultLine = JSON.stringify({ type: 'result', subtype: 'success', result: resultText })
   child.stdout.emit('data', Buffer.from(`${assistantLine}\n${resultLine}\n`))
-  child.emit('exit', 0, null)
+  // executeRun's settle() runs off 'close' (not 'exit') — see the comment at
+  // its listener in chatRunner.cjs. Emitting 'exit' here left activeCount
+  // never decremented once manual runs started sharing the FIFO lane's
+  // activeCount bookkeeping, silently starving every later real-executeRun
+  // test in this file.
+  child.emit('close', 0, null)
 }
 
 async function flush() {
@@ -281,7 +286,7 @@ describe('concurrency (default cap = 2)', () => {
   })
 })
 
-describe('manual runs are uncapped (PRD 493)', () => {
+describe('manual runs share the FIFO lane with silent runs', () => {
   let captured: Array<Record<string, unknown>>
   let resolvers: Array<() => void>
 
@@ -294,10 +299,7 @@ describe('manual runs are uncapped (PRD 493)', () => {
     })
   })
 
-  it('two manual runs for different tabs both invoke the executor immediately, even with cap effectively 1', async () => {
-    // Two DIFFERENT tabs, both manual (silent unset). If manual runs shared
-    // the silent lane's cap, the 2nd would sit in `waiting` until the 1st
-    // resolved. It must not.
+  it('two manual runs for different tabs both invoke the executor immediately under the default cap of 2', async () => {
     chatRunner.run({ tabId: 'tab-manual-a', sessionId: 'sess-manual-a', prompt: 'a', cwd: '/tmp', resume: false })
     chatRunner.run({ tabId: 'tab-manual-b', sessionId: 'sess-manual-b', prompt: 'b', cwd: '/tmp', resume: false })
     await new Promise((r) => setTimeout(r, 0))
@@ -309,26 +311,26 @@ describe('manual runs are uncapped (PRD 493)', () => {
     await new Promise((r) => setTimeout(r, 0))
   })
 
-  it('a manual run does not inflate activeCount / starve a silent probe on another tab', async () => {
-    // Fill both silent lanes first.
+  it('a manual run queues behind an already-full lane shared with silent probes', async () => {
+    // Fill both lanes with silent probes first.
     chatRunner.run({ tabId: 'tab-sil-x', sessionId: 'sess-sil-x', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
     chatRunner.run({ tabId: 'tab-sil-y', sessionId: 'sess-sil-y', prompt: '/context', cwd: '/tmp', resume: true, silent: true })
     await new Promise((r) => setTimeout(r, 0))
     expect(captured).toHaveLength(2)
 
-    // A burst of manual runs across other tabs must not block/queue a 3rd
-    // silent probe waiting behind the 2 already-active silent lanes, nor
-    // themselves queue.
+    // A manual run on a 3rd tab must queue behind the 2 already-active lanes
+    // (shared cap), not execute immediately.
     chatRunner.run({ tabId: 'tab-man-1', sessionId: 'sess-man-1', prompt: '1', cwd: '/tmp', resume: false })
-    chatRunner.run({ tabId: 'tab-man-2', sessionId: 'sess-man-2', prompt: '2', cwd: '/tmp', resume: false })
-    chatRunner.run({ tabId: 'tab-man-3', sessionId: 'sess-man-3', prompt: '3', cwd: '/tmp', resume: false })
     await new Promise((r) => setTimeout(r, 0))
+    expect(captured).toHaveLength(2)
 
-    // All 3 manual runs started immediately (on top of the 2 active silent lanes).
-    expect(captured).toHaveLength(5)
-    expect(captured.filter((j) => j.tabId?.toString().startsWith('tab-man-'))).toHaveLength(3)
+    // Freeing a lane lets the queued manual run start.
+    resolvers[0]()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(captured).toHaveLength(3)
+    expect(captured[2].tabId).toBe('tab-man-1')
 
-    resolvers.forEach((resolve) => resolve())
+    resolvers.slice(1).forEach((resolve) => resolve())
     await new Promise((r) => setTimeout(r, 0))
   })
 })

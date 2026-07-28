@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 function installWindowApiMock(opts: { transcriptExists: boolean }) {
   const run = vi.fn().mockResolvedValue(undefined)
   let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
+  let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
   const api = {
     chat: {
       run,
@@ -19,7 +20,10 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
       onRunStarted: vi.fn(),
       onOutput: vi.fn(),
       onToolUse: vi.fn(),
-      onComplete: vi.fn(),
+      onComplete: vi.fn((handler) => {
+        completeHandler = handler
+        return () => { completeHandler = null }
+      }),
       onNeedsInput: vi.fn((handler) => {
         needsInputHandler = handler
         return () => { needsInputHandler = null }
@@ -36,7 +40,12 @@ function installWindowApiMock(opts: { transcriptExists: boolean }) {
     logs: { write: vi.fn() },
   }
   vi.stubGlobal('window', { api })
-  return { api, run, getNeedsInputHandler: () => needsInputHandler }
+  return {
+    api,
+    run,
+    getNeedsInputHandler: () => needsInputHandler,
+    getCompleteHandler: () => completeHandler,
+  }
 }
 
 describe('chat.ts send() resume decision', () => {
@@ -91,6 +100,7 @@ describe('chat.ts resetThread()', () => {
           started: true,
           stream: 'partial',
           liveToolUses: [{ id: 'u1', kind: 'tool', label: 'Bash' }],
+          queue: [],
         },
       },
     })
@@ -125,6 +135,7 @@ describe('chat.ts pushNotice()', () => {
           started: true,
           stream: 'partial',
           liveToolUses: [{ id: 'u1', kind: 'tool', label: 'Bash' }],
+          queue: [],
         },
       },
     })
@@ -164,6 +175,7 @@ describe('chat.ts onNeedsInput()', () => {
           started: true,
           stream: '',
           liveToolUses: [{ id: 'u1', kind: 'tool', label: 'Bash' }],
+          queue: [],
         },
       },
     })
@@ -191,7 +203,7 @@ describe('chat.ts onNeedsInput()', () => {
 
     useChat.setState({
       chats: {
-        't1': { turns: [], running: true, queuedPosition: 0, started: true, stream: '', liveToolUses: [] },
+        't1': { turns: [], running: true, queuedPosition: 0, started: true, stream: '', liveToolUses: [], queue: [] },
       },
     })
 
@@ -206,5 +218,64 @@ describe('chat.ts onNeedsInput()', () => {
     const after = useChat.getState().get('t1')
     expect(after.turns).toHaveLength(1)
     expect(after.turns[0]).toMatchObject({ role: 'question', text: 'What next?' })
+  })
+})
+
+describe('chat.ts prompt queue', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('queues a second prompt sent while running instead of dropping it', async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+    expect(useChat.getState().get('t1').running).toBe(true)
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
+
+    // Not dropped: it lands in the queue instead of firing a second chat.run.
+    expect(run).toHaveBeenCalledTimes(1)
+    const queued = useChat.getState().get('t1').queue
+    expect(queued).toHaveLength(1)
+    expect(queued[0]).toMatchObject({ tabId: 't1', sessionId: 's1', cwd: '/proj', text: 'second', status: 'queued' })
+    expect(typeof queued[0].id).toBe('string')
+    expect(queued[0].id.length).toBeGreaterThan(0)
+
+    // The queued prompt has not yet appeared as a user turn.
+    expect(useChat.getState().get('t1').turns.some((t) => t.text === 'second')).toBe(false)
+  })
+
+  it('dequeues and dispatches the next queued ticket, FIFO, once the running turn completes', async () => {
+    const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'third' })
+    expect(useChat.getState().get('t1').queue.map((t) => t.text)).toEqual(['second', 'third'])
+
+    // Simulate the in-flight run completing.
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ tabId: 't1', sessionId: 's1', prompt: 'second' }))
+
+    const afterFirstDequeue = useChat.getState().get('t1')
+    expect(afterFirstDequeue.queue.map((t) => t.text)).toEqual(['third'])
+    expect(afterFirstDequeue.running).toBe(true)
+    expect(afterFirstDequeue.turns.some((t) => t.text === 'second' && t.role === 'user')).toBe(true)
+
+    // Completing the second (dequeued) run dispatches the third, still FIFO.
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with second' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(3))
+    expect(run).toHaveBeenNthCalledWith(3, expect.objectContaining({ tabId: 't1', sessionId: 's1', prompt: 'third' }))
+    expect(useChat.getState().get('t1').queue).toHaveLength(0)
   })
 })

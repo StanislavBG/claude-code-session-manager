@@ -3,6 +3,8 @@ import type { PersistedTab } from '../../preload/api'
 import { shellQuote, findPreset, renderCommand } from '../lib/presets'
 import { getRawSessionModel, type RawModel } from '../lib/rawSessionModel'
 import { transcriptExists } from '../lib/transcriptExists'
+import { useChat } from './chat'
+import { toast } from './toast'
 
 export interface SessionTab {
   id: string
@@ -185,6 +187,14 @@ export const useSessions = create<SessionsState>((set, get) => ({
   wakeTab: async (id, modelOverride) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab || tab.status !== 'dormant') return
+    // PRD 718: opening a raw session while a headless chat run is still writing
+    // to the same --resume sessionId would spawn a second live `claude
+    // --resume` process against the same transcript. Cancel and wait for full
+    // teardown first.
+    if (useChat.getState().chats[id]?.running) {
+      await window.api.chat.cancel(id)
+      toast.info('Cancelled the in-progress chat run to open a live session.')
+    }
     const { sessionId, startupCommand } = await resolveStartupCommand(
       { cwd: tab.cwd, sessionId: tab.sessionId },
       false,

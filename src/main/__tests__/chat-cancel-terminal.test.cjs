@@ -75,6 +75,37 @@ test('cancelling an ACTIVE run broadcasts a terminal event (unsticks the UI)', a
   assert.match(terminal[0].payload.message, /cancel/i, 'message names the cancellation');
 });
 
+test('cancel() resolves only AFTER the terminal broadcast fires, not immediately on SIGTERM (PRD 718)', async () => {
+  // Order-of-events assertion (not timing-based — a real SIGTERM can be fast
+  // enough on a lightweight stub child that a fixed-delay race would flake).
+  const order = [];
+  cr.attachWindow({
+    isDestroyed: () => false,
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel, payload) => {
+        if (isTerminal(channel) && payload.tabId === 'T2') order.push('terminal');
+      },
+    },
+  });
+
+  cr.run({ tabId: 'T2', sessionId: 'S2', prompt: 'hello', cwd: process.cwd(), resume: false });
+
+  for (let i = 0; i < 6; i++) await tick();
+
+  await cr.cancel('T2').then(() => order.push('resolved'));
+
+  assert.deepEqual(order, ['terminal', 'resolved'], 'cancel() resolves strictly after the terminal broadcast');
+});
+
+test('cancel() on a tab with no in-flight or waiting run resolves immediately (no-op)', async () => {
+  cr.attachWindow({
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: () => {} },
+  });
+  await cr.cancel('no-such-tab'); // must resolve, not hang
+});
+
 function isTerminal(channel) {
   return (
     channel === 'chat:run:complete' ||

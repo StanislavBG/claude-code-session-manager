@@ -1461,8 +1461,9 @@ export interface SessionManagerAPI {
   chat: {
     /** Spawn a headless `claude -p` run for a tab. Results arrive via the on* listeners. */
     run: (payload: ChatRunPayload) => Promise<{ ok: boolean }>;
-    /** Cancel the in-flight run for a tab (SIGTERM→SIGKILL). No-op when idle. */
-    cancel: (tabId: string) => void;
+    /** Cancel the in-flight run for a tab (SIGTERM→SIGKILL). Resolves once the
+     *  run has fully settled (terminal event fired). No-op when idle. */
+    cancel: (tabId: string) => Promise<void>;
     onQueued: (handler: (e: ChatRunQueuedEvent) => void) => () => void;
     onRunStarted: (handler: (e: ChatRunStartedEvent) => void) => () => void;
     onOutput: (handler: (e: ChatRunOutputEvent) => void) => () => void;

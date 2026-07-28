@@ -18,7 +18,7 @@
  *     `silent` (PRD 470) runs still go through the CONCURRENCY_CAP FIFO lane and suppress the
  *     six turn-affecting broadcasts + recordExchange (see probeContextUsage below). Non-silent
  *     (manual) runs (PRD 493) execute immediately, uncapped, never entering the FIFO lane.
- *   cancel(tabId): void
+ *   cancel(tabId): Promise<void>  — resolves once the cancelled run fully settles
  *   parseStopSignal(finalText): { questions: string[] } | null     — exported for reuse
  *   parseContextUsageMarkdown(text): { usedTokens, totalTokens, usedPct, categories } | null
  *                                                                    — pure parser for `/context`
@@ -284,7 +284,11 @@ function getConcurrencyCap() {
   );
 }
 
-// tabId → cancel() for every ACTIVE run; FIFO list of WAITING runs; live count.
+// tabId → { cancelFn, donePromise } for every ACTIVE run; FIFO list of WAITING
+// runs; live count. `donePromise` resolves once the run's own executeRun()
+// promise settles (i.e. after settle() runs for that tabId) — attached right
+// after the executor is invoked (see run()/pump()) so cancel() callers can
+// await full teardown instead of firing SIGTERM and returning immediately.
 const inFlight = new Map();
 const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult }]
 let activeCount = 0;
@@ -341,7 +345,10 @@ function run(opts) {
   // CLAUDE.md no longer strictly holds for foreground sessions (accepted
   // tradeoff). executeRun still registers in inFlight synchronously, so the
   // per-tab guard above and cancel() keep working; no activeCount, no pump.
-  executor(opts).catch(() => { /* executeRun never rejects; defensive */ });
+  const donePromise = executor(opts);
+  const entry = inFlight.get(opts.tabId);
+  if (entry) entry.donePromise = donePromise;
+  donePromise.catch(() => { /* executeRun never rejects; defensive */ });
 }
 
 // Fill open lanes FIFO up to CONCURRENCY_CAP, then announce queue positions for
@@ -351,7 +358,12 @@ function pump() {
     const job = waiting.shift();
     activeCount += 1;
     Promise.resolve()
-      .then(() => executor(job))
+      .then(() => {
+        const donePromise = executor(job);
+        const entry = inFlight.get(job.tabId);
+        if (entry) entry.donePromise = donePromise;
+        return donePromise;
+      })
       .catch(() => { /* executeRun never rejects; defensive */ })
       .finally(() => { activeCount -= 1; pump(); });
   }
@@ -483,7 +495,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       setTimeout(() => doKill('SIGKILL'), 5000).unref?.();
     };
 
-    inFlight.set(tabId, cancelFn);
+    // donePromise is attached by the caller (run()/pump()) right after this
+    // executor invocation returns — see comment above the inFlight Map decl.
+    inFlight.set(tabId, { cancelFn, donePromise: null });
 
     // Hard wall-clock ceiling — SIGTERM + SIGKILL on expiry
     const killTimer = setTimeout(() => {
@@ -650,12 +664,16 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
  * Cancel a run for the given tabId. An ACTIVE run is SIGTERM→SIGKILL'd (its
  * child exit funnels through settle → pump, freeing the lane). A still-WAITING
  * run is dropped from the queue and announced as cancelled. No-op otherwise.
+ *
+ * @returns {Promise<void>} resolves once the cancelled run has fully settled
+ *   (i.e. its terminal IPC event has fired) — or immediately for a waiting/
+ *   no-op cancel, since there is nothing further to await in those cases.
  */
 function cancel(tabId) {
-  const fn = inFlight.get(tabId);
-  if (fn) {
-    fn(); // settle() (on child exit) deletes from inFlight + pumps the next run
-    return;
+  const entry = inFlight.get(tabId);
+  if (entry) {
+    entry.cancelFn(); // settle() (on child exit) deletes from inFlight + pumps the next run
+    return entry.donePromise || Promise.resolve();
   }
   const idx = waiting.findIndex((w) => w.tabId === tabId);
   if (idx !== -1) {
@@ -667,6 +685,7 @@ function cancel(tabId) {
     });
     pump(); // refresh remaining queue positions
   }
+  return Promise.resolve();
 }
 
 // ─── IPC handler registration ─────────────────────────────────────────────
@@ -679,10 +698,10 @@ function registerChatHandlers() {
     return { ok: true };
   }));
 
-  ipcMain.on('chat:cancel', (_e, payload) => {
+  ipcMain.handle('chat:cancel', async (_e, payload) => {
     let tabId;
     try { tabId = schemas.chatCancel.parse(payload).tabId; } catch { return; }
-    cancel(tabId);
+    await cancel(tabId);
   });
 
   ipcMain.handle('chat:probe-context', validated(schemas.chatProbeContext, async ({ tabId, sessionId, cwd }) => {

@@ -393,8 +393,9 @@ contextBridge.exposeInMainWorld('api', {
   chat: {
     /** Spawn a headless claude -p job. Results arrive via the on* listeners. */
     run: (payload) => ipcRenderer.invoke('chat:run', payload),
-    /** Cancel an in-flight run for the given tabId. No-op if none running. */
-    cancel: (tabId) => ipcRenderer.send('chat:cancel', { tabId }),
+    /** Cancel an in-flight run for the given tabId. Resolves once the run has
+     *  fully settled (terminal event fired). No-op if none running. */
+    cancel: (tabId) => ipcRenderer.invoke('chat:cancel', { tabId }),
     onQueued: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('chat:run:queued', listener);

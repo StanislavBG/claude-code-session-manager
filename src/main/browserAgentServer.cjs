@@ -21,6 +21,11 @@
  *     or derived from the scheduler's token.
  *   - Token compared with crypto.timingSafeEqual to avoid a timing
  *     side-channel on the comparison itself.
+ *   - Mode-scoped token file, same rationale/fix as localAdminHttp.cjs's
+ *     resolveTokenPath() (confirmed-live incident 2026-07-29): a dev/e2e
+ *     launch (SM_DEV=1 / SM_E2E=1) writes to browser-agent-api.dev.json /
+ *     browser-agent-api.e2e.json instead of the production file, so it can
+ *     never silently orphan a concurrently-running production instance.
  *   - Four routes: list tabs (read-only), screenshot, single action
  *     (click/type/key/scroll/navigate), DOM/text snapshot.
  *
@@ -43,6 +48,20 @@ const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'browse
 // Screenshots are base64 PNG data URLs — bigger cap than the admin API's 1MB,
 // still bounded so a malformed/malicious body can't exhaust memory.
 const BODY_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Mode-aware token file path, resolved fresh on every call — see
+ * localAdminHttp.cjs's resolveTokenPath() for the full rationale.
+ */
+function resolveTokenPath() {
+  if (process.env.SM_DEV === '1') {
+    return path.join(os.homedir(), '.claude', 'session-manager', 'browser-agent-api.dev.json');
+  }
+  if (process.env.SM_E2E === '1') {
+    return path.join(os.homedir(), '.claude', 'session-manager', 'browser-agent-api.e2e.json');
+  }
+  return TOKEN_PATH;
+}
 
 function timingSafeEqualStrings(a, b) {
   const bufA = Buffer.from(String(a ?? ''));
@@ -103,14 +122,16 @@ function createBrowserAgentServer(remote) {
 
   async function ensureToken() {
     token = crypto.randomBytes(32).toString('hex');
-    await config.writeJson(TOKEN_PATH, { port: null, token });
-    try { await fsp.chmod(TOKEN_PATH, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
+    const tokenPath = resolveTokenPath();
+    await config.writeJson(tokenPath, { port: null, token });
+    try { await fsp.chmod(tokenPath, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
     return token;
   }
 
   async function persistPort(port) {
-    await config.writeJson(TOKEN_PATH, { port, token });
-    try { await fsp.chmod(TOKEN_PATH, 0o600); } catch { /* */ }
+    const tokenPath = resolveTokenPath();
+    await config.writeJson(tokenPath, { port, token });
+    try { await fsp.chmod(tokenPath, 0o600); } catch { /* */ }
   }
 
   function authorized(req) {
@@ -200,4 +221,4 @@ function createBrowserAgentServer(remote) {
   return { start, stop, get token() { return token; }, get server() { return server; } };
 }
 
-module.exports = { createBrowserAgentServer, TOKEN_PATH };
+module.exports = { createBrowserAgentServer, TOKEN_PATH, resolveTokenPath };

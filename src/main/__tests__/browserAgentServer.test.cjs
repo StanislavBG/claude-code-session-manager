@@ -10,7 +10,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { createBrowserAgentServer } = require('../browserAgentServer.cjs');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createBrowserAgentServer, TOKEN_PATH, resolveTokenPath } = require('../browserAgentServer.cjs');
 
 function request(port, { method = 'GET', path: reqPath, token, body }) {
   return new Promise((resolve, reject) => {
@@ -182,5 +184,52 @@ test('unknown route is a 404', async () => {
     assert.equal(res.status, 404);
   } finally {
     await server.stop();
+  }
+});
+
+test('SM_DEV=1 writes to a dev-suffixed path, never the production browser-agent-api.json', async () => {
+  const devPath = path.join(path.dirname(TOKEN_PATH), 'browser-agent-api.dev.json');
+  const prevMtime = fs.existsSync(TOKEN_PATH) ? fs.statSync(TOKEN_PATH).mtimeMs : null;
+  const prevEnv = process.env.SM_DEV;
+  const remote = makeFakeRemote();
+  let server;
+  try {
+    process.env.SM_DEV = '1';
+    server = createBrowserAgentServer(remote);
+    const { port, token } = await server.start();
+    assert.equal(resolveTokenPath(), devPath);
+    const parsed = JSON.parse(fs.readFileSync(devPath, 'utf8'));
+    assert.equal(parsed.port, port);
+    assert.equal(parsed.token, token);
+    if (prevMtime !== null) {
+      assert.equal(fs.statSync(TOKEN_PATH).mtimeMs, prevMtime);
+    } else {
+      assert.equal(fs.existsSync(TOKEN_PATH), false);
+    }
+  } finally {
+    if (server) await server.stop();
+    if (prevEnv === undefined) delete process.env.SM_DEV; else process.env.SM_DEV = prevEnv;
+    fs.rmSync(devPath, { force: true });
+  }
+});
+
+test('with neither SM_DEV nor SM_E2E set, writes to the original browser-agent-api.json path', async () => {
+  const prevDev = process.env.SM_DEV;
+  const prevE2e = process.env.SM_E2E;
+  const remote = makeFakeRemote();
+  let server;
+  try {
+    delete process.env.SM_DEV;
+    delete process.env.SM_E2E;
+    assert.equal(resolveTokenPath(), TOKEN_PATH);
+    server = createBrowserAgentServer(remote);
+    const { port, token } = await server.start();
+    const parsed = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+    assert.equal(parsed.port, port);
+    assert.equal(parsed.token, token);
+  } finally {
+    if (server) await server.stop();
+    if (prevDev === undefined) delete process.env.SM_DEV; else process.env.SM_DEV = prevDev;
+    if (prevE2e === undefined) delete process.env.SM_E2E; else process.env.SM_E2E = prevE2e;
   }
 });

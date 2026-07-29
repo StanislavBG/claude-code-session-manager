@@ -15,6 +15,18 @@
  *     ~/.claude/session-manager/admin-api.json with 0600 perms.
  *   - Token compared with crypto.timingSafeEqual to avoid a timing
  *     side-channel on the comparison itself.
+ *
+ * Mode-scoped token file (confirmed-live incident 2026-07-29): a dev-mode or
+ * e2e Electron launch (SM_DEV=1 / SM_E2E=1) intentionally skips the
+ * single-instance lock (index.cjs), so it can run concurrently with a
+ * production instance. Without a mode-specific path, that dev/e2e instance's
+ * boot silently overwrote the production instance's admin-api.json with its
+ * own (soon-to-be-dead) port+token, orphaning scheduler-mcp-server.cjs's
+ * access to the still-running production app with no error anywhere. Dev/e2e
+ * instances now write to admin-api.dev.json / admin-api.e2e.json instead —
+ * see resolveTokenPath(). Production (neither env var set) is unaffected:
+ * it still writes/reads admin-api.json, matching scheduler-mcp-server.cjs's
+ * hardcoded read path.
  */
 
 'use strict';
@@ -27,6 +39,29 @@ const fsp = require('node:fs/promises');
 const config = require('../config.cjs');
 
 const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
+
+/**
+ * Mode-aware token file path, resolved fresh on every call (not cached at
+ * module load) so a dev/e2e launch never collides with a production
+ * instance's admin-api.json. index.cjs treats SM_DEV and SM_E2E as one OR'd
+ * `isDev` boolean with no ordering between them; if both happen to be set,
+ * this resolves to the SM_DEV path (checked first below) — an arbitrary but
+ * harmless tie-break, since real launches only ever set one or the other.
+ */
+function resolveTokenPath() {
+  if (process.env.SM_DEV === '1') {
+    return path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.dev.json');
+  }
+  if (process.env.SM_E2E === '1') {
+    return path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.e2e.json');
+  }
+  return TOKEN_PATH;
+}
+
+// Reserved health-check path, handled directly (not via registerRoute) so
+// start()'s post-boot self-check never depends on route-registration order
+// relative to start() across callers (chatRunner/scheduler/prdCreate).
+const HEALTH_PATH = '/__admin/health';
 
 function timingSafeEqualStrings(a, b) {
   const bufA = Buffer.from(String(a ?? ''));
@@ -79,14 +114,16 @@ function createAdminHttp() {
 
   async function ensureToken() {
     token = crypto.randomBytes(32).toString('hex');
-    await config.writeJson(TOKEN_PATH, { port: null, token });
-    try { await fsp.chmod(TOKEN_PATH, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
+    const tokenPath = resolveTokenPath();
+    await config.writeJson(tokenPath, { port: null, token });
+    try { await fsp.chmod(tokenPath, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
     return token;
   }
 
   async function persistPort(port) {
-    await config.writeJson(TOKEN_PATH, { port, token });
-    try { await fsp.chmod(TOKEN_PATH, 0o600); } catch { /* */ }
+    const tokenPath = resolveTokenPath();
+    await config.writeJson(tokenPath, { port, token });
+    try { await fsp.chmod(tokenPath, 0o600); } catch { /* */ }
   }
 
   function authorized(req) {
@@ -105,6 +142,10 @@ function createAdminHttp() {
       sendJson(res, 401, { ok: false, error: 'unauthorized' });
       return;
     }
+    if (req.method === 'GET' && req.url === HEALTH_PATH) {
+      sendJson(res, 200, { ok: true });
+      return;
+    }
     try {
       const handler = routes.get(`${req.method} ${req.url}`);
       if (!handler) {
@@ -115,6 +156,31 @@ function createAdminHttp() {
     } catch (e) {
       sendJson(res, 500, { ok: false, error: e?.message ?? 'internal error' });
     }
+  }
+
+  /**
+   * Post-boot self-check: confirm the server actually answers on the port
+   * it just wrote to the token file, before start() reports success. Catches
+   * the class of bug where the written port/token is stale or the listener
+   * never came up right — otherwise the only symptom is a caller getting
+   * "unauthorized"/connection-refused with zero context in the logs.
+   */
+  function selfCheck(port) {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        { hostname: '127.0.0.1', port, method: 'GET', path: HEALTH_PATH, headers: { Authorization: `Bearer ${token}` }, timeout: 2000 },
+        (res) => {
+          res.resume();
+          res.on('end', () => {
+            if (res.statusCode === 200) resolve();
+            else reject(new Error(`admin HTTP self-check got status ${res.statusCode} from port ${port}`));
+          });
+        },
+      );
+      req.on('timeout', () => { req.destroy(new Error(`admin HTTP self-check timed out on port ${port}`)); });
+      req.on('error', (e) => reject(new Error(`admin HTTP self-check failed to reach port ${port}: ${e.message}`)));
+      req.end();
+    });
   }
 
   async function start() {
@@ -129,7 +195,13 @@ function createAdminHttp() {
       server.listen(0, '127.0.0.1', resolve);
     });
     const { port } = server.address();
-    await persistPort(port);
+    try {
+      await persistPort(port);
+      await selfCheck(port);
+    } catch (e) {
+      await stop();
+      throw e;
+    }
     return { port, token };
   }
 
@@ -151,6 +223,7 @@ function createAdminHttp() {
 module.exports = {
   createAdminHttp,
   TOKEN_PATH,
+  resolveTokenPath,
   timingSafeEqualStrings,
   readBody,
   sendJson,

@@ -283,6 +283,40 @@ describe('chat.ts onNeedsInput()', () => {
     expect(after.turns).toHaveLength(1)
     expect(after.turns[0]).toMatchObject({ role: 'question', text: 'What next?' })
   })
+
+  it('finalizes the run\'s ticket as "needs-input" (not "done") and clears it on the next send()', async () => {
+    const { run, getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    // A fresh send establishes an activeTicket for the run that will stall.
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'do the risky thing' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+    expect(useChat.getState().get('t1').activeTicket).toBeTruthy()
+
+    getNeedsInputHandler()!({
+      tabId: 't1',
+      sessionId: 's1',
+      questions: ['Which env?'],
+      answerBody: '',
+      raw: 'raw text',
+    })
+
+    const stalled = useChat.getState().get('t1')
+    expect(stalled.activeTicket).toBeNull()
+    expect(stalled.running).toBe(false)
+    const history = stalled.ticketHistory ?? []
+    expect(history.some((t) => t.text === 'do the risky thing' && t.status === 'needs-input')).toBe(true)
+    expect(history.find((t) => t.status === 'needs-input')?.questionTurnId).toBe(stalled.turns[1].id)
+
+    // The next successful send() for the tab clears the needs-input marker.
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'use staging' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+
+    const cleared = useChat.getState().get('t1')
+    const clearedHistory = cleared.ticketHistory ?? []
+    expect(clearedHistory.some((t) => t.status === 'needs-input')).toBe(false)
+    expect(clearedHistory.find((t) => t.text === 'do the risky thing')?.status).toBe('done')
+  })
 })
 
 describe('chat.ts prompt queue', () => {

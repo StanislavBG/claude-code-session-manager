@@ -51,11 +51,13 @@ export interface PromptTicket {
   sessionId: string
   cwd: string
   text: string
-  status: 'queued' | 'running' | 'dispatched-to-prd' | 'done' | 'failed'
+  status: 'queued' | 'running' | 'dispatched-to-prd' | 'done' | 'failed' | 'needs-input'
   createdAt: number
   startedAt?: number
   completedAt?: number
   prdSlugs?: string[]
+  /** For a 'needs-input' ticket: the id of the question ChatTurn it corresponds to, so the panel can scroll/highlight it. */
+  questionTurnId?: string
 }
 
 interface TabChat {
@@ -208,6 +210,12 @@ export const useChat = create<ChatState>((set, get) => ({
       })
       return
     }
+    // A fresh send resumes the tab's session regardless of any outstanding
+    // needs-input ticket (chatRunner always resumes by sessionId) — so this
+    // reply IS the answer. Clear the stale needs-input marker before
+    // dispatching so the queue panel/composer stop treating the tab as
+    // stalled once the reply is in flight.
+    clearNeedsInput(tabId)
     dispatchSend({ tabId, sessionId, cwd, text: trimmed })
   },
   resetThread: (tabId) => {
@@ -230,10 +238,21 @@ function patch(tabId: string, fn: (c: TabChat) => TabChat): void {
   useChat.setState({ chats: { ...useChat.getState().chats, [tabId]: fn(cur) } })
 }
 
-function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): void {
+function pushTurn(
+  tabId: string,
+  turn: ChatTurn,
+  extra: Partial<TabChat> = {},
+  ticketStatus: 'done' | 'needs-input' = 'done',
+  ticketExtra: Partial<PromptTicket> = {},
+): void {
   patch(tabId, (c) => {
     const ticketHistory = c.activeTicket
-      ? appendTicketHistory(c.ticketHistory ?? [], { ...c.activeTicket, status: 'done', completedAt: Date.now() })
+      ? appendTicketHistory(c.ticketHistory ?? [], {
+          ...c.activeTicket,
+          status: ticketStatus,
+          completedAt: Date.now(),
+          ...ticketExtra,
+        })
       : (c.ticketHistory ?? [])
     return {
       ...c,
@@ -248,6 +267,23 @@ function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): 
     }
   })
   dequeueNext(tabId)
+}
+
+/**
+ * Clears any ticket left in the 'needs-input' state for a tab, folding it
+ * back to 'done' — called from the start of a fresh send() (the reply that
+ * answers the stalled run) so the queue panel/composer stop treating the tab
+ * as stalled once the answer is in flight. A no-op if none is outstanding.
+ */
+function clearNeedsInput(tabId: string): void {
+  patch(tabId, (c) => {
+    const history = c.ticketHistory ?? []
+    if (!history.some((t) => t.status === 'needs-input')) return c
+    return {
+      ...c,
+      ticketHistory: history.map((t) => (t.status === 'needs-input' ? { ...t, status: 'done' } : t)),
+    }
+  })
 }
 
 /**
@@ -390,6 +426,7 @@ if (typeof window !== 'undefined' && window.api?.chat) {
     pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now() })
   })
   window.api.chat.onNeedsInput(({ tabId, questions, answerBody }) => {
+    const questionTurnId = turnId()
     if (answerBody && answerBody.trim()) {
       // Two turns: the answer body renders as a normal assistant bubble
       // (with the run's accumulated tool-use trace), the question card
@@ -402,22 +439,34 @@ if (typeof window !== 'undefined' && window.api?.chat) {
         ],
         liveToolUses: [],
       }))
-      pushTurn(tabId, {
-        id: turnId(),
+      pushTurn(
+        tabId,
+        {
+          id: questionTurnId,
+          role: 'question',
+          text: questions.join('\n'),
+          questions,
+          at: Date.now(),
+        },
+        {},
+        'needs-input',
+        { questionTurnId },
+      )
+      return
+    }
+    pushTurn(
+      tabId,
+      {
+        id: questionTurnId,
         role: 'question',
         text: questions.join('\n'),
         questions,
         at: Date.now(),
-      })
-      return
-    }
-    pushTurn(tabId, {
-      id: turnId(),
-      role: 'question',
-      text: questions.join('\n'),
-      questions,
-      at: Date.now(),
-    })
+      },
+      {},
+      'needs-input',
+      { questionTurnId },
+    )
   })
   window.api.chat.onError(({ tabId, sessionId, message }) => {
     applyError(tabId, sessionId, message)

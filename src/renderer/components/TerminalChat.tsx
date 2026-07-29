@@ -337,7 +337,14 @@ function openPrdSlug(slug: string): void {
 // ticket plus anything queued behind it, and — folded into the same list —
 // recently finished tickets (done/failed/dispatched-to-prd) so a ticket
 // doesn't vanish from view the instant it leaves the "queued/running" state.
-export function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
+export function QueueTicketPanel({
+  tickets,
+  onSelectNeedsInput,
+}: {
+  tickets: PromptTicket[]
+  /** Fired when a 'needs-input' ticket is clicked — scrolls/highlights its question turn and focuses the composer. */
+  onSelectNeedsInput?: (ticket: PromptTicket) => void
+}) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Unlike the main transcript panel's unconditional auto-scroll (line ~562),
   // this panel guards on "was the user already at the bottom" — root cause of
@@ -383,8 +390,21 @@ export function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
         <EmptyState title="No prompts queued" hint="Prompts sent while a turn is running will show up here." />
       ) : (
         <ul className="space-y-2">
-          {tickets.map((t) => (
-            <li key={t.id} className="rounded-lg border border-line bg-elev px-2.5 py-2" data-testid="chat-queue-ticket">
+          {tickets.map((t) => {
+            const isNeedsInput = t.status === 'needs-input'
+            return (
+            <li
+              key={t.id}
+              className={`rounded-lg border px-2.5 py-2 ${
+                isNeedsInput
+                  ? 'cursor-pointer border-[#8e641a]/40 bg-[#8e641a]/10 hover:bg-[#8e641a]/20'
+                  : 'border-line bg-elev'
+              }`}
+              data-testid="chat-queue-ticket"
+              onClick={isNeedsInput ? () => onSelectNeedsInput?.(t) : undefined}
+              role={isNeedsInput ? 'button' : undefined}
+              tabIndex={isNeedsInput ? 0 : undefined}
+            >
               <PrdStatusPill status={ticketDisplayStatus(t.status)} />
               <div className="mt-1.5 truncate text-xs text-fg-dim" title={t.text}>
                 {t.text}
@@ -404,7 +424,8 @@ export function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
                 </div>
               )}
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
     </div>
@@ -568,8 +589,10 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const [draft, setDraft] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [pastedImage, setPastedImage] = useState<string | null>(null)
+  const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const viewportWidth = useViewportWidth()
   const showRail = viewportWidth > RAIL_BREAKPOINT
 
@@ -583,6 +606,22 @@ export function TerminalChat({ tabId, cwd }: Props) {
     chat?.activeTicket,
     chat?.queue ?? [],
   )
+  const needsInputTicket = displayTickets.find((t) => t.status === 'needs-input') ?? null
+
+  // Clicking a needs-input ticket in the panel scrolls to + briefly highlights
+  // its question turn, and focuses the composer so the reply is obvious.
+  const scrollToQuestion = (ticket: PromptTicket) => {
+    const turnId = ticket.questionTurnId
+    if (turnId) {
+      const el = document.getElementById(`chat-turn-${turnId}`)
+      el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      setHighlightedTurnId(turnId)
+      window.setTimeout(() => {
+        setHighlightedTurnId((cur) => (cur === turnId ? null : cur))
+      }, 1500)
+    }
+    textareaRef.current?.focus()
+  }
 
   // One-shot history rehydration from the durable exchanges store.
   useEffect(() => {
@@ -757,14 +796,23 @@ export function TerminalChat({ tabId, cwd }: Props) {
             </div>
           )}
           {turns.map((t, i) => (
-            <Turn
+            <div
               key={t.id}
-              turn={t}
-              cwd={cwd}
-              tabId={tabId}
-              runActive={running && t.role === 'assistant' && i === turns.length - 1}
-              consentActionDisabled={running}
-            />
+              id={`chat-turn-${t.id}`}
+              className={
+                highlightedTurnId === t.id
+                  ? 'rounded-[14px] ring-2 ring-accent/60 transition-shadow'
+                  : 'rounded-[14px]'
+              }
+            >
+              <Turn
+                turn={t}
+                cwd={cwd}
+                tabId={tabId}
+                runActive={running && t.role === 'assistant' && i === turns.length - 1}
+                consentActionDisabled={running}
+              />
+            </div>
           ))}
           {running && (
             <div className="max-w-[90%]">
@@ -798,7 +846,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
               liveToolUses={liveToolUses}
             />
           )}
-          <QueueTicketPanel tickets={displayTickets} />
+          <QueueTicketPanel tickets={displayTickets} onSelectNeedsInput={scrollToQuestion} />
         </div>
       </div>
 
@@ -808,12 +856,19 @@ export function TerminalChat({ tabId, cwd }: Props) {
         )}
         <div className="flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             rows={2}
-            placeholder={running ? 'Running… send to queue a follow-up prompt' : 'Type a command (Enter to send, Shift+Enter for newline)'}
+            placeholder={
+              needsInputTicket
+                ? 'Reply to answer the pending question…'
+                : running
+                  ? 'Running… send to queue a follow-up prompt'
+                  : 'Type a command (Enter to send, Shift+Enter for newline)'
+            }
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
           {running && (

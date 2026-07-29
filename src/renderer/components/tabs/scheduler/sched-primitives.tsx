@@ -156,6 +156,11 @@ export const STATUS_TONE: Record<string, { bg: string; text: string; border: boo
   // chat queue panel can tell "still in this run's queue" apart from
   // "became scheduler work".
   dispatched:   { bg: 'bg-accent/15', text: 'text-accent',   border: true,  label: 'dispatched to PRD' },
+  // A chat PromptTicket (PRD 766) whose run stopped on the
+  // <<<SM_NEEDS_INPUT>>> sentinel and is stalled waiting on the user's reply
+  // — amber to match the inline "❓ Needs your answer" question card in
+  // TerminalChat.tsx (AMBER_TEXT/AMBER_TINT there use the same retuned hex).
+  needs_input:  { bg: 'bg-[#8e641a]/10', text: 'text-[#7a5416]', border: true, label: 'needs your answer' },
 }
 
 export type PrdDisplayStatus = keyof typeof STATUS_TONE

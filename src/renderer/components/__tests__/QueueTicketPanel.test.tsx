@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { QueueTicketPanel } from '../TerminalChat'
@@ -54,6 +54,49 @@ describe('QueueTicketPanel', () => {
     const items = el.querySelectorAll('[data-testid="chat-queue-ticket"]')
     expect(items).toHaveLength(1)
     expect(items[0].textContent).toContain('do the thing')
+  })
+
+  it('renders a needs-input ticket with the distinct amber treatment and fires the click callback', () => {
+    const onSelectNeedsInput = vi.fn()
+    const ticket: PromptTicket = {
+      id: 't-needs-input',
+      tabId: 'tab-1',
+      sessionId: 'sess-1',
+      cwd: '/proj',
+      text: 'Which environment should I deploy to?',
+      status: 'needs-input',
+      createdAt: Date.now(),
+      questionTurnId: 'turn-1',
+    }
+    const el = mount(<QueueTicketPanel tickets={[ticket]} onSelectNeedsInput={onSelectNeedsInput} />)
+    expect(el.textContent).toContain('needs your answer')
+
+    const item = el.querySelector('[data-testid="chat-queue-ticket"]') as HTMLElement
+    expect(item.className).toContain('cursor-pointer')
+
+    act(() => {
+      item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onSelectNeedsInput).toHaveBeenCalledWith(ticket)
+  })
+
+  it('does not attach the click callback to non-needs-input tickets', () => {
+    const onSelectNeedsInput = vi.fn()
+    const ticket: PromptTicket = {
+      id: 't-done',
+      tabId: 'tab-1',
+      sessionId: 'sess-1',
+      cwd: '/proj',
+      text: 'do the thing',
+      status: 'done',
+      createdAt: Date.now(),
+    }
+    const el = mount(<QueueTicketPanel tickets={[ticket]} onSelectNeedsInput={onSelectNeedsInput} />)
+    const item = el.querySelector('[data-testid="chat-queue-ticket"]') as HTMLElement
+    act(() => {
+      item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onSelectNeedsInput).not.toHaveBeenCalled()
   })
 
   // Covers the scroll-stabilization fix: the panel container is a plain

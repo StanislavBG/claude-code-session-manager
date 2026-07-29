@@ -92,6 +92,33 @@ Published as `claude-code-session-manager` on npm. Run via `npx claude-code-sess
 
 **Simple mode**: `npx claude-code-session-manager@latest --simple` boots a chrome-free single-terminal cockpit — no nav/tabs/config surface, just one `claude --dangerously-skip-permissions` session in the launch directory. Wired via `app:launch-mode` IPC (`process.argv.includes('--simple')` + `process.cwd()`) → `SimpleShell.tsx` (App.tsx early-returns when `simpleMode === true`). The session reuses `DEFAULT_PRESETS[0]` (sm-dangerous); hydration of persisted tabs is skipped.
 
+## Marketing page + purchase flow (hosted in the `Bilko` repo, not here)
+
+This repo ships the app only. The public marketing/purchase page at **bilko.run/products/session-manager**
+(hero, feature list, "Buy Now" → Stripe Checkout, `/checkout/success` license/receipt page) and the
+npm-package registry entry (`Session Manager` card on bilko.run/projects) live in a **separate sibling
+repo**: `~/Projects/Bilko/` (git remote `origin` → `StanislavBG/bilko-run`, **not** `content-grade`). Bilko
+is Stanislav's own multi-project *hosting platform* — the App-Store-style host for bilko.run — not a
+third-party service, so issues with the product page are ours to fix, just in that repo.
+
+Key files in `~/Projects/Bilko/` for session-manager's listing:
+- `src/pages/SessionManagerPage.tsx` — the product page itself (hero Buy Now buttons scroll to `#buy`;
+  the real purchase submit is in `BuySection`, which calls `startSessionManagerCheckout`).
+- `src/lib/sessionManagerCheckout.ts` — POSTs `{ email, priceType: 'session_manager' }` to
+  `/api/stripe/create-checkout-session`.
+- `server/routes/stripe.ts` — creates the Stripe Checkout session server-side; 503s with
+  `"Stripe not configured — price ID missing"` if the `STRIPE_PRICE_SESSION_MANAGER` env var isn't set
+  on the Render deploy (see `shared/product-catalog.ts` catalog entry, `envVar: 'STRIPE_PRICE_SESSION_MANAGER'`).
+  That env var not being set on Render is the most likely cause if "Buy Now" appears to do nothing —
+  the failure surfaces only as a small inline error under the email form, easy to miss.
+- `src/data/packages.ts` / `src/data/standalone-projects.json` — registry entries for the `/projects` grid
+  and the npm-package card.
+
+There is **no `session-manager-operations/feedback/` intake folder in `~/Projects/Bilko/`** (checked
+2026-07-28) — `/my-feedback to Bilko` cannot file there until one exists. Until then, cross-repo issues
+about the bilko.run listing/checkout should be fixed directly in `~/Projects/Bilko/` (it's the same
+author's project, not an external service) rather than queued through the feedback channel.
+
 ## Web-remote v2 mobile cockpit
 
 Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). React Native web frontend talks to relay server (`webRemote.cjs`) over WebSocket. Session state protocol: ping/auth → list-sessions → select → stream state/summary updates. Desktop session-manager is the SoR; mobile is a read-mostly mirror. Rate limits (auth: 5/min, api: 50/min). Audit log to `~/.claude/web-remote-audit.log`.

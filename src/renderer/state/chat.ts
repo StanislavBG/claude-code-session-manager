@@ -256,15 +256,31 @@ function pushTurn(tabId: string, turn: ChatTurn, extra: Partial<TabChat> = {}): 
  * prompt executes exactly like an immediate one. `promptId` is set only when
  * this dispatch originated from a queued ticket (undefined for a fresh
  * manual send with no ticket) — threaded through to recordExchange.
+ *
+ * Every dispatch — fresh or dequeued — is represented by an `activeTicket` so
+ * the queue panel has something to show for the in-flight turn even when
+ * it's the only one. dequeueNext() already installs its own 'running' ticket
+ * as activeTicket before calling here (chat.ts:298+), so `cur.activeTicket`
+ * is reused when present; a fresh send() has none yet, so one is minted here.
  */
 function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string; promptId?: string }): void {
   const { tabId, sessionId, cwd, text, promptId } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
+  const activeTicket: PromptTicket = cur.activeTicket ?? {
+    id: promptId ?? crypto.randomUUID(),
+    tabId,
+    sessionId,
+    cwd,
+    text,
+    status: 'running',
+    createdAt: Date.now(),
+    startedAt: Date.now(),
+  }
   useChat.setState({
     chats: {
       ...useChat.getState().chats,
-      [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, queuedPosition: 0, stream: '' },
+      [tabId]: { ...cur, turns: [...cur.turns, userTurn], running: true, queuedPosition: 0, stream: '', activeTicket },
     },
   })
   // Durable resume-vs-create decision: check the on-disk transcript (same

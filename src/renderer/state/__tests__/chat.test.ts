@@ -425,6 +425,50 @@ describe('chat.ts prompt queue', () => {
   })
 })
 
+describe('chat.ts dispatchSend() activeTicket (immediate send)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('sets an activeTicket for the very first/immediate send, not only for a dequeued one', async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    const state = useChat.getState().get('t1')
+    expect(state.running).toBe(true)
+    expect(state.activeTicket).toBeTruthy()
+    expect(state.activeTicket).toMatchObject({
+      tabId: 't1',
+      sessionId: 's1',
+      cwd: '/proj',
+      text: 'first',
+      status: 'running',
+    })
+    expect(typeof state.activeTicket!.id).toBe('string')
+    expect(state.activeTicket!.id.length).toBeGreaterThan(0)
+  })
+
+  it('folds the immediate-send activeTicket into ticketHistory as "done" on completion', async () => {
+    const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+    expect(useChat.getState().get('t1').activeTicket).toBeTruthy()
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done' })
+
+    const after = useChat.getState().get('t1')
+    expect(after.activeTicket).toBeNull()
+    const history = after.ticketHistory ?? []
+    expect(history.some((t) => t.text === 'first' && t.status === 'done')).toBe(true)
+  })
+})
+
 describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
   beforeEach(() => {
     vi.resetModules()

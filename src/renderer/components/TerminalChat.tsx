@@ -15,6 +15,7 @@ import { mergeTicketsForDisplay, ticketDisplayStatus } from '../lib/ticketDispla
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
 import { PasteThumbnail } from './PasteThumbnail'
+import { EmptyState } from './ui/EmptyState'
 import type { NavKey } from './LeftNav'
 
 /**
@@ -336,8 +337,7 @@ function openPrdSlug(slug: string): void {
 // ticket plus anything queued behind it, and — folded into the same list —
 // recently finished tickets (done/failed/dispatched-to-prd) so a ticket
 // doesn't vanish from view the instant it leaves the "queued/running" state.
-function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
-  if (tickets.length === 0) return null
+export function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
   return (
     <div
       className="w-[260px] shrink-0 overflow-y-auto border-l border-rule px-3 py-4"
@@ -346,30 +346,34 @@ function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
         Prompt queue
       </div>
-      <ul className="space-y-2">
-        {tickets.map((t) => (
-          <li key={t.id} className="rounded-lg border border-line bg-elev px-2.5 py-2" data-testid="chat-queue-ticket">
-            <PrdStatusPill status={ticketDisplayStatus(t.status)} />
-            <div className="mt-1.5 truncate text-xs text-fg-dim" title={t.text}>
-              {t.text}
-            </div>
-            {t.status === 'dispatched-to-prd' && !!t.prdSlugs?.length && (
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {t.prdSlugs.map((slug) => (
-                  <button
-                    key={slug}
-                    onClick={() => openPrdSlug(slug)}
-                    title={`Open PRD "${slug}" in Scheduler`}
-                    className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-accent hover:bg-hi"
-                  >
-                    #{slug}
-                  </button>
-                ))}
+      {tickets.length === 0 ? (
+        <EmptyState title="No prompts queued" hint="Prompts sent while a turn is running will show up here." />
+      ) : (
+        <ul className="space-y-2">
+          {tickets.map((t) => (
+            <li key={t.id} className="rounded-lg border border-line bg-elev px-2.5 py-2" data-testid="chat-queue-ticket">
+              <PrdStatusPill status={ticketDisplayStatus(t.status)} />
+              <div className="mt-1.5 truncate text-xs text-fg-dim" title={t.text}>
+                {t.text}
               </div>
-            )}
-          </li>
-        ))}
-      </ul>
+              {t.status === 'dispatched-to-prd' && !!t.prdSlugs?.length && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {t.prdSlugs.map((slug) => (
+                    <button
+                      key={slug}
+                      onClick={() => openPrdSlug(slug)}
+                      title={`Open PRD "${slug}" in Scheduler`}
+                      className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-accent hover:bg-hi"
+                    >
+                      #{slug}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -559,7 +563,10 @@ export function TerminalChat({ tabId, cwd }: Props) {
   }, [turns.length, stream, running])
 
   const submit = () => {
-    if (running || !draft.trim()) return
+    // Sending while `running` is allowed — send() (chat.ts:189-209) routes it
+    // through the FIFO queue instead of firing a second concurrent
+    // chatRunner.run() for this tab, so no extra guarding is needed here.
+    if (!draft.trim()) return
     const action = decideSubmitAction(draft.trim())
     if (action.type === 'nav') {
       setDraft('')
@@ -770,27 +777,25 @@ export function TerminalChat({ tabId, cwd }: Props) {
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            disabled={running}
             rows={2}
-            placeholder={running ? 'Running… cancel or wait' : 'Type a command (Enter to send, Shift+Enter for newline)'}
+            placeholder={running ? 'Running… send to queue a follow-up prompt' : 'Type a command (Enter to send, Shift+Enter for newline)'}
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
-          {running ? (
+          {running && (
             <button
               onClick={() => window.api.chat.cancel(tabId)}
               className={`rounded-md border px-3 py-2 text-sm hover:bg-[#b8443c]/10 ${ERROR_TEXT} border-[#b8443c]/40`}
             >
               Cancel
             </button>
-          ) : (
-            <button
-              onClick={submit}
-              disabled={!draft.trim()}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-40"
-            >
-              Send
-            </button>
           )}
+          <button
+            onClick={submit}
+            disabled={!draft.trim()}
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-40"
+          >
+            Send
+          </button>
         </div>
       </div>
     </div>

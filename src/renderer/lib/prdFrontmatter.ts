@@ -12,6 +12,9 @@
  *     PromptTicket.id (PRD 748) it was authored from when classified
  *     'develop' (PRD 749). Additive only; absent on every PRD authored
  *     before this field existed.
+ *   - sourceTabId: string (optional) — the tab that originated this PRD, used
+ *     by the scheduler (PRD 761) to route a completion status prompt back
+ *     into that tab's chat queue via enqueueExternalPrompt. Additive only.
  *
  * Round-trip invariant: keys not in `PrdFrontmatter` are preserved verbatim
  * in their original line range via `extras`. Edits only touch lines that own
@@ -24,6 +27,7 @@ export type PrdFrontmatter = {
   estimateMinutes?: number
   parallelGroup?: number
   sourcePromptId?: string
+  sourceTabId?: string
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -50,6 +54,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'estimateMinutes',
   'parallelGroup',
   'sourcePromptId',
+  'sourceTabId',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -59,6 +64,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'estimateMinutes',
   'parallelGroup',
   'sourcePromptId',
+  'sourceTabId',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -172,6 +178,9 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       return
     case 'sourcePromptId':
       fm.sourcePromptId = String(v)
+      return
+    case 'sourceTabId':
+      fm.sourceTabId = String(v)
       return
   }
 }

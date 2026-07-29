@@ -257,6 +257,10 @@ const schedulerCreatePrd = z.object({
   // prompt that spawned it. Same newline-injection guard as title/cwd since
   // it also becomes a frontmatter value.
   sourcePromptId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  // Originating tab id (PRD 761) — used at job completion to route a status
+  // prompt back into the chat tab that queued this PRD, via
+  // enqueueExternalPrompt (PRD 753). Same newline-injection guard.
+  sourceTabId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.

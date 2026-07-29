@@ -60,6 +60,8 @@ const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
+const sessionsStore = require('./sessionsStore.cjs');
+const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated } = require('./ipcSchemas.cjs');
@@ -1185,6 +1187,62 @@ function applyOrphanOutcome(job, outcome, killNote = '') {
   }
 }
 
+/**
+ * isNotifiableTerminalStatus(effectiveStatus) → boolean
+ *
+ * Gates notifyOriginatingTab to true terminal transitions only: 'completed'
+ * and 'failed'. Excludes 'needs_review' (not yet truly done — may still
+ * auto-fix) and, implicitly, the rateLimited/paused-queue path, which never
+ * reaches effectiveStatus computation at all (it takes the treatAsPending
+ * branch in spawnJob and resets the job to pending instead).
+ */
+function isNotifiableTerminalStatus(effectiveStatus) {
+  return effectiveStatus === 'completed' || effectiveStatus === 'failed';
+}
+
+/**
+ * notifyOriginatingTab(job) → void
+ *
+ * On a true terminal transition (completed/failed — never the benign
+ * rateLimited auto-pause, which resets the job to pending instead), push a
+ * short status prompt into the chat tab that queued this PRD via
+ * enqueueExternalPrompt (PRD 753). Resolution order: (1) the PRD's own
+ * `sourceTabId` frontmatter, captured at creation time; (2) the first open
+ * tab (per sessionsStore's persisted tabs.json) whose cwd matches the job's
+ * cwd — first match only, no fan-out to multiple matching tabs; (3) no-op.
+ * Never throws to the caller (fire-and-forget from spawnJob). Deps are
+ * injectable (mirrors partitionBootOrphans's isAlive param) so unit tests can
+ * exercise the resolution logic without touching disk/electron.
+ */
+async function notifyOriginatingTab(job, {
+  parsePrdRaw = prdParser.parsePrdRaw,
+  loadSessions = sessionsStore.load,
+  sendPrompt = enqueueExternalPrompt,
+} = {}) {
+  try {
+    const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+    const prd = await parsePrdRaw(prdPath).catch(() => null);
+
+    let targetTabId = prd?.sourceTabId || null;
+    if (!targetTabId) {
+      const jobCwd = job.cwd || null;
+      if (jobCwd) {
+        const { tabs } = await loadSessions();
+        const match = (tabs || []).find((t) => t && t.cwd === jobCwd);
+        targetTabId = match?.id || null;
+      }
+    }
+    if (!targetTabId) {
+      console.log(`[scheduler] notifyOriginatingTab: no target tab for ${job.slug}, skipping`);
+      return;
+    }
+
+    sendPrompt(targetTabId, `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`);
+  } catch (e) {
+    console.error('[scheduler] notifyOriginatingTab error', job?.slug, e);
+  }
+}
+
 /** Scan the tail of a job's log for the canonical rate-limit signal. We look
  *  at the last 16 KB — final result event always lands at the end.
  *  Uses readTail() so no raw fd lifecycle is needed here. */
@@ -1941,6 +1999,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     let needsInvestigationNow = false;
     let investigationJobSnapshot = null;
     let needsReviewRcaSnapshot = null;
+    let terminalNotifySnapshot = null;
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       if (i2 >= 0) {
@@ -1994,6 +2053,9 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           }
           delete s.jobs[i2].runtime;
 
+          if (isNotifiableTerminalStatus(effectiveStatus)) {
+            terminalNotifySnapshot = { ...s.jobs[i2] };
+          }
           if (effectiveStatus === 'failed') {
             actuallyFailed = true;
             failedJobSnapshot = { ...s.jobs[i2] };
@@ -2051,6 +2113,12 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       }
     });
     await broadcast({ flush: true });
+
+    if (terminalNotifySnapshot) {
+      notifyOriginatingTab(terminalNotifySnapshot).catch((e) => {
+        console.error('[scheduler] notifyOriginatingTab error', job.slug, e);
+      });
+    }
 
     if (needsReviewRcaSnapshot) {
       // Fire-and-forget, mirroring the DoD drain hook: never blocks the status
@@ -3386,4 +3454,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus };

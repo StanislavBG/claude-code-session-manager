@@ -25,6 +25,7 @@ export default defineConfig({
       'src/main/__tests__/classifyPromptTicket.test.cjs',
       'src/main/__tests__/exchangesPromptId.test.cjs',
       'src/main/__tests__/prdParserSourcePromptId.test.cjs',
+      'src/main/__tests__/scheduler-notify-originating-tab.test.cjs',
       'src/main/lib/__tests__/localAdminHttp.test.cjs',
     ],
     globals: true,

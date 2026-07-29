@@ -48,7 +48,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -58,6 +58,9 @@ function buildPrdBody(input) {
   // Optional, additive: traces this PRD back to the PromptTicket (PRD 748)
   // that was classified 'develop' and spawned it (PRD 749).
   if (sourcePromptId) fmLines.push(`sourcePromptId: ${sourcePromptId}`);
+  // Optional, additive: the tab that queued this PRD, read back by
+  // scheduler.cjs at job completion (PRD 761) to route a status prompt.
+  if (sourceTabId) fmLines.push(`sourceTabId: ${sourceTabId}`);
   fmLines.push('---', '');
 
   const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');

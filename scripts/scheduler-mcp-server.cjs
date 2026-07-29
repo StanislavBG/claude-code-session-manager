@@ -104,6 +104,7 @@ const TOOLS = [
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
         parallelGroup: { type: 'number', description: 'Optional: opt into an existing NN group instead of allocating a new one' },
         sourcePromptId: { type: 'string', description: 'Optional: PromptTicket.id this PRD was authored from, for traceability' },
+        sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
       },
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
     },

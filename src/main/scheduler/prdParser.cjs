@@ -68,6 +68,11 @@ async function parsePrdRaw(filePath) {
     // classified 'develop' and spawned this PRD (PRD 749). Additive — absent
     // on every PRD authored before this field existed.
     sourcePromptId: fm.sourcePromptId || null,
+    // Optional traceability back to the chat tab that queued this PRD (PRD
+    // 761) — read back at job completion to route a status prompt via
+    // enqueueExternalPrompt (PRD 753). Additive — absent on every PRD
+    // authored before this field existed.
+    sourceTabId: fm.sourceTabId || null,
     body: body.trim(),
   };
 }

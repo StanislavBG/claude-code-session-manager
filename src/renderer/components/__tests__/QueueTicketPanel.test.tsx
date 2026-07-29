@@ -55,4 +55,78 @@ describe('QueueTicketPanel', () => {
     expect(items).toHaveLength(1)
     expect(items[0].textContent).toContain('do the thing')
   })
+
+  // Covers the scroll-stabilization fix: the panel container is a plain
+  // overflow-y-auto div with no scroll anchoring at all before this fix, so a
+  // ticket status transition (or a new ticket arriving) left scrollTop fixed
+  // while scrollHeight grew underneath it — jsdom always reports
+  // scrollHeight/clientHeight as 0, so these tests stub them via
+  // defineProperty to exercise the "was I at the bottom?" branch logic.
+  function ticket(overrides: Partial<PromptTicket> = {}): PromptTicket {
+    return {
+      id: 't1',
+      tabId: 'tab-1',
+      sessionId: 'sess-1',
+      cwd: '/proj',
+      text: 'do the thing',
+      status: 'running',
+      createdAt: Date.now(),
+      ...overrides,
+    }
+  }
+
+  function stubScrollMetrics(el: HTMLElement, scrollHeight: number, clientHeight: number) {
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, value: scrollHeight })
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: clientHeight })
+  }
+
+  it('preserves scrollTop across a ticket status transition when the user scrolled up', () => {
+    const el = mount(<QueueTicketPanel tickets={[ticket({ status: 'running' })]} />)
+    const panel = el.querySelector('[data-testid="chat-queue-panel"]') as HTMLDivElement
+
+    // Simulate a tall, overflowing list where the user has scrolled up away
+    // from the bottom (scrollHeight - scrollTop - clientHeight >= 8).
+    stubScrollMetrics(panel, 500, 100)
+    Object.defineProperty(panel, 'scrollTop', { configurable: true, writable: true, value: 50 })
+    act(() => {
+      panel.dispatchEvent(new Event('scroll'))
+    })
+    expect(panel.scrollTop).toBe(50)
+
+    // A ticket status transition re-renders with a new tickets array and a
+    // taller scrollHeight (content grew); since the user wasn't at the
+    // bottom, scrollTop must stay untouched — proving the guard actively
+    // suppressed a would-be jump rather than the effect being a no-op.
+    stubScrollMetrics(panel, 650, 100)
+    act(() => {
+      root!.render(<QueueTicketPanel tickets={[ticket({ status: 'done' })]} />)
+    })
+    expect(panel.scrollTop).toBe(50)
+  })
+
+  it('sticks to the bottom when the user was already there before a ticket update', () => {
+    const el = mount(<QueueTicketPanel tickets={[ticket({ status: 'running' })]} />)
+    const panel = el.querySelector('[data-testid="chat-queue-panel"]') as HTMLDivElement
+
+    stubScrollMetrics(panel, 500, 100)
+    Object.defineProperty(panel, 'scrollTop', { configurable: true, writable: true, value: 400 })
+    act(() => {
+      panel.dispatchEvent(new Event('scroll'))
+    })
+    expect(panel.scrollTop).toBe(400)
+
+    // A new ticket arrives (e.g. a second prompt entering the queue) and
+    // grows scrollHeight; since the user was pinned to the bottom, the panel
+    // should re-anchor to the new bottom instead of leaving stale content
+    // visible.
+    stubScrollMetrics(panel, 650, 100)
+    act(() => {
+      root!.render(
+        <QueueTicketPanel
+          tickets={[ticket({ status: 'running' }), ticket({ id: 't2', status: 'queued', text: 'second prompt' })]}
+        />,
+      )
+    })
+    expect(panel.scrollTop).toBe(650)
+  })
 })

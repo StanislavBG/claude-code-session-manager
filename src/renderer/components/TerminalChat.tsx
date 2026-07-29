@@ -338,8 +338,41 @@ function openPrdSlug(slug: string): void {
 // recently finished tickets (done/failed/dispatched-to-prd) so a ticket
 // doesn't vanish from view the instant it leaves the "queued/running" state.
 export function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Unlike the main transcript panel's unconditional auto-scroll (line ~562),
+  // this panel guards on "was the user already at the bottom" — root cause of
+  // the reported jump: with no scroll anchoring at all, a mid-turn ticket
+  // arrival (queued -> active) or a ticket growing (dispatched-to-prd's
+  // prdSlugs row appearing) left scrollTop fixed while scrollHeight grew
+  // underneath it, so the visible window silently cut off/reflowed instead of
+  // staying pinned to the newest item. Defaults true so the panel starts
+  // pinned to the bottom before any scroll event has fired.
+  const stickToBottomRef = useRef(true)
+
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8
+  }
+
+  // Keyed on a content fingerprint, not the `tickets` array itself —
+  // mergeTicketsForDisplay (ticketDisplay.ts) builds a fresh array on every
+  // TerminalChat render (every streamed token, every keystroke), which would
+  // otherwise re-fire this effect on unrelated re-renders during a hot
+  // streaming path. Mirrors the primitive-dependency style already used by
+  // the sibling transcript-panel auto-scroll effect (turns.length/stream).
+  const ticketsFingerprint = tickets.map((t) => `${t.id}:${t.status}`).join(',')
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [ticketsFingerprint])
+
   return (
     <div
+      ref={scrollRef}
+      onScroll={onScroll}
       className="min-h-0 flex-1 overflow-y-auto px-3 py-4"
       data-testid="chat-queue-panel"
     >

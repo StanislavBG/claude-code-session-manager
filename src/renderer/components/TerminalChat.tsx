@@ -264,7 +264,7 @@ function ChatSessionRail({
   const runs = collapseToolUseRuns(liveToolUses)
   const inFlightIdx = running && !stream ? runs.length - 1 : -1
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto border-b border-rule px-3 py-4">
+    <div className="min-h-0 max-h-[45%] shrink-0 overflow-y-auto border-b border-rule px-3 py-4">
       <div className="rounded-lg border border-line bg-elev px-3 py-2.5">
         <div className="text-xs font-semibold text-fg">{label}</div>
         <div className="mt-0.5 truncate font-mono text-[11px] text-fg-dim" title={cwd}>

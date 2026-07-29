@@ -476,6 +476,18 @@ const chatClassifyTicket = z.object({
   ),
 });
 
+// External-caller entry point (admin HTTP route + MCP tool + web-remote
+// command, PRD 753) — pushes a prompt into an already-open tab's chat queue
+// from outside the renderer. tabId only (no sessionId/cwd): those are
+// resolved renderer-side from useSessions, same as the AC requires.
+const chatExternalSend = z.object({
+  tabId: z.string().min(1).max(128),
+  prompt: z.string().min(1).refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
+    `prompt must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
+  ),
+});
+
 // ──────────────────────────────────────────── Web Remote
 // OTP is 8 uppercase alphanumeric chars (case-insensitive entry, normalised to upper in handler).
 const WEB_REMOTE_OTP_RE = /^[A-Z0-9]{8}$/i;
@@ -683,6 +695,9 @@ const MUTATE_COMMANDS = new Set([
   'cmd:schedule:reset-job',
   'cmd:schedule:run-now',
   'cmd:schedule:set-config',
+  // Pushes a prompt into an open tab's chat queue — a real mutation of that
+  // tab's session, same tier as pty:write.
+  'cmd:chat:send',
 ]);
 
 const ALLOWED_COMMANDS = new Set([...READ_COMMANDS, ...SAS_GATED_READS, ...MUTATE_COMMANDS]);
@@ -774,6 +789,7 @@ module.exports = {
     chatCancel,
     chatProbeContext,
     chatClassifyTicket,
+    chatExternalSend,
     exchangesList,
   },
   validated,

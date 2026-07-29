@@ -70,6 +70,8 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   splitStopSignal: (text: string) => { answerBody: string; questions: string[] } | null
   STOP_SENTINEL: string
   CHAT_MODE_TRUTH_INSTRUCTION: string
+  enqueueExternalPrompt: (tabId: string, prompt: string) => void
+  registerAdminRoute: (adminHttp: { registerRoute: (method: string, url: string, handler: (req: unknown, res: unknown) => Promise<void>) => void }) => void
 }
 
 function emitResultLine(child: FakeChild, resultText: string) {
@@ -533,5 +535,91 @@ describe('needs-input payload (real executeRun path via a faked child process)',
     const opts = call[0] as { result: string }
     expect(opts.result).toContain('1. one\n2. two\n3. three\n4. four\n5. five')
     expect(opts.result).toContain('[asked: Proceed with step 6?]')
+  })
+})
+
+describe('enqueueExternalPrompt (PRD 753)', () => {
+  it('broadcasts chat:external-send with the given tabId + prompt to the attached window', () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.enqueueExternalPrompt('tab-external', 'hello from outside')
+
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toEqual({
+      channel: 'chat:external-send',
+      payload: { tabId: 'tab-external', prompt: 'hello from outside' },
+    })
+  })
+
+  it('is a no-op when no window is attached', () => {
+    chatRunner.attachWindow(null)
+    expect(() => chatRunner.enqueueExternalPrompt('tab-x', 'hi')).not.toThrow()
+  })
+})
+
+describe('registerAdminRoute (PRD 753)', () => {
+  function fakeReqRes(body: string) {
+    const { EventEmitter: EE } = require('node:events')
+    const req = new EE()
+    setTimeout(() => {
+      req.emit('data', Buffer.from(body))
+      req.emit('end')
+    }, 0)
+    const res: { statusCode: number | null; body: string | null; writeHead: (s: number) => void; end: (b?: string) => void } = {
+      statusCode: null,
+      body: null,
+      writeHead(status: number) { res.statusCode = status },
+      end(b?: string) { res.body = b ?? null },
+    }
+    return { req, res }
+  }
+
+  it('registers POST /admin/chat/send-prompt and calls enqueueExternalPrompt on a valid body', async () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+
+    const routes = new Map<string, (req: unknown, res: unknown) => Promise<void>>()
+    chatRunner.registerAdminRoute({
+      registerRoute: (method, url, handler) => routes.set(`${method} ${url}`, handler),
+    })
+
+    const handler = routes.get('POST /admin/chat/send-prompt')
+    expect(handler).toBeTruthy()
+
+    const { req, res } = fakeReqRes(JSON.stringify({ tabId: 'tab-admin', prompt: 'hi from admin route' }))
+    await handler!(req, res)
+
+    expect(sent).toEqual([
+      { channel: 'chat:external-send', payload: { tabId: 'tab-admin', prompt: 'hi from admin route' } },
+    ])
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body!)).toEqual({ ok: true })
+  })
+
+  it('responds 400 on an invalid body and does not enqueue anything', async () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+
+    const routes = new Map<string, (req: unknown, res: unknown) => Promise<void>>()
+    chatRunner.registerAdminRoute({
+      registerRoute: (method, url, handler) => routes.set(`${method} ${url}`, handler),
+    })
+    const handler = routes.get('POST /admin/chat/send-prompt')!
+
+    const { req, res } = fakeReqRes(JSON.stringify({ tabId: '' }))
+    await handler(req, res)
+
+    expect(sent).toHaveLength(0)
+    expect(res.statusCode).toBe(400)
   })
 })

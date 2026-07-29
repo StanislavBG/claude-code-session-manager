@@ -13,6 +13,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?
   const classifyTicket = vi.fn(opts.classifyTicket ?? (async () => 'inline' as const))
   let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
+  let externalSendHandler: ((e: { tabId: string; prompt: string }) => void) | null = null
   const api = {
     chat: {
       run,
@@ -31,6 +32,10 @@ function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?
       }),
       onError: vi.fn(),
       onNotice: vi.fn(),
+      onExternalSend: vi.fn((handler) => {
+        externalSendHandler = handler
+        return () => { externalSendHandler = null }
+      }),
       classifyTicket,
     },
     transcripts: {
@@ -48,6 +53,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?
     classifyTicket,
     getNeedsInputHandler: () => needsInputHandler,
     getCompleteHandler: () => completeHandler,
+    getExternalSendHandler: () => externalSendHandler,
   }
 }
 
@@ -156,6 +162,61 @@ describe('chat.ts pushNotice()', () => {
     expect(after.queuedPosition).toBe(2)
     expect(after.stream).toBe('partial')
     expect(after.liveToolUses).toEqual([{ id: 'u1', kind: 'tool', label: 'Bash' }])
+  })
+})
+
+describe('chat.ts onExternalSend listener (PRD 753)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('resolves the tab from useSessions and hands off to send() when the tab is open', async () => {
+    const { api, run } = installWindowApiMock({ transcriptExists: true })
+    const { useSessions } = await import('../sessions')
+    const { useChat } = await import('../chat')
+
+    useSessions.setState({
+      tabs: [
+        {
+          id: 'tab-ext',
+          sessionId: 'sess-ext',
+          label: 'ext',
+          cwd: '/proj/ext',
+          pid: null,
+          status: 'dormant',
+          exitCode: null,
+          startupCommand: null,
+          presetId: null,
+          generation: 0,
+        },
+      ],
+    })
+
+    const handler = api.chat.onExternalSend.mock.calls[0][0]
+    handler({ tabId: 'tab-ext', prompt: 'hello from outside' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 'tab-ext', sessionId: 'sess-ext', prompt: 'hello from outside' }),
+    )
+
+    const chat = useChat.getState().get('tab-ext')
+    expect(chat.turns.some((t) => t.role === 'user' && t.text === 'hello from outside')).toBe(true)
+  })
+
+  it('no-ops and logs a warning when the tab is unknown/closed', async () => {
+    const { api, run } = installWindowApiMock({ transcriptExists: true })
+    const { useSessions } = await import('../sessions')
+    await import('../chat')
+
+    useSessions.setState({ tabs: [] })
+
+    const handler = api.chat.onExternalSend.mock.calls[0][0]
+    handler({ tabId: 'unknown-tab', prompt: 'hello' })
+
+    expect(run).not.toHaveBeenCalled()
+    expect(api.logs.write).toHaveBeenCalledWith('chat', 'warn', expect.stringContaining('unknown-tab'))
   })
 })
 
@@ -431,6 +492,7 @@ describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
           onNeedsInput: vi.fn(),
           onError: vi.fn((h) => { errorHandler = h; return () => { errorHandler = null } }),
           onNotice: vi.fn(),
+          onExternalSend: vi.fn(),
           classifyTicket,
         },
         transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },

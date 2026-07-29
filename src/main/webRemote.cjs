@@ -1056,6 +1056,7 @@ function getDispatchMap() {
   const sessionsStore = require('./sessionsStore.cjs');
   const scheduler = require('./scheduler.cjs');
   const { remote: histRemote } = require('./historyAggregator.cjs');
+  const chatRunner = require('./chatRunner.cjs');
 
   _dispatchMap = {
     'cmd:sessions:load': async () =>
@@ -1144,6 +1145,15 @@ function getDispatchMap() {
     'cmd:session:unsubscribe': async (payload) => {
       const parsed = schemas.ptyTabId.parse(payload);
       stopSessionWatch(parsed.tabId);
+      return { ok: true };
+    },
+
+    // Push a prompt into an open tab's chat queue from the paired phone
+    // client — in-process call, no admin HTTP hop needed since webRemote
+    // already runs inside the Electron main process (PRD 753).
+    'cmd:chat:send': async (payload) => {
+      const parsed = schemas.chatExternalSend.parse(payload);
+      chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt);
       return { ok: true };
     },
   };

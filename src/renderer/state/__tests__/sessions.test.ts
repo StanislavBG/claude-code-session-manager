@@ -32,6 +32,7 @@ function installWindowApiMock() {
       onNeedsInput: vi.fn(),
       onError: vi.fn(),
       onNotice: vi.fn(),
+      onExternalSend: vi.fn(),
     },
   }
   vi.stubGlobal('window', { api })

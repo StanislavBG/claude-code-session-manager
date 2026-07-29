@@ -436,6 +436,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('chat:run:notice', listener);
       return () => ipcRenderer.removeListener('chat:run:notice', listener);
     },
+    /** Fires when a main-process caller pushes a prompt into an open tab's
+     *  queue from outside the renderer (Web Remote / admin HTTP / MCP). */
+    onExternalSend: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:external-send', listener);
+      return () => ipcRenderer.removeListener('chat:external-send', listener);
+    },
     /** Classify a queued PromptTicket's text as 'inline' or 'develop'. */
     classifyTicket: (payload) => ipcRenderer.invoke('chat:classify-ticket', payload),
   },

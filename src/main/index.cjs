@@ -27,9 +27,11 @@ const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
 const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
+const chatRunner = require('./chatRunner.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
+chatRunner.registerAdminRoute(adminHttp);
 const { createBrowserAgentServer } = require('./browserAgentServer.cjs');
 const browserAgentServer = createBrowserAgentServer({
   listTabs: () => browserView.listViews(),
@@ -60,7 +62,6 @@ const searchIpc = require('./search.cjs');
 const repoAnalyzer = require('./repoAnalyzer.cjs');
 const hivesIpc = require('./hives.cjs');
 const webRemote = require('./webRemote.cjs');
-const chatRunner = require('./chatRunner.cjs');
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');

@@ -677,6 +677,48 @@ function cancel(tabId) {
   return Promise.resolve();
 }
 
+// ─── External-caller entry point (PRD 753) ─────────────────────────────────
+// Pushes a prompt into an already-open tab's chat queue from outside the
+// renderer — Web Remote, the admin HTTP route, or the scheduler MCP tool.
+// Fire-and-forget over IPC: the renderer-side listener (chat.ts) resolves
+// the tab's live sessionId/cwd from useSessions and calls useChat.send()
+// directly, reusing send()'s existing queued-vs-immediate branching rather
+// than duplicating it here.
+
+function enqueueExternalPrompt(tabId, prompt) {
+  broadcast('chat:external-send', { tabId, prompt });
+}
+
+/**
+ * Registers the admin-HTTP entry point for enqueueExternalPrompt, mirroring
+ * prdCreate.cjs's registerAdminRoute pattern (auth is the injected transport's
+ * job; this only owns route logic + body parsing).
+ */
+function registerAdminRoute(adminHttp) {
+  const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
+  const { schemas } = require('./ipcSchemas.cjs');
+
+  adminHttp.registerRoute('POST', '/admin/chat/send-prompt', async (req, res) => {
+    const raw = await readBody(req);
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    let body;
+    try {
+      body = schemas.chatExternalSend.parse(parsed);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e?.message ?? 'invalid body' });
+      return;
+    }
+    enqueueExternalPrompt(body.tabId, body.prompt);
+    sendJson(res, 200, { ok: true });
+  });
+}
+
 // ─── IPC handler registration ─────────────────────────────────────────────
 
 function registerChatHandlers() {
@@ -718,4 +760,6 @@ module.exports = {
   STOP_SENTINEL,
   CHAT_MODE_TRUTH_INSTRUCTION,
   __setExecutor,
+  enqueueExternalPrompt,
+  registerAdminRoute,
 };

@@ -1102,6 +1102,13 @@ export interface ChatRunNoticeEvent {
   message: string;
 }
 
+/** Pushed by enqueueExternalPrompt (PRD 753) — Web Remote, the admin HTTP
+ *  route, or an MCP caller asking to enqueue a prompt into an open tab. */
+export interface ChatExternalSendEvent {
+  tabId: string;
+  prompt: string;
+}
+
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
@@ -1475,6 +1482,10 @@ export interface SessionManagerAPI {
     onComplete: (handler: (e: ChatRunCompleteEvent) => void) => () => void;
     onError: (handler: (e: ChatRunErrorEvent) => void) => () => void;
     onNotice: (handler: (e: ChatRunNoticeEvent) => void) => () => void;
+    /** Fires when a main-process caller (Web Remote, admin HTTP route, MCP
+     *  tool) pushes a prompt into an open tab's queue from outside the
+     *  renderer (PRD 753). */
+    onExternalSend: (handler: (e: ChatExternalSendEvent) => void) => () => void;
     /** Classify a queued PromptTicket's text as 'inline' (run through
      *  chatRunner) or 'develop' (dispatch to /develop for PRD decomposition).
      *  A single bounded `claude -p` call, never a scheduler job. */

@@ -6,7 +6,7 @@
  *   2. Schema-invalid payloads throw ZodError before any handler runs.
  *   3. Path-bearing commands (cmd:pty:spawn) pass cwd through validatePath.
  *   4. Kill-switch: commands are refused when remoteEnabled = false.
- *   5. All 17 allowlisted command types are present in the set.
+ *   5. All 18 allowlisted command types are present in the set.
  *   6. Destructive pty commands live in the MUTATE tier, not READ.
  *   7. Sensitive READ commands (SAS_GATED_READS) are not in the plain READ tier.
  */
@@ -28,8 +28,8 @@ const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, SAS_GATED_READS, MUTATE_COMMAN
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 
 describe('ALLOWED_COMMANDS set', () => {
-  it('contains exactly 17 entries', () => {
-    expect(ALLOWED_COMMANDS.size).toBe(17)
+  it('contains exactly 18 entries', () => {
+    expect(ALLOWED_COMMANDS.size).toBe(18)
   })
 
   it('is the exact union of READ, SAS_GATED_READS, and MUTATE tiers (no overlap, no orphans)', () => {

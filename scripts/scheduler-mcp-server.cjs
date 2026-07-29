@@ -108,6 +108,21 @@ const TOOLS = [
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
     },
   },
+  {
+    name: 'chat_send_prompt',
+    description:
+      "Push a prompt into an already-open tab's chat queue via the session-manager app's admin "
+      + 'API. The renderer resolves the tab (must currently be open) and runs the prompt through '
+      + 'the same queued-vs-immediate path as a manual send. No-ops if the tab is unknown/closed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'string', description: 'Target tab id (claudeSessionId) that must already be open in the app' },
+        prompt: { type: 'string', description: 'Prompt text to enqueue' },
+      },
+      required: ['tabId', 'prompt'],
+    },
+  },
 ];
 
 const server = new Server(
@@ -134,6 +149,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (name === 'scheduler_create_prd') {
       const result = await adminRequest('POST', '/admin/scheduler/create-prd', args);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'chat_send_prompt') {
+      const tabId = args && typeof args.tabId === 'string' ? args.tabId : null;
+      const prompt = args && typeof args.prompt === 'string' ? args.prompt : null;
+      if (!tabId || !prompt) {
+        return { content: [{ type: 'text', text: 'missing required arguments: tabId, prompt' }], isError: true };
+      }
+      const result = await adminRequest('POST', '/admin/chat/send-prompt', { tabId, prompt });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     return { content: [{ type: 'text', text: `unknown tool: ${name}` }], isError: true };

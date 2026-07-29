@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { toast } from './toast'
 import { transcriptExists } from '../lib/transcriptExists'
 import { classifyPromptTicket } from '../lib/promptClassifier'
+import { useSessions } from './sessions'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -407,5 +408,18 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   })
   window.api.chat.onNotice(({ tabId, sessionId, message }) => {
     applyNotice(tabId, sessionId, message)
+  })
+  // External caller (Web Remote / admin HTTP route / MCP tool, PRD 753)
+  // pushing a prompt into an open tab's queue from outside the renderer.
+  // Resolves the tab's live sessionId/cwd from useSessions and hands off to
+  // the SAME send() path a manual composer submit uses — no separate queuing
+  // logic. No-ops (with a log line) if the tab isn't open.
+  window.api.chat.onExternalSend(({ tabId, prompt }) => {
+    const tab = useSessions.getState().tabs.find((t) => t.id === tabId)
+    if (!tab) {
+      window.api?.logs?.write('chat', 'warn', `external send ignored: tab ${tabId} is not open`)
+      return
+    }
+    useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt })
   })
 }

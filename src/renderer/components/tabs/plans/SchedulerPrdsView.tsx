@@ -1,101 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import type { ScheduleStateSnapshot, RetagPrdItem, LintFinding } from '../../../../preload/api'
+import { useEffect, useMemo, useState } from 'react'
+import type { ScheduleStateSnapshot, RetagPrdItem } from '../../../../preload/api'
 import { ProjectTag, prdNumber, PrdNumberBadge, prdStatusFor, PrdStatusPill, verdictLabel } from '../scheduler/sched-primitives'
 import { EmptyState } from '../../ui/EmptyState'
-import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { Modal } from '../../ui/Modal'
 import { Tooltip } from '../../ui/Tooltip'
-import { parsePrdFile, serializePrdFile, type PrdFrontmatter } from '../../../lib/prdFrontmatter'
+import { serializePrdFile } from '../../../lib/prdFrontmatter'
 import { formatAgo } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
-import { getLintQueueCached } from '../../../lib/lintQueueCache'
 import { takePendingPrdSlug } from '../../../lib/prdDeepLink'
-
-// ─── Real-time PRD linting ───────────────────────────────────────────────────
-
-// Mirrors the LINE_RULES in queueOps.cjs for instant client-side feedback.
-const CLIENT_LINT_RULES: Array<{ id: string; re: RegExp; severity: 'warn' | 'error'; label: string }> = [
-  { id: 'unbounded-until', re: /^\s*until\s+/, severity: 'error', label: '"until" loop — risk of unbounded poll' },
-  { id: 'while-true',      re: /^\s*while\s+(?:true|:)/i, severity: 'error', label: '"while true" — unbounded loop' },
-  { id: 'unbounded-seq',   re: /for\s+\S+\s+in\s+\$\(seq\s+1\s+[5-9][0-9]{2,}/, severity: 'error', label: 'unbounded seq — range ≥500' },
-  { id: 'no-verify',       re: /--no-verify\b/, severity: 'warn', label: '--no-verify — skips git hooks' },
-  { id: 'no-gpg-sign',     re: /--no-gpg-sign\b/, severity: 'warn', label: '--no-gpg-sign — bypasses signing' },
-]
-
-function lintPrdText(text: string): LintFinding[] {
-  const findings: LintFinding[] = []
-
-  // Frontmatter validation
-  const { frontmatter: fm } = parsePrdFile(text)
-  if (!fm.title?.trim()) {
-    findings.push({ rule: 'missing-title', line: 1, snippet: 'frontmatter "title" is required', severity: 'error' })
-  }
-  if (!fm.cwd?.trim()) {
-    findings.push({ rule: 'missing-cwd', line: 1, snippet: 'frontmatter "cwd" is required', severity: 'error' })
-  }
-  if (fm.estimateMinutes !== undefined && (!Number.isInteger(fm.estimateMinutes) || fm.estimateMinutes <= 0)) {
-    findings.push({ rule: 'invalid-estimate', line: 1, snippet: '"estimateMinutes" must be a positive integer', severity: 'error' })
-  }
-
-  // Line-by-line loop/flag detection
-  const lines = text.split('\n')
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    for (const rule of CLIENT_LINT_RULES) {
-      if (rule.re.test(line)) {
-        findings.push({
-          rule: rule.id,
-          line: i + 1,
-          snippet: line.trim().slice(0, 80),
-          severity: rule.severity,
-        })
-      }
-    }
-  }
-
-  return findings
-}
-
-/** Debounced real-time linting of the current PRD draft. */
-function useLintPrd(text: string): { findings: LintFinding[] } {
-  const [findings, setFindings] = useState<LintFinding[]>([])
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => {
-      setFindings(lintPrdText(text))
-    }, 300)
-    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [text])
-
-  return { findings }
-}
-
-function LintPanel({ findings }: { findings: LintFinding[] }) {
-  if (findings.length === 0) return null
-  const errors = findings.filter((f) => f.severity === 'error')
-  const warns = findings.filter((f) => f.severity === 'warn')
-  return (
-    <div className="mx-4 mt-2 mb-1 p-3 rounded border border-amber-400/30 bg-amber-950/10 text-xs space-y-1" role="alert">
-      <div className="text-[10px] uppercase tracking-wide text-amber-300 font-medium">
-        {errors.length > 0 && `${errors.length} error${errors.length !== 1 ? 's' : ''}`}
-        {errors.length > 0 && warns.length > 0 && ' · '}
-        {warns.length > 0 && `${warns.length} warning${warns.length !== 1 ? 's' : ''}`}
-      </div>
-      {findings.map((f, idx) => (
-        <div key={idx} className="font-mono text-[11px] flex gap-2 items-baseline">
-          <span className={`shrink-0 ${f.severity === 'error' ? 'text-red-300' : 'text-amber-300'}`}>
-            {f.severity === 'error' ? '✗' : '⚠'} L{f.line}
-          </span>
-          <span className="text-fg-faint truncate">{f.rule}: {f.snippet}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
+import { useEditor } from '../../../state/editor'
+import { useHomeDir } from '../../../lib/useHomeDir'
+import { EditorView } from '../EditorView'
 
 interface PrdMeta {
   slug: string
@@ -105,19 +21,6 @@ interface PrdMeta {
   estimateMinutes: number | null
   mtimeMs: number
 }
-
-function validateDraft(draft: string): string | null {
-  const { frontmatter: fm } = parsePrdFile(draft)
-  if (!fm.title?.trim()) return 'frontmatter "title" is required'
-  if (!fm.cwd?.trim()) return 'frontmatter "cwd" is required'
-  if (fm.estimateMinutes !== undefined) {
-    if (!Number.isInteger(fm.estimateMinutes) || fm.estimateMinutes <= 0) {
-      return '"estimateMinutes" must be a positive integer'
-    }
-  }
-  return null
-}
-
 
 function TBtn({
   label,
@@ -150,44 +53,17 @@ function TBtn({
   )
 }
 
-function FmRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex gap-2">
-      <span className="w-28 shrink-0 text-fg-faint">{label}</span>
-      <span className="text-fg-dim min-w-0 break-all">{children}</span>
-    </div>
-  )
-}
-
-
 export function SchedulerPrdsView() {
   const [prds, setPrds] = useState<PrdMeta[]>([])
   const [queueState, setQueueState] = useState<ScheduleStateSnapshot | null>(null)
+  // `selectedSlug` is the PRD currently open in the editor pane below (null =
+  // card list is showing). Card metadata (title/cwd/estimateMinutes/mtime)
+  // comes from `prds`/PrdMeta via listPrds(), never from this.
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
-  const [body, setBody] = useState('')
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  // Bundle E — structured editor state. `editMode` switches between the
-  // structured form (default) and the raw Monaco editor (escape hatch).
-  // `formFm` and `formBody` hold the in-flight structured form fields;
-  // `draft` holds the raw text. Switching modes round-trips through
-  // serializePrdFile / parsePrdFile so in-flight work is preserved.
-  const [editMode, setEditMode] = useState<'structured' | 'raw'>('structured')
-  const [formFm, setFormFm] = useState<PrdFrontmatter>({})
-  const [formBody, setFormBody] = useState('')
-  const [showCustomFields, setShowCustomFields] = useState(false)
-  const [lintFindings, setLintFindings] = useState<LintFinding[]>([])
-  const pendingEditRef = useRef(false)
-
-  // Real-time lint: derive the current "live text" from whichever edit mode is active
-  const liveEditText = editing
-    ? editMode === 'raw' ? draft : serializePrdFile(formFm, formBody)
-    : ''
-  const { findings: realtimeLintFindings } = useLintPrd(liveEditText)
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [logText, setLogText] = useState<string | null>(null)
   const [showLog, setShowLog] = useState(false)
   const [loading, setLoading] = useState(true)
+  const homeDir = useHomeDir()
   // Bundle D — multi-select state. Set semantics avoid accidental O(N^2) on
   // toggle for the ~200-PRD list seen in practice.
   const [checked, setChecked] = useState<Set<string>>(new Set())
@@ -233,11 +109,6 @@ export function SchedulerPrdsView() {
     [prds],
   )
 
-  // Auto-select first (= newest) PRD on initial load
-  useEffect(() => {
-    if (!selectedSlug && sortedPrds.length > 0) setSelectedSlug(sortedPrds[0].slug)
-  }, [sortedPrds, selectedSlug])
-
   // Cross-tab deep link: TerminalChat's queue panel (PRD 750) navigates here
   // to jump straight to a dispatched-to-prd ticket's PRD. `takePendingPrdSlug`
   // covers the common case — this component wasn't mounted yet when the link
@@ -251,126 +122,42 @@ export function SchedulerPrdsView() {
     return () => window.removeEventListener('sm:select-prd', h)
   }, [])
 
-  // Load body when selection changes
-  useEffect(() => {
-    if (!selectedSlug) return
-    let alive = true
-    window.api.schedule
-      .readPrd(selectedSlug)
-      .then((res) => {
-        if (!alive) return
-        const text = res.ok && res.text != null ? res.text : ''
-        setBody(text)
-        setDraft(text)
-        const parsed = parsePrdFile(text)
-        setFormFm(parsed.frontmatter)
-        setFormBody(parsed.body)
-        setEditMode('structured')
-        setShowCustomFields(false)
-        setLintFindings([])
-        setSaveError(null)
-        setLogText(null)
-        setShowLog(false)
-        if (pendingEditRef.current) {
-          pendingEditRef.current = false
-          setEditing(true)
-        } else {
-          setEditing(false)
-        }
-        if (!res.ok) {
-          const msg = res.error ?? 'PRD read returned not-ok'
-          toast.error(`Could not load PRD "${selectedSlug}": ${msg}`)
-        }
-      })
-      .catch((e) => {
-        if (!alive) return
-        const msg = e instanceof Error ? e.message : String(e)
-        toast.error(`Could not load PRD "${selectedSlug}": ${msg}`)
-      })
-    return () => {
-      alive = false
-    }
-  }, [selectedSlug])
-
   const job = useMemo(
     () => queueState?.jobs.find((j) => j.slug === selectedSlug) ?? null,
     [queueState, selectedSlug],
   )
   const status = prdStatusFor(job)
 
-  // Build the text that would be written. Structured-mode work is rendered
-  // back to YAML via serializePrdFile; raw mode uses draft verbatim.
-  function buildPayload(): string {
-    if (editMode === 'raw') return draft
-    return serializePrdFile(formFm, formBody)
+  function prdAbsPath(slug: string): string | null {
+    return homeDir ? `${homeDir}/.claude/session-manager/scheduled-plans/prds/${slug}.md` : null
   }
 
-  async function runLint(forSlug: string) {
-    try {
-      const res = await getLintQueueCached()
-      const report = res.reports.find((r) => r.slug === forSlug)
-      setLintFindings(report?.findings ?? [])
-    } catch {
-      setLintFindings([])
-    }
-  }
-
-  async function handleSave() {
+  // Opening a PRD is the single entry point into view+edit: it drives the
+  // shared editor store (also used by the Projects/File-Explorer tab) and
+  // shows selectedSlug's toolbar (status/Run now/Last run log) above it.
+  // `useEditor` is a multi-tab store (openFile appends rather than replaces),
+  // so browsing PRDs here adds tabs to the same shared strip the Projects tab
+  // renders — a PRD opened here shows up as a tab there too. That's the
+  // acceptable, non-surprising part; this effect (rather than opening inline
+  // in the click handler) exists so a PRD opened before `homeDir` resolves —
+  // via the cross-tab deep link above, or a very early click — still opens
+  // once the home directory IPC round-trip completes, instead of silently
+  // leaving the editor pane on its "no file open" empty state.
+  useEffect(() => {
     if (!selectedSlug) return
-    const payload = buildPayload()
-    const err = validateDraft(payload)
-    if (err) {
-      setSaveError(err)
-      return
-    }
-    setSaveError(null)
-    try {
-      const res = await window.api.schedule.writePrd(selectedSlug, payload)
-      if (!res.ok) {
-        setSaveError(res.error)
-        return
-      }
-      setBody(payload)
-      setDraft(payload)
-      setEditing(false)
-      const list = await window.api.schedule.listPrds()
-      setPrds(list)
-      // Inline linter — surface findings for THIS slug inline. Runs after
-      // save so the on-disk text matches what we lint.
-      runLint(selectedSlug)
-    } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : String(e))
-    }
+    const absPath = prdAbsPath(selectedSlug)
+    if (absPath) useEditor.getState().openFile(absPath)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlug, homeDir])
+
+  function openPrd(slug: string) {
+    setSelectedSlug(slug)
+    setLogText(null)
+    setShowLog(false)
   }
 
-  // Switching modes preserves in-flight work both directions.
-  function switchToRaw() {
-    setDraft(serializePrdFile(formFm, formBody))
-    setEditMode('raw')
-  }
-  function switchToStructured() {
-    const parsed = parsePrdFile(draft)
-    setFormFm(parsed.frontmatter)
-    setFormBody(parsed.body)
-    setEditMode('structured')
-  }
-
-  function beginEdit() {
-    // Re-seed the form from current on-disk body so cancel-then-edit is clean.
-    const parsed = parsePrdFile(body)
-    setFormFm(parsed.frontmatter)
-    setFormBody(parsed.body)
-    setDraft(body)
-    setEditMode('structured')
-    setEditing(true)
-    setSaveError(null)
-  }
-
-  async function pickCwd() {
-    try {
-      const dir = await window.api.app.pickDirectory()
-      if (dir) setFormFm((prev) => ({ ...prev, cwd: dir }))
-    } catch { /* user cancelled */ }
+  function closeEditor() {
+    setSelectedSlug(null)
   }
 
   async function handleShowLog() {
@@ -383,12 +170,6 @@ export function SchedulerPrdsView() {
     const res = await window.api.schedule.readLog(job.runId, selectedSlug)
     setLogText(res.ok ? (res.text ?? '') : `error: ${res.error}`)
     setShowLog((v) => !v)
-  }
-
-  function selectSlug(slug: string) {
-    setSelectedSlug(slug)
-    setEditing(false)
-    setSaveError(null)
   }
 
   if (loading) return <EmptyState title="loading PRDs…" />
@@ -457,19 +238,9 @@ export function SchedulerPrdsView() {
       }
       const list = await window.api.schedule.listPrds()
       setPrds(list)
-      pendingEditRef.current = true
-      selectSlug(slug)
+      openPrd(slug)
     } catch (e: unknown) {
       toast.error(`Failed to create PRD: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-
-  function handleCardEdit(slug: string) {
-    if (slug === selectedSlug) {
-      beginEdit()
-    } else {
-      pendingEditRef.current = true
-      selectSlug(slug)
     }
   }
 
@@ -515,6 +286,16 @@ export function SchedulerPrdsView() {
         clearChecked()
         setRetagOpen(false)
         await refreshPrds()
+        // A parallelGroup change renames the underlying file. Remap any open
+        // editor tab to the new path so it doesn't keep pointing at a file
+        // that no longer exists on disk.
+        for (const r of res.results) {
+          if (r.newSlug && r.newSlug !== r.slug) {
+            const oldPath = prdAbsPath(r.slug)
+            const newPath = prdAbsPath(r.newSlug)
+            if (oldPath && newPath) useEditor.getState().renameOpenFile(oldPath, newPath)
+          }
+        }
         // If the currently-selected slug was retagged with a parallelGroup
         // change, its slug may have moved; clear selection.
         if (selectedSlug && res.results.some((r) => r.slug === selectedSlug && r.newSlug && r.newSlug !== r.slug)) {
@@ -530,13 +311,16 @@ export function SchedulerPrdsView() {
 
   return (
     <>
-      {editing && selectedSlug ? (
+      {selectedSlug ? (
         // ── Editor view ──────────────────────────────────────────────────────
+        // Full-body view+edit is delegated entirely to the shared EditorView /
+        // useEditor store (same surface the Projects/File-Explorer tab uses).
+        // Only PRD-specific, non-file-editing actions stay here.
         <div className="h-full flex flex-col min-h-0">
           <div className="flex items-center gap-2 px-3 py-2 border-b border-line flex-wrap shrink-0">
             <button
               type="button"
-              onClick={() => { setEditing(false); setSaveError(null) }}
+              onClick={closeEditor}
               className="text-[11px] text-fg-faint hover:text-fg"
             >
               ← PRDs
@@ -544,28 +328,6 @@ export function SchedulerPrdsView() {
             <span className="font-mono text-xs text-fg-dim truncate">{selectedSlug}</span>
             <PrdStatusPill status={status} />
             <div className="flex-1" />
-            <TBtn
-              label={editMode === 'structured' ? 'View raw' : 'View structured'}
-              tip={
-                editMode === 'structured'
-                  ? 'Switch to raw Monaco editor (in-flight work preserved)'
-                  : 'Switch back to structured form (in-flight work preserved)'
-              }
-              onClick={editMode === 'structured' ? switchToRaw : switchToStructured}
-            />
-            <TBtn label="Save" tip="Save PRD to disk" onClick={handleSave} primary />
-            <TBtn
-              label="Cancel"
-              tip="Discard edits"
-              onClick={() => {
-                setDraft(body)
-                const parsed = parsePrdFile(body)
-                setFormFm(parsed.frontmatter)
-                setFormBody(parsed.body)
-                setEditing(false)
-                setSaveError(null)
-              }}
-            />
             <TBtn
               label="Reset"
               tip="Reset failed job to pending"
@@ -584,33 +346,9 @@ export function SchedulerPrdsView() {
             />
           </div>
 
-          {saveError && (
-            <div className="px-3 py-2 text-xs text-red-300 bg-red-900/20 border-b border-red-400/30">
-              {saveError}
-            </div>
-          )}
-
-          {editMode === 'raw' ? (
-            <div style={{ height: '600px' }}>
-              <MarkdownEditor
-                value={draft}
-                onChange={setDraft}
-                path={`/scheduler/prds/${selectedSlug}.md`}
-              />
-            </div>
-          ) : (
-            <StructuredPrdEditor
-              fm={formFm}
-              body={formBody}
-              onFmChange={setFormFm}
-              onBodyChange={setFormBody}
-              onPickCwd={pickCwd}
-              slug={selectedSlug}
-              showCustomFields={showCustomFields}
-              onToggleCustomFields={() => setShowCustomFields((v) => !v)}
-            />
-          )}
-          <LintPanel findings={realtimeLintFindings} />
+          <div className="flex-1 min-h-0">
+            <EditorView />
+          </div>
 
           {showLog && logText !== null && (
             <div className="border-t border-line max-h-64 overflow-auto bg-bg-elev">
@@ -704,9 +442,13 @@ export function SchedulerPrdsView() {
                     <div className="flex-1 min-w-0 py-4 pr-2">
                       <div className="flex items-center gap-2.5 mb-[5px] flex-wrap">
                         {prdNumber(p.slug) && <PrdNumberBadge n={prdNumber(p.slug)!} />}
-                        <span className="font-serif text-[18px] font-semibold text-fg leading-tight">
+                        <button
+                          type="button"
+                          onClick={() => openPrd(p.slug)}
+                          className="font-serif text-[18px] font-semibold text-fg leading-tight hover:underline text-left"
+                        >
                           {p.title || p.slug}
-                        </span>
+                        </button>
                         <PrdStatusPill status={prdStatus} />
                         {/* Hidden raw status for screen readers and testability */}
                         {j?.status && <span className="sr-only">{j.status}</span>}
@@ -717,10 +459,10 @@ export function SchedulerPrdsView() {
                         <span>g{p.parallelGroup}</span>
                         <span>edited {formatAgo(p.mtimeMs, Date.now())}</span>
                       </div>
-                      {/* Slug as clickable monospace label */}
+                      {/* Slug as clickable monospace label — opens the same editor pane */}
                       <button
                         type="button"
-                        onClick={() => selectSlug(p.slug)}
+                        onClick={() => openPrd(p.slug)}
                         className="mt-1.5 font-mono text-[11px] text-fg-faint hover:text-fg-dim leading-none"
                       >
                         {p.slug}
@@ -753,13 +495,6 @@ export function SchedulerPrdsView() {
                       >
                         {isRunning ? 'Running…' : 'Queue job'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCardEdit(p.slug)}
-                        className="bg-transparent border border-line text-fg-dim rounded-[9px] px-[18px] py-2 text-[13px] font-medium hover:text-fg hover:bg-bg-hi"
-                      >
-                        Edit
-                      </button>
                     </div>
                   </div>
                 )
@@ -784,136 +519,6 @@ export function SchedulerPrdsView() {
         onConfirm={confirmRetag}
       />
     </>
-  )
-}
-
-// ─── Bundle E — structured PRD editor ──────────────────────────────────────
-
-function StructuredPrdEditor({
-  fm,
-  body,
-  onFmChange,
-  onBodyChange,
-  onPickCwd,
-  slug,
-  showCustomFields,
-  onToggleCustomFields,
-}: {
-  fm: PrdFrontmatter
-  body: string
-  onFmChange: (next: PrdFrontmatter) => void
-  onBodyChange: (next: string) => void
-  onPickCwd: () => void
-  slug: string
-  showCustomFields: boolean
-  onToggleCustomFields: () => void
-}) {
-  const customFieldKeys = fm.extras ? Object.keys(fm.extras) : []
-
-  function patch(partial: Partial<PrdFrontmatter>) {
-    onFmChange({ ...fm, ...partial })
-  }
-
-  // Coerce a string input into number-or-undefined. Empty string = unset.
-  function num(s: string): number | undefined {
-    if (s.trim() === '') return undefined
-    const v = Number(s)
-    return Number.isFinite(v) ? v : undefined
-  }
-
-  return (
-    <div className="p-4 max-w-3xl space-y-4">
-      {/* Structured frontmatter form */}
-      <div className="p-3 rounded border border-line bg-bg-elev space-y-2">
-        <div className="text-[10px] uppercase tracking-wide text-fg-faint">
-          frontmatter
-        </div>
-        <label className="flex items-start gap-2 text-xs">
-          <span className="w-28 shrink-0 text-fg-faint pt-1">title*</span>
-          <input
-            type="text"
-            value={fm.title ?? ''}
-            onChange={(e) => patch({ title: e.target.value })}
-            placeholder="One-line PRD title"
-            className="flex-1 bg-bg border border-line rounded px-2 py-1 text-xs"
-          />
-        </label>
-        <label className="flex items-start gap-2 text-xs">
-          <span className="w-28 shrink-0 text-fg-faint pt-1">cwd*</span>
-          <div className="flex-1 flex gap-2 min-w-0">
-            <input
-              type="text"
-              value={fm.cwd ?? ''}
-              onChange={(e) => patch({ cwd: e.target.value })}
-              placeholder="/absolute/path/to/repo"
-              className="flex-1 min-w-0 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
-            />
-            <button
-              type="button"
-              onClick={onPickCwd}
-              className="px-2 py-1 text-[11px] rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
-              title="Pick directory"
-            >
-              Browse…
-            </button>
-          </div>
-        </label>
-        <label className="flex items-start gap-2 text-xs">
-          <span className="w-28 shrink-0 text-fg-faint pt-1">estimateMinutes*</span>
-          <input
-            type="number"
-            min={1}
-            value={fm.estimateMinutes ?? ''}
-            onChange={(e) => patch({ estimateMinutes: num(e.target.value) })}
-            placeholder="e.g. 60"
-            className="flex-1 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
-          />
-        </label>
-        <label className="flex items-start gap-2 text-xs">
-          <span className="w-28 shrink-0 text-fg-faint pt-1">parallelGroup</span>
-          <input
-            type="number"
-            min={0}
-            max={99}
-            value={fm.parallelGroup ?? ''}
-            onChange={(e) => patch({ parallelGroup: num(e.target.value) })}
-            placeholder="0-99 (matches NN- slug prefix)"
-            className="flex-1 bg-bg border border-line rounded px-2 py-1 font-mono text-xs"
-          />
-        </label>
-
-        {customFieldKeys.length > 0 && (
-          <div className="pt-2 mt-1 border-t border-line/60">
-            <button
-              type="button"
-              onClick={onToggleCustomFields}
-              className="text-[10px] text-fg-faint hover:text-fg-dim"
-            >
-              {showCustomFields ? '▾' : '▸'} custom fields ({customFieldKeys.length}) - round-trip preserved
-            </button>
-            {showCustomFields && (
-              <pre className="mt-1 text-[11px] text-fg-faint whitespace-pre-wrap font-mono leading-5">
-                {customFieldKeys
-                  .map((k) => (fm.extras?.[k]?.lines ?? []).join('\n'))
-                  .join('\n')}
-              </pre>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Body editor (Monaco markdown) */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">body</div>
-        <div style={{ height: '500px' }}>
-          <MarkdownEditor
-            value={body}
-            onChange={onBodyChange}
-            path={`/scheduler/prds/${slug}.body.md`}
-          />
-        </div>
-      </div>
-    </div>
   )
 }
 

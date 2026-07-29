@@ -53,6 +53,12 @@ interface SessionsState {
   sleepTab: (id: string) => void
   /** Mint a fresh sessionId for the tab, starting a brand-new session. */
   newSession: (id: string) => void
+  /** One-shot command typed into a tab's PTY once it's next confirmed spawned/ready. */
+  pendingRawCommand: Record<string, string>
+  /** Queue a command to auto-type once this tab's raw PTY is ready (e.g. wakeTab + a slash command). */
+  queueRawCommand: (id: string, command: string) => void
+  /** Consumes (reads + clears) the pending command for a tab, or null if none queued. */
+  consumeRawCommand: (id: string) => string | null
 }
 
 function labelFromCwd(cwd: string): string {
@@ -94,6 +100,20 @@ export const useSessions = create<SessionsState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   hydrated: false,
+  pendingRawCommand: {},
+  queueRawCommand: (id, command) => {
+    set((s) => ({ pendingRawCommand: { ...s.pendingRawCommand, [id]: command } }))
+  },
+  consumeRawCommand: (id) => {
+    const cmd = get().pendingRawCommand[id]
+    if (cmd === undefined) return null
+    set((s) => {
+      const next = { ...s.pendingRawCommand }
+      delete next[id]
+      return { pendingRawCommand: next }
+    })
+    return cmd
+  },
   addTab: ({ id: providedId, cwd, startupCommand, presetId = null, label }) => {
     const id = providedId ?? crypto.randomUUID()
     // Guard against double-add: callers occasionally retry (HMR remounts, race

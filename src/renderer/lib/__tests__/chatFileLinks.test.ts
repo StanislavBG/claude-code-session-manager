@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
-import { FILE_LINK_ATTR, linkifyFilePaths, resolveFileLinkTarget } from '../chatFileLinks'
+import { FILE_LINK_ATTR, linkifyFilePaths, resolveFileLinkTarget, extractFilePaths } from '../chatFileLinks'
 
 function mount(html: string): HTMLElement {
   const container = document.createElement('div')
@@ -91,5 +91,26 @@ describe('resolveFileLinkTarget', () => {
       line: undefined,
       col: undefined,
     })
+  })
+})
+
+describe('extractFilePaths', () => {
+  it('returns unique file-path mentions, deduping repeats', () => {
+    const text = 'pasted /tmp/session-manager-clipboard/clipboard-1.png then /tmp/session-manager-clipboard/clipboard-1.png again'
+    expect(extractFilePaths(text)).toEqual(['/tmp/session-manager-clipboard/clipboard-1.png'])
+  })
+
+  it('returns each distinct path once, in first-seen order', () => {
+    const text = 'see /tmp/a.png and also /tmp/b.png'
+    expect(extractFilePaths(text)).toEqual(['/tmp/a.png', '/tmp/b.png'])
+  })
+
+  it('caps at 3 distinct paths', () => {
+    const text = '/tmp/a.png /tmp/b.png /tmp/c.png /tmp/d.png'
+    expect(extractFilePaths(text)).toEqual(['/tmp/a.png', '/tmp/b.png', '/tmp/c.png'])
+  })
+
+  it('returns an empty array when the text has no path-like tokens', () => {
+    expect(extractFilePaths('just a normal sentence')).toEqual([])
   })
 })

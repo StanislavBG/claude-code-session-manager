@@ -11,21 +11,12 @@ import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
 // post-process pass (bare mentions like "docs/README.md" that `marked` never
 // turns into a real <a>). `cwd` resolves relative paths the same way
 // Terminal.tsx's xterm link provider does.
-export async function handleChatLinkClick(e: MouseEvent, cwd = ''): Promise<void> {
-  const target = e.target as HTMLElement
-  const a = target.closest('a')
-  if (a) {
-    const href = a.getAttribute('href') || ''
-    if (/^https?:\/\//i.test(href)) {
-      e.preventDefault()
-      window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
-    }
-    return
-  }
-
-  const fileEl = target.closest(`[${FILE_LINK_ATTR}]`)
-  if (!fileEl) return
-  const raw = fileEl.getAttribute(FILE_LINK_ATTR) ?? ''
+/**
+ * Opens a linkified file-path token (e.g. "src/foo.ts:42:8") in the Editor.
+ * Shared by the inline click handler below and FileCallout's click-to-open
+ * (TerminalChat.tsx) so both surfaces validate/resolve identically.
+ */
+export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void> {
   if (!raw) return
   const { absPath, line, col } = resolveFileLinkTarget(raw, cwd)
 
@@ -42,4 +33,22 @@ export async function handleChatLinkClick(e: MouseEvent, cwd = ''): Promise<void
 
   useEditor.getState().openFile(absPath, { line, col })
   window.dispatchEvent(new CustomEvent('sm:open-editor'))
+}
+
+export async function handleChatLinkClick(e: MouseEvent, cwd = ''): Promise<void> {
+  const target = e.target as HTMLElement
+  const a = target.closest('a')
+  if (a) {
+    const href = a.getAttribute('href') || ''
+    if (/^https?:\/\//i.test(href)) {
+      e.preventDefault()
+      window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
+    }
+    return
+  }
+
+  const fileEl = target.closest(`[${FILE_LINK_ATTR}]`)
+  if (!fileEl) return
+  const raw = fileEl.getAttribute(FILE_LINK_ATTR) ?? ''
+  await openLinkifiedFilePath(raw, cwd)
 }

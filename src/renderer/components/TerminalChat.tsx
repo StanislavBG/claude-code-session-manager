@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { linkifyFilePaths } from '../lib/chatFileLinks'
+import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
 import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn, type PromptTicket, type ToolUseTrace } from '../state/chat'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
@@ -9,7 +9,7 @@ import { decideSubmitAction } from '../lib/slashCommand'
 import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
-import { handleChatLinkClick } from '../lib/handleChatLinkClick'
+import { handleChatLinkClick, openLinkifiedFilePath } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { mergeTicketsForDisplay, ticketDisplayStatus } from '../lib/ticketDisplay'
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
@@ -41,12 +41,28 @@ function hasMarkdownList(text: string): boolean {
   return HAS_LIST_RE.test(text)
 }
 
+// Electron's permission handler (index.cjs) only grants media/audioCapture/
+// microphone, so navigator.clipboard.writeText() always rejects here — write
+// through the main-process IPC path instead (already used correctly by the
+// Recorder-export Copy-to-clipboard feature, PRD 412).
+function copyToClipboard(text: string, onDone: (ok: boolean) => void): void {
+  window.api.clipboard
+    .writeText(text)
+    .then((r) => onDone(!!r?.ok))
+    .catch(() => onDone(false))
+}
+
 function UrlCallout({ url }: { url: string }) {
   const [copied, setCopied] = useState(false)
   const onCopy = () => {
-    void navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1100)
+    copyToClipboard(url, (ok) => {
+      if (ok) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1100)
+      } else {
+        toast.error('Copy failed')
+      }
+    })
   }
   return (
     <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-line bg-elev px-2.5 py-1.5 text-xs">
@@ -54,6 +70,45 @@ function UrlCallout({ url }: { url: string }) {
         🔗
       </span>
       <span className="min-w-0 flex-1 truncate font-mono text-fg-dim">{url}</span>
+      <button
+        onClick={onCopy}
+        className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
+// Same callout shape as UrlCallout, for bare file-path mentions (e.g. a pasted
+// clipboard image path) — the label opens the file (reusing the same
+// resolve/validate/open path as inline chat-file-link clicks) instead of
+// external-opening a URL.
+function FileCallout({ path, cwd }: { path: string; cwd: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = () => {
+    copyToClipboard(path, (ok) => {
+      if (ok) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1100)
+      } else {
+        toast.error('Copy failed')
+      }
+    })
+  }
+  const onOpen = () => { void openLinkifiedFilePath(path, cwd) }
+  return (
+    <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-line bg-elev px-2.5 py-1.5 text-xs">
+      <span aria-hidden className="text-fg-dim">
+        📄
+      </span>
+      <button
+        onClick={onOpen}
+        title="Open in Editor"
+        className="min-w-0 flex-1 truncate text-left font-mono text-fg-dim hover:text-fg hover:underline"
+      >
+        {path}
+      </button>
       <button
         onClick={onCopy}
         className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"
@@ -319,14 +374,23 @@ function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
   )
 }
 
+// Stable substring match against the notice text chatRunner.cjs emits on MCP
+// consent-denial (chatRunner.cjs:415-423) — matching our own emitted wording,
+// not the CLI's, so it stays correct even if the CLI's phrasing changes.
+const CONSENT_NOTICE_MARKER = 'needs interactive consent for an MCP server'
+
 function Turn({
   turn,
   cwd,
+  tabId,
   runActive = false,
+  consentActionDisabled = false,
 }: {
   turn: ChatTurn
   cwd: string
+  tabId: string
   runActive?: boolean
+  consentActionDisabled?: boolean
 }) {
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
@@ -375,6 +439,16 @@ function Turn({
     )
   }
   if (turn.role === 'notice') {
+    const isConsentNotice = turn.text.includes(CONSENT_NOTICE_MARKER)
+    const onGrantConsent = () => {
+      // Queue the command for Terminal.tsx's spawn handler to auto-type once
+      // the PTY is ready, then wake the tab into that live raw session — same
+      // mechanism as the existing "Open raw session" button, just pre-filled
+      // so the user lands directly at the confirmation prompt instead of an
+      // empty terminal. The confirmation itself is never auto-answered.
+      useSessions.getState().queueRawCommand(tabId, '/design consent')
+      void useSessions.getState().wakeTab(tabId)
+    }
     return (
       <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
         <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
@@ -382,6 +456,18 @@ function Turn({
           Needs your attention
         </div>
         {turn.text}
+        {isConsentNotice && (
+          <div className={`mt-2 border-t pt-2 ${AMBER_TINT}`}>
+            <button
+              onClick={onGrantConsent}
+              disabled={consentActionDisabled}
+              title={consentActionDisabled ? 'Cancel or wait for the current run before opening a raw session' : 'Open a live interactive claude session with /design consent pre-typed'}
+              className={`rounded border px-2 py-1 text-xs font-medium hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent ${AMBER_TEXT} border-current`}
+            >
+              Grant consent →
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -392,6 +478,7 @@ function Turn({
   if (presentation === 'suppress') return null
 
   const urls = extractUrls(turn.text)
+  const filePaths = extractFilePaths(turn.text)
   const isPlan = hasMarkdownList(turn.text)
   return (
     <div className="flex max-w-[90%] items-start gap-2">
@@ -422,6 +509,9 @@ function Turn({
             />
             {urls.map((url) => (
               <UrlCallout key={url} url={url} />
+            ))}
+            {filePaths.map((path) => (
+              <FileCallout key={path} path={path} cwd={cwd} />
             ))}
           </>
         )}
@@ -631,7 +721,9 @@ export function TerminalChat({ tabId, cwd }: Props) {
               key={t.id}
               turn={t}
               cwd={cwd}
+              tabId={tabId}
               runActive={running && t.role === 'assistant' && i === turns.length - 1}
+              consentActionDisabled={running}
             />
           ))}
           {running && (

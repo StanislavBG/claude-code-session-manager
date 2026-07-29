@@ -203,6 +203,17 @@ export function Terminal({ tabId, cwd }: Props) {
             // Skip on reattach: the shell + claude are already running from the
             // previous renderer-load, so re-writing the startup command would
             // type it as input into the live claude session.
+            // A caller (e.g. TerminalChat's "Grant consent" button) can queue a
+            // one-shot command to auto-type once this PTY is ready — reattach
+            // means the session is already live, so it's typed almost
+            // immediately; a fresh spawn chains after the startup command with
+            // extra margin for the interactive `claude` CLI itself to boot
+            // (best-effort timing, same tradeoff already accepted by the
+            // startupCommand buffering above).
+            const pending = useSessions.getState().consumeRawCommand(tabId)
+            if (pending) {
+              setTimeout(() => { writeInChunks(tabId, `${pending}\r`) }, reattached ? 150 : 1500)
+            }
             if (reattached) return
             const { startupCommand } = useSessions.getState().tabs.find((t) => t.id === tabId) ?? {}
             if (startupCommand) {

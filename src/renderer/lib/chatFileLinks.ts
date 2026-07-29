@@ -61,6 +61,26 @@ export function linkifyFilePaths(root: HTMLElement): void {
   }
 }
 
+// Dedups and hard-caps at 3, mirroring extractUrls.ts's pattern — feeds the
+// same bottom-right callout list as extracted URLs, alongside them.
+const MAX_EXTRACTED_FILE_PATHS = 3
+
+/** Extracts unique bare file-path mentions from raw (pre-render) chat text. */
+export function extractFilePaths(text: string): string[] {
+  FILE_LINK_RE.lastIndex = 0
+  const seen = new Set<string>()
+  const paths: string[] = []
+  for (const m of text.matchAll(FILE_LINK_RE)) {
+    const p = m[1]
+    if (!seen.has(p)) {
+      seen.add(p)
+      paths.push(p)
+      if (paths.length >= MAX_EXTRACTED_FILE_PATHS) break
+    }
+  }
+  return paths
+}
+
 /**
  * Resolves a matched token (e.g. "src/foo.ts:42:8") into an absolute path plus
  * optional line/col, same stripping logic as Terminal.tsx:103-107.

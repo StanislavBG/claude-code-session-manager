@@ -38,6 +38,29 @@ function installWindowApiMock() {
   return api
 }
 
+describe('sessions.ts queueRawCommand()/consumeRawCommand()', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('round-trips a queued command and clears it after one consume', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+
+    useSessions.getState().queueRawCommand('tab-1', '/design consent')
+    expect(useSessions.getState().consumeRawCommand('tab-1')).toBe('/design consent')
+    expect(useSessions.getState().consumeRawCommand('tab-1')).toBeNull()
+  })
+
+  it('returns null for a tab with nothing queued', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+
+    expect(useSessions.getState().consumeRawCommand('never-queued')).toBeNull()
+  })
+})
+
 describe('sessions.ts newSession()', () => {
   beforeEach(() => {
     vi.resetModules()

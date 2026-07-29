@@ -264,7 +264,7 @@ function ChatSessionRail({
   const runs = collapseToolUseRuns(liveToolUses)
   const inFlightIdx = running && !stream ? runs.length - 1 : -1
   return (
-    <div className="w-[280px] shrink-0 overflow-y-auto border-l border-rule px-3 py-4">
+    <div className="min-h-0 flex-1 overflow-y-auto border-b border-rule px-3 py-4">
       <div className="rounded-lg border border-line bg-elev px-3 py-2.5">
         <div className="text-xs font-semibold text-fg">{label}</div>
         <div className="mt-0.5 truncate font-mono text-[11px] text-fg-dim" title={cwd}>
@@ -340,7 +340,7 @@ function openPrdSlug(slug: string): void {
 export function QueueTicketPanel({ tickets }: { tickets: PromptTicket[] }) {
   return (
     <div
-      className="w-[260px] shrink-0 overflow-y-auto border-l border-rule px-3 py-4"
+      className="min-h-0 flex-1 overflow-y-auto px-3 py-4"
       data-testid="chat-queue-panel"
     >
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
@@ -754,17 +754,19 @@ export function TerminalChat({ tabId, cwd }: Props) {
             </div>
           )}
         </div>
-        <QueueTicketPanel tickets={displayTickets} />
-        {showRail && (
-          <ChatSessionRail
-            cwd={cwd}
-            label={tab?.label ?? cwd}
-            running={running}
-            queuedPosition={queuedPosition}
-            stream={stream}
-            liveToolUses={liveToolUses}
-          />
-        )}
+        <div className="flex h-full w-[280px] shrink-0 flex-col border-l border-rule">
+          {showRail && (
+            <ChatSessionRail
+              cwd={cwd}
+              label={tab?.label ?? cwd}
+              running={running}
+              queuedPosition={queuedPosition}
+              stream={stream}
+              liveToolUses={liveToolUses}
+            />
+          )}
+          <QueueTicketPanel tickets={displayTickets} />
+        </div>
       </div>
 
       <div className="border-t border-rule p-3">

@@ -11,6 +11,35 @@ export const FILE_LINK_RE = /(?:^|[\s(])((?:\.{1,2}\/)?[\w./-]+\.[A-Za-z]\w*(?::
 /** data attribute a linkified span carries; read back by handleChatLinkClick. */
 export const FILE_LINK_ATTR = 'data-file-link-text'
 
+// Longest plausible real-world file extension (e.g. "cjsx", "mjs", "tsx",
+// "d.ts" segments) — bounds the false-positive surface without a hardcoded
+// extension allowlist that would need constant upkeep.
+const MAX_EXTENSION_LENGTH = 10
+
+// An ALL-CAPS identifier with an underscore (e.g. "TOOL_PROJECTS") is a common
+// JS/Python constant-naming pattern, never a real file extension. A token with
+// no path separator (no "/") that ends in one of these is prose quoting a
+// constant name, not a file path — FILE_LINK_RE's `\.[A-Za-z]\w*` group has no
+// way to tell "path.ts" from "..TOOL_PROJECTS" (an ellipsis whose last dot the
+// regex mistakes for an extension separator) without this extra check.
+const ALL_CAPS_WITH_UNDERSCORE_RE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
+
+/**
+ * Filters out FILE_LINK_RE matches that look like prose (an ALL-CAPS constant
+ * name, possibly ellipsis-prefixed) rather than a real bare file-path mention.
+ * A token with a path separator is trusted as-is; only extensionless-looking,
+ * separator-free tokens get the extra scrutiny.
+ */
+function isPlausibleFilePath(pathPart: string): boolean {
+  const filePath = pathPart.replace(/(?::\d+)+$/, '')
+  if (filePath.includes('/')) return true
+  const dot = filePath.lastIndexOf('.')
+  const ext = dot === -1 ? '' : filePath.slice(dot + 1)
+  if (!ext || ext.length > MAX_EXTENSION_LENGTH) return false
+  if (ALL_CAPS_WITH_UNDERSCORE_RE.test(ext)) return false
+  return true
+}
+
 /**
  * Walks text nodes under `root` and wraps file-path-like tokens in a
  * `<span data-file-link-text="...">`, skipping text already inside an <a>,
@@ -37,7 +66,7 @@ export function linkifyFilePaths(root: HTMLElement): void {
   for (const node of textNodes) {
     const text = node.textContent ?? ''
     FILE_LINK_RE.lastIndex = 0
-    const matches = [...text.matchAll(FILE_LINK_RE)]
+    const matches = [...text.matchAll(FILE_LINK_RE)].filter((m) => isPlausibleFilePath(m[1]))
     if (matches.length === 0) continue
 
     const frag = document.createDocumentFragment()
@@ -72,6 +101,7 @@ export function extractFilePaths(text: string): string[] {
   const paths: string[] = []
   for (const m of text.matchAll(FILE_LINK_RE)) {
     const p = m[1]
+    if (!isPlausibleFilePath(p)) continue
     if (!seen.has(p)) {
       seen.add(p)
       paths.push(p)

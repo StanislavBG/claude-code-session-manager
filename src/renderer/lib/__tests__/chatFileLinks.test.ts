@@ -58,6 +58,15 @@ describe('linkifyFilePaths', () => {
 
     expect(container.innerHTML).toBe(before)
   })
+
+  it('does not wrap an ellipsis-prefixed ALL_CAPS constant name as a file-path chip', () => {
+    const container = mount('<p>quoting ...TOOL_PROJECTS from the other repo</p>')
+    const before = container.innerHTML
+    linkifyFilePaths(container)
+
+    expect(container.querySelector(`[${FILE_LINK_ATTR}]`)).toBeNull()
+    expect(container.innerHTML).toBe(before)
+  })
 })
 
 describe('resolveFileLinkTarget', () => {
@@ -112,5 +121,31 @@ describe('extractFilePaths', () => {
 
   it('returns an empty array when the text has no path-like tokens', () => {
     expect(extractFilePaths('just a normal sentence')).toEqual([])
+  })
+
+  it('does not treat an ellipsis-prefixed ALL_CAPS constant name as a file path', () => {
+    expect(extractFilePaths('quoting ...TOOL_PROJECTS from the other repo')).toEqual([])
+  })
+
+  it('does not treat a bare ALL_CAPS constant name as a file path', () => {
+    expect(extractFilePaths('the TOOL_PROJECTS constant')).toEqual([])
+  })
+
+  it('matches a real filename with a plausible extension and no path separator', () => {
+    expect(extractFilePaths('see projectsRegistry.ts for the list')).toEqual(['projectsRegistry.ts'])
+  })
+
+  it('matches a path with a line number, capturing the suffix', () => {
+    expect(extractFilePaths('error in src/config/tools.ts:174 during build')).toEqual(['src/config/tools.ts:174'])
+  })
+
+  it('matches a bare .tsx filename with no path separator', () => {
+    expect(extractFilePaths('open SessionManagerPage.tsx to edit')).toEqual(['SessionManagerPage.tsx'])
+  })
+
+  it('rejects a short ALL-CAPS-with-underscore "extension" even under the length cap', () => {
+    // "AB_CD" is only 5 chars — this exercises the all-caps/underscore check
+    // independently of the length cutoff, which alone wouldn't reject it.
+    expect(extractFilePaths('the constant foo.AB_CD is not a file')).toEqual([])
   })
 })

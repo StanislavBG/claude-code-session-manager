@@ -1,5 +1,6 @@
 import type { MouseEvent } from 'react'
 import { useEditor } from '../state/editor'
+import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
 import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
 
@@ -18,20 +19,54 @@ import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
  */
 export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void> {
   if (!raw) return
-  const { absPath, line, col } = resolveFileLinkTarget(raw, cwd)
+  const filePath = raw.replace(/(?::\d+)+$/, '')
+
+  const primary = resolveFileLinkTarget(raw, cwd)
 
   // Security: assistant text is untrusted (it can echo content the model read
   // from anywhere — a fetched URL, a file, prior conversation). Validate the
   // resolved path stays inside the home-scoping boundary before ever opening
   // it in the Editor — reuse files:read's existing assertInsideHome check
   // (files.cjs) rather than re-implementing path validation in the renderer.
-  const r = await window.api.files.read(absPath)
-  if (!r.ok && r.error === 'path outside home') {
+  // The same check runs again below for every cross-tab fallback candidate.
+  const primaryRead = await window.api.files.read(primary.absPath)
+  if (!primaryRead.ok && primaryRead.error === 'path outside home') {
     toast.error("That path is outside the project and can't be opened.")
     return
   }
 
-  useEditor.getState().openFile(absPath, { line, col })
+  let target = primaryRead.ok ? primary : null
+  let triedOtherTabs = 0
+
+  // A mention like "projectsRegistry.ts" may name a real file that simply
+  // lives under a DIFFERENT open tab's cwd than the one the chip was rendered
+  // in (the assistant can discuss another project mid-conversation). Only
+  // relative tokens benefit — an absolute path resolves the same regardless
+  // of cwd, so there's nothing to retry.
+  if (!target && !filePath.startsWith('/')) {
+    const otherCwds = Array.from(
+      new Set(useSessions.getState().tabs.map((t) => t.cwd).filter((c) => c && c !== cwd)),
+    )
+    for (const otherCwd of otherCwds) {
+      const candidate = resolveFileLinkTarget(raw, otherCwd)
+      const candidateRead = await window.api.files.read(candidate.absPath)
+      triedOtherTabs++
+      if (candidateRead.ok) {
+        target = candidate
+        break
+      }
+      // Outside-home or ENOENT — either way this candidate isn't a match;
+      // move on to the next open tab's cwd.
+    }
+  }
+
+  if (!target) {
+    const tabWord = triedOtherTabs === 1 ? 'tab' : 'tabs'
+    toast.error(`${primaryRead.error || 'Not found'} under ${cwd} (tried ${triedOtherTabs} other open ${tabWord})`)
+    return
+  }
+
+  useEditor.getState().openFile(target.absPath, { line: target.line, col: target.col })
   window.dispatchEvent(new CustomEvent('sm:open-editor'))
 }
 

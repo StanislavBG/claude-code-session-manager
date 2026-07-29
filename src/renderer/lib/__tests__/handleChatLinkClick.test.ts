@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handleChatLinkClick } from '../handleChatLinkClick'
 import { FILE_LINK_ATTR } from '../chatFileLinks'
 import { useEditor } from '../../state/editor'
+import { useSessions } from '../../state/sessions'
 
 function mount(html: string): HTMLElement {
   const container = document.createElement('div')
@@ -92,5 +93,91 @@ describe('handleChatLinkClick', () => {
     await result
 
     expect(openFileMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to another open tab whose cwd actually contains the file', async () => {
+    const activeCwd = '/home/user/session-manager'
+    const otherCwd = '/home/user/Bilko'
+    useSessions.setState({
+      tabs: [
+        { id: 'a', cwd: activeCwd } as any,
+        { id: 'b', cwd: otherCwd } as any,
+      ],
+    } as any)
+    ;(window.api.files.read as ReturnType<typeof vi.fn>).mockImplementation(async (path: string) => {
+      if (path === `${otherCwd}/src/data/projectsRegistry.ts`) {
+        return { ok: true, text: 'hi', error: null, size: 2 }
+      }
+      return { ok: false, text: '', error: 'ENOENT: no such file or directory', size: 0 }
+    })
+    const openFileMock = vi.fn()
+    useEditor.setState({ openFile: openFileMock })
+
+    const container = mount(`<div><span ${FILE_LINK_ATTR}="src/data/projectsRegistry.ts">src/data/projectsRegistry.ts</span></div>`)
+    const span = container.querySelector('span')!
+    const { result } = fireClick(container, span, activeCwd)
+    await result
+
+    expect(openFileMock).toHaveBeenCalledWith(`${otherCwd}/src/data/projectsRegistry.ts`, { line: undefined, col: undefined })
+  })
+
+  it('reports which cwds were tried when the file exists nowhere', async () => {
+    const activeCwd = '/home/user/session-manager'
+    const otherCwd = '/home/user/Bilko'
+    useSessions.setState({
+      tabs: [
+        { id: 'a', cwd: activeCwd } as any,
+        { id: 'b', cwd: otherCwd } as any,
+      ],
+    } as any)
+    ;(window.api.files.read as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      text: '',
+      error: 'ENOENT: no such file or directory',
+      size: 0,
+    })
+    const openFileMock = vi.fn()
+    useEditor.setState({ openFile: openFileMock })
+    const { toast } = await import('../../state/toast')
+    const errorSpy = vi.spyOn(toast, 'error')
+
+    const container = mount(`<div><span ${FILE_LINK_ATTR}="totally/fake/path.ts">totally/fake/path.ts</span></div>`)
+    const span = container.querySelector('span')!
+    const { result } = fireClick(container, span, activeCwd)
+    await result
+
+    expect(openFileMock).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(`ENOENT: no such file or directory under ${activeCwd} (tried 1 other open tab)`),
+    )
+  })
+
+  it('pluralizes "tabs" correctly when more than one other tab was tried', async () => {
+    const activeCwd = '/home/user/session-manager'
+    useSessions.setState({
+      tabs: [
+        { id: 'a', cwd: activeCwd } as any,
+        { id: 'b', cwd: '/home/user/Bilko' } as any,
+        { id: 'c', cwd: '/home/user/other-repo' } as any,
+      ],
+    } as any)
+    ;(window.api.files.read as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      text: '',
+      error: 'ENOENT: no such file or directory',
+      size: 0,
+    })
+    const openFileMock = vi.fn()
+    useEditor.setState({ openFile: openFileMock })
+    const { toast } = await import('../../state/toast')
+    const errorSpy = vi.spyOn(toast, 'error')
+
+    const container = mount(`<div><span ${FILE_LINK_ATTR}="totally/fake/path.ts">totally/fake/path.ts</span></div>`)
+    const span = container.querySelector('span')!
+    const { result } = fireClick(container, span, activeCwd)
+    await result
+
+    expect(openFileMock).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('(tried 2 other open tabs)'))
   })
 })

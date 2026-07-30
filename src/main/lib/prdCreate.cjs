@@ -48,7 +48,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -61,6 +61,9 @@ function buildPrdBody(input) {
   // Optional, additive: the tab that queued this PRD, read back by
   // scheduler.cjs at job completion (PRD 761) to route a status prompt.
   if (sourceTabId) fmLines.push(`sourceTabId: ${sourceTabId}`);
+  // Optional, additive: the user-selected Feature/Bug tag (PRD 774) carried
+  // through from the originating PromptTicket — deterministic, never LLM-classified.
+  if (tag) fmLines.push(`tag: ${tag}`);
   fmLines.push('---', '');
 
   const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');

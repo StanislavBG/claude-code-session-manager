@@ -506,6 +506,44 @@ describe('chat.ts prompt queue', () => {
     expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('PRD authoring failed') && t.text.includes('cwd rejected'))).toBe(true)
   })
 
+  it('threads the composer-selected tag from send() through the queued ticket and into the createPrd payload (PRD 774)', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 9, filename: '9-fix-a-bug.md' }),
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'fix a bug', tag: 'bug' })
+    const queuedTicket = useChat.getState().get('t1').queue[0]
+    expect(queuedTicket.tag).toBe('bug')
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'fix a bug' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+    expect(createPrd).toHaveBeenCalledWith(expect.objectContaining({ tag: 'bug' }))
+
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      const dispatchedTicket = after.ticketHistory?.find((t) => t.status === 'dispatched-to-prd')
+      expect(dispatchedTicket?.tag).toBe('bug')
+    })
+  })
+
+  it('carries the composer-selected tag into the fresh-send activeTicket (not just the queued path)', async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first', tag: 'feature' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    expect(useChat.getState().get('t1').activeTicket?.tag).toBe('feature')
+  })
+
   it('stays "running" during the classification round-trip so a send() during that window queues instead of racing a second dispatch', async () => {
     let resolveClassify!: (v: 'inline' | 'develop') => void
     const classifyGate = new Promise<'inline' | 'develop'>((resolve) => { resolveClassify = resolve })

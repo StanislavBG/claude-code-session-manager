@@ -1060,6 +1060,8 @@ export interface ChatCreatePrdPayload {
   sourcePromptId?: string;
   /** Originating tab id — used at job completion to route a status prompt back into the tab. */
   sourceTabId?: string;
+  /** User-selected Feature/Bug tag (PRD 774) carried from the originating PromptTicket. */
+  tag?: 'feature' | 'bug';
 }
 
 export type ChatCreatePrdResult =

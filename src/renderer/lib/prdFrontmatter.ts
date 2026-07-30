@@ -15,6 +15,9 @@
  *   - sourceTabId: string (optional) — the tab that originated this PRD, used
  *     by the scheduler (PRD 761) to route a completion status prompt back
  *     into that tab's chat queue via enqueueExternalPrompt. Additive only.
+ *   - tag: 'feature' | 'bug' (optional) — the user-selected composer tag
+ *     (PRD 774) carried through from the originating PromptTicket. Additive
+ *     only; absent on every PRD authored before this field existed.
  *
  * Round-trip invariant: keys not in `PrdFrontmatter` are preserved verbatim
  * in their original line range via `extras`. Edits only touch lines that own
@@ -28,6 +31,7 @@ export type PrdFrontmatter = {
   parallelGroup?: number
   sourcePromptId?: string
   sourceTabId?: string
+  tag?: 'feature' | 'bug'
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -55,6 +59,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'parallelGroup',
   'sourcePromptId',
   'sourceTabId',
+  'tag',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -65,6 +70,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'parallelGroup',
   'sourcePromptId',
   'sourceTabId',
+  'tag',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -181,6 +187,9 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       return
     case 'sourceTabId':
       fm.sourceTabId = String(v)
+      return
+    case 'tag':
+      if (v === 'feature' || v === 'bug') fm.tag = v
       return
   }
 }

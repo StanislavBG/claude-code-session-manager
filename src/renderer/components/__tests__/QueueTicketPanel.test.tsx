@@ -99,6 +99,34 @@ describe('QueueTicketPanel', () => {
     expect(onSelectNeedsInput).not.toHaveBeenCalled()
   })
 
+  it('renders a tag chip for a ticket with a tag set, and no chip for one without (PRD 774)', () => {
+    const tagged: PromptTicket = {
+      id: 't-tagged',
+      tabId: 'tab-1',
+      sessionId: 'sess-1',
+      cwd: '/proj',
+      text: 'fix the login bug',
+      status: 'done',
+      createdAt: Date.now(),
+      tag: 'bug',
+    }
+    const untagged: PromptTicket = {
+      id: 't-untagged',
+      tabId: 'tab-1',
+      sessionId: 'sess-1',
+      cwd: '/proj',
+      text: 'pre-existing history ticket',
+      status: 'done',
+      createdAt: Date.now(),
+    }
+    const el = mount(<QueueTicketPanel tickets={[tagged, untagged]} />)
+    const items = el.querySelectorAll('[data-testid="chat-queue-ticket"]')
+    expect(items).toHaveLength(2)
+    expect(items[0].textContent).toContain('Bug')
+    expect(items[1].textContent).not.toContain('Feature')
+    expect(items[1].textContent).not.toContain('Bug')
+  })
+
   // Covers the scroll-stabilization fix: the panel container is a plain
   // overflow-y-auto div with no scroll anchoring at all before this fix, so a
   // ticket status transition (or a new ticket arriving) left scrollTop fixed

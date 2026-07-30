@@ -58,6 +58,9 @@ export interface PromptTicket {
   prdSlugs?: string[]
   /** For a 'needs-input' ticket: the id of the question ChatTurn it corresponds to, so the panel can scroll/highlight it. */
   questionTurnId?: string
+  /** User-selected composer tag (PRD 774) — deterministic, never LLM-classified.
+   *  Threaded into the PRD's frontmatter when this ticket dispatches to /develop. */
+  tag?: 'feature' | 'bug'
 }
 
 interface TabChat {
@@ -101,7 +104,7 @@ interface ChatState {
   /** Read (or lazily create) the chat slice for a tab. */
   get: (tabId: string) => TabChat
   /** Submit a user command for a tab. sessionId is the tab's sessionId. */
-  send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string }) => void
+  send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string; tag?: 'feature' | 'bug' }) => void
   /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newSession). */
   resetThread: (tabId: string) => void
   /**
@@ -197,7 +200,7 @@ export const useChat = create<ChatState>((set, get) => ({
       window.api?.logs?.write('chat', 'warn', `exchange hydration failed for tab ${tabId}: ${msg}`)
     }
   },
-  send: ({ tabId, sessionId, cwd, prompt }) => {
+  send: ({ tabId, sessionId, cwd, prompt, tag }) => {
     const trimmed = prompt.trim()
     if (!trimmed) return
     const cur = get().chats[tabId] ?? EMPTY
@@ -213,6 +216,7 @@ export const useChat = create<ChatState>((set, get) => ({
         text: trimmed,
         status: 'queued',
         createdAt: Date.now(),
+        tag,
       }
       set({
         chats: {
@@ -228,7 +232,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // dispatching so the queue panel/composer stop treating the tab as
     // stalled once the reply is in flight.
     clearNeedsInput(tabId)
-    dispatchSend({ tabId, sessionId, cwd, text: trimmed })
+    dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag })
   },
   resetThread: (tabId) => {
     set({
@@ -311,8 +315,8 @@ function clearNeedsInput(tabId: string): void {
  * as activeTicket before calling here (chat.ts:298+), so `cur.activeTicket`
  * is reused when present; a fresh send() has none yet, so one is minted here.
  */
-function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string; promptId?: string }): void {
-  const { tabId, sessionId, cwd, text, promptId } = args
+function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string; promptId?: string; tag?: 'feature' | 'bug' }): void {
+  const { tabId, sessionId, cwd, text, promptId, tag } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
   const activeTicket: PromptTicket = cur.activeTicket ?? {
@@ -324,6 +328,7 @@ function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; tex
     status: 'running',
     createdAt: Date.now(),
     startedAt: Date.now(),
+    tag,
   }
   useChat.setState({
     chats: {
@@ -375,7 +380,7 @@ function dequeueNext(tabId: string): void {
     }
     const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
     patch(tabId, (c) => ({ ...c, activeTicket: running }))
-    dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id })
+    dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id, tag: running.tag })
   })
 }
 
@@ -413,6 +418,7 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
       implementationNotes: `Target project: ${ticket.cwd}`,
       sourcePromptId: ticket.id,
       sourceTabId: ticket.tabId,
+      tag: ticket.tag,
     })
     .then((result) => {
       if (!result?.ok) {

@@ -76,3 +76,76 @@ describe('prdFrontmatter sourcePromptId (PRD 749)', () => {
     expect(updated).toContain('sourcePromptId: ticket-new-1')
   })
 })
+
+describe('prdFrontmatter tag (PRD 774)', () => {
+  it('parses tag when present', () => {
+    const text = [
+      '---',
+      'title: Has a tag',
+      'cwd: ~/Projects/session-manager',
+      'estimateMinutes: 10',
+      'tag: bug',
+      '---',
+      '# Goal',
+      '',
+      'Do the thing.',
+      '',
+    ].join('\n')
+
+    const { frontmatter } = parsePrdFile(text)
+    expect(frontmatter.tag).toBe('bug')
+  })
+
+  it('leaves tag undefined for a PRD authored before this field existed — no required-field regression', () => {
+    const text = [
+      '---',
+      'title: Legacy PRD',
+      'cwd: ~/Projects/session-manager',
+      'estimateMinutes: 5',
+      '---',
+      '# Goal',
+      '',
+      'Do the other thing.',
+      '',
+    ].join('\n')
+
+    const { frontmatter, body } = parsePrdFile(text)
+    expect(frontmatter.tag).toBeUndefined()
+    // round-trips byte-identical when nothing changed
+    expect(serializePrdFile(frontmatter, body)).toBe(text)
+  })
+
+  it('round-trips a file with tag byte-identically when unedited', () => {
+    const text = [
+      '---',
+      'title: Has a tag',
+      'cwd: ~/Projects/session-manager',
+      'estimateMinutes: 10',
+      'tag: feature',
+      '---',
+      '# Goal',
+      '',
+      'Do the thing.',
+      '',
+    ].join('\n')
+
+    const { frontmatter, body } = parsePrdFile(text)
+    expect(serializePrdFile(frontmatter, body)).toBe(text)
+  })
+
+  it('serializes a newly-set tag onto a frontmatter object that lacked one', () => {
+    const text = [
+      '---',
+      'title: Legacy PRD',
+      'cwd: ~/Projects/session-manager',
+      'estimateMinutes: 5',
+      '---',
+      'body',
+      '',
+    ].join('\n')
+
+    const { frontmatter, body } = parsePrdFile(text)
+    const updated = serializePrdFile({ ...frontmatter, tag: 'bug' }, body)
+    expect(updated).toContain('tag: bug')
+  })
+})

@@ -11,7 +11,7 @@ import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import { handleChatLinkClick, openLinkifiedFilePath } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
-import { mergeTicketsForDisplay, ticketDisplayStatus } from '../lib/ticketDisplay'
+import { mergeTicketsForDisplay, ticketDisplayStatus, ticketTagTone } from '../lib/ticketDisplay'
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
 import { PasteThumbnail } from './PasteThumbnail'
@@ -333,6 +333,19 @@ function openPrdSlug(slug: string): void {
   window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'scheduler' }))
 }
 
+// Small Feature/Bug chip for a ticket row — reuses ticketTagTone's
+// STATUS_TONE-shaped tone object (ticketDisplay.ts) rather than a new color system.
+function TagChip({ tag }: { tag: 'feature' | 'bug' }) {
+  const tone = ticketTagTone(tag)
+  return (
+    <span
+      className={`inline-block text-[10.5px] font-semibold px-[7px] py-0.5 rounded-full ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ''}`}
+    >
+      {tone.label}
+    </span>
+  )
+}
+
 // Side panel showing a tab's PromptTicket queue (PRD 750): the in-flight
 // ticket plus anything queued behind it, and — folded into the same list —
 // recently finished tickets (done/failed/dispatched-to-prd) so a ticket
@@ -406,6 +419,7 @@ export function QueueTicketPanel({
               tabIndex={isNeedsInput ? 0 : undefined}
             >
               <PrdStatusPill status={ticketDisplayStatus(t.status)} />
+              {t.tag && <span className="ml-1.5"><TagChip tag={t.tag} /></span>}
               <div className="mt-1.5 truncate text-xs text-fg-dim" title={t.text}>
                 {t.text}
               </div>
@@ -587,6 +601,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const resetThread = useChat((s) => s.resetThread)
   const pushNotice = useChat((s) => s.pushNotice)
   const [draft, setDraft] = useState('')
+  const [composerTag, setComposerTag] = useState<'feature' | 'bug'>('feature')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [pastedImage, setPastedImage] = useState<string | null>(null)
   const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null)
@@ -654,7 +669,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
           'use "Open raw session" if this command asks you something and nothing appears.',
       )
     }
-    send({ tabId, sessionId, cwd, prompt: draft })
+    send({ tabId, sessionId, cwd, prompt: draft, tag: composerTag })
     setDraft('')
     setPastedImage(null)
   }
@@ -871,6 +886,28 @@ export function TerminalChat({ tabId, cwd }: Props) {
             }
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
+          <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5" role="group" aria-label="Feature or bug tag">
+            <button
+              type="button"
+              onClick={() => setComposerTag('feature')}
+              aria-pressed={composerTag === 'feature'}
+              className={`rounded px-2 py-1.5 text-xs font-medium ${
+                composerTag === 'feature' ? 'bg-sage/25 text-sage' : 'text-fg-faint hover:text-fg-dim'
+              }`}
+            >
+              Feature
+            </button>
+            <button
+              type="button"
+              onClick={() => setComposerTag('bug')}
+              aria-pressed={composerTag === 'bug'}
+              className={`rounded px-2 py-1.5 text-xs font-medium ${
+                composerTag === 'bug' ? 'bg-accent/15 text-accent' : 'text-fg-faint hover:text-fg-dim'
+              }`}
+            >
+              Bug
+            </button>
+          </div>
           {running && (
             <button
               onClick={() => window.api.chat.cancel(tabId)}

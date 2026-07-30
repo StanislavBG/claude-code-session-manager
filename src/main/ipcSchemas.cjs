@@ -261,6 +261,9 @@ const schedulerCreatePrd = z.object({
   // prompt back into the chat tab that queued this PRD, via
   // enqueueExternalPrompt (PRD 753). Same newline-injection guard.
   sourceTabId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  // User-selected Feature/Bug tag (PRD 774) carried from the originating
+  // PromptTicket — deterministic, never LLM-classified.
+  tag: z.enum(['feature', 'bug']).optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.

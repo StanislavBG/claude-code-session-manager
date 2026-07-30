@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { NavKey } from './LeftNav'
-import { TerminalStage } from './TerminalStage'
-import { BroadcastBar } from './BroadcastBar'
 import { Home } from './tabs/Home'
 import { Skills } from './tabs/Skills'
 import { Subagents } from './tabs/Subagents'
@@ -24,34 +22,21 @@ import { Browser } from './tabs/Browser'
 import { Scheduler } from './tabs/Scheduler'
 import { WebRemote } from './tabs/WebRemote'
 import { SectionFrame } from './layout/SectionFrame'
-import { ErrorBoundary } from './ui/ErrorBoundary'
-import { useSessions } from '../state/sessions'
-import { WatchersPopover } from './WatchersPopover'
 import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 
 /**
- * MainPane — Almanac-era full-page router. Every Workspace and Configure
- * nav item renders as a full page here; only Tools and infrastructure-level
- * dialogs (Voice, Quick Open, etc.) remain as modals owned by App.tsx.
- *
- * Terminal still gets the special "always mounted, visibility-toggled"
- * treatment so the PTY-backed xterm doesn't churn on every nav switch.
- *
- * Promoted screens are wrapped in <SectionFrame> by default. A screen can
- * opt out (e.g. Terminal, Home) when it draws its own chrome.
+ * screenComponents — single source of truth for "what does NavKey `k` render
+ * as a full screen." Consumed by MainPane (today's single-visible-screen
+ * host) and by layout.ts's panel registry (id list only, via screenKeys.ts —
+ * that file stays React-free). Do not fork this switch; extend it here.
  */
 
-interface MainPaneProps {
-  active: NavKey
+export interface ScreenRenderCtx {
   onNavigate?: (k: NavKey) => void
   onNewSession?: () => void
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
   searchMode?: SearchMode
-  broadcastOpen: boolean
-  watchersOpen: boolean
-  onCloseBroadcast: () => void
-  onCloseWatchers: () => void
 }
 
 interface PageConfig {
@@ -85,13 +70,12 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
 
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
 
-function renderScreen(active: NavKey, ctx: {
-  onNavigate?: (k: NavKey) => void
-  onNewSession?: () => void
-  onOpenVoice?: () => void
-  onOpenScheduler?: () => void
-  searchMode?: SearchMode
-}): React.ReactNode {
+/**
+ * Renders the screen for NavKey `active`. `active === 'terminal'` is
+ * special-cased by callers (MainPane keeps TerminalStage as an
+ * always-mounted singleton) — this function is never called for 'terminal'.
+ */
+export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode {
   // Screens that draw their own chrome — render bare.
   switch (active) {
     case 'overview':
@@ -142,95 +126,4 @@ function renderScreen(active: NavKey, ctx: {
   return meta && eyebrow
     ? <SectionFrame eyebrow={eyebrow} title={meta.title} intro={meta.intro} learnKey={active}>{body}</SectionFrame>
     : body
-}
-
-export function MainPane({
-  active,
-  onNavigate,
-  onNewSession,
-  onOpenVoice,
-  onOpenScheduler,
-  searchMode,
-  broadcastOpen,
-  watchersOpen,
-  onCloseBroadcast,
-  onCloseWatchers,
-}: MainPaneProps) {
-  const tabs = useSessions((s) => s.tabs)
-  const activeTabId = useSessions((s) => s.activeTabId)
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
-
-  const [toast, setToast] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!toast) return
-    const t = window.setTimeout(() => setToast(null), 2500)
-    return () => window.clearTimeout(t)
-  }, [toast])
-
-  // Transient toast on every watcher line for the active tab. Keeps users
-  // aware of background activity without making them open the popover.
-  useEffect(() => {
-    if (!activeTab) return
-    const off = window.api.watchers.onLine((ev) => {
-      if (ev.tabId !== activeTab.id) return
-      const line = ev.line.replace(/\x1b\[[0-9;]*m/g, '')
-      if (!line.trim()) return
-      setToast(line.length > 100 ? `${line.slice(0, 100)}…` : line)
-    })
-    return off
-  }, [activeTab?.id])
-
-  return (
-    // `relative` so absolute-positioned children (WatchersPopover) anchor to
-    // MainPane rather than the viewport. TerminalControls now lives inside the
-    // inner terminal-viewport div so its gear can't overlap the TabBar's
-    // "v{__APP_VERSION__}" text.
-    <main className="relative flex-1 min-w-0 bg-bg flex flex-col">
-      {active === 'terminal' && broadcastOpen && (
-        <BroadcastBar
-          onClose={onCloseBroadcast}
-          onSent={(n) => {
-            onCloseBroadcast()
-            setToast(`Sent to ${n} tab${n === 1 ? '' : 's'}`)
-          }}
-        />
-      )}
-      {active === 'terminal' && activeTab && watchersOpen && (
-        <div className="absolute top-12 right-4 z-30">
-          <WatchersPopover
-            tabId={activeTab.id}
-            cwd={activeTab.cwd}
-            onClose={onCloseWatchers}
-          />
-        </div>
-      )}
-      <div className="flex-1 min-h-0 relative">
-        {/*
-         * Terminals stay mounted across nav switches — unmounting them drops
-         * the IPC listeners while the PTY keeps running in the main process,
-         * so a later remount tries to re-spawn the same tabId and fails with
-         * "session already exists." TerminalStage renders them in a
-         * persistent layer and toggles visibility only.
-         */}
-        <TerminalStage visible={active === 'terminal'} />
-        {active !== 'terminal' && (
-          <div className="absolute inset-0 bg-bg overflow-auto">
-            <ErrorBoundary>
-              {renderScreen(active, { onNavigate, onNewSession, onOpenVoice, onOpenScheduler, searchMode })}
-            </ErrorBoundary>
-          </div>
-        )}
-      </div>
-      {toast && (
-        <div
-          role="status"
-          className="pointer-events-none fixed bottom-10 right-4 z-40 bg-bg-elev border border-line text-fg text-xs px-3 py-1.5 rounded shadow-lg"
-          data-testid="broadcast-toast"
-        >
-          {toast}
-        </div>
-      )}
-    </main>
-  )
 }

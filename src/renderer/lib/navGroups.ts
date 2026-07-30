@@ -26,6 +26,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   // Workspace
   { key: 'overview',   group: 'Workspace', label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
   { key: 'terminal',   group: 'Workspace', label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
+  { key: 'system-prompt', group: 'Workspace', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior' },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences' },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
   { key: 'subagents',  group: 'Workspace', label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Fan out work: Hive · Orchestrate · Race · Boss' },
@@ -40,7 +41,6 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'hooks',          group: 'Configure', label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events' },
   { key: 'keybindings',    group: 'Configure', label: 'Keybindings',    icon: 'keys',           hint: 'Shortcuts you can override' },
   { key: 'memory',         group: 'Configure', label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store' },
-  { key: 'system-prompt',  group: 'Configure', label: 'System Prompt',  icon: 'system-prompt',  hint: 'Personality and behavior' },
   { key: 'permissions',    group: 'Configure', label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },
   { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window' },
   { key: 'remote',         group: 'Configure', label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default' },

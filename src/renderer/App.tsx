@@ -3,7 +3,8 @@ import { TabBar } from './components/TabBar'
 import { type NavKey } from './components/LeftNav'
 import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
-import { MainPane } from './components/MainPane'
+import { BroadcastBar } from './components/BroadcastBar'
+import { WatchersPopover } from './components/WatchersPopover'
 import { Workbench } from './components/workbench/Workbench'
 import { SplitAgentBrowser } from './components/SplitAgentBrowser'
 import { type SearchMode } from './components/modals/SearchModal'
@@ -21,6 +22,7 @@ import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
+import { useLayout } from './state/layout'
 import { useEditor } from './state/editor'
 import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
@@ -38,46 +40,17 @@ import { log } from './lib/logger'
 // double-effect; resets only on full reload.
 let unsupportedLogged = false
 
-// v0.13.1 — every nav item is a full page; no more App-level modal overlays.
-// SCREEN_KEYS lists what MainPane can render. (Cmd+P / Cmd+Shift+F still
-// trigger keyboard nav to the 'search' screen — in Files and Content mode
-// respectively — they just no longer mount as overlays.)
-const SCREEN_KEYS = new Set<NavKey>([
-  // Workspace
-  'overview',
-  'terminal',
-  'browser',
-  'subagents',
-  'scheduler',
-  'history',
-  'usage',
-  // Configure
-  'skills',
-  'plugins',
-  'mcp',
-  'hooks',
-  'keybindings',
-  'memory',
-  'projects',
-  'system-prompt',
-  'permissions',
-  'settings',
-  'remote',
-  // Tools (promoted from modal in v0.13.1)
-  'voice',
-  'repoviz',
-  'search',
-  // In-app file editor (Files sidebar / terminal links route here).
-  'editor',
-])
-
 export function App() {
   // Subscribe to the density singleton at the app root so its module loads and
   // applies the `density-compact` body class from persisted localStorage on
   // every boot. Without a caller the hook is dead code and the class is never
   // applied (the LeftNav-footer toggle that used to call it was dropped).
   useDensity()
-  const [activeNav, setActiveNav] = useState<NavKey>('overview')
+  // The layout store's registry covers every NavKey screen (screenKeys.ts);
+  // openPanel/focusPanel are the single routing path every nav entry point
+  // (sidebar, CommandPalette, keyboard shortcuts, forced-terminal toggles)
+  // goes through — see src/renderer/state/layout.ts.
+  const focusedPanelId = (useLayout((s) => s.focusedPanelId) ?? 'overview') as NavKey
   // `--simple` launch flag: null until resolved, then true → SimpleShell.
   const [simpleMode, setSimpleMode] = useState<boolean | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -85,13 +58,12 @@ export function App() {
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
   const [splitView, setSplitView] = useState(false)
+  const [terminalToast, setTerminalToast] = useState<string | null>(null)
 
-  // Every NavKey routes to MainPane. Used by CommandPalette nav:* entries,
-  // AlmanacSidebar, and the Cmd-P / Cmd-Shift-F keyboard shortcuts.
+  // Every NavKey routes through the layout store. Used by CommandPalette
+  // nav:* entries, AlmanacSidebar, and the Cmd-P / Cmd-Shift-F shortcuts.
   const navigate = useCallback((k: NavKey) => {
-    if (SCREEN_KEYS.has(k)) {
-      setActiveNav(k)
-    }
+    useLayout.getState().openPanel(k)
   }, [])
 
   // Open a file in the main-space Editor scene and route there. Used by the
@@ -115,6 +87,7 @@ export function App() {
   }, [navigate])
   const activeTabId = useSessions((s) => s.activeTabId)
   const tabs = useSessions((s) => s.tabs)
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
 
   // QoL: switching the active session tab lands you on THAT project's terminal —
   // each tab is primarily a terminal, so a tab switch is a project switch. Fires
@@ -137,8 +110,27 @@ export function App() {
     const isPureSwitch =
       prevActive !== null && activeTabId !== null && activeTabId !== prevActive &&
       curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
-    if (isPureSwitch) setActiveNav('terminal')
+    if (isPureSwitch) useLayout.getState().openPanel('terminal')
   }, [activeTabId, tabs])
+
+  // Terminal-screen toast: transient notice on watcher activity, or a
+  // "sent to N tabs" confirmation after a broadcast. Ported from MainPane.
+  useEffect(() => {
+    if (!terminalToast) return
+    const t = window.setTimeout(() => setTerminalToast(null), 2500)
+    return () => window.clearTimeout(t)
+  }, [terminalToast])
+
+  useEffect(() => {
+    if (!activeTab) return
+    const off = window.api.watchers.onLine((ev) => {
+      if (ev.tabId !== activeTab.id) return
+      const line = ev.line.replace(/\x1b\[[0-9;]*m/g, '')
+      if (!line.trim()) return
+      setTerminalToast(line.length > 100 ? `${line.slice(0, 100)}…` : line)
+    })
+    return off
+  }, [activeTab?.id])
 
   const isRecording = useVoice((s) => s.isRecording)
   const wizardOpen = useVoice((s) => s.wizardOpen)
@@ -158,14 +150,14 @@ export function App() {
   // MainPane and gated on active === 'terminal') is actually visible.
   const toggleBroadcast = useCallback(() => {
     setBroadcastOpen((prev) => {
-      if (!prev) setActiveNav('terminal')
+      if (!prev) useLayout.getState().openPanel('terminal')
       return !prev
     })
   }, [])
 
   const toggleWatchers = useCallback(() => {
     setWatchersOpen((prev) => {
-      if (!prev) setActiveNav('terminal')
+      if (!prev) useLayout.getState().openPanel('terminal')
       return !prev
     })
   }, [])
@@ -176,7 +168,7 @@ export function App() {
   const hotkeyModeRef = useRef<HotkeyMode>('hold')
 
   const handleNewSession = useCallback(() => {
-    setActiveNav('terminal')
+    useLayout.getState().openPanel('terminal')
     createPickedSession().catch((e) => {
       console.error('[App] new session failed:', e)
       toast.error('Could not start new session. Is the claude CLI on PATH?')
@@ -663,29 +655,61 @@ export function App() {
       <TabBar splitViewActive={splitView} onToggleSplitView={() => setSplitView(true)} />
       <div className="flex-1 flex min-h-0">
         <AlmanacSidebar
-          active={activeNav}
+          active={focusedPanelId}
           onNavigate={navigate}
           onNewSession={handleNewSession}
         />
-        <Workbench>
-          <MainPane
-            active={activeNav}
-            onNavigate={navigate}
-            onNewSession={handleNewSession}
-            onOpenVoice={() => navigate('voice')}
-            onOpenScheduler={() => navigate('scheduler')}
-            searchMode={searchMode}
-            broadcastOpen={broadcastOpen}
-            watchersOpen={watchersOpen}
-            onCloseBroadcast={() => setBroadcastOpen(false)}
-            onCloseWatchers={() => setWatchersOpen(false)}
-          />
-        </Workbench>
+        {/*
+         * BroadcastBar / WatchersPopover / the watcher-line toast are
+         * terminal-screen chrome, gated on the terminal panel being focused
+         * (was MainPane.tsx:190,199 — MainPane no longer exists; the switch
+         * that used to live there is now the per-screen panel registry in
+         * layout.ts, consumed via Workbench).
+         */}
+        <div className="relative flex-1 min-w-0 bg-bg flex flex-col">
+          {focusedPanelId === 'terminal' && broadcastOpen && (
+            <BroadcastBar
+              onClose={() => setBroadcastOpen(false)}
+              onSent={(n) => {
+                setBroadcastOpen(false)
+                setTerminalToast(`Sent to ${n} tab${n === 1 ? '' : 's'}`)
+              }}
+            />
+          )}
+          {focusedPanelId === 'terminal' && activeTab && watchersOpen && (
+            <div className="absolute top-12 right-4 z-30">
+              <WatchersPopover
+                tabId={activeTab.id}
+                cwd={activeTab.cwd}
+                onClose={() => setWatchersOpen(false)}
+              />
+            </div>
+          )}
+          <div className="flex-1 min-h-0 relative">
+            <Workbench
+              onNavigate={navigate}
+              onNewSession={handleNewSession}
+              onOpenVoice={() => navigate('voice')}
+              onOpenScheduler={() => navigate('scheduler')}
+              searchMode={searchMode}
+            />
+          </div>
+          {terminalToast && (
+            <div
+              role="status"
+              className="pointer-events-none fixed bottom-10 right-4 z-40 bg-bg-elev border border-line text-fg text-xs px-3 py-1.5 rounded shadow-lg"
+              data-testid="broadcast-toast"
+            >
+              {terminalToast}
+            </div>
+          )}
+        </div>
       </div>
       <AlmanacFooter onNavigate={navigate} />
 
-      {/* v0.13.1 — all former-modal tools render as full pages via MainPane.
-       *  No App-level modal mounts remain. */}
+      {/* v0.13.1 — all former-modal tools render as full pages via the
+       *  per-screen panel registry (layout.ts). No App-level modal mounts
+       *  remain. */}
 
       {/* F7 first-run mic check. Renders unconditionally (Modal returns null
           when closed). Open/close lifecycle is owned by the voice store. */}
@@ -714,7 +738,7 @@ export function App() {
             case 'new-tab-here': {
               if (!activeTab) return
               useSessions.getState().addTab({ cwd: activeTab.cwd, startupCommand: null, dormant: true })
-              setActiveNav('terminal')
+              useLayout.getState().openPanel('terminal')
               return
             }
             case 'close-tab':

@@ -1,9 +1,12 @@
 import { create } from 'zustand'
+import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 
 /**
  * Panel registry entry. `component` is a lookup key (not a component
  * reference) so the store stays serializable and free of React imports —
- * Workbench.tsx owns the id → component mapping for rendering.
+ * Workbench.tsx owns the id → component mapping for rendering. `screenKeys`
+ * is the same React-free module App.tsx and screenComponents.tsx build on,
+ * so this registry, the nav guard, and the render map can never drift apart.
  */
 export interface PanelDefinition {
   id: string
@@ -12,13 +15,16 @@ export interface PanelDefinition {
 }
 
 /**
- * Single-panel default: the whole app shell today is one dockview panel
- * hosting MainPane. Link 2 (screens-as-panels) grows this registry to one
- * entry per SCREEN_KEY.
+ * One entry per NavKey screen (link 2 of the Workbench chain). MainPane
+ * still hosts exactly one visible screen at a time — the registry existing
+ * per-screen is what lets openPanel/focusPanel address any screen by id;
+ * side-by-side/multi-panel rendering is link 3.
  */
-export const DEFAULT_LAYOUT: PanelDefinition[] = [
-  { id: 'main', title: 'Session Manager', component: 'main' },
-]
+export const DEFAULT_LAYOUT: PanelDefinition[] = SCREEN_KEYS.map((id) => ({
+  id,
+  title: SCREEN_TITLES[id],
+  component: 'screen',
+}))
 
 interface LayoutState {
   panels: PanelDefinition[]

@@ -67,7 +67,7 @@ const SECTION_LABELS: Record<CommandSection, string> = {
  *   test-fire-hook      — focus Hooks tab + open test-fire dialog
  *   add-allow-rule      — focus Permissions tab + open add-rule
  */
-function buildCommands(): Command[] {
+export function buildCommands(): Command[] {
   const cmds: Command[] = [
     // ── session ──
     { id: 'new-tab-pick', label: 'New tab — pick directory', section: 'session', emitOnly: true },

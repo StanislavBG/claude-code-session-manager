@@ -576,6 +576,213 @@ describe('chat.ts prompt queue', () => {
   })
 })
 
+describe('chat.ts isChainResolved() (PRD 775)', () => {
+  it('is unresolved when the ticket has no prdSlugs', async () => {
+    const { isChainResolved } = await import('../chat')
+    expect(isChainResolved({ prdSlugs: [] } as any, [])).toBe(false)
+    expect(isChainResolved({} as any, [])).toBe(false)
+  })
+
+  it('is unresolved when at least one slug lacks a completed job', async () => {
+    const { isChainResolved } = await import('../chat')
+    const ticket = { prdSlugs: ['a', 'b'] } as any
+    expect(isChainResolved(ticket, [{ slug: 'a', status: 'completed' }])).toBe(false)
+    expect(
+      isChainResolved(ticket, [
+        { slug: 'a', status: 'completed' },
+        { slug: 'b', status: 'running' },
+      ]),
+    ).toBe(false)
+  })
+
+  it('is resolved once every slug in prdSlugs has scheduler job status "completed"', async () => {
+    const { isChainResolved } = await import('../chat')
+    const ticket = { prdSlugs: ['a', 'b'] } as any
+    expect(
+      isChainResolved(ticket, [
+        { slug: 'a', status: 'completed' },
+        { slug: 'b', status: 'completed' },
+      ]),
+    ).toBe(true)
+  })
+})
+
+describe('chat.ts open-chain selection for the composer picker (PRD 775)', () => {
+  // Mirrors the filter TerminalChat.tsx applies to build its picker list:
+  // dispatched-to-prd ROOT tickets (no chainRootId) that are NOT resolved.
+  function openChains(history: any[], jobs: { slug: string; status: string }[]) {
+    return history.filter((t) => t.status === 'dispatched-to-prd' && !t.chainRootId && !isChainResolvedRef!(t, jobs))
+  }
+  let isChainResolvedRef: ((t: any, jobs: any[]) => boolean) | undefined
+
+  beforeEach(async () => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+    const { isChainResolved } = await import('../chat')
+    isChainResolvedRef = isChainResolved
+  })
+
+  it('yields no open chains (defaults to "New item") when ticketHistory has no dispatched-to-prd tickets', () => {
+    expect(openChains([{ id: 't1', status: 'done' }], [])).toEqual([])
+  })
+
+  it('offers one open item for a single unresolved dispatched-to-prd root ticket', () => {
+    const root = { id: 'root-1', status: 'dispatched-to-prd', prdSlugs: ['1-a'] }
+    expect(openChains([root], [{ slug: '1-a', status: 'running' }])).toEqual([root])
+  })
+
+  it('stops offering a chain once every one of its prdSlugs has scheduler job status "completed"', () => {
+    const root = { id: 'root-1', status: 'dispatched-to-prd', prdSlugs: ['1-a'] }
+    expect(openChains([root], [{ slug: '1-a', status: 'completed' }])).toEqual([])
+  })
+
+  it('excludes a follow-up ticket itself (chainRootId set) even if dispatched-to-prd', () => {
+    const followUp = { id: 'follow-1', status: 'dispatched-to-prd', chainRootId: 'root-1' }
+    expect(openChains([followUp], [])).toEqual([])
+  })
+})
+
+describe('chat.ts chain continuation (PRD 775)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('continuing an open chain: sourcePromptId is the ROOT ticket id, and the new slug is appended to the ROOT ticket\'s prdSlugs (not the follow-up ticket\'s)', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 10, filename: '10-second-prd.md' }),
+    })
+    const { useChat } = await import('../chat')
+
+    // Seed ticketHistory with an already-dispatched, unresolved root chain.
+    useChat.setState({
+      chats: {
+        t1: {
+          turns: [],
+          running: false,
+          queuedPosition: 0,
+          started: true,
+          stream: '',
+          liveToolUses: [],
+          queue: [],
+          activeTicket: null,
+          ticketHistory: [
+            {
+              id: 'root-1',
+              tabId: 't1',
+              sessionId: 's1',
+              cwd: '/proj',
+              text: 'first initiative',
+              status: 'dispatched-to-prd',
+              createdAt: 1,
+              completedAt: 2,
+              prdSlugs: ['9-first-prd'],
+            },
+          ],
+        },
+      },
+    })
+
+    // Kick off a running turn so the follow-up prompt queues (only queued
+    // tickets go through classification/dispatch-to-prd).
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off running' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({
+      tabId: 't1',
+      sessionId: 's1',
+      cwd: '/proj',
+      prompt: 'continue the initiative',
+      chainRootId: 'root-1',
+    })
+    const queuedTicket = useChat.getState().get('t1').queue[0]
+    expect(queuedTicket.chainRootId).toBe('root-1')
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with kickoff' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'continue the initiative' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+    expect(createPrd).toHaveBeenCalledWith(expect.objectContaining({ sourcePromptId: 'root-1' }))
+
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      const root = after.ticketHistory?.find((t) => t.id === 'root-1')
+      expect(root?.prdSlugs).toEqual(['9-first-prd', '10-second-prd'])
+    })
+
+    const after = useChat.getState().get('t1')
+    const followUp = after.ticketHistory?.find((t) => t.text === 'continue the initiative')
+    expect(followUp?.status).toBe('dispatched-to-prd')
+    expect(followUp?.prdSlugs).toBeUndefined()
+  })
+
+  it('choosing "New item" (no chainRootId) creates an independent ticket using its own id as sourcePromptId, even while a chain is open', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 11, filename: '11-independent-prd.md' }),
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.setState({
+      chats: {
+        t1: {
+          turns: [],
+          running: false,
+          queuedPosition: 0,
+          started: true,
+          stream: '',
+          liveToolUses: [],
+          queue: [],
+          activeTicket: null,
+          ticketHistory: [
+            {
+              id: 'root-1',
+              tabId: 't1',
+              sessionId: 's1',
+              cwd: '/proj',
+              text: 'first initiative',
+              status: 'dispatched-to-prd',
+              createdAt: 1,
+              completedAt: 2,
+              prdSlugs: ['9-first-prd'],
+            },
+          ],
+        },
+      },
+    })
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off running' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    // Explicit "New item" — no chainRootId passed, even though root-1 is open.
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'a totally new thing' })
+    const queuedTicket = useChat.getState().get('t1').queue[0]
+    expect(queuedTicket.chainRootId).toBeUndefined()
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with kickoff' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'a totally new thing' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+
+    const newTicketId = queuedTicket.id
+    expect(createPrd).toHaveBeenCalledWith(expect.objectContaining({ sourcePromptId: newTicketId }))
+
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      const dispatched = after.ticketHistory?.find((t) => t.text === 'a totally new thing')
+      expect(dispatched?.prdSlugs).toEqual(['11-independent-prd'])
+    })
+
+    // The root chain's own prdSlugs are untouched by the independent ticket.
+    const after = useChat.getState().get('t1')
+    const root = after.ticketHistory?.find((t) => t.id === 'root-1')
+    expect(root?.prdSlugs).toEqual(['9-first-prd'])
+  })
+})
+
 describe('chat.ts dispatchSend() activeTicket (immediate send)', () => {
   beforeEach(() => {
     vi.resetModules()

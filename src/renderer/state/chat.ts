@@ -61,6 +61,37 @@ export interface PromptTicket {
   /** User-selected composer tag (PRD 774) — deterministic, never LLM-classified.
    *  Threaded into the PRD's frontmatter when this ticket dispatches to /develop. */
   tag?: 'feature' | 'bug'
+  /**
+   * Set when the user explicitly chose "Continue: <open item>" in the
+   * composer's chain picker (PRD 775) instead of "New item". Holds the id of
+   * the ROOT ticket whose chain this prompt continues — distinct from this
+   * ticket's own `id`. When this ticket is later classified 'develop' and
+   * dispatched, the PRD payload's sourcePromptId is `chainRootId` (not
+   * `id`), and the resulting PRD slug is appended to the ROOT ticket's
+   * prdSlugs, not this ticket's. Never set for a "New item" choice.
+   */
+  chainRootId?: string
+}
+
+/** Minimal job-status shape a chain-resolution check needs — kept structural
+ *  (not importing ScheduleJob from preload/api) so chat.ts stays free of a
+ *  cross-store dependency; callers pass scheduleState's jobs array directly. */
+export interface ChainJobStatus {
+  slug: string
+  status: string
+}
+
+/**
+ * A dispatched-to-prd ticket's chain counts as resolved once every slug in
+ * its prdSlugs has scheduler job status 'completed' — read from the
+ * scheduler's own job list (scheduleState.ts), never a second polling
+ * mechanism. A chain with no PRD slugs yet is not resolved (nothing to
+ * offer as "done" — and it wouldn't be a chain to continue either).
+ */
+export function isChainResolved(ticket: PromptTicket, jobs: ChainJobStatus[]): boolean {
+  const slugs = ticket.prdSlugs ?? []
+  if (slugs.length === 0) return false
+  return slugs.every((slug) => jobs.find((j) => j.slug === slug)?.status === 'completed')
 }
 
 interface TabChat {
@@ -104,7 +135,15 @@ interface ChatState {
   /** Read (or lazily create) the chat slice for a tab. */
   get: (tabId: string) => TabChat
   /** Submit a user command for a tab. sessionId is the tab's sessionId. */
-  send: (args: { tabId: string; sessionId: string; cwd: string; prompt: string; tag?: 'feature' | 'bug' }) => void
+  send: (args: {
+    tabId: string
+    sessionId: string
+    cwd: string
+    prompt: string
+    tag?: 'feature' | 'bug'
+    /** Set when the composer's chain picker (PRD 775) chose "Continue: <open item>". */
+    chainRootId?: string
+  }) => void
   /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newSession). */
   resetThread: (tabId: string) => void
   /**
@@ -200,7 +239,7 @@ export const useChat = create<ChatState>((set, get) => ({
       window.api?.logs?.write('chat', 'warn', `exchange hydration failed for tab ${tabId}: ${msg}`)
     }
   },
-  send: ({ tabId, sessionId, cwd, prompt, tag }) => {
+  send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId }) => {
     const trimmed = prompt.trim()
     if (!trimmed) return
     const cur = get().chats[tabId] ?? EMPTY
@@ -217,6 +256,7 @@ export const useChat = create<ChatState>((set, get) => ({
         status: 'queued',
         createdAt: Date.now(),
         tag,
+        chainRootId,
       }
       set({
         chats: {
@@ -232,7 +272,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // dispatching so the queue panel/composer stop treating the tab as
     // stalled once the reply is in flight.
     clearNeedsInput(tabId)
-    dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag })
+    dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag, chainRootId })
   },
   resetThread: (tabId) => {
     set({
@@ -315,8 +355,16 @@ function clearNeedsInput(tabId: string): void {
  * as activeTicket before calling here (chat.ts:298+), so `cur.activeTicket`
  * is reused when present; a fresh send() has none yet, so one is minted here.
  */
-function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; text: string; promptId?: string; tag?: 'feature' | 'bug' }): void {
-  const { tabId, sessionId, cwd, text, promptId, tag } = args
+function dispatchSend(args: {
+  tabId: string
+  sessionId: string
+  cwd: string
+  text: string
+  promptId?: string
+  tag?: 'feature' | 'bug'
+  chainRootId?: string
+}): void {
+  const { tabId, sessionId, cwd, text, promptId, tag, chainRootId } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
   const activeTicket: PromptTicket = cur.activeTicket ?? {
@@ -329,6 +377,7 @@ function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; tex
     createdAt: Date.now(),
     startedAt: Date.now(),
     tag,
+    chainRootId,
   }
   useChat.setState({
     chats: {
@@ -380,7 +429,15 @@ function dequeueNext(tabId: string): void {
     }
     const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
     patch(tabId, (c) => ({ ...c, activeTicket: running }))
-    dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id, tag: running.tag })
+    dispatchSend({
+      tabId: running.tabId,
+      sessionId: running.sessionId,
+      cwd: running.cwd,
+      text: running.text,
+      promptId: running.id,
+      tag: running.tag,
+      chainRootId: running.chainRootId,
+    })
   })
 }
 
@@ -416,7 +473,9 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
         'timeout 300 npm run typecheck passes',
       ],
       implementationNotes: `Target project: ${ticket.cwd}`,
-      sourcePromptId: ticket.id,
+      // A continuation reuses the ROOT ticket's id as sourcePromptId, not
+      // this follow-up ticket's own id (PRD 775).
+      sourcePromptId: ticket.chainRootId ?? ticket.id,
       sourceTabId: ticket.tabId,
       tag: ticket.tag,
     })
@@ -427,15 +486,33 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
       }
       const filename = result.filename
       const slug = filename.endsWith('.md') ? filename.slice(0, -3) : filename
-      const dispatched: PromptTicket = { ...ticket, status: 'dispatched-to-prd', completedAt: Date.now(), prdSlugs: [slug] }
+      // A continuation does NOT carry prdSlugs on its own history entry — the
+      // slug is appended to the ROOT ticket's prdSlugs below instead, so the
+      // chip UI (which iterates a ticket's prdSlugs) shows the whole chain
+      // under the single root entry rather than splitting it across tickets.
+      const dispatched: PromptTicket = {
+        ...ticket,
+        status: 'dispatched-to-prd',
+        completedAt: Date.now(),
+        ...(ticket.chainRootId ? {} : { prdSlugs: [slug] }),
+      }
       applyNotice(tabId, dispatched.sessionId, `→ dispatched to PRD ${filename} (ticket ${dispatched.id})`)
-      patch(tabId, (c) => ({
-        ...c,
-        running: false,
-        queuedPosition: 0,
-        activeTicket: null,
-        ticketHistory: appendTicketHistory(c.ticketHistory ?? [], dispatched),
-      }))
+      patch(tabId, (c) => {
+        let history = appendTicketHistory(c.ticketHistory ?? [], dispatched)
+        if (ticket.chainRootId) {
+          const rootId = ticket.chainRootId
+          history = history.map((t) =>
+            t.id === rootId ? { ...t, prdSlugs: [...(t.prdSlugs ?? []), slug] } : t,
+          )
+        }
+        return {
+          ...c,
+          running: false,
+          queuedPosition: 0,
+          activeTicket: null,
+          ticketHistory: history,
+        }
+      })
       dequeueNext(tabId)
     })
     .catch((err: unknown) => {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
 import { useSessions } from '../state/sessions'
-import { useChat, type ChatTurn, type PromptTicket, type ToolUseTrace } from '../state/chat'
+import { useChat, isChainResolved, type ChatTurn, type PromptTicket, type ToolUseTrace } from '../state/chat'
+import { useScheduleState } from '../state/scheduleState'
 import { RAW_MODELS, type RawModel } from '../lib/rawSessionModel'
 import { LearningPanel } from './LearningPanel'
 import { extractUrls } from '../lib/extractUrls'
@@ -602,6 +603,8 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const pushNotice = useChat((s) => s.pushNotice)
   const [draft, setDraft] = useState('')
   const [composerTag, setComposerTag] = useState<'feature' | 'bug'>('feature')
+  // 'new' or the id of an open chain's ROOT ticket to continue (PRD 775).
+  const [chainChoice, setChainChoice] = useState<string>('new')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [pastedImage, setPastedImage] = useState<string | null>(null)
   const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null)
@@ -622,6 +625,23 @@ export function TerminalChat({ tabId, cwd }: Props) {
     chat?.queue ?? [],
   )
   const needsInputTicket = displayTickets.find((t) => t.status === 'needs-input') ?? null
+
+  // Open, unresolved dispatched-to-prd chains for this tab (PRD 775) — only
+  // ROOT tickets (chainRootId unset) are offered as continuation targets;
+  // a follow-up ticket's own chain always resolves back to its root. Read
+  // job status from scheduleState.ts (the existing store), never a second
+  // polling mechanism.
+  const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs ?? [])
+  const openChains = (chat?.ticketHistory ?? []).filter(
+    (t) => t.status === 'dispatched-to-prd' && !t.chainRootId && !isChainResolved(t, scheduleJobs),
+  )
+  const openChainsFingerprint = openChains.map((t) => t.id).join(',')
+  useEffect(() => {
+    if (chainChoice !== 'new' && !openChains.some((t) => t.id === chainChoice)) {
+      setChainChoice('new')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openChainsFingerprint, chainChoice])
 
   // Clicking a needs-input ticket in the panel scrolls to + briefly highlights
   // its question turn, and focuses the composer so the reply is obvious.
@@ -669,9 +689,11 @@ export function TerminalChat({ tabId, cwd }: Props) {
           'use "Open raw session" if this command asks you something and nothing appears.',
       )
     }
-    send({ tabId, sessionId, cwd, prompt: draft, tag: composerTag })
+    const chainRootId = chainChoice !== 'new' ? chainChoice : undefined
+    send({ tabId, sessionId, cwd, prompt: draft, tag: composerTag, chainRootId })
     setDraft('')
     setPastedImage(null)
+    setChainChoice('new')
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -868,6 +890,35 @@ export function TerminalChat({ tabId, cwd }: Props) {
       <div className="border-t border-rule p-3">
         {pastedImage && (
           <PasteThumbnail key={pastedImage} path={pastedImage} onDismiss={() => setPastedImage(null)} />
+        )}
+        {openChains.length > 0 && (
+          <div
+            className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-dim"
+            role="radiogroup"
+            aria-label="New item or continue an existing PRD chain"
+            data-testid="chain-picker"
+          >
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="chain-choice"
+                checked={chainChoice === 'new'}
+                onChange={() => setChainChoice('new')}
+              />
+              New item
+            </label>
+            {openChains.map((t) => (
+              <label key={t.id} className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="chain-choice"
+                  checked={chainChoice === t.id}
+                  onChange={() => setChainChoice(t.id)}
+                />
+                Continue: {t.text.length > 40 ? `${t.text.slice(0, 40)}…` : t.text}
+              </label>
+            ))}
+          </div>
         )}
         <div className="flex items-end gap-2">
           <textarea

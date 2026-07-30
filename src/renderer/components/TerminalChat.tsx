@@ -15,6 +15,7 @@ import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { mergeTicketsForDisplay, ticketDisplayStatus, ticketTagTone } from '../lib/ticketDisplay'
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
+import { TicketDetailView } from './TicketDetailView'
 import { PasteThumbnail } from './PasteThumbnail'
 import { EmptyState } from './ui/EmptyState'
 import type { NavKey } from './LeftNav'
@@ -329,14 +330,14 @@ function ChatSessionRail({
 // 'sm:navigate' already switches tabs (also used by the slash-nav shortcut
 // below); the slug itself goes through prdDeepLink.ts (not a second bare
 // CustomEvent) since SchedulerPrdsView may not be mounted yet to receive it.
-function openPrdSlug(slug: string): void {
+export function openPrdSlug(slug: string): void {
   setPendingPrdSlug(slug)
   window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'scheduler' }))
 }
 
 // Small Feature/Bug chip for a ticket row — reuses ticketTagTone's
 // STATUS_TONE-shaped tone object (ticketDisplay.ts) rather than a new color system.
-function TagChip({ tag }: { tag: 'feature' | 'bug' }) {
+export function TagChip({ tag }: { tag: 'feature' | 'bug' }) {
   const tone = ticketTagTone(tag)
   return (
     <span
@@ -354,10 +355,13 @@ function TagChip({ tag }: { tag: 'feature' | 'bug' }) {
 export function QueueTicketPanel({
   tickets,
   onSelectNeedsInput,
+  onSelectTicket,
 }: {
   tickets: PromptTicket[]
   /** Fired when a 'needs-input' ticket is clicked — scrolls/highlights its question turn and focuses the composer. */
   onSelectNeedsInput?: (ticket: PromptTicket) => void
+  /** Fired when any other ticket row is clicked — opens the Detailed view (PRD 777). */
+  onSelectTicket?: (ticket: PromptTicket) => void
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Unlike the main transcript panel's unconditional auto-scroll (line ~562),
@@ -406,18 +410,21 @@ export function QueueTicketPanel({
         <ul className="space-y-2">
           {tickets.map((t) => {
             const isNeedsInput = t.status === 'needs-input'
+            const clickable = isNeedsInput || !!onSelectTicket
             return (
             <li
               key={t.id}
               className={`rounded-lg border px-2.5 py-2 ${
                 isNeedsInput
                   ? 'cursor-pointer border-[#8e641a]/40 bg-[#8e641a]/10 hover:bg-[#8e641a]/20'
-                  : 'border-line bg-elev'
+                  : clickable
+                    ? 'cursor-pointer border-line bg-elev hover:bg-hi'
+                    : 'border-line bg-elev'
               }`}
               data-testid="chat-queue-ticket"
-              onClick={isNeedsInput ? () => onSelectNeedsInput?.(t) : undefined}
-              role={isNeedsInput ? 'button' : undefined}
-              tabIndex={isNeedsInput ? 0 : undefined}
+              onClick={clickable ? () => (isNeedsInput ? onSelectNeedsInput?.(t) : onSelectTicket?.(t)) : undefined}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
             >
               <PrdStatusPill status={ticketDisplayStatus(t.status)} />
               {t.tag && <span className="ml-1.5"><TagChip tag={t.tag} /></span>}
@@ -608,6 +615,10 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [pastedImage, setPastedImage] = useState<string | null>(null)
   const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null)
+  // id of the ticket whose Detailed view (PRD 777) is open, or null for the
+  // flat list. The list panel stays mounted (hidden via CSS, not unmounted)
+  // while a detail view is open so its scroll position survives the round trip.
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   // Which pane is visible at ≤RAIL_BREAKPOINT, where only one of the two fits
   // (PRD 776). Defaults to 'queue' — the Prompt Queue is now the primary
   // working surface, inverting the old narrow-viewport default of the
@@ -859,7 +870,26 @@ export function TerminalChat({ tabId, cwd }: Props) {
                 </button>
               </div>
             )}
-            <QueueTicketPanel tickets={displayTickets} onSelectNeedsInput={scrollToQuestion} />
+            <div className={selectedTicketId ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
+              <QueueTicketPanel
+                tickets={displayTickets}
+                onSelectNeedsInput={scrollToQuestion}
+                onSelectTicket={(t) => setSelectedTicketId(t.id)}
+              />
+            </div>
+            {selectedTicketId &&
+              (() => {
+                const selectedTicket = displayTickets.find((t) => t.id === selectedTicketId)
+                if (!selectedTicket) return null
+                return (
+                  <TicketDetailView
+                    ticket={selectedTicket}
+                    allTickets={displayTickets}
+                    jobs={scheduleJobs}
+                    onClose={() => setSelectedTicketId(null)}
+                  />
+                )
+              })()}
           </div>
         )}
         {transcriptVisible && (

@@ -10,13 +10,11 @@
  * Throws on IPC / spawn failures — callers should toast.
  */
 import { useSessions } from '../state/sessions'
-import { shellQuote } from './presets'
 
 export async function createPickedSession(): Promise<string | null> {
   const cwd = await window.api.app.pickDirectory()
   if (!cwd) return null
   const id = crypto.randomUUID()
-  const startupCommand = `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`
-  useSessions.getState().addTab({ id, cwd, startupCommand, presetId: 'pick-dangerous' })
+  useSessions.getState().addTab({ id, cwd, startupCommand: null, presetId: 'pick-dangerous', dormant: true })
   return id
 }

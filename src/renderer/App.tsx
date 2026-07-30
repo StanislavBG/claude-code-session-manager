@@ -25,7 +25,7 @@ import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startTeamsPolling } from './state/teams'
 import { startSchedulePolling } from './state/scheduleState'
-import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd, shellQuote } from './lib/presets'
+import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
 import { createPickedSession } from './lib/createPickedSession'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
@@ -710,9 +710,7 @@ export function App() {
               return
             case 'new-tab-here': {
               if (!activeTab) return
-              const id = crypto.randomUUID()
-              const startupCommand = `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`
-              useSessions.getState().addTab({ cwd: activeTab.cwd, startupCommand })
+              useSessions.getState().addTab({ cwd: activeTab.cwd, startupCommand: null, dormant: true })
               setActiveNav('terminal')
               return
             }

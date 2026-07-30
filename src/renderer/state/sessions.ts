@@ -39,6 +39,8 @@ interface SessionsState {
     startupCommand: string | null
     presetId?: string | null
     label?: string
+    /** Create the tab dormant (Chat view, no PTY spawn) instead of spawning. */
+    dormant?: boolean
   }) => string
   setTabRunning: (id: string, pid: number) => void
   setTabExited: (id: string, exitCode: number) => void
@@ -114,7 +116,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     })
     return cmd
   },
-  addTab: ({ id: providedId, cwd, startupCommand, presetId = null, label }) => {
+  addTab: ({ id: providedId, cwd, startupCommand, presetId = null, label, dormant = false }) => {
     const id = providedId ?? crypto.randomUUID()
     // Guard against double-add: callers occasionally retry (HMR remounts, race
     // between auto-spawn + user click). Returning the existing id keeps the
@@ -130,9 +132,9 @@ export const useSessions = create<SessionsState>((set, get) => ({
       label: label ?? labelFromCwd(cwd),
       cwd,
       pid: null,
-      status: 'spawning',
+      status: dormant ? 'dormant' : 'spawning',
       exitCode: null,
-      startupCommand,
+      startupCommand: dormant ? null : startupCommand,
       presetId,
       generation: 0,
     }

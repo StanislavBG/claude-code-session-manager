@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { enrichProject, type ProjectDetails } from './projectEnrichment'
-import { shellQuote } from './presets'
 import { useHomeDir } from './useHomeDir'
 import type { DirEntry } from '../../preload/api'
 
@@ -132,8 +131,9 @@ export function useKnownProjects() {
     addTab({
       id,
       cwd,
-      startupCommand: `claude --dangerously-skip-permissions --session-id ${shellQuote(id)}`,
+      startupCommand: null,
       presetId: 'projects-tab',
+      dormant: true,
     })
   }
 

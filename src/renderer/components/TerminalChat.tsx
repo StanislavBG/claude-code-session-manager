@@ -608,11 +608,18 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [pastedImage, setPastedImage] = useState<string | null>(null)
   const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null)
+  // Which pane is visible at ≤RAIL_BREAKPOINT, where only one of the two fits
+  // (PRD 776). Defaults to 'queue' — the Prompt Queue is now the primary
+  // working surface, inverting the old narrow-viewport default of the
+  // transcript. Irrelevant above the breakpoint, where both panes show at once.
+  const [narrowPane, setNarrowPane] = useState<'queue' | 'transcript'>('queue')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const modelMenuRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const viewportWidth = useViewportWidth()
   const showRail = viewportWidth > RAIL_BREAKPOINT
+  const queueVisible = showRail || narrowPane === 'queue'
+  const transcriptVisible = showRail || narrowPane === 'transcript'
 
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
@@ -644,18 +651,29 @@ export function TerminalChat({ tabId, cwd }: Props) {
   }, [openChainsFingerprint, chainChoice])
 
   // Clicking a needs-input ticket in the panel scrolls to + briefly highlights
-  // its question turn, and focuses the composer so the reply is obvious.
+  // its question turn, and focuses the composer so the reply is obvious. At
+  // narrow viewport the transcript pane may not be mounted (Prompt Queue is
+  // primary there) — flip to it first and defer the scroll/highlight to the
+  // next frame so the target turn exists in the DOM.
   const scrollToQuestion = (ticket: PromptTicket) => {
     const turnId = ticket.questionTurnId
-    if (turnId) {
-      const el = document.getElementById(`chat-turn-${turnId}`)
-      el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
-      setHighlightedTurnId(turnId)
-      window.setTimeout(() => {
-        setHighlightedTurnId((cur) => (cur === turnId ? null : cur))
-      }, 1500)
+    const focusAndScroll = () => {
+      if (turnId) {
+        const el = document.getElementById(`chat-turn-${turnId}`)
+        el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+        setHighlightedTurnId(turnId)
+        window.setTimeout(() => {
+          setHighlightedTurnId((cur) => (cur === turnId ? null : cur))
+        }, 1500)
+      }
+      textareaRef.current?.focus()
     }
-    textareaRef.current?.focus()
+    if (!showRail) {
+      setNarrowPane('transcript')
+      requestAnimationFrame(focusAndScroll)
+    } else {
+      focusAndScroll()
+    }
   }
 
   // One-shot history rehydration from the durable exchanges store.
@@ -664,10 +682,12 @@ export function TerminalChat({ tabId, cwd }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId])
 
-  // Auto-scroll to the newest turn / streamed output.
+  // Auto-scroll to the newest turn / streamed output. Re-runs when the
+  // transcript pane becomes visible (narrow-viewport toggle) so switching
+  // into it lands at the bottom instead of wherever the browser defaulted.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [turns.length, stream, running])
+  }, [turns.length, stream, running, transcriptVisible])
 
   const submit = () => {
     // Sending while `running` is allowed — send() (chat.ts:189-209) routes it
@@ -826,65 +846,106 @@ export function TerminalChat({ tabId, cwd }: Props) {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div ref={scrollRef} className="min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-          {turns.length === 0 && !running && (
-            <div className="flex h-full items-center justify-center text-sm text-fg-faint select-none">
-              Type a command to start a session. It runs, reports back, and asks if it needs you.
-            </div>
-          )}
-          {turns.map((t, i) => (
+        {queueVisible && (
+          <div className="flex min-w-0 flex-1 flex-col">
+            {!showRail && (
+              <div className="flex items-center justify-end border-b border-rule px-3 py-1.5">
+                <button
+                  onClick={() => setNarrowPane('transcript')}
+                  data-testid="show-transcript-btn"
+                  className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
+                >
+                  View transcript →
+                </button>
+              </div>
+            )}
+            <QueueTicketPanel tickets={displayTickets} onSelectNeedsInput={scrollToQuestion} />
+          </div>
+        )}
+        {transcriptVisible && (
+          <div
+            className={
+              showRail
+                ? 'flex h-full w-[280px] shrink-0 flex-col border-l border-rule'
+                : 'flex min-w-0 flex-1 flex-col'
+            }
+          >
+            {!showRail && (
+              <div className="flex items-center justify-start border-b border-rule px-3 py-1.5">
+                <button
+                  onClick={() => setNarrowPane('queue')}
+                  data-testid="show-queue-btn"
+                  className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
+                >
+                  ← Back to queue
+                </button>
+              </div>
+            )}
+            {showRail && (
+              <ChatSessionRail
+                cwd={cwd}
+                label={tab?.label ?? cwd}
+                running={running}
+                queuedPosition={queuedPosition}
+                stream={stream}
+                liveToolUses={liveToolUses}
+              />
+            )}
             <div
-              key={t.id}
-              id={`chat-turn-${t.id}`}
+              ref={scrollRef}
               className={
-                highlightedTurnId === t.id
-                  ? 'rounded-[14px] ring-2 ring-accent/60 transition-shadow'
-                  : 'rounded-[14px]'
+                showRail
+                  ? 'min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4'
+                  : 'min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-4'
               }
             >
-              <Turn
-                turn={t}
-                cwd={cwd}
-                tabId={tabId}
-                runActive={running && t.role === 'assistant' && i === turns.length - 1}
-                consentActionDisabled={running}
-              />
+              {turns.length === 0 && !running && (
+                <div className="flex h-full items-center justify-center text-sm text-fg-faint select-none">
+                  Type a command to start a session. It runs, reports back, and asks if it needs you.
+                </div>
+              )}
+              {turns.map((t, i) => (
+                <div
+                  key={t.id}
+                  id={`chat-turn-${t.id}`}
+                  className={
+                    highlightedTurnId === t.id
+                      ? 'rounded-[14px] ring-2 ring-accent/60 transition-shadow'
+                      : 'rounded-[14px]'
+                  }
+                >
+                  <Turn
+                    turn={t}
+                    cwd={cwd}
+                    tabId={tabId}
+                    runActive={running && t.role === 'assistant' && i === turns.length - 1}
+                    consentActionDisabled={running}
+                  />
+                </div>
+              ))}
+              {running && (
+                <div className="max-w-[90%]">
+                  <ToolUseTraceStrip items={liveToolUses} running={running && !stream} />
+                  <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
+                    {queuedPosition > 0 ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-butter" />
+                        queued · #{queuedPosition} — waiting for a free run slot
+                      </span>
+                    ) : stream ? (
+                      <span className="whitespace-pre-wrap">{stream}</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                        running…
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
-          {running && (
-            <div className="max-w-[90%]">
-              <ToolUseTraceStrip items={liveToolUses} running={running && !stream} />
-              <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
-                {queuedPosition > 0 ? (
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-butter" />
-                    queued · #{queuedPosition} — waiting for a free run slot
-                  </span>
-                ) : stream ? (
-                  <span className="whitespace-pre-wrap">{stream}</span>
-                ) : (
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                    running…
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex h-full w-[280px] shrink-0 flex-col border-l border-rule">
-          {showRail && (
-            <ChatSessionRail
-              cwd={cwd}
-              label={tab?.label ?? cwd}
-              running={running}
-              queuedPosition={queuedPosition}
-              stream={stream}
-              liveToolUses={liveToolUses}
-            />
-          )}
-          <QueueTicketPanel tickets={displayTickets} onSelectNeedsInput={scrollToQuestion} />
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="border-t border-rule p-3">

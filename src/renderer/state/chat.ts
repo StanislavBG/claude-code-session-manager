@@ -145,6 +145,18 @@ function turnId(): string {
   return `t${Date.now().toString(36)}-${seq}`
 }
 
+const PRD_TITLE_MAX_LEN = 60
+
+/** First ~60 chars of a ticket's text, trimmed at a word boundary — a mechanical
+ *  title for the draft PRD, not real authoring (see dequeueNext's 'develop' branch). */
+function deriveTitleFromTicketText(text: string): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= PRD_TITLE_MAX_LEN) return trimmed
+  const cut = trimmed.slice(0, PRD_TITLE_MAX_LEN)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
 export const useChat = create<ChatState>((set, get) => ({
   chats: {},
   hydratedTabs: {},
@@ -340,12 +352,8 @@ function dispatchSend(args: { tabId: string; sessionId: string; cwd: string; tex
  * Dequeue the oldest queued ticket (if any), FIFO. Runs classification
  * immediately as the ticket reaches the front of the queue — an in-session
  * judgment call, not a scheduled hop (see promptClassifier.ts) — then either
- * dispatches it inline through chatRunner or transitions it to
- * 'dispatched-to-prd' and moves on to the next queued ticket.
- *
- * TODO(PRD 749 follow-up): actually invoking /develop's PRD-authoring flow
- * from here needs renderer-side orchestration beyond this store (out of
- * scope for this PRD) — this is the hook point for that call once it exists.
+ * dispatches it inline through chatRunner or authors a mechanical draft PRD
+ * from the ticket text and moves on to the next queued ticket.
  */
 function dequeueNext(tabId: string): void {
   const cur = useChat.getState().chats[tabId] ?? EMPTY
@@ -362,8 +370,59 @@ function dequeueNext(tabId: string): void {
 
   classifyPromptTicket(next.text).then((verdict) => {
     if (verdict === 'develop') {
-      const dispatched: PromptTicket = { ...next, status: 'dispatched-to-prd', completedAt: Date.now() }
-      applyNotice(tabId, dispatched.sessionId, `→ dispatched to /develop for PRD decomposition (ticket ${dispatched.id})`)
+      dispatchToPrd(tabId, next)
+      return
+    }
+    const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
+    patch(tabId, (c) => ({ ...c, activeTicket: running }))
+    dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id })
+  })
+}
+
+/**
+ * Authors a mechanical, templated draft PRD from a ticket's raw text (not a
+ * real decomposition — the user reviews/edits the draft in the Scheduler
+ * tab's PRD editor before it runs; see PRD implementation notes) and
+ * transitions the ticket to 'dispatched-to-prd' with prdSlugs populated on
+ * success, or 'failed' with a notice turn on failure.
+ */
+function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
+  const failPrd = (message: string): void => {
+    patch(tabId, (c) => ({
+      ...c,
+      running: false,
+      queuedPosition: 0,
+      activeTicket: null,
+      ticketHistory: appendTicketHistory(c.ticketHistory ?? [], { ...ticket, status: 'failed', completedAt: Date.now() }),
+    }))
+    applyNotice(tabId, ticket.sessionId, message)
+    toast.error(message)
+    dequeueNext(tabId)
+  }
+
+  window.api.chat
+    .createPrd({
+      title: deriveTitleFromTicketText(ticket.text),
+      cwd: ticket.cwd,
+      estimateMinutes: 15,
+      goal: ticket.text,
+      acceptanceCriteria: [
+        'Implement the request described in Goal.',
+        'timeout 300 npm run typecheck passes',
+      ],
+      implementationNotes: `Target project: ${ticket.cwd}`,
+      sourcePromptId: ticket.id,
+      sourceTabId: ticket.tabId,
+    })
+    .then((result) => {
+      if (!result?.ok) {
+        failPrd(`→ PRD authoring failed for ticket ${ticket.id}: ${result?.error ?? 'unknown error'}`)
+        return
+      }
+      const filename = result.filename
+      const slug = filename.endsWith('.md') ? filename.slice(0, -3) : filename
+      const dispatched: PromptTicket = { ...ticket, status: 'dispatched-to-prd', completedAt: Date.now(), prdSlugs: [slug] }
+      applyNotice(tabId, dispatched.sessionId, `→ dispatched to PRD ${filename} (ticket ${dispatched.id})`)
       patch(tabId, (c) => ({
         ...c,
         running: false,
@@ -372,12 +431,11 @@ function dequeueNext(tabId: string): void {
         ticketHistory: appendTicketHistory(c.ticketHistory ?? [], dispatched),
       }))
       dequeueNext(tabId)
-      return
-    }
-    const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
-    patch(tabId, (c) => ({ ...c, activeTicket: running }))
-    dispatchSend({ tabId: running.tabId, sessionId: running.sessionId, cwd: running.cwd, text: running.text, promptId: running.id })
-  })
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      failPrd(`→ PRD authoring failed for ticket ${ticket.id}: ${msg}`)
+    })
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {

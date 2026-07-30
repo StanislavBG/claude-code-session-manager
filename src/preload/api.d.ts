@@ -1046,6 +1046,26 @@ export interface ChatRunPayload {
   promptId?: string;
 }
 
+export interface ChatCreatePrdPayload {
+  title: string;
+  cwd: string;
+  estimateMinutes: number;
+  goal: string;
+  acceptanceCriteria: string[];
+  implementationNotes: string;
+  outOfScope?: string[];
+  slug?: string;
+  parallelGroup?: number;
+  /** Originating PromptTicket.id (PRD 748) — traces the PRD back to the prompt that spawned it. */
+  sourcePromptId?: string;
+  /** Originating tab id — used at job completion to route a status prompt back into the tab. */
+  sourceTabId?: string;
+}
+
+export type ChatCreatePrdResult =
+  | { ok: true; nn: number; filename: string }
+  | { ok: false; status: number; error: string };
+
 export interface ChatRunQueuedEvent {
   tabId: string;
   sessionId: string;
@@ -1490,6 +1510,11 @@ export interface SessionManagerAPI {
      *  chatRunner) or 'develop' (dispatch to /develop for PRD decomposition).
      *  A single bounded `claude -p` call, never a scheduler job. */
     classifyTicket: (payload: { text: string }) => Promise<'inline' | 'develop'>;
+    /** Author a mechanical draft PRD from a queued PromptTicket classified
+     *  'develop' — an in-process call to prdCreate.createPrd, never an HTTP
+     *  round-trip. The draft is meant to be reviewed/edited in the Scheduler
+     *  tab's PRD editor before it runs. */
+    createPrd: (payload: ChatCreatePrdPayload) => Promise<ChatCreatePrdResult>;
   };
   exchanges: {
     /** Durable per-exchange log entries for a project, newest-first (max 100 by default). */

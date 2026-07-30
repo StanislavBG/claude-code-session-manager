@@ -8,9 +8,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * mocked here since vitest runs this suite in a node environment.
  */
 
-function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?: (payload: { text: string }) => Promise<'inline' | 'develop'> }) {
+function installWindowApiMock(opts: {
+  transcriptExists: boolean
+  classifyTicket?: (payload: { text: string }) => Promise<'inline' | 'develop'>
+  createPrd?: (payload: unknown) => Promise<{ ok: true; nn: number; filename: string } | { ok: false; status: number; error: string }>
+}) {
   const run = vi.fn().mockResolvedValue(undefined)
   const classifyTicket = vi.fn(opts.classifyTicket ?? (async () => 'inline' as const))
+  const createPrd = vi.fn(opts.createPrd ?? (async () => ({ ok: true as const, nn: 42, filename: '42-fake-prd.md' })))
   let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
   let externalSendHandler: ((e: { tabId: string; prompt: string }) => void) | null = null
@@ -37,6 +42,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?
         return () => { externalSendHandler = null }
       }),
       classifyTicket,
+      createPrd,
     },
     transcripts: {
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
@@ -51,6 +57,7 @@ function installWindowApiMock(opts: { transcriptExists: boolean; classifyTicket?
     api,
     run,
     classifyTicket,
+    createPrd,
     getNeedsInputHandler: () => needsInputHandler,
     getCompleteHandler: () => completeHandler,
     getExternalSendHandler: () => externalSendHandler,
@@ -398,10 +405,56 @@ describe('chat.ts prompt queue', () => {
     expect(useChat.getState().get('t1').running).toBe(true)
   })
 
-  it('transitions a dequeued ticket to dispatched-to-prd and skips inline dispatch when classified "develop"', async () => {
-    const { run, classifyTicket, getCompleteHandler } = installWindowApiMock({
+  it('transitions a dequeued ticket to dispatched-to-prd, calls createPrd with the mapped payload, and populates prdSlugs when classified "develop"', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 7, filename: '7-build-a-whole-feature.md' }),
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build a whole feature' })
+    const queuedTicket = useChat.getState().get('t1').queue[0]
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build a whole feature' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+
+    expect(createPrd).toHaveBeenCalledWith({
+      title: 'build a whole feature',
+      cwd: '/proj',
+      estimateMinutes: 15,
+      goal: 'build a whole feature',
+      acceptanceCriteria: ['Implement the request described in Goal.', 'timeout 300 npm run typecheck passes'],
+      implementationNotes: 'Target project: /proj',
+      sourcePromptId: queuedTicket.id,
+      sourceTabId: 't1',
+    })
+
+    // Never dispatched inline: chat.run only ever called once (for "first").
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      expect(after.running).toBe(false)
+      expect(after.queue).toHaveLength(0)
+    })
+    expect(run).toHaveBeenCalledTimes(1)
+
+    // A notice turn records the dispatch-to-prd transition, and prdSlugs is populated.
+    const after = useChat.getState().get('t1')
+    expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('7-build-a-whole-feature.md'))).toBe(true)
+    const dispatchedTicket = after.ticketHistory?.find((t) => t.status === 'dispatched-to-prd')
+    expect(dispatchedTicket?.prdSlugs).toEqual(['7-build-a-whole-feature'])
+  })
+
+  it('marks a dequeued ticket "failed" with a notice when createPrd rejects', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => { throw new Error('write failed') },
     })
     const { useChat } = await import('../chat')
 
@@ -412,19 +465,45 @@ describe('chat.ts prompt queue', () => {
 
     getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
 
-    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build a whole feature' }))
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalled())
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
 
-    // Never dispatched inline: chat.run only ever called once (for "first").
     await vi.waitFor(() => {
       const after = useChat.getState().get('t1')
-      expect(after.running).toBe(false)
-      expect(after.queue).toHaveLength(0)
+      const failedTicket = after.ticketHistory?.find((t) => t.status === 'failed')
+      expect(failedTicket).toBeDefined()
     })
-    expect(run).toHaveBeenCalledTimes(1)
 
-    // A notice turn records the dispatch-to-prd transition.
     const after = useChat.getState().get('t1')
-    expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('dispatched to /develop'))).toBe(true)
+    expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('PRD authoring failed') && t.text.includes('write failed'))).toBe(true)
+  })
+
+  it('marks a dequeued ticket "failed" with a notice when createPrd resolves not-ok', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: false, status: 400, error: 'cwd rejected' }),
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build a whole feature' })
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalled())
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      const failedTicket = after.ticketHistory?.find((t) => t.status === 'failed')
+      expect(failedTicket).toBeDefined()
+    })
+
+    const after = useChat.getState().get('t1')
+    expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('PRD authoring failed') && t.text.includes('cwd rejected'))).toBe(true)
   })
 
   it('stays "running" during the classification round-trip so a send() during that window queues instead of racing a second dispatch', async () => {

@@ -781,6 +781,14 @@ hivesIpc.registerHiveHandlers();
 webRemote.registerRemoteHandlers();
 chatRunner.registerChatHandlers();
 
+// Direct in-process PRD authoring for a queued PromptTicket classified
+// 'develop' (PRD 749 follow-up) — calls the same createPrd() the admin HTTP
+// route (prdCreate.registerAdminRoute above) and the MCP tool use, just
+// in-process instead of over localAdminHttp.cjs.
+ipcMain.handle('chat:create-prd', validated(schemas.schedulerCreatePrd, async (input) => {
+  return prdCreate.createPrd(input, scheduler.remote);
+}));
+
 // Exchanges: read the durable per-exchange log (written by chatRunner → recordExchange).
 ipcMain.handle('exchanges:list', validated(schemas.exchangesList, async (payload) => {
   try {

@@ -86,6 +86,63 @@ function buildPrdBody(input) {
 }
 
 /**
+ * Core create-PRD orchestration: cwd validation, slug derivation, NN
+ * allocation, existing-file collision check, body build, write. Shared by
+ * both the admin HTTP route (registerAdminRoute, used by the MCP tool) and
+ * the renderer-facing IPC handler (chat:create-prd, index.cjs) so the
+ * validation/write logic lives in exactly one place (API-reuse standard).
+ * `input` must already be schema-validated by the caller (schemas.schedulerCreatePrd).
+ * `remote` is scheduler.cjs's remote object (allocateParallelGroup/readPrd/writePrd).
+ *
+ * Returns `{ ok: true, nn, filename }` on success, or `{ ok: false, status, error }`
+ * on failure — `status` is the HTTP status code the caller should map errors to
+ * (400/409/500), left to the caller since only the HTTP route needs it.
+ */
+async function createPrd(input, remote) {
+  // cwd is untrusted: this is the first *creating* mutation on a
+  // token-authed API whose product is "a command that will later run
+  // with --dangerously-skip-permissions in a chosen cwd". Route it
+  // through config.cjs's validatePath (allowedRoots = home dir) —
+  // same boundary every other fs-touching IPC handler uses — never a
+  // bespoke check here.
+  try {
+    config.validatePath(expandHome(input.cwd));
+  } catch (e) {
+    return { ok: false, status: 400, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` };
+  }
+
+  const slug = input.slug || deriveSlugFromTitle(input.title);
+  if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {
+    return { ok: false, status: 400, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' };
+  }
+
+  // NN allocation is delegated to allocateParallelGroup() (PRD 548) via
+  // the injected remote — never re-derived here — unless the caller
+  // opted into an existing group explicitly.
+  const nn = input.parallelGroup ?? await remote.allocateParallelGroup();
+  const filenameSlug = `${nn}-${slug}`;
+
+  // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
+  // collision-proof reservation, so re-check for an existing file at
+  // this exact destination before writing — remote.writePrd itself has
+  // no existence guard (by design, it doubles as the edit-in-place
+  // path for Scheduler UI PRD edits), so "create" must not silently
+  // clobber an existing job's PRD.
+  const existing = await remote.readPrd(filenameSlug);
+  if (existing?.ok) {
+    return { ok: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
+  }
+
+  const body = buildPrdBody(input);
+  const writeResult = await remote.writePrd(filenameSlug, body);
+  if (!writeResult?.ok) {
+    return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };
+  }
+
+  return { ok: true, nn, filename: `${filenameSlug}.md` };
+}
+
+/**
  * Registers the create-prd admin HTTP route (PRD 689 — moved verbatim out of
  * the former standalone admin HTTP server module's handleRequest, no behavior
  * change) against an injected localAdminHttp.cjs transport. `remote` is
@@ -112,51 +169,13 @@ function registerAdminRoute(adminHttp, remote) {
       return;
     }
 
-    // cwd is untrusted: this is the first *creating* mutation on a
-    // token-authed API whose product is "a command that will later run
-    // with --dangerously-skip-permissions in a chosen cwd". Route it
-    // through config.cjs's validatePath (allowedRoots = home dir) —
-    // same boundary every other fs-touching IPC handler uses — never a
-    // bespoke check here.
-    try {
-      config.validatePath(expandHome(input.cwd));
-    } catch (e) {
-      sendJson(res, 400, { ok: false, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` });
+    const result = await createPrd(input, remote);
+    if (!result.ok) {
+      sendJson(res, result.status, { ok: false, error: result.error });
       return;
     }
 
-    const slug = input.slug || deriveSlugFromTitle(input.title);
-    if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {
-      sendJson(res, 400, { ok: false, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' });
-      return;
-    }
-
-    // NN allocation is delegated to allocateParallelGroup() (PRD 548) via
-    // the injected remote — never re-derived here — unless the caller
-    // opted into an existing group explicitly.
-    const nn = input.parallelGroup ?? await remote.allocateParallelGroup();
-    const filenameSlug = `${nn}-${slug}`;
-
-    // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
-    // collision-proof reservation, so re-check for an existing file at
-    // this exact destination before writing — remote.writePrd itself has
-    // no existence guard (by design, it doubles as the edit-in-place
-    // path for Scheduler UI PRD edits), so "create" must not silently
-    // clobber an existing job's PRD.
-    const existing = await remote.readPrd(filenameSlug);
-    if (existing?.ok) {
-      sendJson(res, 409, { ok: false, error: `PRD already exists: ${filenameSlug}.md` });
-      return;
-    }
-
-    const body = buildPrdBody(input);
-    const writeResult = await remote.writePrd(filenameSlug, body);
-    if (!writeResult?.ok) {
-      sendJson(res, 500, { ok: false, error: writeResult?.error ?? 'write failed' });
-      return;
-    }
-
-    sendJson(res, 200, { nn, filename: `${filenameSlug}.md`, status: 'queued' });
+    sendJson(res, 200, { nn: result.nn, filename: result.filename, status: 'queued' });
   });
 }
 
@@ -166,5 +185,6 @@ module.exports = {
   readStandards,
   deriveSlugFromTitle,
   buildPrdBody,
+  createPrd,
   registerAdminRoute,
 };

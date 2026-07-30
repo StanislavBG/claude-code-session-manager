@@ -445,6 +445,8 @@ contextBridge.exposeInMainWorld('api', {
     },
     /** Classify a queued PromptTicket's text as 'inline' or 'develop'. */
     classifyTicket: (payload) => ipcRenderer.invoke('chat:classify-ticket', payload),
+    /** Author a mechanical draft PRD from a queued PromptTicket classified 'develop'. */
+    createPrd: (payload) => ipcRenderer.invoke('chat:create-prd', payload),
   },
   exchanges: {
     /** List exchanges for a project (durable chat-run log), newest-first.

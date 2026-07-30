@@ -9,7 +9,7 @@
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -22,6 +22,7 @@ const {
   STANDARDS_PATH,
   PRD_CREATE_SLUG_RE,
   registerAdminRoute,
+  createPrd,
 } = require('../lib/prdCreate.cjs');
 const { createAdminHttp } = require('../lib/localAdminHttp.cjs');
 const config = require('../config.cjs');
@@ -336,6 +337,59 @@ test('POST /admin/scheduler/create-prd honors an explicit slug + parallelGroup i
   } finally {
     await admin.stop();
   }
+});
+
+// ──────────────────────────────────────────── createPrd() (chat:create-prd IPC handler, PRD 749 follow-up)
+//
+// createPrd() is the function ipcMain.handle('chat:create-prd', ...) in
+// index.cjs calls directly (in-process, no HTTP) — same function
+// registerAdminRoute's HTTP handler calls above. These tests exercise it
+// directly, mirroring the handler's own call shape: createPrd(input, remote).
+
+test('createPrd rejects a cwd outside allowedRoots before any write, returning {ok:false, status:400}', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
+
+  const result = await createPrd(validCreateBody({ cwd: '/etc/passwd-adjacent-outside-home' }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+});
+
+test('createPrd with a valid payload allocates a group, writes through remote.writePrd, and returns {ok:true, nn, filename}', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ sourcePromptId: 'ticket-abc', sourceTabId: 'tab-1' }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(typeof result.nn).toBe('number');
+  expect(result.filename).toMatch(/^\d+-add-widget-frobnication\.md$/);
+
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/^---\n/);
+  expect(written).toMatch(/title: Add widget frobnication/);
+  expect(written).toMatch(/sourcePromptId: ticket-abc/);
+  expect(written).toMatch(/sourceTabId: tab-1/);
+  expect(written).toMatch(/# Goal/);
+});
+
+test('createPrd returns {ok:false, status:409} without clobbering an existing file at the same destination', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  await fsp.writeFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'ORIGINAL CONTENT\n');
+
+  const result = await createPrd(validCreateBody({ slug: 'my-explicit-slug', parallelGroup: 777 }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(409);
+  const stillThere = await fsp.readFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'utf8');
+  expect(stillThere).toBe('ORIGINAL CONTENT\n');
 });
 
 test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the created PRD frontmatter', async () => {

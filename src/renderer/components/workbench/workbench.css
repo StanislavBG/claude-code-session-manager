@@ -1,0 +1,51 @@
+/*
+ * Dockview theme mapped onto the Almanac paper-warm palette
+ * (tailwind.config.js: bg/bg.elev/bg.hi, line, fg/fg.dim/fg.faint, accent).
+ *
+ * The app has a single persistent palette that does not change with the OS
+ * color-scheme preference, so this theme is applied unconditionally rather
+ * than switching between dockview's built-in light/dark themes — that is
+ * intentional, not an oversight: it covers both light and dark OS settings
+ * the same way the rest of the app already does, and it never falls back to
+ * dockview's own default (grey/blue VS Code-like) palette.
+ */
+
+.dockview-theme-sm {
+  --dv-group-view-background-color: #f6efe1; /* bg */
+  --dv-tabs-and-actions-container-background-color: #efe6d3; /* bg.elev */
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-height: 32px;
+
+  --dv-activegroup-visiblepanel-tab-background-color: #f6efe1; /* bg */
+  --dv-activegroup-hiddenpanel-tab-background-color: #efe6d3; /* bg.elev */
+  --dv-inactivegroup-visiblepanel-tab-background-color: #efe6d3; /* bg.elev */
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #efe6d3; /* bg.elev */
+  --dv-tab-divider-color: #e0d3b8; /* line */
+
+  --dv-activegroup-visiblepanel-tab-color: #2a221a; /* fg */
+  --dv-activegroup-hiddenpanel-tab-color: #5b4a36; /* fg.dim */
+  --dv-inactivegroup-visiblepanel-tab-color: #5b4a36; /* fg.dim */
+  --dv-inactivegroup-hiddenpanel-tab-color: #8a7a60; /* fg.faint */
+
+  --dv-separator-border: #e0d3b8; /* line */
+  --dv-paneview-header-border-color: #e0d3b8; /* line */
+  --dv-paneview-active-outline-color: #b85c34; /* accent */
+
+  --dv-icon-hover-background-color: rgba(184, 92, 52, 0.12); /* accent tint */
+  --dv-drag-over-background-color: rgba(184, 92, 52, 0.16); /* accent tint */
+  --dv-drag-over-border-color: #b85c34; /* accent */
+
+  --dv-scrollbar-background-color: rgba(42, 34, 26, 0.2); /* fg tint */
+  --dv-tabs-container-scrollbar-color: #8a7a60; /* fg.faint */
+
+  --dv-floating-box-shadow: 0 8px 32px rgba(42, 34, 26, 0.18), 0 2px 8px rgba(42, 34, 26, 0.1);
+  --dv-floating-border: 1px solid #e0d3b8; /* line */
+
+  --dv-border-radius: 0px;
+  --dv-tab-border-radius: 0px;
+}
+
+.workbench-root {
+  height: 100%;
+  width: 100%;
+}

@@ -4,6 +4,7 @@ import { type NavKey } from './components/LeftNav'
 import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { MainPane } from './components/MainPane'
+import { Workbench } from './components/workbench/Workbench'
 import { SplitAgentBrowser } from './components/SplitAgentBrowser'
 import { type SearchMode } from './components/modals/SearchModal'
 import { RecordingStatus } from './components/RecordingStatus'
@@ -666,18 +667,20 @@ export function App() {
           onNavigate={navigate}
           onNewSession={handleNewSession}
         />
-        <MainPane
-          active={activeNav}
-          onNavigate={navigate}
-          onNewSession={handleNewSession}
-          onOpenVoice={() => navigate('voice')}
-          onOpenScheduler={() => navigate('scheduler')}
-          searchMode={searchMode}
-          broadcastOpen={broadcastOpen}
-          watchersOpen={watchersOpen}
-          onCloseBroadcast={() => setBroadcastOpen(false)}
-          onCloseWatchers={() => setWatchersOpen(false)}
-        />
+        <Workbench>
+          <MainPane
+            active={activeNav}
+            onNavigate={navigate}
+            onNewSession={handleNewSession}
+            onOpenVoice={() => navigate('voice')}
+            onOpenScheduler={() => navigate('scheduler')}
+            searchMode={searchMode}
+            broadcastOpen={broadcastOpen}
+            watchersOpen={watchersOpen}
+            onCloseBroadcast={() => setBroadcastOpen(false)}
+            onCloseWatchers={() => setWatchersOpen(false)}
+          />
+        </Workbench>
       </div>
       <AlmanacFooter onNavigate={navigate} />
 

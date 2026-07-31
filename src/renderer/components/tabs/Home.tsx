@@ -2,8 +2,8 @@
  * Home — the Almanac landing page. Replaces Overview as the `overview` route.
  *
  * Sections (top to bottom):
- *   1. Hero — greeting + mascot + "Your local cockpit for Claude Code"
- *   2. Grid — 5h billing window card + Quick start card
+ *   1. Hero — "This machine" kicker + live session-slot greeting.
+ *   2. Grid — 5h billing window card + Projects card.
  *   3. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
  *      History tab) and shows the 4 most-recent.
  *   4. Scheduler peek — first 3 jobs from useScheduleState.
@@ -16,13 +16,17 @@ import type { NavKey } from '../LeftNav'
 import { useBilling, getBillingData, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
+import { usePromptSessions } from '../../state/promptSessions'
+import { useChatSignals } from '../../lib/useChatSignals'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
-import { candidatePath } from '../../lib/useKnownProjects'
-import { AlmanacIcon } from '../layout/AlmanacIcon'
+import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
+import { buildHomeProjectRows } from '../../lib/homeProjectRows'
+import { projectColorFor } from '../../lib/projectColor'
 import { UsageMeters } from './home/UsageMeters'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import type { DirEntry, ScheduleJob } from '../../../preload/api'
+
 
 interface HomeProps {
   onNavigate?: (k: NavKey) => void
@@ -31,7 +35,7 @@ interface HomeProps {
   onOpenScheduler?: () => void
 }
 
-export function Home({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }: HomeProps) {
+export function Home({ onNavigate, onOpenScheduler }: HomeProps) {
   const greeting = useMemo(() => {
     const h = new Date().getHours()
     if (h < 5)  return 'Up late'
@@ -42,15 +46,11 @@ export function Home({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }:
 
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-[1100px] px-10 py-9 text-fg">
+      <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
         <Hero greeting={greeting} />
-        <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: '1.25fr 1fr' }}>
+        <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
           <BillingCard />
-          <QuickStartCard
-            onNewSession={onNewSession}
-            onOpenVoice={onOpenVoice}
-            onNavigate={onNavigate}
-          />
+          <ProjectsCard />
         </div>
         <SessionsPoolCard />
         <RecentSessionsCard onNavigate={onNavigate} />
@@ -61,48 +61,35 @@ export function Home({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }:
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Hero
+// Hero — "This machine" kicker + greeting with live session-slot count.
 // ────────────────────────────────────────────────────────────────────
 function Hero({ greeting }: { greeting: string }) {
-  return (
-    <header className="flex items-start gap-[18px] mb-7">
-      <div className="w-14 h-14 rounded-[14px] bg-bg-hi border border-line grid place-items-center shadow-[0_2px_0_#e0d3b8]">
-        <Mascot size={32} />
-      </div>
-      <div>
-        <div className="text-[13px] text-fg-dim tracking-[0.01em]">{greeting}.</div>
-        <h1 className="m-0 mt-0.5 mb-1.5 font-serif text-[38px] font-medium leading-[1.1] text-fg tracking-[-0.01em]">
-          Your <em className="text-accent not-italic font-serif italic">local cockpit</em> for Claude Code.
-        </h1>
-        <p className="m-0 text-[15px] text-fg-dim max-w-[620px] leading-[1.5]">
-          Wraps the CLI alongside skills, hooks, MCP servers, and a scheduler that runs jobs against your 5-hour window. Nothing here phones home.
-        </p>
-      </div>
-    </header>
-  )
-}
+  const [slots, setSlots] = useState<SlotSnapshot | null>(null)
 
-function Mascot({ size = 28 }: { size?: number }) {
-  // 8x8 pixel mascot — terracotta face on paper. Matches the design bundle's
-  // SMMascot exactly (project/variants/shared.jsx) so the icon stays on-brand.
-  const grid = [
-    '00111100',
-    '01111110',
-    '11011011',
-    '11111111',
-    '11011011',
-    '01111110',
-    '00111100',
-    '00100100',
-  ]
+  useEffect(() => {
+    let alive = true
+    const poll = () => {
+      window.api.schedule.sessionSlots()
+        .then((s) => { if (alive) setSlots(s) })
+        .catch(() => { /* hero slot count is diagnostic-only */ })
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  const total = slots?.total ?? 3
+  const inUse = slots?.inUse ?? 0
+
   return (
-    <svg width={size} height={size} viewBox="0 0 8 8" shapeRendering="crispEdges">
-      {grid.map((row, y) =>
-        row.split('').map((c, x) =>
-          c === '1' ? <rect key={`${x},${y}`} x={x} y={y} width="1" height="1" fill="#b85c34" /> : null
-        )
-      )}
-    </svg>
+    <header className="mb-7">
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-1.5">
+        This machine
+      </div>
+      <h1 className="m-0 font-serif text-[32px] font-medium leading-[1.15] text-fg tracking-[-0.01em]">
+        {greeting}. <span className="text-accent">{inUse} of {total}</span> session slots are busy.
+      </h1>
+    </header>
   )
 }
 
@@ -126,48 +113,61 @@ function BillingCard() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Quick start
+// Projects — compact list of known projects with live/activity chips.
+// Clicking a row activates the matching SessionTab, or opens one.
 // ────────────────────────────────────────────────────────────────────
-function QuickStartCard({
-  onNewSession, onOpenVoice, onNavigate,
-}: {
-  onNewSession?: () => void
-  onOpenVoice?: () => void
-  onNavigate?: (k: NavKey) => void
-}) {
-  const actions = [
-    { id: 'new',    label: 'Start a session',  hint: 'Open Claude Code in a project',  icon: 'play'    as const, run: () => onNewSession?.() },
-    { id: 'resume', label: 'Resume last',      hint: 'Reattach to a recent session',   icon: 'sparkle' as const, run: () => onNavigate?.('history') },
-    { id: 'plan',   label: 'Draft a PRD',      hint: 'Plan a job for the scheduler',   icon: 'book'    as const, run: () => onNavigate?.('scheduler') },
-    { id: 'invite', label: 'Add a project',    hint: 'Point me at a folder on disk',   icon: 'plus'    as const, run: () => onNavigate?.('projects') },
-  ]
+function ProjectsCard() {
+  const { rows, enriched } = useKnownProjects()
+  const chats = useChatSignals()
+  const sessions = usePromptSessions((s) => s.sessions)
+  const tabs = useSessions((s) => s.tabs)
+  const addTab = useSessions((s) => s.addTab)
+  const setActive = useSessions((s) => s.setActive)
+
+  const projectRows = useMemo(
+    () => buildHomeProjectRows(rows, enriched, chats, sessions),
+    [rows, enriched, chats, sessions],
+  )
+
+  const openProject = (cwd: string) => {
+    const existing = tabs.find((t) => t.cwd === cwd)
+    if (existing) {
+      setActive(existing.id)
+    } else {
+      addTab({ cwd, startupCommand: null, dormant: true })
+    }
+  }
+
   return (
     <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]">
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-serif text-[17px] font-medium">Quick start</div>
-        <button
-          title="Voice (Whisper)"
-          onClick={() => onOpenVoice?.()}
-          className="w-[30px] h-[30px] rounded-lg border border-line bg-bg grid place-items-center text-accent hover:bg-bg-hi/70 transition-colors"
-        >
-          <AlmanacIcon name="mic" size={15} />
-        </button>
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2.5">
+        Projects
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {actions.map((a) => (
-          <button
-            key={a.id}
-            onClick={a.run}
-            className="text-left bg-bg border border-line rounded-[10px] px-3 py-2.5 hover:border-accent/40 hover:bg-bg-hi/40 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-accent inline-flex"><AlmanacIcon name={a.icon} size={14} /></span>
-              <span className="text-[13px] font-semibold text-fg">{a.label}</span>
-            </div>
-            <div className="text-[11.5px] text-fg-faint mt-0.5">{a.hint}</div>
-          </button>
-        ))}
-      </div>
+      {projectRows.length === 0 ? (
+        <div className="text-[13px] text-fg-faint py-2">No known projects yet.</div>
+      ) : (
+        <div className="space-y-1">
+          {projectRows.map((p) => (
+            <button
+              key={p.encoded}
+              onClick={() => openProject(p.cwd)}
+              className="w-full flex items-center gap-2.5 text-left px-2 py-1.5 rounded-lg hover:bg-bg/60 transition-colors"
+              title={p.cwd}
+            >
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: projectColorFor(p.dotSeed) }}
+              />
+              <span className="flex-1 min-w-0 text-[13px] text-fg truncate">{p.name}</span>
+              {p.liveCount > 0 ? (
+                <span className="font-mono text-[11px] text-accent whitespace-nowrap">{p.liveCount} live</span>
+              ) : (
+                <span className="font-mono text-[11px] text-fg-faint whitespace-nowrap">{relativeTime(p.lastActivityMs)}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -353,19 +353,6 @@ function SessionsPoolCard() {
               : slots!.holders.map((h) => h.owner).join(' · ')}
           </span>
         </div>
-        <p className="m-0 text-[13px] text-fg-dim leading-relaxed">
-          Session-Manager owns one machine-wide pool of {total} concurrent Claude sessions —
-          scheduler jobs and chat runs both request a slot from it before launching, and a
-          memory gate defers work when free RAM runs low. That's what keeps a burst of
-          parallel jobs from taking down the app.
-        </p>
-        <p className="mt-2 mb-0 text-[13px] text-fg-faint leading-relaxed">
-          How work flows: each <span className="font-medium text-fg-dim">Tab</span> is one project
-          (its folder). Inside a project, work is organized into{' '}
-          <span className="font-medium text-fg-dim">Epics</span> — small goals, each with its own
-          conversation — and every Epic dispatches <span className="font-medium text-fg-dim">PRDs</span>{' '}
-          that the Scheduler executes as headless jobs when session capacity is available.
-        </p>
       </div>
     </section>
   )

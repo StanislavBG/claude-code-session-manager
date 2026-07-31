@@ -1073,3 +1073,39 @@ describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
     expect(history.some((t) => t.text === 'second' && t.status === 'failed')).toBe(true)
   })
 })
+
+describe('chat.ts send() refuses while an Epic Terminal-mode PTY is attached (PRD 831)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('blocks send and toasts an error when useEpicTerminal reports the tab attached', async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+    const { useEpicTerminal } = await import('../epicTerminal')
+    const { useToast } = await import('../toast')
+
+    useEpicTerminal.getState().setAttached('epic-1', true)
+
+    useChat.getState().send({ tabId: 'epic-1', sessionId: 'sess-1', cwd: '/proj', prompt: 'hello' })
+
+    expect(run).not.toHaveBeenCalled()
+    expect(useChat.getState().get('epic-1').running).toBe(false)
+    expect(
+      useToast.getState().toasts.some((t) => t.kind === 'error' && t.message.includes('Terminal mode is active')),
+    ).toBe(true)
+  })
+
+  it('sends normally once the Epic is detached again', async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+    const { useEpicTerminal } = await import('../epicTerminal')
+
+    useEpicTerminal.getState().setAttached('epic-1', true)
+    useEpicTerminal.getState().setAttached('epic-1', false)
+
+    useChat.getState().send({ tabId: 'epic-1', sessionId: 'sess-1', cwd: '/proj', prompt: 'hello' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+  })
+})

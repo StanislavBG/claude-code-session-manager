@@ -28,8 +28,10 @@ interface Props {
 }
 
 // Main-side zod cap is 64 KiB; 60 KiB leaves headroom for IPC envelope overhead.
-const PTY_WRITE_CHUNK_SIZE = 60 * 1024
-function writeInChunks(tabId: string, data: string) {
+// Exported so EpicTerminalPane.tsx (the Epic Terminal-mode PTY, PRD 831)
+// reuses the same chunking instead of forking a second copy.
+export const PTY_WRITE_CHUNK_SIZE = 60 * 1024
+export function writeInChunks(tabId: string, data: string) {
   for (let i = 0; i < data.length; i += PTY_WRITE_CHUNK_SIZE) {
     window.api.pty.write({ tabId, data: data.slice(i, i + PTY_WRITE_CHUNK_SIZE) })
   }

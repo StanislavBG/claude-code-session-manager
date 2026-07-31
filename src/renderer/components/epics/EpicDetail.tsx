@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useChat } from '../../state/chat'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
+import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
+import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag } from './epic-primitives'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
@@ -164,12 +166,9 @@ function lastActivityAt(session: PromptSession, events: PromptSessionEvent[], tu
 
 interface Props {
   promptSession: PromptSession
-  /** Navigation to the real terminal/session behind this Epic — the target
-   *  itself is wired by PRD 829; this file only surfaces the button/prop. */
-  onOpenRawSession?: (epicId: string) => void
 }
 
-export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
+export function EpicDetail({ promptSession }: Props) {
   const epicId = promptSession.id
   const { cwd, claudeSessionId: sessionId } = promptSession
   const isCompleted = promptSession.status === 'completed'
@@ -181,7 +180,11 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
   const sessionEvents = usePromptSessions((s) => s.events[epicId]) ?? EMPTY_EVENTS
   const markCompleted = usePromptSessions((s) => s.markCompleted)
   const resumeArchived = usePromptSessions((s) => s.resumeArchived)
+  const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
+
+  const mode = useEpicTerminal((s) => s.modes[epicId] ?? 'chat')
+  const setMode = useEpicTerminal((s) => s.setMode)
 
   const [view, setView] = useState<ViewKey>('discussion')
   const prds = useScheduledPrds()
@@ -201,14 +204,14 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
 
-  // Merged timeline: chat turns + this Epic's own 'prd_created'/'closed'
-  // audit events, ordered by time — mirrors PromptSessionConversation.tsx's
-  // timeline construction verbatim.
+  // Merged timeline: chat turns + this Epic's own 'prd_created'/'closed'/
+  // 'response' (Terminal-stint marker, PRD 831) audit events, ordered by
+  // time — mirrors PromptSessionConversation.tsx's timeline construction.
   const timeline = [
     ...turns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
     ...sessionEvents
-      .filter((e): e is PromptSessionEvent & { kind: 'prd_created' | 'closed' } =>
-        e.kind === 'prd_created' || e.kind === 'closed',
+      .filter((e): e is PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' } =>
+        e.kind === 'prd_created' || e.kind === 'closed' || e.kind === 'response',
       )
       .map((e) => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
   ].sort((a, b) => a.at - b.at)
@@ -242,6 +245,45 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
     void markCompleted(epicId).finally(() => setMarkingCompleted(false))
   }
 
+  // Mutual exclusion: a chatRunner run in flight (or queued behind one) for
+  // this Epic must finish before Terminal mode can attach the same
+  // claudeSessionId — otherwise a headless resume and an interactive resume
+  // would race on the same transcript.
+  const chatBusy = running || (chat?.queuedPosition ?? 0) > 0
+  const terminalDisabledReason = chatBusy
+    ? 'Chat is running or queued for this Epic — wait for it to finish before switching to Terminal.'
+    : null
+
+  // Returning to Chat (manual toggle or the pane reporting a PTY exit) records
+  // a 'response'-kind marker on the Epic's event chain so the Discussion
+  // thread's audit trail stays honest even though the interactive turns
+  // themselves are never backfilled (out of scope).
+  const returnToChat = () => {
+    // Read the tail fresh rather than off the render-snapshotted
+    // `sessionEvents` — appendPromptSessionEvent's tail-chain check needs the
+    // CURRENT tail, not whatever was current when EpicDetail last rendered.
+    const liveEvents = usePromptSessions.getState().events[epicId] ?? []
+    const tail = liveEvents[liveEvents.length - 1] ?? null
+    if (tail) {
+      appendPromptSessionEvent(epicId, {
+        kind: 'response',
+        causedByEventId: tail.id,
+        text: 'Iterated in Terminal view',
+      })
+    }
+    setMode(epicId, 'chat')
+  }
+
+  const onModeChange = (next: EpicTerminalMode) => {
+    if (next === mode) return
+    if (next === 'terminal') {
+      if (terminalDisabledReason) return
+      setMode(epicId, 'terminal')
+      return
+    }
+    returnToChat()
+  }
+
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-bg" data-testid="epic-detail">
       <header className="border-b border-line px-5 pt-4">
@@ -256,14 +298,33 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
             {goal && <p className="m-0 mt-1.5 max-w-[700px] text-[13.5px] leading-relaxed text-fg-dim">{goal}</p>}
           </div>
           <div className="ml-auto flex shrink-0 gap-1.5">
-            <button
-              type="button"
-              onClick={() => onOpenRawSession?.(epicId)}
-              data-testid="epic-open-raw-session"
-              className="rounded-md border border-line bg-bg-hi px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-hi"
-            >
-              Open raw session
-            </button>
+            {!isCompleted && (
+              <div
+                className="inline-flex items-center gap-0.5 rounded-md border border-line bg-bg-hi p-0.5"
+                data-testid="epic-mode-toggle"
+              >
+                <button
+                  type="button"
+                  onClick={() => onModeChange('chat')}
+                  aria-pressed={mode === 'chat'}
+                  data-testid="epic-mode-chat"
+                  className={`rounded px-2.5 py-1 text-xs font-semibold ${mode === 'chat' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
+                >
+                  Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onModeChange('terminal')}
+                  aria-pressed={mode === 'terminal'}
+                  disabled={Boolean(terminalDisabledReason)}
+                  title={terminalDisabledReason ?? 'Switch to an interactive terminal for this Epic'}
+                  data-testid="epic-mode-terminal"
+                  className={`rounded px-2.5 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${mode === 'terminal' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
+                >
+                  Terminal
+                </button>
+              </div>
+            )}
             {isCompleted ? (
               <button
                 type="button"
@@ -277,7 +338,8 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
               <button
                 type="button"
                 onClick={onMarkCompleted}
-                disabled={markingCompleted}
+                disabled={markingCompleted || mode === 'terminal'}
+                title={mode === 'terminal' ? 'Switch back to Chat before marking this Epic completed — it would kill the live Terminal session.' : undefined}
                 data-testid="epic-mark-completed"
                 className="rounded-md border border-line bg-bg-hi px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-hi disabled:opacity-50"
               >
@@ -294,11 +356,22 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
           {stats && <MetaItem label="tool calls" value={String(stats.toolCalls)} />}
         </div>
 
-        <div className="flex gap-0.5">
-          <ViewTabs options={views} active={view} onChange={setView} />
-        </div>
+        {mode === 'chat' && (
+          <div className="flex gap-0.5">
+            <ViewTabs options={views} active={view} onChange={setView} />
+          </div>
+        )}
       </header>
 
+      {mode === 'terminal' ? (
+        <div className="min-h-0 flex-1" data-testid="epic-terminal-pane-wrap">
+          {/* Keyed by sessionId: forces a full unmount/remount when the
+           *  selected Epic changes rather than reusing this instance across
+           *  two different claudeSessionIds (spawnedRef/exited state assume
+           *  a single session's lifetime). */}
+          <EpicTerminalPane key={sessionId} epicId={epicId} cwd={cwd} sessionId={sessionId} onReturnToChat={returnToChat} />
+        </div>
+      ) : (
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-5" data-testid="epic-detail-body">
         {view === 'discussion' && (
           <div className="grid max-w-[900px] gap-4">
@@ -363,6 +436,13 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
                   </div>
                 )
               }
+              if (e.kind === 'response') {
+                return (
+                  <div key={e.id} data-testid="epic-response-event" className="text-center text-[11px] text-fg-faint">
+                    — {e.text} —
+                  </div>
+                )
+              }
               return (
                 <div key={e.id} data-testid="epic-closed-event" className="text-center text-[11px] text-fg-faint">
                   — Epic marked completed —
@@ -401,6 +481,7 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
           </div>
         )}
       </div>
+      )}
     </section>
   )
 }

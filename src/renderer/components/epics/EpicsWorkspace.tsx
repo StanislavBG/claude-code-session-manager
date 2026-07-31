@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePromptSessions } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
 import { useScheduleState } from '../../state/scheduleState'
+import { useEpicTerminal } from '../../state/epicTerminal'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
-import { toast } from '../../state/toast'
 import type { EpicSnapshots } from '../../lib/epicDerive'
 import type { ScheduleJob } from '../../../preload/api'
 import { EpicQueueControls } from './EpicQueueControls'
@@ -81,6 +81,10 @@ export function EpicsWorkspace() {
   const epics = useMemo(() => Object.values(sessions), [sessions])
   const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds }
   const selectedEpic = selectedId ? (sessions[selectedId] ?? null) : null
+  // Terminal mode (PRD 831) replaces the tabs+thread+composer area inside
+  // EpicDetail itself — the composer is this file's sibling, so it must be
+  // hidden here too rather than EpicDetail reaching out to unmount it.
+  const selectedMode = useEpicTerminal((s) => s.modes[selectedId ?? ''] ?? 'chat')
 
   const handleSelect = (id: string) => {
     setShowNewEpic(false)
@@ -95,15 +99,6 @@ export function EpicsWorkspace() {
   const handleCreated = (id: string) => {
     setShowNewEpic(false)
     setSelectedId(id)
-  }
-
-  // Terminal view (in-pane xterm over the Epic's own claudeSessionId) isn't
-  // wired yet — PRD 831 replaces this stub with the Chat <-> Terminal mode
-  // toggle. Routing to a SessionTab instead would orphan the Epic's context
-  // (an Epic IS its claude session, 1:1), so this is a no-op + toast, not a
-  // navigation.
-  const handleOpenRawSession = () => {
-    toast.info('Terminal view lands with PRD 831')
   }
 
   return (
@@ -121,8 +116,10 @@ export function EpicsWorkspace() {
         <NewEpicCard onCreated={handleCreated} onCancel={() => setShowNewEpic(false)} />
       ) : selectedEpic ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <EpicDetail promptSession={selectedEpic} onOpenRawSession={handleOpenRawSession} />
-          {canCompose(selectedEpic) && <EpicComposer epic={selectedEpic} snapshots={snapshots} />}
+          <EpicDetail promptSession={selectedEpic} />
+          {selectedMode === 'chat' && canCompose(selectedEpic) && (
+            <EpicComposer epic={selectedEpic} snapshots={snapshots} />
+          )}
         </div>
       ) : (
         <div className="min-h-0 min-w-0 flex-1">

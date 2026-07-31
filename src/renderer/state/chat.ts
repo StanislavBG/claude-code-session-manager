@@ -5,6 +5,7 @@ import { classifyPromptTicket } from '../lib/promptClassifier'
 import { isDiscussionTag, type TicketTag } from '../lib/ticketDisplay'
 import { useSessions } from './sessions'
 import { usePromptSessions } from './promptSessions'
+import { useEpicTerminal } from './epicTerminal'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -276,6 +277,13 @@ export const useChat = create<ChatState>((set, get) => ({
   send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId, external }) => {
     const trimmed = prompt.trim()
     if (!trimmed) return
+    // PRD 831: Chat and Terminal are two mutually-exclusive views over the
+    // same claude session for an Epic — a live Terminal-mode PTY (keyed by
+    // the same sessionId) must never race a headless chatRunner resume.
+    if (useEpicTerminal.getState().isAttached(tabId)) {
+      toast.error('Terminal mode is active for this Epic — switch back to Chat to send a message.')
+      return
+    }
     const cur = get().chats[tabId] ?? EMPTY
     if (cur.running) {
       // A turn is already in flight (or queued behind one) — queue this

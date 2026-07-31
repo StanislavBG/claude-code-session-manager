@@ -42,6 +42,13 @@ interface LayoutState {
    */
   focusToken: number
   /**
+   * Bumped by `resetLayout` only. Workbench.tsx watches this (skipping the
+   * initial mount value) to imperatively clear the live DockviewApi and
+   * remount the default panel — a store flag is how the CommandPalette
+   * (which has no reference to the live DockviewApi) reaches into Workbench.
+   */
+  resetToken: number
+  /**
    * Register (or focus, if already registered) a panel from an app-driven
    * action (sidebar click, command palette, etc.) — always bumps
    * `focusToken` so Workbench re-mounts/re-activates even for a same-id call.
@@ -53,12 +60,15 @@ interface LayoutState {
    * dockview has already made the panel active, no re-mount is needed.
    */
   focusPanel: (id: string) => void
+  /** Reset the workbench to DEFAULT_LAYOUT (CommandPalette "Reset layout"). */
+  resetLayout: () => void
 }
 
 export const useLayout = create<LayoutState>((set, get) => ({
   panels: DEFAULT_LAYOUT,
   focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
   focusToken: 0,
+  resetToken: 0,
   openPanel: (id: string) => {
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
@@ -68,6 +78,13 @@ export const useLayout = create<LayoutState>((set, get) => ({
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
     set({ focusedPanelId: id })
+  },
+  resetLayout: () => {
+    set((s) => ({
+      resetToken: s.resetToken + 1,
+      focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
+      focusToken: s.focusToken + 1,
+    }))
   },
 }))
 

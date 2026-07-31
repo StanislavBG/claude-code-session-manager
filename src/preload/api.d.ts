@@ -176,6 +176,14 @@ export interface LoadedSessions {
   freshStart?: boolean;
 }
 
+export interface LayoutEnvelope {
+  version: number;
+  /** Panel ids present in `dockview` at save time — pruned against the live registry on hydrate. */
+  panels: string[];
+  /** Opaque dockview `SerializedDockview` blob (from `api.toJSON()`/for `api.fromJSON()`). */
+  dockview: Record<string, unknown>;
+}
+
 export interface UsageWindow {
   utilization: number;
   resets_at: string | null;
@@ -1139,6 +1147,10 @@ export interface SessionManagerAPI {
   sessions: {
     load: () => Promise<LoadedSessions>;
     save: (payload: LoadedSessions) => Promise<{ ok: boolean }>;
+  };
+  layout: {
+    load: () => Promise<LayoutEnvelope | null>;
+    save: (payload: LayoutEnvelope) => Promise<{ ok: boolean }>;
   };
   billing: {
     fetch: () => Promise<BillingFetchResult>;

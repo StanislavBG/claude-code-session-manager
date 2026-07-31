@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useSessions } from '../state/sessions'
 import { useVoice } from '../state/voice'
 import { useTour } from '../state/tour'
+import { useLayout } from '../state/layout'
 import { toast } from '../state/toast'
 
 /**
@@ -159,6 +160,12 @@ export function buildCommands(): Command[] {
     { id: 'devtools', label: 'Toggle DevTools', section: 'config', emitOnly: true, hint: 'F12' },
     { id: 'reload-window', label: 'Reload window', section: 'config', emitOnly: true, hint: 'Ctrl+R' },
     { id: 'tour:start', label: 'Restart guided tour', section: 'config', run: () => useTour.getState().start() },
+    {
+      id: 'layout-reset',
+      label: 'Reset layout',
+      section: 'config',
+      run: () => useLayout.getState().resetLayout(),
+    },
 
     // ── nav ── (NavKey values from AlmanacSidebar.tsx — keep in sync when tabs are added/removed)
     { id: 'nav:overview', label: 'Go to Overview', section: 'nav', emitOnly: true },

@@ -204,6 +204,19 @@ const sessionsPayload = z.object({
   activeTabId: z.string().max(128).nullable(),
 });
 
+// ──────────────────────────────────────────── Workbench layout
+// layout:save envelope — validated at the shape level only (version + panel
+// id list); `dockview` is dockview's own opaque SerializedDockview blob and
+// is intentionally z.unknown() so a dockview library upgrade never fails
+// validation on a shape this schema doesn't know about. Zero-panel layouts
+// are refused here too (defense in depth — the renderer serializer already
+// refuses to call save() with an empty panels list).
+const layoutEnvelope = z.object({
+  version: z.number().int().min(1),
+  panels: z.array(z.string().min(1).max(128)).min(1).max(64),
+  dockview: z.record(z.string(), z.unknown()),
+}).strict();
+
 // ──────────────────────────────────────────── Schedule
 const SCHEDULE_SLUG_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const SCHEDULE_RUN_ID_RE = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -736,6 +749,7 @@ module.exports = {
     configListDir,
     configWatch,
     sessionsPayload,
+    layoutEnvelope,
     scheduleSlug,
     scheduleReadLog,
     scheduleWritePrd,

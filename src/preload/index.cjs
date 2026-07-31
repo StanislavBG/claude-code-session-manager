@@ -132,6 +132,10 @@ contextBridge.exposeInMainWorld('api', {
     load: () => ipcRenderer.invoke('sessions:load'),
     save: (payload) => ipcRenderer.invoke('sessions:save', payload),
   },
+  layout: {
+    load: () => ipcRenderer.invoke('layout:load'),
+    save: (payload) => ipcRenderer.invoke('layout:save', payload),
+  },
   billing: {
     fetch: () => ipcRenderer.invoke('billing:fetch'),
   },

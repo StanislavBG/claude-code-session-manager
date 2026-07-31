@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react'
+import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
 import './workbench.css'
 import { DEFAULT_LAYOUT, getPanelDefinition, useLayout } from '../../state/layout'
@@ -11,20 +11,38 @@ import { PanelFocusProvider } from '../../lib/panelFocus'
 import { TerminalPanelContent } from './TerminalPanelContent'
 import { useVoice } from '../../state/voice'
 import { WORKBENCH_REFIT_EVENT } from '../../lib/workbenchRefit'
+import { buildLayoutEnvelope, parsePersistedLayout } from '../../lib/workbenchLayoutSerialize'
+
+const LAYOUT_SAVE_DEBOUNCE_MS = 500
+const KNOWN_PANEL_IDS = new Set(DEFAULT_LAYOUT.map((p) => p.id))
+
+function persistLayout(dockview: SerializedDockview) {
+  const envelope = buildLayoutEnvelope(dockview)
+  if (!envelope) return // zero-panel layout — refuse to persist it
+  window.api.layout.save(envelope).catch((e) => {
+    console.warn('[Workbench] layout save failed:', e)
+  })
+}
 
 interface PanelParams {
-  node: ReactNode
+  id: string
 }
 
 /**
- * Dockview's component registry is keyed by string and constructed once;
- * screen content changes on every App render. PanelHost reads the current
- * node out of panel `params` instead of being handed it as a normal prop,
- * so Workbench can push updates via `panel.api.updateParameters()` without
- * re-registering components.
+ * Panel `params` must stay JSON-serializable — dockview's `api.toJSON()`
+ * copies them verbatim into the persisted layout, and a live React element
+ * (the old `params.node` shape) has a Fiber backref that throws on
+ * `JSON.stringify`. So params carry only the panel id; PanelHost resolves
+ * the actual screen content at render time from `WorkbenchCtxContext`, which
+ * Workbench keeps current across renders (portalled dockview content still
+ * inherits it — `createPortal` preserves the calling React tree's context).
  */
+const WorkbenchCtxContext = createContext<ScreenRenderCtx | null>(null)
+
 function PanelHost(props: IDockviewPanelProps<PanelParams>) {
-  return <>{props.params.node}</>
+  const ctx = useContext(WorkbenchCtxContext)
+  if (!ctx) return null
+  return <>{screenNode(props.params.id, ctx)}</>
 }
 
 const COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
@@ -69,11 +87,38 @@ type WorkbenchProps = ScreenRenderCtx
  */
 export function Workbench(ctx: WorkbenchProps) {
   const apiRef = useRef<DockviewApi | null>(null)
-  const ctxRef = useRef(ctx)
-  ctxRef.current = ctx
   const focusedPanelId = useLayout((s) => s.focusedPanelId) ?? DEFAULT_PANEL_ID
   const focusToken = useLayout((s) => s.focusToken)
+  const resetToken = useLayout((s) => s.resetToken)
   const isRecording = useVoice((s) => s.isRecording || s.externalRecording)
+
+  // Persisted layout is fetched once, before the workbench's first paint —
+  // `hydrated` gates the `<DockviewReact>` render below so `onReady` never
+  // fires against an empty/default layout that a beat later gets replaced by
+  // the real persisted one (which would be a visible flash + a wasted mount).
+  // The result itself lives in a ref (not state) since `onReady` — a
+  // `useCallback([])` fired exactly once — needs the value at call time, not
+  // whatever it closed over when the callback was first created.
+  const persistedRef = useRef<SerializedDockview | null>(null)
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.layout
+      .load()
+      .then((envelope) => {
+        if (cancelled) return
+        if (envelope) persistedRef.current = parsePersistedLayout(envelope, KNOWN_PANEL_IDS)
+        setHydrated(true)
+      })
+      .catch((e) => {
+        console.warn('[Workbench] layout load failed, using default:', e)
+        if (!cancelled) setHydrated(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Opens (or focuses, if already open) the panel for `id`. Non-terminal
   // panels get fresh content pushed on every focus (mirrors MainPane's old
@@ -93,16 +138,16 @@ export function Workbench(ctx: WorkbenchProps) {
     const definition = getPanelDefinition(id) ?? DEFAULT_LAYOUT[0]
     const existing = api.getPanel(definition.id)
     if (existing) {
-      if (definition.id !== 'terminal') {
-        existing.api.updateParameters({ node: screenNode(definition.id, ctxRef.current) })
-      }
+      // Content updates flow through WorkbenchCtxContext now (PanelHost
+      // re-renders on every ctx change), so there's no params push here —
+      // params only ever hold the id, which never changes for a panel.
       existing.api.setActive()
     } else {
       const panel = api.addPanel<PanelParams>({
         id: definition.id,
         component: definition.component,
         title: definition.title,
-        params: { node: screenNode(definition.id, ctxRef.current) },
+        params: { id: definition.id },
         renderer: 'always',
       })
       // The terminal panel hosts a live xterm (FitAddon); forward its
@@ -120,7 +165,24 @@ export function Workbench(ctx: WorkbenchProps) {
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     apiRef.current = event.api
-    mountPanel(focusedPanelId)
+    const persisted = persistedRef.current
+    if (persisted) {
+      try {
+        event.api.fromJSON(persisted)
+        // The restored layout's active panel may differ from the store's
+        // default `focusedPanelId` — sync it (mirrors an ordinary
+        // dockview-driven activation) so the mount effect below doesn't
+        // immediately `setActive()` back to the default panel.
+        const activeId = event.api.activePanel?.id
+        if (activeId) useLayout.getState().focusPanel(activeId)
+      } catch (e) {
+        console.warn('[Workbench] fromJSON failed, falling back to default layout:', e)
+        event.api.clear()
+        mountPanel(focusedPanelId)
+      }
+    } else {
+      mountPanel(focusedPanelId)
+    }
     // Mirror dockview-initiated activation (tab click, close, drag) back
     // into the store — without this, a dockview-driven change leaves
     // `focusedPanelId` stale and a subsequent app-driven `openPanel` call
@@ -146,6 +208,15 @@ export function Workbench(ctx: WorkbenchProps) {
         mountPanel(DEFAULT_PANEL_ID)
       }
     })
+    // Debounced autosave: any layout change (resize, split, drag, close)
+    // schedules one write ~500ms out, mirroring hydrateSessions' debounced
+    // autosave (sessions.ts). `persistLayout` itself refuses to save a
+    // zero-panel layout.
+    let saveTimer: number | null = null
+    event.api.onDidLayoutChange(() => {
+      if (saveTimer !== null) window.clearTimeout(saveTimer)
+      saveTimer = window.setTimeout(() => persistLayout(event.api.toJSON()), LAYOUT_SAVE_DEBOUNCE_MS)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -154,11 +225,30 @@ export function Workbench(ctx: WorkbenchProps) {
     // Keyed on focusToken (bumped by every openPanel call, even a same-id
     // one) rather than focusedPanelId itself — see layout.ts's focusToken
     // doc for why a same-id `set()` must still re-trigger this. Also re-run
-    // whenever any ctx field the currently-focused screen depends on
-    // changes (e.g. searchMode flipping Files↔Content while 'search' is
-    // already open) — ctxRef always has the latest values regardless.
+    // whenever ctx.searchMode changes (Files↔Content while 'search' is
+    // already open) so a same-id focus token bump isn't required to
+    // activate the panel — content itself refreshes via WorkbenchCtxContext.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusToken, ctx.searchMode, mountPanel])
+
+  // "Reset layout" (CommandPalette) bumps resetToken — the store is how a
+  // component with no reference to the live DockviewApi (CommandPalette)
+  // reaches into Workbench. Skip the initial-mount value so boot doesn't
+  // spuriously clear a just-hydrated layout.
+  const isFirstResetRun = useRef(true)
+  useEffect(() => {
+    if (isFirstResetRun.current) {
+      isFirstResetRun.current = false
+      return
+    }
+    const api = apiRef.current
+    if (!api) return
+    api.clear()
+    persistedRef.current = null
+    mountPanel(DEFAULT_PANEL_ID)
+    persistLayout(api.toJSON())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetToken])
 
   // RecordingStatus toggling shifts the whole app tree by 28px (App.tsx's
   // `pt-7`), which resizes the workbench's actual container without the
@@ -180,5 +270,14 @@ export function Workbench(ctx: WorkbenchProps) {
     [onReady],
   )
 
-  return <DockviewReact {...props} />
+  // Gate the very first paint on hydration so `onReady` never fires against
+  // a default layout that a beat later gets torn down and replaced by the
+  // persisted one — avoids both the visible flash and a wasted mount/unmount.
+  if (!hydrated) return null
+
+  return (
+    <WorkbenchCtxContext.Provider value={ctx}>
+      <DockviewReact {...props} />
+    </WorkbenchCtxContext.Provider>
+  )
 }

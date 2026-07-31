@@ -4,9 +4,10 @@
  * Sections (top to bottom):
  *   1. Hero — "This machine" kicker + live session-slot greeting.
  *   2. Grid — 5h billing window card + Projects card.
- *   3. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
- *      History tab) and shows the 4 most-recent.
- *   4. Scheduler peek — first 3 jobs from useScheduleState.
+ *   3. Active sessions — the machine session-slot pool's ≤3 holders, joined
+ *      against running scheduler jobs / chat runs for context.
+ *   4. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
+ *      History tab) and shows the 5 most-recent.
  *
  * Data sources are all existing zustand stores; nothing new on the backend.
  */
@@ -22,10 +23,14 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
 import { buildHomeProjectRows } from '../../lib/homeProjectRows'
+import { activeSessionRows, recentSessionEpicTitle } from '../../lib/homeSessionRows'
+import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { projectColorFor } from '../../lib/projectColor'
 import { UsageMeters } from './home/UsageMeters'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import type { DirEntry, ScheduleJob } from '../../../preload/api'
+
+const EMPTY_JOBS: ScheduleJob[] = []
 
 
 interface HomeProps {
@@ -35,7 +40,7 @@ interface HomeProps {
   onOpenScheduler?: () => void
 }
 
-export function Home({ onNavigate, onOpenScheduler }: HomeProps) {
+export function Home({ onNavigate }: HomeProps) {
   const greeting = useMemo(() => {
     const h = new Date().getHours()
     if (h < 5)  return 'Up late'
@@ -43,6 +48,8 @@ export function Home({ onNavigate, onOpenScheduler }: HomeProps) {
     if (h < 18) return 'Good afternoon'
     return 'Good evening'
   }, [])
+
+  useHydrateKnownEpics()
 
   return (
     <div className="h-full overflow-auto">
@@ -52,9 +59,8 @@ export function Home({ onNavigate, onOpenScheduler }: HomeProps) {
           <BillingCard />
           <ProjectsCard />
         </div>
-        <SessionsPoolCard />
+        <ActiveSessionsCard onNavigate={onNavigate} />
         <RecentSessionsCard onNavigate={onNavigate} />
-        <SchedulerPeek onNavigate={onNavigate} onOpenScheduler={onOpenScheduler} />
       </div>
     </div>
   )
@@ -173,6 +179,25 @@ function ProjectsCard() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Epic hydration — active + archived PromptSessions for every known cwd, so
+// Active/Recent sessions can resolve Epic titles. Mirrors EpicsWorkspace's
+// knownCwds hydrate loop.
+// ────────────────────────────────────────────────────────────────────
+function useHydrateKnownEpics(): void {
+  const { rows, enriched } = useKnownProjects()
+  const knownCwdsKey = useMemo(
+    () => rows.map((r) => enriched[r.encoded]?.cwd ?? r.displayPath).join('\n'),
+    [rows, enriched],
+  )
+  useEffect(() => {
+    for (const cwd of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
+      void usePromptSessions.getState().hydrate(cwd)
+      void usePromptSessions.getState().hydrateArchived(cwd)
+    }
+  }, [knownCwdsKey])
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Recent sessions
 // ────────────────────────────────────────────────────────────────────
 interface RecentRow {
@@ -222,9 +247,12 @@ function useRecentSessions(limit = 4): { rows: RecentRow[]; loading: boolean } {
   return { rows, loading }
 }
 
+const RECENT_SESSIONS_GRID = '92px minmax(0,1.2fr) minmax(0,1fr) 80px 74px 78px'
+
 function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
-  const { rows, loading } = useRecentSessions(4)
+  const { rows, loading } = useRecentSessions(5)
   const addTab = useSessions((s) => s.addTab)
+  const sessions = usePromptSessions((s) => s.sessions)
   const resume = (r: RecentRow) => {
     const decoded = candidatePath(r.projectEncoded)
     addTab({
@@ -253,33 +281,33 @@ function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
             No sessions yet — hit “Start a session” to begin.
           </div>
         )}
-        {rows.map((r, i) => (
-          <button
-            key={r.path}
-            onClick={() => resume(r)}
-            className="w-full text-left grid items-center gap-4 px-[18px] py-3 hover:bg-bg/40 transition-colors"
-            style={{ gridTemplateColumns: '1.4fr 2fr auto auto', borderTop: i ? '1px solid #d9c9a8' : 'none' }}
-            title={`Resume ${r.sessionId.slice(0, 8)}…`}
-          >
-            <div>
-              <div className="text-[13.5px] font-semibold text-fg truncate">
+        {rows.map((r, i) => {
+          const epicTitle = recentSessionEpicTitle(r.sessionId, sessions)
+          return (
+            <div
+              key={r.path}
+              className="grid items-center gap-3.5 px-[18px] py-[11px]"
+              style={{ gridTemplateColumns: RECENT_SESSIONS_GRID, borderTop: i ? '1px solid #d9c9a8' : 'none' }}
+            >
+              <span className="text-[11.5px] text-fg-faint font-mono truncate">{r.sessionId.slice(0, 8)}</span>
+              <span className="text-[12.5px] font-semibold text-fg truncate" title={r.projectEncoded}>
                 {decodeProject(r.projectEncoded)}
-              </div>
-              <div className="text-[11.5px] text-fg-faint font-mono mt-0.5">
-                {r.sessionId.slice(0, 8)}
-              </div>
+              </span>
+              <span className="text-[12.5px] text-fg-dim truncate">{epicTitle ?? '—'}</span>
+              <span className="text-[11.5px] text-fg-faint font-mono text-right">
+                {Math.round(r.sizeBytes / 1024)}k
+              </span>
+              <span className="text-[11px] text-fg-faint font-mono text-right">{relativeTime(r.mtimeMs)}</span>
+              <button
+                onClick={() => resume(r)}
+                className="justify-self-end text-[12px] font-semibold px-[11px] py-[5px] rounded-lg text-sage bg-[#e5ecd8] hover:brightness-95 transition-[filter]"
+                title={`Resume ${r.sessionId.slice(0, 8)}…`}
+              >
+                resume
+              </button>
             </div>
-            <div className="text-[13.5px] text-fg-dim font-serif italic truncate">
-              {Math.round(r.sizeBytes / 1024)}k transcript
-            </div>
-            <div className="text-[12px] text-fg-faint font-mono text-right whitespace-nowrap">
-              {relativeTime(r.mtimeMs)}
-            </div>
-            <span className="text-[11px] font-semibold px-2 py-[3px] rounded-full text-sage bg-[#e5ecd8]">
-              resume
-            </span>
-          </button>
-        ))}
+          )
+        })}
       </div>
     </section>
   )
@@ -301,19 +329,17 @@ function relativeTime(ms: number): string {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Sessions pool (Session-Manager global guardrails)
+// Active sessions — the machine-wide `claude -p` session-slot pool
+// (lib/sessionSlots.cjs) joined against running scheduler jobs / chat runs.
 // ────────────────────────────────────────────────────────────────────
 
 type SlotSnapshot = { total: number; inUse: number; holders: { owner: string; at: string }[] }
 
-/**
- * SessionsPoolCard — the machine-wide `claude -p` session pool owned by
- * Session-Manager (lib/sessionSlots.cjs). The scheduler and chat lanes both
- * request capacity from this one pool; this widget shows it live, plus the
- * guardrails and a first-run explainer of the TAB → EPIC → PRD model.
- */
-function SessionsPoolCard() {
+function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
+  const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
+  const chats = useChatSignals()
+  const sessions = usePromptSessions((s) => s.sessions)
 
   useEffect(() => {
     let alive = true
@@ -329,94 +355,63 @@ function SessionsPoolCard() {
 
   const total = slots?.total ?? 3
   const inUse = slots?.inUse ?? 0
+  const runningJobs = useMemo(() => jobs.filter((j) => j.status === 'running'), [jobs])
+  const rows = useMemo(
+    () => activeSessionRows(slots?.holders ?? [], runningJobs, chats, sessions),
+    [slots, runningJobs, chats, sessions],
+  )
+
+  const open = (row: ReturnType<typeof activeSessionRows>[number]) => {
+    if (row.openTarget === 'scheduler') { onNavigate?.('scheduler'); return }
+    if (row.openTarget === 'terminal' && row.epicId) {
+      setPendingPromptSessionId(row.epicId)
+      onNavigate?.('terminal')
+    }
+  }
 
   return (
     <section className="mb-6">
-      <div className="flex items-baseline justify-between mb-2">
-        <h2 className="m-0 font-serif text-[19px] font-semibold text-fg">Active sessions</h2>
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="m-0 font-serif text-[22px] font-medium">Active sessions</h2>
         <span className="font-mono text-[12px] text-fg-faint">{inUse} of {total} slots in use</span>
       </div>
-      <div className="border border-line rounded-xl bg-bg-hi px-[18px] py-4">
-        {/* Slot dots */}
-        <div className="flex items-center gap-2 mb-3" aria-label={`${inUse} of ${total} session slots in use`}>
-          {Array.from({ length: total }, (_, i) => (
-            <span
-              key={i}
-              className={`w-3.5 h-3.5 rounded-full border ${
-                i < inUse ? 'bg-accent border-accent' : 'bg-bg border-line'
-              }`}
-            />
-          ))}
-          <span className="ml-2 text-[12.5px] text-fg-dim">
-            {inUse === 0
-              ? 'No headless Claude sessions running.'
-              : slots!.holders.map((h) => h.owner).join(' · ')}
-          </span>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Scheduler peek
-// ────────────────────────────────────────────────────────────────────
-function SchedulerPeek({
-  onNavigate, onOpenScheduler,
-}: {
-  onNavigate?: (k: NavKey) => void
-  onOpenScheduler?: () => void
-}) {
-  const snap = useScheduleState((s) => s.snapshot)
-  const jobs = (snap?.jobs ?? []).slice(0, 3)
-  const openFull = () => {
-    if (onNavigate) { onNavigate('scheduler' as NavKey); return }
-    onOpenScheduler?.()
-  }
-  return (
-    <section>
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="m-0 font-serif text-[22px] font-medium">In the scheduler</h2>
-        <button
-          onClick={openFull}
-          className="text-[13px] text-accent font-medium hover:underline"
-        >
-          Open scheduler →
-        </button>
-      </div>
-      {jobs.length === 0 ? (
-        <div className="bg-bg-hi border border-line rounded-[14px] px-5 py-6 text-[13px] text-fg-faint text-center">
-          No jobs queued. Draft a PRD to schedule one.
-        </div>
+      {rows.length === 0 ? (
+        <div className="text-[13px] text-fg-faint py-1">No headless Claude sessions running.</div>
       ) : (
-        <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-          {jobs.map((j) => <JobCard key={j.slug} job={j} />)}
+        <div className="grid gap-2">
+          {rows.map((row) => (
+            <div
+              key={row.owner}
+              className="bg-bg-hi border border-line rounded-[13px] px-4 py-[13px] grid items-center gap-3.5"
+              style={{ gridTemplateColumns: 'minmax(0,1fr) auto' }}
+            >
+              <span className="min-w-0">
+                <span className="flex items-center gap-2 mb-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+                  <span className="font-mono text-[12.5px] font-semibold text-fg truncate">{row.owner}</span>
+                  <span className="font-mono text-[10.5px] text-fg-faint shrink-0">{row.kind}</span>
+                </span>
+                {(row.project || row.epicTitle) && (
+                  <span className="block text-[12px] text-fg-faint truncate">
+                    {[row.project, row.epicTitle ? `Epic · ${row.epicTitle}` : null].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </span>
+              <span className="flex items-center gap-3.5 shrink-0">
+                <span className="font-mono text-[11px] text-fg-faint">{relativeTime(new Date(row.at).getTime())}</span>
+                {row.openTarget && (
+                  <button
+                    onClick={() => open(row)}
+                    className="border border-line bg-bg rounded-lg px-[11px] py-[5px] text-[12px] font-semibold text-fg-dim hover:bg-bg/60 transition-colors"
+                  >
+                    Open
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </section>
-  )
-}
-
-function JobCard({ job }: { job: ScheduleJob }) {
-  const state = job.status === 'running' ? 'running' : job.status === 'pending' ? 'queued' : job.status
-  const isRunning = state === 'running'
-  const eta = job.estimateMinutes ? `~${job.estimateMinutes} min` : 'queued'
-  return (
-    <div className="bg-bg-hi border border-line rounded-[12px] px-3.5 py-3">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-          isRunning
-            ? 'bg-accent text-white'
-            : 'bg-bg text-fg-dim border border-line'
-        }`}>
-          {state}
-        </span>
-        <span className="text-[11px] text-fg-faint font-mono">{eta}</span>
-      </div>
-      <div className="text-[12.5px] font-semibold text-fg truncate">{job.slug}</div>
-      <div className="text-[12.5px] text-fg-dim font-serif italic mt-0.5 line-clamp-2">
-        “{job.title}”
-      </div>
-    </div>
   )
 }

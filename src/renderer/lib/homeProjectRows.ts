@@ -22,7 +22,7 @@ export interface HomeProjectRow {
   lastActivityMs: number
 }
 
-function projectNameFromCwd(cwd: string): string {
+export function projectNameFromCwd(cwd: string): string {
   const parts = cwd.split('/').filter(Boolean)
   return parts.length > 0 ? parts[parts.length - 1] : cwd
 }

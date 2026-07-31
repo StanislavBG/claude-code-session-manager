@@ -603,6 +603,17 @@ export function TerminalChat({ tabId, cwd }: Props) {
           <div className="text-xs text-fg-dim">
             Chat · headless session — no process runs between commands
           </div>
+          {/* This is the legacy per-tab flow (predates the TAB→EPIC→PRD model) —
+              it is genuinely not scoped to any Epic, so say so plainly rather
+              than let the generic "Chat"/"Type a command" chrome read as if it
+              were. Use the Epics nav for goal-scoped, PRD-chained conversations. */}
+          <div
+            className="rounded-full border border-line px-2 py-0.5 font-mono text-[10.5px] text-fg-faint"
+            title="This session is a standalone tab, not linked to any Epic. Use the Epics nav for goal-scoped conversations."
+            data-testid="terminal-chat-no-epic-badge"
+          >
+            not part of an Epic
+          </div>
           <LearningPanel active="terminal" />
         </div>
         <div className="flex items-stretch gap-2">

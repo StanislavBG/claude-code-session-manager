@@ -23,6 +23,24 @@ const respondedTurnIds = new Map<string, Set<string>>()
 // zustand-selector-stability rule).
 const EMPTY_EVENTS: PromptSessionEvent[] = []
 
+// Deterministic per-Epic identity color, keyed off the Epic's own id (not its
+// goal text, which can be edited/reused) — same palette-hash approach as the
+// project-dot palette in sched-primitives.tsx, kept local since this is the
+// only place an Epic needs a visual identity badge.
+const EPIC_BADGE_PALETTE = ['#b8895a', '#6f9e7a', '#7a8fb8', '#b87a9e', '#8fa63f', '#c2874a']
+function epicBadgeColor(epicId: string): string {
+  let hash = 0
+  for (let i = 0; i < epicId.length; i++) hash = (hash * 31 + epicId.charCodeAt(i)) | 0
+  return EPIC_BADGE_PALETTE[Math.abs(hash) % EPIC_BADGE_PALETTE.length]
+}
+function epicInitial(goalText: string): string {
+  return (goalText.trim()[0] ?? 'E').toUpperCase()
+}
+function truncateGoal(goalText: string, max = 60): string {
+  const t = goalText.trim()
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t
+}
+
 /**
  * Dedicated conversation view for a single PromptSession (PRD 802/803) — a
  * goal-scoped Agent conversation, NOT a top-level SessionTab. Reuses
@@ -130,17 +148,39 @@ export function PromptSessionConversation({ promptSession }: Props) {
     }
   }
 
+  const prdCount = sessionEvents.filter((e) => e.kind === 'prd_created').length
+  const badgeColor = epicBadgeColor(promptSession.id)
+  const projectName = cwd.split('/').filter(Boolean).pop() ?? cwd
+
   return (
     <div className="flex h-full w-full flex-col bg-bg" data-testid="prompt-session-conversation">
-      <div className="flex items-center justify-between border-b border-rule px-4 py-2">
-        <div className="min-w-0">
+      {/* Epic context header — every surface below (agent turns, composer) reads
+          as "this Epic's conversation," never a generic chat, per the domain
+          model: TAB → EPIC → PRD. */}
+      <div className="flex items-center gap-3 border-b border-rule px-4 py-2.5" data-testid="epic-context-header">
+        <div
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-serif text-[13px] font-semibold text-white"
+          style={{ backgroundColor: badgeColor }}
+          title={`Epic ${promptSession.id}`}
+        >
+          {epicInitial(promptSession.goalText)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-mono text-[10.5px] uppercase tracking-wide text-fg-faint">
+            {projectName} · Epic
+          </div>
           <div className="font-serif text-base text-fg truncate" title={promptSession.goalText}>
             {promptSession.goalText}
           </div>
-          <div className="truncate font-mono text-[11px] text-fg-dim" title={cwd}>
-            {cwd}
-          </div>
         </div>
+        {prdCount > 0 && (
+          <span
+            className="shrink-0 rounded-full border border-line px-2 py-0.5 font-mono text-[11px] text-fg-dim"
+            title={`${prdCount} PRD(s) dispatched from this Epic`}
+          >
+            {prdCount} PRD{prdCount === 1 ? '' : 's'} dispatched
+          </span>
+        )}
       </div>
 
       <div
@@ -157,18 +197,43 @@ export function PromptSessionConversation({ promptSession }: Props) {
           if (item.kind === 'turn') {
             const t = item.turn
             const i = turns.indexOf(t)
+            const body = (
+              <Turn
+                turn={t}
+                cwd={cwd}
+                tabId={chatKey}
+                runActive={running && t.role === 'assistant' && i === turns.length - 1}
+                consentActionDisabled={running}
+                enableRawSessionActions={false}
+                linkTarget="browser"
+                inlineFilePreview
+              />
+            )
+            // Agent replies carry the Epic's own identity badge — never a
+            // generic assistant avatar — so it's unmistakable which Epic's
+            // conversation produced this response.
+            if (t.role !== 'assistant') {
+              return (
+                <div key={t.id} id={`prompt-session-turn-${t.id}`} className="rounded-[14px]">
+                  {body}
+                </div>
+              )
+            }
             return (
-              <div key={t.id} id={`prompt-session-turn-${t.id}`} className="rounded-[14px]">
-                <Turn
-                  turn={t}
-                  cwd={cwd}
-                  tabId={chatKey}
-                  runActive={running && t.role === 'assistant' && i === turns.length - 1}
-                  consentActionDisabled={running}
-                  enableRawSessionActions={false}
-                  linkTarget="browser"
-                  inlineFilePreview
-                />
+              <div
+                key={t.id}
+                id={`prompt-session-turn-${t.id}`}
+                className="flex items-start gap-2 rounded-[14px]"
+                data-testid="epic-assistant-turn"
+              >
+                <div
+                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
+                  style={{ backgroundColor: badgeColor }}
+                  title={`Response in "${promptSession.goalText}"`}
+                >
+                  {epicInitial(promptSession.goalText)}
+                </div>
+                <div className="min-w-0 flex-1">{body}</div>
               </div>
             )
           }
@@ -218,6 +283,14 @@ export function PromptSessionConversation({ promptSession }: Props) {
       </div>
 
       <div className="border-t border-rule p-3">
+        <div className="mb-1.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint" data-testid="epic-composer-label">
+          <span
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: badgeColor }}
+            aria-hidden="true"
+          />
+          Message this Epic: "{truncateGoal(promptSession.goalText)}"
+        </div>
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
@@ -227,8 +300,10 @@ export function PromptSessionConversation({ promptSession }: Props) {
             rows={2}
             placeholder={
               running
-                ? 'Running… send to queue a follow-up prompt'
-                : 'Type a message (Enter to send, Shift+Enter for newline)'
+                ? 'Running… send to queue a follow-up prompt for this Epic'
+                : composerTag === 'discussion'
+                  ? 'Discuss with this Epic (Enter to send, Shift+Enter for newline)'
+                  : `Describe the work to dispatch as a PRD under this Epic (Enter to send)`
             }
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />

@@ -145,3 +145,15 @@ not an obvious yes.
 
 **Not asked for:** any change that resolves this by pushing the user to the raw terminal
 session. Chat mode is the surface that needs to work here.
+
+## RESOLUTION
+
+**Asks 1-3 queued as `812-chat-kill-ceiling-budget-disclosure-and-actionable-kill`** (this repo's
+own `session-manager-operations/scheduler/prds/`, ~30 min, sub-tasked AC per ask) — interpolates
+the real `KILL_CEILING_MS` budget into `CHAT_MODE_TRUTH_INSTRUCTION`, adds an 80%-elapsed
+`chat:run:notice` warning before the hard kill, and extends the `chat:run:error` payload with
+elapsed time/ceiling/last tool-uses so a resumed turn can verify before repeating a potentially
+irreversible operation. **Ask 4 (configurable ceiling) declined for now** — the filer explicitly
+flagged it as a genuine open design tradeoff ("bilko's call, not an obvious yes") rather than
+something to guess at during triage; left for a deliberate decision later, same pattern as prior
+deferred-design-question items in this log (`2026-06-27-01`, `2026-07-21-agent-persona-registry-and-sync`).

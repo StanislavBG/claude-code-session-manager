@@ -65,7 +65,7 @@ interface LayoutState {
 }
 
 export const useLayout = create<LayoutState>((set, get) => ({
-  panels: DEFAULT_LAYOUT,
+  panels: [...DEFAULT_LAYOUT],
   focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
   focusToken: 0,
   resetToken: 0,
@@ -89,7 +89,7 @@ export const useLayout = create<LayoutState>((set, get) => ({
 }))
 
 export function getPanelDefinition(id: string): PanelDefinition | undefined {
-  return DEFAULT_LAYOUT.find((p) => p.id === id)
+  return useLayout.getState().panels.find((p) => p.id === id)
 }
 
 /** True when `panelId` is the workbench's currently active panel. */

@@ -44,6 +44,14 @@
   --dv-border-radius: 0px;
   --dv-tab-border-radius: 0px;
 
+  --dv-sash-color: #e0d3b8; /* line */
+  --dv-active-sash-color: #b85c34; /* accent */
+
+  --dv-tab-font-size: 12px;
+  --dv-tab-margin: 0px;
+  --dv-tab-close-icon-size: 14px;
+  --dv-floating-group-border: 1px solid #e0d3b8; /* line */
+
   /*
    * Z-order ladder (app-wide fixed UI, highest to lowest):
    *   z-[60] RecordingStatus > z-[55] Toast > z-50 Modal/CommandPalette

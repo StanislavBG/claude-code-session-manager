@@ -102,6 +102,18 @@ export function Workbench(ctx: WorkbenchProps) {
   const persistedRef = useRef<SerializedDockview | null>(null)
   const [hydrated, setHydrated] = useState(false)
 
+  // onReady is a useCallback([]) fired exactly once (dockview's own effect
+  // ordering), so it can't close over `focusedPanelId` directly — that would
+  // freeze it at whatever the store held on first render. Mirror it into a
+  // ref that's kept current every render so onReady always reads the latest
+  // value at the moment dockview actually calls back.
+  const focusedPanelIdRef = useRef(focusedPanelId)
+  focusedPanelIdRef.current = focusedPanelId
+
+  // Holds the disposable returned by dockview's onDidRemovePanel subscription
+  // so it can be torn down on unmount (see the cleanup effect below).
+  const removePanelDisposableRef = useRef<{ dispose: () => void } | null>(null)
+
   useEffect(() => {
     let cancelled = false
     window.api.layout
@@ -178,10 +190,10 @@ export function Workbench(ctx: WorkbenchProps) {
       } catch (e) {
         console.warn('[Workbench] fromJSON failed, falling back to default layout:', e)
         event.api.clear()
-        mountPanel(focusedPanelId)
+        mountPanel(focusedPanelIdRef.current)
       }
     } else {
-      mountPanel(focusedPanelId)
+      mountPanel(focusedPanelIdRef.current)
     }
     // Mirror dockview-initiated activation (tab click, close, drag) back
     // into the store — without this, a dockview-driven change leaves
@@ -190,7 +202,7 @@ export function Workbench(ctx: WorkbenchProps) {
     event.api.onDidActivePanelChange((panel) => {
       if (panel) useLayout.getState().focusPanel(panel.id)
     })
-    event.api.onDidRemovePanel((panel) => {
+    removePanelDisposableRef.current = event.api.onDidRemovePanel((panel) => {
       // The terminal panel is one persistent PTY-backed session, not a
       // closable document — treat its × as "hide", not "close": reopen it
       // immediately so TerminalStage remounts (PTY reattach is idempotent;
@@ -218,6 +230,14 @@ export function Workbench(ctx: WorkbenchProps) {
       saveTimer = window.setTimeout(() => persistLayout(event.api.toJSON()), LAYOUT_SAVE_DEBOUNCE_MS)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Dispose the onDidRemovePanel subscription registered in onReady when
+  // Workbench unmounts — it otherwise outlives the component and leaks.
+  useEffect(() => {
+    return () => {
+      removePanelDisposableRef.current?.dispose()
+    }
   }, [])
 
   useEffect(() => {

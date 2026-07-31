@@ -1,7 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useLayout, DEFAULT_LAYOUT, getPanelDefinition } from '../layout'
 import { SCREEN_KEYS } from '../../lib/screenKeys'
 import { buildCommands } from '../../components/CommandPalette'
+
+// react-force-graph-2d (pulled in transitively via screenComponents ->
+// Plugins -> SkillReferenceGraph) touches `window` at module-import time,
+// which the 'node' vitest environment this file runs under doesn't provide.
+// Stub it — this test only needs renderScreenComponent's return value to be
+// non-null, not a real force-graph render.
+vi.mock('react-force-graph-2d', () => ({ default: () => null }))
+
+const { renderScreenComponent } = await import('../../components/screenComponents')
 
 /**
  * layout.ts is the panel registry backing the dockview workbench (link 1 of
@@ -132,6 +141,15 @@ describe('layout.ts panel-focus predicate (backs usePanelFocus)', () => {
     useLayout.getState().focusPanel('editor')
     expect(isFocused('skills')).toBe(false)
     expect(isFocused('editor')).toBe(true)
+  })
+})
+
+describe('screenComponents.renderScreenComponent covers every non-terminal SCREEN_KEY', () => {
+  it('renders a non-null result for every SCREEN_KEY except terminal', () => {
+    for (const key of SCREEN_KEYS) {
+      if (key === 'terminal') continue
+      expect(renderScreenComponent(key, {}), `renderScreenComponent(${key}) returned null`).not.toBeNull()
+    }
   })
 })
 

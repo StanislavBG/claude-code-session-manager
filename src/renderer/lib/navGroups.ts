@@ -26,13 +26,13 @@ export const NAV_ITEMS: NavGroupItem[] = [
   // Workspace
   { key: 'overview',   group: 'Workspace', label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
   { key: 'terminal',   group: 'Workspace', label: 'Projects',   icon: 'terminal',     hint: 'Independent goal-scoped sessions, grouped by project' },
-  { key: 'system-prompt', group: 'Workspace', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior' },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences' },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
   { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
 
   // Configure
+  { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior' },
   { key: 'skills',        group: 'Configure', label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads' },
   { key: 'plugins',       group: 'Configure', label: 'Plugins',        icon: 'plugins',        hint: 'Extensions for Claude Code' },
   { key: 'mcp',            group: 'Configure', label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations' },

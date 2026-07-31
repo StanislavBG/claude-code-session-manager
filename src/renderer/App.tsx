@@ -60,6 +60,11 @@ export function App() {
   // Every NavKey routes through the layout store. Used by CommandPalette
   // nav:* entries, AlmanacSidebar, and the Cmd-P / Cmd-Shift-F shortcuts.
   const navigate = useCallback((k: NavKey) => {
+    // The Epics destination ('terminal') is the EpicsWorkspace, which
+    // TerminalStage only shows when no SessionTab is active — deselect the
+    // active tab on explicit nav so persisted dormant tabs can't mask the
+    // workspace. Tab views stay reachable via the TabBar / Open raw session.
+    if (k === 'terminal') useSessions.setState({ activeTabId: null })
     useLayout.getState().openPanel(k)
   }, [])
 

@@ -49,6 +49,7 @@ const RAIL_BREAKPOINT = 1180
 
 const NAV_LABELS: Record<NavKey, string> = {
   overview: 'Overview',
+  'project-home': 'Home',
   terminal: 'Epics',
   browser: 'Browser',
   'system-prompt': 'System Prompt',

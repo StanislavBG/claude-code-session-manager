@@ -14,6 +14,7 @@ import { NAV_ITEMS } from './navGroups'
 export const SCREEN_KEYS: NavKey[] = [
   // Workspace
   'overview',
+  'project-home',
   'terminal',
   'browser',
   'scheduler',

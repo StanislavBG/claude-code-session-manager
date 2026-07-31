@@ -9,7 +9,9 @@ import type { AlmanacIconName } from '../components/layout/AlmanacIcon'
  * disagree.
  *
  * `NavKey`s that render their own chrome and have no sidebar row (overview,
- * terminal, browser, projects, editor) are intentionally absent.
+ * terminal, browser, projects, editor) are intentionally absent. `overview`
+ * (the machine-wide Home) is reached only via the fixed TabBar home chip, not
+ * a sidebar row — `project-home` (the per-project Brief) took its row.
  */
 export type NavGroupLabel = 'Workspace' | 'Configure' | 'Tools'
 
@@ -24,7 +26,7 @@ export interface NavGroupItem {
 
 export const NAV_ITEMS: NavGroupItem[] = [
   // Workspace
-  { key: 'overview',   group: 'Workspace', label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
+  { key: 'project-home', group: 'Workspace', label: 'Home',     icon: 'home',         hint: 'What this project is, and what is in flight' },
   { key: 'terminal',   group: 'Workspace', label: 'Epics',      icon: 'terminal',     hint: 'Independent goal-scoped Epics, grouped by project' },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences' },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },

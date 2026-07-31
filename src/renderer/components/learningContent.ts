@@ -22,6 +22,19 @@ export interface LearningContent {
 }
 
 export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
+  'project-home': {
+    headline: 'The Brief — what this project is, and what is in flight',
+    intro:
+      'Home for a project tab is a synthesized brief: what the project is for, how it is structured, and what is currently in flight across its Epics. Content is scaffolded for now — the synthesis pipeline lands in a later update.',
+    sections: [
+      {
+        title: 'What you see',
+        items: [
+          { body: 'A header naming the active project, resolved from the active tab\'s working directory.' },
+        ],
+      },
+    ],
+  },
   'overview': {
       headline: 'Your home base — a calm landing page for your local Claude Code cockpit',
       intro:

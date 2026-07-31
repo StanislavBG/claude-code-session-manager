@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { NavKey } from './LeftNav'
 import { Home } from './tabs/Home'
+import { ProjectHome } from './tabs/projecthome/ProjectHome'
 import { Skills } from './tabs/Skills'
 import { History } from './tabs/History'
 import { EditorView } from './tabs/EditorView'
@@ -84,6 +85,8 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
           onOpenScheduler={ctx.onOpenScheduler}
         />
       )
+    case 'project-home':
+      return <ProjectHome />
     case 'editor':
       return <EditorView />
     case 'projects':

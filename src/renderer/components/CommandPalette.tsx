@@ -168,7 +168,8 @@ export function buildCommands(): Command[] {
     },
 
     // ── nav ── (NavKey values from AlmanacSidebar.tsx — keep in sync when tabs are added/removed)
-    { id: 'nav:overview', label: 'Go to Overview', section: 'nav', emitOnly: true },
+    { id: 'nav:overview', label: 'Home — this machine', section: 'nav', emitOnly: true },
+    { id: 'nav:project-home', label: 'Go to Home', section: 'nav', emitOnly: true },
     { id: 'nav:terminal', label: 'Go to Terminal', section: 'nav', emitOnly: true },
     { id: 'nav:browser', label: 'Go to Browser', section: 'nav', emitOnly: true },
     { id: 'nav:settings', label: 'Go to Settings', section: 'nav', emitOnly: true },

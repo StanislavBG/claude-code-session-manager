@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { useWatchers } from '../state/watchers'
 import { useBrowserState } from '../state/browser'
+import { useLayout } from '../state/layout'
+import { AlmanacIcon } from './layout/AlmanacIcon'
 import { useTabDragReorder } from './useTabDragReorder'
 
 const ACTIVITY_WINDOW_MS = 30_000
@@ -24,6 +26,9 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
   const watchersById = useWatchers((s) => s.watchers)
   const hasBrowserTabs = useBrowserState((s) => s.tabs.length > 0)
   const canSplitView = activeTabId != null && hasBrowserTabs
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const openPanel = useLayout((s) => s.openPanel)
+  const machineHomeActive = focusedPanelId === 'overview'
 
   // Re-render the badge layer once a second so the 30s activity window can
   // expire on its own — lastLineAt itself doesn't change when no new line
@@ -61,6 +66,21 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
       className="h-11 bg-bg-elev border-b border-line flex items-end px-3 gap-0 shrink-0 relative"
       data-testid="tour-tabbar"
     >
+      <button
+        onClick={() => openPanel('overview')}
+        title="This machine — home"
+        aria-current={machineHomeActive ? 'true' : undefined}
+        data-testid="tabbar-machine-home"
+        className={`flex items-center gap-2 px-3.5 pt-1.5 pb-2 rounded-t-[10px] text-[13px] shrink-0 transition-colors ${
+          machineHomeActive
+            ? 'bg-bg text-fg font-medium relative z-10 -mb-px shadow-[inset_0_2px_0_theme(colors.accent.DEFAULT)]'
+            : 'text-fg-dim hover:text-fg hover:bg-bg-hi/40'
+        }`}
+      >
+        <AlmanacIcon name="home" className="w-[15px] h-[15px]" />
+        <span>Home</span>
+      </button>
+      <span className="w-px self-stretch my-1.5 bg-line" />
       <div
         ref={containerRef}
         className={`flex items-end gap-0.5 overflow-x-auto min-w-0 flex-1 select-none ${isDragging ? 'cursor-grabbing' : ''}`}

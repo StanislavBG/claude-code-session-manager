@@ -12,6 +12,7 @@
  */
 export type NavKey =
   | 'overview'
+  | 'project-home'
   | 'terminal'
   | 'browser'
   | 'system-prompt'

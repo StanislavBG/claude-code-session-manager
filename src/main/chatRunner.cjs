@@ -54,6 +54,7 @@ const { recordExchange } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
+const sessionSlots = require('./lib/sessionSlots.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -387,6 +388,12 @@ function run(opts) {
 // the remainder. O(n) over the waiting list (bounded by open tabs).
 function pump() {
   while (activeCount < getConcurrencyCap() && waiting.length > 0) {
+    // The chat lane cap is a POLICY bound; actual capacity comes from the
+    // Session-Manager-wide slot pool shared with the scheduler
+    // (lib/sessionSlots.cjs). No slot → everyone keeps waiting; the next
+    // settle() in either subsystem re-pumps.
+    const slotToken = sessionSlots.acquire(`chat:${waiting[0].tabId}`);
+    if (!slotToken) break;
     const job = waiting.shift();
     activeCount += 1;
     Promise.resolve()
@@ -397,7 +404,7 @@ function pump() {
         return donePromise;
       })
       .catch(() => { /* executeRun never rejects; defensive */ })
-      .finally(() => { activeCount -= 1; pump(); });
+      .finally(() => { sessionSlots.release(slotToken); activeCount -= 1; pump(); });
   }
   // Anyone still waiting gets a 1-based position update. Silent (automated
   // probe) runs must stay invisible to the renderer, same as every other
@@ -408,6 +415,9 @@ function pump() {
     broadcast('chat:run:queued', { tabId: w.tabId, sessionId: w.sessionId, position: i + 1 });
   });
 }
+
+// A slot freed anywhere (e.g. a scheduler job settled) may unblock our lane.
+sessionSlots.subscribe(() => { try { pump(); } catch { /* defensive */ } });
 
 // ─── Core runner ──────────────────────────────────────────────────────────
 

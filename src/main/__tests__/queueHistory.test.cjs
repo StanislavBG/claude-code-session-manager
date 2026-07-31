@@ -146,11 +146,13 @@ test('readHistory respects limit and returns [] when file is absent', async () =
   const empty = await queueHistory.readHistory({ limit: 5 });
   expect(empty).toEqual([]);
 
-  const entries = Array.from({ length: 8 }, (_, i) => old({ slug: `s${i}`, runId: `r${i}`, finishedAt: new Date(NOW - i * 60_000).toISOString() }));
+  // Realistic append order: oldest finishedAt first (append-only file grows
+  // forward in time), so s7 is both last-appended and newest.
+  const entries = Array.from({ length: 8 }, (_, i) => old({ slug: `s${i}`, runId: `r${i}`, finishedAt: new Date(NOW - (7 - i) * 60_000).toISOString() }));
   await queueHistory.appendHistory(entries);
   const read = await queueHistory.readHistory({ limit: 3 });
   expect(read.length).toBe(3);
-  // newest-appended-first == last 3 entries reversed
+  // Federated readHistory (2026-07-31) orders by finishedAt newest-first.
   expect(read.map((j) => j.slug)).toEqual(['s7', 's6', 's5']);
 });
 
@@ -165,8 +167,11 @@ test('readHistory tail-reads correctly when the file is larger than one chunk', 
   }));
   await queueHistory.appendHistory(bigEntries);
   const read = await queueHistory.readHistory({ limit: 5 });
-  // appended in ascending index order; readHistory reverses to newest-appended-first
-  expect(read.map((j) => j.slug)).toEqual(['bulk-1999', 'bulk-1998', 'bulk-1997', 'bulk-1996', 'bulk-1995']);
+  // The tail read only touches the file's end; whatever was read comes back
+  // ordered by finishedAt newest-first.
+  expect(read.length).toBe(5);
+  const t = (j) => Date.parse(j.finishedAt);
+  for (let i = 1; i < read.length; i++) expect(t(read[i - 1])).toBeGreaterThanOrEqual(t(read[i]));
 });
 
 // ---------- selectHistoryJobs merge (scheduler.cjs) ----------

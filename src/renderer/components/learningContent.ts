@@ -596,4 +596,29 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'Revoke a single device from the Paired Devices list, or hit Panic / "Revoke all" to tear down every session and invalidate all device tokens at once if you suspect compromise.',
       ],
     },
+  'sm-config': {
+      headline: 'Session-Manager configuration — the global layer',
+      intro: 'Everything project-scoped lives inside that project\'s session-manager-operations/ folder; this page holds the small set of things that are global by nature: the machine-wide session pool, its guardrails, and the scheduler\'s runtime policy.',
+      sections: [
+        {
+          title: 'The session pool',
+          items: [
+            { term: 'One pool, every consumer', body: 'Session-Manager owns a machine-wide pool of concurrent Claude sessions (3 by default). Scheduler jobs and Epic chat runs each request a slot before launching and release it when they finish — no subsystem has a private cap that can stack with another\'s.' },
+            { term: 'Guardrails', body: 'Beyond the slot cap, a memory gate defers new jobs when free RAM drops below a per-job budget, and each job gets an OOM-score bias so the kernel prefers killing a restartable job over the app itself.' },
+          ],
+        },
+        {
+          title: 'How work flows',
+          items: [
+            { term: 'Tab = project', body: 'A tab is anchored to one folder — that folder IS the project. All of its operational state lives under session-manager-operations/ inside it.' },
+            { term: 'Epic = one goal', body: 'Inside a project, work is organized into Epics: small goals, each with its own conversation and a 1:1 Claude session.' },
+            { term: 'PRD = one job', body: 'An Epic dispatches PRDs — self-contained work orders the scheduler runs headlessly when a session slot and token budget are available.' },
+          ],
+        },
+      ],
+      tips: [
+        'The Scheduler tab shows the active project by default — flip to "All projects" for the machine-wide view.',
+        'SM_SESSION_SLOTS (1–3) overrides the pool size for one launch; the default is sized to keep three 1 GB+ jobs from starving the app.',
+      ],
+    },
 }

@@ -42,6 +42,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'permissions',    group: 'Configure', label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules' },
   { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window' },
   { key: 'remote',         group: 'Configure', label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default' },
+  { key: 'sm-config',      group: 'Configure', label: 'Session-Manager', icon: 'settings',      hint: 'Global session pool, guardrails, scheduler policy' },
 
   // Tools
   { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk' },

@@ -450,9 +450,12 @@ ipcMain.handle('app:home-self-check', () => bootHomeSelfCheck);
 ipcMain.handle('app:pick-directory', async () => {
   console.log('[main] pick-directory invoked');
   const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory'],
+    // createDirectory enables the picker's "New Folder" affordance (macOS;
+    // the GTK chooser has its own) — this is the "Start Project" path:
+    // create a fresh folder in place, open it as the project's TAB.
+    properties: ['openDirectory', 'createDirectory'],
     defaultPath: os.homedir(),
-    title: 'Choose project directory for new session',
+    title: 'Open a project folder — or create a new one to start a project',
   });
   console.log('[main] pick-directory result:', result);
   if (result.canceled || result.filePaths.length === 0) return null;

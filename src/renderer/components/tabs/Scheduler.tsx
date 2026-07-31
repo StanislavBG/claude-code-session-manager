@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSessions } from '../../state/sessions'
 import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
 import { SchedulePanel } from '../SchedulePanel'
 import { SchedulerPrdsView } from './plans/SchedulerPrdsView'
@@ -168,15 +169,31 @@ function WindowStrip() {
 
 // ─── Scheduler shell ─────────────────────────────────────────────────────────
 
+const LS_SCOPE_KEY = 'sm.schedulerTab.scope'
+
 export function Scheduler() {
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
     return (stored === 'prds' || stored === 'history') ? stored : 'queue'
   })
+  // Scheduler is a BROWSER over TAB → EPIC → PRD (CLAUDE.md domain model):
+  // default to the active tab's project. "All projects" stays as an explicit
+  // machine-wide escape hatch.
+  const [scope, setScope] = useState<'project' | 'all'>(() =>
+    localStorage.getItem(LS_SCOPE_KEY) === 'all' ? 'all' : 'project',
+  )
+  const tabs = useSessions((s) => s.tabs)
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
+  const scopeCwd = scope === 'project' ? activeCwd : null
 
   useEffect(() => {
     localStorage.setItem(LS_KEY, subView)
   }, [subView])
+
+  useEffect(() => {
+    localStorage.setItem(LS_SCOPE_KEY, scope)
+  }, [scope])
 
   return (
     <div className="h-full flex flex-col">
@@ -204,6 +221,32 @@ export function Scheduler() {
 
         <div className="flex items-center gap-3 pb-0">
           <SchedulerSubTabs options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
+          {/* Project scope toggle — Scheduler browses the active TAB's project by default */}
+          <div className="ml-auto flex items-center gap-1 text-[12px]" role="group" aria-label="Scheduler scope">
+            <button
+              type="button"
+              onClick={() => setScope('project')}
+              className={`px-2.5 py-1 rounded-full border transition-colors ${
+                scope === 'project'
+                  ? 'border-accent/60 bg-accent/10 text-fg font-medium'
+                  : 'border-line text-fg-faint hover:text-fg-dim'
+              }`}
+              title={activeCwd ? `Only ${activeCwd}` : 'No active tab — showing all projects'}
+            >
+              This project
+            </button>
+            <button
+              type="button"
+              onClick={() => setScope('all')}
+              className={`px-2.5 py-1 rounded-full border transition-colors ${
+                scope === 'all'
+                  ? 'border-accent/60 bg-accent/10 text-fg font-medium'
+                  : 'border-line text-fg-faint hover:text-fg-dim'
+              }`}
+            >
+              All projects
+            </button>
+          </div>
         </div>
 
         {subView === 'queue' && (
@@ -220,9 +263,9 @@ export function Scheduler() {
 
       {/* ── Content ──────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0">
-        {subView === 'queue' && <SchedulePanel />}
-        {subView === 'prds' && <SchedulerPrdsView />}
-        {subView === 'history' && <SchedulerHistoryView />}
+        {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} />}
+        {subView === 'prds' && <SchedulerPrdsView scopeCwd={scopeCwd} />}
+        {subView === 'history' && <SchedulerHistoryView scopeCwd={scopeCwd} />}
       </div>
     </div>
   )

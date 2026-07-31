@@ -52,7 +52,7 @@ function TBtn({
   )
 }
 
-export function SchedulerPrdsView() {
+export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | null }) {
   const [prds, setPrds] = useState<PrdMeta[]>([])
   const [queueState, setQueueState] = useState<ScheduleStateSnapshot | null>(null)
   // `selectedSlug` is the PRD currently open in the editor pane below (null =
@@ -103,8 +103,10 @@ export function SchedulerPrdsView() {
   // edited ones, which matches "latest" better than slug order (slugs lead
   // with the parallel group prefix, not creation order).
   const sortedPrds = useMemo(
-    () => [...prds].sort((a, b) => b.mtimeMs - a.mtimeMs || a.slug.localeCompare(b.slug)),
-    [prds],
+    () => [...prds]
+      .filter((p) => !scopeCwd || p.cwd === scopeCwd)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs || a.slug.localeCompare(b.slug)),
+    [prds, scopeCwd],
   )
 
   // Cross-tab deep link: TerminalChat's queue panel (PRD 750) navigates here

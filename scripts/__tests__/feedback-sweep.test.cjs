@@ -420,12 +420,13 @@ test('sweep() returns correct summary counts', () => {
   }
 });
 
-// ── default prdsDir: no override → writes into the project's own PRD dir ────
-// Regression guard for the 812 split-brain incident: the sweep writer and the
-// scheduler reader (prdPathForJob → resolvePrdWriteDir) must agree on where a
-// PRD source lives when no explicit prdsDir override is passed.
+// ── default prdsDir: no override → writes into an auto-minted Epic's dir ────
+// Domain model (CLAUDE.md): every PRD belongs to an Epic. With no explicit
+// prdsDir the sweep joins the project's standing "Inbound feedback processing"
+// Epic under session-manager-operations/scheduler/epics/<id>/prds/ and
+// registers that Epic in prompt-sessions/active-index.json.
 
-test('emitFeedbackPRD with no prdsDir override writes to <cwd>/session-manager-operations/scheduler/prds/', () => {
+test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic prds dir', () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -439,10 +440,26 @@ test('emitFeedbackPRD with no prdsDir override writes to <cwd>/session-manager-o
     const result = emitFeedbackPRD(projectDir, { queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, true, 'PRD should be emitted');
 
-    const expectedDir = resolvePrdWriteDir(projectDir);
-    assert.equal(path.dirname(result.prdPath), expectedDir,
-      'PRD must land in the project\'s own PRD dir when prdsDir is unset');
+    const epicsRoot = path.join(projectDir, 'session-manager-operations', 'scheduler', 'epics');
+    const dir = path.dirname(result.prdPath);
+    assert.ok(dir.startsWith(epicsRoot + path.sep), 'PRD must land under scheduler/epics/<id>/prds');
+    assert.ok(dir.endsWith(`${path.sep}prds`), 'PRD dir must be the Epic\'s prds/ subdir');
     assert.ok(fs.existsSync(result.prdPath), 'PRD file must actually exist at the resolved path');
+
+    // The Epic must be registered where the renderer's Epics nav reads.
+    const index = JSON.parse(fs.readFileSync(
+      path.join(projectDir, 'session-manager-operations', 'prompt-sessions', 'active-index.json'), 'utf8'));
+    const epicId = path.basename(path.dirname(dir));
+    assert.ok(index.sessions[epicId], 'auto-minted Epic must be in active-index.json');
+    assert.equal(index.sessions[epicId].status, 'active');
+    const events = index.events[epicId];
+    assert.equal(events[0].kind, 'prompt');
+    assert.equal(events[events.length - 1].kind, 'prd_created', 'dispatch must be traced as prd_created');
+
+    // A second sweep with new feedback joins the SAME Epic (reuseByGoal),
+    // not a sibling — but this tick dedups on the open feedback PRD, so just
+    // assert the standing Epic count stayed at one.
+    assert.equal(Object.keys(index.sessions).length, 1);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

@@ -85,8 +85,13 @@ const queueOps = require('./queueOps.cjs');
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
 const { sweep: sweepFeedback } = require('../../scripts/lib/watchdogHelpers.cjs');
-const { resolvePrdsDirs, resolvePrdWriteDir } = require('./lib/prdLocations.cjs');
-const { migratePrds } = require('./lib/prdMigration.cjs');
+const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
+const { ensureEpic, appendPrdCreatedEvent } = require('./lib/epicMint.cjs');
+const sessionSlots = require('./lib/sessionSlots.cjs');
+const queueStore = require('./lib/queueStore.cjs');
+const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
+const { migratePrds, consolidateFlatPrds } = require('./lib/prdMigration.cjs');
+const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
 // Captured once at module load so every run's meta sidecar can record how
 // stale the running process is relative to on-disk source (incident: PRD
@@ -650,6 +655,29 @@ async function runPrdMigration() {
       console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
     }
   }
+
+  // Phase 2 (2026-07-31 domain-model decision): the flat per-project
+  // `scheduler/prds/` dir is retired — new PRDs are epic-scoped, and anything
+  // still sitting flat consolidates into `prds-archived/` for later special
+  // processing. Queue rows for moved files are reaped by the archived-twin
+  // retirement. Idempotent per project; failures are logged, never fatal.
+  for (const cwd of allProjectCwds()) {
+    try {
+      const c = await consolidateFlatPrds(cwd);
+      if (c.moved > 0) {
+        console.log(`[scheduler] flat-PRD consolidation: archived ${c.moved} file(s) in ${cwd}`);
+      }
+      for (const f of c.failed) {
+        logs.writeLine({
+          level: 'warn', scope: 'scheduler',
+          message: `flat-PRD consolidation: could not archive ${f.file}`,
+          meta: { cwd, reason: f.reason },
+        });
+      }
+    } catch (e) {
+      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'flat-PRD consolidation failed', meta: { cwd, error: e?.message } });
+    }
+  }
   return result;
 }
 
@@ -765,74 +793,62 @@ function appendHeartbeat(entry) {
 // So: a MISSING file is a legitimately empty queue (first boot). A file that
 // exists but won't read or parse is `unreadable` — a poison state that must
 // never reach reconcile() or writeQueue(). Callers get the flag, not a lie.
-const EMPTY_QUEUE = () => ({
-  config: { ...DEFAULT_CONFIG }, jobs: [], scheduledFor: null, lastRunAt: null, paused: null,
-});
+// (The single-file EMPTY_QUEUE/shapeQueue readers were retired with the
+// global queue.json — queueStore.cjs's merged readers own the shape now.)
 
-function shapeQueue(raw) {
-  const data = JSON.parse(raw);
-  return {
-    config: { ...DEFAULT_CONFIG, ...(data.config || {}) },
-    jobs: Array.isArray(data.jobs) ? data.jobs : [],
-    scheduledFor: data.scheduledFor ?? null,
-    lastRunAt: data.lastRunAt ?? null,
-    paused: data.paused ?? null,
-  };
-}
-
-// Quarantine a corrupt queue.json alongside itself (once per process — the
-// first copy is the one that matters; later ticks would just overwrite it
-// with the same bytes) so a human can diff it against the .bak-* snapshots.
+// Quarantine a corrupt shard alongside itself (once per process — the first
+// copy is the one that matters; later ticks would just overwrite it with the
+// same bytes) so a human can diff it against the .bak-* snapshots.
 let quarantined = false;
-function unreadableQueue(e) {
-  const state = EMPTY_QUEUE();
-  state.unreadable = e?.message ?? 'queue.json read failed';
-  if (!quarantined) {
+function flagUnreadable(state) {
+  if (!state.unreadable) return state;
+  if (!quarantined && state.unreadablePath) {
     quarantined = true;
     try {
-      fs.copyFileSync(QUEUE_PATH, `${QUEUE_PATH}.corrupt-${Date.now()}`);
+      fs.copyFileSync(state.unreadablePath, `${state.unreadablePath}.corrupt-${Date.now()}`);
     } catch { /* best-effort: the read already failed, the copy may too */ }
   }
-  console.error(`[scheduler] queue.json unreadable — refusing to treat as empty: ${state.unreadable}`);
+  console.error(`[scheduler] queue state unreadable — refusing to treat as empty: ${state.unreadable}`);
   logs.writeLine({
     level: 'error', scope: 'scheduler',
-    message: 'queue.json unreadable — scheduling halted until it reads clean',
-    meta: { path: QUEUE_PATH, error: state.unreadable },
+    message: 'queue state unreadable — scheduling halted until it reads clean',
+    meta: { path: state.unreadablePath, error: state.unreadable },
   });
   return state;
 }
+
+// Storage is FEDERATED (lib/queueStore.cjs, 2026-07-31): per-project job
+// shards under `<cwd>/session-manager-operations/scheduler/state/queue.json`
+// plus one machine-runtime file (config/paused/lastRunAt). Reads merge every
+// shard into the single state object all downstream logic already expects;
+// writes split it back. The old global scheduled-plans/queue.json is retired
+// (split at boot by queueStore.migrateLegacyGlobalQueue).
 
 // Sync queue read — passed to the supervisor module (which calls it from
 // supervisorTick / applyAction with no await) and the heartbeat interval.
 // IPC handlers and mutate() use readQueue (async) below.
 function readQueueSync() {
-  try {
-    return shapeQueue(fs.readFileSync(QUEUE_PATH, 'utf8'));
-  } catch (e) {
-    if (e?.code === 'ENOENT') return EMPTY_QUEUE();
-    return unreadableQueue(e);
-  }
+  const s = queueStore.readMergedSync();
+  s.config = { ...DEFAULT_CONFIG, ...(s.config || {}) };
+  return flagUnreadable(s);
 }
 
 // Async queue read — used on all IPC hot paths. Reading queue.json sync was
-// blocking the main thread inside ipcMain.handle callbacks; awaiting fsp.readFile
-// hands control back to the renderer while the kernel paginates the file.
+// blocking the main thread inside ipcMain.handle callbacks; awaiting the
+// shard reads hands control back to the renderer between files.
 async function readQueue() {
-  try {
-    return shapeQueue(await fsp.readFile(QUEUE_PATH, 'utf8'));
-  } catch (e) {
-    if (e?.code === 'ENOENT') return EMPTY_QUEUE();
-    return unreadableQueue(e);
-  }
+  const s = await queueStore.readMerged();
+  s.config = { ...DEFAULT_CONFIG, ...(s.config || {}) };
+  return flagUnreadable(s);
 }
 
 async function writeQueue(state) {
   // Last line of defence: never persist a state derived from a failed read.
   if (state && state.unreadable) {
-    throw new Error(`refusing to write queue.json from an unreadable read (${state.unreadable})`);
+    throw new Error(`refusing to write queue state from an unreadable read (${state.unreadable})`);
   }
   ensureDirs();
-  await config.writeJson(QUEUE_PATH, state);
+  await queueStore.writeSplit(state, state.config?.defaultCwd ?? DEFAULT_PROJECT_CWD);
 }
 
 // ---------- serialized mutation queue ----------
@@ -1286,7 +1302,7 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
     },
   };
   if (withPaths) {
-    payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: QUEUE_PATH };
+    payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: queueStore.MACHINE_STATE_PATH };
   }
   return payload;
 }
@@ -2325,6 +2341,14 @@ async function spawnInvestigation(failedJob, runDir) {
 }
 
 async function spawnJob(job, runId, runDir, defaultCwd) {
+  // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
+  // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
+  // leaves the job pending; the next tick retries when a slot frees up.
+  const slotToken = sessionSlots.acquire(`scheduler:${job.slug}`);
+  if (!slotToken) {
+    console.log(`[scheduler] no session slot free for ${job.slug} — deferring (${JSON.stringify(sessionSlots.snapshot().holders.map((h) => h.owner))})`);
+    return;
+  }
   runningSet.add(job.slug);
   try {
     await mutate((s) => {
@@ -2757,6 +2781,8 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     console.error('[scheduler] spawnJob error', job.slug, e);
   } finally {
     runningSet.delete(job.slug);
+    // Slot release notifies subscribed pumps (chat lane) machine-wide.
+    sessionSlots.release(slotToken);
     // Each job completion is a signal to advance the queue.
     tickQueue().catch(() => {});
   }
@@ -2814,7 +2840,18 @@ function tickQueue() {
     // job is never started into the host's own headroom (that path OOM-kills
     // Electron and SIGHUPs every pty — 2026-06-16 incident).
     const jobBudgetMb = availableForJobs(availableMb, RESERVED_HOST_MB);
-    const allowed = memoryLimitedBatchSize(jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length);
+    // Session-Manager's machine-wide slot pool is the outer bound: chat runs
+    // and scheduler jobs share it, so a busy chat lane shrinks this batch.
+    const slotAllowed = sessionSlots.available();
+    if (slotAllowed === 0) {
+      const snap = sessionSlots.snapshot();
+      console.log(`[scheduler] slot gate: 0 of ${snap.total} session slots free (${snap.holders.map((h) => h.owner).join(', ')}) — deferring ${batch.length} job(s)`);
+      return { fired: false, reason: 'slots-exhausted', deferredCount: batch.length, holders: snap.holders };
+    }
+    const allowed = Math.min(
+      slotAllowed,
+      memoryLimitedBatchSize(jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length),
+    );
     if (allowed === 0) {
       const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
       console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1}) — deferring ${batch.length} job(s)`);
@@ -2867,6 +2904,8 @@ function forceTickOutcome(result) {
       return { ok: true, kind: 'warn', message: 'Batch cancelled — try again' };
     case 'memory-deferred':
       return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — low memory (${result.availableMb} MB available, need ${result.threshold} MB)` };
+    case 'slots-exhausted':
+      return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — all session slots in use (${(result.holders ?? []).map((h) => h.owner).join(', ')})` };
     case 'held': {
       const detail = String(result.detail ?? '').replace(/^\[scheduler\]\s*[\w-]+\s*(?:\[[^\]]*\])?:\s*/, '');
       return { ok: true, kind: 'warn', message: detail || 'Batch held' };
@@ -3459,6 +3498,11 @@ function registerScheduleHandlers() {
     return buildScheduleStatePayload(state, { withPaths: true });
   });
 
+  // Session-Manager-wide claude -p slot pool (lib/sessionSlots.cjs) —
+  // read-only diagnostic surface for the Home widget and the global
+  // configuration tab.
+  ipcMain.handle('schedule:session-slots', () => sessionSlots.snapshot());
+
   ipcMain.handle('schedule:health', async () => {
     const state = await readQueue();
     const runningJobs = [];
@@ -3715,6 +3759,19 @@ function registerScheduleHandlers() {
 
 async function init() {
   ensureDirs();
+  // A slot freed anywhere (e.g. a chat run settled) may unblock a deferred
+  // batch — advance the queue without waiting for the next 60s poll.
+  sessionSlots.subscribe(() => { tickQueue().catch(() => {}); });
+  // Retire the global queue.json: split its rows into per-project shards
+  // BEFORE the first read below, so boot reconciliation sees the shards.
+  try {
+    const m = await queueStore.migrateLegacyGlobalQueue(DEFAULT_PROJECT_CWD);
+    if (m.migrated) {
+      console.log(`[scheduler] legacy global queue retired: ${m.moved} row(s) split across ${m.projects} project shard(s)`);
+    }
+  } catch (e) {
+    console.error('[scheduler] legacy queue split failed', e?.message);
+  }
   await runPrdMigration();
   sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
 
@@ -3914,7 +3971,19 @@ const remote = {
   // nothing for findPrdDir to search for); the renderer's slug-only IPC
   // path (editing an already-queued PRD) omits it and relies on findPrdDir.
   async readPrd(slug, cwd) {
-    const dir = cwd ? prdDirForCwd(cwd) : await findPrdDir(slug);
+    let dir;
+    if (cwd) {
+      // The slug may live in the legacy flat dir or any Epic's prds/ under
+      // this project; probe local dirs, defaulting to the flat dir (callers
+      // use a miss there as the "doesn't exist yet" signal on create).
+      const localDirs = [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)];
+      dir = localDirs.find((d) => {
+        const p = safeSlugPathIn(d, slug);
+        return p && fs.existsSync(p);
+      }) ?? prdDirForCwd(cwd);
+    } else {
+      dir = await findPrdDir(slug);
+    }
     if (!dir) return { ok: false, error: 'invalid slug' };
     const filePath = safeSlugPathIn(dir, slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
@@ -3956,8 +4025,35 @@ const remote = {
   // doesn't exist yet, so findPrdDir would return nothing to write into).
   async writePrd(slug, body, cwd) {
     let dir;
+    let epicTrace = null;
     if (cwd) {
-      dir = prdDirForCwd(cwd);
+      // Edit-in-place if this slug already lives anywhere under this project
+      // (legacy flat dir or any Epic's prds/); otherwise this is a CREATE,
+      // and every new PRD belongs to an Epic (CLAUDE.md domain model) — mint
+      // one from the body's frontmatter title/tag.
+      const localDirs = [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)];
+      for (const d of localDirs) {
+        const candidate = safeSlugPathIn(d, slug);
+        if (candidate && fs.existsSync(candidate)) { dir = d; break; }
+      }
+      if (!dir) {
+        try {
+          const { fm } = splitFrontmatter(body);
+          const epic = ensureEpic(cwd, {
+            goalText: fm.title || slug,
+            tag: fm.tag,
+            // An Epic-conversation dispatch already has its Epic — join it.
+            epicId: fm.sourcePromptId,
+          });
+          dir = epic.prdDir;
+          epicTrace = epic.epicId;
+        } catch (e) {
+          // Epic mint must never block a PRD write — fall back to the
+          // legacy flat dir and log loudly.
+          console.error(`[scheduler] ensureEpic failed for ${slug}: ${e?.message}`);
+          dir = prdDirForCwd(cwd);
+        }
+      }
       await fsp.mkdir(dir, { recursive: true });
     } else {
       dir = (await findPrdDir(slug)) ?? PRDS_DIR;
@@ -3982,6 +4078,10 @@ const remote = {
       }
       await config.writeTextAtomic(resolved, body);
       const stat = await fsp.stat(resolved);
+      if (epicTrace) {
+        // Best-effort: record the dispatch on the minted Epic's event chain.
+        try { appendPrdCreatedEvent(cwd, epicTrace, slug); } catch { /* trace only */ }
+      }
       return { ok: true, bytesWritten: stat.size };
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };

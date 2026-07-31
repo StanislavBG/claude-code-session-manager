@@ -77,7 +77,7 @@ can't load skills.
    do they actually share the same shape, or only look similar — confirm by reading, don't
    assume: a wrong assumption here means an inaccurate PRD, discovered only after the executor
    runs it), check existing tests for the area, and check whether a prior PRD already touched
-   this subsystem (`ls <cwd>/session-manager-operations/scheduler/prds/` for related slugs, in
+   this subsystem (`ls <cwd>/session-manager-operations/scheduler/epics/*/prds/` for related slugs, in
    the target repo) — duplicating or contradicting a still-queued PRD is a real failure mode,
    not a hypothetical one.
 
@@ -197,7 +197,7 @@ can't load skills.
    and collides). PRDs are stored per-project, so `NN` allocation for a given PRD only needs
    *that project's own* prds directory scanned — not every project's:
    ```bash
-   ls <cwd>/session-manager-operations/scheduler/prds/ | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
+   ls <cwd>/session-manager-operations/scheduler/epics/*/prds/ <cwd>/session-manager-operations/scheduler/prds-archived/ 2>/dev/null | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
    ```
    (`<cwd>` is the target repo's absolute path — the same one this PRD's `cwd` field will use.)
    The last line is the current max within that project. Then: same `NN` as a logically
@@ -218,19 +218,25 @@ can't load skills.
    system that runs `claude -p <prd-body> --dangerously-skip-permissions` jobs around 5-hour
    token-window resets, with auto-pause on rate-limit and auto-resume.
 
-   **Canonical location — non-negotiable.** PRDs MUST be written to, inside the target repo:
+   **Canonical location — non-negotiable.** Every PRD belongs to an **Epic** (the TAB → EPIC →
+   PRD domain model in the project CLAUDE.md). PRDs MUST be written to, inside the target repo:
    ```
-   <cwd>/session-manager-operations/scheduler/prds/<NN>-<kebab-slug>.md
+   <cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<kebab-slug>.md
    ```
-   **Anywhere else doesn't get scheduled.** If you write to `data/prds/`, `docs/prds/`, or the
-   old, now-retired global `prds/` dir under `~/.claude/session-manager/scheduled-plans/`,
-   the scheduler will not see it and the user loses their token-budget-managed execution. PRD
-   *source* files are per-project — each active project's own
-   `session-manager-operations/scheduler/prds/` directory, resolved at runtime from active
-   session cwds (`src/main/lib/prdLocations.cjs`) — but there is still exactly one **queue**
-   across all projects (`queue.json`/`history.jsonl`/`runs/` under
-   `~/.claude/session-manager/scheduled-plans/` remain global bookkeeping), because the 5-hour
-   token budget is global across all of the user's Claude work.
+   Get `<epic-id>`'s prds/ directory by minting (or joining) an Epic first:
+   ```bash
+   node <session-manager-repo>/scripts/mint-epic.cjs <cwd> "<one-line goal for this work>" [feature|bug|discussion]
+   ```
+   The last stdout line is the exact directory to write into. Reuse-by-goal makes it idempotent —
+   all PRDs of one /develop ask share one Epic. (The MCP `scheduler_create_prd` tool does all of
+   this automatically; the mint step is only for the manual-write fallback.)
+
+   **Anywhere else doesn't get scheduled or gets retired.** `data/prds/`, `docs/prds/`, and the
+   old global `prds/` dir under `~/.claude/session-manager/scheduled-plans/` are invisible to
+   the scheduler; the legacy flat `session-manager-operations/scheduler/prds/` dir is RETIRED —
+   anything written there is auto-consolidated into `prds-archived/` at the next app boot
+   without being executed. PRD *source* files are per-project and per-Epic, resolved at runtime
+   via `src/main/lib/prdLocations.cjs`.
 
    **Filename rules.** `NN` is the 2-digit zero-padded parallel group (picked per the `ls`
    command above — same `NN` as an independent sibling, or next free `NN` = max+1 when this PRD

@@ -20,6 +20,47 @@ const path = require('node:path');
 const { activeProjectCwds, allProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
 
 const PRD_SUBPATH = ['session-manager-operations', 'scheduler', 'prds'];
+const EPICS_SUBPATH = ['session-manager-operations', 'scheduler', 'epics'];
+
+/**
+ * resolveEpicsRoot(cwd) → `<cwd>/session-manager-operations/scheduler/epics`
+ * The per-project root under which every Epic keeps its own prds/ dir.
+ */
+function resolveEpicsRoot(cwd) {
+  if (!cwd || typeof cwd !== 'string') {
+    throw new Error('resolveEpicsRoot: cwd is required');
+  }
+  return path.join(cwd, ...EPICS_SUBPATH);
+}
+
+/**
+ * resolveEpicPrdWriteDir(cwd, epicId) →
+ *   `<cwd>/session-manager-operations/scheduler/epics/<epicId>/prds`
+ * The write destination for every NEW PRD. The flat legacy dir
+ * (resolvePrdWriteDir) remains read-only during the transition — new PRDs
+ * always belong to an Epic (auto-minted when the dispatch has none).
+ */
+function resolveEpicPrdWriteDir(cwd, epicId) {
+  if (!epicId || typeof epicId !== 'string' || epicId.includes('/') || epicId.includes('..')) {
+    throw new Error('resolveEpicPrdWriteDir: epicId must be a plain directory name');
+  }
+  return path.join(resolveEpicsRoot(cwd), epicId, 'prds');
+}
+
+/** Enumerate every existing `epics/<id>/prds` dir under one project cwd. */
+function listEpicPrdDirs(cwd) {
+  let root;
+  try { root = resolveEpicsRoot(cwd); } catch { return []; }
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  const dirs = [];
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    const prdDir = path.join(root, ent.name, 'prds');
+    if (fs.existsSync(prdDir)) dirs.push(prdDir);
+  }
+  return dirs;
+}
 
 /**
  * resolvePrdWriteDir(cwd) → `<cwd>/session-manager-operations/scheduler/prds`
@@ -68,6 +109,9 @@ function resolvePrdsDirs(maxAgeMin, opts) {
     let dir;
     try { dir = resolvePrdWriteDir(cwd); } catch { continue; }
     if (fs.existsSync(dir)) add(dir);
+    // Epic-scoped dirs (the write layout for all new PRDs) are first-class
+    // scan sources alongside the legacy flat dir.
+    for (const epicDir of listEpicPrdDirs(cwd)) add(epicDir);
   }
 
   // Active projects are added unconditionally: a brand-new project has no
@@ -75,9 +119,18 @@ function resolvePrdsDirs(maxAgeMin, opts) {
   // find it. Scans over a non-existent dir are a harmless ENOENT no-op.
   for (const cwd of activeProjectCwds(maxAgeMin, opts)) {
     try { add(resolvePrdWriteDir(cwd)); } catch { /* unusable cwd */ }
+    for (const epicDir of listEpicPrdDirs(cwd)) add(epicDir);
   }
 
   return dirs;
 }
 
-module.exports = { resolvePrdWriteDir, resolvePrdsDirs, PRD_SUBPATH };
+module.exports = {
+  resolvePrdWriteDir,
+  resolvePrdsDirs,
+  resolveEpicsRoot,
+  resolveEpicPrdWriteDir,
+  listEpicPrdDirs,
+  PRD_SUBPATH,
+  EPICS_SUBPATH,
+};

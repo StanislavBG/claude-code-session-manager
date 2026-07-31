@@ -14,8 +14,31 @@ const os = require('os');
 const path = require('path');
 const fsp = require('fs').promises;
 const { HISTORY_RETENTION_MS } = require('./schedulerConfig.cjs');
+const { projectHistoryPath, stateCwds } = require('./queueStore.cjs');
 
+// Legacy global sidecar — READ-ONLY since 2026-07-31 (federated per-project
+// history under <cwd>/session-manager-operations/scheduler/state/history.jsonl,
+// resolved via queueStore.cjs). Old rows stay readable from here; new appends
+// go to the owning project's shard (entries without a cwd still land here so
+// nothing is ever dropped).
 const HISTORY_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'history.jsonl');
+
+/** Every history file currently in play: each project's shard + the legacy global. */
+function historyPaths() {
+  const paths = [];
+  for (const cwd of stateCwds()) {
+    try { paths.push(projectHistoryPath(cwd)); } catch { /* unusable cwd */ }
+  }
+  paths.push(HISTORY_PATH);
+  return paths;
+}
+
+function historyPathFor(entry) {
+  if (entry && entry.cwd) {
+    try { return projectHistoryPath(entry.cwd); } catch { /* fall through */ }
+  }
+  return HISTORY_PATH;
+}
 
 function isFixPlanSlug(slug) {
   return /^\d+-fix-/.test(slug);
@@ -76,32 +99,45 @@ async function appendHistory(entries) {
   const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
   if (list.length === 0) return { appended: 0 };
 
-  let existingText = '';
-  try {
-    existingText = await fsp.readFile(HISTORY_PATH, 'utf8');
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
+  // Federated: each entry appends to its own project's shard (fallback: the
+  // legacy global file for cwd-less rows). Dedupe stays per target file.
+  const byPath = new Map();
+  for (const e of list) {
+    const target = historyPathFor(e);
+    if (!byPath.has(target)) byPath.set(target, []);
+    byPath.get(target).push(e);
   }
 
-  const existingKeys = new Set();
-  if (existingText) {
-    for (const line of existingText.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        existingKeys.add(jobKey(JSON.parse(line)));
-      } catch {
-        // corrupt/partial line — ignore for dedupe purposes
+  let appended = 0;
+  for (const [target, group] of byPath) {
+    let existingText = '';
+    try {
+      existingText = await fsp.readFile(target, 'utf8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+
+    const existingKeys = new Set();
+    if (existingText) {
+      for (const line of existingText.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          existingKeys.add(jobKey(JSON.parse(line)));
+        } catch {
+          // corrupt/partial line — ignore for dedupe purposes
+        }
       }
     }
+
+    const fresh = group.filter((e) => !existingKeys.has(jobKey(e)));
+    if (fresh.length === 0) continue;
+
+    await fsp.mkdir(path.dirname(target), { recursive: true });
+    const text = fresh.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    await fsp.appendFile(target, text, 'utf8');
+    appended += fresh.length;
   }
-
-  const fresh = list.filter((e) => !existingKeys.has(jobKey(e)));
-  if (fresh.length === 0) return { appended: 0 };
-
-  await fsp.mkdir(path.dirname(HISTORY_PATH), { recursive: true });
-  const text = fresh.map((e) => JSON.stringify(e)).join('\n') + '\n';
-  await fsp.appendFile(HISTORY_PATH, text, 'utf8');
-  return { appended: fresh.length };
+  return { appended };
 }
 
 /**
@@ -112,10 +148,22 @@ async function appendHistory(entries) {
  */
 async function readHistory({ limit } = {}) {
   const cap = Math.max(1, Math.min(500, Number.isFinite(limit) ? Math.floor(limit) : 50));
+  // Federated: newest `cap` from EACH file, merged newest-first by finishedAt
+  // (fallback startedAt), then capped. Per-file tail reads keep this cheap.
+  const chunks = await Promise.all(historyPaths().map((p2) => readHistoryFile(p2, cap)));
+  const ts = (e) => Date.parse(e?.finishedAt ?? e?.startedAt ?? '') || 0;
+  // Each chunk is already newest-first; keep that order as the tiebreak so
+  // timestamp-less rows don't get shuffled by the cross-file sort.
+  const tagged = chunks.flatMap((chunk) => chunk.map((e, idx) => ({ e, ts: ts(e), idx })));
+  tagged.sort((a, b) => (b.ts - a.ts) || (a.idx - b.idx));
+  return tagged.slice(0, cap).map((t) => t.e);
+}
 
+/** Tail-read one history file: newest `cap` parsed rows, newest-first. */
+async function readHistoryFile(target, cap) {
   let fh;
   try {
-    fh = await fsp.open(HISTORY_PATH, 'r');
+    fh = await fsp.open(target, 'r');
   } catch (e) {
     if (e.code === 'ENOENT') return [];
     throw e;
@@ -162,7 +210,7 @@ async function readHistory({ limit } = {}) {
 // mtime-gated cache, same convention as scheduler/prdParser.cjs's dirCache —
 // repeated reconcile() calls between appends hit the cache instead of
 // re-reading/re-parsing a JSONL file that only grows over time.
-let historyCacheMtime = -1;
+let historyCacheKey = null;
 let historyCacheMap = null;
 
 /**
@@ -176,22 +224,22 @@ let historyCacheMap = null;
  * from "this is a genuinely brand-new PRD nobody has ever queued."
  */
 async function historyTerminalBySlug() {
-  let mtime;
-  try {
-    mtime = (await fsp.stat(HISTORY_PATH)).mtimeMs;
-  } catch {
-    mtime = -1;
-  }
-  if (mtime === historyCacheMtime && historyCacheMap) return historyCacheMap;
+  const paths = historyPaths();
+  const mtimes = await Promise.all(paths.map(async (p2) => {
+    try { return (await fsp.stat(p2)).mtimeMs; } catch { return -1; }
+  }));
+  const cacheKey = paths.map((p2, i) => `${p2}:${mtimes[i]}`).join('|');
+  if (cacheKey === historyCacheKey && historyCacheMap) return historyCacheMap;
 
   const map = new Map();
-  let text = '';
-  try {
-    text = await fsp.readFile(HISTORY_PATH, 'utf8');
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  if (text) {
+  for (const p2 of paths) {
+    let text = '';
+    try {
+      text = await fsp.readFile(p2, 'utf8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+    if (!text) continue;
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try {
@@ -202,7 +250,7 @@ async function historyTerminalBySlug() {
       }
     }
   }
-  historyCacheMtime = mtime;
+  historyCacheKey = cacheKey;
   historyCacheMap = map;
   return map;
 }

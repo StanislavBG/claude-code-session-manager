@@ -1277,6 +1277,8 @@ export interface SessionManagerAPI {
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;
+    /** Machine-wide claude -p slot pool (sessionSlots.cjs): total/inUse/holders. */
+    sessionSlots: () => Promise<{ total: number; inUse: number; holders: { owner: string; at: string }[] }>;
     setConfig: (partial: Partial<ScheduleConfig & { supervisor?: Partial<SupervisorConfig> }>) => Promise<{ ok: boolean; config: ScheduleConfig }>;
     resetJob: (slug: string) => Promise<{ ok: boolean; error?: string }>;
     runNow: () => Promise<{ ok: boolean }>;

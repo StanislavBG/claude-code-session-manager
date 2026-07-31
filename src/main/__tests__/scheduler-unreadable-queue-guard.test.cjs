@@ -32,7 +32,7 @@ const unreadableState = () => ({
 });
 
 test('writeQueue refuses to persist a state derived from an unreadable read', async () => {
-  await expect(writeQueue(unreadableState())).rejects.toThrow(/refusing to write queue\.json/i);
+  await expect(writeQueue(unreadableState())).rejects.toThrow(/refusing to write queue/i);
 });
 
 test('writeQueue still persists a normal state (guard is not a blanket block)', () => {

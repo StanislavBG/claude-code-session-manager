@@ -89,8 +89,15 @@ function saveHidden(set: Set<string>) {
  * SchedulePanel — Queue sub-view of the Scheduler tab. Shows policy controls,
  * filter chips, and an expandable job list wired to the live queue snapshot.
  */
-export function SchedulePanel() {
-  const snap = useScheduleState((s) => s.snapshot)
+export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null }) {
+  const rawSnap = useScheduleState((s) => s.snapshot)
+  // Scheduler-as-browser (2026-07-31 domain model): the panel shows one
+  // TAB/project's jobs when scoped. Derived AFTER selection (memoized) — never
+  // build values inside a zustand selector (React #185 blank-app class).
+  const snap = useMemo(() => {
+    if (!rawSnap || !scopeCwd) return rawSnap
+    return { ...rawSnap, jobs: rawSnap.jobs.filter((j) => j.cwd === scopeCwd) }
+  }, [rawSnap, scopeCwd])
   const [health, setHealth] = useState<ScheduleHealthSnapshot | null>(null)
   const [showHealth, setShowHealth] = useState(false)
   const [now, setNow] = useState(() => Date.now())

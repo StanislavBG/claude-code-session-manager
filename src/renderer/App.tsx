@@ -26,7 +26,7 @@ import { startBillingPolling } from './state/billing'
 import { startTeamsPolling } from './state/teams'
 import { startSchedulePolling } from './state/scheduleState'
 import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
-import { createPickedSession } from './lib/createPickedSession'
+import { createPickedSession, openOrStartProject } from './lib/createPickedSession'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
 import { isRecognitionSupported } from './lib/speechRecognition'
@@ -164,15 +164,15 @@ export function App() {
   activeTabIdRef.current = activeTabId
   const hotkeyModeRef = useRef<HotkeyMode>('hold')
 
-  // "+ New session" now opens the Epics landing page rather than picking a
-  // directory and creating a legacy dormant SessionTab — the Epics nav
-  // ('terminal') is exclusively the PromptSession/Epic experience
-  // (ProjectsLanding's own "New starting prompt" form creates the Epic).
-  // createPickedSession/legacy SessionTab creation remains reachable via the
-  // Command Palette's new-tab-here/new-tab-pick commands for power users —
-  // this button was the only caller that force-navigated to the Epics nav.
+  // "Open / Start Project" (renamed from "+ New session", 2026-07-31): TAB =
+  // project folder, one tab per project. Browse to an existing folder to open
+  // it (the native picker's New Folder button covers "start"), then land on
+  // the Epics view where the project's work is actually managed. Cancelling
+  // the picker still opens the Epics landing so the button never dead-ends.
   const handleNewSession = useCallback(() => {
-    useLayout.getState().openPanel('terminal')
+    void openOrStartProject()
+      .catch(() => null)
+      .finally(() => { useLayout.getState().openPanel('terminal') })
   }, [])
 
   // Eager preload of the speech model + permission subscription.

@@ -53,6 +53,7 @@ const NAV_LABELS: Record<NavKey, string> = {
   browser: 'Browser',
   'system-prompt': 'System Prompt',
   settings: 'Settings',
+  'sm-config': 'Session-Manager',
   permissions: 'Permissions',
   skills: 'Skills',
   plugins: 'Plugins',

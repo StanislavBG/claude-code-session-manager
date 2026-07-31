@@ -273,7 +273,7 @@ function ProjectCaption({
         <button
           onClick={onNewSession}
           data-testid="tour-new-session"
-          title="New session"
+          title="Open / Start Project"
           className="w-9 h-9 rounded-md bg-bg-hi border border-line text-fg hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center"
         >
           <AlmanacIcon name="plus" size={15} stroke={1.8} />
@@ -325,7 +325,7 @@ function ProjectCaption({
           className="flex-1 px-3 py-1.5 rounded-md bg-bg-hi border border-line text-fg text-[12.5px] font-medium hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center gap-1.5"
         >
           <AlmanacIcon name="plus" size={13} stroke={1.8} />
-          New session
+          Open / Start Project
         </button>
       </div>
     </div>

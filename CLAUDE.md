@@ -4,6 +4,19 @@ Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ confi
 
 All session-manager per-project operations (feedback intake, the `/explain-to-me` knowledge base) live under `session-manager-operations/` at the repo root — e.g. `session-manager-operations/feedback/`, `session-manager-operations/HUMAN_LEARN/`.
 
+## Domain model (TAB / EPIC) — foundational, keep every surface consistent with this
+
+- **TAB = file location = Main Project.** A Terminal tab is anchored to one cwd; that cwd IS the project identity. Everything the app manages for a project keys off this path.
+- **`<TAB cwd>/session-manager-operations/`** — the per-project operations root, created when a tab first opens on that cwd. Definitive path; session-manager owns and manages its contents (`feedback/`, `scheduler/prds/`, `prompt-sessions/`, `HUMAN_LEARN/`, …).
+- **EPIC = one small unit of work within the Main Project.** Implemented as `PromptSession` (`state/promptSessions.ts`). Each Epic carries an initial intent tag (**feature / bug / discussion** — expected to gain more clarity/kinds over time) and its `goalText`.
+- **EPIC : claude-session = 1:1.** Each Epic mints its own `claudeSessionId` (never shared with or derived from any SessionTab's sessionId). The Epic is the context root for that session; `PromptSessionConversation.tsx` renders the claude session *in the Epic's context* on screen. Its event chain (`prompt → prd_created → response → closed`, FK-linked via `causedByEventId`) is the auditable trace of everything the Epic spawned, including PRD-dispatch chips.
+- Persistence: active Epics in `session-manager-operations/prompt-sessions/active-index.json`; completed ones archived one JSON per Epic in the same folder (`promptSessionArchivePath`). An archived Epic's claudeSessionId is dead — resuming mints a new session with `resumedFromId` tracing back.
+
+- **Scheduler = a browser over TAB → EPIC → PRD** (implemented 2026-07-31, v0.39.4). The Scheduler tab is a viewer/operator surface on this hierarchy — scoped to the active TAB's project by default ("All projects" is the explicit machine-wide escape hatch). On disk, per project: PRD sources in `scheduler/epics/<epic-id>/prds/` (every new PRD auto-mints/joins an Epic via `lib/epicMint.cjs` — flat `scheduler/prds/` is RETIRED and auto-consolidated into `prds-archived/` at boot), queue + history shards in `scheduler/state/` (`lib/queueStore.cjs`). Global bookkeeping is retired; what remains machine-level is Session-Manager runtime only: `~/.claude/session-manager/scheduler-machine.json` (policy/pause), run logs under `scheduled-plans/runs/`, and the **session slot pool** (`lib/sessionSlots.cjs`) — one machine-wide pool of ≤3 concurrent `claude -p` sessions that scheduler jobs AND chat runs must acquire from. Surfaced in the "Session-Manager" Configure nav tab + the Home "Active sessions" widget.
+- **One TAB per project.** The sidebar button is "Open / Start Project" (native folder picker; New Folder = start). Picking an already-open project activates its existing tab — extra sessions within a project are Epics, not tabs.
+
+Any new feature touching sessions, navigation, or per-project state must map onto this TAB→operations-root→EPIC→session hierarchy rather than inventing a parallel scoping scheme.
+
 ## Stack
 
 Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Whisper (ricky0123/vad-web + onnxruntime-web) for voice.

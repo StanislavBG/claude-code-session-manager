@@ -13,6 +13,7 @@ const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
+const queueStore = require('./lib/queueStore.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -197,16 +198,14 @@ async function check() {
     status.ok = false;
   }
 
-  // 3. Check scheduler PRD directory and queue.json.
-  const schedulerBaseDir = path.join(
-    os.homedir(),
-    '.claude/session-manager/scheduled-plans'
-  );
-  const queuePath = path.join(schedulerBaseDir, 'queue.json');
+  // 3. Check scheduler state (federated, 2026-07-31): machine runtime file +
+  // per-project job shards merged via queueStore — the retired global
+  // queue.json is no longer consulted.
+  const queuePath = queueStore.MACHINE_STATE_PATH;
   let queueState = null;
   try {
-    const queueText = await fsp.readFile(queuePath, 'utf8');
-    queueState = JSON.parse(queueText);
+    queueState = queueStore.readMergedSync();
+    if (queueState.unreadable) throw new Error(queueState.unreadable);
     const runningCount = Object.values(queueState.jobs || {}).filter(
       (j) => j.status === 'running'
     ).length;

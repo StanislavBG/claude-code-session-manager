@@ -8,7 +8,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { activeProjectCwds } = require('./activeSessions.cjs');
-const { resolvePrdWriteDir } = require('../../src/main/lib/prdLocations.cjs');
+const { resolvePrdWriteDir, listEpicPrdDirs } = require('../../src/main/lib/prdLocations.cjs');
+const { ensureEpic, appendPrdCreatedEvent } = require('../../src/main/lib/epicMint.cjs');
+const { projectQueuePath } = require('../../src/main/lib/queueStore.cjs');
 
 // Mirrors scheduler.cjs:215 (single source of truth there; kept in sync here).
 const DEFAULT_HEARTBEAT_PATH = path.join(
@@ -294,7 +296,7 @@ function hasOpenFeedback(cwd) {
  */
 function emitFeedbackPRD(cwd, {
   prdsDir,
-  queuePath = DEFAULT_QUEUE_PATH,
+  queuePath,
   skillPath,
   standardsPath,
   pluginCacheRoot = PLUGIN_CACHE_ROOT,
@@ -306,8 +308,18 @@ function emitFeedbackPRD(cwd, {
   // PRD dir so the sweep writer agrees with scheduler.cjs's reader (see
   // prdLocations.cjs — PRD chain 808→811 moved PRD sources out of the legacy
   // global dir into `<cwd>/session-manager-operations/scheduler/prds`).
+  let epicId = null;
   if (prdsDir === undefined) {
-    prdsDir = resolvePrdWriteDir(cwd);
+    // Every PRD belongs to an Epic (CLAUDE.md domain model). The sweep joins
+    // one standing "Inbound feedback" Epic per project (reuseByGoal) so
+    // recurring ticks chain into a single Epic rather than minting one each.
+    const epic = ensureEpic(cwd, {
+      goalText: 'Inbound feedback processing',
+      tag: 'discussion',
+      reuseByGoal: true,
+    });
+    epicId = epic.epicId;
+    prdsDir = epic.prdDir;
   }
   const skillPathExplicit = skillPath !== undefined;
   const standardsPathExplicit = standardsPath !== undefined;
@@ -319,11 +331,20 @@ function emitFeedbackPRD(cwd, {
   }
   const project = slugify(path.basename(cwd));
 
-  // De-dup: check queue.json for pending/running feedback job for this project.
-  let queueState = { jobs: [] };
-  try {
-    queueState = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-  } catch { /* queue.json may not exist */ }
+  // De-dup: check the queue for a pending/running feedback job for this
+  // project. Federated state (2026-07-31): the project's own shard is the
+  // system of record; the legacy global path is still consulted as a fallback
+  // during transition. An explicit queuePath override (tests) wins verbatim.
+  const queuePaths = queuePath !== undefined
+    ? [queuePath]
+    : [projectQueuePath(cwd), DEFAULT_QUEUE_PATH];
+  const queueState = { jobs: [] };
+  for (const qp of queuePaths) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(qp, 'utf8'));
+      queueState.jobs.push(...(Array.isArray(parsed.jobs) ? parsed.jobs : []));
+    } catch { /* file may not exist */ }
+  }
 
   // project only contains [a-z0-9-] after slugify — no regex metachar escaping needed.
   const dupRe = new RegExp(`^\\d+-feedback-${project}$`);
@@ -341,18 +362,28 @@ function emitFeedbackPRD(cwd, {
   // watchdog tick emits a fresh NN-feedback-<project>.md, unbounded.
   const prdDupRe = new RegExp(`^\\d+-feedback-${project}\\.md$`);
   let maxNN = 0;
-  let prdFiles = [];
-  try {
-    prdFiles = fs.readdirSync(prdsDir);
-  } catch { /* prdsDir may not exist yet */ }
-  for (const f of prdFiles) {
-    if (prdDupRe.test(f)) {
-      return { emitted: false, reason: 'duplicate' };
-    }
-    const m = f.match(/^(\d+)-/);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (n > maxNN) maxNN = n;
+  // NN numbering and the on-disk dedup are project-global, so scan every PRD
+  // location the project has: the write dir, the legacy flat dir, and every
+  // Epic's prds/ dir. (An explicit prdsDir override — tests — scans only it.)
+  const scanDirs = new Set([prdsDir]);
+  if (epicId !== null) {
+    try { scanDirs.add(resolvePrdWriteDir(cwd)); } catch { /* unusable cwd */ }
+    for (const d of listEpicPrdDirs(cwd)) scanDirs.add(d);
+  }
+  for (const dir of scanDirs) {
+    let prdFiles = [];
+    try {
+      prdFiles = fs.readdirSync(dir);
+    } catch { continue; /* dir may not exist yet */ }
+    for (const f of prdFiles) {
+      if (prdDupRe.test(f)) {
+        return { emitted: false, reason: 'duplicate' };
+      }
+      const m = f.match(/^(\d+)-/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxNN) maxNN = n;
+      }
     }
   }
   const nn = String(maxNN + 1).padStart(2, '0');
@@ -440,6 +471,11 @@ function emitFeedbackPRD(cwd, {
     fs.mkdirSync(prdsDir, { recursive: true });
     fs.writeFileSync(tmpPath, body + '\n', 'utf8');
     fs.renameSync(tmpPath, prdPath);
+    if (epicId !== null) {
+      // Trace the dispatch on the Epic's event chain (prompt → prd_created →
+      // ...) so the Epic conversation shows the PRD it spawned.
+      try { appendPrdCreatedEvent(cwd, epicId, slug, `Feedback sweep emitted ${slug}`); } catch { /* trace is best-effort */ }
+    }
   } catch (e) {
     try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
     throw e;
@@ -622,7 +658,7 @@ function maybeRelaunchApp({
 function sweep({
   projectsDir,
   prdsDir,
-  queuePath = DEFAULT_QUEUE_PATH,
+  queuePath,
   skillPath,
   standardsPath,
 } = {}) {

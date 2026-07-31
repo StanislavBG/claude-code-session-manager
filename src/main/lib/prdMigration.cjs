@@ -82,4 +82,50 @@ async function migratePrds(legacyPrdsDir) {
   return { moved, skipped, unresolved };
 }
 
-module.exports = { migratePrds };
+/**
+ * consolidateFlatPrds(cwd) — one-time, idempotent retirement of the legacy
+ * FLAT per-project PRD dir (`scheduler/prds/`) now that new PRDs are always
+ * epic-scoped (`scheduler/epics/<id>/prds/`, CLAUDE.md domain model).
+ *
+ * Every `.md` in the flat dir moves to the sibling `prds-archived/` for later
+ * special processing (per 2026-07-31 decision: "new PRDs only; consolidate
+ * existing into prds-archived"). Queue rows pointing at moved files are
+ * reaped by the existing archived-twin retirement (11ad3d8). Dotfiles
+ * (.max-allocated-group, .reserved-*) stay — NN allocation still uses them.
+ * Name collisions in prds-archived/ get a `-legacy-<n>` suffix, never an
+ * overwrite. Idempotent: an emptied flat dir is a no-op readdir.
+ *
+ * Returns { moved, failed: [{ file, reason }] }.
+ */
+async function consolidateFlatPrds(cwd) {
+  const flatDir = resolvePrdWriteDir(cwd);
+  const archiveDir = path.join(path.dirname(flatDir), 'prds-archived');
+  let entries;
+  try {
+    entries = await fsp.readdir(flatDir);
+  } catch {
+    return { moved: 0, failed: [] };
+  }
+
+  let moved = 0;
+  const failed = [];
+  for (const name of entries) {
+    if (!name.endsWith('.md') || name.startsWith('.')) continue;
+    const src = path.join(flatDir, name);
+    try {
+      await fsp.mkdir(archiveDir, { recursive: true });
+      let dst = path.join(archiveDir, name);
+      for (let n = 1; fs.existsSync(dst); n++) {
+        dst = path.join(archiveDir, `${name.slice(0, -3)}-legacy-${n}.md`);
+      }
+      await fsp.rename(src, dst);
+      moved++;
+    } catch (e) {
+      if (e?.code === 'ENOENT') continue; // raced with a concurrent mover
+      failed.push({ file: name, reason: e?.message ?? 'move failed' });
+    }
+  }
+  return { moved, failed };
+}
+
+module.exports = { migratePrds, consolidateFlatPrds };

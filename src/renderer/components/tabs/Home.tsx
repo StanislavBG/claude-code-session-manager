@@ -52,6 +52,7 @@ export function Home({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }:
             onNavigate={onNavigate}
           />
         </div>
+        <SessionsPoolCard />
         <RecentSessionsCard onNavigate={onNavigate} />
         <SchedulerPeek onNavigate={onNavigate} onOpenScheduler={onOpenScheduler} />
       </div>
@@ -297,6 +298,77 @@ function relativeTime(ms: number): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Sessions pool (Session-Manager global guardrails)
+// ────────────────────────────────────────────────────────────────────
+
+type SlotSnapshot = { total: number; inUse: number; holders: { owner: string; at: string }[] }
+
+/**
+ * SessionsPoolCard — the machine-wide `claude -p` session pool owned by
+ * Session-Manager (lib/sessionSlots.cjs). The scheduler and chat lanes both
+ * request capacity from this one pool; this widget shows it live, plus the
+ * guardrails and a first-run explainer of the TAB → EPIC → PRD model.
+ */
+function SessionsPoolCard() {
+  const [slots, setSlots] = useState<SlotSnapshot | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const poll = () => {
+      window.api.schedule.sessionSlots()
+        .then((s) => { if (alive) setSlots(s) })
+        .catch(() => { /* pool surface is diagnostic-only */ })
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  const total = slots?.total ?? 3
+  const inUse = slots?.inUse ?? 0
+
+  return (
+    <section className="mb-6">
+      <div className="flex items-baseline justify-between mb-2">
+        <h2 className="m-0 font-serif text-[19px] font-semibold text-fg">Active sessions</h2>
+        <span className="font-mono text-[12px] text-fg-faint">{inUse} of {total} slots in use</span>
+      </div>
+      <div className="border border-line rounded-xl bg-bg-hi px-[18px] py-4">
+        {/* Slot dots */}
+        <div className="flex items-center gap-2 mb-3" aria-label={`${inUse} of ${total} session slots in use`}>
+          {Array.from({ length: total }, (_, i) => (
+            <span
+              key={i}
+              className={`w-3.5 h-3.5 rounded-full border ${
+                i < inUse ? 'bg-accent border-accent' : 'bg-bg border-line'
+              }`}
+            />
+          ))}
+          <span className="ml-2 text-[12.5px] text-fg-dim">
+            {inUse === 0
+              ? 'No headless Claude sessions running.'
+              : slots!.holders.map((h) => h.owner).join(' · ')}
+          </span>
+        </div>
+        <p className="m-0 text-[13px] text-fg-dim leading-relaxed">
+          Session-Manager owns one machine-wide pool of {total} concurrent Claude sessions —
+          scheduler jobs and chat runs both request a slot from it before launching, and a
+          memory gate defers work when free RAM runs low. That's what keeps a burst of
+          parallel jobs from taking down the app.
+        </p>
+        <p className="mt-2 mb-0 text-[13px] text-fg-faint leading-relaxed">
+          How work flows: each <span className="font-medium text-fg-dim">Tab</span> is one project
+          (its folder). Inside a project, work is organized into{' '}
+          <span className="font-medium text-fg-dim">Epics</span> — small goals, each with its own
+          conversation — and every Epic dispatches <span className="font-medium text-fg-dim">PRDs</span>{' '}
+          that the Scheduler executes as headless jobs when session capacity is available.
+        </p>
+      </div>
+    </section>
+  )
 }
 
 // ────────────────────────────────────────────────────────────────────

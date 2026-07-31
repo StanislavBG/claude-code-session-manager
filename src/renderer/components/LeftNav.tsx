@@ -36,3 +36,5 @@ export type NavKey =
   | 'repoviz'
   | 'search'
   | 'remote'
+  // Global (machine-level) Session-Manager configuration — session pool, scheduler policy.
+  | 'sm-config'

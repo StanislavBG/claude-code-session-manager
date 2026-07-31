@@ -25,7 +25,7 @@ const STATUS_OPTIONS = [
 ] as const
 type StatusFilter = typeof STATUS_OPTIONS[number]['value']
 
-export function SchedulerHistoryView() {
+export function SchedulerHistoryView({ scopeCwd = null }: { scopeCwd?: string | null }) {
   const [result, setResult] = useState<HistoryResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [projectFilter, setProjectFilter] = useState('')
@@ -55,6 +55,7 @@ export function SchedulerHistoryView() {
   const filtered = useMemo(() => {
     if (!result?.jobs) return []
     return result.jobs.filter((j) => {
+      if (scopeCwd && j.cwd !== scopeCwd) return false
       if (statusFilter !== 'all' && j.status !== statusFilter) return false
       if (projectFilter) {
         if (projectNameFromCwd(j.cwd) !== projectFilter) return false
@@ -63,7 +64,7 @@ export function SchedulerHistoryView() {
       if (toDate && toDateStr(j.finishedAt) > toDate) return false
       return true
     })
-  }, [result, statusFilter, projectFilter, fromDate, toDate])
+  }, [result, statusFilter, projectFilter, fromDate, toDate, scopeCwd])
 
   if (loading) return <EmptyState title="Loading history…" />
 

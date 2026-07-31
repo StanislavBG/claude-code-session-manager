@@ -4,11 +4,13 @@
  * epics/DESIGN_SPEC.md ("Left pane") + epics-mock.jsx's QueueRow/EpicQueue,
  * translated from inline styles to Tailwind Almanac tokens.
  *
- * Search/filter/sort/pin/keyboard controls are PRD 828's job — this
- * component only renders whatever (already-filtered, already-sorted) epics
- * list it's given, grouped by status.
+ * Search/filter/sort/pin/paging/keyboard controls are PRD 828's job, wired
+ * in via `EpicQueueControls.tsx`. This component's own default (status-only,
+ * unpaged) grouping still runs when the `sections` prop is omitted, so PRD
+ * 827's original contract keeps working for any caller that only needs the
+ * plain grouped list.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type { PromptSession, PromptSessionEvent } from '../../state/promptSessions'
 import { epicDisplayStatus, epicPrds, epicStats, type EpicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
@@ -31,6 +33,14 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width={11} height={11} aria-hidden="true" fill={filled ? 'currentColor' : 'none'}>
+      <path d="M8 2l1.5 3.2L13 6l-2.5 2.4L11 12l-3-1.8L5 12l.5-3.6L3 6l3.5-.8L8 2z" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function activityAgeLabel(epicId: string, epic: PromptSession, events: Record<string, PromptSessionEvent[]>, now: number): string {
   const tail = events[epicId]?.slice(-1)[0] ?? null
   const at = tail?.at ?? epic.createdAt
@@ -48,26 +58,48 @@ interface QueueRowProps {
   compact: boolean
   now: number
   onSelect: (id: string) => void
+  pinned?: boolean
+  onPin?: (id: string) => void
 }
 
-function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect }: QueueRowProps) {
+function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
   const age = activityAgeLabel(epic.id, epic, events, now)
 
   if (compact) {
     return (
-      <button
-        type="button"
-        onClick={() => onSelect(epic.id)}
-        data-testid="epic-queue-row"
-        data-epic-id={epic.id}
-        className={`w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2 rounded-md py-1.5 px-2 text-left border-l-2 ${
-          selected ? 'bg-bg-hi border-l-accent' : 'border-l-transparent hover:bg-bg-hi/60'
-        }`}
-      >
-        <span className={`w-1.5 h-1.5 rounded-full ${epicStatusDotClass(status)} ${status === 'completed' ? 'opacity-45' : ''}`} aria-hidden="true" />
-        <span className={`min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-fg' : 'text-fg-dim'}`}>{epic.goalText}</span>
-        <span className="font-mono text-[10px] text-fg-faint shrink-0">{age}</span>
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => onSelect(epic.id)}
+          data-testid="epic-queue-row"
+          data-epic-id={epic.id}
+          className={`w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2 rounded-md py-1.5 px-2 text-left border-l-2 ${
+            selected ? 'bg-bg-hi border-l-accent' : 'border-l-transparent hover:bg-bg-hi/60'
+          } ${onPin ? 'pr-6' : ''}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${epicStatusDotClass(status)} ${status === 'completed' ? 'opacity-45' : ''}`} aria-hidden="true" />
+          <span className="min-w-0 flex items-center gap-1.5">
+            {pinned && <span className="text-accent shrink-0" aria-hidden="true"><PinIcon filled /></span>}
+            <span className={`min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-fg' : 'text-fg-dim'}`}>{epic.goalText}</span>
+          </span>
+          <span className="font-mono text-[10px] text-fg-faint shrink-0">{age}</span>
+        </button>
+        {onPin && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onPin(epic.id)
+            }}
+            title={pinned ? 'Unpin' : 'Pin to top'}
+            aria-label={pinned ? `Unpin ${epic.goalText}` : `Pin ${epic.goalText} to top`}
+            data-testid="epic-queue-row-pin"
+            className={`absolute top-1/2 -translate-y-1/2 right-1.5 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
+          >
+            <PinIcon filled={pinned} />
+          </button>
+        )}
+      </div>
     )
   }
 
@@ -75,34 +107,62 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
   const stats = epicStats(epic.id, snapshots)
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(epic.id)}
-      data-testid="epic-queue-row"
-      data-epic-id={epic.id}
-      className={`relative w-full text-left rounded-lg p-2.5 grid gap-1.5 ${
-        selected ? 'bg-bg-hi shadow-sm ring-1 ring-line' : 'hover:bg-bg-hi/50'
-      }`}
-    >
-      {selected && (
-        <span className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${epicStatusDotClass(status)}`} aria-hidden="true" />
-      )}
-      <span className="flex items-center gap-1.5">
-        <EpicStatusChip status={status} small />
-        <EpicKindTag kind={epic.tag} small />
-        <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-1">{age}</span>
-      </span>
-      <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1">{epic.goalText}</span>
-      <span className="flex items-center gap-3 font-mono text-[10.5px] text-fg-faint">
-        {prds.length > 0 && (
-          <span>
-            {prds.length} {prds.length === 1 ? 'PRD' : 'PRDs'}
-          </span>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => onSelect(epic.id)}
+        data-testid="epic-queue-row"
+        data-epic-id={epic.id}
+        className={`relative w-full text-left rounded-lg p-2.5 grid gap-1.5 ${
+          selected ? 'bg-bg-hi shadow-sm ring-1 ring-line' : 'hover:bg-bg-hi/50'
+        }`}
+      >
+        {selected && (
+          <span className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${epicStatusDotClass(status)}`} aria-hidden="true" />
         )}
-        {stats !== null && <span>{stats.turns} turns</span>}
-      </span>
-    </button>
+        <span className="flex items-center gap-1.5">
+          <EpicStatusChip status={status} small />
+          <EpicKindTag kind={epic.tag} small />
+          <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-4">{age}</span>
+        </span>
+        <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1">{epic.goalText}</span>
+        <span className="flex items-center gap-3 font-mono text-[10.5px] text-fg-faint">
+          {prds.length > 0 && (
+            <span>
+              {prds.length} {prds.length === 1 ? 'PRD' : 'PRDs'}
+            </span>
+          )}
+          {stats !== null && <span>{stats.turns} turns</span>}
+        </span>
+      </button>
+      {onPin && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onPin(epic.id)
+          }}
+          title={pinned ? 'Unpin' : 'Pin to top'}
+          aria-label={pinned ? `Unpin ${epic.goalText}` : `Pin ${epic.goalText} to top`}
+          data-testid="epic-queue-row-pin"
+          className={`absolute top-2 right-2 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
+        >
+          <PinIcon filled={pinned} />
+        </button>
+      )}
+    </div>
   )
+}
+
+/** A precomputed, already-grouped-and-paged section — PRD 828's control layer owns this shape. */
+export interface EpicQueueSection {
+  key: string
+  label: string
+  dotClass: string
+  /** Rows to render — already sliced to the current page limit. */
+  items: PromptSession[]
+  /** Full (unpaged) count, for the "N hidden" paging button. */
+  total: number
 }
 
 export interface EpicQueueProps {
@@ -116,30 +176,72 @@ export interface EpicQueueProps {
   compact?: boolean
   /** Injectable for tests; defaults to Date.now(). */
   now?: number
+  /** Precomputed grouped+paged sections, overriding the default status-only grouping. */
+  sections?: EpicQueueSection[]
+  /** Rows pinned to a sticky "pinned" section above the groups. */
+  pinnedEpics?: PromptSession[]
+  onPin?: (id: string) => void
+  /** Reveal the next page of a section (id === section.key). */
+  onShowMore?: (key: string) => void
+  /** Overrides the zero-epics empty state — e.g. a "no search match" state. */
+  emptyState?: { title: string; hint?: ReactNode }
+  /** Controlled collapse state, keyed by section key — lets a caller (e.g. keyboard nav) read it. Falls back to internal state when omitted. */
+  closedKeys?: ReadonlySet<string>
+  onToggleSection?: (key: string) => void
 }
 
-export function EpicQueue({ epics, snapshots, events, selectedId, onSelect, onNew, compact = false, now }: EpicQueueProps) {
-  const [closedSections, setClosedSections] = useState<Set<EpicDisplayStatus>>(() => new Set(['completed']))
+export function EpicQueue({
+  epics,
+  snapshots,
+  events,
+  selectedId,
+  onSelect,
+  onNew,
+  compact = false,
+  now,
+  sections: sectionsProp,
+  pinnedEpics = [],
+  onPin,
+  onShowMore,
+  emptyState,
+  closedKeys,
+  onToggleSection,
+}: EpicQueueProps) {
+  const [internalClosed, setInternalClosed] = useState<Set<string>>(() => new Set(['completed']))
+  const closedSections = closedKeys ?? internalClosed
   const nowMs = now ?? Date.now()
 
-  const sections = useMemo(() => {
+  const defaultSections = useMemo<EpicQueueSection[]>(() => {
     const buckets = new Map<EpicDisplayStatus, PromptSession[]>()
     for (const epic of epics) {
       const status = epicDisplayStatus(epic.id, snapshots)
       if (!buckets.has(status)) buckets.set(status, [])
       buckets.get(status)!.push(epic)
     }
-    return STATUS_ORDER.filter((s) => buckets.has(s)).map((s) => ({ status: s, items: buckets.get(s)! }))
+    return STATUS_ORDER.filter((s) => buckets.has(s)).map((s) => {
+      const items = buckets.get(s)!
+      return { key: s, label: epicStatusLabel(s), dotClass: epicStatusDotClass(s), items, total: items.length }
+    })
   }, [epics, snapshots])
 
-  const toggleSection = (status: EpicDisplayStatus) => {
-    setClosedSections((prev) => {
+  const sections = sectionsProp ?? defaultSections
+
+  const toggleSection = (key: string) => {
+    if (onToggleSection) {
+      onToggleSection(key)
+      return
+    }
+    setInternalClosed((prev) => {
       const next = new Set(prev)
-      if (next.has(status)) next.delete(status)
-      else next.add(status)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
+
+  const isEmpty = sectionsProp
+    ? sectionsProp.length === 0 && pinnedEpics.length === 0
+    : epics.length === 0 && pinnedEpics.length === 0
 
   return (
     <aside className="w-[352px] shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
@@ -156,53 +258,98 @@ export function EpicQueue({ epics, snapshots, events, selectedId, onSelect, onNe
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1.5">
-        {epics.length === 0 ? (
+        {isEmpty ? (
           <EmptyState
-            title="No Epics yet"
+            title={emptyState?.title ?? 'No Epics yet'}
             hint={
-              <button type="button" onClick={onNew} className="mt-2 text-accent font-semibold text-xs">
-                + New Epic
-              </button>
+              emptyState?.hint ?? (
+                <button type="button" onClick={onNew} className="mt-2 text-accent font-semibold text-xs">
+                  + New Epic
+                </button>
+              )
             }
           />
         ) : (
-          sections.map(({ status, items }) => {
-            const closed = closedSections.has(status)
-            return (
-              <div key={status} className="mb-1.5">
-                <button
-                  type="button"
-                  onClick={() => toggleSection(status)}
-                  className="sticky top-0 z-10 w-full flex items-center gap-1.5 bg-bg-elev py-1.5 px-1.5 text-left"
-                >
-                  <ChevronIcon open={!closed} />
-                  <span className={`w-1.5 h-1.5 rounded-full ${epicStatusDotClass(status)}`} aria-hidden="true" />
-                  <span className="font-mono text-[10px] font-semibold tracking-[0.9px] uppercase text-fg-dim">
-                    {epicStatusLabel(status)}
+          <>
+            {pinnedEpics.length > 0 && (
+              <div className="mb-2">
+                <div className="sticky top-0 z-10 flex items-center gap-1.5 bg-bg-elev py-1.5 px-1.5">
+                  <span className="text-accent" aria-hidden="true">
+                    <PinIcon filled />
                   </span>
-                  <span className="font-mono text-[10px] text-fg-faint">{items.length}</span>
-                  <span className="ml-auto h-px flex-1 bg-rule opacity-70" />
-                </button>
-                {!closed && (
-                  <div className={`grid ${compact ? 'gap-px' : 'gap-1.5'}`}>
-                    {items.map((epic) => (
-                      <QueueRow
-                        key={epic.id}
-                        epic={epic}
-                        snapshots={snapshots}
-                        events={events}
-                        status={status}
-                        selected={epic.id === selectedId}
-                        compact={compact}
-                        now={nowMs}
-                        onSelect={onSelect}
-                      />
-                    ))}
-                  </div>
-                )}
+                  <span className="font-mono text-[10px] font-semibold tracking-[0.9px] uppercase text-fg-dim">pinned</span>
+                  <span className="font-mono text-[10px] text-fg-faint">{pinnedEpics.length}</span>
+                </div>
+                <div className={`grid ${compact ? 'gap-px' : 'gap-1.5'}`}>
+                  {pinnedEpics.map((epic) => (
+                    <QueueRow
+                      key={epic.id}
+                      epic={epic}
+                      snapshots={snapshots}
+                      events={events}
+                      status={epicDisplayStatus(epic.id, snapshots)}
+                      selected={epic.id === selectedId}
+                      compact={compact}
+                      now={nowMs}
+                      onSelect={onSelect}
+                      pinned
+                      onPin={onPin}
+                    />
+                  ))}
+                </div>
               </div>
-            )
-          })
+            )}
+
+            {sections.map((section) => {
+              const closed = closedSections.has(section.key)
+              const hidden = section.total - section.items.length
+              return (
+                <div key={section.key} className="mb-1.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(section.key)}
+                    className="sticky top-0 z-10 w-full flex items-center gap-1.5 bg-bg-elev py-1.5 px-1.5 text-left"
+                  >
+                    <ChevronIcon open={!closed} />
+                    <span className={`w-1.5 h-1.5 rounded-full ${section.dotClass}`} aria-hidden="true" />
+                    <span className="font-mono text-[10px] font-semibold tracking-[0.9px] uppercase text-fg-dim">
+                      {section.label}
+                    </span>
+                    <span className="font-mono text-[10px] text-fg-faint">{section.total}</span>
+                    <span className="ml-auto h-px flex-1 bg-rule opacity-70" />
+                  </button>
+                  {!closed && (
+                    <div className={`grid ${compact ? 'gap-px' : 'gap-1.5'}`}>
+                      {section.items.map((epic) => (
+                        <QueueRow
+                          key={epic.id}
+                          epic={epic}
+                          snapshots={snapshots}
+                          events={events}
+                          status={epicDisplayStatus(epic.id, snapshots)}
+                          selected={epic.id === selectedId}
+                          compact={compact}
+                          now={nowMs}
+                          onSelect={onSelect}
+                          onPin={onPin}
+                        />
+                      ))}
+                      {hidden > 0 && onShowMore && (
+                        <button
+                          type="button"
+                          onClick={() => onShowMore(section.key)}
+                          data-testid="epic-queue-show-more"
+                          className="text-left rounded-md border border-dashed border-rule px-2.5 py-1.5 my-0.5 text-[11.5px] font-semibold text-fg-faint"
+                        >
+                          Show {Math.min(40, hidden)} more · {hidden} hidden
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </>
         )}
       </div>
     </aside>

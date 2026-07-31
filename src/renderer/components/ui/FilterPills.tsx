@@ -1,6 +1,8 @@
 interface FilterPillOption<T extends string> {
   value: T
   label: string
+  /** Optional live count appended after the label, e.g. "Open 12". */
+  count?: number
 }
 
 interface FilterPillsProps<T extends string> {
@@ -28,6 +30,7 @@ export function FilterPills<T extends string>({ options, value, onChange, pillPa
             }`}
           >
             {opt.label}
+            {opt.count !== undefined && <span> {opt.count}</span>}
           </button>
         )
       })}

@@ -47,6 +47,22 @@ const KIND_TONE: Record<NonNullable<PromptSession['tag']>, { text: string; ring:
   discussion: { text: 'text-fg-faint',   ring: 'ring-fg-faint/40',   label: 'DISCUSSION' },
 }
 
+const KIND_DOT: Record<NonNullable<PromptSession['tag']>, string> = {
+  feature: 'bg-sage',
+  bug: 'bg-accent-dark',
+  discussion: 'bg-fg-faint',
+}
+
+/** Solid dot color for a kind, e.g. the tag-grouped Epic queue section header. */
+export function epicKindDotClass(kind: NonNullable<PromptSession['tag']>): string {
+  return KIND_DOT[kind]
+}
+
+/** Title-case kind label, e.g. the tag-grouped Epic queue section header. */
+export function epicKindLabel(kind: NonNullable<PromptSession['tag']>): string {
+  return KIND_TONE[kind].label.charAt(0) + KIND_TONE[kind].label.slice(1).toLowerCase()
+}
+
 export function EpicKindTag({ kind, small }: { kind: PromptSession['tag']; small?: boolean }) {
   if (!kind) return null
   const tone = KIND_TONE[kind]

@@ -115,6 +115,62 @@ test('fileRcaFeedback: new runId for the same slug files a new RCA', async () =>
   expect(files.length).toBe(2);
 });
 
+test('fileRcaFeedback: a duplicate is still detected after /process-feedback archives the file into processed/', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+  const job = baseJob({ cwd });
+
+  const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
+  expect(first.filed).toBe(true);
+
+  const feedbackDir = path.join(cwd, 'session-manager-operations', 'feedback');
+  const processedDir = path.join(feedbackDir, 'processed');
+  fs.mkdirSync(processedDir, { recursive: true });
+  const fileName = path.basename(first.path);
+  fs.renameSync(first.path, path.join(processedDir, fileName));
+
+  const second = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
+  expect(second.filed).toBe(false);
+  expect(second.reason).toBe('duplicate');
+  expect(second.path).toBe(path.join(processedDir, fileName));
+
+  expect(fs.existsSync(path.join(feedbackDir, fileName))).toBe(false);
+  const liveFiles = fs.readdirSync(feedbackDir).filter((f) => f !== 'processed');
+  expect(liveFiles.length).toBe(0);
+  expect(fs.readdirSync(processedDir).length).toBe(1);
+});
+
+test('fileRcaFeedback: investigationText updates the file in processed/ in place instead of duplicating it in the live dir', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+  const job = baseJob({ cwd });
+
+  const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
+  expect(first.filed).toBe(true);
+
+  const feedbackDir = path.join(cwd, 'session-manager-operations', 'feedback');
+  const processedDir = path.join(feedbackDir, 'processed');
+  fs.mkdirSync(processedDir, { recursive: true });
+  const fileName = path.basename(first.path);
+  const processedPath = path.join(processedDir, fileName);
+  fs.renameSync(first.path, processedPath);
+
+  const second = await rcaFeedbackHook.fileRcaFeedback({
+    job, runDir, verdict: 'transcript_errors', investigationText: 'Root cause: forgot to bound the poll loop.',
+  });
+  expect(second.filed).toBe(true);
+  expect(second.updated).toBe(true);
+  expect(second.path).toBe(processedPath);
+
+  const after = fs.readFileSync(processedPath, 'utf8');
+  expect(after).toContain('## Investigation analysis');
+  expect(fs.existsSync(path.join(feedbackDir, fileName))).toBe(false);
+});
+
 // ─── failure-class matching ───────────────────────────────────────────────────
 
 test('classifyFailure: detects stuck-loop from an until/while-true/sleep tail', () => {

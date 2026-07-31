@@ -335,12 +335,28 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
       console.log(`[rca] skip: destPath escaped dest dir (${destPath})`);
       return { filed: false, reason: 'unsafe-path' };
     }
-
-    const alreadyFiled = fs.existsSync(destPath);
-    if (alreadyFiled && !investigationText) {
-      console.log(`[rca] skip: already filed for ${job.slug}@${job.runId}`);
-      return { filed: false, reason: 'duplicate', path: destPath };
+    // /process-feedback archives dispositioned items to <dest.dir>/processed/
+    // immediately at disposition time (its own README convention) — long
+    // before this hook's own run-verify/self-heal passes might touch the same
+    // (slug, runId) again. Once archived, the live-dir check alone goes false
+    // and a re-trigger would refile a duplicate straight into the live inbox.
+    const processedPath = path.resolve(path.join(dest.dir, 'processed', fileName));
+    if (!processedPath.startsWith(path.resolve(path.join(dest.dir, 'processed')) + path.sep)) {
+      console.log(`[rca] skip: processedPath escaped processed dir (${processedPath})`);
+      return { filed: false, reason: 'unsafe-path' };
     }
+
+    const liveExists = fs.existsSync(destPath);
+    const processedExists = !liveExists && fs.existsSync(processedPath);
+    const alreadyFiled = liveExists || processedExists;
+    if (alreadyFiled && !investigationText) {
+      const existingPath = liveExists ? destPath : processedPath;
+      console.log(`[rca] skip: already filed for ${job.slug}@${job.runId}`);
+      return { filed: false, reason: 'duplicate', path: existingPath };
+    }
+    // An investigationText update must target wherever the file actually
+    // lives (live dir or processed/), not assume the live dir.
+    const targetPath = liveExists || !processedExists ? destPath : processedPath;
 
     const meta = readRunMeta(runDir, job.slug);
     const logPath = runDir ? path.join(runDir, `${job.slug}.log`) : null;
@@ -354,10 +370,10 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
     });
 
     config.addAllowedRoot(dest.allowlistRoot);
-    await config.writeTextAtomic(destPath, markdown);
+    await config.writeTextAtomic(targetPath, markdown);
 
-    console.log(`[rca] ${alreadyFiled ? 'updated (investigation)' : 'filed'} ${destPath}`);
-    return { filed: true, path: destPath, updated: alreadyFiled };
+    console.log(`[rca] ${alreadyFiled ? 'updated (investigation)' : 'filed'} ${targetPath}`);
+    return { filed: true, path: targetPath, updated: alreadyFiled };
   } catch (e) {
     console.error('[rca] error filing RCA feedback', e?.message ?? String(e));
     return { filed: false, reason: 'error', error: e?.message ?? String(e) };

@@ -11,6 +11,8 @@ import { attachVadDucking } from '../lib/vadDucking'
 import { log } from '../lib/logger'
 import { matchVoiceCommand } from '../lib/voiceCommands'
 import { toast } from './toast'
+import { useSessions } from './sessions'
+import { useChat } from './chat'
 
 export type GateReason =
   | 'ready'
@@ -331,10 +333,21 @@ function armSubmit(tabId: string) {
   submitTimer = setTimeout(() => {
     submitTimer = null
     useVoice.setState({ submitCountdownStartAt: null })
-    try {
-      window.api.pty.write({ tabId, data: '\r' })
-    } catch (e: unknown) {
-      log.warn('voice', 'submit pty.write failed', { error: e instanceof Error ? e.message : String(e) })
+    const tab = useSessions.getState().tabs.find((t) => t.id === tabId)
+    if (tab?.status === 'dormant') {
+      // No PTY to send '\r' to — dispatch the accumulated voice text through
+      // the Chat composer's own send() path instead.
+      const pendingText = useChat.getState().chats[tabId]?.pendingVoiceText
+      if (pendingText) {
+        useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt: pendingText })
+        useChat.getState().clearPendingVoiceText(tabId)
+      }
+    } else {
+      try {
+        window.api.pty.write({ tabId, data: '\r' })
+      } catch (e: unknown) {
+        log.warn('voice', 'submit pty.write failed', { error: e instanceof Error ? e.message : String(e) })
+      }
     }
     // Continuous listening: keep the mic open across turns. The user closes
     // it explicitly via hotkey/button; if they truly walk away, the idle
@@ -625,6 +638,21 @@ export const useVoice = create<VoiceState>((set, get) => ({
           const trimmed = text.trim()
           if (!trimmed || ASR_HALLUCINATIONS.has(trimmed)) {
             set({ lastTranscript: '', lastPartial: '', statusPill: 'idle' })
+            return
+          }
+          const tabStatus = useSessions.getState().tabs.find((t) => t.id === tabId)?.status
+          if (tabStatus === 'dormant') {
+            // No PTY to write into (Chat view, PRD 772) — voice commands are
+            // raw terminal control sequences with no meaning here, so always
+            // treat the final transcript as literal text for the composer.
+            useChat.getState().setPendingVoiceText(tabId, trimmed)
+            set({ lastTranscript: '', lastPartial: '', statusPill: 'idle' })
+            if (get().autoSubmit) armSubmit(tabId)
+            const w = window as unknown as { __transcripts?: Array<{ tabId: string; text: string }> }
+            if (w.__transcripts) {
+              w.__transcripts.push({ tabId, text: trimmed })
+              if (w.__transcripts.length > 500) w.__transcripts.shift()
+            }
             return
           }
           const cmd = matchVoiceCommand(trimmed)

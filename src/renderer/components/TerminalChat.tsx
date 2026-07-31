@@ -604,6 +604,8 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const hydrate = useChat((s) => s.hydrate)
   const resetThread = useChat((s) => s.resetThread)
   const pushNotice = useChat((s) => s.pushNotice)
+  const pendingVoiceText = useChat((s) => s.chats[tabId]?.pendingVoiceText)
+  const clearPendingVoiceText = useChat((s) => s.clearPendingVoiceText)
   const [draft, setDraft] = useState('')
   const [composerTag, setComposerTag] = useState<'feature' | 'bug'>('feature')
   // 'new' or the id of an open chain's ROOT ticket to continue (PRD 775).
@@ -688,6 +690,16 @@ export function TerminalChat({ tabId, cwd }: Props) {
     void hydrate({ tabId, cwd, sessionId })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId])
+
+  // Voice input for a dormant tab (no PTY to write to, see voice.ts's
+  // onFinal) lands here instead — append it into the draft (space-joined,
+  // mirroring how pty.write appends keystrokes to whatever's already typed)
+  // then clear it so a second spoken segment appends rather than duplicates.
+  useEffect(() => {
+    if (!pendingVoiceText) return
+    setDraft((d) => (d.trim() ? `${d} ${pendingVoiceText}` : pendingVoiceText))
+    clearPendingVoiceText(tabId)
+  }, [pendingVoiceText, tabId, clearPendingVoiceText])
 
   // Auto-scroll to the newest turn / streamed output. Re-runs when the
   // transcript pane becomes visible (narrow-viewport toggle) so switching

@@ -126,6 +126,13 @@ interface TabChat {
    * moment it's dispatched or completes.
    */
   ticketHistory?: PromptTicket[]
+  /**
+   * A voice transcript recognized while this tab is dormant (no PTY to
+   * pty.write into) — set by voice.ts's onFinal, consumed once by
+   * TerminalChat's composer (appended into its local draft, then cleared)
+   * and/or read by voice.ts's armSubmit at auto-submit time.
+   */
+  pendingVoiceText?: string
 }
 
 interface ChatState {
@@ -152,6 +159,10 @@ interface ChatState {
    * persisted via recordExchange — mirrors the IPC-driven applyNotice below.
    */
   pushNotice: (tabId: string, message: string) => void
+  /** Set by voice.ts's onFinal for a dormant tab's recognized transcript. */
+  setPendingVoiceText: (tabId: string, text: string) => void
+  /** Consumed by TerminalChat's composer or voice.ts's armSubmit. */
+  clearPendingVoiceText: (tabId: string) => void
   /**
    * One-shot: load prior exchanges from the durable store and prepend them as
    * history turns. No-ops if already called for this tabId, if there are no
@@ -284,6 +295,12 @@ export const useChat = create<ChatState>((set, get) => ({
   },
   pushNotice: (tabId, message) => {
     applyNotice(tabId, '', message)
+  },
+  setPendingVoiceText: (tabId, text) => {
+    patch(tabId, (c) => ({ ...c, pendingVoiceText: text }))
+  },
+  clearPendingVoiceText: (tabId) => {
+    patch(tabId, (c) => ({ ...c, pendingVoiceText: undefined }))
   },
 }))
 

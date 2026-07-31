@@ -59,3 +59,27 @@ state. Fix verified 3/3 clean boots on previously 3/3-crashing state.
 While diagnosing, a sandboxed test launch at ~23:16 PDT ran boot reconciliation against the
 real queue and SIGTERM'd orphan claude pid 2122468 (PRD 660 recovery run); the scheduler
 re-spawned it at 23:21 (pid 2133617). Later test launches used an isolated `$HOME`.
+
+## RESOLUTION
+
+Evaluated 2026-07-31 against current code. Disposition per follow-up item:
+
+1. **Publish v0.39.1** — ✅ already done. `package.json` version and the published npm
+   `claude-code-session-manager` version both read `0.39.1`.
+2. **Codebase sweep for the unstable-selector class** — no live instances found in
+   `src/renderer` today (grepped all `use*State((s) => ...)` selectors for
+   `?? []`/`?? {}`/`.filter(`/`.map(`/`Object.values(`). No preventive guard existed
+   though, so queued PRD `815-add-unstable-selector-guard` to add a lint/grep check +
+   CLAUDE.md pointer so a 4th occurrence is caught automatically.
+3. **Crash-visibility gap (renderer uncaught errors)** — ✅ already done.
+   `src/main/crashDiagnostics.cjs` already hooks `render-process-gone` and forwards it.
+4. **`browserView.cjs:231` shutdown crash** — confirmed still present (destroyed-handler
+   dereferences `view.webContents.id` after webContents may be gone). Queued PRD
+   `815-fix-browserview-destroyed-handler-crash`.
+5. **PRD migration tilde bug** — confirmed still present in
+   `src/main/lib/prdMigration.cjs` (`fs.existsSync(cwd)` called on raw, unexpanded `cwd`).
+   Queued PRD `815-fix-prdmigration-tilde-expansion`.
+
+Items 2, 4, 5 queued as PRDs `815-add-unstable-selector-guard`,
+`815-fix-browserview-destroyed-handler-crash`, `815-fix-prdmigration-tilde-expansion`
+(all group 815, independent/parallel-safe) — execution now owned by the scheduler.

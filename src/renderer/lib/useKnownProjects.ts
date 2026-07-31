@@ -128,6 +128,10 @@ export function useKnownProjects() {
       if (!cwd) return
     }
     const id = crypto.randomUUID()
+    // 'projects-tab' isn't a real entry in presets.ts, so restartTab's
+    // findPreset lookup always misses and falls back to the plain
+    // `claude --dangerously-skip-permissions --session-id <uuid>` command —
+    // which is the correct restart behavior for these tabs anyway.
     addTab({
       id,
       cwd,

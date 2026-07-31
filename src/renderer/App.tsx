@@ -168,7 +168,7 @@ export function App() {
     useLayout.getState().openPanel('terminal')
     createPickedSession().catch((e) => {
       console.error('[App] new session failed:', e)
-      toast.error('Could not start new session. Is the claude CLI on PATH?')
+      toast.error('Could not start new session. The directory picker failed.')
     })
   }, [])
 
@@ -306,7 +306,7 @@ export function App() {
     const offNewSession = window.api.app.onNewSession(() => {
       createPickedSession().catch((e) => {
         console.error('[App] new-session from menu failed:', e)
-        toast.error('Could not start new session. Is the claude CLI on PATH?')
+        toast.error('Could not start new session. The directory picker failed.')
       })
     })
 
@@ -726,7 +726,7 @@ export function App() {
             case 'new-tab-pick':
               createPickedSession().catch((e) => {
                 console.error('[App] new tab (pick) failed:', e)
-                toast.error('Could not start new session. Is the claude CLI on PATH?')
+                toast.error('Could not start new session. The directory picker failed.')
               })
               return
             case 'new-tab-here': {

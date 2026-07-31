@@ -1,13 +1,15 @@
 /**
- * Pick a directory via the OS dialog and open a Claude session there.
+ * Pick a directory via the OS dialog and open a dormant Chat-view tab there.
  *
- * The "pick a folder + spawn `claude --dangerously-skip-permissions
- * --session-id <uuid>`" flow used to live inline in three places: App.tsx
- * (menu + Ctrl+N), TabBar.tsx (the + button), and Overview.tsx's
+ * The "pick a folder + open a tab" flow used to live inline in three places:
+ * App.tsx (menu + Ctrl+N), TabBar.tsx (the + button), and Overview.tsx's
  * QuickActions. Each spelt the same flow slightly differently. Unified here.
  *
+ * No process is spawned — the tab is added in `dormant` state and only
+ * starts a PTY when the user later wakes it.
+ *
  * Returns the new tab id on success, or null if the user cancelled the picker.
- * Throws on IPC / spawn failures — callers should toast.
+ * Throws only if the `pickDirectory` IPC call itself fails — callers should toast.
  */
 import { useSessions } from '../state/sessions'
 

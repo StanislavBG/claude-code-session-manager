@@ -131,6 +131,9 @@ export const useSessions = create<SessionsState>((set, get) => ({
       set({ activeTabId: id })
       return id
     }
+    if (dormant && startupCommand) {
+      console.warn('[sessions] addTab: dormant tab requested with a startupCommand — command is discarded:', startupCommand)
+    }
     const tab: SessionTab = {
       id,
       sessionId: id,

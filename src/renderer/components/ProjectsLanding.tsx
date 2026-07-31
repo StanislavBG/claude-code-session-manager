@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../state/promptSessions'
 import { useKnownProjects, candidatePath } from '../lib/useKnownProjects'
 import { compactPath } from '../lib/compactPath'
@@ -6,6 +6,7 @@ import { formatAgo } from '../lib/formatTime'
 import { PromptSessionConversation } from './PromptSessionConversation'
 import { PromptSessionArchiveView } from './PromptSessionArchiveView'
 import { toast } from '../state/toast'
+import { takePendingPromptSessionId } from '../lib/promptSessionDeepLink'
 
 /**
  * Landing content for the (renamed) 'terminal' nav item — shown in place of
@@ -43,6 +44,29 @@ export function ProjectsLanding() {
   const effectiveCwd = cwd || knownCwds[0] || ''
   const openedSession = openedId ? sessions[openedId] : null
   const openedArchiveSession = openedArchiveId ? sessions[openedArchiveId] : null
+
+  // Scheduler-job → PromptSession traceability link (see promptSessionDeepLink.ts):
+  // opens the session a job row traced back to, live conversation for an
+  // active session or the read-only archive for a completed one.
+  const openFromDeepLink = (id: string) => {
+    const target = usePromptSessions.getState().sessions[id]
+    if (!target) return
+    if (target.status === 'completed') {
+      setOpenedArchiveId(id)
+      setOpenedId(null)
+    } else {
+      setOpenedId(id)
+      setOpenedArchiveId(null)
+    }
+  }
+  useEffect(() => {
+    const pendingId = takePendingPromptSessionId()
+    if (pendingId) openFromDeepLink(pendingId)
+    const h = (e: Event) => openFromDeepLink((e as CustomEvent<string>).detail)
+    window.addEventListener('sm:select-prompt-session', h)
+    return () => window.removeEventListener('sm:select-prompt-session', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Only active sessions appear in the working Projects list — a completed
   // session is removed from here and moves to the read-only History section

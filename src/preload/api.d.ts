@@ -399,6 +399,12 @@ export interface ScheduleJob {
   verifierVerdict?: string;
   /** Per-job values carried in queue.json for dependency checking. */
   dependsOn?: string[];
+  /** Originating tab id (PRD frontmatter `sourceTabId`), refreshed from the
+   *  PRD file on every reconcile. When the PRD was authored from inside a
+   *  PromptSessionConversation, this equals that PromptSession's own id
+   *  (its chat key) — lets the Scheduler UI trace a job back to the
+   *  PromptSession that spawned it. */
+  sourceTabId?: string | null;
 }
 
 export interface SchedulePaths {

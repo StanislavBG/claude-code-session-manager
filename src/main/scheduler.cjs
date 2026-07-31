@@ -739,6 +739,7 @@ async function reconcile(state) {
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
+      sourceTabId: p.sourceTabId,
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     });
   }
@@ -784,6 +785,7 @@ async function reconcile(state) {
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
+      sourceTabId: p.sourceTabId,
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       status: 'pending',
       runId: null,

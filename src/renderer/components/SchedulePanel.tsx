@@ -4,6 +4,8 @@ import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHe
 import { toast } from '../state/toast'
 import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
 import { useScheduleState } from '../state/scheduleState'
+import { usePromptSessions } from '../state/promptSessions'
+import { setPendingPromptSessionId } from '../lib/promptSessionDeepLink'
 import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
@@ -756,6 +758,16 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
 
+  // Traceability link back to the PromptSession this job's PRD was authored
+  // from (see promptSessionDeepLink.ts) — job.sourceTabId equals a
+  // PromptSession's own id when the PRD came out of PromptSessionConversation
+  // (its chat key IS the PromptSession id), so a match here is the PRD → the
+  // goal-scoped conversation that spawned it, for tracing + reopening it to
+  // see the completion prompt the scheduler published back into that session.
+  const linkedPromptSession = usePromptSessions((s) =>
+    job.sourceTabId ? (s.sessions[job.sourceTabId] ?? null) : null,
+  )
+
   const isRunning = job.status === 'running'
   const isFailed = job.status === 'failed'
 
@@ -873,6 +885,20 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
 
           <DetailBlock label="Actions">
             <div className="flex flex-col gap-1.5 items-start">
+              {linkedPromptSession && (
+                <button
+                  type="button"
+                  data-testid="job-row-prompt-session-link"
+                  title={linkedPromptSession.goalText}
+                  onClick={() => {
+                    setPendingPromptSessionId(linkedPromptSession.id)
+                    window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
+                  }}
+                  className="text-[13px] font-semibold text-accent hover:text-accent/80 bg-transparent border-0 cursor-pointer p-0"
+                >
+                  view prompt session →
+                </button>
+              )}
               {job.runId && (
                 <button
                   type="button"

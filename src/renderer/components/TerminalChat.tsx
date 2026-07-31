@@ -122,9 +122,7 @@ function FileCallout({ path, cwd }: { path: string; cwd: string }) {
   )
 }
 
-// Mirrors hive-primitives.tsx's ToolChip shape (rounded border pill, text-[10px]
-// font-mono) without importing it directly — that component's tone is a binary
-// read/write concept tied to the Hive design system, not this skill/mcp/tool trace.
+// Rounded border pill, text-[10px] font-mono — this skill/mcp/tool trace's own tone scheme.
 const TOOL_USE_TONE: Record<ToolUseTrace['kind'], string> = {
   skill: 'border-sage/60 bg-sage/10 text-sage',
   mcp: 'border-accent/60 bg-accent/10 text-accent',

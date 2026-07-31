@@ -47,10 +47,6 @@ export default {
         // app-wide for buttons/links/branding) so this fix doesn't ripple
         // into unrelated accent-colored UI.
         'accent-dark': '#814024',
-        // Hive accent palette — three extra low-chroma tones to supplement
-        // accent/sage/butter for the 6-slot hive card rotation.
-        'hive-slate': '#5f6f86',
-        'hive-plum': '#8a5a6e',
         'hive-teal': '#4f7d72',
         // History analytics dashboard — single source for delta/band tones so
         // no component hardcodes these hexes (see HistoryDashboard analytics/).

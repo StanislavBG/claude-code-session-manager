@@ -75,7 +75,45 @@ function prdPillStatus(status: EpicPrd['status']): PrdDisplayStatus {
   return status === 'pending' ? 'queued' : (status as PrdDisplayStatus)
 }
 
+/** Lazy, cached PRD line count — no field for this on EpicPrd/PrdListItem,
+ *  so this reads the file body via schedule.readPrd on first render of each
+ *  slug and remembers the result module-wide (cards remount often as the
+ *  Epic list re-groups/re-sorts). Absent in test mocks that don't stub
+ *  readPrd — guarded, so those cards just render without a line count. */
+const prdLineCountCache = new Map<string, number | null>()
+
+function usePrdLineCount(slug: string): number | null {
+  const [count, setCount] = useState<number | null>(() => prdLineCountCache.get(slug) ?? null)
+
+  useEffect(() => {
+    const cached = prdLineCountCache.get(slug)
+    if (cached !== undefined) {
+      setCount(cached)
+      return
+    }
+    if (typeof window.api?.schedule?.readPrd !== 'function') return
+    let cancelled = false
+    window.api.schedule
+      .readPrd(slug)
+      .then((res) => {
+        const lines = res.ok && res.text ? res.text.split('\n').length : null
+        prdLineCountCache.set(slug, lines)
+        if (!cancelled) setCount(lines)
+      })
+      .catch(() => {
+        prdLineCountCache.set(slug, null)
+        if (!cancelled) setCount(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slug])
+
+  return count
+}
+
 function PrdCard({ prd }: { prd: EpicPrd }) {
+  const lineCount = usePrdLineCount(prd.slug)
   return (
     <div
       className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-3 rounded-xl border border-line bg-bg-hi p-3.5"
@@ -88,6 +126,11 @@ function PrdCard({ prd }: { prd: EpicPrd }) {
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-[12.5px] font-semibold text-fg">{prd.slug}</span>
           <PrdStatusPill status={prdPillStatus(prd.status)} />
+          {lineCount !== null && (
+            <span className="font-mono text-[11px] text-fg-faint" data-testid="epic-prd-line-count">
+              {lineCount} lines
+            </span>
+          )}
         </span>
         {prd.title && <span className="mt-1 block text-[12.5px] leading-relaxed text-fg-faint">{prd.title}</span>}
       </span>

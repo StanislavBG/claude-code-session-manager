@@ -113,6 +113,40 @@ describe('sortEpics', () => {
     expect(sorted.map((e) => e.id)).toEqual(['e-many', 'e-few'])
   })
 
+  it('sorts by tokens descending', () => {
+    const epics = [makeEpic({ id: 'e-few' }), makeEpic({ id: 'e-many' })]
+    const snapshots = emptySnapshots({
+      sessions: Object.fromEntries(epics.map((e) => [e.id, e])),
+      usage: {
+        'e-few': { inputTokens: 100, outputTokens: 0 },
+        'e-many': { inputTokens: 900_000, outputTokens: 300_000 },
+      },
+    })
+    const sorted = sortEpics(epics, 'tokens', snapshots, events)
+    expect(sorted.map((e) => e.id)).toEqual(['e-many', 'e-few'])
+  })
+
+  it('sorts by turns descending', () => {
+    const epics = [makeEpic({ id: 'e-few' }), makeEpic({ id: 'e-many' })]
+    const snapshots = emptySnapshots({
+      sessions: Object.fromEntries(epics.map((e) => [e.id, e])),
+      chats: {
+        'e-few': { turns: [{ id: 't1', role: 'user', text: 'hi', at: 0 }], running: false, queuedPosition: 0 } as unknown as TabChat,
+        'e-many': {
+          turns: [
+            { id: 't1', role: 'user', text: 'hi', at: 0 },
+            { id: 't2', role: 'assistant', text: 'ok', at: 1 },
+            { id: 't3', role: 'user', text: 'more', at: 2 },
+          ],
+          running: false,
+          queuedPosition: 0,
+        } as unknown as TabChat,
+      },
+    })
+    const sorted = sortEpics(epics, 'turns', snapshots, events)
+    expect(sorted.map((e) => e.id)).toEqual(['e-many', 'e-few'])
+  })
+
   it('sorts by recent activity, most recent first', () => {
     const epics = [
       makeEpic({ id: 'e-old', createdAt: new Date(NOW - 100_000).toISOString() }),

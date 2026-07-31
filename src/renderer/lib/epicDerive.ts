@@ -1,6 +1,8 @@
 import type { PromptSession } from '../state/promptSessions'
 import type { TabChat, ChatTurn } from '../state/chat'
 import type { ScheduleJob, PrdListItem } from '../../preload/api'
+import type { EpicUsage } from '../state/epicUsage'
+import { formatCompactCount } from './formatCompactCount'
 
 /**
  * Already-selected store snapshots the Epics workspace joins across —
@@ -15,6 +17,9 @@ export interface EpicSnapshots {
   chats: Record<string, TabChat>
   jobs: ScheduleJob[]
   prds: PrdListItem[]
+  /** Keyed by Epic id — batched from `transcripts:usageFor`, see epicUsage.ts.
+   *  Optional: older callers that haven't wired the fetch yet just omit tokens. */
+  usage?: Record<string, EpicUsage>
 }
 
 export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'draft'
@@ -86,17 +91,24 @@ export function epicPrds(epicId: string, snapshots: EpicSnapshots): EpicPrd[] {
 export interface EpicStats {
   turns: number
   toolCalls: number
+  /** Formatted k/M token total (e.g. "1.2M"), or null when no usage has been
+   *  fetched yet for this Epic — callers omit the metric rather than show 0. */
+  tokens: string | null
 }
 
 /**
- * `{ turns, toolCalls }` derived from useChat's turns for this Epic's chat
- * key — null when that chat hasn't been hydrated yet (never "0, 0", which
- * would misleadingly read as "no activity" rather than "not loaded").
+ * `{ turns, toolCalls, tokens }` derived from useChat's turns + the batched
+ * epicUsage store for this Epic's key — null when the chat hasn't been
+ * hydrated yet (never "0, 0", which would misleadingly read as "no activity"
+ * rather than "not loaded").
  */
 export function epicStats(epicId: string, snapshots: EpicSnapshots): EpicStats | null {
   const chat = snapshots.chats[epicId]
   if (!chat) return null
   const turns: ChatTurn[] = chat.turns
   const toolCalls = turns.reduce((sum, t) => sum + (t.toolUses?.length ?? 0), 0)
-  return { turns: turns.length, toolCalls }
+  const usage = snapshots.usage?.[epicId]
+  const totalTokens = usage ? usage.inputTokens + usage.outputTokens : 0
+  const tokens = totalTokens > 0 ? formatCompactCount(totalTokens) : null
+  return { turns: turns.length, toolCalls, tokens }
 }

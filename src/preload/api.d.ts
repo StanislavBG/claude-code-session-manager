@@ -1226,6 +1226,10 @@ export interface SessionManagerAPI {
     closeTab: (tabId: string) => Promise<{ ok: boolean }>;
     buffer: (tabId: string) => Promise<TranscriptEvent[]>;
     pathFor: (cwd: string, sessionUuid: string) => Promise<string>;
+    /** Batched token-usage totals, one map entry per requested sessionId. A
+     *  session with no transcript file yet (or one over the main-process size
+     *  cap) maps to null. */
+    usageFor: (cwd: string, sessionIds: string[]) => Promise<Record<string, { inputTokens: number; outputTokens: number } | null>>;
     onEvent: (tabId: string, handler: (ev: TranscriptEvent) => void) => () => void;
   };
   sessions: {

@@ -7,6 +7,7 @@ import { usePromptSessions } from '../../state/promptSessions'
 import { useEpicsPrefs } from '../../state/epicsPrefs'
 import { useChat } from '../../state/chat'
 import { useScheduleState } from '../../state/scheduleState'
+import { useEpicUsage } from '../../state/epicUsage'
 
 /**
  * EpicsWorkspace (PRD 829) — the two-pane Epics workspace that replaced
@@ -50,7 +51,10 @@ function installWindowApiMock() {
       onNotice: vi.fn(() => () => {}),
       onExternalSend: vi.fn(() => () => {}),
     },
-    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+    transcripts: {
+      pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+      usageFor: vi.fn().mockResolvedValue({}),
+    },
     config: {
       readText: vi.fn().mockResolvedValue({ exists: true, text: 'transcript content', mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),
@@ -80,6 +84,7 @@ beforeEach(() => {
   useEpicsPrefs.setState({ pins: {}, group: 'status', sort: 'recent', compact: false, hydrated: true })
   useChat.setState({ chats: {}, hydratedTabs: {} })
   useScheduleState.setState({ snapshot: null })
+  useEpicUsage.setState({ usage: {} })
 })
 
 afterEach(() => {

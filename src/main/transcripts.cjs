@@ -262,6 +262,77 @@ function getBuffer(tabId) {
   return sub ? sub.buffer.slice() : [];
 }
 
+// Cap on the transcript file we'll fully re-read for a token-usage summary —
+// protects against OOM on a pathologically large transcript. Sessions over
+// this size report null (omitted by the renderer) rather than a partial sum.
+const MAX_USAGE_FILE_BYTES = 64 * 1024 * 1024;
+
+/** Map<filePath, { mtimeMs, size, usage: {inputTokens, outputTokens} }> */
+const usageCache = new Map();
+
+/**
+ * Sum `usage` events out of one session's JSONL transcript — same
+ * classifyLine()/field-name resolution live.ts's ingest uses for its running
+ * per-tab totals (input_tokens/output_tokens, snake_case on the wire).
+ * Cached by file mtime so repeat calls for an unchanged transcript are a
+ * single fs.stat.
+ */
+async function usageForOne(filePath) {
+  const stat = await fsp.stat(filePath).catch(() => null);
+  if (!stat) return null;
+  const cached = usageCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.usage;
+  }
+  if (stat.size > MAX_USAGE_FILE_BYTES) {
+    logs.writeLine({
+      level: 'warn',
+      scope: 'transcripts',
+      message: 'usageForOne: transcript too large, skipping',
+      meta: { filePath, size: stat.size },
+    });
+    return null;
+  }
+  const text = await fsp.readFile(filePath, 'utf8').catch(() => null);
+  if (text === null) return null;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const ev = classifyLine(obj);
+    if (!ev || ev.kind !== 'usage') continue;
+    const u = ev.data || {};
+    inputTokens += u.input_tokens ?? u.inputTokens ?? 0;
+    outputTokens += u.output_tokens ?? u.outputTokens ?? 0;
+  }
+  const usage = { inputTokens, outputTokens };
+  usageCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, usage });
+  return usage;
+}
+
+/**
+ * Batched token-usage lookup for the Epics workspace — one IPC call per
+ * visible set of Epics rather than a per-row round trip. Returns a map keyed
+ * by sessionId; a session with no transcript file yet (or one over the size
+ * cap) maps to null so callers can omit it rather than showing "0".
+ */
+async function usageFor(cwd, sessionIds) {
+  const out = {};
+  await Promise.all(
+    sessionIds.map(async (sessionId) => {
+      const filePath = transcriptPath(cwd, sessionId);
+      out[sessionId] = await usageForOne(filePath);
+    }),
+  );
+  return out;
+}
+
 function closeAll() {
   for (const sub of subs.values()) sub.watcher?.close().catch(() => {});
   subs.clear();
@@ -282,6 +353,7 @@ function registerTranscriptHandlers() {
   }));
   ipcMain.handle('transcript:buffer', v(s.transcriptTabId, ({ tabId }) => getBuffer(tabId)));
   ipcMain.handle('transcript:path', v(s.transcriptPath, ({ cwd, sessionUuid }) => transcriptPath(cwd, sessionUuid)));
+  ipcMain.handle('transcript:usageFor', v(s.transcriptUsageFor, ({ cwd, sessionIds }) => usageFor(cwd, sessionIds)));
 }
 
 module.exports = {
@@ -293,4 +365,5 @@ module.exports = {
   encodeCwd,
   transcriptPath,
   classifyLine,
+  usageFor,
 };

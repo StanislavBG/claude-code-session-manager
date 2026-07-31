@@ -172,6 +172,14 @@ const transcriptPath = z.object({
   sessionUuid: z.string().regex(SESSION_UUID_RE),
 });
 
+// Batched token-usage lookup for the Epics workspace (one call per visible
+// set of Epics rather than a per-row IPC round trip). Bounded array size —
+// mirrors ptyAlive's cap for the same reason (renderer can't ask unbounded).
+const transcriptUsageFor = z.object({
+  cwd: z.string().min(1).max(4096),
+  sessionIds: z.array(z.string().regex(SESSION_UUID_RE)).max(500),
+});
+
 // ──────────────────────────────────────────── Config
 const configPath = z.object({ path: z.string().min(1).max(4096) });
 
@@ -769,6 +777,7 @@ module.exports = {
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,
+    transcriptUsageFor,
     configPath,
     configWriteJson,
     configWriteText,

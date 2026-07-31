@@ -3,6 +3,7 @@ import { usePromptSessions } from '../../state/promptSessions'
 import { useChatSignals } from '../../lib/useChatSignals'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal } from '../../state/epicTerminal'
+import { useEpicUsage } from '../../state/epicUsage'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
@@ -131,7 +132,22 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     () => (cwd ? Object.values(sessions).filter((s) => s.cwd === cwd) : Object.values(sessions)),
     [sessions, cwd],
   )
-  const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds }
+  const usage = useEpicUsage((s) => s.usage)
+  const fetchUsage = useEpicUsage((s) => s.fetch)
+  // Batched token-usage refresh — one call per distinct cwd among the
+  // visible Epics, never per row. Re-runs when the visible Epic set changes
+  // or the selected Epic changes (its transcript is the one most likely to
+  // have grown), plus a ≥30s interval to pick up usage from a run in flight.
+  const epicUsageKey = epics.map((e) => e.id).join('\n')
+  useEffect(() => {
+    if (!epics.length) return
+    const rows = epics.map((e) => ({ id: e.id, cwd: e.cwd, claudeSessionId: e.claudeSessionId }))
+    void fetchUsage(rows)
+    const t = setInterval(() => void fetchUsage(rows), 30_000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epicUsageKey, selectedId])
+  const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds, usage }
   const selectedEpic = selectedId ? (sessions[selectedId] ?? null) : null
 
   // Preselect the scoped project's most recently active Epic (Terminal.tsx's

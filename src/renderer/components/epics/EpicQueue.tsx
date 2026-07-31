@@ -133,6 +133,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
             </span>
           )}
           {stats !== null && <span>{stats.turns} turns</span>}
+          {stats?.tokens && <span>{stats.tokens} tok</span>}
         </span>
       </button>
       {onPin && (
@@ -188,6 +189,13 @@ export interface EpicQueueProps {
   /** Controlled collapse state, keyed by section key — lets a caller (e.g. keyboard nav) read it. Falls back to internal state when omitted. */
   closedKeys?: ReadonlySet<string>
   onToggleSection?: (key: string) => void
+  /** Search/chips/group-sort controls, rendered inside this component's own
+   *  header block (below the title row, above the scrollable list) — keeps
+   *  the 352px/border-r container single-owned instead of a caller nesting
+   *  a second one around this component. */
+  filters?: ReactNode
+  /** Rendered below the scrollable list, inside this component's own container. */
+  footer?: ReactNode
 }
 
 export function EpicQueue({
@@ -206,6 +214,8 @@ export function EpicQueue({
   emptyState,
   closedKeys,
   onToggleSection,
+  filters,
+  footer,
 }: EpicQueueProps) {
   const [internalClosed, setInternalClosed] = useState<Set<string>>(() => new Set(['completed']))
   const closedSections = closedKeys ?? internalClosed
@@ -245,7 +255,7 @@ export function EpicQueue({
 
   return (
     <aside className="w-[352px] shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
-      <div className="flex items-center gap-2 px-3.5 py-3 border-b border-line">
+      <div className={`flex items-center gap-2 px-3.5 py-3 ${filters ? '' : 'border-b border-line'}`}>
         <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Epic queue</span>
         <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
         <button
@@ -256,6 +266,8 @@ export function EpicQueue({
           + New Epic
         </button>
       </div>
+
+      {filters}
 
       <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1.5">
         {isEmpty ? (
@@ -352,6 +364,8 @@ export function EpicQueue({
           </>
         )}
       </div>
+
+      {footer}
     </aside>
   )
 }

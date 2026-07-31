@@ -46,6 +46,8 @@ const SORT_OPTIONS: ReadonlyArray<{ value: EpicSortKey; label: string }> = [
   { value: 'recent', label: 'last activity' },
   { value: 'title', label: 'title' },
   { value: 'prdCount', label: 'PRD count' },
+  { value: 'tokens', label: 'tokens' },
+  { value: 'turns', label: 'turns' },
 ]
 
 function sectionPresentation(groupBy: EpicGroupKey, key: string): { label: string; dotClass: string } {
@@ -239,94 +241,96 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
       }
     : undefined
 
-  return (
-    <div className="w-[352px] shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
-      <div className="px-3.5 pt-3 pb-2.5 border-b border-line flex flex-col gap-2.5">
-        <div className="relative">
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint pointer-events-none">
-            <SearchIcon />
-          </span>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Search ${epics.length} Epics`}
-            aria-label="Search Epics"
-            className="w-full bg-bg border border-line rounded-md py-1.5 pl-8 pr-7 text-[12.5px] text-fg outline-none focus:border-fg-faint"
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch('')}
-              aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-faint hover:text-fg"
-            >
-              <XIcon />
-            </button>
-          )}
-        </div>
-
-        <FilterPills
-          value={filter}
-          onChange={setFilter}
-          pillPadding="px-2 py-1"
-          options={FILTER_OPTIONS.map((o) => ({
-            value: o.value,
-            label: o.label,
-            count: o.value === 'open' ? counts.open : o.value === 'needs' ? counts.needs : o.value === 'running' ? counts.running : o.value === 'pinned' ? counts.pinned : counts.all,
-          }))}
+  const filters = (
+    <div className="px-3.5 pb-2.5 border-b border-line flex flex-col gap-2.5">
+      <div className="relative">
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint pointer-events-none">
+          <SearchIcon />
+        </span>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={`Search ${epics.length} Epics`}
+          aria-label="Search Epics"
+          className="w-full bg-bg border border-line rounded-md py-1.5 pl-8 pr-7 text-[12.5px] text-fg outline-none focus:border-fg-faint"
         />
-
-        <div className="flex items-center gap-1.5">
-          <MiniSelect label="group" value={group} onChange={setGroup} options={GROUP_OPTIONS} />
-          <MiniSelect label="sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+        {search && (
           <button
             type="button"
-            onClick={() => setCompact(!compact)}
-            title={compact ? 'Comfortable rows' : 'Compact rows'}
-            aria-pressed={compact}
-            className={`ml-auto w-7 h-[26px] grid place-items-center rounded-md border ${
-              compact ? 'border-line bg-bg-hi text-accent' : 'border-line text-fg-faint'
-            }`}
+            onClick={() => setSearch('')}
+            aria-label="Clear search"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-faint hover:text-fg"
           >
-            <CompactToggleIcon />
+            <XIcon />
           </button>
-        </div>
+        )}
       </div>
 
-      <div className="flex-1 min-h-0">
-        <EpicQueue
-          epics={epics}
-          snapshots={snapshots}
-          events={events}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onNew={onNew}
-          compact={compact}
-          now={nowMs}
-          sections={sections}
-          pinnedEpics={pinnedRows}
-          onPin={togglePin}
-          onShowMore={onShowMore}
-          emptyState={emptyState}
-          closedKeys={closedKeys}
-          onToggleSection={(key) =>
-            setClosedKeys((prev) => {
-              const next = new Set(prev)
-              if (next.has(key)) next.delete(key)
-              else next.add(key)
-              return next
-            })
-          }
-        />
-      </div>
+      <FilterPills
+        value={filter}
+        onChange={setFilter}
+        pillPadding="px-2 py-1"
+        options={FILTER_OPTIONS.map((o) => ({
+          value: o.value,
+          label: o.label,
+          count: o.value === 'open' ? counts.open : o.value === 'needs' ? counts.needs : o.value === 'running' ? counts.running : o.value === 'pinned' ? counts.pinned : counts.all,
+        }))}
+      />
 
-      <div className="border-t border-line px-3 py-1.5 flex items-center gap-2.5 bg-bg-elev">
-        <span className="font-mono text-[10.5px] text-fg-faint">
-          {sorted.length} shown · {counts.needs} need you
-        </span>
-        <span className="ml-auto font-mono text-[10px] text-fg-faint">j / k to move</span>
+      <div className="flex items-center gap-1.5">
+        <MiniSelect label="group" value={group} onChange={setGroup} options={GROUP_OPTIONS} />
+        <MiniSelect label="sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+        <button
+          type="button"
+          onClick={() => setCompact(!compact)}
+          title={compact ? 'Comfortable rows' : 'Compact rows'}
+          aria-pressed={compact}
+          className={`ml-auto w-7 h-[26px] grid place-items-center rounded-md border ${
+            compact ? 'border-line bg-bg-hi text-accent' : 'border-line text-fg-faint'
+          }`}
+        >
+          <CompactToggleIcon />
+        </button>
       </div>
     </div>
+  )
+
+  const footer = (
+    <div className="border-t border-line px-3 py-1.5 flex items-center gap-2.5 bg-bg-elev">
+      <span className="font-mono text-[10.5px] text-fg-faint">
+        {sorted.length} shown · {counts.needs} need you
+      </span>
+      <span className="ml-auto font-mono text-[10px] text-fg-faint">j / k to move</span>
+    </div>
+  )
+
+  return (
+    <EpicQueue
+      epics={epics}
+      snapshots={snapshots}
+      events={events}
+      selectedId={selectedId}
+      onSelect={onSelect}
+      onNew={onNew}
+      compact={compact}
+      now={nowMs}
+      sections={sections}
+      pinnedEpics={pinnedRows}
+      onPin={togglePin}
+      onShowMore={onShowMore}
+      emptyState={emptyState}
+      closedKeys={closedKeys}
+      onToggleSection={(key) =>
+        setClosedKeys((prev) => {
+          const next = new Set(prev)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
+          return next
+        })
+      }
+      filters={filters}
+      footer={footer}
+    />
   )
 }

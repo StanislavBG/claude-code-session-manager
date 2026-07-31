@@ -7,11 +7,11 @@
  * epics-mock.jsx's EpicQueue state machine (matches/sorted/sections/flat).
  */
 import type { PromptSession, PromptSessionEvent } from '../state/promptSessions'
-import { epicDisplayStatus, epicPrds, type EpicDisplayStatus, type EpicSnapshots } from './epicDerive'
+import { epicDisplayStatus, epicPrds, epicStats, type EpicDisplayStatus, type EpicSnapshots } from './epicDerive'
 
 export type EpicFilterKey = 'open' | 'needs' | 'running' | 'pinned' | 'all'
 export type EpicGroupKey = 'status' | 'tag' | 'recency'
-export type EpicSortKey = 'recent' | 'title' | 'prdCount'
+export type EpicSortKey = 'recent' | 'title' | 'prdCount' | 'tokens' | 'turns'
 
 /** First page size per section; "show more" reveals this many additional rows. */
 export const PAGE = 18
@@ -105,6 +105,21 @@ export function sortEpics(
     // prds/jobs inside the O(n log n) comparator.
     const counts = new Map(copy.map((e) => [e.id, epicPrds(e.id, snapshots).length]))
     copy.sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0))
+    return copy
+  }
+  if (sort === 'tokens') {
+    const totals = new Map(
+      copy.map((e) => {
+        const usage = snapshots.usage?.[e.id]
+        return [e.id, usage ? usage.inputTokens + usage.outputTokens : 0]
+      }),
+    )
+    copy.sort((a, b) => (totals.get(b.id) ?? 0) - (totals.get(a.id) ?? 0))
+    return copy
+  }
+  if (sort === 'turns') {
+    const totals = new Map(copy.map((e) => [e.id, epicStats(e.id, snapshots)?.turns ?? 0]))
+    copy.sort((a, b) => (totals.get(b.id) ?? 0) - (totals.get(a.id) ?? 0))
     return copy
   }
   copy.sort((a, b) => lastActivityMs(b, events) - lastActivityMs(a, events))

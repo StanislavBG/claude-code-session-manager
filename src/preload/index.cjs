@@ -122,6 +122,8 @@ contextBridge.exposeInMainWorld('api', {
     buffer: (tabId) => ipcRenderer.invoke('transcript:buffer', { tabId }),
     pathFor: (cwd, sessionUuid) =>
       ipcRenderer.invoke('transcript:path', { cwd, sessionUuid }),
+    usageFor: (cwd, sessionIds) =>
+      ipcRenderer.invoke('transcript:usageFor', { cwd, sessionIds }),
     onEvent: (tabId, handler) => {
       const channel = `transcript:event:${tabId}`;
       const listener = (_e, ev) => handler(ev);

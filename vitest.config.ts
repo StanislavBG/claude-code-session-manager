@@ -20,6 +20,7 @@ export default defineConfig({
       'src/main/__tests__/historyDashboard.test.cjs',
       'src/main/__tests__/rcaFeedbackHook.test.cjs',
       'src/main/__tests__/classifyTranscriptLine.test.cjs',
+      'src/main/__tests__/transcriptsUsageFor.test.cjs',
       'src/main/__tests__/prdCreate.test.cjs',
       'src/main/__tests__/scheduler-admin-routes.test.cjs',
       'src/main/__tests__/classifyPromptTicket.test.cjs',

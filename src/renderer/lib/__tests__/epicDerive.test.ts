@@ -191,6 +191,19 @@ describe('epicDerive.epicStats', () => {
         }),
       },
     })
-    expect(epicStats('epic-1', snapshots)).toEqual({ turns: 3, toolCalls: 3 })
+    expect(epicStats('epic-1', snapshots)).toEqual({ turns: 3, toolCalls: 3, tokens: null })
+  })
+
+  it('formats tokens as k/M and omits them when no usage is recorded', () => {
+    const withUsage = makeSnapshots({
+      chats: { 'epic-1': makeChat({ turns: [{ id: 't1', role: 'user', text: 'hi', at: 0 }] }) },
+      usage: { 'epic-1': { inputTokens: 900_000, outputTokens: 300_000 } },
+    })
+    expect(epicStats('epic-1', withUsage)?.tokens).toBe('1.2M')
+
+    const withoutUsage = makeSnapshots({
+      chats: { 'epic-1': makeChat({ turns: [{ id: 't1', role: 'user', text: 'hi', at: 0 }] }) },
+    })
+    expect(epicStats('epic-1', withoutUsage)?.tokens).toBeNull()
   })
 })

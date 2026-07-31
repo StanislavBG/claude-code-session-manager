@@ -419,6 +419,24 @@ export function EpicDetail({ promptSession }: Props) {
           {stats && <MetaItem label="turns" value={String(stats.turns)} />}
           {stats && <MetaItem label="tool calls" value={String(stats.toolCalls)} />}
           {stats?.tokens && <MetaItem label="tokens" value={stats.tokens} />}
+          {/* The Epic IS this claude session — surface the id so it's
+              unambiguous which session scheduler PRDs post their completion
+              responses back to (notifyOriginatingTab keys off it). */}
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(sessionId).then(
+                () => toast.info('Session id copied'),
+                () => toast.error('Copy failed'),
+              )
+            }}
+            title={`claude session ${sessionId} — click to copy. Scheduler PRDs dispatched from this Epic post their completion responses back into this session's thread.`}
+            data-testid="epic-session-id"
+            className="inline-flex items-baseline gap-1.5 text-xs hover:text-fg"
+          >
+            <span className="text-fg-faint">session</span>
+            <span className="font-mono font-semibold text-fg-dim">{sessionId.slice(0, 8)}…</span>
+          </button>
         </div>
 
         {mode === 'chat' && (

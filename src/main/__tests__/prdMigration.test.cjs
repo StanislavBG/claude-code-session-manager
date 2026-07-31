@@ -119,6 +119,31 @@ test('migratePrds expands a tilde-prefixed cwd and moves the file', async () => 
   expect(fs.existsSync(dest)).toBe(true);
 });
 
+test('migratePrds expands a tilde cwd under a temp HOME (regression: stale installs lacking expandHome leave these unresolved)', async () => {
+  const legacyDir = await mkLegacyDir();
+  const fakeHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdmigration-fakehome-'));
+  tmpDirs.push(fakeHome);
+  const projectCwd = path.join(fakeHome, 'Projects', 'session-manager');
+  await fsp.mkdir(projectCwd, { recursive: true });
+
+  const originalHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+  try {
+    const body = `---\ntitle: Tilde under fake HOME\ncwd: ~/Projects/session-manager\nestimateMinutes: 15\n---\n\nBody.\n`;
+    await fsp.writeFile(path.join(legacyDir, '08-tilde-fakehome.md'), body, 'utf8');
+
+    const result = await migratePrds(legacyDir);
+
+    expect(result.moved).toBe(1);
+    expect(result.unresolved).toEqual([]);
+    expect(fs.existsSync(path.join(legacyDir, '08-tilde-fakehome.md'))).toBe(false);
+    const dest = path.join(resolvePrdWriteDir(projectCwd), '08-tilde-fakehome.md');
+    expect(fs.existsSync(dest)).toBe(true);
+  } finally {
+    process.env.HOME = originalHome;
+  }
+});
+
 test('migratePrds moves multiple PRDs to different projects independently', async () => {
   const legacyDir = await mkLegacyDir();
   const cwdA = await mkProjectCwd();

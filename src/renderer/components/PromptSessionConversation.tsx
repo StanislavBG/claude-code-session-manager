@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import { useChat, dispatchPromptSessionToPrd } from '../state/chat'
+import { useChat } from '../state/chat'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../state/promptSessions'
+import { useScheduleState } from '../state/scheduleState'
 import { Turn } from './ChatTranscriptTurn'
-import { TagSelector, openPrdSlug } from './TerminalChat'
-import type { TicketTag } from '../lib/ticketDisplay'
+import { openPrdSlug } from './TerminalChat'
+import { EpicComposer, canCompose } from './epics/EpicComposer'
+import type { EpicSnapshots } from '../lib/epicDerive'
+import type { PrdListItem, ScheduleJob } from '../../preload/api'
+
+// Stable fallback for the snapshots.prds slice below — EpicComposer only
+// needs epicDisplayStatus (sessions/chats/jobs), never the PRD list itself,
+// so an empty constant avoids minting a fresh array per render (zustand
+// selector-stability rule).
+const EMPTY_PRDS: PrdListItem[] = []
+const EMPTY_JOBS: ScheduleJob[] = []
 
 /**
  * Assistant-turn ids already folded into a 'response' PromptSessionEvent, per
@@ -36,10 +46,6 @@ function epicBadgeColor(epicId: string): string {
 function epicInitial(goalText: string): string {
   return (goalText.trim()[0] ?? 'E').toUpperCase()
 }
-function truncateGoal(goalText: string, max = 60): string {
-  const t = goalText.trim()
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t
-}
 
 /**
  * Dedicated conversation view for a single PromptSession (PRD 802/803) — a
@@ -66,16 +72,15 @@ export function PromptSessionConversation({ promptSession }: Props) {
   const { cwd, claudeSessionId: sessionId } = promptSession
 
   const chat = useChat((s) => s.chats[chatKey])
-  const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
   const sessionEvents = usePromptSessions((s) => s.events[promptSession.id]) ?? EMPTY_EVENTS
 
-  const [draft, setDraft] = useState('')
-  const [composerTag, setComposerTag] = useState<TicketTag>('feature')
-  const [dispatching, setDispatching] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const allSessions = usePromptSessions((s) => s.sessions)
+  const allChats = useChat((s) => s.chats)
+  const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
+  const snapshots: EpicSnapshots = { sessions: allSessions, chats: allChats, jobs: scheduleJobs, prds: EMPTY_PRDS }
 
   useEffect(() => {
     void hydrate({ tabId: chatKey, cwd, sessionId })
@@ -126,27 +131,6 @@ export function PromptSessionConversation({ promptSession }: Props) {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [turns.length, stream])
-
-  const submit = () => {
-    if (!draft.trim()) return
-    const text = draft.trim()
-    setDraft('')
-    if (composerTag === 'discussion') {
-      // Discussion stays interactive — never dispatched to /develop, same
-      // rule TerminalChat's composer already enforces for this tag.
-      send({ tabId: chatKey, sessionId, cwd, prompt: text })
-      return
-    }
-    setDispatching(true)
-    void dispatchPromptSessionToPrd(promptSession.id, cwd, text, composerTag).finally(() => setDispatching(false))
-  }
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      submit()
-    }
-  }
 
   const prdCount = sessionEvents.filter((e) => e.kind === 'prd_created').length
   const badgeColor = epicBadgeColor(promptSession.id)
@@ -282,49 +266,7 @@ export function PromptSessionConversation({ promptSession }: Props) {
         )}
       </div>
 
-      <div className="border-t border-rule p-3">
-        <div className="mb-1.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint" data-testid="epic-composer-label">
-          <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: badgeColor }}
-            aria-hidden="true"
-          />
-          Message this Epic: "{truncateGoal(promptSession.goalText)}"
-        </div>
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            rows={2}
-            placeholder={
-              running
-                ? 'Running… send to queue a follow-up prompt for this Epic'
-                : composerTag === 'discussion'
-                  ? 'Discuss with this Epic (Enter to send, Shift+Enter for newline)'
-                  : `Describe the work to dispatch as a PRD under this Epic (Enter to send)`
-            }
-            className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
-          />
-          <TagSelector value={composerTag} onChange={setComposerTag} disabled={dispatching} />
-          {running && (
-            <button
-              onClick={() => window.api.chat.cancel(chatKey)}
-              className="rounded-md border border-[#b8443c]/40 px-3 py-2 text-sm text-[#8a2f28] hover:bg-[#b8443c]/10"
-            >
-              Cancel
-            </button>
-          )}
-          <button
-            onClick={submit}
-            disabled={!draft.trim() || dispatching}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-40"
-          >
-            {dispatching ? 'Dispatching…' : 'Send'}
-          </button>
-        </div>
-      </div>
+      {canCompose(promptSession) && <EpicComposer epic={promptSession} snapshots={snapshots} />}
     </div>
   )
 }

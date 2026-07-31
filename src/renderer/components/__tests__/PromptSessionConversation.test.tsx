@@ -130,13 +130,13 @@ describe('PromptSessionConversation (PRD 804)', () => {
 
       const textarea = container.querySelector('textarea') as HTMLTextAreaElement
       const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
-      const discussionButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Discussion') as HTMLButtonElement
+      const chatButton = container.querySelector('[data-testid="epic-composer-action-chat"]') as HTMLButtonElement
 
-      // Discussion tag: stays interactive / runs through chatRunner, never
-      // dispatched to a PRD (Feature/Bug tags dispatch instead — covered by
-      // chat.test.ts's dispatchPromptSessionToPrd coverage).
+      // Chat action: stays interactive / runs through chatRunner, never
+      // dispatched to a PRD (the Dispatch-as-PRD action dispatches instead —
+      // covered by chat.test.ts's dispatchPromptSessionToPrd coverage).
       act(() => {
-        discussionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        chatButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
 
       // React tracks a controlled element's last-known value via a patched
@@ -197,9 +197,9 @@ describe('PromptSessionConversation (PRD 804)', () => {
 
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
-    const discussionButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Discussion') as HTMLButtonElement
+    const chatButton = container.querySelector('[data-testid="epic-composer-action-chat"]') as HTMLButtonElement
     act(() => {
-      discussionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      chatButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
     act(() => {

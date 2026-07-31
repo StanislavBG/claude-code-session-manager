@@ -17,6 +17,26 @@ export interface PromptSession {
   status: 'active' | 'completed'
   createdAt: string
   completedAt: string | null
+  /** Set only on a session minted via resumeArchived — traces back to the
+   *  completed/archived PromptSession this one follows on from. The
+   *  archived session's claudeSessionId is dead and never reused. */
+  resumedFromId?: string | null
+}
+
+/** On-disk archive shape written by markCompleted and read back by any
+ *  read-only history viewer — the single source of truth for both sides. */
+export interface PromptSessionArchive {
+  session: PromptSession
+  events: PromptSessionEvent[]
+  transcript: string
+  archivedAt: string
+}
+
+/** Where a PromptSession's archive lives once completed — shared by the
+ *  writer (markCompleted) and any reader (history view) so the path is
+ *  defined exactly once. */
+export function promptSessionArchivePath(cwd: string, promptSessionId: string): string {
+  return `${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/${promptSessionId}.json`
 }
 
 /**
@@ -49,6 +69,15 @@ interface PromptSessionsState {
     promptSessionId: string,
     event: Omit<PromptSessionEvent, 'id' | 'promptSessionId' | 'at'>,
   ) => PromptSessionEvent
+  /** User-triggered only (never auto-fired when a PRD lands). Kills the
+   *  session's live chatRunner process, appends a 'closed' event, flips
+   *  status to 'completed', and persists the full event chain + transcript
+   *  to session-manager-operations/prompt-sessions/<id>.json. */
+  markCompleted: (promptSessionId: string) => Promise<void>
+  /** Mints a brand-new independent PromptSession (fresh claudeSessionId —
+   *  the archived one is dead) that carries a traceability link back to the
+   *  archived session it follows on from. */
+  resumeArchived: (archivedId: string) => PromptSession
 }
 
 let seq = 0
@@ -117,5 +146,60 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       events: { ...get().events, [promptSessionId]: [...existing, fullEvent] },
     })
     return fullEvent
+  },
+  markCompleted: async (promptSessionId) => {
+    const session = get().sessions[promptSessionId]
+    if (!session) {
+      throw new Error(`markCompleted: no PromptSession with id "${promptSessionId}"`)
+    }
+    if (session.status === 'completed') return
+
+    // Real kill path: a PromptSession's live process is a chatRunner child
+    // process keyed by promptSessionId (chat.ts's chatKey), not a pty.cjs
+    // tab — claudeSessionId was never registered with PtyManager. Cancel it
+    // for real, and also hit pty:kill on claudeSessionId as the AC's named
+    // reuse path (a harmless no-op today, cheap insurance if that ever
+    // changes) rather than inventing a second kill mechanism.
+    await window.api.chat.cancel(promptSessionId)
+    window.api.pty.kill(session.claudeSessionId)
+
+    const tail = get().events[promptSessionId]?.slice(-1)[0] ?? null
+    if (tail) {
+      get().appendPromptSessionEvent(promptSessionId, {
+        kind: 'closed',
+        causedByEventId: tail.id,
+      })
+    }
+
+    const now = new Date().toISOString()
+    const completed: PromptSession = { ...session, status: 'completed', completedAt: now }
+    set({ sessions: { ...get().sessions, [promptSessionId]: completed } })
+
+    let transcript = ''
+    try {
+      const transcriptPath = await window.api.transcripts.pathFor(session.cwd, session.claudeSessionId)
+      const result = await window.api.config.readText(transcriptPath)
+      transcript = result.exists ? result.text : ''
+    } catch {
+      transcript = ''
+    }
+
+    const archive: PromptSessionArchive = {
+      session: completed,
+      events: get().events[promptSessionId] ?? [],
+      transcript,
+      archivedAt: now,
+    }
+    await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive)
+  },
+  resumeArchived: (archivedId) => {
+    const archived = get().sessions[archivedId]
+    if (!archived) {
+      throw new Error(`resumeArchived: no PromptSession with id "${archivedId}"`)
+    }
+    const session = get().createPromptSession(archived.cwd, archived.goalText)
+    const linked: PromptSession = { ...session, resumedFromId: archivedId }
+    set({ sessions: { ...get().sessions, [session.id]: linked } })
+    return linked
   },
 }))

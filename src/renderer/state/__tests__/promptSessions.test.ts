@@ -25,6 +25,11 @@ function installWindowApiMock() {
       onNotice: vi.fn(),
       onExternalSend: vi.fn(),
     },
+    config: {
+      readText: vi.fn().mockResolvedValue({ exists: true, text: 'transcript body', mtimeMs: 0, error: null }),
+      writeJson: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),
+      readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }),
+    },
   }
   vi.stubGlobal('window', { api })
   return api
@@ -224,5 +229,77 @@ describe('promptSessions.ts', () => {
         causedByEventId: promptEvent.id,
       }),
     ).toThrow()
+  })
+
+  it('markCompleted kills the live chatRunner process, closes the chain, and persists a correctly-shaped archive', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    store.appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: usePromptSessions.getState().events[session.id][0].id,
+      text: 'progress update',
+    })
+
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    // Real kill path: chatRunner's child process is keyed by promptSessionId.
+    expect(api.chat.cancel).toHaveBeenCalledWith(session.id)
+    // AC-named reuse path, hit defensively even though it's a no-op today.
+    expect(api.pty.kill).toHaveBeenCalledWith(session.claudeSessionId)
+
+    const updated = usePromptSessions.getState().sessions[session.id]
+    expect(updated.status).toBe('completed')
+    expect(updated.completedAt).toBeTruthy()
+
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events[events.length - 1].kind).toBe('closed')
+    expect(events[events.length - 1].causedByEventId).toBe(events[events.length - 2].id)
+
+    expect(api.config.writeJson).toHaveBeenCalledTimes(1)
+    const [archivePath, archive] = api.config.writeJson.mock.calls[0]
+    expect(archivePath).toBe(promptSessionArchivePath('/proj', session.id))
+    expect(archive.session).toEqual(updated)
+    expect(archive.events).toEqual(events)
+    expect(archive.transcript).toBe('transcript body')
+    expect(archive.archivedAt).toBeTruthy()
+  })
+
+  it('markCompleted is a no-op when the session is already completed', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    await usePromptSessions.getState().markCompleted(session.id)
+    api.chat.cancel.mockClear()
+    api.config.writeJson.mockClear()
+
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    expect(api.chat.cancel).not.toHaveBeenCalled()
+    expect(api.config.writeJson).not.toHaveBeenCalled()
+  })
+
+  it('resumeArchived mints a fresh independent session id and records the link back to the archived session', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const archived = store.createPromptSession('/proj', 'Ship the feature')
+    await usePromptSessions.getState().markCompleted(archived.id)
+
+    const resumed = usePromptSessions.getState().resumeArchived(archived.id)
+
+    expect(resumed.id).not.toBe(archived.id)
+    expect(resumed.claudeSessionId).not.toBe(archived.claudeSessionId)
+    expect(resumed.status).toBe('active')
+    expect(resumed.resumedFromId).toBe(archived.id)
+    expect(resumed.cwd).toBe(archived.cwd)
+
+    // The archived session's own record is untouched by the resume.
+    expect(usePromptSessions.getState().sessions[archived.id].status).toBe('completed')
   })
 })

@@ -4,6 +4,8 @@ import { useKnownProjects, candidatePath } from '../lib/useKnownProjects'
 import { compactPath } from '../lib/compactPath'
 import { formatAgo } from '../lib/formatTime'
 import { PromptSessionConversation } from './PromptSessionConversation'
+import { PromptSessionArchiveView } from './PromptSessionArchiveView'
+import { toast } from '../state/toast'
 
 /**
  * Landing content for the (renamed) 'terminal' nav item — shown in place of
@@ -29,16 +31,27 @@ export function ProjectsLanding() {
     return out
   }, [rows, enriched])
 
+  const markCompleted = usePromptSessions((s) => s.markCompleted)
+  const resumeArchived = usePromptSessions((s) => s.resumeArchived)
+
   const [cwd, setCwd] = useState('')
   const [goalText, setGoalText] = useState('')
   const [openedId, setOpenedId] = useState<string | null>(null)
+  const [openedArchiveId, setOpenedArchiveId] = useState<string | null>(null)
+  const [completingId, setCompletingId] = useState<string | null>(null)
 
   const effectiveCwd = cwd || knownCwds[0] || ''
   const openedSession = openedId ? sessions[openedId] : null
+  const openedArchiveSession = openedArchiveId ? sessions[openedArchiveId] : null
 
+  // Only active sessions appear in the working Projects list — a completed
+  // session is removed from here and moves to the read-only History section
+  // below, per the explicit user requirement that completion never happens
+  // implicitly and a completed session shouldn't clutter active work.
   const groups = useMemo(() => {
     const byCwd = new Map<string, PromptSession[]>()
     for (const session of Object.values(sessions)) {
+      if (session.status !== 'active') continue
       const list = byCwd.get(session.cwd) ?? []
       list.push(session)
       byCwd.set(session.cwd, list)
@@ -49,6 +62,12 @@ export function ProjectsLanding() {
     return Array.from(byCwd.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   }, [sessions])
 
+  const history = useMemo(() => {
+    return Object.values(sessions)
+      .filter((s) => s.status === 'completed')
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+  }, [sessions])
+
   const submit = () => {
     const trimmedGoal = goalText.trim()
     if (!effectiveCwd || !trimmedGoal) return
@@ -56,16 +75,68 @@ export function ProjectsLanding() {
     setGoalText('')
   }
 
+  const handleMarkCompleted = async (id: string) => {
+    setCompletingId(id)
+    try {
+      await markCompleted(id)
+      if (openedId === id) setOpenedId(null)
+    } catch (e) {
+      toast.error(`Could not mark session completed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setCompletingId(null)
+    }
+  }
+
+  const handleResume = (archivedId: string) => {
+    const resumed = resumeArchived(archivedId)
+    setOpenedArchiveId(null)
+    setOpenedId(resumed.id)
+  }
+
+  if (openedArchiveSession) {
+    return (
+      <div className="h-full flex flex-col bg-bg" data-testid="projects-landing">
+        <div className="shrink-0 border-b border-rule px-3 py-1.5 flex items-center justify-between">
+          <button
+            data-testid="prompt-session-archive-back"
+            onClick={() => setOpenedArchiveId(null)}
+            className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
+          >
+            ← Back to Projects
+          </button>
+          <button
+            data-testid="prompt-session-resume"
+            onClick={() => handleResume(openedArchiveSession.id)}
+            className="rounded border border-accent/40 px-2 py-1 text-xs text-accent hover:bg-accent/10"
+          >
+            Resume
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">
+          <PromptSessionArchiveView cwd={openedArchiveSession.cwd} promptSessionId={openedArchiveSession.id} />
+        </div>
+      </div>
+    )
+  }
+
   if (openedSession) {
     return (
       <div className="h-full flex flex-col bg-bg" data-testid="projects-landing">
-        <div className="shrink-0 border-b border-rule px-3 py-1.5">
+        <div className="shrink-0 border-b border-rule px-3 py-1.5 flex items-center justify-between">
           <button
             data-testid="prompt-session-back"
             onClick={() => setOpenedId(null)}
             className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
           >
             ← Back to Projects
+          </button>
+          <button
+            data-testid="prompt-session-mark-completed"
+            onClick={() => void handleMarkCompleted(openedSession.id)}
+            disabled={completingId === openedSession.id}
+            className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg disabled:opacity-40"
+          >
+            {completingId === openedSession.id ? 'Marking completed…' : 'Mark completed'}
           </button>
         </div>
         <div className="min-h-0 flex-1">
@@ -138,45 +209,137 @@ export function ProjectsLanding() {
                     key={session.id}
                     session={session}
                     onClick={() => setOpenedId(session.id)}
+                    onMarkCompleted={() => void handleMarkCompleted(session.id)}
+                    completing={completingId === session.id}
                   />
                 ))}
               </div>
             </div>
           ))
         )}
+
+        <div className="mt-10">
+          <div className="mb-2 text-[11px] font-semibold tracking-[0.05em] text-fg-faint uppercase">
+            History
+          </div>
+          {history.length === 0 ? (
+            <div className="text-center text-[12.5px] text-fg-faint py-6">
+              No completed prompt sessions yet.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {history.map((session) => (
+                <PromptSessionHistoryRow
+                  key={session.id}
+                  session={session}
+                  onOpen={() => setOpenedArchiveId(session.id)}
+                  onResume={() => handleResume(session.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-function PromptSessionRow({ session, onClick }: { session: PromptSession; onClick: () => void }) {
-  const isActive = session.status === 'active'
+function PromptSessionRow({
+  session,
+  onClick,
+  onMarkCompleted,
+  completing,
+}: {
+  session: PromptSession
+  onClick: () => void
+  onMarkCompleted: () => void
+  completing: boolean
+}) {
   return (
-    <button
+    <div
       data-testid="prompt-session-row"
       data-status={session.status}
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-md border text-left transition-colors ${
-        isActive
-          ? 'border-accent/40 bg-accent/5 hover:bg-accent/10'
-          : 'border-line bg-bg-elev hover:bg-bg-hi/50'
-      }`}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-md border border-accent/40 bg-accent/5 hover:bg-accent/10 transition-colors"
     >
-      <span
-        data-testid="prompt-session-status-badge"
-        className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
-          isActive ? 'bg-accent/20 text-accent' : 'bg-bg-hi text-fg-faint'
-        }`}
+      <button onClick={onClick} className="flex flex-1 min-w-0 items-center gap-3 text-left">
+        <span
+          data-testid="prompt-session-status-badge"
+          className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-accent/20 text-accent"
+        >
+          Active
+        </span>
+        <span className="flex-1 min-w-0 truncate text-[13px] text-fg">
+          {truncateGoal(session.goalText)}
+        </span>
+        <span className="shrink-0 text-[11px] text-fg-faint font-mono">
+          {formatAgo(new Date(session.createdAt).getTime(), Date.now())}
+        </span>
+      </button>
+      <button
+        data-testid="prompt-session-row-mark-completed"
+        onClick={(e) => {
+          e.stopPropagation()
+          onMarkCompleted()
+        }}
+        disabled={completing}
+        className="shrink-0 rounded border border-line px-2 py-1 text-[11px] text-fg-dim hover:bg-elev hover:text-fg disabled:opacity-40"
       >
-        {isActive ? 'Active' : 'Completed'}
-      </span>
-      <span className="flex-1 min-w-0 truncate text-[13px] text-fg">
-        {truncateGoal(session.goalText)}
-      </span>
-      <span className="shrink-0 text-[11px] text-fg-faint font-mono">
-        {formatAgo(new Date(session.createdAt).getTime(), Date.now())}
-      </span>
-    </button>
+        {completing ? 'Marking…' : 'Mark completed'}
+      </button>
+    </div>
+  )
+}
+
+function PromptSessionHistoryRow({
+  session,
+  onOpen,
+  onResume,
+}: {
+  session: PromptSession
+  onOpen: () => void
+  onResume: () => void
+}) {
+  return (
+    <div
+      data-testid="prompt-session-history-row"
+      data-status={session.status}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-md border border-line bg-bg-elev hover:bg-bg-hi/50 transition-colors"
+    >
+      <button onClick={onOpen} className="flex flex-1 min-w-0 items-center gap-3 text-left">
+        <span
+          data-testid="prompt-session-status-badge"
+          className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-bg-hi text-fg-faint"
+        >
+          Completed
+        </span>
+        <span className="flex-1 min-w-0 truncate text-[13px] text-fg">
+          {truncateGoal(session.goalText)}
+        </span>
+        <span className="shrink-0 text-[11px] text-fg-faint font-mono">
+          {session.completedAt ? formatAgo(new Date(session.completedAt).getTime(), Date.now()) : ''}
+        </span>
+      </button>
+      <button
+        data-testid="prompt-session-history-open"
+        onClick={(e) => {
+          e.stopPropagation()
+          onOpen()
+        }}
+        className="shrink-0 rounded border border-line px-2 py-1 text-[11px] text-fg-dim hover:bg-elev hover:text-fg"
+      >
+        Open
+      </button>
+      <button
+        data-testid="prompt-session-history-resume"
+        onClick={(e) => {
+          e.stopPropagation()
+          onResume()
+        }}
+        className="shrink-0 rounded border border-accent/40 px-2 py-1 text-[11px] text-accent hover:bg-accent/10"
+      >
+        Resume
+      </button>
+    </div>
   )
 }
 

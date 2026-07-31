@@ -8,7 +8,7 @@ import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots, type EpicPr
 import { EpicStatusChip, EpicKindTag } from './epic-primitives'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn } from '../ChatTranscriptTurn'
-import { openPrdSlug } from '../TerminalChat'
+import { openPrdSlug } from '../../lib/epicNav'
 import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'

@@ -150,9 +150,9 @@ export interface TabChat {
   ticketHistory?: PromptTicket[]
   /**
    * A voice transcript recognized while this tab is dormant (no PTY to
-   * pty.write into) — set by voice.ts's onFinal, consumed once by
-   * TerminalChat's composer (appended into its local draft, then cleared)
-   * and/or read by voice.ts's armSubmit at auto-submit time.
+   * pty.write into) — set by voice.ts's onFinal, read (and cleared) by
+   * voice.ts's armSubmit at auto-submit time, which sends it directly
+   * through send() below rather than via any composer UI.
    */
   pendingVoiceText?: string
 }
@@ -185,7 +185,7 @@ interface ChatState {
   pushNotice: (tabId: string, message: string) => void
   /** Set by voice.ts's onFinal for a dormant tab's recognized transcript. */
   setPendingVoiceText: (tabId: string, text: string) => void
-  /** Consumed by TerminalChat's composer or voice.ts's armSubmit. */
+  /** Consumed by voice.ts's armSubmit at auto-submit time. */
   clearPendingVoiceText: (tabId: string) => void
   /**
    * One-shot: load prior exchanges from the durable store and prepend them as

@@ -1,6 +1,7 @@
-// chat-restart.spec.mjs — "restart rehearsal" for the v0.34 terminal chat.
-// Verifies that a normal boot lands on the dormant chat box, spawns ZERO claude
-// processes until the user acts, and that Send wires through to a headless run.
+// chat-restart.spec.mjs — "restart rehearsal", updated for the retirement of
+// the legacy TerminalChat surface: a dormant tab now renders the Epics
+// workspace, not a per-tab "Open raw session"/chat textarea. Verifies that a
+// normal boot lands there and spawns ZERO claude processes until the user acts.
 //
 // Run: xvfb-run -a npx playwright test e2e/chat-restart.spec.mjs
 
@@ -68,7 +69,13 @@ function claudeChildrenOf(pid) {
   return matches.length
 }
 
-async function launch() {
+// Active-index path mirrors promptSessionActiveIndexPath (promptSessions.ts)
+// — kept as a literal here since e2e specs don't import renderer modules.
+function epicActiveIndexPath(cwd) {
+  return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json')
+}
+
+async function launch({ withEpic = false } = {}) {
   // Tab id / claudeSessionId MUST be a real UUID — the chat engine passes it
   // to `claude -p --session-id`, which rejects non-UUIDs with exit code 1
   // ("Invalid session ID. Must be a valid UUID").
@@ -83,6 +90,39 @@ async function launch() {
   fs.mkdirSync(path.dirname(TABS_JSON), { recursive: true })
   fs.writeFileSync(TABS_JSON, JSON.stringify({ tabs: [seedTab], activeTabId: seedTab.id }))
 
+  let epic = null
+  if (withEpic) {
+    // Since the dormant tab now lands on the Epics workspace (not a per-tab
+    // chat box), sending a prompt goes through the Epic composer — seed one
+    // active Epic for this tab's cwd so it's preselected on mount.
+    const now = new Date().toISOString()
+    epic = {
+      id: `psess-${crypto.randomUUID()}`,
+      cwd: ROOT,
+      goalText: 'restart-rehearsal epic',
+      claudeSessionId: crypto.randomUUID(),
+      status: 'active',
+      createdAt: now,
+      completedAt: null,
+      tag: 'feature',
+    }
+    const indexPath = epicActiveIndexPath(ROOT)
+    fs.mkdirSync(path.dirname(indexPath), { recursive: true })
+    fs.writeFileSync(indexPath, JSON.stringify({
+      sessions: { [epic.id]: epic },
+      events: {
+        [epic.id]: [{
+          id: `pevt-${crypto.randomUUID()}`,
+          promptSessionId: epic.id,
+          kind: 'prompt',
+          causedByEventId: null,
+          at: now,
+          text: epic.goalText,
+        }],
+      },
+    }))
+  }
+
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-restart-'))
   // Electron flags (--user-data-dir, --no-sandbox) MUST precede the app path.
   const app = await electron.launch({
@@ -96,7 +136,7 @@ async function launch() {
   win.on('pageerror', (e) => errors.push(e.message))
   await win.waitForSelector('text=Claude Session Manager', { timeout: 20_000 })
   await win.waitForTimeout(2500)
-  return { app, win, errors }
+  return { app, win, errors, epic }
 }
 
 // SAFE, fast, claude-free: the core restart regression.
@@ -109,22 +149,21 @@ test('boot: dormant chat box renders + ZERO claude on boot', async () => {
 
   // NOTE on locators: if the user's real Session Manager is open it rewrites
   // ~/.claude/session-manager/tabs.json between our seed-write and app boot,
-  // so the test instance can hydrate MANY dormant tabs — every one mounts a
-  // TerminalChat. Filter to the visible one instead of assuming a single tab.
-  const rawSessionBtns = win.getByRole('button', { name: /Open raw session/i })
-  const visibleRawSessionBtn = rawSessionBtns.locator('visible=true')
+  // so the test instance can hydrate MANY dormant tabs — every one mounts the
+  // Epics workspace. Filter to the visible one instead of assuming a single tab.
+  const workspaces = win.locator('[data-testid="epics-workspace"]')
+  const visibleWorkspace = workspaces.locator('visible=true')
 
-  // 2) The app boots on the Overview screen — the dormant chat box must NOT
-  //    leak through it. (Regression: the per-tab layer once forced
-  //    `visibility: visible`, overriding the hidden terminal layer, so this
-  //    assertion passed without the chat box ever being on screen.)
-  await expect(visibleRawSessionBtn).toHaveCount(0, { timeout: 15_000 })
+  // 2) The app boots on the Overview screen — the dormant tab's Epics
+  //    workspace must NOT leak through it. (Regression: the per-tab layer
+  //    once forced `visibility: visible`, overriding the hidden terminal
+  //    layer, so this assertion passed without anything actually hidden.)
+  await expect(visibleWorkspace).toHaveCount(0, { timeout: 15_000 })
 
-  // 3) Navigate to Terminal: the dormant chat box renders (NOT a live xterm).
-  //    "Open raw session" + the chat textarea are the TerminalChat signature.
+  // 3) Navigate to Terminal: the dormant tab's Epics workspace renders (NOT a
+  //    live xterm) — the workspace root is the dormant-tab signature now.
   await gotoTerminal(win)
-  await expect(visibleRawSessionBtn).toHaveCount(1, { timeout: 15_000 })
-  await expect(win.getByPlaceholder(/Type a command/i).locator('visible=true')).toHaveCount(1, { timeout: 5_000 })
+  await expect(visibleWorkspace).toHaveCount(1, { timeout: 15_000 })
 
   // 4) ZERO claude processes spawned by the app on boot (the core regression) —
   //    even after landing on the terminal, the dormant tab must not spawn.
@@ -149,18 +188,20 @@ test('boot: dormant chat box renders + ZERO claude on boot', async () => {
 // respect the ≤3 concurrent claude-p OOM ceiling. Run manually when the machine
 // is quiet:  xvfb-run -a npx playwright test e2e/chat-restart.spec.mjs -g "send:"
 test.skip('send: Enter wires a headless run (claude child spawns)', async () => {
-  const { app, win } = await launch()
+  // The dormant tab's chat entry point is now the Epic composer (the legacy
+  // TerminalChat "Open raw session" chat box was retired) — seed one active
+  // Epic for this tab's cwd so EpicsWorkspace preselects it and shows the
+  // composer immediately on navigating to Terminal.
+  const { app, win } = await launch({ withEpic: true })
   const mainPid = app.process().pid
   // Boot lands on Overview — route to the terminal before interacting.
   await gotoTerminal(win)
-  // The visible chat box only — a live user session can inject extra tabs
-  // via the shared tabs.json (see note in the boot test).
-  const input = win.getByPlaceholder(/Type a command/i).locator('visible=true')
+  const input = win.locator('[data-testid="epic-composer-textarea"]').locator('visible=true')
   await expect(input).toHaveCount(1, { timeout: 15_000 })
 
   await input.fill('print exactly: chat-restart-ok')
-  // Enter submits (see TerminalChat onKeyDown); the Send button is skipped for
-  // the same actionability reason as gotoTerminal.
+  // Enter submits (see EpicComposer's onKeyDown); the Send button is skipped
+  // for the same actionability reason as gotoTerminal.
   await input.press('Enter')
   await expect(win.getByText(/running…|queued ·/i).locator('visible=true').first()).toBeVisible({ timeout: 8_000 })
 

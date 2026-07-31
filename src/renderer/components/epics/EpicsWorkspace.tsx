@@ -6,6 +6,7 @@ import { useEpicTerminal } from '../../state/epicTerminal'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
+import { lastActivityMs } from '../../lib/epicQueueControls'
 import type { EpicSnapshots } from '../../lib/epicDerive'
 import type { ScheduleJob } from '../../../preload/api'
 import { EpicQueueControls } from './EpicQueueControls'
@@ -23,8 +24,12 @@ const EMPTY_JOBS: ScheduleJob[] = []
  * pane (EpicDetail + EpicComposer, or NewEpicCard while creating), per
  * session-manager-operations/design-mocks/epics/DESIGN_SPEC.md's two-pane
  * layout.
+ *
+ * Also mounted by Terminal.tsx in place of the retired TerminalChat for a
+ * dormant SessionTab — `cwd`, when passed, scopes the visible Epics to that
+ * tab's project and preselects its most recently active Epic.
  */
-export function EpicsWorkspace() {
+export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const sessions = usePromptSessions((s) => s.sessions)
   const events = usePromptSessions((s) => s.events)
   // Signal-level chats snapshot — a raw whole-map subscription would
@@ -62,7 +67,7 @@ export function EpicsWorkspace() {
     }
   }, [knownCwdsKey])
 
-  // Deep links: a Scheduler job row or TerminalChat's dispatched-ticket chip
+  // Deep links: a Scheduler job row or EpicDetail's dispatched-ticket chip
   // (see promptSessionDeepLink.ts) select an Epic here — for a completed
   // Epic this opens EpicDetail in its read-only (no composer) mode, never
   // a crash. A target not hydrated yet (first jump right after boot,
@@ -122,9 +127,24 @@ export function EpicsWorkspace() {
       .catch(() => { /* reconcile is best-effort; a failed probe changes nothing */ })
   }, [sessions])
 
-  const epics = useMemo(() => Object.values(sessions), [sessions])
+  const epics = useMemo(
+    () => (cwd ? Object.values(sessions).filter((s) => s.cwd === cwd) : Object.values(sessions)),
+    [sessions, cwd],
+  )
   const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds }
   const selectedEpic = selectedId ? (sessions[selectedId] ?? null) : null
+
+  // Preselect the scoped project's most recently active Epic (Terminal.tsx's
+  // dormant-tab mount) so switching to that tab lands directly in its own
+  // ongoing work instead of an empty "No Epic selected" pane. Re-runs while
+  // `epics` is still empty (hydration hasn't landed this cwd's Epics yet)
+  // and stops once any Epic is selected — a manual selection afterwards
+  // (including the user's own pick) sticks.
+  useEffect(() => {
+    if (!cwd || selectedId || showNewEpic || !epics.length) return
+    const mostRecent = [...epics].sort((a, b) => lastActivityMs(b, events) - lastActivityMs(a, events))[0]
+    setSelectedId(mostRecent.id)
+  }, [cwd, epics, events, selectedId, showNewEpic])
   // Terminal mode (PRD 831) replaces the tabs+thread+composer area inside
   // EpicDetail itself — the composer is this file's sibling, so it must be
   // hidden here too rather than EpicDetail reaching out to unmount it.

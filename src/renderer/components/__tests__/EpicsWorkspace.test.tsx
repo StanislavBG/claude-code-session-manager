@@ -265,4 +265,70 @@ describe('EpicsWorkspace', () => {
     expect(useEpicTerminal.getState().modes[session!.id]).toBe('terminal')
     expect(useEpicTerminal.getState().isAttached(session!.id)).toBe(true)
   })
+
+  // Terminal.tsx mounts EpicsWorkspace with `cwd` for a dormant SessionTab
+  // (retiring the old TerminalChat surface) — these cover the scoping +
+  // preselect behavior that swap depends on.
+  describe('cwd scoping (dormant SessionTab mount)', () => {
+    it('shows only the scoped project\'s Epics when `cwd` is passed', () => {
+      installWindowApiMock()
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      })
+
+      const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)
+      const rows = el.querySelectorAll('[data-testid="epic-queue-row"]')
+      expect(rows).toHaveLength(1)
+      expect(el.textContent).toContain('alpha epic')
+      expect(el.textContent).not.toContain('beta epic')
+    })
+
+    it('with no `cwd`, shows Epics from every project (unscoped default)', () => {
+      installWindowApiMock()
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      })
+
+      const el = mount(<EpicsWorkspace />)
+      expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(2)
+    })
+
+    it('preselects the scoped project\'s most recently active Epic on mount', () => {
+      installWindowApiMock()
+      let older: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
+      let newer: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
+      act(() => {
+        older = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'older alpha epic')
+        newer = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'newer alpha epic')
+      })
+      // Force a deterministic activity ordering regardless of same-millisecond createdAt.
+      act(() => {
+        usePromptSessions.setState((s) => ({
+          events: {
+            ...s.events,
+            [older!.id]: [{ ...s.events[older!.id][0], at: '2020-01-01T00:00:00.000Z' }],
+            [newer!.id]: [{ ...s.events[newer!.id][0], at: '2020-06-01T00:00:00.000Z' }],
+          },
+        }))
+      })
+
+      const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)
+      const detail = el.querySelector('[data-testid="epic-detail"]')
+      expect(detail).not.toBeNull()
+      expect(detail!.textContent).toContain('newer alpha epic')
+    })
+
+    it('does not preselect when the scoped project has no Epics yet', () => {
+      installWindowApiMock()
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      })
+
+      const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)
+      expect(el.querySelector('[data-testid="epic-detail"]')).toBeNull()
+      expect(el.textContent).toContain('No Epic selected')
+    })
+  })
 })

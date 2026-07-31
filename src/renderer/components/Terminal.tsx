@@ -7,7 +7,7 @@ import { useSessions } from '../state/sessions'
 import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from './TerminalControls'
-import { TerminalChat } from './TerminalChat'
+import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { fetchTerminalDigest } from '../lib/terminalDigest'
 import { PasteThumbnail } from './PasteThumbnail'
 import { canFit } from '../lib/terminalFit'
@@ -210,7 +210,7 @@ export function Terminal({ tabId, cwd }: Props) {
             // Skip on reattach: the shell + claude are already running from the
             // previous renderer-load, so re-writing the startup command would
             // type it as input into the live claude session.
-            // A caller (e.g. TerminalChat's "Grant consent" button) can queue a
+            // A caller (e.g. a "Grant consent" action) can queue a
             // one-shot command to auto-type once this PTY is ready — reattach
             // means the session is already live, so it's typed almost
             // immediately; a fresh spawn chains after the startup command with
@@ -259,10 +259,13 @@ export function Terminal({ tabId, cwd }: Props) {
     }
   }, [tabId, cwd])
 
-  // Dormant tab → chat experience (default). Raw xterm only spawns once the
-  // user opens a raw session (wakeTab) — see TerminalChat's "Open raw session".
+  // Dormant tab → Epics workspace (PRD post-319: retired the standalone
+  // legacy chat surface), scoped to this tab's own project so switching a
+  // dormant SessionTab lands the user in that project's Epics rather than
+  // the global list. Raw xterm only spawns once the user opens a raw
+  // session (wakeTab) via EpicDetail's Terminal mode.
   if (isDormant) {
-    return <TerminalChat tabId={tabId} cwd={cwd} />
+    return <EpicsWorkspace cwd={cwd} />
   }
 
   return (

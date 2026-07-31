@@ -10,6 +10,8 @@ import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from 
 import { TerminalChat } from './TerminalChat'
 import { fetchTerminalDigest } from '../lib/terminalDigest'
 import { PasteThumbnail } from './PasteThumbnail'
+import { canFit } from '../lib/terminalFit'
+import { WORKBENCH_REFIT_EVENT } from '../lib/workbenchRefit'
 
 // Matches plausible source-path tokens: optional ./ or ../ prefix, dotted name
 // with extension, optional :line[:col] suffix. Word-boundary on the front
@@ -37,7 +39,6 @@ export function Terminal({ tabId, cwd }: Props) {
   const isDormant = useSessions((s) => s.tabs.find((t) => t.id === tabId)?.status === 'dormant')
   const hostRef = useRef<HTMLDivElement | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
   const spawnedRef = useRef(false)
   const [pastedImage, setPastedImage] = useState<string | null>(null)
 
@@ -56,17 +57,22 @@ export function Terminal({ tabId, cwd }: Props) {
       theme: TERMINAL_THEMES[initial.theme],
     })
 
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    const guardedFit = () => {
+      const el = hostRef.current
+      if (!el || !canFit(el.clientWidth, el.clientHeight)) return
+      try { fit.fit() } catch { /* ignore */ }
+    }
+
     // Live theme + font updates from the TerminalControls popover. xterm v5
     // accepts assignment to `term.options.*` without remount, but font size
     // changes need a refit so the existing rows reflow.
     const offSettings = onTerminalSettingsChange((s) => {
       term.options.theme = TERMINAL_THEMES[s.theme]
       term.options.fontSize = s.fontSize
-      try { fitRef.current?.fit() } catch { /* ignore */ }
+      guardedFit()
     })
-
-    const fit = new FitAddon()
-    term.loadAddon(fit)
     // WebLinksAddon with an explicit handler: by default the addon underlines
     // URLs but the click hits the xterm <div> and dies (setWindowOpenHandler
     // only fires on window.open()). Routing through the new app:open-external
@@ -116,7 +122,7 @@ export function Terminal({ tabId, cwd }: Props) {
     }
     term.registerLinkProvider(fileLinkProvider)
     term.open(hostRef.current)
-    fit.fit()
+    guardedFit()
     term.focus()
 
     // Ctrl+Shift+C copies selection.
@@ -168,7 +174,6 @@ export function Terminal({ tabId, cwd }: Props) {
       return true
     })
     xtermRef.current = term
-    fitRef.current = fit
 
     const { cols, rows } = term
     const offData = window.api.pty.onData(tabId, (data) => term.write(data))
@@ -230,14 +235,20 @@ export function Terminal({ tabId, cwd }: Props) {
           })
       })
 
-    const onWinResize = () => fit.fit()
+    const onWinResize = () => guardedFit()
     window.addEventListener('resize', onWinResize)
 
-    const ro = new ResizeObserver(() => fit.fit())
+    // Window resize alone misses dockview-driven geometry changes (group
+    // resize, split, drop) and the RecordingStatus banner's layout shift —
+    // Workbench.tsx dispatches this event for both.
+    window.addEventListener(WORKBENCH_REFIT_EVENT, onWinResize)
+
+    const ro = new ResizeObserver(() => guardedFit())
     ro.observe(hostRef.current)
 
     return () => {
       window.removeEventListener('resize', onWinResize)
+      window.removeEventListener(WORKBENCH_REFIT_EVENT, onWinResize)
       ro.disconnect()
       offData()
       offExit()

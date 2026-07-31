@@ -9,6 +9,8 @@ import type { NavKey } from '../LeftNav'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { PanelFocusProvider } from '../../lib/panelFocus'
 import { TerminalPanelContent } from './TerminalPanelContent'
+import { useVoice } from '../../state/voice'
+import { WORKBENCH_REFIT_EVENT } from '../../lib/workbenchRefit'
 
 interface PanelParams {
   node: ReactNode
@@ -71,6 +73,7 @@ export function Workbench(ctx: WorkbenchProps) {
   ctxRef.current = ctx
   const focusedPanelId = useLayout((s) => s.focusedPanelId) ?? DEFAULT_PANEL_ID
   const focusToken = useLayout((s) => s.focusToken)
+  const isRecording = useVoice((s) => s.isRecording || s.externalRecording)
 
   // Opens (or focuses, if already open) the panel for `id`. Non-terminal
   // panels get fresh content pushed on every focus (mirrors MainPane's old
@@ -95,13 +98,23 @@ export function Workbench(ctx: WorkbenchProps) {
       }
       existing.api.setActive()
     } else {
-      api.addPanel<PanelParams>({
+      const panel = api.addPanel<PanelParams>({
         id: definition.id,
         component: definition.component,
         title: definition.title,
         params: { node: screenNode(definition.id, ctxRef.current) },
         renderer: 'always',
       })
+      // The terminal panel hosts a live xterm (FitAddon); forward its
+      // dockview-reported dimension changes (group resize, split, drop) to
+      // the same refit path the window 'resize' listener uses — xterm has
+      // no way to observe those on its own since the window itself doesn't
+      // resize.
+      if (definition.id === 'terminal') {
+        panel.api.onDidDimensionsChange(() => {
+          window.dispatchEvent(new CustomEvent(WORKBENCH_REFIT_EVENT))
+        })
+      }
     }
   }, [])
 
@@ -146,6 +159,17 @@ export function Workbench(ctx: WorkbenchProps) {
     // already open) — ctxRef always has the latest values regardless.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusToken, ctx.searchMode, mountPanel])
+
+  // RecordingStatus toggling shifts the whole app tree by 28px (App.tsx's
+  // `pt-7`), which resizes the workbench's actual container without the
+  // browser window itself resizing. Dockview caches pixel geometry, so
+  // force a relayout, then let live terminals refit against their new size.
+  useEffect(() => {
+    const api = apiRef.current
+    if (!api) return
+    api.layout(api.width, api.height, true)
+    window.dispatchEvent(new CustomEvent(WORKBENCH_REFIT_EVENT))
+  }, [isRecording])
 
   const props = useMemo(
     () => ({

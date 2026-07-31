@@ -43,9 +43,29 @@
 
   --dv-border-radius: 0px;
   --dv-tab-border-radius: 0px;
+
+  /*
+   * Z-order ladder (app-wide fixed UI, highest to lowest):
+   *   z-[60] RecordingStatus > z-[55] Toast > z-50 Modal/CommandPalette
+   *   > dockview overlays (this block)
+   * dockview's packaged CSS defaults --dv-overlay-z-index to 999, which
+   * outranks all three fixed-position layers above since the workbench's
+   * containing block doesn't establish its own stacking context. Most of
+   * dockview's own chrome (floating/dragged groups, resize handles, popups)
+   * reads this variable, so lowering it here is enough for those; the
+   * drag-over drop-target indicator classes below hardcode a literal
+   * z-index in dockview's packaged CSS instead of reading the variable, so
+   * they're pinned directly.
+   */
+  --dv-overlay-z-index: 45;
 }
 
 .workbench-root {
   height: 100%;
   width: 100%;
+}
+
+.workbench-root .dv-drop-target-container,
+.workbench-root .dv-drop-target > .dv-drop-target-dropzone {
+  z-index: 45;
 }

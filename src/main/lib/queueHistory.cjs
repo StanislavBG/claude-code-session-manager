@@ -196,7 +196,7 @@ async function historyTerminalBySlug() {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
-        if (j?.slug) map.set(j.slug, { status: j.status, finishedAt: j.finishedAt });
+        if (j?.slug) map.set(j.slug, { status: j.status, finishedAt: j.finishedAt, landedCommit: j.landedCommit ?? null });
       } catch {
         // corrupt/partial line — ignore
       }

@@ -24,6 +24,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { verifyRun } = require('../runVerify.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -1218,6 +1219,89 @@ test('allDeliverablesAlreadyTracked: fail-safe on empty paths, non-git cwd, and 
     paths: ['src/main/runVerify.cjs'],
     execImpl: () => '',
   }), true);
+});
+
+// ─── pass_no_commit_prior_run_verified: re-fired slug whose PRIOR run landed ─
+// (incident: 812-workbench-review-nits-cleanup, 2026-07-31)
+
+const { isAncestorCommit } = require('../runVerify.cjs');
+const REPO_ROOT_COMMIT = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], {
+  cwd: REPO_ROOT, encoding: 'utf8',
+}).trim().split('\n')[0];
+
+test('pass_no_commit: PASS, no commit, priorLandedCommit is an ancestor of HEAD → pass_no_commit_prior_run_verified', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '812-workbench-review-nits-cleanup';
+    writeLog(tmp, slug, noOpRunEvents('Re-checked every AC item; all already implemented by an earlier run.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'This PRD names no deliverable paths, just prose.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+      priorLandedCommit: REPO_ROOT_COMMIT,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit_prior_run_verified', `expected prior-run exemption, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+    assert.equal(verdict.priorLandedCommit, REPO_ROOT_COMMIT);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('pass_no_commit: PASS, no commit, priorLandedCommit is NOT an ancestor of HEAD → pass_no_commit', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '812-workbench-review-nits-cleanup';
+    writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'This PRD names no deliverable paths, just prose.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+      priorLandedCommit: '0000000000000000000000000000000000000000',
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('isAncestorCommit: fail-safe on missing sha and on a throwing execImpl (git error)', () => {
+  assert.equal(isAncestorCommit({ cwd: REPO_ROOT, sha: null }), false);
+  assert.equal(isAncestorCommit({
+    cwd: REPO_ROOT,
+    sha: REPO_ROOT_COMMIT,
+    execImpl: () => { throw new Error('git: command not found'); },
+  }), false);
+  assert.equal(isAncestorCommit({
+    cwd: REPO_ROOT,
+    sha: REPO_ROOT_COMMIT,
+    execImpl: () => '',
+  }), true);
+});
+
+test('pass_no_commit: PASS, no commit, priorLandedCommit not supplied (null) → pass_no_commit (regression guard)', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '812-workbench-review-nits-cleanup';
+    writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'This PRD names no deliverable paths, just prose.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected pass_no_commit with no priorLandedCommit, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
 });
 
 // (e) halt + sentinel PASS → still halt (override must not apply to halt)

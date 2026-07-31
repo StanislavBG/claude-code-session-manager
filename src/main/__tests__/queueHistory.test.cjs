@@ -208,8 +208,8 @@ test('historyTerminalBySlug: returns status + finishedAt for every archived slug
   await queueHistory.appendHistory([a, b]);
 
   const map = await queueHistory.historyTerminalBySlug();
-  expect(map.get('term-completed')).toEqual({ status: 'completed', finishedAt: a.finishedAt });
-  expect(map.get('term-failed')).toEqual({ status: 'failed', finishedAt: b.finishedAt });
+  expect(map.get('term-completed')).toEqual({ status: 'completed', finishedAt: a.finishedAt, landedCommit: null });
+  expect(map.get('term-failed')).toEqual({ status: 'failed', finishedAt: b.finishedAt, landedCommit: null });
   expect(map.has('never-archived-slug')).toBe(false);
 });
 

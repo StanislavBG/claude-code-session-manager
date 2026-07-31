@@ -530,6 +530,38 @@ function checkMergeablePr({ cwd, prNumber, timeoutMs = GH_CHECK_TIMEOUT_MS, exec
   }
 }
 
+// ─── prior-run-landed-commit postcondition exemption (re-fired same slug) ───
+
+/**
+ * Independently re-check, via real git ancestry, whether a commit a PREVIOUS
+ * run of this same slug landed is reachable from the current HEAD. Used to
+ * distinguish a truthful no-op re-run (the slug's work already shipped in an
+ * earlier run, so this run correctly made no new commit) from a lying PASS
+ * with no substantiating work at all.
+ *
+ * Bounded (15s) and fully fail-safe: ANY error (bad SHA, non-git cwd, timeout,
+ * `sha` not an ancestor) resolves `false` rather than throwing, so a failure
+ * here only ever falls back to today's pass_no_commit behavior — it can never
+ * turn a real failure into a false "verified".
+ *
+ * `execImpl` is injectable (defaults to `child_process.execFileSync`) so unit
+ * tests can stub the subprocess call without shelling out to real git.
+ */
+function isAncestorCommit({ cwd, sha, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl = execFileSync }) {
+  if (!sha) return false;
+  try {
+    execImpl('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], {
+      cwd: cwd || process.cwd(),
+      timeout: timeoutMs,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── already-shipped postcondition exemption (original PRD re-runs) ─────────
 
 const PRD_DELIVERABLE_PATH_RE = /(?:^|[`\s(])((?:src|scripts|session-manager-operations|test|tests|docs|bin)\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)\b/g;
@@ -605,9 +637,13 @@ function allDeliverablesAlreadyTracked({ cwd, paths, execImpl = execFileSync, ti
  *                                            subprocess call used by the -merge-main
  *                                            postcondition exemption. Defaults to
  *                                            child_process.execFileSync.
+ * @param {string|null} [params.priorLandedCommit] The commit SHA a PREVIOUS run of this
+ *                                            same slug landed, if any — supplied by the
+ *                                            caller (scheduler.cjs). Used by the
+ *                                            pass_no_commit_prior_run_verified exemption.
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
-async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false, ghExecImpl }) {
+async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false, ghExecImpl, priorLandedCommit = null }) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
   const verdictsPath = path.join(runDir, `${slug}.verdicts.json`);
@@ -825,6 +861,35 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
           }
         }
       }
+      // EXEMPTION: the SAME slug was already executed by a PRIOR run that
+      // landed a commit, and that commit is still reachable from HEAD. "I
+      // re-checked every AC item, found it all already implemented by an
+      // earlier run of this exact PRD, declined to make a no-op commit, and
+      // printed a truthful PASS" is correct, idempotent behavior — the
+      // systemic false-failure class this exemption exists to catch (distinct
+      // from the already-shipped exemption below, which looks at PRD-named
+      // file paths rather than a specific prior run's SHA).
+      // (Incident: 812-workbench-review-nits-cleanup, 2026-07-31 — re-fired
+      // ~24 min after its own prior run landed 00d891c; re-verified,
+      // re-ran typecheck + 17 green tests, made no new commit, printed a
+      // truthful PASS, and was parked in needs_review anyway.)
+      let priorRunVerified = false;
+      if (!mergeMainVerified && priorLandedCommit
+        && isAncestorCommit({ cwd: queueEntry?.cwd, sha: priorLandedCommit })) {
+        priorRunVerified = true;
+        return conclude(
+          'pass_no_commit_prior_run_verified',
+          `SCHEDULER_VERDICT: PASS with no commit, but a prior run of this slug landed ${priorLandedCommit}, `
+            + 'which is an ancestor of HEAD — the PRD\'s work is already in the tree, so this re-run correctly '
+            + 'made no change',
+          null,
+          {
+            ...(annotations.length ? { annotations } : {}),
+            sentinel,
+            priorLandedCommit,
+          },
+        );
+      }
       // EXEMPTION: an ORIGINAL PRD re-queued after its deliverables already
       // landed. "I checked, the work is already committed and green, nothing
       // to change" is a truthful PASS, not a silent no-op — the same
@@ -835,7 +900,7 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       // tests, made no commit, printed a truthful PASS, and was parked
       // anyway.)
       let alreadyShipped = false;
-      if (!mergeMainVerified) {
+      if (!mergeMainVerified && !priorRunVerified) {
         const deliverablePaths = extractPrdDeliverablePaths(prdBody);
         if (deliverablePaths.length > 0
           && allDeliverablesAlreadyTracked({ cwd: queueEntry?.cwd, paths: deliverablePaths })) {
@@ -853,7 +918,7 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
           );
         }
       }
-      if (!mergeMainVerified && !alreadyShipped) {
+      if (!mergeMainVerified && !priorRunVerified && !alreadyShipped) {
         issues.push({
           verdict: 'pass_no_commit',
           reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
@@ -938,4 +1003,5 @@ module.exports = {
   checkMergeablePr,
   extractPrdDeliverablePaths,
   allDeliverablesAlreadyTracked,
+  isAncestorCommit,
 };

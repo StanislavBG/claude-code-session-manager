@@ -58,6 +58,7 @@ const VERDICT_LABELS = {
   no_verdict_sentinel: 'no commit or verdict sentinel',
   pass_no_commit: 'PASS sentinel but no commit landed',
   pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
+  pass_no_commit_prior_run_verified: 'PASS with no commit — prior run of this slug already landed the work',
 };
 
 function humanVerdict(verdict) {

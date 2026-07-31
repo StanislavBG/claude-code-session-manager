@@ -47,9 +47,17 @@ function makeFakeRemote({ jobs = [] } = {}) {
     async listJobs() {
       return jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd }));
     },
-    async resetJob(slug) {
+    // Mirrors the real scheduler.cjs remote.resetJob's force-guard so this
+    // fake exercises the SAME contract the admin route promises callers.
+    async resetJob(slug, opts = {}) {
       const job = jobs.find((j) => j.slug === slug);
       if (!job) return { ok: false, error: 'not found' };
+      if (job.status === 'completed' && opts.force !== true) {
+        return {
+          ok: false,
+          error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead, or pass force:true',
+        };
+      }
       job.status = 'pending';
       job.runId = null;
       job.startedAt = null;
@@ -120,11 +128,11 @@ test('POST /admin/scheduler/reset-job without slug returns 400', async () => {
   }
 });
 
-test('POST /admin/scheduler/reset-job with known slug flips job to pending and clears run fields', async () => {
+test('POST /admin/scheduler/reset-job with known needs_review slug flips job to pending and clears run fields', async () => {
   const job = {
     slug: '10-foo',
     title: 'Foo',
-    status: 'completed',
+    status: 'needs_review',
     cwd: '/tmp/foo',
     runId: 'run-1',
     startedAt: 100,
@@ -150,6 +158,41 @@ test('POST /admin/scheduler/reset-job with known slug flips job to pending and c
     expect(job.error).toBe(null);
     expect('runtime' in job).toBe(false);
     expect('verifierVerdict' in job).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job on a completed job without force refuses and does not mutate', async () => {
+  const job = { slug: '10-foo', title: 'Foo', status: 'completed', cwd: '/tmp/foo', runId: 'run-1' };
+  const remote = makeFakeRemote({ jobs: [job] });
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug: '10-foo' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).toMatch(/force:true/);
+    expect(job.status).toBe('completed');
+    expect(job.runId).toBe('run-1');
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job on a completed job WITH force:true resets it', async () => {
+  const job = { slug: '10-foo', title: 'Foo', status: 'completed', cwd: '/tmp/foo', runId: 'run-1' };
+  const remote = makeFakeRemote({ jobs: [job] });
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug: '10-foo', force: true },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, slug: '10-foo', status: 'pending' });
+    expect(job.status).toBe('pending');
+    expect(job.runId).toBe(null);
   } finally {
     await admin.stop();
   }

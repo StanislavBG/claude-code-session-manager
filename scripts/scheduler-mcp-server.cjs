@@ -67,11 +67,14 @@ async function adminRequest(method, urlPath, body) {
 const TOOLS = [
   {
     name: 'scheduler_reset_job',
-    description: "Reset a stuck scheduler job by slug via the session-manager app's admin API.",
+    description: "Reset a stuck scheduler job by slug via the session-manager app's admin API. "
+      + 'Refuses a job whose status is already "completed" unless force:true is passed — resetting '
+      + 'a completed job re-executes already-shipped work.',
     inputSchema: {
       type: 'object',
       properties: {
         slug: { type: 'string', description: 'PRD slug of the job to reset' },
+        force: { type: 'boolean', description: 'Required to reset a job whose status is already "completed"' },
       },
       required: ['slug'],
     },
@@ -141,7 +144,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (!slug) {
         return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
       }
-      const result = await adminRequest('POST', '/admin/scheduler/reset-job', { slug });
+      const force = args && args.force === true;
+      const result = await adminRequest('POST', '/admin/scheduler/reset-job', { slug, force });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_list_jobs') {

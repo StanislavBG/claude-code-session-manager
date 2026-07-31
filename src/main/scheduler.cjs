@@ -491,6 +491,34 @@ async function safeSlugPath(slug) {
   return safeSlugPathIn(dir, slug);
 }
 
+/**
+ * Move a completed job's `<slug>.md` out of its PRD dir into that dir's
+ * sibling `prds-archived/`, so a finished slug can't be re-fired by the
+ * scheduler. Sibling-of-source (not the hard-coded legacy PRDS_ARCHIVE_DIR)
+ * so a per-project PRD (`<cwd>/session-manager-operations/scheduler/prds/`)
+ * archives into that SAME project's `prds-archived/`, not the global legacy
+ * one — PRDS_ARCHIVE_DIR only happens to coincide with this for the legacy
+ * PRDS_DIR. Mirrors the `schedule:clear-queue` archive logic (same
+ * containment check). Non-throwing: a missing source file (already archived
+ * or already gone) is a silent no-op, and any other error is logged as a
+ * warning — an archive failure must never break job-completion bookkeeping.
+ */
+async function archiveCompletedPrd(slug, cwd) {
+  try {
+    const srcDir = (await findPrdDir(slug)) ?? prdDirForCwd(cwd);
+    const src = safeSlugPathIn(srcDir, slug);
+    if (!src) return;
+    const archiveDir = path.join(srcDir, '..', 'prds-archived');
+    await fsp.mkdir(archiveDir, { recursive: true });
+    const dst = path.join(archiveDir, `${slug}.md`);
+    await fsp.rename(src, dst);
+  } catch (e) {
+    if (e?.code !== 'ENOENT') {
+      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'archiveCompletedPrd: rename failed', meta: { slug, error: e?.message } });
+    }
+  }
+}
+
 // Bundled authoring guide seeded into the scheduler dir so the session-manager-dev
 // plugin's /develop and /prd skills — which reference this stable `~`-absolute
 // path — work on any user's machine, not just the author's.
@@ -1260,6 +1288,9 @@ function resetJobFields(job, errorMsg) {
   job.error = errorMsg ?? null;
   delete job.runtime;
   delete job.verifierVerdict;
+  // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
+  // re-fired run of this same slug can pass it to verifyRun as
+  // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
 }
 
 // Grace period between a boot orphan's SIGTERM and reading its log to
@@ -2115,6 +2146,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // in its tool output (see incidents: PRD 39, 44, 56 on 2026-05-23→24).
     // Called outside mutate() so the queue lock is not held during I/O.
     let verifyResult = null;
+    // Persisted onto the job row (see the mutate() block below) whenever
+    // this run's own HEAD advances, so a LATER re-fire of the same slug can
+    // pass it back into verifyRun as priorLandedCommit (see the
+    // pass_no_commit_prior_run_verified exemption in runVerify.cjs).
+    let jobLandedCommitThisRun = null;
     if (res.exitCode === 0 && !res.rateLimited) {
       // Detect whether the job self-committed by comparing HEAD before/after.
       // Used by the sentinel override: SCHEDULER_VERDICT: PASS + a landed
@@ -2127,15 +2163,30 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         job.startedAt,
         new Date().toISOString(),
       );
+      if (guardHeadBefore && headAtExit && headAtExit !== guardHeadBefore) {
+        jobLandedCommitThisRun = headAtExit;
+      }
 
       const prdPath = prdPathForJob(job);
       const stateForDeps = await readQueue();
+      // priorLandedCommit: the commit a PREVIOUS run of this same slug landed,
+      // if any — prefer the live jobs[] row (survives a resetJob, see
+      // resetJobFields), fall back to history.jsonl for a slug that already
+      // left jobs[]. Never the commit THIS run just made (committedDuringRun
+      // already covers that case).
+      const liveRow = stateForDeps.jobs.find((j) => j.slug === job.slug);
+      let priorLandedCommit = liveRow?.landedCommit ?? null;
+      if (!priorLandedCommit) {
+        const hist = await queueHistory.historyTerminalBySlug().catch(() => null);
+        priorLandedCommit = hist?.get(job.slug)?.landedCommit ?? null;
+      }
       verifyResult = await verifyRun({
         runDir,
         prdPath,
         queueEntry: job,
         allJobs: stateForDeps.jobs,
         committedDuringRun,
+        priorLandedCommit,
       }).catch((e) => ({
         verdict: 'verify_unavailable',
         reason: `verifier threw: ${e?.message ?? String(e)}`,
@@ -2223,6 +2274,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     let investigationJobSnapshot = null;
     let needsReviewRcaSnapshot = null;
     let terminalNotifySnapshot = null;
+    const newlyCompletedPrds = [];
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       if (i2 >= 0) {
@@ -2261,6 +2313,13 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           s.jobs[i2].error = effectiveStatus === 'needs_review'
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
             : (res.error || null);
+          // Persist the commit THIS run landed (if HEAD advanced) so a later
+          // re-fire of the same slug can prove its own no-op re-run is
+          // truthful via the pass_no_commit_prior_run_verified exemption.
+          // Survives resetJobFields — see that function's comment.
+          if (jobLandedCommitThisRun) {
+            s.jobs[i2].landedCommit = jobLandedCommitThisRun;
+          }
           // Persist the verifier's verdict string so the renderer can show it.
           if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
             s.jobs[i2].verifierVerdict = verifyResult.verdict;
@@ -2281,6 +2340,9 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
 
           if (isNotifiableTerminalStatus(effectiveStatus)) {
             terminalNotifySnapshot = { ...s.jobs[i2] };
+          }
+          if (effectiveStatus === 'completed') {
+            newlyCompletedPrds.push({ slug: s.jobs[i2].slug, cwd: s.jobs[i2].cwd });
           }
           if (effectiveStatus === 'failed') {
             actuallyFailed = true;
@@ -2333,11 +2395,15 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
               if (priorStatus === 'needs_review') {
                 delete orig.verifierVerdict;
               }
+              newlyCompletedPrds.push({ slug: orig.slug, cwd: orig.cwd });
             }
           }
         }
       }
     });
+    for (const { slug, cwd } of newlyCompletedPrds) {
+      await archiveCompletedPrd(slug, cwd);
+    }
     await broadcast({ flush: true });
 
     if (terminalNotifySnapshot) {
@@ -2963,6 +3029,13 @@ async function reverifyNeedsReview() {
     // commit-guard uses gitHead() (before/after HEAD diff); here the run is
     // already over so we query git log filtered to [startedAt, finishedAt+60s].
     const committedDuringRun = await committedInWindow(job.cwd, job.startedAt, job.finishedAt);
+    // priorLandedCommit: same lookup as spawnJob's post-run verify — the live
+    // jobs[] row first (survives a resetJob), else history.jsonl.
+    let priorLandedCommit = job.landedCommit ?? null;
+    if (!priorLandedCommit) {
+      const hist = await queueHistory.historyTerminalBySlug().catch(() => null);
+      priorLandedCommit = hist?.get(job.slug)?.landedCommit ?? null;
+    }
     let v = null;
     try {
       v = await verifyRun({
@@ -2972,6 +3045,7 @@ async function reverifyNeedsReview() {
         allJobs: snap.jobs,
         committedDuringRun,
         allowPreSentinelHeal: true,
+        priorLandedCommit,
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
     if (v && COMPLETED_EQUIVALENT_VERDICTS.has(v.verdict)) {
@@ -2982,15 +3056,20 @@ async function reverifyNeedsReview() {
   }
   if (healed.length) {
     const healSet = new Set(healed);
+    const healedPrds = [];
     await mutate((s) => {
       for (const j of s.jobs) {
         if (j.status === 'needs_review' && healSet.has(j.slug)) {
           j.status = 'completed';
           j.error = null;
           delete j.verifierVerdict;
+          healedPrds.push({ slug: j.slug, cwd: j.cwd });
         }
       }
     });
+    for (const { slug, cwd } of healedPrds) {
+      await archiveCompletedPrd(slug, cwd);
+    }
     console.log(`[scheduler] boot reverify: healed ${healed.length} stale needs_review → completed (${healed.join(', ')})`);
     await broadcast();
   }
@@ -3012,6 +3091,7 @@ async function reverifyNeedsReview() {
   // boot/tick, because the promotion only ran inside `if (healed.length)`
   // scoped to that single pass's fresh heals.)
   const promoted = [];
+  const promotedPrds = [];
   await mutate((s) => {
     for (const job of s.jobs) {
       if (job.status !== 'completed' || !isFixPlanSlug(job.slug)) continue;
@@ -3024,8 +3104,12 @@ async function reverifyNeedsReview() {
       orig.completedBy = job.slug;
       if (priorStatus === 'needs_review') delete orig.verifierVerdict;
       promoted.push(`${orig.slug} (was ${priorStatus}, via ${job.slug})`);
+      promotedPrds.push({ slug: orig.slug, cwd: orig.cwd });
     }
   });
+  for (const { slug, cwd } of promotedPrds) {
+    await archiveCompletedPrd(slug, cwd);
+  }
   if (promoted.length) {
     console.log(`[scheduler] boot reverify: auto-promoted ${promoted.length} original(s): ${promoted.join(', ')}`);
     await broadcast();
@@ -3393,6 +3477,7 @@ async function init() {
     const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
     bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
   }
+  const bootReconciledCompletions = [];
   await mutate((state) => {
     for (const j of state.jobs) {
       if (j.status !== 'running' || !immediateSlugs.includes(j.slug)) continue;
@@ -3400,9 +3485,13 @@ async function init() {
       const pid = j.runtime?.pid;
       const killNote = pid ? ` (orphan pid=${pid}: dead)` : '';
       applyOrphanOutcome(j, outcome, killNote);
+      if (j.status === 'completed') bootReconciledCompletions.push({ slug: j.slug, cwd: j.cwd });
       console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → status=${j.status}`);
     }
   });
+  for (const { slug, cwd } of bootReconciledCompletions) {
+    await archiveCompletedPrd(slug, cwd);
+  }
 
   // Still-alive orphans: SIGTERM (+ killOrphanClaudePid's own deferred SIGKILL
   // follow-up) now, but classification waits until BOOT_ORPHAN_KILL_GRACE_MS
@@ -3422,6 +3511,7 @@ async function init() {
     setTimeout(() => {
       const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
       const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
+      let deferredCompletedCwd;
       mutate((state) => {
         const cur = state.jobs.find((x) => x.slug === slug);
         // Race guard: bail if the job already resolved, OR if it's already been
@@ -3431,6 +3521,9 @@ async function init() {
         if (!cur || cur.status !== 'running' || cur.runId !== bootRunId) return;
         applyOrphanOutcome(cur, outcome, killNote);
         console.log(`[scheduler] boot reconcile (deferred): slug=${slug} outcome=${outcome} → status=${cur.status}`);
+        deferredCompletedCwd = cur.status === 'completed' ? cur.cwd : undefined;
+      }).then(() => {
+        if (deferredCompletedCwd !== undefined) return archiveCompletedPrd(slug, deferredCompletedCwd);
       }).catch((e) => console.error(`[scheduler] deferred boot reconcile failed for ${slug}:`, e?.message));
     }, BOOT_ORPHAN_KILL_GRACE_MS).unref?.();
   }
@@ -3629,15 +3722,30 @@ const remote = {
     }
   },
 
-  async resetJob(slug) {
+  async resetJob(slug, opts = {}) {
     if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
-    const found = await mutate((state) => {
+    const outcome = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
-      if (idx < 0) return false;
+      if (idx < 0) return { kind: 'not-found' };
+      // A 'completed' job already landed its deliverable — resetting it
+      // re-fires the PRD and re-executes already-shipped work (the exact
+      // false-failure class this PRD's Defect 2 documents: PRD
+      // 812-workbench-review-nits-cleanup was re-run this way and burned a
+      // full claude -p job + Opus investigation over a correct no-op).
+      // Require an explicit force:true to override.
+      if (state.jobs[idx].status === 'completed' && opts.force !== true) {
+        return { kind: 'refused' };
+      }
       resetJobFields(state.jobs[idx]);
-      return true;
+      return { kind: 'ok' };
     });
-    if (!found) return { ok: false, error: 'not found' };
+    if (outcome.kind === 'not-found') return { ok: false, error: 'not found' };
+    if (outcome.kind === 'refused') {
+      return {
+        ok: false,
+        error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead, or pass force:true',
+      };
+    }
     await broadcast({ flush: true });
     return { ok: true, slug, status: 'pending' };
   },
@@ -3703,9 +3811,10 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
       sendJson(res, 400, { ok: false, error: 'missing slug' });
       return;
     }
-    const result = await remoteObj.resetJob(slug);
+    const force = parsed.force === true;
+    const result = await remoteObj.resetJob(slug, { force });
     sendJson(res, 200, result);
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd };

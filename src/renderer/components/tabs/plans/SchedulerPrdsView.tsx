@@ -10,7 +10,6 @@ import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
 import { takePendingPrdSlug } from '../../../lib/prdDeepLink'
 import { useEditor } from '../../../state/editor'
-import { useHomeDir } from '../../../lib/useHomeDir'
 import { EditorView } from '../EditorView'
 
 interface PrdMeta {
@@ -63,7 +62,6 @@ export function SchedulerPrdsView() {
   const [logText, setLogText] = useState<string | null>(null)
   const [showLog, setShowLog] = useState(false)
   const [loading, setLoading] = useState(true)
-  const homeDir = useHomeDir()
   // Bundle D — multi-select state. Set semantics avoid accidental O(N^2) on
   // toggle for the ~200-PRD list seen in practice.
   const [checked, setChecked] = useState<Set<string>>(new Set())
@@ -129,7 +127,8 @@ export function SchedulerPrdsView() {
   const status = prdStatusFor(job)
 
   function prdAbsPath(slug: string): string | null {
-    return homeDir ? `${homeDir}/.claude/session-manager/scheduled-plans/prds/${slug}.md` : null
+    const cwd = prds.find((p) => p.slug === slug)?.cwd
+    return cwd ? `${cwd}/session-manager-operations/scheduler/prds/${slug}.md` : null
   }
 
   // Opening a PRD is the single entry point into view+edit: it drives the
@@ -139,16 +138,17 @@ export function SchedulerPrdsView() {
   // so browsing PRDs here adds tabs to the same shared strip the Projects tab
   // renders — a PRD opened here shows up as a tab there too. That's the
   // acceptable, non-surprising part; this effect (rather than opening inline
-  // in the click handler) exists so a PRD opened before `homeDir` resolves —
+  // in the click handler) exists so a PRD opened before `prds` resolves —
   // via the cross-tab deep link above, or a very early click — still opens
-  // once the home directory IPC round-trip completes, instead of silently
-  // leaving the editor pane on its "no file open" empty state.
+  // once listPrds() (which supplies the per-slug cwd prdAbsPath needs)
+  // round-trips, instead of silently leaving the editor pane on its "no file
+  // open" empty state.
   useEffect(() => {
     if (!selectedSlug) return
     const absPath = prdAbsPath(selectedSlug)
     if (absPath) useEditor.getState().openFile(absPath)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSlug, homeDir])
+  }, [selectedSlug, prds])
 
   function openPrd(slug: string) {
     setSelectedSlug(slug)

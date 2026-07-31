@@ -74,7 +74,7 @@ export const TOUR_STEPS: ReadonlyArray<TourStep> = [
   {
     id: 'scheduler',
     title: 'PRD scheduler',
-    body: "Drop a Markdown plan in ~/.claude/session-manager/scheduled-plans/prds/ and the scheduler runs it as a token-budget-managed claude -p job.",
+    body: "Drop a Markdown plan in this project's session-manager-operations/scheduler/prds/ and the scheduler runs it as a token-budget-managed claude -p job.",
     target: '[data-testid="tour-scheduler"]',
     position: 'right',
   },

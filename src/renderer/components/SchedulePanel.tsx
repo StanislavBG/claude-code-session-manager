@@ -418,7 +418,7 @@ export function SchedulePanel() {
                 onClick={() => window.api.schedule.openFolder()}
                 className="block mt-1 text-fg-dim hover:text-fg underline truncate w-full text-left"
               >
-                ~/.claude/session-manager/scheduled-plans/prds/
+                {'<project>/session-manager-operations/scheduler/prds/'}
               </button>
             </div>
           )}

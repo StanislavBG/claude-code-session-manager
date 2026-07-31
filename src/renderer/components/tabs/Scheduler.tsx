@@ -24,8 +24,8 @@ import { LearningPanel } from '../LearningPanel'
  *
  * Consolidates what used to be three separate nav destinations (Scheduler,
  * Plans, and the duplicate "Background Agents" tool) — all three read the same
- * queue.json + ~/.claude/session-manager/scheduled-plans/prds/ files. One
- * surface, no duplication.
+ * queue.json + each active project's <cwd>/session-manager-operations/scheduler/prds/
+ * files. One surface, no duplication.
  */
 
 type SubView = 'queue' | 'prds' | 'history'

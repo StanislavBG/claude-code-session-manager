@@ -470,7 +470,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'scheduler': {
       headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
       intro:
-        'One home for the headless-batch workflow, split into three tabs. The Queue tab runs and monitors jobs; the PRDs tab is where you author the markdown files those jobs execute; the History tab lists recent completed and failed jobs. PRDs live in ~/.claude/session-manager/scheduled-plans/prds/. A status strip across the top shows when the window resets, how many jobs are pending / running / completed today, and how much of the 5-hour window you have used. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
+        'One home for the headless-batch workflow, split into three tabs. The Queue tab runs and monitors jobs; the PRDs tab is where you author the markdown files those jobs execute; the History tab lists recent completed and failed jobs. PRDs live in each active project\'s own <cwd>/session-manager-operations/scheduler/prds/. A status strip across the top shows when the window resets, how many jobs are pending / running / completed today, and how much of the 5-hour window you have used. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
       sections: [
         {
           title: 'Queue — when jobs start',

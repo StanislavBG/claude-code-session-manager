@@ -221,4 +221,62 @@ describe('EpicTerminalPane (PRD 831)', () => {
     // same instance (spawnedRef already true) and never spawn for Epic B.
     expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ tabId: sessionB.claudeSessionId }))
   })
+
+  it('PRD 833 I3: reattaching to a surviving pty never re-types the launch command', async () => {
+    const { spawn, write } = installWindowApiMock()
+    spawn.mockResolvedValue({ pid: 123, cwd: '/proj', reattached: true })
+    const { EpicTerminalPane } = await import('../EpicTerminalPane')
+
+    mount(
+      createElement(EpicTerminalPane, {
+        epicId: 'epic-1',
+        cwd: '/proj',
+        sessionId: 'claude-session-abc',
+        onReturnToChat: () => {},
+      }),
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => { vi.advanceTimersByTime(2000) })
+
+    // The surviving claude REPL must not receive the literal launch command
+    // as a prompt — no write at all until the user types.
+    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
+    expect(cmdWrite).toBeUndefined()
+  })
+
+  it('PRD 833 I2: a session with no transcript yet launches with --session-id, not --resume', async () => {
+    const { write } = installWindowApiMock()
+    // transcriptExists probes pathFor + exists; report "no transcript".
+    const fullApi = window.api as unknown as Record<string, unknown>
+    Object.assign(fullApi, {
+      transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+      config: { exists: vi.fn().mockResolvedValue(false) },
+    })
+    const { EpicTerminalPane } = await import('../EpicTerminalPane')
+
+    mount(
+      createElement(EpicTerminalPane, {
+        epicId: 'epic-1',
+        cwd: '/proj',
+        sessionId: 'claude-session-new',
+        onReturnToChat: () => {},
+      }),
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => { vi.advanceTimersByTime(1600) })
+
+    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
+    expect(cmdWrite).toBeTruthy()
+    expect(cmdWrite![0].data).toContain('--session-id')
+    expect(cmdWrite![0].data).not.toContain('--resume')
+  })
 })

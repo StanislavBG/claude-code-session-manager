@@ -137,7 +137,15 @@ export interface EpicQueueControlsProps {
 }
 
 export function EpicQueueControls({ epics, snapshots, events, selectedId, onSelect, onNew, now }: EpicQueueControlsProps) {
-  const nowMs = now ?? Date.now()
+  // A per-render Date.now() in the grouping memo's deps would defeat every
+  // memo below on every render (PRD 833 I6) — recency buckets only need
+  // ~30s resolution, so tick a stable timestamp instead.
+  const [autoNow, setAutoNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setAutoNow(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  const nowMs = now ?? autoNow
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<EpicFilterKey>('open')
   const [closedKeys, setClosedKeys] = useState<Set<string>>(() => new Set(['completed']))

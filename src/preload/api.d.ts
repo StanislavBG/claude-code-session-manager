@@ -1096,6 +1096,10 @@ export interface SessionManagerAPI {
     write: (payload: { tabId: string; data: string }) => void;
     resize: (payload: { tabId: string; cols: number; rows: number }) => void;
     kill: (tabId: string) => void;
+    /** Subset of `tabIds` (session keys) that currently have a live PTY —
+     *  used by the Epics workspace to reconcile Terminal-mode attachment
+     *  after a renderer reload (PRD 833 C1). */
+    alive: (tabIds: string[]) => Promise<string[]>;
     onData: (tabId: string, handler: (data: string) => void) => () => void;
     onExit: (tabId: string, handler: (info: PtyExit) => void) => () => void;
     onWriteError: (handler: (ev: WriteErrorEvent) => void) => () => void;

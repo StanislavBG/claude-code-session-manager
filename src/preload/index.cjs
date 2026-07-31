@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('api', {
     write: (payload) => ipcRenderer.send('pty:write', payload),
     resize: (payload) => ipcRenderer.send('pty:resize', payload),
     kill: (tabId) => ipcRenderer.send('pty:kill', tabId),
+    alive: (tabIds) => ipcRenderer.invoke('pty:alive', { tabIds }),
     onData: (tabId, handler) => {
       const channel = `pty:data:${tabId}`;
       const listener = (_e, data) => handler(data);

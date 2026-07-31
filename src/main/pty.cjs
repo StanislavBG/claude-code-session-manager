@@ -231,6 +231,14 @@ class PtyManager {
   killAll() {
     for (const tabId of [...this.sessions.keys()]) this.kill(tabId);
   }
+
+  /** Subset of `ids` that currently have a live PTY in the sessions map.
+   *  Lets the Epics workspace reconcile Terminal-mode attachment after a
+   *  renderer reload (the PTY survives; the renderer's in-memory attachment
+   *  record does not — PRD 833 C1). */
+  aliveOf(ids) {
+    return ids.filter((id) => this.sessions.has(id));
+  }
 }
 
 const manager = new PtyManager();
@@ -244,6 +252,7 @@ function registerPtyHandlers() {
     if (typeof tabId !== 'string') return;
     manager.kill(tabId);
   });
+  ipcMain.handle('pty:alive', v(s.ptyAlive, ({ tabIds }) => manager.aliveOf(tabIds)));
 }
 
 module.exports = { manager, registerPtyHandlers };

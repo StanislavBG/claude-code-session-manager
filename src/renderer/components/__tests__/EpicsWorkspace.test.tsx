@@ -220,4 +220,49 @@ describe('EpicsWorkspace', () => {
     expect(detail).not.toBeNull()
     expect(detail!.textContent).toContain('ship the widget')
   })
+
+  it('PRD 833 I4: a deep link to a not-yet-hydrated Epic is held and selected once hydration delivers it', () => {
+    installWindowApiMock()
+    const el = mount(<EpicsWorkspace />)
+
+    // Deep link fires BEFORE the target exists in the store (boot race).
+    act(() => {
+      window.dispatchEvent(new CustomEvent('sm:select-prompt-session', { detail: 'late-epic' }))
+    })
+    expect(el.querySelector('[data-testid="epic-detail"]')).toBeNull()
+
+    // Hydration lands the Epic afterwards — the held deep link resolves.
+    act(() => {
+      const session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'late arriving epic')
+      usePromptSessions.setState((s) => {
+        const { [session.id]: created, ...rest } = s.sessions
+        return { sessions: { ...rest, 'late-epic': { ...created, id: 'late-epic' } } }
+      })
+    })
+
+    const detail = el.querySelector('[data-testid="epic-detail"]')
+    expect(detail).not.toBeNull()
+    expect(detail!.textContent).toContain('late arriving epic')
+  })
+
+  it('PRD 833 C1: a surviving pty for an active Epic is re-adopted into Terminal mode with attachment re-recorded', async () => {
+    const api = installWindowApiMock()
+    let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
+    act(() => {
+      session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'epic with surviving pty')
+    })
+    ;(api.pty as Record<string, unknown>).alive = vi
+      .fn()
+      .mockImplementation((ids: string[]) => Promise.resolve(ids.filter((id) => id === session!.claudeSessionId)))
+
+    mount(<EpicsWorkspace />)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const { useEpicTerminal } = await import('../../state/epicTerminal')
+    expect(useEpicTerminal.getState().modes[session!.id]).toBe('terminal')
+    expect(useEpicTerminal.getState().isAttached(session!.id)).toBe(true)
+  })
 })

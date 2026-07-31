@@ -13,6 +13,7 @@ import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
 import { formatAgo, formatDuration, formatTimingLabel } from '../../lib/formatTime'
+import { toast } from '../../state/toast'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import type { ScheduleJob } from '../../../preload/api'
 
@@ -174,7 +175,6 @@ export function EpicDetail({ promptSession }: Props) {
   const isCompleted = promptSession.status === 'completed'
 
   const chat = useChat((s) => s.chats[epicId])
-  const chats = useChat((s) => s.chats)
   const hydrate = useChat((s) => s.hydrate)
   const sessions = usePromptSessions((s) => s.sessions)
   const sessionEvents = usePromptSessions((s) => s.events[epicId]) ?? EMPTY_EVENTS
@@ -222,7 +222,10 @@ export function EpicDetail({ promptSession }: Props) {
     // Auto-scroll to bottom on Epic switch and on switching back to Discussion.
   }, [epicId, view, timeline.length])
 
-  const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds }
+  // Narrow chats snapshot: the derive helpers only index this Epic's own
+  // entry, and subscribing to the whole `chats` record would re-render this
+  // component on every streaming token of ANY chat (PRD 833 I6).
+  const snapshots: EpicSnapshots = { sessions, chats: chat ? { [epicId]: chat } : {}, jobs: scheduleJobs, prds }
   const status = epicDisplayStatus(epicId, snapshots)
   const attachedPrds = epicPrds(epicId, snapshots)
   const stats = epicStats(epicId, snapshots)
@@ -277,7 +280,16 @@ export function EpicDetail({ promptSession }: Props) {
   const onModeChange = (next: EpicTerminalMode) => {
     if (next === mode) return
     if (next === 'terminal') {
-      if (terminalDisabledReason) return
+      // Re-read the LIVE chat state, not the render snapshot: a run can start
+      // between the last render and this click (external send, dequeued
+      // ticket, Web Remote prompt) — spawning a PTY then would double-attach
+      // the claudeSessionId (PRD 833 I1).
+      const live = useChat.getState().chats[epicId]
+      const liveBusy = Boolean(live?.running) || (live?.queuedPosition ?? 0) > 0
+      if (terminalDisabledReason || liveBusy) {
+        toast.info('Chat is running or queued for this Epic — wait for it to finish before switching to Terminal.')
+        return
+      }
       setMode(epicId, 'terminal')
       return
     }

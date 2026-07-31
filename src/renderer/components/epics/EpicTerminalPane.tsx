@@ -7,6 +7,7 @@ import { writeInChunks } from '../Terminal'
 import { getRawSessionModel } from '../../lib/rawSessionModel'
 import { shellQuote } from '../../lib/presets'
 import { canFit } from '../../lib/terminalFit'
+import { transcriptExists } from '../../lib/transcriptExists'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { toast } from '../../state/toast'
 
@@ -86,10 +87,19 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
 
     window.api.pty
       .spawn({ tabId: sessionId, cwd, cols, rows })
-      .then(({ reattached }) => {
+      .then(async ({ reattached }) => {
+        // Reattached to a surviving PTY (renderer reload) — claude is already
+        // running in it; typing the launch command again would inject it into
+        // the live REPL as a prompt. Same guard as Terminal.tsx (PRD 833 I3).
+        if (reattached) return
+        // First interaction of an Epic in Terminal mode has no transcript yet:
+        // `--resume` of a nonexistent session errors out. Same durable
+        // resume-vs-create decision chat.ts's send() makes (PRD 833 I2).
+        const resume = await transcriptExists(cwd, sessionId).catch(() => true)
         const model = getRawSessionModel()
-        const cmd = `claude --dangerously-skip-permissions --resume ${shellQuote(sessionId)} --model ${model}\r`
-        setTimeout(() => writeInChunks(sessionId, cmd), reattached ? 150 : 1500)
+        const flag = resume ? `--resume ${shellQuote(sessionId)}` : `--session-id ${shellQuote(sessionId)}`
+        const cmd = `claude --dangerously-skip-permissions ${flag} --model ${model}\r`
+        setTimeout(() => writeInChunks(sessionId, cmd), 1500)
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err)

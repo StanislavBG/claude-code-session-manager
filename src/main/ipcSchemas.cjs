@@ -20,6 +20,10 @@ const ptySpawn = z.object({
 
 const ptyTabId = z.object({ tabId: z.string().min(1).max(128) });
 
+// PRD 833 C1: Epics-workspace reconcile — which of these session keys still
+// have a live PTY? Bounded so the renderer can't ask about unbounded lists.
+const ptyAlive = z.object({ tabIds: z.array(z.string().min(1).max(128)).max(500) });
+
 // v2 mobile: subscribe to a session's live state + summary. cwd is needed to
 // locate the transcript JSONL (transcriptPath); validated against home-dir boundary
 // in webRemote before any fs access.
@@ -726,6 +730,7 @@ module.exports = {
     webRemoteAuditTail,
     ptySpawn,
     ptyTabId,
+    ptyAlive,
     ptyWrite,
     ptyResize,
     sessionSubscribe,

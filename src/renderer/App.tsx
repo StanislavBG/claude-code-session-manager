@@ -177,7 +177,13 @@ export function App() {
   const handleNewSession = useCallback(() => {
     void openOrStartProject()
       .catch(() => null)
-      .finally(() => { useLayout.getState().openPanel('terminal') })
+      .finally(() => {
+        // Land on the Epics view (not the opened tab's chat), matching the
+        // comment above and navigate('terminal')'s deselect — otherwise the
+        // freshly activated tab masks the workspace (PRD 833 I5).
+        useSessions.setState({ activeTabId: null })
+        useLayout.getState().openPanel('terminal')
+      })
   }, [])
 
   // Eager preload of the speech model + permission subscription.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePromptSessions } from '../../state/promptSessions'
-import { useChat } from '../../state/chat'
+import { useChatSignals } from '../../lib/useChatSignals'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
@@ -27,7 +27,9 @@ const EMPTY_JOBS: ScheduleJob[] = []
 export function EpicsWorkspace() {
   const sessions = usePromptSessions((s) => s.sessions)
   const events = usePromptSessions((s) => s.events)
-  const chats = useChat((s) => s.chats)
+  // Signal-level chats snapshot — a raw whole-map subscription would
+  // re-render the entire workspace on every streaming token (PRD 833 I6).
+  const chats = useChatSignals()
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
   const { rows, enriched } = useKnownProjects()
 
@@ -63,13 +65,19 @@ export function EpicsWorkspace() {
   // Deep links: a Scheduler job row or TerminalChat's dispatched-ticket chip
   // (see promptSessionDeepLink.ts) select an Epic here — for a completed
   // Epic this opens EpicDetail in its read-only (no composer) mode, never
-  // a crash.
+  // a crash. A target not hydrated yet (first jump right after boot,
+  // especially to an archived Epic) is HELD and retried once hydration
+  // delivers it, instead of being destructively consumed (PRD 833 I4).
+  const [pendingDeepLink, setPendingDeepLink] = useState<string | null>(null)
   useEffect(() => {
     const openFromDeepLink = (id: string) => {
-      const target = usePromptSessions.getState().sessions[id]
-      if (!target) return
       setShowNewEpic(false)
-      setSelectedId(id)
+      if (usePromptSessions.getState().sessions[id]) {
+        setSelectedId(id)
+        setPendingDeepLink(null)
+      } else {
+        setPendingDeepLink(id)
+      }
     }
     const pendingId = takePendingPromptSessionId()
     if (pendingId) openFromDeepLink(pendingId)
@@ -77,6 +85,42 @@ export function EpicsWorkspace() {
     window.addEventListener('sm:select-prompt-session', h)
     return () => window.removeEventListener('sm:select-prompt-session', h)
   }, [])
+  useEffect(() => {
+    if (pendingDeepLink && sessions[pendingDeepLink]) {
+      setSelectedId(pendingDeepLink)
+      setShowNewEpic(false)
+      setPendingDeepLink(null)
+    }
+  }, [pendingDeepLink, sessions])
+
+  // PRD 833 C1: PTYs survive a renderer reload but the in-memory attachment
+  // record does not — a surviving interactive claude would invisibly hold its
+  // Epic's claudeSessionId while chat.ts's isAttached guard reads false,
+  // allowing a second attachment. Reconcile: re-adopt any live PTY whose key
+  // matches an active Epic's session (mode back to 'terminal', attached
+  // re-recorded; the pane's reattach path never re-types the launch command).
+  useEffect(() => {
+    const bySession: Record<string, string> = {}
+    for (const s of Object.values(sessions)) {
+      if (s.status === 'active') bySession[s.claudeSessionId] = s.id
+    }
+    const keys = Object.keys(bySession)
+    if (!keys.length) return
+    const probeAlive = window.api.pty?.alive
+    if (typeof probeAlive !== 'function') return
+    void probeAlive(keys)
+      .then((live) => {
+        const et = useEpicTerminal.getState()
+        for (const sessionId of live) {
+          const epicId = bySession[sessionId]
+          if (!et.isAttached(epicId)) {
+            et.setMode(epicId, 'terminal')
+            et.setAttached(epicId, true)
+          }
+        }
+      })
+      .catch(() => { /* reconcile is best-effort; a failed probe changes nothing */ })
+  }, [sessions])
 
   const epics = useMemo(() => Object.values(sessions), [sessions])
   const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds }

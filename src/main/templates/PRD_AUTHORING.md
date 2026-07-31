@@ -392,8 +392,8 @@ the user may or may not have open.
 
 ### Fallback: writing the PRD file directly
 
-When the app is not running, write `<NN>-<slug>.md` by hand into the target repo's own
-`<cwd>/session-manager-operations/scheduler/prds/` following the frontmatter rules in §6 and the
+When the app is not running, first mint (or join) an Epic — `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> "<goal>" [feature|bug|discussion]`; its last stdout line is the prds dir — then write `<NN>-<slug>.md` by hand into that
+`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` dir (the flat `scheduler/prds/` is RETIRED and auto-archived unexecuted at boot), add `sourcePromptId: <epic-id>` to the frontmatter so the job keeps its Epic linkage, following the frontmatter rules in §6 and the
 body conventions the rest of this guide describes (`# Goal`, `# Acceptance criteria`,
 `# Implementation notes`, `## Engineering standards` inlined verbatim — see `/develop`'s output
 for the exact shape). **Trade-off:** this path has no atomic `NN` allocation. The tool's

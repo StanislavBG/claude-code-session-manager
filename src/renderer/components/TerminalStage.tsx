@@ -1,6 +1,7 @@
 import { Terminal } from './Terminal'
 import { TerminalControls } from './TerminalControls'
 import { LiveTranscript } from './LiveTranscript'
+import { ProjectsLanding } from './ProjectsLanding'
 import { useSessions } from '../state/sessions'
 
 /**
@@ -39,7 +40,11 @@ export function TerminalStage({ visible = true }: TerminalStageProps) {
           </div>
         ))
       ) : (
-        <NoSession />
+        // Renamed nav item's landing content (PRD 803): the "Projects" list
+        // of PromptSession records, in place of the old bare "no active
+        // session" message. SplitAgentBrowser keeps the plain <NoSession />
+        // for its own no-session state — this swap is local to TerminalStage.
+        <ProjectsLanding />
       )}
       <LiveTranscript />
       {/* Terminal settings overlay — theme + font-size. Anchored to the

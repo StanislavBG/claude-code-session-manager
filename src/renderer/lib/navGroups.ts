@@ -25,7 +25,7 @@ export interface NavGroupItem {
 export const NAV_ITEMS: NavGroupItem[] = [
   // Workspace
   { key: 'overview',   group: 'Workspace', label: 'Home',       icon: 'home',         hint: "Today's sessions + the 5-hour window" },
-  { key: 'terminal',   group: 'Workspace', label: 'Terminal',   icon: 'terminal',     hint: 'Live Claude Code, in-app' },
+  { key: 'terminal',   group: 'Workspace', label: 'Projects',   icon: 'terminal',     hint: 'Independent goal-scoped sessions, grouped by project' },
   { key: 'system-prompt', group: 'Workspace', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior' },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences' },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },

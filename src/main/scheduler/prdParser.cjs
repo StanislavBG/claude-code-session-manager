@@ -18,6 +18,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+const { deriveEpicIdFromPrdPath } = require('../lib/prdLocations.cjs');
 
 /**
  * Expand a PRD `cwd` value to an absolute path.
@@ -66,8 +67,12 @@ async function parsePrdRaw(filePath) {
     parallelGroup: (fm.parallelGroup ? Number(fm.parallelGroup) || null : null) ?? groupFromName ?? 99,
     // Optional traceability back to the PromptTicket.id (PRD 748) that was
     // classified 'develop' and spawned this PRD (PRD 749). Additive — absent
-    // on every PRD authored before this field existed.
-    sourcePromptId: fm.sourcePromptId || null,
+    // on every PRD authored before this field existed. When frontmatter
+    // omits it, fall back to the owning Epic dir name (PRD 830) — a PRD's
+    // file location already IS its Epic membership, so hand-authored PRDs
+    // dropped straight into an Epic's prds/ dir still get real linkage
+    // instead of null.
+    sourcePromptId: fm.sourcePromptId || deriveEpicIdFromPrdPath(filePath) || null,
     // Optional traceability back to the chat tab that queued this PRD (PRD
     // 761) — read back at job completion to route a status prompt via
     // enqueueExternalPrompt (PRD 753). Additive — absent on every PRD

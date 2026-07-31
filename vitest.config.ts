@@ -34,6 +34,7 @@ export default defineConfig({
       'src/main/lib/__tests__/terminalRunOutcome.test.cjs',
       'src/main/lib/__tests__/importReferences.spec.cjs',
       'src/main/__tests__/prdLocations.test.cjs',
+      'src/main/__tests__/prdSourcePromptIdBackfill.test.cjs',
       'src/main/__tests__/prdMigration.test.cjs',
       'src/main/__tests__/scheduler-find-prd-dir.test.cjs',
       'src/main/__tests__/scheduler-archive-completed-prd.test.cjs',

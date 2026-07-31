@@ -125,12 +125,40 @@ function resolvePrdsDirs(maxAgeMin, opts) {
   return dirs;
 }
 
+/**
+ * deriveEpicIdFromPrdPath(filePath) → epicId | null
+ *
+ * A PRD's file location already IS its Epic membership (epic id == parent
+ * dir name, 1:1 by design). Given an absolute PRD file path, walk back up
+ * `EPICS_SUBPATH.length` segments from the epics root implied by the path's
+ * own `.../prds/<slug>.md` shape and confirm it round-trips through
+ * `resolveEpicsRoot` — i.e. the path really is
+ * `<projectCwd>/session-manager-operations/scheduler/epics/<epicId>/prds/<slug>.md`,
+ * not some other `prds/` dir (e.g. the retired flat layout). Returns null for
+ * any path that doesn't match this shape.
+ */
+function deriveEpicIdFromPrdPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return null;
+  const prdsDir = path.dirname(filePath);
+  if (path.basename(prdsDir) !== 'prds') return null;
+  const epicDir = path.dirname(prdsDir);
+  const epicId = path.basename(epicDir);
+  if (!epicId || epicId === '.' || epicId === path.sep) return null;
+  let projectCwd = path.dirname(epicDir); // epicsRoot (.../scheduler/epics)
+  for (let i = 0; i < EPICS_SUBPATH.length; i++) projectCwd = path.dirname(projectCwd);
+  let epicsRoot;
+  try { epicsRoot = resolveEpicsRoot(projectCwd); } catch { return null; }
+  if (path.join(epicsRoot, epicId, 'prds') !== prdsDir) return null;
+  return epicId;
+}
+
 module.exports = {
   resolvePrdWriteDir,
   resolvePrdsDirs,
   resolveEpicsRoot,
   resolveEpicPrdWriteDir,
   listEpicPrdDirs,
+  deriveEpicIdFromPrdPath,
   PRD_SUBPATH,
   EPICS_SUBPATH,
 };

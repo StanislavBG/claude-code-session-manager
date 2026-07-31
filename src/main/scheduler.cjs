@@ -992,6 +992,20 @@ function validatePromptForSpawn(body, srcLabel) {
 // ---------- queue reconciliation ----------
 
 /**
+ * sourcePromptId backfill (PRD 830) is pending-only: a pending row always
+ * takes the freshly-parsed value (explicit frontmatter, or the dir-derived
+ * epic id parsePrd falls back to when frontmatter has none) since it hasn't
+ * started executing yet. A running/completed row's sourcePromptId is left
+ * exactly as it was minted at dispatch time — reconcile must not rewrite
+ * linkage on work already in flight or finished.
+ */
+function reconcileSourcePromptId(job, parsedSourcePromptId) {
+  return job.status === 'pending'
+    ? (parsedSourcePromptId ?? job.sourcePromptId ?? null)
+    : job.sourcePromptId;
+}
+
+/**
  * Walk prds/, ensure every .md has a queue entry. Drop entries whose .md
  * is gone. Refresh title/cwd/parallelGroup from disk every reconcile so
  * editing the .md after queueing is honored.
@@ -1046,7 +1060,7 @@ async function reconcile(state) {
       cwd: p.cwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
-      sourcePromptId: p.sourcePromptId,
+      sourcePromptId: reconcileSourcePromptId(job, p.sourcePromptId),
       sourceTabId: p.sourceTabId,
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     });
@@ -4204,4 +4218,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

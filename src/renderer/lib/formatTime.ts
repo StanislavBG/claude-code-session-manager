@@ -76,8 +76,8 @@ export function formatMtimeMs(ms: number | null | undefined): string {
   return `${formatRelative(diff)} ago`
 }
 
-/** "M:SS" elapsed clock — used by live status bars (SuperAgentStatusBar)
- *  ticking a running job's elapsed time once a second. */
+/** "M:SS" elapsed clock — used by live status bars ticking a running job's
+ *  elapsed time once a second. */
 export function formatElapsedClock(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const m = Math.floor(s / 60)

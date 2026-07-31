@@ -13,8 +13,6 @@ import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { SimpleShell } from './components/SimpleShell'
 import { Toast } from './components/ui/Toast'
-import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
-import { installSuperAgentListener } from './state/superagent'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
 import { toast } from './state/toast'
@@ -319,7 +317,6 @@ export function App() {
     })
 
     useWatchers.getState().init()
-    const offSuperagent = installSuperAgentListener()
 
     // Singleton pollers — replace per-component timers in Overview,
     // SchedulePanel, TeamsCard, etc.
@@ -422,7 +419,7 @@ export function App() {
     }
 
     return () => {
-      off(); offNewSession(); offReboot(); offCfg(); offHotkey(); offSuperagent()
+      off(); offNewSession(); offReboot(); offCfg(); offHotkey()
       window.removeEventListener('beforeunload', onBeforeUnload)
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.removeEventListener) {
         navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
@@ -649,7 +646,6 @@ export function App() {
           spacer on the outer container shifts the rest of the app down by
           the banner's 28px height so TabBar stays visible. */}
       <RecordingStatus />
-      <SuperAgentStatusBar />
       <TabBar splitViewActive={splitView} onToggleSplitView={() => setSplitView(true)} />
       <div className="flex-1 flex min-h-0">
         <AlmanacSidebar

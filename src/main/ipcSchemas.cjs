@@ -623,20 +623,6 @@ const pluginsAbort = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
 }).passthrough();
 
-// SuperAgent — "boss" run that writes a structured prompt to the active
-// tab's PTY. Bounds match the inline schemas in superagent.cjs; centralizing
-// here so the schema is the boundary fence rather than each handler.
-const superagentStart = z.object({
-  tabId: z.string().min(1).max(128),
-  prompt: z.string().min(1).max(8 * 1024),
-  specialistCount: z.number().int().min(1).max(8),
-  depth: z.enum(['quick', 'standard', 'deep']),
-}).strict();
-
-const superagentTabId = z.object({
-  tabId: z.string().min(1).max(128),
-}).strict();
-
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
  * parses the payload before calling the original. On invalid payload throws
@@ -772,8 +758,6 @@ module.exports = {
     repoAnalyze,
     pluginsInstall,
     pluginsAbort,
-    superagentStart,
-    superagentTabId,
     memoryList,
     memoryRead,
     memoryWrite,

@@ -1,6 +1,6 @@
 # Claude Code Session Manager
 
-Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, Usage, Subagents, History, Scheduler, Knowledge Graph, Web Remote, Memory, Permissions, etc.). Mobile web cockpit at bilko.run (v2: same-origin relay + session state/summary protocol).
+Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, Usage, History, Scheduler, Knowledge Graph, Web Remote, Memory, Permissions, etc.). Mobile web cockpit at bilko.run (v2: same-origin relay + session state/summary protocol).
 
 All session-manager per-project operations (feedback intake, the `/explain-to-me` knowledge base) live under `session-manager-operations/` at the repo root — e.g. `session-manager-operations/feedback/`, `session-manager-operations/HUMAN_LEARN/`.
 
@@ -43,24 +43,20 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `state/config.ts` — per-path FileState with dirty tracking. Backed by config.cjs IPC.
 - `state/live.ts` — per-tab derived state (todos, plans, agents, usage) fed by transcript events. Subscribed to `transcript:event:<tabId>` from main process.
 - `state/voice.ts` — voice store + auto-submit timer + idle-stop timer + drain watchdog.
-- `state/hives.ts` — subagent hive definitions (Configured/Library views), EditingRole, ToolChip tone + paletted rendering (HIVE_PALETTE).
-- `state/orchestrator.ts` — per-running hive session state (roles, tools, lifecycle). Ephemeral, cleared on hive stop.
 - `state/scheduleState.ts` — scheduler queue state (jobs, history, filter state, per-project group ordering). Subscribed to schedule IPC events.
 - `state/toast.ts` — toast message queue. Consumed by components via `useToast()`.
 - `components/tabs/Settings.tsx` — canonical "scoped editor" shape (ScopeSwitcher + SaveBar + JsonEditor). Other scoped tabs follow it.
-- `components/tabs/Skills.tsx` — canonical "list+detail" shape. Other list tabs (Subagents, Hooks, McpServers, Plugins) follow it.
+- `components/tabs/Skills.tsx` — canonical "list+detail" shape. Other list tabs (Hooks, McpServers, Plugins) follow it.
 - `components/tabs/Scheduler.tsx` — Scheduler cockpit (Almanac design). Renders Queue/PRDs/History via SchedulePanel + scheduleState.
-- `components/tabs/Subagents.tsx` — Hive cockpit (Launch-first editorial shell). Conductor for Configured/Library/Live sub-tabs. Reads hives.ts + live.ts.
 - `components/tabs/Memory.tsx` / `MemoryNaturalPanel.tsx` — Memory Clusters UI over `memoryAggregate.cjs`'s output. Replaced the old `KnowledgeGraph.tsx` graph-visualization tab (KG feature retired; its prompt-log ingestion pipeline is gone).
 - `components/tabs/WebRemote.tsx` — web-remote cockpit: relay URL, session state, device list, tunnel status.
 - `components/SchedulePanel.tsx` — modular pane (Queue/PRDs/History tabs). Extracted 2026-06 to be reusable by Scheduler tab + web-remote. Owns filter state.
 - `components/tabs/scheduler/sched-primitives.tsx` — Almanac design shared: SchBadge (status color/mark), ProjectTag, DetailBlock/Line (project dots hashed-color palette).
-- `components/tabs/subagents/hive-primitives.tsx` — Hive design shared: ToolChip (read/write tone), StatusPill, HiveCell, HIVE_PALETTE (6 accents), hiveEstimate cost/time.
 - `components/ui/` — shared primitives (Panel, ScopeSwitcher, SaveBar, JsonEditor, KVTable, ListDetail, Toggle, EmptyState).
 - `components/layout/AlmanacFooter.tsx` — global chip strip (connected dot, 5h-usage, conditional scheduler-paused pill, active tab + branch via `lib/useBranch.ts`, last-activity, todos, app version). Pills navigate to Settings / Usage / Scheduler on click. (Renamed/redesigned from the pre-Almanac `AppStatusBar.tsx`, which no longer exists — it had no model/effort/team/voice pills; the team chip lives only in `components/ui/TeamsCard.tsx` now.)
 - `components/CommandPalette.tsx` — Cmd-K palette with fuzzy filter + emit-only dispatch. Suppressed inside Monaco / text inputs.
 - `components/ui/Toast.tsx` — non-fatal error surfacing. `info / warn / error`. Mounted above modals, below RecordingStatus.
-- `lib/agentFrontmatter.ts` + `lib/prdFrontmatter.ts` — round-trip YAML preservation for Subagents and SchedulerPrdsView.
+- `lib/prdFrontmatter.ts` — round-trip YAML preservation for SchedulerPrdsView.
 - `lib/prettyModel.ts` — single source of truth for model-name shortening (incl. `[1m]` context-suffix); every pill/chip that shows a model name imports it — don't reintroduce a local copy.
 
 ## Renderer data flow
@@ -126,12 +122,10 @@ Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). 
 ## Conventions (extensions for v0.20+)
 
 - **Almanac design** (Scheduler): SchBadge status colors + project-dot palette. Single source of truth in `sched-primitives.tsx`.
-- **Hive design** (Subagents): 6-color palette (accent/sage/butter/hive-slate/hive-plum/hive-teal), ToolChip read/write tone, hiveEstimate. Single source of truth in `hive-primitives.tsx`.
-- **Launch-first editorial shell** (Subagents): Configured / Library / Live sub-tabs. Subagents.tsx is the conductor; Live feeds `OrchestratorRunView`/`RaceRunView` monitor rows + results digest (there is no separate `AgentView.tsx`/`SchedulerDock.tsx` — Subagents.tsx and its `tabs/subagents/*` children own this surface directly).
 - **Knowledge graph data pipeline**: Ingest → filter (automated patterns, length caps) → extract (with EXTRACTION_SYSTEM role to prevent prompt-injection refusals) → persist. Per-project entity vocab + rate-limiting.
-- **Renderer state stores** (zustand): separate concerns: `config.ts` (file-backed, dirty-tracked), `live.ts` (per-tab derived from transcripts), `voice.ts` (voice UI), `hives.ts` (subagent definitions), `orchestrator.ts` (running hive state), `scheduleState.ts` (queue + history), `toast.ts` (toast messages). Stores do NOT cross-subscribe; use composed selectors in components for multi-store queries.
+- **Renderer state stores** (zustand): separate concerns: `config.ts` (file-backed, dirty-tracked), `live.ts` (per-tab derived from transcripts), `voice.ts` (voice UI), `scheduleState.ts` (queue + history), `toast.ts` (toast messages). Stores do NOT cross-subscribe; use composed selectors in components for multi-store queries.
 - **Modular pane pattern**: extracted panes (SchedulePanel: Queue/PRDs/History tabs) are reusable by multiple parent tabs (Scheduler, web-remote). Panes own local filter state + filtering logic; parents own scope/context state.
-- **Design primitive extraction**: when a design system (Almanac, Hive) is shared across components, extract `*-primitives.tsx` with explicit exports (SchBadge, ToolChip, etc.). Import primitives explicitly by name, not as wildcard — prevents cross-system pollution.
+- **Design primitive extraction**: when a design system (Almanac) is shared across components, extract `*-primitives.tsx` with explicit exports (SchBadge, ToolChip, etc.). Import primitives explicitly by name, not as wildcard — prevents cross-system pollution.
 
 ## Avoid
 
@@ -139,11 +133,10 @@ Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). 
 - Adding `shell: true` to `child_process.spawn` calls — only `watchers.cjs` and `app:test-fire-hook` legitimately need it (user-supplied shell strings are part of those features). Anywhere else, pass argv arrays.
 - Reading remote URLs in production — `createWindow` hard-fails if `dist/index.html` is missing rather than falling back to `localhost:5173`.
 - Re-implementing the tmp+rename atomic-write pattern. Use `config.cjs`'s `writeJson` / `writeTextAtomic`.
-- Reusing primitives across Almanac and Hive designs without coordination — they use different color palettes and visual conventions (SchBadge vs ToolChip). Keep them in separate files + import explicitly.
 - Cross-subscribing between renderer state stores — e.g., don't read `live.ts` from `config.ts` or vice versa. Each store is an island; components compose them via hooks. Complex queries go in components or memoized selectors, not in store initialization.
 - Adding pane-specific state to parent tabs — if a SchedulePanel needs filter persistence, keep it in the pane, not the tab. Panes own their UI concerns; tabs own layout + navigation.
 - Importing design primitives via wildcard (`import * as SchElements from ...`) — requires explicit named imports to prevent accidental cross-system usage.
-- Adding a new LeftNav tab for a live/observability feature before checking whether an existing surface (Terminal, Subagents Live, Scheduler) already owns that data. Treat each nav destination as an independent "micro-service" — before adding one, check if an existing item already owns the data/job and extend it (a sub-tab) instead of shipping a parallel UI. When two surfaces read the same underlying state, consolidate rather than duplicate. The nav has been pruned once already (2026-06-03: Scheduler/Plans/Background-Agents merged into one Scheduler destination) after growing to ~31 destinations with real overlap.
+- Adding a new LeftNav tab for a live/observability feature before checking whether an existing surface (Terminal, Scheduler) already owns that data. Treat each nav destination as an independent "micro-service" — before adding one, check if an existing item already owns the data/job and extend it (a sub-tab) instead of shipping a parallel UI. When two surfaces read the same underlying state, consolidate rather than duplicate. The nav has been pruned once already (2026-06-03: Scheduler/Plans/Background-Agents merged into one Scheduler destination) after growing to ~31 destinations with real overlap.
 
 ## Future: Files API
 

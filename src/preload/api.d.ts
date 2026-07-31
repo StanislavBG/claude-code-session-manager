@@ -691,19 +691,6 @@ export interface RepoAnalyzeResult {
 }
 export interface RepoAnalyzeError { ok: false; error: string }
 
-export interface RecipeStep { agentName: string; note?: string }
-export interface Recipe {
-  slug: string;
-  name: string;
-  description: string;
-  brief?: string;
-  steps: RecipeStep[];
-}
-// Channel keeps legacy "hives" name; concept is now "recipe".
-export interface HiveListResult { hives: Recipe[]; error: string | null }
-export interface HiveGetResult { hive: Recipe | null; error: string | null }
-export interface HiveMutationResult { ok: boolean; error: string | null }
-
 export interface WatcherInfo {
   watcherId: string;
   tabId: string;
@@ -954,40 +941,6 @@ export interface PluginInstallResult {
 export interface PluginInstallProgressEvent {
   slug: string;
   line: string;
-}
-
-// ────────────────────────────────────────────── SuperAgent
-// "Boss" run that dispatches specialist subagents on the active tab's claude
-// session. Renderer-driven progress — main only owns lifecycle + prompt write.
-
-export type SuperAgentDepth = 'quick' | 'standard' | 'deep';
-export type SuperAgentStatus = 'idle' | 'running' | 'done' | 'error';
-
-export interface SuperAgentRunState {
-  status: SuperAgentStatus;
-  prompt: string;
-  specialistCount: number;
-  depth: SuperAgentDepth;
-  startedAt: number | null;
-  finishedAt: number | null;
-  error?: string;
-}
-
-export interface SuperAgentStartArgs {
-  tabId: string;
-  prompt: string;
-  specialistCount: number;
-  depth: SuperAgentDepth;
-}
-
-export interface SuperAgentStartResult {
-  ok: boolean;
-  error?: string;
-}
-
-export interface SuperAgentStateChangedEvent {
-  tabId: string;
-  state: SuperAgentRunState | null;
 }
 
 // ────────────────────────────────────────────── Web Remote (PRD 08)
@@ -1337,12 +1290,6 @@ export interface SessionManagerAPI {
   repo: {
     analyze: (cwd: string) => Promise<RepoAnalyzeResult | RepoAnalyzeError>;
   };
-  hives: {
-    list: () => Promise<HiveListResult>;
-    get: (slug: string) => Promise<HiveGetResult>;
-    save: (slug: string, hive: Recipe) => Promise<HiveMutationResult>;
-    delete: (slug: string) => Promise<HiveMutationResult>;
-  };
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
     scanProjects: () => Promise<SessionScanResult>;
@@ -1457,17 +1404,6 @@ export interface SessionManagerAPI {
      *  Same 5s cache as status(). Designed for a file-tree sidebar where the
      *  renderer needs per-row badges without a separate git call per file. */
     fileStatus: (cwd: string) => Promise<GitFileStatusMap>;
-  };
-  superagent: {
-    /** Start a SuperAgent boss run — writes a structured prompt to the tab's
-     *  PTY asking Claude to pick + dispatch specialists. Single run per tab. */
-    start: (args: SuperAgentStartArgs) => Promise<SuperAgentStartResult>;
-    /** Current run state for tab, or null if no run has been started. */
-    status: (tabId: string) => Promise<SuperAgentRunState | null>;
-    /** Mark the run as done. Does not interrupt Claude — the user can stop
-     *  the in-PTY work via Ctrl-C; this only flips the renderer indicator. */
-    stop: (tabId: string) => Promise<{ ok: boolean }>;
-    onStateChanged: (handler: (ev: SuperAgentStateChangedEvent) => void) => () => void;
   };
   webRemote: {
     getStatus: () => Promise<WebRemoteStatus>;

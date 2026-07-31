@@ -248,12 +248,6 @@ contextBridge.exposeInMainWorld('api', {
   repo: {
     analyze: (cwd) => ipcRenderer.invoke('repo:analyze', { cwd }),
   },
-  hives: {
-    list: () => ipcRenderer.invoke('hives:list'),
-    get: (slug) => ipcRenderer.invoke('hives:get', { slug }),
-    save: (slug, hive) => ipcRenderer.invoke('hives:save', { slug, hive }),
-    delete: (slug) => ipcRenderer.invoke('hives:delete', { slug }),
-  },
   schedule: {
     state: () => ipcRenderer.invoke('schedule:state'),
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),
@@ -337,19 +331,6 @@ contextBridge.exposeInMainWorld('api', {
     // kept — StatusBar still uses it for the cheap per-tab branch readout.
     status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
     fileStatus: (cwd) => ipcRenderer.invoke('git:file-status', { cwd }),
-  },
-  superagent: {
-    /** Start a SuperAgent boss run on a tab — writes a structured prompt to
-     *  the PTY asking Claude to pick + dispatch specialists. Single live run
-     *  per tab; starting again on a running tab terminates the prior one. */
-    start: (payload) => ipcRenderer.invoke('superagent:start', payload),
-    status: (tabId) => ipcRenderer.invoke('superagent:status', { tabId }),
-    stop: (tabId) => ipcRenderer.invoke('superagent:stop', { tabId }),
-    onStateChanged: (handler) => {
-      const listener = (_e, payload) => handler(payload);
-      ipcRenderer.on('superagent:state-changed', listener);
-      return () => ipcRenderer.removeListener('superagent:state-changed', listener);
-    },
   },
   webRemote: {
     /** Current connection state (no token values). */

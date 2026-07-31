@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { AlmanacIcon } from '../layout/AlmanacIcon'
 
 export interface AttachmentItem {
   id: string
@@ -88,7 +89,9 @@ export function AttachTray({ att, tall, testId }: { att: AttachmentsState; tall?
           tall ? 'p-3.5' : 'px-3 py-2.5'
         } ${over ? 'border-accent bg-accent/10' : 'border-rule'}`}
       >
-        <span className={over ? 'text-accent' : 'text-fg-faint'}>📎</span>
+        <span className={over ? 'text-accent' : 'text-fg-faint'} aria-hidden="true">
+          <AlmanacIcon name="paperclip" size={14} />
+        </span>
         <span className="text-[12.5px] leading-snug text-fg-faint">
           Paste a screenshot (⌘V) or drop files here
         </span>
@@ -120,7 +123,9 @@ export function AttachTray({ att, tall, testId }: { att: AttachmentsState; tall?
               {i.url ? (
                 <img src={i.url} alt="" className="h-6 w-[30px] rounded object-cover border border-rule" />
               ) : (
-                <span className="text-accent">📄</span>
+                <span className="text-accent" aria-hidden="true">
+                  <AlmanacIcon name="file" size={14} />
+                </span>
               )}
               <span className="truncate font-mono text-[11px] text-fg-dim">{i.name}</span>
               <span className="shrink-0 font-mono text-[10px] text-fg-faint">{i.size}</span>

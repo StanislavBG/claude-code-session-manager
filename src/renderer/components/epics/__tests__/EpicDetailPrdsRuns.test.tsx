@@ -134,6 +134,37 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     expect(card!.textContent).toContain('draft')
   })
 
+  it('shows a lazily-fetched, cached line count on the PRD card when readPrd resolves', async () => {
+    installWindowApiMock([
+      { slug: '5-widget', title: 'Widget', cwd: '/tmp/proj', estimateMinutes: 30, mtimeMs: 1, parallelGroup: 1, sourcePromptId: 'EPIC' },
+    ])
+    const readPrd = vi.fn().mockResolvedValue({ ok: true, text: 'line one\nline two\nline three' })
+    window.api.schedule.readPrd = readPrd
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    useScheduleState.setState({ snapshot: { jobs: [] } as any, loaded: true })
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    usePromptSessions.setState({
+      sessions: { ...usePromptSessions.getState().sessions, [session.id]: session },
+    })
+    ;(window.api.schedule.listPrds as any).mockResolvedValue([
+      { slug: '5-widget', title: 'Widget', cwd: '/tmp/proj', estimateMinutes: 30, mtimeMs: 1, parallelGroup: 1, sourcePromptId: session.id },
+    ])
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flush()
+    clickTab(el, 'PRDs')
+    await flush()
+    await flush()
+
+    const card = el.querySelector('[data-testid="epic-prd-card"]')
+    expect(card).not.toBeNull()
+    expect(card!.querySelector('[data-testid="epic-prd-line-count"]')?.textContent).toBe('3 lines')
+    expect(readPrd).toHaveBeenCalledWith('5-widget')
+  })
+
   it('joins a PRD file with a matching job row as the job status, and shows a live PRDs count', async () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')

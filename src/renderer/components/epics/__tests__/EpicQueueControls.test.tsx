@@ -180,6 +180,23 @@ describe('EpicQueueControls', () => {
     expect(onSelect).toHaveBeenCalledWith('e-second')
   })
 
+  it('renders exactly one 352px bordered container, with the Epic queue header above search', () => {
+    const epics = [makeEpic({ id: 'e-a' })]
+    const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
+    const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
+
+    const containers = Array.from(el.querySelectorAll('*')).filter((node) => node.className?.toString().includes('w-[352px]'))
+    expect(containers).toHaveLength(1)
+
+    const headingText = Array.from(el.querySelectorAll('span')).find((s) => s.textContent === 'Epic queue')
+    const searchInput = el.querySelector('input[aria-label="Search Epics"]')
+    expect(headingText).not.toBeNull()
+    expect(searchInput).not.toBeNull()
+    // Header (title row + New Epic) precedes the search/filter block in DOM order.
+    const position = headingText!.compareDocumentPosition(searchInput!)
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('suppresses j/k when focus is inside a text input', () => {
     const epics = [makeEpic({ id: 'e-a' }), makeEpic({ id: 'e-b' })]
     const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })

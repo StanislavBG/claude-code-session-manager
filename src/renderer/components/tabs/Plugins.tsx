@@ -3,11 +3,13 @@ import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
 import { ProvenanceBadge } from '../ui/ProvenanceBadge'
+import { Badge } from '../ui/Badge'
 import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
 import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
+import { parseSkillMeta } from '../../lib/skillFrontmatter'
 import { PluginSkillBrowser } from './plugins/PluginSkillBrowser'
 
 type PluginsView = 'installed' | 'library'
@@ -199,13 +201,14 @@ export function Plugins() {
           <span className="mx-2 text-fg-faint">·</span>
           <span className="text-fg-faint">{rows.length} plugins</span>
           <div className="flex-1" />
-          {selectedRow && <ProvenanceBadge input={pluginProvInput(selectedRow)} className="mr-2" />}
           <span className="text-fg-faint font-mono truncate">~/.claude/plugins/installed_plugins.json</span>
         </>
       }
     >
       {loading ? (
         <EmptyState title="scanning plugins…" />
+      ) : selectedRow ? (
+        <PluginHomePage key={selectedRow.path} row={selectedRow} home={home} onBack={() => setSelected(null)} />
       ) : (
         <div className="flex flex-col h-full">
           <div className="flex-1 min-h-0 overflow-auto">
@@ -225,9 +228,6 @@ export function Plugins() {
               }
             />
           </div>
-          {selectedRow ? (
-            <PluginDetail key={selectedRow.path} row={selectedRow} home={home} onClose={() => setSelected(null)} />
-          ) : null}
         </div>
       )}
     </Panel>
@@ -268,79 +268,301 @@ function PluginsViewTabs({
   )
 }
 
-function PluginDetail({ row, home, onClose }: { row: PluginRow; home: string | null; onClose: () => void }) {
-  const [skillEntries, setSkillEntries] = useState<PluginSkillEntry[] | null>(null)
-  const [loadingSkills, setLoadingSkills] = useState(false)
-  const [browsing, setBrowsing] = useState(false)
+interface AgentEntry {
+  id: string
+  name: string | null
+  description: string | null
+}
 
-  const browseSkills = async () => {
+interface McpEntry {
+  id: string
+  name: string
+  description: string | null
+}
+
+type SectionKey = 'skills' | 'agents' | 'mcp' | 'files'
+
+/**
+ * Full-page plugin drill-in ("mockup 2a"): one-line header, thin meta strip,
+ * and a left section index beside a full-height component listing. Replaces
+ * the Installed table in place (Plugins.tsx swaps it in on row click).
+ */
+function PluginHomePage({
+  row,
+  home,
+  onBack,
+}: {
+  row: PluginRow
+  home: string | null
+  onBack: () => void
+}) {
+  const [skills, setSkills] = useState<PluginSkillEntry[]>([])
+  const [agents, setAgents] = useState<AgentEntry[]>([])
+  const [mcpServers, setMcpServers] = useState<McpEntry[]>([])
+  const [files, setFiles] = useState<string[]>([])
+  const [active, setActive] = useState<SectionKey>('skills')
+  const [browsingSkill, setBrowsingSkill] = useState<PluginSkillEntry | null>(null)
+
+  useEffect(() => {
     if (!home) return
-    setLoadingSkills(true)
-    try {
-      const dir = await resolveInstalledPluginSkillsDir(row.name, row.path, home)
-      const entries = dir ? await listPluginSkills(dir) : []
-      setSkillEntries(entries)
-      setBrowsing(true)
-    } finally {
-      setLoadingSkills(false)
+    let cancelled = false
+    ;(async () => {
+      const [skillsDir, agentFiles, mcpJson, binFiles] = await Promise.all([
+        resolveInstalledPluginSkillsDir(row.name, row.path, home),
+        listOrEmpty(`${row.path}/agents`, { filesOnly: true }),
+        row.hasMcp ? window.api.config.readJson(`${row.path}/.mcp.json`) : Promise.resolve(null),
+        listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
+      ])
+
+      const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
+
+      const agentEntries: AgentEntry[] = []
+      for (const name of agentFiles.filter((f) => f.endsWith('.md'))) {
+        const r = await window.api.config.readText(`${row.path}/agents/${name}`)
+        if (!r.exists) continue
+        const meta = parseSkillMeta(r.text)
+        agentEntries.push({ id: name, name: meta.name ?? name.replace(/\.md$/, ''), description: meta.description })
+      }
+
+      const mcpEntries: McpEntry[] = []
+      if (mcpJson && mcpJson.exists && !mcpJson.parseError && mcpJson.data && typeof mcpJson.data === 'object') {
+        const servers = (mcpJson.data as Record<string, unknown>).mcpServers
+        if (servers && typeof servers === 'object') {
+          for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
+            const command =
+              def && typeof def === 'object' ? (def as Record<string, unknown>).command : undefined
+            mcpEntries.push({ id: name, name, description: typeof command === 'string' ? command : null })
+          }
+        }
+      }
+
+      if (cancelled) return
+      setSkills(skillEntries)
+      setAgents(agentEntries)
+      setMcpServers(mcpEntries)
+      setFiles(binFiles)
+      setActive(
+        skillEntries.length > 0
+          ? 'skills'
+          : agentEntries.length > 0
+            ? 'agents'
+            : mcpEntries.length > 0
+              ? 'mcp'
+              : 'files',
+      )
+    })()
+    return () => {
+      cancelled = true
     }
+  }, [row.path, row.name, row.hasMcp, home])
+
+  const sections: Array<{ key: SectionKey; label: string; count: number }> = [
+    { key: 'skills', label: 'Skills', count: skills.length },
+    { key: 'agents', label: 'Agents', count: agents.length },
+    { key: 'mcp', label: 'MCP server', count: mcpServers.length },
+    { key: 'files', label: 'Files', count: files.length },
+  ]
+
+  const author = row.manifest?.author
+    ? typeof row.manifest.author === 'string'
+      ? row.manifest.author
+      : row.manifest.author.name ?? null
+    : null
+  const openHomepage = (url: string) => {
+    void window.api.shell.open({ as: 'external', url })
   }
 
   return (
-    <div className="border-t border-line bg-bg-elev">
-      <div className="p-3 text-xs space-y-1 max-h-64 overflow-auto">
-        <div className="flex items-center justify-between mb-1">
-          <span className="font-medium text-fg">{row.manifest?.name ?? row.name}</span>
-          <button onClick={onClose} className="text-fg-faint hover:text-fg">×</button>
-        </div>
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+      {/* Header: one row, back link + name + version + description + badges. */}
+      <div className="shrink-0 h-11 flex items-baseline gap-3.5 px-3 border-b border-line bg-bg">
+        <button onClick={onBack} className="font-mono text-accent hover:underline shrink-0 text-xs">
+          ← Plugins
+        </button>
+        <span className="font-serif text-[22px] text-fg shrink-0 truncate max-w-[16rem]">
+          {row.manifest?.name ?? row.name}
+        </span>
+        {row.manifest?.version ? (
+          <span className="font-mono text-fg-faint text-xs shrink-0">v{row.manifest.version}</span>
+        ) : null}
         {row.manifest?.description ? (
-          <div className="text-fg-dim">{row.manifest.description}</div>
-        ) : null}
-        <div className="font-mono text-fg-faint">{row.path}</div>
-        {row.skills > 0 ? (
-          <div className="pt-1">
-            <button
-              onClick={browseSkills}
-              disabled={loadingSkills}
-              className="text-accent hover:underline disabled:opacity-50"
-            >
-              Browse skills → {skillEntries ? `(${skillEntries.length})` : loadingSkills ? '(…)' : ''}
-            </button>
-          </div>
-        ) : null}
-        {row.manifest ? (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1">
-            {row.manifest.version ? <Kv k="version" v={row.manifest.version} /> : null}
-            {row.manifest.license ? <Kv k="license" v={row.manifest.license} /> : null}
-            {row.manifest.homepage ? <Kv k="homepage" v={row.manifest.homepage} /> : null}
-            {row.manifest.repository ? <Kv k="repository" v={row.manifest.repository} /> : null}
-            {row.manifest.author ? (
-              <Kv
-                k="author"
-                v={typeof row.manifest.author === 'string' ? row.manifest.author : row.manifest.author.name ?? ''}
-              />
-            ) : null}
-          </div>
-        ) : null}
-        <div className="pt-1 text-fg-faint">
-          contents — agents: {row.agents} · skills: {row.skills} · hooks: {row.hooks} · monitors:{' '}
-          {row.monitors} · bin: {row.binCount} · lsp: {row.hasLsp ? 'yes' : 'no'} · mcp:{' '}
-          {row.hasMcp ? 'yes' : 'no'}
+          <span className="text-fg-dim text-xs min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+            {row.manifest.description}
+          </span>
+        ) : (
+          <span className="flex-1" />
+        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <ProvenanceBadge input={pluginProvInput(row)} />
+          {row.hasMcp ? <Badge tone="accent">MCP</Badge> : null}
         </div>
       </div>
-      {browsing && skillEntries ? (
-        <PluginSkillBrowser skills={skillEntries} onClose={() => setBrowsing(false)} />
+
+      {/* Meta strip: thin muted row, omits keys the manifest lacks. */}
+      {row.manifest ? (
+        <div className="shrink-0 h-[26px] flex items-center gap-[18px] px-3 bg-bg-elev border-b border-line text-[9px] font-mono uppercase tracking-wide overflow-hidden">
+          {author ? (
+            <span className="text-fg-dim truncate">
+              <span className="text-fg-faint">Author </span>
+              {author}
+            </span>
+          ) : null}
+          {row.manifest.license ? (
+            <span className="text-fg-dim truncate">
+              <span className="text-fg-faint">License </span>
+              {row.manifest.license}
+            </span>
+          ) : null}
+          {row.manifest.homepage ? (
+            <button
+              onClick={() => openHomepage(row.manifest!.homepage!)}
+              className="text-accent hover:underline truncate normal-case"
+              title={row.manifest.homepage}
+            >
+              <span className="text-fg-faint uppercase">Homepage </span>
+              {row.manifest.homepage}
+            </button>
+          ) : null}
+          <span className="ml-auto text-fg-faint truncate normal-case">{row.path}</span>
+        </div>
+      ) : (
+        <div className="shrink-0 h-[26px] flex items-center px-3 bg-bg-elev border-b border-line text-[9px] font-mono uppercase tracking-wide overflow-hidden">
+          <span className="ml-auto text-fg-faint truncate normal-case">{row.path}</span>
+        </div>
+      )}
+
+      {/* Body: 170px section index + full-height content column. */}
+      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: '170px 1fr' }}>
+        <div className="min-h-0 overflow-auto bg-bg-elev border-r border-line py-1">
+          {sections.map((s) => (
+            <button
+              key={s.key}
+              disabled={s.count === 0}
+              onClick={() => setActive(s.key)}
+              className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
+                s.count === 0
+                  ? 'text-fg-faint opacity-50 cursor-default'
+                  : active === s.key
+                    ? 'bg-bg-hi text-fg'
+                    : 'text-fg-dim hover:text-fg hover:bg-bg-hi'
+              }`}
+            >
+              <span>{s.label}</span>
+              {s.count > 0 ? <span className="font-mono text-fg-faint">{s.count}</span> : null}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-0 overflow-auto">
+          <SectionContent
+            active={active}
+            skills={skills}
+            agents={agents}
+            mcpServers={mcpServers}
+            files={files}
+            onOpenSkill={setBrowsingSkill}
+          />
+        </div>
+      </div>
+
+      {browsingSkill ? (
+        <PluginSkillBrowser
+          skills={skills}
+          initialSelectedId={browsingSkill.id}
+          onClose={() => setBrowsingSkill(null)}
+        />
       ) : null}
     </div>
   )
 }
 
-function Kv({ k, v }: { k: string; v: string }) {
+function SectionContent({
+  active,
+  skills,
+  agents,
+  mcpServers,
+  files,
+  onOpenSkill,
+}: {
+  active: SectionKey
+  skills: PluginSkillEntry[]
+  agents: AgentEntry[]
+  mcpServers: McpEntry[]
+  files: string[]
+  onOpenSkill: (skill: PluginSkillEntry) => void
+}) {
+  if (active === 'skills') {
+    if (skills.length === 0) return <EmptyState title="no components" />
+    return (
+      <div>
+        {skills.map((s, i) => (
+          <ContentRow
+            key={s.id}
+            n={i + 1}
+            name={s.name ?? s.id}
+            description={s.description}
+            onClick={() => onOpenSkill(s)}
+          />
+        ))}
+      </div>
+    )
+  }
+  if (active === 'agents') {
+    if (agents.length === 0) return <EmptyState title="no components" />
+    return (
+      <div>
+        {agents.map((a, i) => (
+          <ContentRow key={a.id} n={i + 1} name={a.name ?? a.id} description={a.description} />
+        ))}
+      </div>
+    )
+  }
+  if (active === 'mcp') {
+    if (mcpServers.length === 0) return <EmptyState title="no components" />
+    return (
+      <div>
+        {mcpServers.map((m, i) => (
+          <ContentRow key={m.id} n={i + 1} name={m.name} description={m.description} />
+        ))}
+      </div>
+    )
+  }
+  if (files.length === 0) return <EmptyState title="no components" />
   return (
-    <div className="flex gap-2">
-      <span className="text-fg-faint w-20">{k}</span>
-      <span className="text-fg font-mono truncate">{v}</span>
+    <div>
+      {files.map((f, i) => (
+        <ContentRow key={f} n={i + 1} name={f} description={null} />
+      ))}
     </div>
+  )
+}
+
+function ContentRow({
+  n,
+  name,
+  description,
+  onClick,
+}: {
+  n: number
+  name: string
+  description: string | null
+  onClick?: () => void
+}) {
+  const Tag = onClick ? 'button' : 'div'
+  return (
+    <Tag
+      onClick={onClick}
+      className={`w-full flex items-baseline gap-2.5 py-[9px] px-3 border-b border-line text-left min-w-0 ${
+        onClick ? 'hover:bg-bg-hi cursor-pointer' : ''
+      }`}
+    >
+      <span className="font-serif text-fg-faint text-xs shrink-0 w-6 text-right">
+        {String(n).padStart(2, '0')}
+      </span>
+      <span className="min-w-0 flex-1">
+        <div className="font-mono font-semibold text-accent truncate">{name}</div>
+        {description ? <div className="text-fg-dim text-xs truncate">{description}</div> : null}
+      </span>
+    </Tag>
   )
 }
 

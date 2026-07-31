@@ -9,11 +9,13 @@ import { detectSkillEdges, type PluginSkillEntry } from '../../../lib/pluginSkil
 export function PluginSkillBrowser({
   skills,
   onClose,
+  initialSelectedId,
 }: {
   skills: PluginSkillEntry[]
   onClose: () => void
+  initialSelectedId?: string
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(skills[0]?.id ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? skills[0]?.id ?? null)
   const selected = selectedId ? skills.find((s) => s.id === selectedId) ?? null : null
   const edges = useMemo(() => detectSkillEdges(skills), [skills])
   const [view, setView] = useState<'list' | 'graph'>('list')

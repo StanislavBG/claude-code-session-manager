@@ -15,8 +15,9 @@
  */
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
-const { activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
+const { activeProjectCwds, allProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
 
 const PRD_SUBPATH = ['session-manager-operations', 'scheduler', 'prds'];
 
@@ -34,13 +35,49 @@ function resolvePrdWriteDir(cwd) {
 
 /**
  * resolvePrdsDirs(maxAgeMin?, opts?) → string[]
- * One `<cwd>/session-manager-operations/scheduler/prds` dir per active
- * project cwd (activeProjectCwds' default window is 90 minutes). `opts` is
- * forwarded to activeProjectCwds (e.g. `projectsDir` override for tests).
+ *
+ * Every `<cwd>/session-manager-operations/scheduler/prds` dir that actually
+ * EXISTS on disk, across every project this machine has ever opened — plus
+ * the currently-active projects' dirs even if they haven't been created yet
+ * (write paths need a destination before the first PRD lands there).
+ *
+ * Deliberately NOT filtered by recency. This function answers "where do PRD
+ * source files live", and a project being quiet says nothing about whether it
+ * owns queued work. It used to return only activeProjectCwds' 90-minute
+ * window, which made a quiet project's PRDs unscannable — and reconcile()
+ * reads an unscannable PRD as a deleted one, silently dropping its queue row
+ * (2026-07-31: 142 PRDs across 6 quiet projects). Recency stays where it
+ * belongs: the feedback sweep, which genuinely only cares about live work.
+ *
+ * `maxAgeMin` is still honoured for the active-project half so existing
+ * callers and tests keep their semantics; `opts` is forwarded to the
+ * underlying scan (e.g. `projectsDir` override for tests).
  */
 function resolvePrdsDirs(maxAgeMin, opts) {
-  const cwds = activeProjectCwds(maxAgeMin, opts);
-  return cwds.map(resolvePrdWriteDir);
+  const dirs = [];
+  const seen = new Set();
+  const add = (dir) => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    dirs.push(dir);
+  };
+
+  // Every historical project that has a PRD dir on disk — the set that
+  // matters for discovery, regardless of when it was last touched.
+  for (const cwd of allProjectCwds(opts)) {
+    let dir;
+    try { dir = resolvePrdWriteDir(cwd); } catch { continue; }
+    if (fs.existsSync(dir)) add(dir);
+  }
+
+  // Active projects are added unconditionally: a brand-new project has no
+  // prds/ dir yet, and callers that resolve a write destination must still
+  // find it. Scans over a non-existent dir are a harmless ENOENT no-op.
+  for (const cwd of activeProjectCwds(maxAgeMin, opts)) {
+    try { add(resolvePrdWriteDir(cwd)); } catch { /* unusable cwd */ }
+  }
+
+  return dirs;
 }
 
 module.exports = { resolvePrdWriteDir, resolvePrdsDirs, PRD_SUBPATH };

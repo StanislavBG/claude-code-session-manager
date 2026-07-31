@@ -940,7 +940,22 @@ async function reconcile(state) {
   const seen = new Set();
   for (const job of state.jobs) {
     const p = onDisk.get(job.slug);
-    if (!p) continue;
+    if (!p) {
+      // A terminal job whose .md is gone was archived on purpose — dropping
+      // its row is the intended end of the auto-archive flow.
+      //
+      // A PENDING or RUNNING job whose .md is merely not VISIBLE is a
+      // different thing entirely, and dropping it destroys queued work: the
+      // file may be unreadable, on a project whose dir failed to enumerate,
+      // or mid-move. "I can't see it" is not "the user deleted it", so the
+      // row survives — worst case it re-resolves on the next pass.
+      if (job.status === 'pending' || job.status === 'running') {
+        seen.add(job.slug);
+        next.push({ ...job });
+        console.warn(`[scheduler] reconcile: keeping ${job.status} job ${job.slug} — PRD source not visible in any candidate dir`);
+      }
+      continue;
+    }
     seen.add(job.slug);
     next.push({
       ...job,

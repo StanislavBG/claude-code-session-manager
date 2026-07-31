@@ -61,14 +61,18 @@ function readTailLines(filePath, maxBytes) {
  */
 function activeProjectCwds(maxAgeMin = 90, {
   projectsDir = path.join(HOME, '.claude', 'projects'),
+  maxCwds = MAX_CWDS,
 } = {}) {
+  // maxAgeMin === Infinity means "every project ever seen, no recency filter"
+  // (allProjectCwds below). Date.now() - Infinity is -Infinity, which every
+  // mtime clears — spelled out here because it reads like an accident.
   const cutoffMs = Date.now() - maxAgeMin * 60 * 1000;
   const seen = new Set();
   const result = [];
 
   function addCwd(cwd) {
     if (!cwd || typeof cwd !== 'string') return;
-    if (seen.has(cwd) || result.length >= MAX_CWDS) return;
+    if (seen.has(cwd) || result.length >= maxCwds) return;
     try { fs.statSync(cwd); } catch { return; } // must exist on disk
     seen.add(cwd);
     result.push(cwd);
@@ -79,7 +83,7 @@ function activeProjectCwds(maxAgeMin = 90, {
   try { slugs = fs.readdirSync(projectsDir); } catch { return result; }
 
   for (const slug of slugs) {
-    if (result.length >= MAX_CWDS) break;
+    if (result.length >= maxCwds) break;
     const projDir = path.join(projectsDir, slug);
     let entries;
     try {
@@ -114,4 +118,23 @@ function activeProjectCwds(maxAgeMin = 90, {
   return result;
 }
 
-module.exports = { activeProjectCwds };
+/**
+ * allProjectCwds(opts?) → string[]
+ *
+ * Every project cwd this machine has ever opened a Claude session in, with NO
+ * recency filter — the same transcript scan, minus the cutoff.
+ *
+ * Recency is the right question for "which projects should I sweep for new
+ * feedback". It is the WRONG question for "which projects own PRDs": a
+ * project that has been quiet for 90 minutes still owns its queued work, and
+ * treating its PRD dir as non-existent makes reconcile() read absence as
+ * deletion. (2026-07-31: 142 PRDs across 6 quiet projects went unscannable.)
+ *
+ * The cap is raised well above activeProjectCwds' 50 because this list is
+ * historical rather than "currently in flight".
+ */
+function allProjectCwds(opts = {}) {
+  return activeProjectCwds(Infinity, { maxCwds: 500, ...opts });
+}
+
+module.exports = { activeProjectCwds, allProjectCwds };

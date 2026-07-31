@@ -33,6 +33,47 @@ test('resolvePrdWriteDir throws on a missing cwd', () => {
   expect(() => resolvePrdWriteDir('')).toThrow();
 });
 
+test('resolvePrdsDirs still finds a QUIET project\'s PRDs dir (no recency filter)', async () => {
+  // Regression cover for 2026-07-31: discovery used activeProjectCwds' 90-min
+  // window, so a project nobody had touched recently became unscannable — and
+  // reconcile() reads an unscannable PRD as a deleted one and drops its queue
+  // row. 142 PRDs across 6 quiet projects were affected.
+  const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-quiet-projects-'));
+  tmpDirs.push(projectsDir);
+  const quietCwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-quiet-cwd-'));
+  tmpDirs.push(quietCwd);
+
+  // The project owns a real PRDs dir on disk...
+  fs.mkdirSync(resolvePrdWriteDir(quietCwd), { recursive: true });
+
+  const projDir = path.join(projectsDir, 'quiet-project');
+  fs.mkdirSync(projDir, { recursive: true });
+  const transcript = path.join(projDir, 'session1.jsonl');
+  fs.writeFileSync(transcript, `${JSON.stringify({ cwd: quietCwd })}\n`);
+  // ...but its last session was a week ago, far outside the active window.
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  fs.utimesSync(transcript, weekAgo, weekAgo);
+
+  const dirs = resolvePrdsDirs(90, { projectsDir });
+  expect(dirs).toContain(resolvePrdWriteDir(quietCwd));
+});
+
+test('resolvePrdsDirs skips a quiet project that owns no PRDs dir', async () => {
+  const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-nodir-projects-'));
+  tmpDirs.push(projectsDir);
+  const quietCwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-nodir-cwd-'));
+  tmpDirs.push(quietCwd);
+
+  const projDir = path.join(projectsDir, 'quiet-no-prds');
+  fs.mkdirSync(projDir, { recursive: true });
+  const transcript = path.join(projDir, 'session1.jsonl');
+  fs.writeFileSync(transcript, `${JSON.stringify({ cwd: quietCwd })}\n`);
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  fs.utimesSync(transcript, weekAgo, weekAgo);
+
+  expect(resolvePrdsDirs(90, { projectsDir })).not.toContain(resolvePrdWriteDir(quietCwd));
+});
+
 test('resolvePrdsDirs maps each active project cwd to its own PRDs dir', async () => {
   const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdlocations-projects-'));
   tmpDirs.push(projectsDir);

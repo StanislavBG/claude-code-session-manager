@@ -4,6 +4,7 @@ import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { EmptyState } from '../ui/EmptyState'
+import { ReferencedFilesPanel } from './ReferencedFilesPanel'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
 import { CLAUDE_MD_SCOPES, type Scope } from '../../lib/scopes'
@@ -126,14 +127,19 @@ export function SystemPrompt() {
           hint="open a tab in a project directory to edit project or local CLAUDE.md"
         />
       ) : activePath && file ? (
-        <MarkdownEditor
-          path={activePath}
-          value={file.draftRaw}
-          onChange={(v) => {
-            setSaveError(null)
-            setDraft(activePath, v)
-          }}
-        />
+        <div className="h-full flex flex-col">
+          <ReferencedFilesPanel activePath={activePath} />
+          <div className="flex-1 min-h-0">
+            <MarkdownEditor
+              path={activePath}
+              value={file.draftRaw}
+              onChange={(v) => {
+                setSaveError(null)
+                setDraft(activePath, v)
+              }}
+            />
+          </div>
+        </div>
       ) : (
         <EmptyState title="resolving…" />
       )}

@@ -35,6 +35,7 @@ export default defineConfig({
       'src/main/__tests__/prdMigration.test.cjs',
       'src/main/__tests__/scheduler-find-prd-dir.test.cjs',
       'src/main/__tests__/scheduler-investigation-clean-skip.test.cjs',
+      'src/main/__tests__/runVerify.test.cjs',
       'scripts/__tests__/feedback-sweep.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',

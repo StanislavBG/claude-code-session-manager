@@ -530,6 +530,55 @@ function checkMergeablePr({ cwd, prNumber, timeoutMs = GH_CHECK_TIMEOUT_MS, exec
   }
 }
 
+// ─── already-shipped postcondition exemption (original PRD re-runs) ─────────
+
+const PRD_DELIVERABLE_PATH_RE = /(?:^|[`\s(])((?:src|scripts|session-manager-operations|test|tests|docs|bin)\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)\b/g;
+
+/**
+ * Extract the deliverable file paths a PRD body names — backticked or bare
+ * paths under a source dir with a file extension (e.g. `src/main/lib/foo.cjs`,
+ * `src/renderer/components/Bar.tsx`, `scripts/baz.cjs`). Deliberately narrow:
+ * only repo-relative paths under a known source root, no globs, no
+ * node_modules, no URLs. O(n) over the PRD body length.
+ */
+function extractPrdDeliverablePaths(prdBody) {
+  if (typeof prdBody !== 'string' || !prdBody) return [];
+  const seen = new Set();
+  const out = [];
+  let m;
+  PRD_DELIVERABLE_PATH_RE.lastIndex = 0;
+  while ((m = PRD_DELIVERABLE_PATH_RE.exec(prdBody)) !== null) {
+    const p = m[1];
+    if (p.includes('node_modules') || p.includes('..') || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Materially check whether every deliverable path a PRD names is already
+ * tracked in git — i.e. the PRD's work landed in an EARLIER run/commit and
+ * this run correctly had nothing to do. Uses `git ls-files --error-unmatch`
+ * (bounded, execImpl injectable for tests). Fails safe in every direction:
+ * any error, a non-git cwd, or zero paths returns false, which falls straight
+ * through to today's pass_no_commit behavior.
+ */
+function allDeliverablesAlreadyTracked({ cwd, paths, execImpl = execFileSync, timeoutMs = 15_000 }) {
+  if (!Array.isArray(paths) || paths.length === 0) return false;
+  try {
+    execImpl('git', ['ls-files', '--error-unmatch', '--', ...paths], {
+      cwd: cwd || process.cwd(),
+      timeout: timeoutMs,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── main verifier ────────────────────────────────────────────────────────────
 
 /**
@@ -776,7 +825,35 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
           }
         }
       }
+      // EXEMPTION: an ORIGINAL PRD re-queued after its deliverables already
+      // landed. "I checked, the work is already committed and green, nothing
+      // to change" is a truthful PASS, not a silent no-op — the same
+      // reasoning that exempts fix-plan slugs above. Materially checked
+      // against real git state, never inferred from the transcript.
+      // (Incident: 655-needs-review-rca-feedback-hook, 2026-07-31 — verified
+      // rcaFeedbackHook.cjs shipped in e13168d, ran typecheck + 23 green
+      // tests, made no commit, printed a truthful PASS, and was parked
+      // anyway.)
+      let alreadyShipped = false;
       if (!mergeMainVerified) {
+        const deliverablePaths = extractPrdDeliverablePaths(prdBody);
+        if (deliverablePaths.length > 0
+          && allDeliverablesAlreadyTracked({ cwd: queueEntry?.cwd, paths: deliverablePaths })) {
+          alreadyShipped = true;
+          return conclude(
+            'pass_no_commit_already_shipped',
+            `SCHEDULER_VERDICT: PASS with no commit, but every PRD-named deliverable path is already `
+              + `tracked in git (${deliverablePaths.join(', ')}) — this PRD's work landed in an earlier run`,
+            null,
+            {
+              ...(annotations.length ? { annotations } : {}),
+              sentinel,
+              alreadyTrackedPaths: deliverablePaths,
+            },
+          );
+        }
+      }
+      if (!mergeMainVerified && !alreadyShipped) {
         issues.push({
           verdict: 'pass_no_commit',
           reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
@@ -859,4 +936,6 @@ module.exports = {
   isMergeMainSlug,
   extractMergeMainPrNumber,
   checkMergeablePr,
+  extractPrdDeliverablePaths,
+  allDeliverablesAlreadyTracked,
 };

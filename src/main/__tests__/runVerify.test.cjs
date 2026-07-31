@@ -1,7 +1,7 @@
 /**
  * runVerify.test.cjs — unit tests for the post-run reconciliation verifier.
  *
- * Run standalone: node src/main/__tests__/runVerify.test.cjs
+ * Run standalone: timeout 180 npx vitest run src/main/__tests__/runVerify.test.cjs
  *
  * Three fixture scenarios (matching the 2026-05-23→24 incident window):
  *
@@ -19,9 +19,7 @@
  *      Expected: clean → null (caller may stamp 'completed')
  */
 
-'use strict';
-
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
@@ -1134,6 +1132,92 @@ test('pass_no_commit: fix-plan job (slug ^\\d+-fix-) with PASS but no commit is 
   } finally {
     rmdir(tmp);
   }
+});
+
+// ─── pass_no_commit_already_shipped: original PRD re-run after landing ─────
+// (incident: 655-needs-review-rca-feedback-hook, 2026-07-31)
+
+const { extractPrdDeliverablePaths, allDeliverablesAlreadyTracked } = require('../runVerify.cjs');
+const REPO_ROOT = path.resolve(__dirname, '../../..');
+
+test('pass_no_commit: original PRD, PASS no commit, all deliverable paths already tracked in git → pass_no_commit_already_shipped', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '655-needs-review-rca-feedback-hook';
+    writeLog(tmp, slug, noOpRunEvents('Verified rcaFeedbackHook.cjs already shipped in e13168d; typecheck + tests green; no commit needed.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/__tests__/rcaFeedbackHook.test.cjs`.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit_already_shipped', `expected already-shipped exemption, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('pass_no_commit: original PRD, PASS no commit, one deliverable path untracked → falls through to pass_no_commit', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '655-needs-review-rca-feedback-hook';
+    writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/lib/does-not-exist-xyz.cjs`.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('pass_no_commit: original PRD, PASS no commit, zero extractable deliverable paths → falls through to pass_no_commit', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '999-some-vague-prd';
+    writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'This PRD names no file paths at all, just prose.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('extractPrdDeliverablePaths: extracts backticked repo-relative paths, ignores prose', () => {
+  const body = 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/__tests__/rcaFeedbackHook.test.cjs`. Also see node_modules/foo/bar.js which should be excluded.';
+  const paths = extractPrdDeliverablePaths(body);
+  assert.deepEqual(paths, ['src/main/lib/rcaFeedbackHook.cjs', 'src/main/__tests__/rcaFeedbackHook.test.cjs']);
+  assert.deepEqual(extractPrdDeliverablePaths(''), []);
+  assert.deepEqual(extractPrdDeliverablePaths(undefined), []);
+});
+
+test('allDeliverablesAlreadyTracked: fail-safe on empty paths, non-git cwd, and git errors', () => {
+  assert.equal(allDeliverablesAlreadyTracked({ cwd: REPO_ROOT, paths: [] }), false);
+  assert.equal(allDeliverablesAlreadyTracked({
+    cwd: REPO_ROOT,
+    paths: ['src/main/runVerify.cjs'],
+    execImpl: () => { throw new Error('boom'); },
+  }), false);
+  assert.equal(allDeliverablesAlreadyTracked({
+    cwd: REPO_ROOT,
+    paths: ['src/main/runVerify.cjs'],
+    execImpl: () => '',
+  }), true);
 });
 
 // (e) halt + sentinel PASS → still halt (override must not apply to halt)

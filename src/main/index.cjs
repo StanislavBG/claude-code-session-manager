@@ -7,6 +7,7 @@ const os = require('node:os');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const { terminateLosingInstance } = require('./lib/singleInstanceGuard.cjs');
+const { acquireSchedulerOwnership, releaseSchedulerOwnership } = require('./lib/instanceLock.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
 const browserView = require('./browserView.cjs');
 const browserCapture = require('./browserCapture.cjs');
@@ -1090,12 +1091,26 @@ app.whenReady().then(async () => {
   webRemote.attachWindow(mainWindow);
   chatRunner.attachWindow(mainWindow);
   attachDocEditWindow(mainWindow);
-  scheduler.init().catch((e) => {
-    logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
-  });
-  adminHttp.start().catch((e) => {
-    logs.writeLine({ scope: 'admin-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
-  });
+  // Scheduler ownership (PRD 834): exactly one instance machine-wide runs
+  // scheduler mutation (boot reconciliation, ticking, sweep, supervisor) and
+  // the admin API. Electron's own single-instance lock is keyed by userData
+  // identity, which a dev/e2e/Playwright launch bypasses — live incident
+  // 2026-07-31: a secondary instance's boot reconciliation SIGTERM'd the
+  // owner's running job and overwrote admin-api.json. Losing instances run
+  // scheduler-PASSIVE: read IPC still works (handlers registered above),
+  // nothing mutates.
+  const ownership = acquireSchedulerOwnership();
+  if (ownership.owner) {
+    scheduler.init().catch((e) => {
+      logs.writeLine({ scope: 'scheduler', level: 'error', message: 'init failed', meta: { error: e?.message } });
+    });
+    adminHttp.start().catch((e) => {
+      logs.writeLine({ scope: 'admin-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
+    });
+  } else {
+    console.log(`[main] scheduler ownership held by pid ${ownership.holderPid} — running scheduler-passive (no reconciliation, no admin server)`);
+    logs.writeLine({ scope: 'scheduler', level: 'info', message: 'scheduler-passive: ownership held by another instance', meta: { holderPid: ownership.holderPid } });
+  }
   browserAgentServer.start().catch((e) => {
     logs.writeLine({ scope: 'browser-agent-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
@@ -1199,6 +1214,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  releaseSchedulerOwnership();
   supervisor.stopSupervisor();
   ptyManager.killAll();
   configMgr.closeAllWatchers();

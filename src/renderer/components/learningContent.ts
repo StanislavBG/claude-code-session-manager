@@ -257,7 +257,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         {
           title: 'Three views',
           items: [
-            { term: 'Installed', body: 'A read-only inspector for every plugin folder on disk, shown as a table: name, origin, version, whether it has a manifest, and a contents summary (counts of agents · skills · hooks · monitors · bin · lsp · mcp). Click a row for a detail panel with the manifest fields (version, license, homepage, repository, author) and the full path. To edit a plugin\'s pieces, use the dedicated Skills / Hooks tabs — they point at the same files.' },
+            { term: 'Installed', body: 'A read-only inspector for every plugin folder on disk, shown as a table: name, origin, version, whether it has a manifest, and a contents summary (counts of agents · skills · hooks · monitors · bin · lsp · mcp). Click a row to drill into a full-page view: a header with name/version/description, a meta strip (author, license, homepage, and the full path), and a section index (skills, agents, MCP server, hooks, monitors, LSP, bin) beside the component listing. To edit a plugin\'s pieces, use the dedicated Skills / Hooks tabs — they point at the same files.' },
             { term: 'Discover', body: 'A built-in list of official add-ons (LSP servers, MCP integrations). The Install button runs claude plugin install <slug> in a hidden terminal and streams its output below the row; on success the row flips to installed.' },
             { term: 'Library', body: 'Browse the curated plugin catalog. Each row has a "source" link, a "copy" button for the /plugin install command, and an Install button that wires up the marketplace and installs for you.' },
           ],

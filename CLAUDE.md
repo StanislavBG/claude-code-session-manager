@@ -125,7 +125,7 @@ Deployed at bilko.run/projects/session-manager (Clerk auth, same-origin relay). 
 - **Knowledge graph data pipeline**: Ingest → filter (automated patterns, length caps) → extract (with EXTRACTION_SYSTEM role to prevent prompt-injection refusals) → persist. Per-project entity vocab + rate-limiting.
 - **Renderer state stores** (zustand): separate concerns: `config.ts` (file-backed, dirty-tracked), `live.ts` (per-tab derived from transcripts), `voice.ts` (voice UI), `scheduleState.ts` (queue + history), `toast.ts` (toast messages). Stores do NOT cross-subscribe; use composed selectors in components for multi-store queries.
 - **Modular pane pattern**: extracted panes (SchedulePanel: Queue/PRDs/History tabs) are reusable by multiple parent tabs (Scheduler, web-remote). Panes own local filter state + filtering logic; parents own scope/context state.
-- **Design primitive extraction**: when a design system (Almanac) is shared across components, extract `*-primitives.tsx` with explicit exports (SchBadge, ToolChip, etc.). Import primitives explicitly by name, not as wildcard — prevents cross-system pollution.
+- **Design primitive extraction**: when a design system (Almanac) is shared across components, extract `*-primitives.tsx` with explicit exports (SchBadge, ProjectTag, etc.). Import primitives explicitly by name, not as wildcard — prevents cross-system pollution.
 
 ## Avoid
 

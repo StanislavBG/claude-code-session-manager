@@ -11,6 +11,7 @@ import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 import { parseSkillMeta } from '../../lib/skillFrontmatter'
 import { PluginSkillBrowser } from './plugins/PluginSkillBrowser'
+import { toast } from '../../state/toast'
 
 type PluginsView = 'installed' | 'library'
 
@@ -280,7 +281,7 @@ interface McpEntry {
   description: string | null
 }
 
-type SectionKey = 'skills' | 'agents' | 'mcp' | 'files'
+type SectionKey = 'skills' | 'agents' | 'mcp' | 'hooks' | 'monitors' | 'lsp' | 'files'
 
 /**
  * Full-page plugin drill-in ("mockup 2a"): one-line header, thin meta strip,
@@ -302,65 +303,91 @@ function PluginHomePage({
   const [files, setFiles] = useState<string[]>([])
   const [active, setActive] = useState<SectionKey>('skills')
   const [browsingSkill, setBrowsingSkill] = useState<PluginSkillEntry | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!home) return
     let cancelled = false
     ;(async () => {
-      const [skillsDir, agentFiles, mcpJson, binFiles] = await Promise.all([
-        resolveInstalledPluginSkillsDir(row.name, row.path, home),
-        listOrEmpty(`${row.path}/agents`, { filesOnly: true }),
-        row.hasMcp ? window.api.config.readJson(`${row.path}/.mcp.json`) : Promise.resolve(null),
-        listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
-      ])
+      setLoading(true)
+      try {
+        const [skillsDir, agentFiles, mcpJson, binFiles] = await Promise.all([
+          resolveInstalledPluginSkillsDir(row.name, row.path, home),
+          listOrEmpty(`${row.path}/agents`, { filesOnly: true }),
+          row.hasMcp ? window.api.config.readJson(`${row.path}/.mcp.json`) : Promise.resolve(null),
+          listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
+        ])
 
-      const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
+        const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
 
-      const agentEntries: AgentEntry[] = []
-      for (const name of agentFiles.filter((f) => f.endsWith('.md'))) {
-        const r = await window.api.config.readText(`${row.path}/agents/${name}`)
-        if (!r.exists) continue
-        const meta = parseSkillMeta(r.text)
-        agentEntries.push({ id: name, name: meta.name ?? name.replace(/\.md$/, ''), description: meta.description })
-      }
+        const agentMdFiles = agentFiles.filter((f) => f.endsWith('.md'))
+        const agentReads = await Promise.all(
+          agentMdFiles.map((name) => window.api.config.readText(`${row.path}/agents/${name}`)),
+        )
+        const agentEntries: AgentEntry[] = []
+        agentMdFiles.forEach((name, i) => {
+          const r = agentReads[i]
+          if (!r.exists) return
+          const meta = parseSkillMeta(r.text)
+          agentEntries.push({ id: name, name: meta.name ?? name.replace(/\.md$/, ''), description: meta.description })
+        })
 
-      const mcpEntries: McpEntry[] = []
-      if (mcpJson && mcpJson.exists && !mcpJson.parseError && mcpJson.data && typeof mcpJson.data === 'object') {
-        const servers = (mcpJson.data as Record<string, unknown>).mcpServers
-        if (servers && typeof servers === 'object') {
-          for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
-            const command =
-              def && typeof def === 'object' ? (def as Record<string, unknown>).command : undefined
-            mcpEntries.push({ id: name, name, description: typeof command === 'string' ? command : null })
+        const mcpEntries: McpEntry[] = []
+        if (mcpJson && mcpJson.exists && !mcpJson.parseError && mcpJson.data && typeof mcpJson.data === 'object') {
+          const servers = (mcpJson.data as Record<string, unknown>).mcpServers
+          if (servers && typeof servers === 'object') {
+            for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
+              const command =
+                def && typeof def === 'object' ? (def as Record<string, unknown>).command : undefined
+              mcpEntries.push({ id: name, name, description: typeof command === 'string' ? command : null })
+            }
           }
         }
-      }
 
-      if (cancelled) return
-      setSkills(skillEntries)
-      setAgents(agentEntries)
-      setMcpServers(mcpEntries)
-      setFiles(binFiles)
-      setActive(
-        skillEntries.length > 0
-          ? 'skills'
-          : agentEntries.length > 0
-            ? 'agents'
-            : mcpEntries.length > 0
-              ? 'mcp'
-              : 'files',
-      )
+        if (cancelled) return
+        setSkills(skillEntries)
+        setAgents(agentEntries)
+        setMcpServers(mcpEntries)
+        setFiles(binFiles)
+        setActive(
+          skillEntries.length > 0
+            ? 'skills'
+            : agentEntries.length > 0
+              ? 'agents'
+              : mcpEntries.length > 0
+                ? 'mcp'
+                : row.hooks > 0
+                  ? 'hooks'
+                  : row.monitors > 0
+                    ? 'monitors'
+                    : row.hasLsp
+                      ? 'lsp'
+                      : 'files',
+        )
+      } catch (err) {
+        if (cancelled) return
+        toast.error(`Failed to load plugin contents: ${err instanceof Error ? err.message : String(err)}`)
+        setSkills([])
+        setAgents([])
+        setMcpServers([])
+        setFiles([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [row.path, row.name, row.hasMcp, home])
+  }, [row.path, row.name, row.hasMcp, row.hooks, row.monitors, row.hasLsp, home])
 
   const sections: Array<{ key: SectionKey; label: string; count: number }> = [
     { key: 'skills', label: 'Skills', count: skills.length },
     { key: 'agents', label: 'Agents', count: agents.length },
     { key: 'mcp', label: 'MCP server', count: mcpServers.length },
-    { key: 'files', label: 'Files', count: files.length },
+    { key: 'hooks', label: 'Hooks', count: row.hooks },
+    { key: 'monitors', label: 'Monitors', count: row.monitors },
+    { key: 'lsp', label: 'LSP', count: row.hasLsp ? 1 : 0 },
+    { key: 'files', label: 'Bin', count: files.length },
   ]
 
   const author = row.manifest?.author
@@ -368,15 +395,16 @@ function PluginHomePage({
       ? row.manifest.author
       : row.manifest.author.name ?? null
     : null
-  const openHomepage = (url: string) => {
-    void window.api.shell.open({ as: 'external', url })
+  const openHomepage = async (url: string) => {
+    const result = await window.api.shell.open({ as: 'external', url })
+    if (!result.ok) toast.error(result.error ?? `Failed to open ${url}`)
   }
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Header: one row, back link + name + version + description + badges. */}
       <div className="shrink-0 h-11 flex items-baseline gap-3.5 px-3 border-b border-line bg-bg">
-        <button onClick={onBack} className="font-mono text-accent hover:underline shrink-0 text-xs">
+        <button type="button" onClick={onBack} className="font-mono text-accent hover:underline shrink-0 text-xs">
           ← Plugins
         </button>
         <span className="font-serif text-[22px] text-fg shrink-0 truncate max-w-[16rem]">
@@ -437,6 +465,7 @@ function PluginHomePage({
           {sections.map((s) => (
             <button
               key={s.key}
+              type="button"
               disabled={s.count === 0}
               onClick={() => setActive(s.key)}
               className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
@@ -453,19 +482,25 @@ function PluginHomePage({
           ))}
         </div>
         <div className="min-h-0 overflow-auto">
-          <SectionContent
-            active={active}
-            skills={skills}
-            agents={agents}
-            mcpServers={mcpServers}
-            files={files}
-            onOpenSkill={setBrowsingSkill}
-          />
+          {loading ? (
+            <EmptyState title="scanning…" />
+          ) : (
+            <SectionContent
+              active={active}
+              row={row}
+              skills={skills}
+              agents={agents}
+              mcpServers={mcpServers}
+              files={files}
+              onOpenSkill={setBrowsingSkill}
+            />
+          )}
         </div>
       </div>
 
       {browsingSkill ? (
         <PluginSkillBrowser
+          key={browsingSkill.id}
           skills={skills}
           initialSelectedId={browsingSkill.id}
           onClose={() => setBrowsingSkill(null)}
@@ -477,6 +512,7 @@ function PluginHomePage({
 
 function SectionContent({
   active,
+  row,
   skills,
   agents,
   mcpServers,
@@ -484,6 +520,7 @@ function SectionContent({
   onOpenSkill,
 }: {
   active: SectionKey
+  row: PluginRow
   skills: PluginSkillEntry[]
   agents: AgentEntry[]
   mcpServers: McpEntry[]
@@ -526,6 +563,38 @@ function SectionContent({
       </div>
     )
   }
+  if (active === 'hooks') {
+    if (row.hooks === 0) return <EmptyState title="no components" />
+    return (
+      <div>
+        <ContentRow
+          n={1}
+          name={`${row.hooks} ${row.hooks === 1 ? 'hook' : 'hooks'} configured`}
+          description={`${row.path}/hooks/hooks.json`}
+        />
+      </div>
+    )
+  }
+  if (active === 'monitors') {
+    if (row.monitors === 0) return <EmptyState title="no components" />
+    return (
+      <div>
+        <ContentRow
+          n={1}
+          name={`${row.monitors} ${row.monitors === 1 ? 'monitor' : 'monitors'} configured`}
+          description={`${row.path}/monitors/monitors.json`}
+        />
+      </div>
+    )
+  }
+  if (active === 'lsp') {
+    if (!row.hasLsp) return <EmptyState title="no components" />
+    return (
+      <div>
+        <ContentRow n={1} name="LSP server enabled" description={`${row.path}/.lsp.json`} />
+      </div>
+    )
+  }
   if (files.length === 0) return <EmptyState title="no components" />
   return (
     <div>
@@ -558,10 +627,10 @@ function ContentRow({
       <span className="font-serif text-fg-faint text-xs shrink-0 w-6 text-right">
         {String(n).padStart(2, '0')}
       </span>
-      <span className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1">
         <div className="font-mono font-semibold text-accent truncate">{name}</div>
         {description ? <div className="text-fg-dim text-xs truncate">{description}</div> : null}
-      </span>
+      </div>
     </Tag>
   )
 }

@@ -15,6 +15,7 @@ import { RunLogViewer } from '../tabs/plans/RunLogViewer'
 import { formatAgo, formatDuration, formatTimingLabel } from '../../lib/formatTime'
 import { toast } from '../../state/toast'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
+import { useBranch } from '../../lib/useBranch'
 import type { ScheduleJob } from '../../../preload/api'
 
 /**
@@ -233,6 +234,7 @@ export function EpicDetail({ promptSession }: Props) {
   const stats = epicStats(epicId, snapshots)
 
   const projectName = cwd.replace(/\/+$/, '').split('/').filter(Boolean).pop() ?? cwd
+  const branch = useBranch(cwd)
   // Job row is the source of truth for Runs (not the PRD join) so a job
   // whose PRD file was later archived still lists.
   const epicRuns = scheduleJobs.filter((j) => j.sourcePromptId === epicId)
@@ -307,6 +309,11 @@ export function EpicDetail({ promptSession }: Props) {
               <EpicStatusChip status={status} />
               <EpicKindTag kind={promptSession.tag} />
               <ProjectTag cwd={cwd} name={projectName} />
+              {branch && (
+                <span className="font-mono text-xs text-fg-faint" data-testid="epic-detail-branch">
+                  ⎇ {branch}
+                </span>
+              )}
             </div>
             <h1 className="m-0 font-serif text-2xl font-semibold leading-tight text-fg">{title}</h1>
             {goal && <p className="m-0 mt-1.5 max-w-[700px] text-[13.5px] leading-relaxed text-fg-dim">{goal}</p>}

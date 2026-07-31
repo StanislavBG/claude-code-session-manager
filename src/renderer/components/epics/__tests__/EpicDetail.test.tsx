@@ -14,9 +14,12 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
  * module-load IPC wiring only fires if window.api exists at import time.
  */
 
-function installWindowApiMock() {
+function installWindowApiMock(opts: { branch?: string | null } = {}) {
   const listPrds = vi.fn().mockResolvedValue([])
   const api = {
+    app: {
+      gitBranch: vi.fn().mockResolvedValue(opts.branch ?? null),
+    },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -87,6 +90,40 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.textContent).toContain('Get it out the door.')
     expect(el.querySelector('[data-testid="epic-mark-completed"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="epic-resume"]')).toBeNull()
+  })
+
+  it('renders the Epic cwd\'s branch next to the ProjectTag when useBranch resolves one', async () => {
+    installWindowApiMock({ branch: 'epic/contextual-chat' })
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const branchEl = el.querySelector('[data-testid="epic-detail-branch"]')
+    expect(branchEl).not.toBeNull()
+    expect(branchEl?.textContent).toBe('⎇ epic/contextual-chat')
+  })
+
+  it('hides the branch line cleanly when useBranch resolves null', async () => {
+    installWindowApiMock({ branch: null })
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(el.querySelector('[data-testid="epic-detail-branch"]')).toBeNull()
   })
 
   it('renders "Resume" instead of "Mark completed" for a completed Epic', async () => {

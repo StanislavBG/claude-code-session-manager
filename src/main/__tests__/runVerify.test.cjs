@@ -389,6 +389,220 @@ test('FAIL recovered within 30 events → clean', async () => {
   }
 });
 
+// ─── self-recovery: sleep-prefix normalization (RCA 745-pr188-ci-lint-docs-integrity) ──
+
+/**
+ * Build N innocuous tool_use/tool_result pairs, used to push a later error
+ * event into the last-20%-of-transcript window that the is_error scan
+ * requires (parseLog counts every tool_use/tool_result as its own event).
+ */
+function paddingEvents(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_pad${i}`, name: 'Bash', input: { command: 'echo ok', description: `padding step ${i}` } }] },
+    });
+    out.push({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_pad${i}`, content: 'ok', is_error: false }] },
+    });
+  }
+  return out;
+}
+
+test('sleep-prefixed FAIL recovered by a bare retry of the same command → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '812-sleep-prefix-recovery';
+    const logEvents = [
+      ...paddingEvents(8),
+      // First attempt: polls too early with a `sleep 20 &&` prefix, gets a
+      // pending/error result.
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_r1',
+            name: 'Bash',
+            input: {
+              command: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma 2>&1',
+              description: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma',
+            },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'toolu_r1',
+            content: 'Exit code 8\ncheck\tpending\t0\thttps://github.com/midt-bg/sigma/actions/runs/1/job/1',
+            is_error: true,
+          }],
+        },
+      },
+      // Later retry: same underlying command, no sleep prefix, succeeds.
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_r2',
+            name: 'Bash',
+            input: {
+              command: 'gh pr checks 188 --repo midt-bg/sigma 2>&1',
+              description: 'gh pr checks 188 --repo midt-bg/sigma',
+            },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'toolu_r2',
+            content: 'check\tpass\t2m16s\thttps://github.com/midt-bg/sigma/actions/runs/1/job/1',
+            is_error: false,
+          }],
+        },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        result: 'CI is green.\nSCHEDULER_VERDICT: PASS',
+      },
+    ];
+
+    writeLog(tmp, slug, logEvents);
+    const prdPath = writePrd(tmp, slug, '# Sleep-prefix recovery test');
+
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+
+    assert.equal(verdict.verdict, 'clean', `sleep-prefix recovery should yield clean, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('normalizeDescForRecovery only strips the sleep wrapper, not unrelated text', () => {
+  const { normalizeDescForRecovery } = require('../runVerify.cjs');
+  assert.equal(
+    normalizeDescForRecovery('sleep 20 && gh pr checks 188 --repo midt-bg/sigma'),
+    'gh pr checks 188 --repo midt-bg/sigma',
+  );
+  assert.equal(
+    normalizeDescForRecovery('sleep 90; gh pr checks 188 --repo midt-bg/sigma'),
+    'gh pr checks 188 --repo midt-bg/sigma',
+  );
+  assert.equal(
+    normalizeDescForRecovery('gh pr checks 188 --repo midt-bg/sigma'),
+    'gh pr checks 188 --repo midt-bg/sigma',
+  );
+});
+
+test('two different commands, one sleep-prefixed, are not paired as recovered', () => {
+  // Exercise isSelfRecovered directly (via parseLog) rather than the full
+  // verifyRun pipeline: a SCHEDULER_VERDICT: PASS + landed commit legitimately
+  // overrides a transcript_errors finding at the verifyRun layer by design
+  // (see verifyRun's sentinel-override comment), which would mask the
+  // narrower claim this test makes — that the sleep-prefix strip alone must
+  // not pair two genuinely different commands.
+  const { isSelfRecovered, parseLog } = require('../runVerify.cjs');
+  const tmp = makeTmpDir();
+  try {
+    const slug = '812-sleep-prefix-no-false-pair';
+    const logEvents = [
+      // First attempt: sleep-prefixed poll of PR 188, fails.
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_r1',
+            name: 'Bash',
+            input: {
+              command: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma 2>&1',
+              description: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma',
+            },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'toolu_r1',
+            content: 'Exit code 8\ncheck\tpending\t0\thttps://github.com/midt-bg/sigma/actions/runs/1/job/1',
+            is_error: true,
+          }],
+        },
+      },
+      // "Retry" is actually a different command (different PR number) —
+      // after stripping the sleep wrapper it must NOT be treated as the
+      // same underlying command.
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_r2',
+            name: 'Bash',
+            input: {
+              command: 'gh pr checks 999 --repo midt-bg/sigma 2>&1',
+              description: 'gh pr checks 999 --repo midt-bg/sigma',
+            },
+          }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'toolu_r2',
+            content: 'check\tpass\t2m16s\thttps://github.com/midt-bg/sigma/actions/runs/2/job/2',
+            is_error: false,
+          }],
+        },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        result: 'Done.\nSCHEDULER_VERDICT: PASS',
+      },
+    ];
+
+    writeLog(tmp, slug, logEvents);
+    const { events } = parseLog(path.join(tmp, `${slug}.log`));
+    const failedToolUse = events.find((ev) => ev.kind === 'tool_use' && ev.toolUseId === 'toolu_r1');
+    assert.ok(failedToolUse, 'fixture should contain the failing tool_use event');
+
+    const recovered = isSelfRecovered(events, failedToolUse.seq, failedToolUse.description);
+    assert.equal(recovered, false, 'a differently-numbered PR check must not be treated as a recovered retry of the sleep-prefixed one');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
 // ─── fixtures: feedback 2026-06-10-01 — quoted-error false positives ─────────
 
 /** Build a one-Bash-call log: tool_use → tool_result(content) → result event. */

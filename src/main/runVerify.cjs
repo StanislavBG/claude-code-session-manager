@@ -260,16 +260,34 @@ function hasInstallRecovery(events, fromSeq) {
   return false;
 }
 
+// Matches a leading `sleep <N> &&` or `sleep <N> ;` wrapper (the shell idiom
+// used to poll a still-pending remote job) so a retry that only drops/changes
+// its own timing wrapper still counts as the same underlying command. Narrow
+// on purpose: it strips nothing else, so two genuinely different commands
+// never collapse into a false pairing (incident: RCA 745-pr188-ci-lint-docs-integrity).
+const SLEEP_PREFIX_RE = /^\s*sleep\s+\d+\s*(&&|;)\s*/;
+
+/**
+ * Strip a leading `sleep <N> (&&|;)` wrapper from a tool_use description so
+ * self-recovery comparisons ignore only that timing-poll idiom.
+ */
+function normalizeDescForRecovery(desc) {
+  return (desc ?? '').replace(SLEEP_PREFIX_RE, '');
+}
+
 /**
  * Check whether the error at `errorSeq` is self-recovered within the next 30
  * events.
  *
  * Recovery heuristic: another tool_use with the same non-empty `description`
+ * (after stripping a leading `sleep N &&`/`sleep N;` wrapper from both sides)
  * appears within 30 events of the error, AND its corresponding tool_result is
  * free of error patterns AND is not is_error=true.
  */
 function isSelfRecovered(events, errorSeq, desc) {
   if (!desc) return false;
+  const normalizedDesc = normalizeDescForRecovery(desc);
+  if (!normalizedDesc) return false;
 
   // Build a quick lookup from tool_use_id → tool_result event.
   const resultByUseId = new Map();
@@ -281,7 +299,7 @@ function isSelfRecovered(events, errorSeq, desc) {
   for (const ev of events) {
     if (ev.seq <= errorSeq) continue;
     if (++seen > 30) break;
-    if (ev.kind !== 'tool_use' || ev.description !== desc) continue;
+    if (ev.kind !== 'tool_use' || normalizeDescForRecovery(ev.description) !== normalizedDesc) continue;
     const result = resultByUseId.get(ev.toolUseId);
     if (result && !result.isError && !detectPattern(result.content)) return true;
   }
@@ -830,6 +848,8 @@ module.exports = {
   // Exposed for unit tests.
   detectPattern,
   isHarnessToolError,
+  isSelfRecovered,
+  normalizeDescForRecovery,
   toolUseName,
   extractSoakFromBody,
   parsePrdBodyDepFragments,

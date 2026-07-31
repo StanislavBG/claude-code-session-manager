@@ -1,8 +1,7 @@
 'use strict';
 
-// Run: timeout 120 node --test scripts/__tests__/watchdog-relaunch.test.cjs
+// Run: timeout 120 npx vitest run scripts/__tests__/watchdog-relaunch.test.cjs
 
-const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

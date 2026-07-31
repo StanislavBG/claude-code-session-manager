@@ -11,7 +11,9 @@ import type { EpicDisplayStatus } from '../../lib/epicDerive'
 const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: string; ring?: boolean; label: string }> = {
   running:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'running' },
   needs:     { bg: 'bg-delta-bad/15',   text: 'text-delta-bad',   dot: 'bg-delta-bad',   label: 'needs you' },
-  queued:    { bg: 'bg-bg',             text: 'text-fg-dim',      dot: 'bg-fg-faint',    label: 'queued', ring: true },
+  // Mock (epics-mock.jsx E_STATUS): queued is a FILLED tan pill (#ece0c6) —
+  // only draft is the outline variant.
+  queued:    { bg: 'bg-muteband/60',    text: 'text-fg-dim',      dot: 'bg-fg-faint',    label: 'queued' },
   draft:     { bg: 'transparent',       text: 'text-fg-faint',    dot: 'bg-fg-faint',    label: 'draft', ring: true },
   completed: { bg: 'bg-sage/20',        text: 'text-sage',        dot: 'bg-sage',        label: 'completed' },
 }

@@ -59,9 +59,11 @@ function EmptyPlaceholder({ text }: { text: string }) {
   )
 }
 
+// Relative ages per the mock's EMeta ("opened 2 days ago · last activity
+// 26m ago") — absolute timestamps read as a log, not an almanac.
 function formatWhen(value: string | number): string {
   const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
+  return Number.isNaN(d.getTime()) ? '—' : formatAgo(d.getTime(), Date.now())
 }
 
 /** A PRD file with no matching queue.json job row reads 'draft'

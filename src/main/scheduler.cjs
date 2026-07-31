@@ -570,7 +570,7 @@ async function runPrdMigration() {
     result = await migratePrds(PRDS_DIR);
   } catch (e) {
     logs.writeLine({ level: 'error', scope: 'scheduler', message: 'PRD migration failed', meta: { error: e?.message } });
-    return;
+    return null;
   }
   console.log(`[scheduler] PRD migration: moved ${result.moved}, skipped ${result.skipped}`);
   if (result.unresolved.length > 0) {
@@ -584,6 +584,7 @@ async function runPrdMigration() {
       console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
     }
   }
+  return result;
 }
 
 // Matches only numbered timestamp backups (queue.json.bak-<epoch>), not the

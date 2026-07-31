@@ -12,6 +12,7 @@ const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
+const { migratePrds } = require('./lib/prdMigration.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -116,6 +117,19 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
     tickAgeMs,
     oldestPendingSlug: pending[0]?.slug,
     pendingCount: pending.length,
+  };
+}
+
+// Pure evaluator over migratePrds()'s { moved, skipped, unresolved } result —
+// kept separate from the fs-touching check() call site so it's directly
+// unit-testable, matching evaluateTickLiveness's pattern.
+function evaluatePrdMigrationHealth(migrationResult, legacyPrdsDir) {
+  const strandedCount = migrationResult.unresolved.length;
+  return {
+    ok: strandedCount === 0,
+    legacyDir: legacyPrdsDir,
+    strandedCount,
+    ...(strandedCount > 0 ? { unresolved: migrationResult.unresolved } : {}),
   };
 }
 
@@ -266,6 +280,29 @@ async function check() {
     ...(prdsDirs.length === 0 || anyPrdsDirAccessible ? {} : { exists: false }),
   };
 
+  // 4.5. Check for stranded legacy-dir PRDs left behind by runPrdMigration()
+  // (scheduler.cjs). A stranded PRD is the cheapest generic leading indicator
+  // of a stale installed build vs. the git repo — it fires regardless of
+  // *why* the build is stale (the 2026-07-31 burrow-project ENOENT + the
+  // 223-file/189-resurrected-job incident both trace back to this).
+  const legacyPrdsDir = path.join(
+    os.homedir(),
+    '.claude/session-manager/scheduled-plans/prds'
+  );
+  try {
+    const migrationResult = await migratePrds(legacyPrdsDir);
+    status.components.prd_migration = evaluatePrdMigrationHealth(migrationResult, legacyPrdsDir);
+  } catch (e) {
+    status.components.prd_migration = { ok: false, legacyDir: legacyPrdsDir, error: e.message };
+  }
+  if (!status.components.prd_migration.ok) {
+    status.issues.push(
+      status.components.prd_migration.error
+        ? `PRD migration check failed: ${status.components.prd_migration.error}`
+        : `PRD migration: ${status.components.prd_migration.strandedCount} file(s) stranded in legacy dir ${legacyPrdsDir} — could not be resolved into a per-project dir`
+    );
+  }
+
   // 5. Check transcripts directory (where live session logs are tailed).
   const projectsDir = path.join(os.homedir(), '.claude/projects');
   try {
@@ -329,7 +366,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'prd_migration'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -345,4 +382,4 @@ if (require.main === module) {
   })();
 }
 
-module.exports = { check, evaluateTickLiveness, readFreshHeartbeat, TICK_STALL_THRESHOLD_MS, HEARTBEAT_STALE_MS };
+module.exports = { check, evaluateTickLiveness, readFreshHeartbeat, evaluatePrdMigrationHealth, TICK_STALL_THRESHOLD_MS, HEARTBEAT_STALE_MS };

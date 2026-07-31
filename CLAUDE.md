@@ -15,7 +15,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
 - `npm run test:unit` — `vitest run`. Unit tests for renderer lib/components. Single file: `timeout 120 npx vitest run <path>`. This repo does not use `node --test` — it can't resolve the TypeScript renderer imports.
 - `npm run test:e2e` — Playwright Electron tests under `xvfb-run` (Linux).
-- `npm run health` — `src/main/health.cjs`. Validates build (types, dist artifact, e2e infra present) + runtime (config dir writable, scheduler queue.json + PRD count, transcripts dir). Exit 0 = GREEN, 1 = RED. Entry point for `/local-project-health`.
+- `npm run health` — `src/main/health.cjs`. Validates build (types, dist artifact, e2e infra present) + runtime (config dir writable, scheduler queue.json + PRD count, transcripts dir, stranded legacy-dir PRD migration). Exit 0 = GREEN, 1 = RED. Entry point for `/local-project-health`.
 - `npm publish` — runs `vite build` via `prepublishOnly`. Tag is `latest`.
 
 ## Architecture (load-bearing files)

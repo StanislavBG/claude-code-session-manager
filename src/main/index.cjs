@@ -12,7 +12,6 @@ const browserView = require('./browserView.cjs');
 const browserCapture = require('./browserCapture.cjs');
 const configMgr = require('./config.cjs');
 const transcripts = require('./transcripts.cjs');
-const usageMatrix = require('./usageMatrix.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const billing = require('./usage.cjs');
 const { probeMcpStatus } = require('./mcpStatus.cjs');
@@ -296,7 +295,6 @@ async function rebootApp() {
     ptyManager.attachWindow(mainWindow);
     configMgr.attachWindow(mainWindow);
     transcripts.attachWindow(mainWindow);
-    usageMatrix.attachWindow(mainWindow);
     browserView.attachWindow(mainWindow);
     browserCapture.attachWindow(mainWindow);
     voiceHotkey.init(mainWindow).catch((e) => {
@@ -752,7 +750,6 @@ ipcMain.handle('app:archive-project', validated(schemas.archiveProject, async ({
 registerPtyHandlers();
 configMgr.registerConfigHandlers();
 transcripts.registerTranscriptHandlers();
-usageMatrix.registerHandlers();
 sessionsStore.registerSessionsHandlers();
 billing.registerBillingHandlers();
 logs.registerLogHandlers();
@@ -1076,7 +1073,6 @@ app.whenReady().then(async () => {
   ptyManager.attachWindow(mainWindow);
   configMgr.attachWindow(mainWindow);
   transcripts.attachWindow(mainWindow);
-  usageMatrix.attachWindow(mainWindow);
   browserView.registerBrowserView({ mainWindow, ipcMain });
   browserCapture.attachWindow(mainWindow);
   browserCapture.registerBrowserCapture({ ipcMain, getView: browserView.getView });

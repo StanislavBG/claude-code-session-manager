@@ -25,7 +25,6 @@ const os = require('node:os');
 const chokidar = require('chokidar');
 const otel = require('./otel.cjs');
 const logs = require('./logs.cjs');
-const usageMatrix = require('./usageMatrix.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 let window = null;
@@ -103,7 +102,7 @@ async function readDelta(sub) {
   }
 }
 
-async function doFlush(sub, { emit = true, replay = false } = {}) {
+async function doFlush(sub, { emit = true } = {}) {
   const lines = await readDelta(sub);
   for (const line of lines) {
     let obj;
@@ -117,15 +116,6 @@ async function doFlush(sub, { emit = true, replay = false } = {}) {
     // Ring buffer (cap at 500 entries to bound memory).
     sub.buffer.push(ev);
     if (sub.buffer.length > 500) sub.buffer.shift();
-    // Feed the AgOps aggregator on every event — both replay and live, so
-    // freshly-attached tabs land with full history reflected in the matrix.
-    usageMatrix.recordEvent({
-      tabId: sub.tabId,
-      cwd: sub.cwd,
-      sessionUuid: sub.sessionUuid,
-      ev,
-      replay,
-    });
     if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
     // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
     // so backfilled transcripts show up in the trace store.
@@ -178,7 +168,6 @@ function _closeSub(tabId) {
   if (!sub) return;
   sub.watcher?.close().catch(() => {});
   subs.delete(tabId);
-  usageMatrix.removeTab(tabId);
   const i = lruReleased.indexOf(tabId);
   if (i !== -1) lruReleased.splice(i, 1);
 }
@@ -247,9 +236,8 @@ async function subscribe({ tabId, cwd, sessionUuid }) {
   // during this initial drain — the renderer drains sub.buffer via
   // `transcript:buffer` after `transcript:subscribe` resolves. Emitting here
   // would race the renderer's onEvent listener registration and drop events.
-  // replay:true prevents historical usage events from entering the 5-min window.
   if (fs.existsSync(filePath)) {
-    await doFlush(sub, { emit: false, replay: true });
+    await doFlush(sub, { emit: false });
   }
   const watcher = chokidar.watch(filePath, {
     ignoreInitial: false,
@@ -277,7 +265,6 @@ function getBuffer(tabId) {
 function closeAll() {
   for (const sub of subs.values()) sub.watcher?.close().catch(() => {});
   subs.clear();
-  usageMatrix.closeAll();
 }
 
 function registerTranscriptHandlers() {

@@ -228,54 +228,6 @@ export interface McpStatusResult {
   checkedAt: number;
 }
 
-// ── Usage matrix (AgOps dashboard, main-side aggregator)
-export type UsageMatrixState = 'idle' | 'executing' | 'plan' | 'background';
-export type UsageMatrixIntensity = 'idle' | 'low' | 'medium' | 'critical';
-export type UsageMatrixCacheState = 'warm' | 'expiring' | 'cold';
-
-export interface UsageMatrixAlert {
-  level: 'info' | 'warn';
-  code:
-    | 'geometric-growth'
-    | 'long-session'
-    | 'cache-cold-start'
-    | 'cache-cold'
-    | 'subagent-fanout';
-  message: string;
-}
-
-export interface UsageMatrixTab {
-  tabId: string;
-  workspace: string;
-  cwd: string;
-  state: UsageMatrixState;
-  turns: number;
-  lastEventAt: number;
-  lastAssistantAt: number;
-  cacheAgeMs: number | null;
-  cacheState: UsageMatrixCacheState;
-  tokensPerMin: number;
-  intensity: UsageMatrixIntensity;
-  avgTokensPerTurn: number;
-  cumulativeUsage: { input: number; output: number; cacheRead: number; cacheCreate: number };
-  subagentsActive: number;
-  subagentsSpawned: number;
-  geometricGrowth: boolean;
-  alerts: UsageMatrixAlert[];
-}
-
-export interface UsageMatrixSnapshot {
-  generatedAt: number;
-  tabs: UsageMatrixTab[];
-  totals: {
-    activeSessions: number;
-    subagentsActive: number;
-    subagentsSpawned: number;
-    tokensTotal: number;
-    combinedTokensPerMin: number;
-  };
-}
-
 export interface VoiceHotkeyConfig {
   accelerator: string;
   mode: 'hold' | 'toggle';
@@ -1193,10 +1145,6 @@ export interface SessionManagerAPI {
   };
   mcp: {
     status: () => Promise<McpStatusResult>;
-  };
-  usageMatrix: {
-    snapshot: () => Promise<UsageMatrixSnapshot>;
-    onTick: (handler: (snap: UsageMatrixSnapshot) => void) => () => void;
   };
   logs: {
     write: (scope: string, level: 'debug' | 'info' | 'warn' | 'error', message: string, meta?: unknown) => void;

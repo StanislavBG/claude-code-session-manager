@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileEntry } from '../../../preload/api'
 import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
+import { usePanelFocusRef } from '../../lib/panelFocus'
 
 // Persist which folders are expanded, per-cwd, so browsing state survives
 // navigating away from the Files sidebar and back (the component unmounts, and
@@ -145,6 +146,7 @@ interface ContextMenuState {
 }
 
 export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: FileTreeProps) {
+  const focusedRef = usePanelFocusRef()
   const [root, setRoot] = useState<TreeNode[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // Live mirror of `expanded` so effects keyed on other deps (e.g. showHidden)
@@ -298,7 +300,10 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
   useEffect(() => {
     if (!menu) return
     const onDown = () => setMenu(null)
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    const onKey = (e: KeyboardEvent) => {
+      if (!focusedRef.current) return
+      if (e.key === 'Escape') setMenu(null)
+    }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
     return () => {

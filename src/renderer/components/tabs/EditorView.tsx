@@ -32,6 +32,7 @@ import {
 } from '../../state/editor'
 import { useEditorPrefs } from '../../state/editorPrefs'
 import { toast } from '../../state/toast'
+import { usePanelFocusRef } from '../../lib/panelFocus'
 import { FileTabBar } from '../layout/FileTabBar'
 import { CodeEditorPane } from './editor/CodeEditorPane'
 import { MarkdownPreview } from './editor/MarkdownPreview'
@@ -80,6 +81,7 @@ function isMediaPath(p: string): boolean {
 }
 
 export function EditorView() {
+  const focusedRef = usePanelFocusRef()
   const openFiles = useEditor((s) => s.openFiles)
   const activeFilePath = useEditor((s) => s.activeFilePath)
   const dirty = useEditor((s) => s.dirty)
@@ -214,13 +216,16 @@ export function EditorView() {
   }, [openFiles, dirty, closeToTheRight, pruneClosed])
 
   // Scene-level Cmd/Ctrl-S + focus-mode toggle/exit + close-others shortcut.
-  // EditorView only mounts while the editor scene is active, so these
-  // listeners are naturally scoped to it. Ctrl/Cmd+Shift+W is not suppressed
-  // for Monaco focus (unlike App.tsx's Cmd-K family) — it mirrors the
-  // existing Cmd/Ctrl-S handler above, which also fires while typing, since
-  // tab-management shortcuts aren't typing input.
+  // Dockview can keep an EditorView panel mounted in the background (split
+  // alongside another panel, or simply not the active tab), so these are
+  // gated on `usePanelFocus` rather than relying on mount lifetime alone.
+  // Ctrl/Cmd+Shift+W is not suppressed for Monaco focus (unlike App.tsx's
+  // Cmd-K family) — it mirrors the existing Cmd/Ctrl-S handler above, which
+  // also fires while typing, since tab-management shortcuts aren't typing
+  // input.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!focusedRef.current) return
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         const path = useEditor.getState().activeFilePath
         if (path && !isMediaPath(path)) {

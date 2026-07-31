@@ -28,6 +28,7 @@ import { useConfig } from '../../state/config'
 import { KEYBINDINGS_SCOPES } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { toast } from '../../state/toast'
+import { usePanelFocus } from '../../lib/panelFocus'
 import {
   CONTEXTS, CONTEXT_HINT, PRESETS, RESERVED_PATTERNS, SCHEMA_URL,
   actionLabel, actionsForContext, blockFor, detectPreset, eventToPattern,
@@ -73,6 +74,7 @@ export function Keybindings() {
   const [context, setContext] = useState<string>('Global')
   const [capture, setCapture] = useState<Capture>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const focused = usePanelFocus()
 
   const file = path ? files[path] : undefined
   const raw = file?.draftRaw ?? ''
@@ -91,8 +93,14 @@ export function Keybindings() {
   }
 
   // ── Key capture: one global keydown listener while a capture is armed ──────
+  // Gated at attach site (not just an in-handler check): an unfocused
+  // mounted Keybindings panel — now possible since dockview keeps
+  // background panels mounted — must swallow zero keys, and this capture
+  // handler preventDefault+stopPropagation()s on EVERY keydown while armed.
+  // Deriving `focused` skips attaching entirely, and detaches immediately
+  // if focus moves away mid-capture.
   useEffect(() => {
-    if (!capture || !doc) return
+    if (!capture || !doc || !focused) return
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault()
       e.stopPropagation()
@@ -124,7 +132,7 @@ export function Keybindings() {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capture, doc, context, path])
+  }, [capture, doc, context, path, focused])
 
   if (!home || !path) return <EmptyState title="loading…" />
 

@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlmanacIcon } from '../../layout/AlmanacIcon'
 import { useBrowserState, type BrowserTab } from '../../../state/browser'
+import { usePanelFocusRef } from '../../../lib/panelFocus'
 import { IconBtn } from './browser-primitives'
 
 function stripScheme(url: string): string {
@@ -45,6 +46,7 @@ export function AddressBar({ tab }: { tab: BrowserTab }) {
   const [draft, setDraft] = useState(stripScheme(tab.url))
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
+  const focusedRef = usePanelFocusRef()
 
   useEffect(() => {
     if (!editing) setDraft(stripScheme(tab.url))
@@ -61,6 +63,7 @@ export function AddressBar({ tab }: { tab: BrowserTab }) {
   useEffect(() => {
     if (mode !== 'capture') return
     const onKeyDown = (e: KeyboardEvent) => {
+      if (!focusedRef.current) return
       if (e.key === 'Escape') setMode('browse')
     }
     window.addEventListener('keydown', onKeyDown)

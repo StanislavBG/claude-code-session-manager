@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { usePanelFocusRef } from '../../lib/panelFocus'
 
 export interface OpenFile {
   path: string
@@ -40,13 +41,17 @@ export function FileTabBar({
 }: FileTabBarProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const focusedRef = usePanelFocusRef()
 
   useEffect(() => {
     if (!menu) return
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(null)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    const onKey = (e: KeyboardEvent) => {
+      if (!focusedRef.current) return
+      if (e.key === 'Escape') setMenu(null)
+    }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {

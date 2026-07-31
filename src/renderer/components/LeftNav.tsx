@@ -6,8 +6,9 @@
  * old LeftNav React component was removed in the Almanac re-skin — its
  * responsibilities moved into `components/layout/AlmanacSidebar.tsx`.
  *
- * Adding a NavKey: append the literal below, add the screen to
- * `SCREEN_KEYS` in App.tsx, then handle it in MainPane.renderScreen.
+ * Adding a NavKey: append the literal below, add it to `SCREEN_KEYS` in
+ * lib/screenKeys.ts, then handle it in screenComponents.tsx's
+ * renderScreenComponent switch.
  */
 export type NavKey =
   | 'overview'

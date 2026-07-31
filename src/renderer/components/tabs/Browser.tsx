@@ -22,6 +22,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { useBrowserState } from '../../state/browser'
+import { usePanelFocusRef } from '../../lib/panelFocus'
 import { SubTabStrip } from './browser/SubTabStrip'
 import { AddressBar } from './browser/AddressBar'
 import { ActionBar } from './browser/ActionBar'
@@ -37,13 +38,14 @@ export function Browser() {
   const mode = useBrowserState((s) => s.mode)
   const findOpen = useBrowserState((s) => s.findOpen)
   const columnRef = useRef<HTMLDivElement | null>(null)
+  const focusedRef = usePanelFocusRef()
 
-  // Cmd/Ctrl+F (find) and Cmd/Ctrl +/-/0 (zoom) — scoped to this component's
-  // lifetime, which mirrors "only while the Browser tab is active" since
-  // MainPane renders exactly one screen at a time (see project convention:
-  // keybindings only wired while the owning nav tab is mounted).
+  // Cmd/Ctrl+F (find) and Cmd/Ctrl +/-/0 (zoom) — scoped to whichever Browser
+  // panel is currently the workbench's focused panel (dockview can keep a
+  // background Browser panel mounted alongside another visible panel).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (!focusedRef.current) return
       if (!(e.metaKey || e.ctrlKey)) return
       const id = useBrowserState.getState().activeTabId
       if (!id) return

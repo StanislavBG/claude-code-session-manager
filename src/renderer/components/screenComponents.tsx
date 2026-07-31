@@ -26,8 +26,8 @@ import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 
 /**
  * screenComponents — single source of truth for "what does NavKey `k` render
- * as a full screen." Consumed by MainPane (today's single-visible-screen
- * host) and by layout.ts's panel registry (id list only, via screenKeys.ts —
+ * as a full screen." Consumed by Workbench.tsx (the dockview panel host)
+ * and by layout.ts's panel registry (id list only, via screenKeys.ts —
  * that file stays React-free). Do not fork this switch; extend it here.
  */
 
@@ -72,7 +72,7 @@ const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
 
 /**
  * Renders the screen for NavKey `active`. `active === 'terminal'` is
- * special-cased by callers (MainPane keeps TerminalStage as an
+ * special-cased by callers (Workbench.tsx keeps TerminalStage as an
  * always-mounted singleton) — this function is never called for 'terminal'.
  */
 export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode {

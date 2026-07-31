@@ -229,6 +229,52 @@ export function ToolUseTraceStrip({
   )
 }
 
+// Collapsible variant of ToolUseTraceStrip — "used N tools" / "working · N
+// tools" button that expands to the per-tool ×count chips, for surfaces
+// (EpicDetail, PRD 827) that want the tool trace collapsed by default rather
+// than always-visible. Kept in this file (not forked) per the API-reuse
+// standard: same collapseToolUseRuns/runLabel/tone data as the inline strip.
+export function CollapsibleToolStrip({
+  items,
+  running = false,
+}: {
+  items: ToolUseTrace[] | undefined
+  running?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  if (!items?.length) return null
+  const runs = collapseToolUseRuns(items)
+  const n = items.length
+  return (
+    <div className="mb-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        data-testid="tool-strip-toggle"
+        className="inline-flex items-center gap-1.5 rounded border border-line bg-elev px-2 py-1 font-mono text-[11px] text-fg-dim hover:bg-hi"
+      >
+        <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true">
+          ▸
+        </span>
+        <span>{(running ? 'working · ' : 'used ') + n + (n === 1 ? ' tool' : ' tools')}</span>
+        {running && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />}
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-wrap gap-1" data-testid="tool-strip-chips">
+          {runs.map((u) => (
+            <span
+              key={u.id}
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${TOOL_USE_TONE[u.kind]}`}
+            >
+              {TOOL_USE_ICON[u.kind]} {runLabel(u)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Error/question turns keep red/amber as an intentional accent (same pattern as
 // Toast.tsx / StatusBadge.tsx) but retuned off the dark-theme red-*/amber-* shades:
 // text colors below are checked at >=4.5:1 contrast against all three paper
@@ -253,6 +299,8 @@ export function Turn({
   enableRawSessionActions = true,
   linkTarget = 'external',
   inlineFilePreview = false,
+  toolStripVariant = 'inline',
+  needsDecisionStyle = false,
 }: {
   turn: ChatTurn
   cwd: string
@@ -272,6 +320,15 @@ export function Turn({
    *  instead of Open-in-Editor-only — set only by PromptSessionConversation
    *  (PRD 805), which has no Editor screen to navigate to. */
   inlineFilePreview?: boolean
+  /** 'collapsible' renders CollapsibleToolStrip ("used N tools" toggle)
+   *  instead of the always-expanded ToolUseTraceStrip — set only by
+   *  EpicDetail (PRD 827). TerminalChat.tsx/PromptSessionConversation.tsx
+   *  keep the default 'inline' behavior unchanged. */
+  toolStripVariant?: 'inline' | 'collapsible'
+  /** Red-tinted "NEEDS YOUR DECISION" styling for question turns instead of
+   *  the default amber "Needs your answer" — set only by EpicDetail
+   *  (PRD 827), per the Epics design spec's needs-you treatment. */
+  needsDecisionStyle?: boolean
 }) {
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
@@ -301,19 +358,28 @@ export function Turn({
     )
   }
   if (turn.role === 'question') {
+    const tint = needsDecisionStyle ? ERROR_TINT : AMBER_TINT
+    const text = needsDecisionStyle ? ERROR_TEXT : AMBER_TEXT
+    const label = needsDecisionStyle ? 'NEEDS YOUR DECISION' : 'Needs your answer'
     return (
-      <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
-        <ToolUseTraceStrip items={turn.toolUses} />
-        <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
+      <div className={`rounded-[14px] border px-4 py-3 text-sm ${tint} ${text}`} data-testid="chat-turn-question">
+        {toolStripVariant === 'collapsible' ? (
+          <CollapsibleToolStrip items={turn.toolUses} />
+        ) : (
+          <ToolUseTraceStrip items={turn.toolUses} />
+        )}
+        <div
+          className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${needsDecisionStyle ? 'font-mono' : ''} ${text}`}
+        >
           <span aria-hidden>❓</span>
-          Needs your answer
+          {label}
         </div>
         <ul className="list-disc space-y-1 pl-5">
           {(turn.questions ?? [turn.text]).map((q, i) => (
             <li key={i}>{q}</li>
           ))}
         </ul>
-        <div className={`mt-2 border-t pt-2 text-[11px] opacity-70 ${AMBER_TINT}`}>
+        <div className={`mt-2 border-t pt-2 text-[11px] opacity-70 ${tint}`}>
           Reply in the composer below to answer.
         </div>
       </div>
@@ -367,7 +433,11 @@ export function Turn({
         C
       </div>
       <div className="min-w-0 flex-1">
-        <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
+        {toolStripVariant === 'collapsible' ? (
+          <CollapsibleToolStrip items={turn.toolUses} running={presentation === 'working'} />
+        ) : (
+          <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
+        )}
         {presentation === 'working' ? (
           <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
             <span className="inline-flex items-center gap-2">

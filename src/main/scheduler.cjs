@@ -63,6 +63,7 @@ const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { verifyRun } = require('./runVerify.cjs');
+const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
@@ -888,6 +889,18 @@ async function reconcile(state) {
       // 'failed' (or any other terminal status found in history) is left
       // alone entirely: not resurrected, not archived — matches "needs_
       // review and failed PRD files are NEVER auto-archived."
+      continue;
+    }
+    // history.jsonl may not exist yet (nothing has crossed HISTORY_RETENTION_MS
+    // since the feature shipped), which leaves historyBySlug empty and the
+    // guard above inert. Fall back to reading the slug's own newest run
+    // sidecars straight off disk — same "don't resurrect an already-terminal
+    // slug" intent, independent of history.jsonl's existence.
+    const fallback = latestTerminalOutcomeForSlug(slug, { runsDir: RUNS_DIR });
+    if (fallback) {
+      if (fallback.status === 'completed') {
+        historyArchiveCandidates.push({ slug, status: fallback.status, finishedAt: fallback.finishedAt });
+      }
       continue;
     }
     const entry = {
@@ -1847,6 +1860,36 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
 }
 
 /**
+ * Pure predicate: a run whose meta.json shows a clean exit (exitCode 0) and
+ * whose verdicts.json verdict is completed-equivalent (clean / the
+ * pass_no_commit exemptions) has nothing left to diagnose — spawning an
+ * Opus investigation for it just manufactures a depth+1 fix-of-a-fix PRD for
+ * already-shipped work. Any missing/malformed input is treated as "don't
+ * skip" (fail-open: never let a missing artifact suppress a real
+ * investigation). Exported for tests.
+ */
+function shouldSkipInvestigationForCleanRun({ meta, verdicts }) {
+  if (!meta || meta.exitCode !== 0) return false;
+  if (!verdicts || !COMPLETED_EQUIVALENT_VERDICTS.has(verdicts.verdict)) return false;
+  return true;
+}
+
+/**
+ * Reads <runDir>/<slug>.meta.json + <slug>.verdicts.json off disk for the
+ * shouldSkipInvestigationForCleanRun guard. Fails safe to {} on any read/parse
+ * error (never suppresses an investigation on a missing artifact).
+ */
+function readRunOutcomeSidecars(runDir, slug) {
+  const readJson = (p) => {
+    try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+  };
+  return {
+    meta: readJson(path.join(runDir, `${slug}.meta.json`)),
+    verdicts: readJson(path.join(runDir, `${slug}.verdicts.json`)),
+  };
+}
+
+/**
  * Spawn an Opus investigation session for a failed job. The investigator's job
  * is to read the failure log + original PRD, identify the root cause, and write
  * a fix-plan PRD into prds/<NN>-fix-<base>.md. Reconcile picks it up; the next
@@ -1854,12 +1897,21 @@ DO NOT attempt the fix. ONLY write the file. When the file exists, exit immediat
  * run out-of-band, so they don't consume the concurrency cap. They DO consume
  * tokens, which the when-available throttle will reflect on the next poll.
  *
- * Skipped if the failed job is itself a fix-plan (avoids infinite recursion).
+ * Skipped if the failed job is itself a fix-plan (avoids infinite recursion),
+ * or if the run being investigated actually verified clean (nothing to fix —
+ * see shouldSkipInvestigationForCleanRun).
  */
 async function spawnInvestigation(failedJob, runDir) {
   if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is a fix plan at/beyond depth cap (depth=${failedJob.investigationDepth ?? 'none'})`);
     return { deferred: false };
+  }
+  {
+    const { meta, verdicts } = readRunOutcomeSidecars(runDir, failedJob.slug);
+    if (shouldSkipInvestigationForCleanRun({ meta, verdicts })) {
+      console.log(`[scheduler] skip investigation: ${failedJob.slug} last run verified ${verdicts.verdict} (exit 0) — nothing to diagnose`);
+      return { deferred: false };
+    }
   }
   if (investigationsInFlight >= MAX_CONCURRENT_INVESTIGATIONS) {
     // Queue for retry when a slot frees rather than dropping — otherwise a failed
@@ -2191,11 +2243,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             effectiveStatus = 'failed';
           } else if (
             !verifyResult
-            || verifyResult.verdict === 'clean'
-            // pass_no_commit_target_verified: -merge-main postcondition exemption
-            // (runVerify.cjs) — an independently gh-confirmed clean merge target,
-            // not a plain unsubstantiated PASS. Completed, same as 'clean'.
-            || verifyResult.verdict === 'pass_no_commit_target_verified'
+            || COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict)
           ) {
             effectiveStatus = 'completed';
           } else if (verifyResult.downgradeTo === 'pending') {
@@ -2763,7 +2811,7 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
 // investigation jobs correctly found "nothing to fix" but were flagged
 // anyway). For non-fix-plan jobs the exemption never applies, so rescanning
 // their pass_no_commit verdict is a harmless no-op (same facts, same verdict).
-const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'pass_no_commit']);
+const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'pass_no_commit', 'pass_no_commit_already_shipped']);
 
 // Bounds fix-plan recursion: depth 1 = the original job, depth 2 = its fix
 // (gets exactly one follow-up investigation if it also lands in
@@ -2926,10 +2974,7 @@ async function reverifyNeedsReview() {
         allowPreSentinelHeal: true,
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
-    // pass_no_commit_target_verified: -merge-main postcondition exemption
-    // (runVerify.cjs) — same "heal it" treatment as 'clean', see spawnJob's
-    // effectiveStatus branch above for the primary-path equivalent.
-    if (v && (v.verdict === 'clean' || v.verdict === 'pass_no_commit_target_verified')) {
+    if (v && COMPLETED_EQUIVALENT_VERDICTS.has(v.verdict)) {
       healed.push(job.slug);
     } else {
       leftForReview.push({ slug: job.slug, reason: v ? `${v.verdict}: ${v.reason}` : 'null verdict' });
@@ -3663,4 +3708,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun };

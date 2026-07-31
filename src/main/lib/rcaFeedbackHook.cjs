@@ -57,6 +57,7 @@ const VERDICT_LABELS = {
   uncommitted_changes: 'uncommitted changes',
   no_verdict_sentinel: 'no commit or verdict sentinel',
   pass_no_commit: 'PASS sentinel but no commit landed',
+  pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
 };
 
 function humanVerdict(verdict) {
@@ -66,6 +67,7 @@ function humanVerdict(verdict) {
 // ─── Failure-class matching (deterministic, no LLM) ─────────────────────────
 
 const FAILURE_CLASSES = {
+  ALREADY_SHIPPED: 'already-shipped',
   SELF_QUEUE: 'self-queue',
   STUCK_LOOP: 'stuck-loop',
   POST_AC_OVERRUN: 'post-ac-overrun',
@@ -76,6 +78,8 @@ const FAILURE_CLASSES = {
 };
 
 const PREVENTION_HINTS = {
+  [FAILURE_CLASSES.ALREADY_SHIPPED]:
+    "This run found its acceptance criteria already satisfied by a prior commit and correctly made no change, so no commit landed and the verifier returned `pass_no_commit`. This is a stale re-run, not an execution failure — the PRD's `.md` was never moved out of `session-manager-operations/scheduler/prds/` after the work shipped. Archive the PRD into `session-manager-operations/scheduler/prds-archived/` instead of re-queuing or re-running it.",
   [FAILURE_CLASSES.SELF_QUEUE]:
     "This run either invoked /develop or /process-feedback from inside its own headless execution, or backgrounded a long-running command and called ScheduleWakeup to check back later — both are the 'you ARE the executor — never re-queue or self-schedule' anti-pattern. A headless PRD run must perform its own acceptance criteria directly and has no next turn to resume it (standards.md → Execution discipline).",
   [FAILURE_CLASSES.STUCK_LOOP]:
@@ -107,6 +111,7 @@ function extractRcaBlock(text) {
   return m ? m[1].trim() : null;
 }
 
+const ALREADY_SHIPPED_RE = /already (fully )?(satisfied|implemented|committed|done|shipped)|was (already )?(implemented|committed) in|nothing (new )?to commit|no (code )?changes were needed/i;
 const SELF_QUEUE_SKILL_RE = /Launching skill: session-manager-dev:(develop|process-feedback)/;
 const SELF_QUEUE_WAKEUP_RE = /ScheduleWakeup/;
 const STUCK_LOOP_RE = /\b(until\s|while\s+true|sleep\s)/i;
@@ -124,6 +129,22 @@ const POST_AC_OVERRUN_MIN_TAIL_FRACTION = 0.3;
  */
 function classifyFailure({ verdict, logTail }) {
   const lines = (logTail || '').split('\n');
+
+  // Checked first, before SELF_QUEUE/STUCK_LOOP: a correct executor that finds
+  // its acceptance criteria already satisfied by a prior commit makes no
+  // change and truthfully prints a PASS sentinel, so the run lands
+  // `pass_no_commit` (or `no_verdict_sentinel`, e.g. when it exits before the
+  // finish-protocol sentinel). Gated tightly on verdict so a tail that merely
+  // *mentions* "already implemented" (e.g. quoting a PRD body) while genuinely
+  // failing for another reason doesn't get misclassified as this benign case
+  // (incident: PRD 812-rca-self-delegation-failure-class re-ran 27 minutes
+  // after its own fix landed in 9cf0384 and was misclassified NO_SENTINEL).
+  if (
+    (verdict === 'pass_no_commit' || verdict === 'no_verdict_sentinel') &&
+    ALREADY_SHIPPED_RE.test(logTail || '')
+  ) {
+    return FAILURE_CLASSES.ALREADY_SHIPPED;
+  }
 
   // Checked before STUCK_LOOP: a backgrounded command + ScheduleWakeup
   // (variant b) can land words like "sleep"/"poll" in the tail via the PRD's

@@ -166,6 +166,29 @@ test('classifyFailure: detects self-queue from a ScheduleWakeup tool_use even wh
   expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
 });
 
+test('classifyFailure: detects already-shipped from a pass_no_commit tail citing a prior commit', () => {
+  const logTail = ['re-verified acceptance criteria', 'this work was already committed in 9cf0384', 'nothing left to change'].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail })).toBe('already-shipped');
+});
+
+test('classifyFailure: detects already-shipped from a pass_no_commit tail with "nothing new to commit"', () => {
+  const logTail = ['checked the diff', 'nothing new to commit for this PRD', 'exiting clean'].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail })).toBe('already-shipped');
+});
+
+test('classifyFailure: ALREADY_SHIPPED is checked before SELF_QUEUE, so a no_verdict_sentinel tail with both markers classifies as already-shipped', () => {
+  const logTail = [
+    'Launching skill: session-manager-dev:develop',
+    'the acceptance criteria were already implemented',
+  ].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('already-shipped');
+});
+
+test('classifyFailure: pass_no_commit tail with no already-shipped phrasing still falls back to no-sentinel (regression)', () => {
+  const logTail = ['ran the tests', 'everything looked fine', 'printed PASS'].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail })).toBe('no-sentinel');
+});
+
 test('classifyFailure: STUCK_LOOP/POST_AC_OVERRUN reordering does not change classification when no self-queue marker is present', () => {
   const stuckLoopTail = ['doing work', 'until curl -s http://x | jq .uptime; do sleep 5; done', 'still waiting'].join('\n');
   expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail: stuckLoopTail })).toBe('stuck-loop');

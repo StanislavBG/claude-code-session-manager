@@ -314,6 +314,11 @@ contextBridge.exposeInMainWorld('api', {
     stale: (workspace, cwd) =>
       ipcRenderer.invoke('memory:stale', { ...(workspace ? { workspace } : {}), ...(cwd ? { cwd } : {}) }),
   },
+  projectBrief: {
+    get: (cwd) => ipcRenderer.invoke('project-brief:get', { cwd }),
+    refresh: (cwd) => ipcRenderer.invoke('project-brief:refresh', { cwd }),
+    setPin: (cwd, block, pinned) => ipcRenderer.invoke('project-brief:set-pin', { cwd, block, pinned }),
+  },
   agentMemory: {
     list: (agentId) => ipcRenderer.invoke('agent-memory:list', { agentId }),
     get: (agentId, entryId) => ipcRenderer.invoke('agent-memory:get', { agentId, entryId }),

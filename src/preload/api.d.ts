@@ -852,6 +852,58 @@ export interface MemoryStaleResult {
   error: string | null;
 }
 
+// ────────────────────────────────────────────── Project Brief (PRD 837)
+// Persisted at <cwd>/session-manager-operations/project-brief/brief.json.
+export type ProjectBriefPinnableBlock = 'what' | 'conventions';
+
+export interface ProjectBriefArea {
+  name: string;
+  files: number;
+  note: string;
+  epic: string | null;
+  heat: number;
+}
+
+export interface ProjectBriefScopeEntry {
+  when: string;
+  kind: 'added' | 'narrowed' | 'decided';
+  text: string;
+  src: string;
+}
+
+export interface ProjectBrief {
+  version: number;
+  synthesizedAt: string;
+  model: string;
+  purpose: string;
+  what: string[];
+  areas: ProjectBriefArea[];
+  scope: ProjectBriefScopeEntry[];
+  conventions: string[];
+  pins: { what: boolean; conventions: boolean };
+  pinned: { what: string[] | null; conventions: string[] | null };
+}
+
+export interface ProjectBriefSource {
+  label: string;
+  detail: string;
+  mtimeMs: number | null;
+  drift: boolean;
+}
+
+export interface ProjectBriefGetResult {
+  brief: ProjectBrief | null;
+  sources: ProjectBriefSource[];
+}
+
+export type ProjectBriefRefreshResult =
+  | { ok: true; brief: ProjectBrief }
+  | { ok: false; error: string };
+
+export type ProjectBriefSetPinResult =
+  | { ok: true; brief: ProjectBrief }
+  | { ok: false; error: string };
+
 // ────────────────────────────────────────────── Per-subagent memory
 // Stored at ~/.claude/session-manager/agent-memory/<agentId>.json. Keyed by
 // agent name (the .md filename in ~/.claude/agents/), not by workspace cwd.
@@ -1375,6 +1427,14 @@ export interface SessionManagerAPI {
     aggregate: (workspace: string, refresh?: boolean) => Promise<MemoryAggregateResult>;
     /** Deterministic, zero-LLM-cost staleness report. `cwd` (optional) scopes the dead-repo-ref check. */
     stale: (workspace?: string, cwd?: string) => Promise<MemoryStaleResult>;
+  };
+  projectBrief: {
+    /** Read brief.json (or null if none yet) plus cheaply-computed source/drift metadata. Never fires an LLM call. */
+    get: (cwd: string) => Promise<ProjectBriefGetResult>;
+    /** Cost-gated headless synthesis. Acquires a machine session slot first; returns `{ok:false}` if none free or a refresh is already running for this cwd. */
+    refresh: (cwd: string) => Promise<ProjectBriefRefreshResult>;
+    /** Pin/unpin a synthesized block ('what' | 'conventions'), freezing or clearing its frozen copy. */
+    setPin: (cwd: string, block: ProjectBriefPinnableBlock, pinned: boolean) => Promise<ProjectBriefSetPinResult>;
   };
   agentMemory: {
     /** List all memory entries for one subagent. Sorted newest first. */

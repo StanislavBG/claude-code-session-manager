@@ -19,12 +19,11 @@
  */
 
 const { ipcMain } = require('electron');
-const { spawn } = require('node:child_process');
 const path = require('node:path');
 const os = require('node:os');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
+const { runClaudeP } = require('./lib/runClaudeP.cjs');
 const { writeJson } = require('./config.cjs');
 const config = require('./config.cjs');
 const { MEMORY_SLUG_RE } = require('./lib/memorySlug.cjs');
@@ -38,43 +37,6 @@ function memoryDir(workspace) {
 
 function cachePath(workspace) {
   return path.join(CLUSTERS_DIR, `${workspace}.json`);
-}
-
-/** Spawn `claude -p`, capture stdout. Resolves {ok, out, error} — never throws. */
-function runClaude(prompt, { model = 'sonnet', timeoutMs = 180_000, systemPrompt = null } = {}) {
-  return new Promise((resolve) => {
-    let bin;
-    try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
-    const args = [
-      '-p', prompt,
-      '--model', model,
-      '--dangerously-skip-permissions',
-      '--output-format', 'text',
-    ];
-    if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
-    // stdin MUST be closed ('ignore') — `claude -p` otherwise blocks waiting
-    // for piped stdin and returns empty. SM_KG_INTERNAL=1 tells the
-    // prompt-logging hook to skip this invocation.
-    const child = spawn(bin, args, { env: { ...process.env, SM_KG_INTERNAL: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    let err = '';
-    // Cap accumulated stdout — clustering runs over memory bodies that may
-    // themselves contain adversarial content; a runaway response shouldn't
-    // grow `out` without bound.
-    const MAX_OUT_BYTES = 8 * 1024 * 1024;
-    let killedForSize = false;
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* */ } resolve({ ok: false, error: 'timeout', out }); }, timeoutMs);
-    child.stdout.on('data', (d) => {
-      if (out.length > MAX_OUT_BYTES) {
-        if (!killedForSize) { killedForSize = true; try { child.kill('SIGKILL'); } catch { /* */ } }
-        return;
-      }
-      out += d;
-    });
-    child.stderr.on('data', (d) => { if (err.length < MAX_OUT_BYTES) err += d; });
-    child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: e?.message || 'spawn error' }); });
-    child.on('close', (code) => { clearTimeout(timer); resolve({ ok: code === 0, code, out, err }); });
-  });
 }
 
 // System prompt for clustering — sets the role server-side so the CLI treats
@@ -203,7 +165,7 @@ async function aggregate({ workspace, refresh }) {
   let clusters = [];
   let orphans = slugs;
   if (memories.length > 0) {
-    const res = await runClaude(clusterPrompt(memories), { model: 'sonnet', timeoutMs: 180_000, systemPrompt: CLUSTER_SYSTEM });
+    const res = await runClaudeP(clusterPrompt(memories), { model: 'sonnet', timeoutMs: 180_000, systemPrompt: CLUSTER_SYSTEM });
     if (res.ok) {
       const parsed = parseClusters(res.out, slugs);
       clusters = parsed.clusters;

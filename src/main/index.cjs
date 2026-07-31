@@ -54,6 +54,7 @@ const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('../../script
 const schedulerConfig = require('./lib/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
+const { registerProjectBriefIpc } = require('./projectBrief.cjs');
 const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const filesIpc = require('./files.cjs');
@@ -770,6 +771,7 @@ registerHistoryDashboardHandlers();
 pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 registerMemoryAggregateIpc();
+registerProjectBriefIpc();
 agentMemory.registerAgentMemoryHandlers();
 git.register(ipcMain);
 filesIpc.registerFilesHandlers();

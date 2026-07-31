@@ -162,6 +162,13 @@ function validateWrite(realAbs) {
       if (realAbs === schedulerSub || realAbs.startsWith(schedulerSub + path.sep)) {
         return;
       }
+      // Project Brief persistence (PRD 837 — projectBrief.cjs's writeJson of
+      // brief.json): narrowly scoped to session-manager-operations/project-brief/,
+      // this repo's existing per-project artifact-store convention.
+      const briefSub = path.join(realRoot, 'session-manager-operations', 'project-brief');
+      if (realAbs === briefSub || realAbs.startsWith(briefSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

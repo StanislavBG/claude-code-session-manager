@@ -33,6 +33,7 @@ export default defineConfig({
       'src/main/lib/__tests__/instanceLock.test.cjs',
       'src/main/__tests__/uniquePrdNumbers.test.cjs',
       'src/main/lib/__tests__/sessionSlots.test.cjs',
+      'src/main/lib/__tests__/projectBriefCore.test.cjs',
       'src/main/lib/__tests__/terminalRunOutcome.test.cjs',
       'src/main/lib/__tests__/importReferences.spec.cjs',
       'src/main/__tests__/prdLocations.test.cjs',

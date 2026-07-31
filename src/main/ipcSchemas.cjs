@@ -404,6 +404,20 @@ const memoryAggregate = z.object({
   refresh: z.boolean().optional(),
 }).strict();
 
+// ──────────────────────────────────────────── Project Brief (PRD 837)
+// cwd is validated for real via config.cjs's validatePath (allowedRoots =
+// home dir) at first fs access in projectBrief.cjs — this schema only bounds
+// the wire shape.
+const PROJECT_BRIEF_BLOCK = z.enum(['what', 'conventions']);
+const projectBriefCwd = z.object({
+  cwd: z.string().min(1).max(4096),
+}).strict();
+const projectBriefSetPin = z.object({
+  cwd: z.string().min(1).max(4096),
+  block: PROJECT_BRIEF_BLOCK,
+  pinned: z.boolean(),
+}).strict();
+
 // ──────────────────────────────────────────── Per-subagent memory
 // Distinct from the workspace-scoped Memory tool: agentMemory is keyed by
 // subagent name (the .md filename in ~/.claude/agents/, e.g. "code-reviewer"),
@@ -792,6 +806,8 @@ module.exports = {
     memoryCreate,
     memoryAggregate,
     memoryStale,
+    projectBriefCwd,
+    projectBriefSetPin,
     agentMemoryList,
     agentMemoryGet,
     agentMemorySet,

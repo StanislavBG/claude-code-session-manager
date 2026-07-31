@@ -1,0 +1,213 @@
+// @vitest-environment jsdom
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
+
+/**
+ * PromptSessionConversation (PRD 804) — the goal-scoped Agent conversation
+ * view opened from a PromptSession row (PRD 802/803). Verifies the three
+ * hard constraints from the PRD: no SessionTab/TabBar entry gets created, no
+ * ChatSessionRail/right-nav renders, and sending a message runs through
+ * chatRunner scoped to the PromptSession's own claudeSessionId and appends a
+ * correctly-chained 'response' PromptSessionEvent.
+ *
+ * window.api is stubbed via vi.stubGlobal + vi.resetModules/dynamic import,
+ * mirroring state/__tests__/chat.test.ts's pattern — chat.ts's module-load
+ * IPC subscription block only wires up if window.api.chat exists at import
+ * time, so the mock must be installed before chat.ts (transitively imported
+ * by the component under test) is first imported.
+ */
+
+function installWindowApiMock() {
+  const run = vi.fn().mockResolvedValue(undefined)
+  let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
+  const api = {
+    chat: {
+      run,
+      cancel: vi.fn(),
+      onQueued: vi.fn(),
+      onRunStarted: vi.fn(),
+      onOutput: vi.fn(),
+      onToolUse: vi.fn(),
+      onComplete: vi.fn((handler) => {
+        completeHandler = handler
+        return () => { completeHandler = null }
+      }),
+      onNeedsInput: vi.fn(),
+      onError: vi.fn(),
+      onNotice: vi.fn(),
+      onExternalSend: vi.fn(),
+      classifyTicket: vi.fn(async () => 'inline' as const),
+      createPrd: vi.fn(async () => ({ ok: true as const, nn: 1, filename: '1-fake.md' })),
+    },
+    transcripts: {
+      pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+    },
+    config: {
+      exists: vi.fn().mockResolvedValue(true),
+    },
+    clipboard: {
+      writeText: vi.fn().mockResolvedValue({ ok: true }),
+    },
+    logs: { write: vi.fn() },
+  }
+  // Assign directly onto the real jsdom `window` (rather than vi.stubGlobal
+  // replacing the whole object) — replacing `window` wholesale drops
+  // prototype-chain DOM APIs (MessageChannel, queueMicrotask, etc.) that
+  // React's test renderer needs, which manifests as an opaque "Should not
+  // already be working" act() error.
+  ;(window as unknown as { api: typeof api }).api = api
+  return { api, run, getCompleteHandler: () => completeHandler }
+}
+
+describe('PromptSessionConversation (PRD 804)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    delete (window as unknown as { api?: unknown }).api
+  })
+
+  it('renders composer + transcript with no SessionTab created and no ChatSessionRail/right-nav markup', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../../state/sessions')
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+
+    useSessions.setState({ tabs: [], activeTabId: null })
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship the thing')
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(createElement(PromptSessionConversation, { promptSession: session }))
+      })
+
+      expect(container.querySelector('[data-testid="prompt-session-conversation"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="prompt-session-transcript"]')).not.toBeNull()
+      expect(container.querySelector('textarea')).not.toBeNull()
+
+      // No SessionTab/TabBar entry was created for this PromptSession.
+      expect(useSessions.getState().tabs).toHaveLength(0)
+
+      // No ChatSessionRail equivalent: no cwd/idle card, no "This turn" tool-activity card.
+      expect(container.textContent).not.toContain('This turn')
+      expect(container.textContent).not.toContain('No tool activity yet.')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('sending a message runs it through chatRunner scoped to the PromptSession\'s claudeSessionId and appends a correctly-chained response event', async () => {
+    const { run, getCompleteHandler } = installWindowApiMock()
+    const { useSessions } = await import('../../state/sessions')
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+
+    useSessions.setState({ tabs: [], activeTabId: null })
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship the thing')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(createElement(PromptSessionConversation, { promptSession: session }))
+      })
+
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+      const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
+
+      // React tracks a controlled element's last-known value via a patched
+      // value setter; a plain `el.value = x` updates that tracker too, so a
+      // follow-up dispatchEvent sees "no change" and never fires onChange.
+      // Go through the native prototype setter to bypass it (mirrors
+      // ProjectsLanding.test.tsx's setNativeValue).
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
+      act(() => {
+        setter.call(textarea, 'do the first step')
+        textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      act(() => {
+        sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+
+      await vi.waitFor(() => expect(run).toHaveBeenCalled())
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tabId: session.id,
+          sessionId: session.claudeSessionId,
+          cwd: session.cwd,
+          prompt: 'do the first step',
+        }),
+      )
+
+      act(() => {
+        getCompleteHandler()!({ tabId: session.id, sessionId: session.claudeSessionId, finalMessage: 'done with step one' })
+      })
+
+      const events = usePromptSessions.getState().events[session.id]
+      const response = events[events.length - 1]
+      expect(response.kind).toBe('response')
+      expect(response.text).toBe('done with step one')
+      expect(response.causedByEventId).toBe(initialEvent.id)
+
+      // Still no SessionTab, even after a full send/response round trip.
+      expect(useSessions.getState().tabs).toHaveLength(0)
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('does not double-append a response event when the view unmounts and remounts for the same completed turn', async () => {
+    const { run, getCompleteHandler } = installWindowApiMock()
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship the thing')
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root = createRoot(container)
+    act(() => {
+      root.render(createElement(PromptSessionConversation, { promptSession: session }))
+    })
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(textarea, 'first message')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => {
+      sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    act(() => {
+      getCompleteHandler()!({ tabId: session.id, sessionId: session.claudeSessionId, finalMessage: 'the reply' })
+    })
+
+    const afterFirstMount = usePromptSessions.getState().events[session.id]
+    expect(afterFirstMount.filter((e) => e.kind === 'response')).toHaveLength(1)
+
+    // Simulate "Back to Projects" then reopening the same row: the component
+    // fully unmounts and remounts, but chat.ts's turn (and its store entry)
+    // persists since it's keyed by session.id, not by the component instance.
+    act(() => { root.unmount() })
+    root = createRoot(container)
+    act(() => {
+      root.render(createElement(PromptSessionConversation, { promptSession: session }))
+    })
+
+    const afterRemount = usePromptSessions.getState().events[session.id]
+    expect(afterRemount.filter((e) => e.kind === 'response')).toHaveLength(1)
+
+    act(() => { root.unmount() })
+    container.remove()
+  })
+})

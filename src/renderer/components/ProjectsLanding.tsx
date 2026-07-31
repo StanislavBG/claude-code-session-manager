@@ -3,13 +3,14 @@ import { usePromptSessions, type PromptSession } from '../state/promptSessions'
 import { useKnownProjects, candidatePath } from '../lib/useKnownProjects'
 import { compactPath } from '../lib/compactPath'
 import { formatAgo } from '../lib/formatTime'
+import { PromptSessionConversation } from './PromptSessionConversation'
 
 /**
  * Landing content for the (renamed) 'terminal' nav item — shown in place of
  * TerminalStage's old empty "no active session" state. Lists every
  * PromptSession (PRD 802's independent goal-scoped session model) grouped by
- * cwd, one row per goal. Clicking a row is a placeholder until PRD 804 wires
- * the actual scoped conversation view.
+ * cwd, one row per goal. Clicking a row opens PromptSessionConversation
+ * (PRD 804) scoped to that session — never a top-level SessionTab/TabBar entry.
  */
 export function ProjectsLanding() {
   const sessions = usePromptSessions((s) => s.sessions)
@@ -30,9 +31,10 @@ export function ProjectsLanding() {
 
   const [cwd, setCwd] = useState('')
   const [goalText, setGoalText] = useState('')
-  const [openedStubId, setOpenedStubId] = useState<string | null>(null)
+  const [openedId, setOpenedId] = useState<string | null>(null)
 
   const effectiveCwd = cwd || knownCwds[0] || ''
+  const openedSession = openedId ? sessions[openedId] : null
 
   const groups = useMemo(() => {
     const byCwd = new Map<string, PromptSession[]>()
@@ -52,6 +54,25 @@ export function ProjectsLanding() {
     if (!effectiveCwd || !trimmedGoal) return
     createPromptSession(effectiveCwd, trimmedGoal)
     setGoalText('')
+  }
+
+  if (openedSession) {
+    return (
+      <div className="h-full flex flex-col bg-bg" data-testid="projects-landing">
+        <div className="shrink-0 border-b border-rule px-3 py-1.5">
+          <button
+            data-testid="prompt-session-back"
+            onClick={() => setOpenedId(null)}
+            className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
+          >
+            ← Back to Projects
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">
+          <PromptSessionConversation promptSession={openedSession} />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -116,18 +137,12 @@ export function ProjectsLanding() {
                   <PromptSessionRow
                     key={session.id}
                     session={session}
-                    onClick={() => setOpenedStubId(session.id)}
+                    onClick={() => setOpenedId(session.id)}
                   />
                 ))}
               </div>
             </div>
           ))
-        )}
-
-        {openedStubId && (
-          <div data-testid="prompt-session-stub" className="mt-4 p-3 rounded-lg border border-dashed border-line text-[12px] text-fg-faint">
-            Conversation view coming soon (PRD 804).
-          </div>
         )}
       </div>
     </div>

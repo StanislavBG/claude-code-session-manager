@@ -32,6 +32,7 @@ import { formatBytes } from '../../lib/formatBytes'
 import { MEMORY_SLUG_RE } from '../../lib/memorySlug'
 import { EmptyState } from '../ui/EmptyState'
 import { toast } from '../../state/toast'
+import { VoiceButton } from '../VoiceButton'
 import type { MemoryEntry } from '../../../preload/api'
 
 type MessageRole = 'user' | 'system' | 'result'
@@ -172,6 +173,10 @@ interface Props {
 
 export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
   const home = useHomeDir()
+  // useActiveTab() derives its id from useSessions state (tabs.find by
+  // activeTabId), the same store VoiceButton's onClick reads via
+  // useSessions.getState().activeTabId — always the same value, so
+  // VoiceButton needs no tabId override prop here.
   const activeTab = useActiveTab()
   const activeTabId = activeTab?.id ?? null
 
@@ -466,6 +471,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
           ))}
         </div>
         <div className="flex gap-2 items-end">
+          <VoiceButton />
           <textarea
             ref={inputRef}
             value={input}

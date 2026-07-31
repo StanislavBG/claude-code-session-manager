@@ -1297,8 +1297,21 @@ async function clearPause(source) {
   if (wasPaused) await broadcast({ flush: true });
 }
 
-/** Mutate a job in place to "pending" with cleared run metadata. */
-function resetJobFields(job, errorMsg) {
+/**
+ * Mutate a job in place to "pending" with cleared run metadata.
+ *
+ * Refuses (no-ops, returns false) on a job already in a terminal success
+ * state ('completed') unless opts.force is true — resetting a completed job
+ * re-fires the PRD and re-executes already-shipped work (the false-failure
+ * class PRD 812-workbench-review-nits-cleanup demonstrated: a completed job
+ * was reset to pending and re-ran a correct no-op that then got flagged
+ * needs_review). All internal call sites operate on jobs that are still
+ * 'running'/'failed' at the point they call this, so the guard is a no-op
+ * for them; only an external reset request (IPC/admin API) can target an
+ * already-'completed' job, and that path is exactly what this guards.
+ */
+function resetJobFields(job, errorMsg, opts = {}) {
+  if (job.status === 'completed' && opts.force !== true) return false;
   job.status = 'pending';
   job.runId = null;
   job.startedAt = null;
@@ -1310,6 +1323,7 @@ function resetJobFields(job, errorMsg) {
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
+  return true;
 }
 
 // Grace period between a boot orphan's SIGTERM and reading its log to
@@ -3293,13 +3307,21 @@ function registerScheduleHandlers() {
 
   ipcMain.handle('schedule:reset-job', validated(schemas.scheduleSlug, async ({ slug }) => {
     if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
-    const found = await mutate((state) => {
+    const outcome = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
-      if (idx < 0) return false;
-      resetJobFields(state.jobs[idx]);
-      return true;
+      if (idx < 0) return 'not-found';
+      // Guard is in resetJobFields: refuses to reset an already-'completed'
+      // job, which would otherwise re-fire a PRD whose deliverable already
+      // landed (see resetJobFields' doc comment for the incident).
+      return resetJobFields(state.jobs[idx]) ? 'ok' : 'refused';
     });
-    if (!found) return { ok: false, error: 'not found' };
+    if (outcome === 'not-found') return { ok: false, error: 'not found' };
+    if (outcome === 'refused') {
+      return {
+        ok: false,
+        error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead',
+      };
+    }
     await broadcast({ flush: true });
     return { ok: true };
   }));
@@ -3764,16 +3786,11 @@ const remote = {
     const outcome = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return { kind: 'not-found' };
-      // A 'completed' job already landed its deliverable — resetting it
-      // re-fires the PRD and re-executes already-shipped work (the exact
-      // false-failure class this PRD's Defect 2 documents: PRD
-      // 812-workbench-review-nits-cleanup was re-run this way and burned a
-      // full claude -p job + Opus investigation over a correct no-op).
-      // Require an explicit force:true to override.
-      if (state.jobs[idx].status === 'completed' && opts.force !== true) {
+      // Terminal-status guard lives in resetJobFields itself; force:true
+      // threads through to override it.
+      if (!resetJobFields(state.jobs[idx], null, { force: opts.force === true })) {
         return { kind: 'refused' };
       }
-      resetJobFields(state.jobs[idx]);
       return { kind: 'ok' };
     });
     if (outcome.kind === 'not-found') return { ok: false, error: 'not found' };
@@ -3854,4 +3871,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

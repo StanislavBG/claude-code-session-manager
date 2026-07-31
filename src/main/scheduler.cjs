@@ -261,9 +261,23 @@ async function committedInWindow(cwd, startedAt, finishedAt) {
 // checks out other branches, commits real work on each, then checks its
 // starting branch back out before exit leaves HEAD unchanged even though
 // commits landed — the fallback catches that case. Never throws.
+//
+// Both signals are known to race against ref/object visibility at the exact
+// moment of process exit — a job that commits in a throwaway linked worktree
+// and removes it before exiting can have committedInWindow() return false
+// even though the commit is real and already pushed (confirmed incidents:
+// pass-no-commit-worktree-commit-invisible-at-exit, RCA 770-pr269). When both
+// signals say "no commit", wait a short bounded delay and retry once before
+// giving up — a replayed identical call moments later reliably finds it.
+const COMMIT_GUARD_RETRY_DELAY_MS = 2000;
+
 async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, untilIso) {
   if (headBefore && headAfter && headBefore !== headAfter) return true;
-  return committedInWindow(cwd, startedAt, untilIso);
+  // Call via module.exports (not the bare local binding) so tests can
+  // vi.spyOn(scheduler, 'committedInWindow') to drive the retry deterministically.
+  if (await module.exports.committedInWindow(cwd, startedAt, untilIso)) return true;
+  await new Promise((resolve) => { setTimeout(resolve, COMMIT_GUARD_RETRY_DELAY_MS); });
+  return module.exports.committedInWindow(cwd, startedAt, untilIso);
 }
 
 /**
@@ -1490,16 +1504,35 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
 
   // Read full PRD body fresh from disk (queue stored only the preview).
   let prompt;
-  const prdPath = prdPathForJob(job);
+  let prdPath = prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
     // Centrally enforce the review → security-review → verify → commit finish
     // sequence on every job, regardless of what the PRD body says.
     prompt = parsed.body + FINISH_PROTOCOL;
   } catch (e) {
-    safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
-    closeFd();
-    return { exitCode: -1, durationMs: 0, error: e?.message };
+    // The project-scoped dir isn't the only place a PRD source can live — a
+    // writer that hasn't migrated to prdLocations.cjs yet (or a not-yet-run
+    // boot migration) can leave it in the legacy global dir. Fall back to
+    // findPrdDir's full candidate search before failing the job outright.
+    const fallbackDir = await findPrdDir(job.slug);
+    if (fallbackDir) {
+      const fallbackPath = path.join(fallbackDir, `${job.slug}.md`);
+      safeLog(`[scheduler] PRD not in project dir; found ${job.slug}.md in ${fallbackDir}\n`);
+      try {
+        const parsed = await parsePrd(fallbackPath);
+        prompt = parsed.body + FINISH_PROTOCOL;
+        prdPath = fallbackPath;
+      } catch (e2) {
+        safeLog(`[scheduler] failed to read PRD: ${e2?.message}\n`);
+        closeFd();
+        return { exitCode: -1, durationMs: 0, error: e2?.message };
+      }
+    } else {
+      safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
+      closeFd();
+      return { exitCode: -1, durationMs: 0, error: e?.message };
+    }
   }
 
   const promptCheck = validatePromptForSpawn(prompt, prdPath);

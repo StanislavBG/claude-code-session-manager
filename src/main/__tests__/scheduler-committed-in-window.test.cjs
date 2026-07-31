@@ -1,17 +1,19 @@
 /**
- * scheduler-committed-in-window.test.cjs — unit tests for committedInWindow.
+ * scheduler-committed-in-window.test.cjs — unit tests for committedInWindow
+ * and computeCommittedDuringRun's bounded retry.
  *
  * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-committed-in-window.test.cjs
  */
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { committedInWindow } = require('../scheduler.cjs');
+const scheduler = require('../scheduler.cjs');
+const { committedInWindow, computeCommittedDuringRun } = scheduler;
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -123,5 +125,58 @@ test('committedInWindow sees a commit pushed from an isolated checkout, only rea
     fs.rmSync(bareDir, { recursive: true, force: true });
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(worktreeDir, { recursive: true, force: true });
+  }
+});
+
+// Reproduces the pass-no-commit-worktree / RCA 770-pr269 incidents: the live
+// commit-guard's committedInWindow() call can race against ref/object
+// visibility at the exact moment of process exit and return false even
+// though the commit is real. computeCommittedDuringRun() should retry once
+// after a bounded delay before giving up.
+test('computeCommittedDuringRun retries committedInWindow once and returns true when the retry succeeds', async () => {
+  vi.useFakeTimers();
+  try {
+    const spy = vi.spyOn(scheduler, 'committedInWindow')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const resultPromise = computeCommittedDuringRun('/tmp/fake', 'abc', 'abc', 'start', 'until');
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  }
+});
+
+test('computeCommittedDuringRun returns false when both committedInWindow calls return false', async () => {
+  vi.useFakeTimers();
+  try {
+    const spy = vi.spyOn(scheduler, 'committedInWindow').mockResolvedValue(false);
+
+    const resultPromise = computeCommittedDuringRun('/tmp/fake', 'abc', 'abc', 'start', 'until');
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  }
+});
+
+test('computeCommittedDuringRun skips the retry (and the delay) when the HEAD-diff fast path already resolves true', async () => {
+  const spy = vi.spyOn(scheduler, 'committedInWindow');
+  try {
+    const result = await computeCommittedDuringRun('/tmp/fake', 'headBefore', 'headAfter', 'start', 'until');
+
+    expect(result).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
   }
 });

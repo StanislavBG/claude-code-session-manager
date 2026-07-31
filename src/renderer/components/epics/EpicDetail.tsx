@@ -11,7 +11,8 @@ import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
 import { formatAgo, formatDuration, formatTimingLabel } from '../../lib/formatTime'
-import type { ScheduleJob, PrdListItem } from '../../../preload/api'
+import { useScheduledPrds } from '../../lib/useScheduledPrds'
+import type { ScheduleJob } from '../../../preload/api'
 
 /**
  * Right pane of the redesigned Epics workspace — header (status/kind/project
@@ -35,7 +36,6 @@ import type { ScheduleJob, PrdListItem } from '../../../preload/api'
 
 const EMPTY_EVENTS: PromptSessionEvent[] = []
 const EMPTY_JOBS: ScheduleJob[] = []
-const EMPTY_PRDS: PrdListItem[] = []
 
 type ViewKey = 'discussion' | 'prds' | 'runs'
 
@@ -184,7 +184,7 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
 
   const [view, setView] = useState<ViewKey>('discussion')
-  const [prds, setPrds] = useState<PrdListItem[]>(EMPTY_PRDS)
+  const prds = useScheduledPrds()
   const [markingCompleted, setMarkingCompleted] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -197,24 +197,6 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
   useEffect(() => {
     setView('discussion')
   }, [epicId])
-
-  useEffect(() => {
-    let alive = true
-    window.api.schedule
-      .listPrds()
-      .then((list) => {
-        if (alive) setPrds(list)
-      })
-      .catch(() => {
-        if (alive) setPrds(EMPTY_PRDS)
-      })
-    return () => {
-      alive = false
-    }
-    // Re-fetch on every schedule snapshot broadcast (scheduleJobs reference
-    // changes) so a PRD file dropped by a running job attaches without a
-    // manual refresh — listPrds() itself has no dedicated broadcast.
-  }, [epicId, scheduleJobs])
 
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false

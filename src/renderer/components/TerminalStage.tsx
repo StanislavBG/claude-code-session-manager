@@ -1,7 +1,7 @@
 import { Terminal } from './Terminal'
 import { TerminalControls } from './TerminalControls'
 import { LiveTranscript } from './LiveTranscript'
-import { ProjectsLanding } from './ProjectsLanding'
+import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { useSessions } from '../state/sessions'
 
 /**
@@ -40,11 +40,11 @@ export function TerminalStage({ visible = true }: TerminalStageProps) {
           </div>
         ))
       ) : (
-        // Renamed nav item's landing content (PRD 803): the "Projects" list
-        // of PromptSession records, in place of the old bare "no active
-        // session" message. SplitAgentBrowser keeps the plain <NoSession />
-        // for its own no-session state — this swap is local to TerminalStage.
-        <ProjectsLanding />
+        // Epics workspace (PRD 829): the two-pane Epic queue + detail
+        // surface, in place of the old bare "no active session" message.
+        // SplitAgentBrowser keeps the plain <NoSession /> for its own
+        // no-session state — this swap is local to TerminalStage.
+        <EpicsWorkspace />
       )}
       <LiveTranscript />
       {/* Terminal settings overlay — theme + font-size. Anchored to the

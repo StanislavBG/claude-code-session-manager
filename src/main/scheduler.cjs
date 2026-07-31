@@ -4026,6 +4026,8 @@ const remote = {
   async writePrd(slug, body, cwd) {
     let dir;
     let epicTrace = null;
+    let epicCreated = false;
+    let epicId = null;
     if (cwd) {
       // Edit-in-place if this slug already lives anywhere under this project
       // (legacy flat dir or any Epic's prds/); otherwise this is a CREATE,
@@ -4047,6 +4049,8 @@ const remote = {
           });
           dir = epic.prdDir;
           epicTrace = epic.epicId;
+          epicCreated = epic.created === true;
+          epicId = epic.epicId;
         } catch (e) {
           // Epic mint must never block a PRD write — fall back to the
           // legacy flat dir and log loudly.
@@ -4059,8 +4063,27 @@ const remote = {
       dir = (await findPrdDir(slug)) ?? PRDS_DIR;
       if (dir === PRDS_DIR) ensureDirs();
     }
+
+    // PRD 825: if this call minted a brand-new Epic (ensureEpic's `created`)
+    // and the write below never lands, don't strand an empty Epic dir —
+    // best-effort remove `<epic>/prds` then `<epic>` itself, only when empty.
+    const cleanupEmptyMintedEpic = async () => {
+      if (!epicCreated || !epicId) return;
+      try {
+        const entries = await fsp.readdir(dir);
+        if (entries.length > 0) return;
+        await fsp.rmdir(dir);
+        const epicRootDir = path.dirname(dir);
+        const epicRootEntries = await fsp.readdir(epicRootDir);
+        if (epicRootEntries.length === 0) await fsp.rmdir(epicRootDir);
+      } catch { /* best-effort only */ }
+    };
+
     const resolved = safeSlugPathIn(dir, slug);
-    if (!resolved) return { ok: false, error: 'invalid slug' };
+    if (!resolved) {
+      await cleanupEmptyMintedEpic();
+      return { ok: false, error: 'invalid slug' };
+    }
     try {
       // Symlink defense, matching readPrd/readLog: safeSlugPathIn is lexical
       // and does NOT resolve symlinks, so a rogue job could plant a PRDs-dir
@@ -4070,10 +4093,12 @@ const remote = {
       // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
       if (realParent !== dir && !realParent.startsWith(dir + path.sep)) {
+        await cleanupEmptyMintedEpic();
         return { ok: false, error: 'invalid slug' };
       }
       const existing = await fsp.lstat(resolved).catch(() => null);
       if (existing && existing.isSymbolicLink()) {
+        await cleanupEmptyMintedEpic();
         return { ok: false, error: 'invalid slug' };
       }
       await config.writeTextAtomic(resolved, body);
@@ -4084,6 +4109,7 @@ const remote = {
       }
       return { ok: true, bytesWritten: stat.size };
     } catch (e) {
+      await cleanupEmptyMintedEpic();
       return { ok: false, error: e?.message ?? 'write failed' };
     }
   },

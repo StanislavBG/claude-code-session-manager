@@ -108,11 +108,17 @@ async function createPrd(input, remote) {
   // through config.cjs's validatePath (allowedRoots = home dir) —
   // same boundary every other fs-touching IPC handler uses — never a
   // bespoke check here.
+  // Normalize a `~`-prefixed cwd BEFORE it reaches allocateParallelGroup/
+  // readPrd/writePrd — those pass cwd through to safeSlugPathIn-adjacent path
+  // joins that treat it as a literal path segment, so an unexpanded `~/...`
+  // fails downstream as a bare "invalid slug" instead of a clear cwd error.
+  const cwd = expandHome(input.cwd);
   try {
-    config.validatePath(expandHome(input.cwd));
+    config.validatePath(cwd);
   } catch (e) {
     return { ok: false, status: 400, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` };
   }
+  input = { ...input, cwd };
 
   const slug = input.slug || deriveSlugFromTitle(input.title);
   if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {

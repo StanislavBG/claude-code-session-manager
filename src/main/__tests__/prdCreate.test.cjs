@@ -398,6 +398,39 @@ test('createPrd returns {ok:false, status:409} without clobbering an existing fi
   expect(stillThere).toBe('ORIGINAL CONTENT\n');
 });
 
+// ──────────────────────────────────────────── PRD 825: Epic PRD dir write grant + `~` cwd normalization
+
+test('validateWrite allows writes under <root>/session-manager-operations/scheduler/epics/<id>/prds/', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-scheduler-epics-'));
+  config.addAllowedRoot(root);
+  const prdsDir = path.join(root, 'session-manager-operations', 'scheduler', 'epics', 'epic-abc123', 'prds');
+  await fsp.mkdir(prdsDir, { recursive: true });
+  const filePath = path.join(prdsDir, '1-do-thing.md');
+
+  await config.writeTextAtomic(filePath, 'PRD body\n');
+
+  expect(fs.existsSync(filePath)).toBeTruthy();
+  expect(await fsp.readFile(filePath, 'utf8')).toBe('PRD body\n');
+});
+
+test('createPrd normalizes a `~`-prefixed cwd via expandHome before calling remote', async () => {
+  const receivedCwds = [];
+  const remote = {
+    async allocateParallelGroup(cwd) { receivedCwds.push(cwd); return 42; },
+    async readPrd(slug, cwd) { receivedCwds.push(cwd); return { ok: false }; },
+    async writePrd(slug, body, cwd) { receivedCwds.push(cwd); return { ok: true, bytesWritten: body.length }; },
+  };
+
+  const result = await createPrd(validCreateBody({ cwd: '~' }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(receivedCwds.length).toBeGreaterThan(0);
+  for (const cwd of receivedCwds) {
+    expect(cwd.startsWith('~')).toBe(false);
+    expect(cwd).toBe(os.homedir());
+  }
+});
+
 test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the created PRD frontmatter', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);

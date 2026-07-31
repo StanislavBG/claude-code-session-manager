@@ -152,6 +152,16 @@ function validateWrite(realAbs) {
       if (realAbs === promptSessionsSub || realAbs.startsWith(promptSessionsSub + path.sep)) {
         return;
       }
+      // Scheduler PRD sources (PRD 825 — per-project Epic PRD dirs under
+      // scheduler/epics/<id>/prds/, plus the legacy flat scheduler/prds/ and
+      // scheduler/state/ shards): narrowly scoped to
+      // session-manager-operations/scheduler/, this repo's existing
+      // per-project artifact-store convention (scheduler.cjs's remote.writePrd
+      // writes here via config.writeTextAtomic).
+      const schedulerSub = path.join(realRoot, 'session-manager-operations', 'scheduler');
+      if (realAbs === schedulerSub || realAbs.startsWith(schedulerSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

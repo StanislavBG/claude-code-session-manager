@@ -574,6 +574,41 @@ describe('chat.ts prompt queue', () => {
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
     expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: 'second' }))
   })
+
+  it('dispatches an external-origin ticket queued while busy inline, without ever classifying or creating a PRD', async () => {
+    const { run, classifyTicket, createPrd, getExternalSendHandler, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+    })
+    const { useChat } = await import('../chat')
+    const { useSessions } = await import('../sessions')
+    useSessions.setState({
+      tabs: [{ id: 't1', sessionId: 's1', cwd: '/proj' } as any],
+    } as any)
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    // Simulate a scheduler completion notification arriving via onExternalSend
+    // while the tab is busy — this is the exact path that previously got
+    // misclassified as 'develop' and created a garbage PRD.
+    getExternalSendHandler()!({ tabId: 't1', prompt: 'PRD 793 finished: completed. Check Scheduler for details.' })
+
+    const queued = useChat.getState().get('t1').queue
+    expect(queued).toHaveLength(1)
+    expect(queued[0].external).toBe(true)
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ tabId: 't1', sessionId: 's1', prompt: 'PRD 793 finished: completed. Check Scheduler for details.' }),
+    )
+
+    expect(classifyTicket).not.toHaveBeenCalled()
+    expect(createPrd).not.toHaveBeenCalled()
+    expect(useChat.getState().get('t1').running).toBe(true)
+  })
 })
 
 describe('chat.ts isChainResolved() (PRD 775)', () => {

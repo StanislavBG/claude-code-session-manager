@@ -71,6 +71,16 @@ export interface PromptTicket {
    * prdSlugs, not this ticket's. Never set for a "New item" choice.
    */
   chainRootId?: string
+  /**
+   * Set when this ticket originated from an external source (Web Remote,
+   * admin HTTP route, MCP tool, or the scheduler's own completion
+   * notifications — see chatRunner.cjs's enqueueExternalPrompt) rather than
+   * a human typing into the composer. External tickets MUST skip
+   * classifyPromptTicket entirely in dequeueNext() and are always dispatched
+   * inline — they were never a feature request, so they must never reach
+   * dispatchToPrd()/chat:create-prd.
+   */
+  external?: boolean
 }
 
 /** Minimal job-status shape a chain-resolution check needs — kept structural
@@ -150,6 +160,8 @@ interface ChatState {
     tag?: 'feature' | 'bug'
     /** Set when the composer's chain picker (PRD 775) chose "Continue: <open item>". */
     chainRootId?: string
+    /** Set when this prompt originates from onExternalSend, not a human composer submit. */
+    external?: boolean
   }) => void
   /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newSession). */
   resetThread: (tabId: string) => void
@@ -250,7 +262,7 @@ export const useChat = create<ChatState>((set, get) => ({
       window.api?.logs?.write('chat', 'warn', `exchange hydration failed for tab ${tabId}: ${msg}`)
     }
   },
-  send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId }) => {
+  send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId, external }) => {
     const trimmed = prompt.trim()
     if (!trimmed) return
     const cur = get().chats[tabId] ?? EMPTY
@@ -268,6 +280,7 @@ export const useChat = create<ChatState>((set, get) => ({
         createdAt: Date.now(),
         tag,
         chainRootId,
+        external,
       }
       set({
         chats: {
@@ -439,22 +452,39 @@ function dequeueNext(tabId: string): void {
   // queue panel can show it (status still 'queued' during classification).
   patch(tabId, (c) => ({ ...c, queue: rest, running: true, queuedPosition: 0, activeTicket: next }))
 
+  // External-origin tickets (Web Remote, admin HTTP route, MCP tool, or the
+  // scheduler's own completion notifications — see PromptTicket.external)
+  // were never a human's feature request, so they must never reach the
+  // classifier and therefore can never be misrouted to dispatchToPrd().
+  // Always dispatch inline, exactly like a non-'develop' verdict would.
+  if (next.external) {
+    dispatchQueuedInline(tabId, next)
+    return
+  }
+
   classifyPromptTicket(next.text).then((verdict) => {
     if (verdict === 'develop') {
       dispatchToPrd(tabId, next)
       return
     }
-    const running: PromptTicket = { ...next, status: 'running', startedAt: Date.now() }
-    patch(tabId, (c) => ({ ...c, activeTicket: running }))
-    dispatchSend({
-      tabId: running.tabId,
-      sessionId: running.sessionId,
-      cwd: running.cwd,
-      text: running.text,
-      promptId: running.id,
-      tag: running.tag,
-      chainRootId: running.chainRootId,
-    })
+    dispatchQueuedInline(tabId, next)
+  })
+}
+
+/** Shared by dequeueNext()'s external-skip branch and its non-'develop'
+ *  classifier verdict — installs the ticket as 'running' and hands it to
+ *  chatRunner via the same dispatchSend() path a fresh manual send() uses. */
+function dispatchQueuedInline(tabId: string, ticket: PromptTicket): void {
+  const running: PromptTicket = { ...ticket, status: 'running', startedAt: Date.now() }
+  patch(tabId, (c) => ({ ...c, activeTicket: running }))
+  dispatchSend({
+    tabId: running.tabId,
+    sessionId: running.sessionId,
+    cwd: running.cwd,
+    text: running.text,
+    promptId: running.id,
+    tag: running.tag,
+    chainRootId: running.chainRootId,
   })
 }
 
@@ -643,6 +673,6 @@ if (typeof window !== 'undefined' && window.api?.chat) {
       window.api?.logs?.write('chat', 'warn', `external send ignored: tab ${tabId} is not open`)
       return
     }
-    useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt })
+    useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt, external: true })
   })
 }

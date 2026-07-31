@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { hasOpenFeedback, emitFeedbackPRD, sweep, resolveSkillFile } = require('../lib/watchdogHelpers.cjs');
+const { resolvePrdWriteDir } = require('../../src/main/lib/prdLocations.cjs');
 
 const FAKE_SKILL = [
   '---',
@@ -415,6 +416,60 @@ test('sweep() returns correct summary counts', () => {
     assert.equal(result.scanned, 2, 'scanned should count all active cwds');
     assert.equal(result.emitted, 1, 'emitted should count projects with open feedback');
     assert.equal(result.skipped, 0, 'skipped should count de-dup hits');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── default prdsDir: no override → writes into the project's own PRD dir ────
+// Regression guard for the 812 split-brain incident: the sweep writer and the
+// scheduler reader (prdPathForJob → resolvePrdWriteDir) must agree on where a
+// PRD source lives when no explicit prdsDir override is passed.
+
+test('emitFeedbackPRD with no prdsDir override writes to <cwd>/session-manager-operations/scheduler/prds/', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
+    fs.mkdirSync(feedbackDir, { recursive: true });
+    fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
+
+    const queuePath = makeQueue(base);
+    const { skillPath, standardsPath } = makeSkillFiles(base);
+
+    const result = emitFeedbackPRD(projectDir, { queuePath, skillPath, standardsPath });
+    assert.equal(result.emitted, true, 'PRD should be emitted');
+
+    const expectedDir = resolvePrdWriteDir(projectDir);
+    assert.equal(path.dirname(result.prdPath), expectedDir,
+      'PRD must land in the project\'s own PRD dir when prdsDir is unset');
+    assert.ok(fs.existsSync(result.prdPath), 'PRD file must actually exist at the resolved path');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── explicit prdsDir override still honored verbatim (regression guard) ─────
+
+test('emitFeedbackPRD with an explicit prdsDir still writes there, not the project dir', () => {
+  const base = makeTmpDir();
+  try {
+    const projectDir = path.join(base, 'myproject');
+    const feedbackDir = path.join(projectDir, 'session-manager-operations', 'feedback');
+    fs.mkdirSync(feedbackDir, { recursive: true });
+    fs.writeFileSync(path.join(feedbackDir, '2026-01-01-foo.md'), '# Feedback\n');
+
+    const explicitDir = path.join(base, 'explicit-prds');
+    fs.mkdirSync(explicitDir);
+    const queuePath = makeQueue(base);
+    const { skillPath, standardsPath } = makeSkillFiles(base);
+
+    const result = emitFeedbackPRD(projectDir, { prdsDir: explicitDir, queuePath, skillPath, standardsPath });
+    assert.equal(result.emitted, true, 'PRD should be emitted');
+    assert.equal(path.dirname(result.prdPath), explicitDir, 'explicit prdsDir override must be honored verbatim');
+
+    const expectedProjectDir = resolvePrdWriteDir(projectDir);
+    assert.ok(!fs.existsSync(expectedProjectDir), 'must not also write into the project\'s own PRD dir');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

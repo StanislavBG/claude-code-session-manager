@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { activeProjectCwds } = require('./activeSessions.cjs');
+const { resolvePrdWriteDir } = require('../../src/main/lib/prdLocations.cjs');
 
 // Mirrors scheduler.cjs:215 (single source of truth there; kept in sync here).
 const DEFAULT_HEARTBEAT_PATH = path.join(
@@ -100,9 +101,6 @@ function heartbeatFresh(heartbeatPath = DEFAULT_HEARTBEAT_PATH, maxAgeMs = DEFAU
 // Default paths — callers can override via opts for testing.
 const DEFAULT_QUEUE_PATH = path.join(
   os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json',
-);
-const DEFAULT_PRDS_DIR = path.join(
-  os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds',
 );
 const PLUGIN_CACHE_ROOT = path.join(
   os.homedir(), '.claude', 'plugins', 'cache', 'session-manager', 'session-manager-dev',
@@ -295,7 +293,7 @@ function hasOpenFeedback(cwd) {
  * Complexity: O(P) over PRD files in prdsDir + O(J) over queue jobs.
  */
 function emitFeedbackPRD(cwd, {
-  prdsDir = DEFAULT_PRDS_DIR,
+  prdsDir,
   queuePath = DEFAULT_QUEUE_PATH,
   skillPath,
   standardsPath,
@@ -303,7 +301,14 @@ function emitFeedbackPRD(cwd, {
 } = {}) {
   // Explicit overrides (used by tests) are honored verbatim and skip the
   // candidate search entirely — only resolve via candidates when the caller
-  // didn't pass a path.
+  // didn't pass a path. Same convention for prdsDir: an explicit override
+  // (tests pass a tmpdir) wins verbatim; otherwise resolve the project's own
+  // PRD dir so the sweep writer agrees with scheduler.cjs's reader (see
+  // prdLocations.cjs — PRD chain 808→811 moved PRD sources out of the legacy
+  // global dir into `<cwd>/session-manager-operations/scheduler/prds`).
+  if (prdsDir === undefined) {
+    prdsDir = resolvePrdWriteDir(cwd);
+  }
   const skillPathExplicit = skillPath !== undefined;
   const standardsPathExplicit = standardsPath !== undefined;
   if (!skillPathExplicit) {
@@ -616,7 +621,7 @@ function maybeRelaunchApp({
  */
 function sweep({
   projectsDir,
-  prdsDir = DEFAULT_PRDS_DIR,
+  prdsDir,
   queuePath = DEFAULT_QUEUE_PATH,
   skillPath,
   standardsPath,
@@ -634,6 +639,8 @@ function sweep({
     scanned++;
     if (!hasOpenFeedback(cwd)) continue;
 
+    // prdsDir unset → emitFeedbackPRD resolves per-cwd (project's own PRD
+    // dir); an explicit override (tests) is forwarded verbatim to every cwd.
     let result;
     try {
       result = emitFeedbackPRD(cwd, { prdsDir, queuePath, skillPath, standardsPath });

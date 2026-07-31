@@ -83,6 +83,12 @@ function useViewportWidth(): number {
 // Read-only, real-data-only subset of the design's SessionRail: no Branch/Model
 // (no per-session plumbing reaches this component), no 5h window (that's
 // AppStatusBar's job), no Touched files (not captured by classifyToolUse today).
+//
+// Still reachable: the primary "+ New session" entry point no longer creates a
+// legacy SessionTab (it force-navs to the Epics ProjectsLanding instead), but
+// Command Palette's new-tab-pick/new-tab-here and the OS menu "Ctrl+N" handler
+// (App.tsx) still call createPickedSession()/addTab({dormant: true}) directly,
+// and Terminal.tsx renders any dormant tab through <TerminalChat>. Not dead code.
 function ChatSessionRail({
   cwd,
   label,
@@ -250,6 +256,10 @@ export function TagSelector({
 // ticket plus anything queued behind it, and — folded into the same list —
 // recently finished tickets (done/failed/dispatched-to-prd) so a ticket
 // doesn't vanish from view the instant it leaves the "queued/running" state.
+//
+// Still reachable: see the ChatSessionRail comment above — Command Palette
+// new-tab-pick/new-tab-here and the OS menu "Ctrl+N" still create dormant
+// SessionTabs that render here via Terminal.tsx. Not dead code.
 export function QueueTicketPanel({
   tickets,
   onSelectNeedsInput,

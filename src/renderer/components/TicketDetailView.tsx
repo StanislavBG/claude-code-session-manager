@@ -56,6 +56,11 @@ function TicketEntry({ ticket, jobs }: { ticket: PromptTicket; jobs: ScheduleJob
   )
 }
 
+// Still reachable: Command Palette new-tab-pick/new-tab-here and the OS menu
+// "Ctrl+N" (App.tsx) still create dormant SessionTabs, which Terminal.tsx
+// renders through TerminalChat, which renders this alongside QueueTicketPanel.
+// Not dead code — only the primary "+ New session" entry point stopped
+// creating these tabs.
 export function TicketDetailView({
   ticket,
   allTickets,

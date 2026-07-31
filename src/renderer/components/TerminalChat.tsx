@@ -17,6 +17,7 @@ import { setPendingPrdSlug } from '../lib/prdDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
 import { TicketDetailView } from './TicketDetailView'
 import { PasteThumbnail } from './PasteThumbnail'
+import { VoiceButton } from './VoiceButton'
 import { EmptyState } from './ui/EmptyState'
 import type { NavKey } from './LeftNav'
 
@@ -1020,6 +1021,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
           </div>
         )}
         <div className="flex items-end gap-2">
+          <VoiceButton />
           <textarea
             ref={textareaRef}
             value={draft}

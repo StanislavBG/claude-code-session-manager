@@ -18,7 +18,6 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useBilling } from '../../state/billing'
 import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
-import { VoiceButton } from '../VoiceButton'
 import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
 import { NAV_ITEMS, NAV_GROUP_DESCRIPTIONS, type NavGroupItem } from '../../lib/navGroups'
@@ -328,9 +327,6 @@ function ProjectCaption({
           <AlmanacIcon name="plus" size={13} stroke={1.8} />
           New session
         </button>
-        <div className="flex items-center rounded-md bg-bg-hi border border-line">
-          <VoiceButton />
-        </div>
       </div>
     </div>
   )

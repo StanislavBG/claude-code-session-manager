@@ -1199,6 +1199,33 @@ test('pass_no_commit: original PRD, PASS no commit, zero extractable deliverable
   }
 });
 
+// (incident: 812-commit-guard-retry-on-worktree-ref-visibility-delay — a
+// stale scheduler process, booted before the already-shipped exemption
+// landed, produced a false pass_no_commit for exactly this shape of re-run)
+test('pass_no_commit: commit-guard-retry PRD naming scheduler.cjs + its committed-in-window test, PASS no commit → pass_no_commit_already_shipped', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '812-commit-guard-retry-on-worktree-ref-visibility-delay';
+    writeLog(tmp, slug, noOpRunEvents('Retry + tests already present; nothing to change.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(
+      tmp,
+      slug,
+      'Deliverables: `src/main/scheduler.cjs` and `src/main/__tests__/scheduler-committed-in-window.test.cjs`.',
+    );
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit_already_shipped', `expected already-shipped exemption, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
 test('extractPrdDeliverablePaths: extracts backticked repo-relative paths, ignores prose', () => {
   const body = 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/__tests__/rcaFeedbackHook.test.cjs`. Also see node_modules/foo/bar.js which should be excluded.';
   const paths = extractPrdDeliverablePaths(body);

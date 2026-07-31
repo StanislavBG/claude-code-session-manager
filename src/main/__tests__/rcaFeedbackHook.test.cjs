@@ -147,6 +147,35 @@ test('classifyFailure: unknown verdict with no matching markers falls back to un
   expect(rcaFeedbackHook.classifyFailure({ verdict: 'halt', logTail: 'nothing special' })).toBe('unknown');
 });
 
+test('classifyFailure: detects self-queue from a "Launching skill: session-manager-dev:develop" tail', () => {
+  const logTail = ['doing setup', 'Launching skill: session-manager-dev:develop', 'skill running'].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
+});
+
+test('classifyFailure: detects self-queue from a "Launching skill: session-manager-dev:process-feedback" tail', () => {
+  const logTail = ['doing setup', 'Launching skill: session-manager-dev:process-feedback', 'skill running'].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
+});
+
+test('classifyFailure: detects self-queue from a ScheduleWakeup tool_use even when the tail also contains "sleep" (PRD 771 regression)', () => {
+  const logTail = [
+    'launching background build: eas-cli build --wait',
+    'the app will sleep between polls',
+    '{"type":"tool_use","name":"ScheduleWakeup","input":{"delaySeconds":600}}',
+  ].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
+});
+
+test('classifyFailure: STUCK_LOOP/POST_AC_OVERRUN reordering does not change classification when no self-queue marker is present', () => {
+  const stuckLoopTail = ['doing work', 'until curl -s http://x | jq .uptime; do sleep 5; done', 'still waiting'].join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail: stuckLoopTail })).toBe('stuck-loop');
+
+  const postAcLines = ['- [x] first AC item done', '- [x] last AC item done'];
+  for (let i = 0; i < 30; i++) postAcLines.push(`extra post-AC work line ${i}`);
+  const postAcTail = postAcLines.join('\n');
+  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail: postAcTail })).toBe('post-ac-overrun');
+});
+
 // ─── AC extraction ─────────────────────────────────────────────────────────────
 
 test('extractAcceptanceCriteria: pulls the section body between the heading and the next heading', () => {

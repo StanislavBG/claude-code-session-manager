@@ -66,6 +66,7 @@ function humanVerdict(verdict) {
 // ─── Failure-class matching (deterministic, no LLM) ─────────────────────────
 
 const FAILURE_CLASSES = {
+  SELF_QUEUE: 'self-queue',
   STUCK_LOOP: 'stuck-loop',
   POST_AC_OVERRUN: 'post-ac-overrun',
   NO_SENTINEL: 'no-sentinel',
@@ -75,6 +76,8 @@ const FAILURE_CLASSES = {
 };
 
 const PREVENTION_HINTS = {
+  [FAILURE_CLASSES.SELF_QUEUE]:
+    "This run either invoked /develop or /process-feedback from inside its own headless execution, or backgrounded a long-running command and called ScheduleWakeup to check back later — both are the 'you ARE the executor — never re-queue or self-schedule' anti-pattern. A headless PRD run must perform its own acceptance criteria directly and has no next turn to resume it (standards.md → Execution discipline).",
   [FAILURE_CLASSES.STUCK_LOOP]:
     'Bound every command with `timeout <N> <cmd>` — never leave an unbounded `until`/`while true`/`sleep` poll in a PRD body (PRD_AUTHORING.md loop-hang guidance).',
   [FAILURE_CLASSES.POST_AC_OVERRUN]:
@@ -104,6 +107,8 @@ function extractRcaBlock(text) {
   return m ? m[1].trim() : null;
 }
 
+const SELF_QUEUE_SKILL_RE = /Launching skill: session-manager-dev:(develop|process-feedback)/;
+const SELF_QUEUE_WAKEUP_RE = /ScheduleWakeup/;
 const STUCK_LOOP_RE = /\b(until\s|while\s+true|sleep\s)/i;
 const AC_CHECKBOX_RE = /^\s*[-*]\s*\[[xX]\]/;
 const SENTINEL_PASS_RE = /SCHEDULER_VERDICT:\s*PASS/;
@@ -119,6 +124,13 @@ const POST_AC_OVERRUN_MIN_TAIL_FRACTION = 0.3;
  */
 function classifyFailure({ verdict, logTail }) {
   const lines = (logTail || '').split('\n');
+
+  // Checked before STUCK_LOOP: a backgrounded command + ScheduleWakeup
+  // (variant b) can land words like "sleep"/"poll" in the tail via the PRD's
+  // own AC text, which would otherwise false-match STUCK_LOOP_RE (see PRD 771).
+  if (SELF_QUEUE_SKILL_RE.test(logTail || '') || SELF_QUEUE_WAKEUP_RE.test(logTail || '')) {
+    return FAILURE_CLASSES.SELF_QUEUE;
+  }
 
   const tailWindow = lines.slice(-STUCK_LOOP_WINDOW);
   if (tailWindow.some((l) => STUCK_LOOP_RE.test(l))) {

@@ -10,7 +10,7 @@ import type { DirEntry } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 import { parseSkillMeta } from '../../lib/skillFrontmatter'
-import { PluginSkillBrowser } from './plugins/PluginSkillBrowser'
+import { SkillHomePage } from './plugins/PluginSkillBrowser'
 import { toast } from '../../state/toast'
 
 type PluginsView = 'installed' | 'library'
@@ -400,6 +400,18 @@ function PluginHomePage({
     if (!result.ok) toast.error(result.error ?? `Failed to open ${url}`)
   }
 
+  if (browsingSkill) {
+    return (
+      <SkillHomePage
+        key={browsingSkill.id}
+        pluginName={row.manifest?.name ?? row.name}
+        skills={skills}
+        initialSelectedId={browsingSkill.id}
+        onBack={() => setBrowsingSkill(null)}
+      />
+    )
+  }
+
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Header: one row, back link + name + version + description + badges. */}
@@ -497,15 +509,6 @@ function PluginHomePage({
           )}
         </div>
       </div>
-
-      {browsingSkill ? (
-        <PluginSkillBrowser
-          key={browsingSkill.id}
-          skills={skills}
-          initialSelectedId={browsingSkill.id}
-          onClose={() => setBrowsingSkill(null)}
-        />
-      ) : null}
     </div>
   )
 }

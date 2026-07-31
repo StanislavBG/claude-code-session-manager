@@ -4,6 +4,12 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// Monaco doesn't mount in jsdom; render the raw value so tests can assert on
+// the skill body text, mirroring Skills.description.test.ts's approach.
+vi.mock('../../ui/MarkdownEditor', () => ({
+  MarkdownEditor: ({ value }: { value: string }) => createElement('pre', null, value),
+}))
+
 /**
  * Clicking an installed-plugin row navigates to a full drill-in page
  * (PluginHomePage) in place of the table: one-line header, meta strip,
@@ -198,6 +204,60 @@ describe('Plugins drill-in page', () => {
     expect(container.querySelector('table')).toBeTruthy()
 
     expect(api.config.readJson).toHaveBeenCalled()
+    act(() => root.unmount())
+  })
+
+  it('navigates to a full-page Skill Home on skill row click, and back returns to the Skills section', async () => {
+    installWindowApiMock()
+    const { Plugins } = await import('../Plugins')
+
+    const root = createRoot(container)
+    act(() => {
+      root.render(createElement(Plugins))
+    })
+    await flush()
+
+    const demoRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
+      r.textContent?.includes('demo'),
+    ) as HTMLElement
+    act(() => {
+      demoRow.click()
+    })
+    await flush()
+
+    const skillRow = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('my-skill'),
+    ) as HTMLButtonElement
+    expect(skillRow).toBeTruthy()
+
+    act(() => {
+      skillRow.click()
+    })
+    await flush()
+
+    // Plugin Home body (section index) is replaced by the full-page Skill Home.
+    const text = container.textContent ?? ''
+    expect(text).toContain('my-skill')
+    expect(text).toContain('demo')
+    expect(text).toContain('Body text.')
+
+    const skillBackLink = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.trim().startsWith('←') && b.textContent?.includes('demo'),
+    ) as HTMLButtonElement
+    expect(skillBackLink).toBeTruthy()
+
+    act(() => {
+      skillBackLink.click()
+    })
+    await flush()
+
+    // Back to Plugin Home's Skills section list — not the outer Plugins table.
+    expect(container.querySelector('table')).toBeFalsy()
+    const afterBackText = container.textContent ?? ''
+    expect(afterBackText).toContain('my-skill')
+    expect(afterBackText).toContain('Does the skill thing.')
+    expect(afterBackText).not.toContain('Body text.')
+
     act(() => root.unmount())
   })
 

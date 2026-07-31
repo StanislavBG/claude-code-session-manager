@@ -11,6 +11,7 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
+const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -237,28 +238,33 @@ async function check() {
     };
   }
 
-  // 4. Check PRDs directory.
-  const prdsDir = path.join(schedulerBaseDir, 'prds');
-  try {
-    await fsp.access(prdsDir, fs.constants.R_OK);
-    const files = await fsp.readdir(prdsDir);
-    const prdFiles = files.filter((f) => f.endsWith('.md'));
-    status.components.scheduler_prds = {
-      ok: true,
-      path: prdsDir,
-      count: prdFiles.length,
-    };
-  } catch (e) {
-    if (e.code !== 'ENOENT') {
-      status.issues.push(`PRDs directory not accessible: ${e.message}`);
+  // 4. Check PRDs directories — one per active project
+  // (session-manager-operations/scheduler/prds/), summed. PRD 809.
+  const prdsDirs = resolvePrdsDirs();
+  let totalPrdCount = 0;
+  let anyPrdsDirAccessible = false;
+  const prdsDirErrors = [];
+  for (const dir of prdsDirs) {
+    try {
+      await fsp.access(dir, fs.constants.R_OK);
+      const files = await fsp.readdir(dir);
+      totalPrdCount += files.filter((f) => f.endsWith('.md')).length;
+      anyPrdsDirAccessible = true;
+    } catch (e) {
+      if (e.code !== 'ENOENT') {
+        prdsDirErrors.push(`${dir}: ${e.message}`);
+      }
     }
-    status.components.scheduler_prds = {
-      ok: e.code === 'ENOENT', // ok if not yet created
-      path: prdsDir,
-      exists: false,
-      error: e.code === 'ENOENT' ? 'not yet created' : e.message,
-    };
   }
+  if (prdsDirErrors.length > 0) {
+    status.issues.push(`PRDs directory not accessible: ${prdsDirErrors.join('; ')}`);
+  }
+  status.components.scheduler_prds = {
+    ok: prdsDirErrors.length === 0,
+    dirs: prdsDirs,
+    count: totalPrdCount,
+    ...(prdsDirs.length === 0 || anyPrdsDirAccessible ? {} : { exists: false }),
+  };
 
   // 5. Check transcripts directory (where live session logs are tailed).
   const projectsDir = path.join(os.homedir(), '.claude/projects');

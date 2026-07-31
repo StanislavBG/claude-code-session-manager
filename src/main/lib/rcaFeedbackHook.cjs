@@ -30,8 +30,7 @@ const path = require('node:path');
 const config = require('../config.cjs');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readTail } = require('./fileTail.cjs');
-
-const PRDS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'prds');
+const { resolvePrdWriteDir } = require('./prdLocations.cjs');
 
 // The one project this hook always knows how to reach, used as the fallback
 // destination when a job's own cwd has no feedback inbox.
@@ -214,9 +213,10 @@ function readRunMeta(runDir, slug) {
   }
 }
 
-function readPrdBody(slug) {
+function readPrdBody(cwd, slug) {
+  if (!cwd) return '';
   try {
-    const raw = fs.readFileSync(path.join(PRDS_DIR, `${slug}.md`), 'utf8');
+    const raw = fs.readFileSync(path.join(resolvePrdWriteDir(cwd), `${slug}.md`), 'utf8');
     return splitFrontmatter(raw).body;
   } catch {
     return '';
@@ -311,7 +311,7 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
     const meta = readRunMeta(runDir, job.slug);
     const logPath = runDir ? path.join(runDir, `${job.slug}.log`) : null;
     const logTail = logPath ? readTail(logPath, 64 * 1024) : '';
-    const acText = extractAcceptanceCriteria(readPrdBody(job.slug));
+    const acText = extractAcceptanceCriteria(readPrdBody(job.cwd, job.slug));
     const failureClass = classifyFailure({ verdict, logTail });
 
     const markdown = buildRcaMarkdown({

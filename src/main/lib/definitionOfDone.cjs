@@ -13,6 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
+const { resolvePrdWriteDir } = require('./prdLocations.cjs');
 
 // Regex identifying meta/dod slugs that must NOT influence the batchKey.
 // This is the load-bearing loop-avoidance filter: when the gate job itself
@@ -95,11 +96,6 @@ function reportExists(key, runsDir = RUNS_DIR) {
 // rather than running under a shell, since CLAUDE.md restricts shell:true to
 // watchers.cjs and app:test-fire-hook only.
 const SHELL_META_RE = /[|>&;<`]|\$[({]/;
-
-const PRDS_DIR = path.join(
-  os.homedir(),
-  '.claude', 'session-manager', 'scheduled-plans', 'prds'
-);
 
 /**
  * Extract the first bounded AC test command from a PRD body.
@@ -185,11 +181,12 @@ function extractAcCommand(prdBody) {
  * @param {{ slug: string, cwd: string }} job
  * @param {{ timeoutMs?: number, prdsDir?: string }} opts
  *   timeoutMs  Hard kill ceiling for the child (default 60s).
- *   prdsDir    Override PRD directory (for tests).
+ *   prdsDir    Override PRD directory (for tests). Defaults to the job's own
+ *              per-project PRDs dir (resolvePrdWriteDir(job.cwd)).
  * @returns {Promise<{ slug: string, status: 'pass'|'fail'|'unverifiable', code: number|null, ms: number }>}
  */
 function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
-  const resolvedPrdsDir = prdsDir ?? PRDS_DIR;
+  const resolvedPrdsDir = prdsDir ?? (job.cwd ? resolvePrdWriteDir(job.cwd) : null);
   const startNs = process.hrtime.bigint();
 
   function elapsedMs() {
@@ -371,14 +368,16 @@ function _extractSection(body, headingText) {
  *
  * @param {Array<{ slug: string, cwd: string, landedCommit?: string }>} jobs
  * @param {{ prdsDir?: string, gitTimeoutMs?: number }} opts
+ *   prdsDir  Override PRD directory for every job (for tests). Defaults per-job to
+ *            the job's own per-project PRDs dir (resolvePrdWriteDir(job.cwd)).
  * @returns {Array<{ slug: string, surfaces: string[] }>}  Only jobs with ≥1 hit.
  */
 function flagRiskySurfaces(jobs, { prdsDir, gitTimeoutMs = 10_000 } = {}) {
-  const resolvedPrdsDir = prdsDir ?? PRDS_DIR;
   const results = [];
 
   for (const job of jobs) {
     let candidateText = '';
+    const resolvedPrdsDir = prdsDir ?? (job.cwd ? resolvePrdWriteDir(job.cwd) : null);
 
     // 1. Try git commit — bounded by gitTimeoutMs.
     if (job.landedCommit && job.cwd) {
@@ -395,7 +394,7 @@ function flagRiskySurfaces(jobs, { prdsDir, gitTimeoutMs = 10_000 } = {}) {
     // 2. Fallback: PRD # Implementation notes section.
     // Guard: slug must contain only safe chars to prevent path traversal via a
     // corrupted queue.json entry (e.g. slug: "../../.ssh/id_rsa").
-    if (!candidateText && job.slug && /^[\w-]+$/.test(job.slug)) {
+    if (!candidateText && resolvedPrdsDir && job.slug && /^[\w-]+$/.test(job.slug)) {
       try {
         const raw = fs.readFileSync(path.join(resolvedPrdsDir, `${job.slug}.md`), 'utf8');
         const body = splitFrontmatter(raw).body;

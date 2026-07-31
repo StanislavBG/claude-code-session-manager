@@ -16,7 +16,7 @@ let realHome;
 let rcaFeedbackHook;
 
 // config.cjs and rcaFeedbackHook.cjs both bake os.homedir() into top-level
-// consts at first require (allowedRoots/WRITE_PREFIXES, PRDS_DIR/SM_REPO_ROOT).
+// consts at first require (allowedRoots/WRITE_PREFIXES, SM_REPO_ROOT).
 // Node's require cache must be purged per test so each test's tmpHome takes
 // effect — vi.resetModules() only resets vitest's ESM graph, not require().
 const MODULES_TO_RELOAD = ['../lib/rcaFeedbackHook.cjs', '../config.cjs'];
@@ -65,8 +65,8 @@ function writeRun(runDir, slug, { logLines = ['line1', 'line2'], exitCode = 1, d
   fs.writeFileSync(path.join(runDir, `${slug}.meta.json`), JSON.stringify({ exitCode, durationMs }));
 }
 
-function writePrd(slug, { acBody = '- [ ] `timeout 10 echo ok` passes.' } = {}) {
-  const prdsDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'prds');
+function writePrd(cwd, slug, { acBody = '- [ ] `timeout 10 echo ok` passes.' } = {}) {
+  const prdsDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   const body = ['---', `title: ${slug}`, '---', '', '# Goal', '', 'Do the thing.', '', '# Acceptance criteria', '', acBody, '', '# Out of scope', '', '- N/A'].join('\n');
   fs.writeFileSync(path.join(prdsDir, `${slug}.md`), body);
@@ -82,7 +82,7 @@ test('fileRcaFeedback: second call with same (slug, runId) is a no-op', async ()
   const cwd = makeProjectWithInbox();
   const runDir = path.join(tmpHome, 'run1');
   writeRun(runDir, 'testslug');
-  writePrd('testslug');
+  writePrd(cwd, 'testslug');
   const job = baseJob({ cwd });
 
   const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
@@ -102,7 +102,7 @@ test('fileRcaFeedback: new runId for the same slug files a new RCA', async () =>
   const runDir2 = path.join(tmpHome, 'run2');
   writeRun(runDir1, 'testslug');
   writeRun(runDir2, 'testslug');
-  writePrd('testslug');
+  writePrd(cwd, 'testslug');
 
   const r1 = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd, runId: 'run-aaa' }), runDir: runDir1, verdict: 'transcript_errors' });
   const r2 = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd, runId: 'run-bbb' }), runDir: runDir2, verdict: 'transcript_errors' });
@@ -195,7 +195,7 @@ test('fileRcaFeedback: actually writes into the fallback dir when the target inb
   const cwd = makeProjectWithoutInbox();
   const runDir = path.join(tmpHome, 'run1');
   writeRun(runDir, 'testslug');
-  writePrd('testslug');
+  writePrd(cwd, 'testslug');
 
   const res = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
   expect(res.filed).toBe(true);
@@ -221,7 +221,7 @@ test('fileRcaFeedback: SM_RCA_DISABLE=1 skips without writing', async () => {
   const cwd = makeProjectWithInbox();
   const runDir = path.join(tmpHome, 'run1');
   writeRun(runDir, 'testslug');
-  writePrd('testslug');
+  writePrd(cwd, 'testslug');
 
   const res = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
   expect(res.filed).toBe(false);
@@ -235,7 +235,7 @@ test('fileRcaFeedback: investigationText updates the existing RCA instead of dup
   const cwd = makeProjectWithInbox();
   const runDir = path.join(tmpHome, 'run1');
   writeRun(runDir, 'testslug');
-  writePrd('testslug');
+  writePrd(cwd, 'testslug');
   const job = baseJob({ cwd });
 
   const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });

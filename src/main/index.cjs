@@ -760,7 +760,7 @@ voiceWizard.registerWizardHandlers();
 scheduler.registerScheduleHandlers();
 watchers.registerWatcherHandlers();
 teams.registerTeamsHandlers();
-queueOps.registerQueueOpsHandlers();
+queueOps.registerQueueOpsHandlers({ retireCompletedSlugs: scheduler.retireCompletedSlugs });
 registerHistoryAggregatorHandlers();
 registerHistoryDashboardHandlers();
 pluginInstall.registerPluginInstallHandlers();

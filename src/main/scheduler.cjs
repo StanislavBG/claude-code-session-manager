@@ -469,6 +469,44 @@ function prdPathForJob(job) {
   return path.join(prdDirForCwd(job && job.cwd), `${job && job.slug}.md`);
 }
 
+/** Absolute path to the sibling `prds-archived/<slug>.md` twin of a job's PRD. */
+function archivedPrdPathForJob(job) {
+  return path.join(prdDirForCwd(job && job.cwd), '..', 'prds-archived', `${job && job.slug}.md`);
+}
+
+/**
+ * True if a job's PRD has already been archived (sibling `prds-archived/<slug>.md`
+ * exists). A queue entry whose PRD moved there is stale — the work already shipped
+ * — not a genuine missing-PRD failure.
+ */
+async function archivedTwinExists(job) {
+  try {
+    await fsp.access(archivedPrdPathForJob(job));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build the non-failure result + run meta for a job whose PRD has already
+ * been archived (work shipped, queue entry is stale). Shared by both
+ * PRD-read failure exits in executeJob so the stale-skip logic isn't
+ * duplicated.
+ */
+function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath) {
+  const archivedTwin = archivedPrdPathForJob(job);
+  const msg = `PRD already archived (${archivedTwin}) — work shipped; retiring stale queue entry`;
+  safeLog(`[scheduler] ${msg}\n`);
+  closeFd();
+  const finishedAt = Date.now();
+  config.writeJsonSync(metaPath, {
+    slug: job.slug, cwd, sessionId, exitCode: 0, skipped: 'prd-archived',
+    note: msg, startedAt, finishedAt, durationMs: 0,
+  });
+  return { exitCode: 0, durationMs: 0, skipped: 'prd-archived', note: msg, sessionId };
+}
+
 /**
  * Search every candidate PRD dir for `<slug>.md` (legacy dir first, then
  * each active project's dir). Returns the containing dir, or null if the
@@ -536,6 +574,34 @@ async function archiveCompletedPrd(slug, cwd) {
       logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'archiveCompletedPrd: rename failed', meta: { slug, error: e?.message } });
     }
   }
+}
+
+/**
+ * Mark any still-runnable (pending/running) queue job for the given slugs as
+ * completed. Called after a PRD's .md is manually archived (queueOps.cjs's
+ * `schedule:archive-prd`) so a stale queue entry can never survive to fire
+ * against a PRD that no longer exists in the live prds/ dir — the same
+ * ENOENT-avoidance archivedTwinExists provides in executeJob, applied at the
+ * archiving source instead of at fire-time. auto-archived slugs never need
+ * this (selectAutoArchivable in queueOps.cjs only selects already-completed
+ * jobs), so this is exercised only by the manual archive path.
+ */
+async function retireCompletedSlugs(slugs) {
+  const list = Array.isArray(slugs) ? slugs.filter(Boolean) : [];
+  if (list.length === 0) return;
+  const slugSet = new Set(list);
+  await mutate((s) => {
+    for (const j of s.jobs) {
+      if (!j || !slugSet.has(j.slug)) continue;
+      if (j.status !== 'pending' && j.status !== 'running') continue;
+      j.status = 'completed';
+      j.finishedAt = new Date().toISOString();
+      j.exitCode = 0;
+      j.error = null;
+      delete j.runtime;
+    }
+  });
+  await broadcast({ flush: true });
 }
 
 // Bundled authoring guide seeded into the scheduler dir so the session-manager-dev
@@ -1714,11 +1780,17 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
         prompt = parsed.body + FINISH_PROTOCOL;
         prdPath = fallbackPath;
       } catch (e2) {
+        if (await archivedTwinExists(job)) {
+          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath);
+        }
         safeLog(`[scheduler] failed to read PRD: ${e2?.message}\n`);
         closeFd();
         return { exitCode: -1, durationMs: 0, error: e2?.message };
       }
     } else {
+      if (await archivedTwinExists(job)) {
+        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath);
+      }
       safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
       closeFd();
       return { exitCode: -1, durationMs: 0, error: e?.message };
@@ -2285,6 +2357,25 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     if (res.rateLimited) {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
       await setPaused('rate_limit', resetIso);
+    }
+
+    // Stale queue entry: the PRD already shipped and was archived before this
+    // run fired (see archivedTwinExists in executeJob). Treat it as a plain
+    // completion — no verify pass, no commit guard, no RCA feedback — since
+    // there is no real transcript/commit to check.
+    if (res.skipped === 'prd-archived') {
+      await mutate((s) => {
+        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+        if (idx >= 0) {
+          s.jobs[idx].status = 'completed';
+          s.jobs[idx].finishedAt = new Date().toISOString();
+          s.jobs[idx].exitCode = 0;
+          s.jobs[idx].error = null;
+          delete s.jobs[idx].runtime;
+        }
+      });
+      await broadcast({ flush: true });
+      return;
     }
 
     // Post-run verification: for exit=0 runs, scan the transcript and check
@@ -3987,4 +4078,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

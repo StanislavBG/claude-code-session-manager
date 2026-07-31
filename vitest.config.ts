@@ -36,6 +36,7 @@ export default defineConfig({
       'src/main/__tests__/prdMigration.test.cjs',
       'src/main/__tests__/scheduler-find-prd-dir.test.cjs',
       'src/main/__tests__/scheduler-archive-completed-prd.test.cjs',
+      'src/main/__tests__/scheduler-archived-twin-guard.test.cjs',
       'src/main/__tests__/scheduler-investigation-clean-skip.test.cjs',
       'src/main/__tests__/runVerify.test.cjs',
       'src/main/__tests__/scheduler-meta-code-sha.test.cjs',

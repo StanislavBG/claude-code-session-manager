@@ -140,3 +140,15 @@ test('autoArchiveCompleted: tolerates a missing/malformed state.jobs', async () 
   const result = await autoArchiveCompleted({}, { nowMs: NOW });
   expect(result.archived).toBe(0);
 });
+
+// ---------- archiving never strands a runnable queue job (scheduler PRD:
+// archived-prd-skip — job 822-epics-nav-rename fired ENOENT after its PRD
+// was archived out from under a still-queued job) ----------
+
+test('selectAutoArchivable never selects a slug whose job is still pending or running, so auto-archive can never leave a runnable job pointing at an archived PRD', () => {
+  const pending = old({ slug: '13-pending', status: 'pending', finishedAt: null });
+  const running = old({ slug: '14-running', status: 'running', finishedAt: null });
+  const completed = old({ slug: '15-done', status: 'completed' });
+  const slugs = selectAutoArchivable([pending, running, completed], { nowMs: NOW });
+  expect(slugs).toEqual(['15-done']);
+});

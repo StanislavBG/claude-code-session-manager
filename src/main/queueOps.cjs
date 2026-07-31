@@ -307,6 +307,16 @@ async function archiveOne(slug, archiveDir) {
   }
 }
 
+/**
+ * Injected by index.cjs at registration time (see registerQueueOpsHandlers)
+ * so a manual archive can retire any still-runnable queue job for the same
+ * slug without queueOps.cjs importing scheduler.cjs (circular — scheduler.cjs
+ * already requires queueOps.cjs). No-op until set; the auto-archive path
+ * never needs it (selectAutoArchivable only ever selects already-completed
+ * jobs).
+ */
+let retireCompletedSlugsFn = async () => {};
+
 async function archiveMany(slugs) {
   if (!Array.isArray(slugs) || slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
@@ -324,6 +334,12 @@ async function archiveMany(slugs) {
     results.push(await archiveOne(slug, archiveDir));
   }
   const archived = results.filter((r) => r.ok).length;
+  const archivedSlugs = results.filter((r) => r.ok).map((r) => r.slug);
+  if (archivedSlugs.length > 0) {
+    await retireCompletedSlugsFn(archivedSlugs).catch((e) => {
+      logs.writeLine({ level: 'warn', scope: 'queueOps', message: 'archiveMany: retireCompletedSlugs failed', meta: { error: e?.message } });
+    });
+  }
   return { ok: true, archived, archivedTo: archiveDir, results };
 }
 
@@ -547,7 +563,10 @@ async function retagMany(items) {
 
 // ────────────────────────────────────────────── IPC registration
 
-function registerQueueOpsHandlers() {
+function registerQueueOpsHandlers({ retireCompletedSlugs } = {}) {
+  if (typeof retireCompletedSlugs === 'function') {
+    retireCompletedSlugsFn = retireCompletedSlugs;
+  }
   ipcMain.handle('schedule:lint-queue', async () => {
     return lintAll();
   });

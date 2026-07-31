@@ -95,3 +95,25 @@ describe('pickForProject dependsOn eligibility (PRD 832)', () => {
     expect(res.batch.map((j) => j.slug).sort()).toEqual(['827-one', '827-two']);
   });
 });
+
+describe('reconcile retires archived-twin pending rows (post-832 cleanup)', () => {
+  it('drops a pending row whose PRD lives in prds-archived, keeps a normal invisible pending row', async () => {
+    const scheduler = require('../scheduler.cjs');
+    const root = tmpdir();
+    const opsDir = path.join(root, 'session-manager-operations', 'scheduler');
+    fs.mkdirSync(path.join(opsDir, 'prds'), { recursive: true });
+    fs.mkdirSync(path.join(opsDir, 'prds-archived'), { recursive: true });
+    fs.writeFileSync(path.join(opsDir, 'prds-archived', '833-landed-inline.md'), '---\ntitle: x\n---\n# Goal\n');
+
+    const state = {
+      jobs: [
+        job('833-landed-inline', 'pending', 833, { cwd: root }),
+        job('900-still-hidden', 'pending', 900, { cwd: root }),
+      ],
+    };
+    await scheduler.reconcile(state);
+    const slugs = state.jobs.map((j) => j.slug);
+    expect(slugs).not.toContain('833-landed-inline');
+    expect(slugs).toContain('900-still-hidden');
+  });
+});

@@ -1081,6 +1081,16 @@ async function reconcile(state) {
       // or mid-move. "I can't see it" is not "the user deleted it", so the
       // row survives — worst case it re-resolves on the next pass.
       if (job.status === 'pending' || job.status === 'running') {
+        // Exception: a PENDING row whose PRD has an archived twin was
+        // retired on purpose (work landed by other means — e.g. implemented
+        // inline — and the source .md moved to prds-archived/). Keeping it
+        // would show a phantom "scheduled" job forever; firing it would just
+        // hit executeJob's archived-twin skip anyway. Running rows are left
+        // alone — the reaper owns their lifecycle.
+        if (job.status === 'pending' && (await archivedTwinExists(job))) {
+          console.log(`[scheduler] reconcile: retiring pending job ${job.slug} — PRD already archived (work landed elsewhere)`);
+          continue;
+        }
         seen.add(job.slug);
         next.push({ ...job });
         console.warn(`[scheduler] reconcile: keeping ${job.status} job ${job.slug} — PRD source not visible in any candidate dir`);

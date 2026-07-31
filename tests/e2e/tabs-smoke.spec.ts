@@ -27,7 +27,6 @@ const TABS: NavKey[] = [
   'plugins',
   'mcp',
   'hooks',
-  'subagents',
   'scheduler',
   'memory',
   'projects',

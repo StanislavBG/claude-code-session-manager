@@ -16,7 +16,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'overview',
   'terminal',
   'browser',
-  'subagents',
   'scheduler',
   'history',
   'usage',

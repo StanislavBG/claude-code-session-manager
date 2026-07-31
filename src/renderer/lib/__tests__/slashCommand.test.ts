@@ -11,7 +11,7 @@ describe('matchSlashNav', () => {
   })
 
   it('ignores trailing args', () => {
-    expect(matchSlashNav('/agents foo bar')).toBe('subagents')
+    expect(matchSlashNav('/mcp foo bar')).toBe('mcp')
   })
 
   it('returns null for plain text with no leading slash', () => {

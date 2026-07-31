@@ -8,12 +8,12 @@
  * with the rest of the set.
  */
 export type AlmanacIconName =
-  | 'home' | 'terminal' | 'agents' | 'skills' | 'history' | 'usage'
-  | 'hive' | 'plugins' | 'mcp' | 'hooks' | 'keys' | 'plans' | 'tasks' | 'projects'
+  | 'home' | 'terminal' | 'skills' | 'history' | 'usage'
+  | 'plugins' | 'mcp' | 'hooks' | 'keys' | 'plans' | 'tasks' | 'projects'
   | 'memory' | 'search' | 'chevron' | 'caret' | 'dot' | 'plus'
   | 'folder' | 'file' | 'play' | 'pause' | 'sparkle' | 'book' | 'compass'
   | 'scheduler' | 'settings' | 'mic' | 'clock' | 'leaf' | 'orchestrator'
-  | 'race' | 'background' | 'repoviz' | 'subagents' | 'system-prompt'
+  | 'race' | 'background' | 'repoviz' | 'system-prompt'
   | 'permissions' | 'agent-memory' | 'tool' | 'quick-open' | 'global-search'
   | 'remote' | 'wifi' | 'shield' | 'link' | 'copy'
   | 'check' | 'x' | 'send'
@@ -43,12 +43,9 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
   switch (name) {
     case 'home':         return <svg {...props}><path d="M4 11l8-7 8 7" /><path d="M6 10v9h12v-9" /><path d="M10 19v-5h4v5" /></svg>
     case 'terminal':     return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 10l3 2-3 2" /><path d="M13 14h4" /></svg>
-    case 'agents':
-    case 'subagents':    return <svg {...props}><circle cx="7" cy="9" r="2.5" /><circle cx="17" cy="9" r="2.5" /><circle cx="12" cy="17" r="2.5" /><path d="M8.6 11l2.8 4M15.4 11l-2.8 4M9.5 9h5" /></svg>
     case 'skills':       return <svg {...props}><path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z" /></svg>
     case 'history':      return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /><path d="M4 6l2 2" /></svg>
     case 'usage':        return <svg {...props}><path d="M4 19V8M10 19V5M16 19v-7M22 19H2" /></svg>
-    case 'hive':         return <svg {...props}><path d="M8 4h8l4 7-4 7H8l-4-7z" /><circle cx="12" cy="11" r="2.5" /></svg>
     case 'plugins':      return <svg {...props}><path d="M9 3v4M15 3v4M5 7h14v6a5 5 0 01-5 5h-4a5 5 0 01-5-5V7z" /></svg>
     case 'mcp':          return <svg {...props}><rect x="3" y="4" width="18" height="6" rx="1.5" /><rect x="3" y="14" width="18" height="6" rx="1.5" /><circle cx="6.5" cy="7" r=".5" fill="currentColor" /><circle cx="6.5" cy="17" r=".5" fill="currentColor" /></svg>
     case 'hooks':        return <svg {...props}><path d="M12 4v9a3 3 0 003 3h5" /><path d="M9 17l3 3 3-3" /></svg>

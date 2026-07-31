@@ -257,7 +257,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         {
           title: 'Three views',
           items: [
-            { term: 'Installed', body: 'A read-only inspector for every plugin folder on disk, shown as a table: name, origin, version, whether it has a manifest, and a contents summary (counts of agents · skills · hooks · monitors · bin · lsp · mcp). Click a row for a detail panel with the manifest fields (version, license, homepage, repository, author) and the full path. To edit a plugin\'s pieces, use the dedicated Skills / Subagents / Hooks tabs — they point at the same files.' },
+            { term: 'Installed', body: 'A read-only inspector for every plugin folder on disk, shown as a table: name, origin, version, whether it has a manifest, and a contents summary (counts of agents · skills · hooks · monitors · bin · lsp · mcp). Click a row for a detail panel with the manifest fields (version, license, homepage, repository, author) and the full path. To edit a plugin\'s pieces, use the dedicated Skills / Hooks tabs — they point at the same files.' },
             { term: 'Discover', body: 'A built-in list of official add-ons (LSP servers, MCP integrations). The Install button runs claude plugin install <slug> in a hidden terminal and streams its output below the row; on success the row flips to installed.' },
             { term: 'Library', body: 'Browse the curated plugin catalog. Each row has a "source" link, a "copy" button for the /plugin install command, and an Install button that wires up the marketplace and installs for you.' },
           ],
@@ -267,14 +267,14 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
           items: [
             { term: 'plugin.json', body: 'The manifest — name, version, description, what the plugin includes. The canonical location is .claude-plugin/plugin.json; older installs keep it at the folder root. Both are detected.' },
             { term: 'skills/', body: 'Same shape as ~/.claude/skills/. Show up in the Skills tab.' },
-            { term: 'agents/', body: 'Markdown subagents (same shape as ~/.claude/agents/). Show up in the Subagents tab.' },
+            { term: 'agents/', body: 'Markdown subagents (same shape as ~/.claude/agents/), available to the main Claude to delegate to.' },
             { term: 'hooks/hooks.json', body: 'Hooks contributed by the plugin (mirrors settings.json\'s hooks shape, keyed by event), merged into your effective hook set.' },
             { term: '.mcp.json / .lsp.json / monitors/', body: 'Optional — MCP servers, language servers, and monitors the plugin bundles. Their presence shows up in the contents summary.' },
           ],
         },
       ],
       tips: [
-        'The Installed view is inspect-only here — it will not let you edit or delete plugin files. Edit a plugin\'s contents through the Skills/Subagents/Hooks tabs instead.',
+        'The Installed view is inspect-only here — it will not let you edit or delete plugin files. Edit a plugin\'s contents through the Skills/Hooks tabs instead.',
         'Editing plugin contents directly is fine but be aware: an upgrade may overwrite your changes. Fork the plugin if you need persistent customizations.',
       ],
     },
@@ -336,7 +336,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
             { term: 'command', body: 'Run a shell string (with an optional args array for the no-shell exec form). The script receives the event as JSON on stdin and can return a JSON decision. Only command hooks support the Test fire button.' },
             { term: 'http', body: 'POST the event JSON to a URL. The response becomes the decision.' },
             { term: 'prompt', body: 'Send a templated prompt to Claude itself for a quick gut-check. Useful for "should I really run this command?" guards.' },
-            { term: 'agent', body: 'Spawn a subagent (defined in the Subagents tab) with the event as input. The agent\'s output is the decision.' },
+            { term: 'agent', body: 'Spawn a subagent (a markdown file under ~/.claude/agents/) with the event as input. The agent\'s output is the decision.' },
             { term: 'mcp_tool', body: 'Invoke a named MCP tool (e.g. mcp__server__tool) in response to the event.' },
           ],
         },
@@ -355,36 +355,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       tips: [
         'Test new hooks with the "test fire" button next to a command hook — it runs the command against an editable fake event payload (and shows whether your matcher would match) so you can debug without waiting for a real session.',
         'Each hook can set a timeout (ms) and command hooks can emit a terminalSequence (e.g. a bell). Slow synchronous hooks are noticeable — use http or fire-and-forget for work you don\'t need to wait on.',
-      ],
-    },
-  'subagents': {
-      headline: 'Specialised mini-Claudes that handle focused tasks for the main session',
-      intro:
-        'A subagent is a separate Claude instance with its own system prompt, model, and tool restrictions. When the main Claude needs to delegate something focused — code review, security audit, large search — it spawns a subagent, which works in isolation and returns a single summary. Subagents protect the main context window from drowning in intermediate output and let you specialise prompts per task type.',
-      sections: [
-        {
-          title: 'Three sub-tabs',
-          items: [
-            { term: 'Launch', body: 'Type one brief, then pick a topology: Hive (a preset bundle of subagents fanned out in parallel), Orchestrate (a different sub-task per running tab, needs 2+ tabs), Race (the same brief to 2+ running tabs, pick a winner), or Boss (Claude runs as a boss on the active tab, dispatching N specialists at a chosen depth). The brief is shared — switching topology keeps what you typed.' },
-            { term: 'Live', body: 'Active cross-tab runs (Orchestrate / Race / Boss) plus the per-tab Task-tool subagents spawned in the active session, with a running/done banner, elapsed time, and a results digest that fills in as agents finish.' },
-            { term: 'Agents', body: 'Edit the subagents you have defined. Each is a markdown file in ~/.claude/agents/ (User) or .claude/agents/ (Project). Filter the roster, add a new agent, install a starter from the bundled catalog, or delete one.' },
-          ],
-        },
-        {
-          title: 'Subagent anatomy',
-          items: [
-            { term: 'name', body: 'Referenced by the main Claude when delegating ("Task tool, subagent_type: code-reviewer"). Lowercase-with-hyphens; should be a stable identifier.' },
-            { term: 'description', body: 'When to use this subagent. Main Claude reads descriptions to choose. Be specific about scope.' },
-            { term: 'tools', body: 'A whitelist, edited as clickable chips (Read/Grep/Bash/Write/Edit/… plus a box to add custom or mcp__ tools). Empty = inherit all tools. Tightening this is the easiest way to make a subagent safer.' },
-            { term: 'model', body: 'inherit / opus / sonnet / haiku. Use a cheaper model for simple agents to save cost; opus for complex reasoning.' },
-            { term: 'More settings', body: 'Optional knobs under the expander: effort, color, isolation (worktree), memory scope, permissionMode, maxTurns, run-as-background, initialPrompt, and preloaded skills. Any mcpServers/hooks already in the frontmatter are preserved.' },
-            { term: 'System prompt', body: 'The body of the markdown file — what this agent should and shouldn\'t do. Be explicit.' },
-          ],
-        },
-      ],
-      tips: [
-        'A subagent that returns 5000 words of debug logs has failed at its job — the whole point is to compress. Only its final summary reaches your main session.',
-        'Use "Install a starter" in the Agents roster to drop in a ready-made agent (like a read-only code explorer) if you\'re building your first one.',
       ],
     },
   'memory': {

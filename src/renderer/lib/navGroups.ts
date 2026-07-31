@@ -18,7 +18,7 @@ export interface NavGroupItem {
   group: NavGroupLabel
   label: string
   icon: AlmanacIconName
-  liveKind?: 'subagents' | 'scheduler'
+  liveKind?: 'scheduler'
   hint?: string
 }
 
@@ -29,7 +29,6 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'system-prompt', group: 'Workspace', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior' },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences' },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
-  { key: 'subagents',  group: 'Workspace', label: 'Subagents',  icon: 'hive',         liveKind: 'subagents', hint: 'Fan out work: Hive · Orchestrate · Race · Boss' },
   { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
   { key: 'usage',      group: 'Workspace', label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },

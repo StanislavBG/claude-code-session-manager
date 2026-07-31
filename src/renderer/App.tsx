@@ -14,7 +14,6 @@ import { CommandPalette, type Command } from './components/CommandPalette'
 import { SimpleShell } from './components/SimpleShell'
 import { Toast } from './components/ui/Toast'
 import { SuperAgentStatusBar } from './components/layout/SuperAgentStatusBar'
-import { OrchestratorStatusPanel } from './components/layout/OrchestratorStatusPanel'
 import { installSuperAgentListener } from './state/superagent'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
@@ -651,7 +650,6 @@ export function App() {
           the banner's 28px height so TabBar stays visible. */}
       <RecordingStatus />
       <SuperAgentStatusBar />
-      <OrchestratorStatusPanel />
       <TabBar splitViewActive={splitView} onToggleSplitView={() => setSplitView(true)} />
       <div className="flex-1 flex min-h-0">
         <AlmanacSidebar

@@ -170,7 +170,6 @@ export function buildCommands(): Command[] {
     { id: 'nav:plugins', label: 'Go to Plugins', section: 'nav', emitOnly: true },
     { id: 'nav:mcp', label: 'Go to MCP Servers', section: 'nav', emitOnly: true },
     { id: 'nav:hooks', label: 'Go to Hooks', section: 'nav', emitOnly: true },
-    { id: 'nav:subagents', label: 'Go to Subagents', section: 'nav', emitOnly: true },
     { id: 'nav:scheduler', label: 'Go to Scheduler', section: 'nav', emitOnly: true },
     { id: 'nav:memory', label: 'Go to Memory', section: 'nav', emitOnly: true },
     { id: 'nav:projects', label: 'Go to File Explorer', section: 'nav', emitOnly: true },

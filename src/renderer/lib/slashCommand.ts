@@ -5,8 +5,6 @@ const SLASH_NAV_COMMANDS: Record<string, NavKey> = {
   permissions: 'permissions',
   hooks: 'hooks',
   memory: 'memory',
-  agents: 'subagents',
-  subagents: 'subagents',
   skills: 'skills',
   plugins: 'plugins',
   usage: 'usage',

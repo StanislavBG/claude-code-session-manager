@@ -21,7 +21,6 @@ export type NavKey =
   | 'plugins'
   | 'mcp'
   | 'hooks'
-  | 'subagents'
   | 'memory'
   | 'projects'
   | 'history'

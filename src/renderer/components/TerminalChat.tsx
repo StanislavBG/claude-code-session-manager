@@ -221,7 +221,6 @@ const NAV_LABELS: Record<NavKey, string> = {
   plugins: 'Plugins',
   mcp: 'MCP Servers',
   hooks: 'Hooks',
-  subagents: 'Subagents',
   memory: 'Memory',
   projects: 'Projects',
   history: 'History',

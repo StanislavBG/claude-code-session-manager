@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NavKey } from '../LeftNav'
 import { useSessions } from '../../state/sessions'
-import { useLive } from '../../state/live'
 import { useVoice } from '../../state/voice'
 import { useScheduleState } from '../../state/scheduleState'
 import { useBilling } from '../../state/billing'
@@ -93,20 +92,12 @@ function loadCollapsed(): Set<GroupName> {
 }
 
 function useLiveIndicators() {
-  const tabs = useLive((s) => s.tabs)
   // Selector returns a primitive so this component only re-renders when the
   // boolean flips, not on every scheduler snapshot broadcast.
   const schedulerRunning = useScheduleState((s) =>
     (s.snapshot?.jobs ?? []).some((j) => j.status === 'running'),
   )
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 5_000)
-    return () => clearInterval(id)
-  }, [])
-  const list = Object.values(tabs)
   return {
-    subagents: list.some((t) => t.agents.some((a) => now - a.at < 60_000)),
     scheduler: schedulerRunning,
   }
 }

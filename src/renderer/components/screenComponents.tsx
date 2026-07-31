@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import type { NavKey } from './LeftNav'
 import { Home } from './tabs/Home'
 import { Skills } from './tabs/Skills'
-import { Subagents } from './tabs/Subagents'
 import { History } from './tabs/History'
 import { Usage } from './tabs/Usage'
 import { EditorView } from './tabs/EditorView'
@@ -46,8 +45,6 @@ interface PageConfig {
 
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'skills':        { title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
-  // 'subagents' intentionally omitted: Subagents owns its own full-bleed editorial header
-  // ("The hive" h1 + eyebrow + blurb). Adding it here would double-render the heading.
   'history':       { title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
   'usage':         { title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
@@ -99,7 +96,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
   const body = (() => {
     switch (active) {
       case 'skills':        return <Skills />
-      case 'subagents':     return <Subagents />
       case 'history':       return <History />
       case 'usage':         return <Usage />
       case 'scheduler':     return <Scheduler />

@@ -23,6 +23,7 @@ const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
+const { listReferencedFiles } = require('./lib/importReferences.cjs');
 
 /** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
 const watchers = new Map();
@@ -409,6 +410,14 @@ function registerConfigHandlers() {
   ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text }) => writeTextAtomic(p, text)));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
+  ipcMain.handle('config:parse-imports', v(s.configParseImports, async ({ path: p }) => {
+    try {
+      const real = validatePath(expandHome(p));
+      return { ok: true, imports: listReferencedFiles(real) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }));
   ipcMain.on('config:watch', (e, { paths }) => { try { s.configWatch.parse(paths); watch(paths, e.sender.id); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch schema reject', meta: { error: err?.message } }); } });
   ipcMain.on('config:unwatch', (e, { paths }) => { try { s.configWatch.parse(paths); unwatch(paths, e.sender.id); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:unwatch schema reject', meta: { error: err?.message } }); } });
 }

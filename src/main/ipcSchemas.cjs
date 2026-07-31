@@ -192,6 +192,8 @@ const configListDir = z.object({
 
 const configWatch = z.array(z.string().min(1).max(4096));
 
+const configParseImports = z.object({ path: z.string().min(1).max(4096) });
+
 // ──────────────────────────────────────────── Sessions
 const sessionsPayload = z.object({
   tabs: z.array(z.object({
@@ -748,6 +750,7 @@ module.exports = {
     configWriteText,
     configListDir,
     configWatch,
+    configParseImports,
     sessionsPayload,
     layoutEnvelope,
     scheduleSlug,

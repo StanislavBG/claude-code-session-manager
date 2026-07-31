@@ -113,6 +113,15 @@ export interface ReadTextResult {
   error: string | null;
 }
 
+/** One resolved node in a CLAUDE.md-like file's `@path` import chain. */
+export interface ImportRef {
+  path: string;
+  exists: boolean;
+  sizeBytes: number;
+  tokenEstimate: number;
+  ok: boolean;
+}
+
 export interface WriteResult {
   ok: boolean;
   mtimeMs: number;
@@ -1172,6 +1181,7 @@ export interface SessionManagerAPI {
     watch: (paths: string[]) => void;
     unwatch: (paths: string[]) => void;
     onChanged: (handler: (info: ConfigChangedEvent) => void) => () => void;
+    parseImports: (path: string) => Promise<{ ok: true; imports: ImportRef[] } | { ok: false; error: string }>;
   };
   voice: {
     onHotkey: (handler: (event: VoiceHotkeyEvent) => void) => () => void;

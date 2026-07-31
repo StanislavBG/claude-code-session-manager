@@ -156,6 +156,7 @@ contextBridge.exposeInMainWorld('api', {
     exists: (path) => ipcRenderer.invoke('config:exists', { path }),
     watch: (paths) => ipcRenderer.send('config:watch', { paths }),
     unwatch: (paths) => ipcRenderer.send('config:unwatch', { paths }),
+    parseImports: (path) => ipcRenderer.invoke('config:parse-imports', { path }),
     onChanged: (handler) => {
       const listener = (_e, info) => handler(info);
       ipcRenderer.on('config:changed', listener);

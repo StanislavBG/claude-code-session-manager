@@ -96,8 +96,8 @@ function makeTab(overrides: Partial<{ id: string; status: TabStatus; sessionId: 
 }
 
 /** Drives startRecording through its async getDevicePref hop so createRecognition's opts are captured. */
-async function startAndCapture(useVoice: any, tabId: string) {
-  useVoice.getState().startRecording(tabId)
+async function startAndCapture(useVoice: any, tabId: string, startOpts?: { sink?: (text: string) => void }) {
+  useVoice.getState().startRecording(tabId, startOpts)
   await vi.waitFor(() => expect(capturedOpts).not.toBeNull())
   const opts = capturedOpts
   capturedOpts = null
@@ -168,6 +168,87 @@ describe('voice.ts onFinal — dormant vs live tab delivery', () => {
     opts.onFinal('cancel')
 
     expect(ptyWrite).toHaveBeenCalledWith({ tabId: 't1', data: '\x1b' })
+  })
+})
+
+describe('voice.ts onFinal — sink mode (e.g. EpicComposer dictation)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+    capturedOpts = null
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('hands the transcript to the sink instead of pty.write, with no tab lookup involved', async () => {
+    const { ptyWrite } = installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+    const { useVoice } = await import('../voice')
+
+    // No tab exists for this id at all — sink mode must not depend on one.
+    useSessions.setState({ tabs: [] })
+
+    const sink = vi.fn()
+    const opts = await startAndCapture(useVoice, 'epic-1', { sink })
+    opts.onFinal('add a mic button')
+
+    expect(sink).toHaveBeenCalledWith('add a mic button')
+    expect(ptyWrite).not.toHaveBeenCalled()
+    expect(useVoice.getState().isRecording).toBe(true)
+  })
+
+  it('does not arm the auto-submit countdown in sink mode', async () => {
+    const { ptyWrite, chatRun } = installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+    const { useVoice } = await import('../voice')
+
+    useSessions.setState({ tabs: [] })
+
+    const sink = vi.fn()
+    const opts = await startAndCapture(useVoice, 'epic-1', { sink })
+    opts.onFinal('add a mic button')
+
+    await vi.advanceTimersByTimeAsync(useVoice.getState().submitDelayMs)
+
+    expect(ptyWrite).not.toHaveBeenCalled()
+    expect(chatRun).not.toHaveBeenCalled()
+  })
+
+  it('does not treat a matched voice command specially in sink mode — delivered as literal text', async () => {
+    const { ptyWrite } = installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+    const { useVoice } = await import('../voice')
+
+    useSessions.setState({ tabs: [] })
+
+    const sink = vi.fn()
+    const opts = await startAndCapture(useVoice, 'epic-1', { sink })
+    opts.onFinal('cancel')
+
+    expect(sink).toHaveBeenCalledWith('cancel')
+    expect(ptyWrite).not.toHaveBeenCalled()
+  })
+
+  it('a later plain startRecording(tabId) does not inherit a stale sink', async () => {
+    const { ptyWrite } = installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+    const { useVoice } = await import('../voice')
+
+    useSessions.setState({ tabs: [makeTab({ id: 't1', status: 'running' })] })
+
+    const sink = vi.fn()
+    await startAndCapture(useVoice, 'epic-1', { sink })
+    useVoice.getState().stopRecording()
+    await vi.waitFor(() => expect(useVoice.getState().isRecording).toBe(false))
+
+    const opts = await startAndCapture(useVoice, 't1')
+    opts.onFinal('hello from voice')
+
+    expect(sink).not.toHaveBeenCalled()
+    expect(ptyWrite).toHaveBeenCalledWith({ tabId: 't1', data: 'hello from voice' })
   })
 })
 

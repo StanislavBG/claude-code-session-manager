@@ -166,7 +166,7 @@ interface VoiceState {
   wizardArmed: boolean
   wizardOpen: boolean
 
-  startRecording: (tabId: string) => void
+  startRecording: (tabId: string, opts?: { sink?: (text: string) => void }) => void
   stopRecording: () => void
   setExternalRecording: (v: boolean) => void
   toggleTTS: () => void
@@ -375,6 +375,17 @@ let activeHandle: RecognitionHandle | null = null
 let detachVadDucking: (() => void) | null = null
 
 /**
+ * Optional per-recording override for where a final transcript goes. Set by
+ * `startRecording(tabId, { sink })`. When present, `onFinal` hands the
+ * trimmed transcript straight to the sink instead of the tab-coupled
+ * pty.write/armSubmit path (used by non-terminal callers like EpicComposer
+ * that dictate into local text state, not a PTY). No voice-command matching
+ * or auto-submit occurs in sink mode. Cleared whenever `activeHandle` is
+ * cleared so a later plain `startRecording(tabId)` doesn't inherit it.
+ */
+let currentSink: ((text: string) => void) | null = null
+
+/**
  * F3: read-only getter for <MicLevelMeter />. Returns the active recognition
  * handle's AnalyserNode, or null if no recording is in flight (or the handle
  * was created before getAnalyser() landed). Callers should treat null as a
@@ -539,7 +550,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
     get().initModel()
   },
 
-  startRecording: (tabId: string) => {
+  startRecording: (tabId: string, opts?: { sink?: (text: string) => void }) => {
     if (get().isRecording) return
     // Defuse fast double-click during async stop-drain: stopRecording sets
     // isRecording=false synchronously but the prior handle drains async, and
@@ -640,6 +651,14 @@ export const useVoice = create<VoiceState>((set, get) => ({
             set({ lastTranscript: '', lastPartial: '', statusPill: 'idle' })
             return
           }
+          if (currentSink) {
+            // Sink mode (e.g. EpicComposer): hand the transcript to the
+            // caller's text state and stop — no pty write, no voice-command
+            // matching, no auto-submit countdown.
+            currentSink(trimmed)
+            set({ lastTranscript: '', lastPartial: '', statusPill: 'idle' })
+            return
+          }
           const tabStatus = useSessions.getState().tabs.find((t) => t.id === tabId)?.status
           if (tabStatus === 'dormant') {
             // No PTY to write into (Chat view, PRD 772) — voice commands are
@@ -692,6 +711,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
           cancelIdleAutoStop()
           activeHandle?.destroy()
           activeHandle = null
+          currentSink = null
           // User-visible signal: the mic button only shows error state in its
           // tooltip, which is easy to miss. Toast it.
           toast.error(`Microphone error: ${err}`)
@@ -704,6 +724,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
       })
 
       activeHandle = handle
+      currentSink = opts?.sink ?? null
       // Set isRecording before start() resolves so the UI shows the recording
       // ring immediately. Ducking is attached inside the start chain so
       // setVadThresholds runs after MicVAD's worklet booted (otherwise the
@@ -758,7 +779,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
     // double-click in startRecording sees it and bails.
     handle.stop().finally(() => {
       handle.destroy()
-      if (activeHandle === handle) activeHandle = null
+      if (activeHandle === handle) { activeHandle = null; currentSink = null }
       // F1: if a hotkey-driven flow is in `stopping`, transition to `idle`
       // and clear the drain watchdog. Other paths (button click) stay in
       // their hotkeyState (which is `idle` already, this is a no-op).

@@ -5,6 +5,7 @@ import { act } from 'react-dom/test-utils'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { EpicComposer, canCompose } from '../EpicComposer'
 import { useChat } from '../../../state/chat'
+import { useVoice } from '../../../state/voice'
 import type { PromptSession } from '../../../state/promptSessions'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
 
@@ -18,6 +19,29 @@ const saveBinarySpy = vi.fn(async () => ({ ok: true }))
 
 vi.mock('../../../state/toast', () => ({
   toast: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+}))
+
+let capturedVoiceOpts: any = null
+vi.mock('../../../lib/speechRecognition', () => ({
+  createRecognition: vi.fn((opts: any) => {
+    capturedVoiceOpts = opts
+    return {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn(),
+      setVadThresholds: vi.fn(),
+      getAnalyser: vi.fn(() => null),
+    }
+  }),
+  isRecognitionSupported: vi.fn(() => true),
+  preloadModel: vi.fn(),
+  resetModel: vi.fn(),
+}))
+vi.mock('../../../lib/vadDucking', () => ({ attachVadDucking: vi.fn(() => () => {}) }))
+vi.mock('../../../lib/speechSynthesis', () => ({
+  stopSpeaking: vi.fn(),
+  isSpeaking: vi.fn(() => false),
+  getSpeakStartedAt: vi.fn(() => null),
 }))
 
 const dispatchSpy = vi.fn(async (..._args: unknown[]) => 'some-prd-slug')
@@ -70,9 +94,18 @@ beforeEach(() => {
   cancelSpy.mockClear()
   saveBinarySpy.mockClear()
   dispatchSpy.mockClear()
+  capturedVoiceOpts = null
+  useVoice.setState({
+    isRecording: false,
+    modelStatus: 'ready',
+    permissionState: 'granted',
+    error: null,
+    errorKind: null,
+  } as any)
 })
 
 afterEach(() => {
+  if (useVoice.getState().isRecording) useVoice.getState().stopRecording()
   act(() => root?.unmount())
   container?.remove()
   container = null
@@ -177,5 +210,53 @@ describe('EpicComposer', () => {
     rerender(createElement(EpicComposer, { epic: e2, snapshots: snapshots() }))
     const textareaAfter = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
     expect(textareaAfter.value).toBe('')
+  })
+
+  it('mic button dictates into the composer text, flips the store isRecording flag (RecordingStatus path), and never auto-submits', async () => {
+    const send = vi.fn()
+    useChat.setState({ send } as any)
+    const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
+    const micBtn = el.querySelector('[data-testid="epic-composer-mic"]') as HTMLButtonElement
+
+    await act(async () => {
+      micBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await vi.waitFor(() => expect(capturedVoiceOpts).not.toBeNull())
+    })
+
+    // RecordingStatus (App-level privacy banner) is keyed off this exact
+    // store flag — asserting it here covers the mount invariant without
+    // needing to render RecordingStatus itself.
+    expect(useVoice.getState().isRecording).toBe(true)
+    expect(micBtn.getAttribute('aria-pressed')).toBe('true')
+
+    act(() => capturedVoiceOpts.onFinal('add a mic button'))
+    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
+    expect(textarea.value).toBe('add a mic button')
+
+    // No auto-submit: dictating never sends/dispatches on its own.
+    expect(send).not.toHaveBeenCalled()
+    expect(dispatchSpy).not.toHaveBeenCalled()
+
+    act(() => capturedVoiceOpts.onFinal('for the epic composer'))
+    expect(textarea.value).toBe('add a mic button for the epic composer')
+
+    act(() => micBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await vi.waitFor(() => expect(useVoice.getState().isRecording).toBe(false))
+    expect(micBtn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('does not treat a dictated voice command specially — delivered as literal appended text', async () => {
+    const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
+    const micBtn = el.querySelector('[data-testid="epic-composer-mic"]') as HTMLButtonElement
+
+    await act(async () => {
+      micBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await vi.waitFor(() => expect(capturedVoiceOpts).not.toBeNull())
+    })
+
+    act(() => capturedVoiceOpts.onFinal('cancel'))
+    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
+    expect(textarea.value).toBe('cancel')
+    expect(cancelSpy).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useChat, dispatchPromptSessionToPrd } from '../../state/chat'
 import type { PromptSession } from '../../state/promptSessions'
 import { epicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
@@ -6,6 +7,8 @@ import { EpicKindTag, epicStatusDotClass } from './epic-primitives'
 import { AttachTray, useAttachments, type AttachmentItem } from './attachments'
 import type { TicketTag } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
+import { useVoice, selectCanRecord } from '../../state/voice'
+import { copyFor } from '../../lib/voiceCopy'
 
 type ComposerAction = 'chat' | 'dispatch'
 
@@ -90,14 +93,43 @@ export function EpicComposer({ epic, snapshots, onSent }: Props) {
   const send = useChat((s) => s.send)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
+  // Dictation: appends into `text` via a sink, never auto-submits. `dictating`
+  // tracks whether THIS composer owns the in-flight recording (vs. some other
+  // mic consumer, e.g. a Terminal tab) so its button doesn't stop someone
+  // else's session.
+  const [dictating, setDictating] = useState(false)
+  const isRecording = useVoice((s) => s.isRecording)
+  const voiceGate = useVoice(useShallow(selectCanRecord))
+
   // Composer state (text, attachments, action override) is scoped to the
   // Epic being iterated on — switching Epics must not leak a draft across.
   useEffect(() => {
     setText('')
     att.clear()
     setAction(defaultAction(epic.tag))
+    setDictating(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epic.id])
+
+  // Recognition can stop on its own (idle timeout, error) without this
+  // composer calling stopRecording — drop ownership when that happens.
+  useEffect(() => {
+    if (!isRecording && dictating) setDictating(false)
+  }, [isRecording, dictating])
+
+  const onMicClick = () => {
+    if (dictating) {
+      useVoice.getState().stopRecording()
+      return
+    }
+    if (isRecording || !voiceGate.canRecord) return
+    setDictating(true)
+    useVoice.getState().startRecording(epic.id, {
+      sink: (transcript) => setText((prev) => (prev ? `${prev} ${transcript}` : transcript)),
+    })
+  }
+
+  const micLabel = copyFor(voiceGate.reason, { isRecording: dictating })
 
   useEffect(() => {
     const el = textareaRef.current
@@ -190,6 +222,30 @@ export function EpicComposer({ epic, snapshots, onSent }: Props) {
       <AttachTray att={att} testId="epic-composer-attach-tray" />
 
       <div className="mt-2 flex items-end gap-2">
+        <div
+          className="flex h-[58px] shrink-0 items-center overflow-hidden rounded-[10px] border border-line bg-bg-hi"
+          data-testid="epic-composer-input-tools"
+        >
+          <button
+            type="button"
+            data-testid="epic-composer-mic"
+            onClick={onMicClick}
+            disabled={voiceGate.reason === 'unsupported'}
+            aria-pressed={dictating}
+            aria-label={micLabel}
+            title={micLabel}
+            className={`grid h-full w-11 place-items-center ${
+              dictating ? 'text-red-400' : isRecording ? 'text-fg-faint' : 'text-accent hover:text-accent/80'
+            }`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="1" width="6" height="12" rx="3" />
+              <path d="M5 10a7 7 0 0 0 14 0" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+            </svg>
+          </button>
+        </div>
         <textarea
           ref={textareaRef}
           data-testid="epic-composer-textarea"

@@ -288,6 +288,13 @@ export function QueueTicketPanel({
   )
 }
 
+// Stable fallback for the scheduleJobs selector below. An inline `?? []`
+// mints a fresh array every getSnapshot call, which useSyncExternalStore
+// treats as a changed store snapshot — infinite re-render, React #185, blank
+// app whenever a dormant tab mounts before the first schedule snapshot lands
+// (same failure class as the per-slice note at the top of TabBar.tsx).
+const EMPTY_JOBS: never[] = []
+
 export function TerminalChat({ tabId, cwd }: Props) {
   const tab = useSessions((s) => s.tabs.find((t) => t.id === tabId))
   const sessionId = tab?.sessionId ?? tabId
@@ -339,7 +346,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   // a follow-up ticket's own chain always resolves back to its root. Read
   // job status from scheduleState.ts (the existing store), never a second
   // polling mechanism.
-  const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs ?? [])
+  const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs ?? EMPTY_JOBS)
   const openChains = (chat?.ticketHistory ?? []).filter(
     (t) => t.status === 'dispatched-to-prd' && !t.chainRootId && !isChainResolved(t, scheduleJobs),
   )

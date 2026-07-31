@@ -64,9 +64,15 @@ function makeFakeRemote({ jobs = [] } = {}) {
 }
 
 async function startWithRemote(remote) {
+  // Force the e2e-suffixed token path so this suite never races the real
+  // ~/.claude/session-manager/admin-api.json against other test files (or a
+  // live production instance) that also call createAdminHttp() concurrently.
+  const prevE2e = process.env.SM_E2E;
+  process.env.SM_E2E = '1';
   const admin = createAdminHttp();
   registerAdminRoutes(admin, remote);
   const { port, token } = await admin.start();
+  if (prevE2e === undefined) delete process.env.SM_E2E; else process.env.SM_E2E = prevE2e;
   return { admin, port, token };
 }
 

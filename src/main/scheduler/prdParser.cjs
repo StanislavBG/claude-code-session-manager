@@ -78,8 +78,24 @@ async function parsePrdRaw(filePath) {
     // enqueueExternalPrompt (PRD 753). Additive — absent on every PRD
     // authored before this field existed.
     sourceTabId: fm.sourceTabId || null,
+    // Explicit cross-PRD ordering (PRD 832): `dependsOn: [<slug>, <slug>]`
+    // or a comma-separated string. Replaces the retired shared-NN-means-
+    // parallel convention — a job is eligible only once every listed slug's
+    // queue row is completed (a slug with no row is treated as already
+    // done/archived, matching retireCompletedSlugs semantics).
+    dependsOn: parseDependsOn(fm.dependsOn),
     body: body.trim(),
   };
+}
+
+/** `[a, b]` / `a, b` / `a` → ['a','b']; anything else → []. */
+function parseDependsOn(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  const inner = raw.trim().replace(/^\[/, '').replace(/\]$/, '');
+  return inner
+    .split(',')
+    .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+    .filter((s) => /^[A-Za-z0-9][\w.-]*$/.test(s));
 }
 
 /**
@@ -262,11 +278,14 @@ async function maxParallelGroupInUse(prdsDir) {
  * number) and never wedges future callers, since each attempt only needs
  * the marker for its OWN candidate to not already exist.
  */
-async function allocateParallelGroup(prdsDir) {
+async function allocateParallelGroup(prdsDir, { extraFloor = 0 } = {}) {
   await fsp.mkdir(prdsDir, { recursive: true });
   const scanMax = await maxParallelGroupInUse(prdsDir);
   const highWater = await readHighWaterMark(prdsDir);
-  const floor = Math.max(scanMax, highWater);
+  // extraFloor (PRD 832): the caller's max across OTHER dirs sharing the
+  // project's number space (epic prds/ dirs, prds-archived) — numbers are
+  // unique per project, never merely per directory.
+  const floor = Math.max(scanMax, highWater, extraFloor);
   let candidate = floor + 1;
   for (let attempt = 0; attempt < MAX_RESERVE_ATTEMPTS; attempt += 1) {
     const markerPath = path.join(prdsDir, `.reserved-${candidate}`);

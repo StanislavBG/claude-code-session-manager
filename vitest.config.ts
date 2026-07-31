@@ -31,6 +31,7 @@ export default defineConfig({
       'src/main/__tests__/queueOps-interactive-ac-lint.test.cjs',
       'src/main/lib/__tests__/localAdminHttp.test.cjs',
       'src/main/lib/__tests__/instanceLock.test.cjs',
+      'src/main/__tests__/uniquePrdNumbers.test.cjs',
       'src/main/lib/__tests__/sessionSlots.test.cjs',
       'src/main/lib/__tests__/terminalRunOutcome.test.cjs',
       'src/main/lib/__tests__/importReferences.spec.cjs',

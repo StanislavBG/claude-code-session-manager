@@ -270,7 +270,12 @@ const schedulerCreatePrd = z.object({
   implementationNotes: z.string().min(1).max(20000),
   outOfScope: z.array(z.string().min(1).max(2000)).max(100).optional(),
   slug: z.string().min(1).max(60).regex(PRD_CREATE_SLUG_RE).optional(),
+  // DEPRECATED (PRD 832): accepted for wire-compat but ignored — numbers are
+  // strictly unique per project; use dependsOn for ordering.
   parallelGroup: z.number().int().min(1).max(999999).optional(),
+  // Explicit ordering (PRD 832): slugs that must complete before this PRD
+  // becomes eligible. Written to frontmatter as `dependsOn: [a, b]`.
+  dependsOn: z.array(z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/)).max(20).optional(),
   // Originating PromptTicket.id (PRD 748) when this PRD was authored from a
   // ticket classified 'develop' (PRD 749) — traces the PRD back to the
   // prompt that spawned it. Same newline-injection guard as title/cwd since

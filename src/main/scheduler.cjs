@@ -86,7 +86,25 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { sweep: sweepFeedback } = require('../../scripts/lib/watchdogHelpers.cjs');
 const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
-const { ensureEpic, appendPrdCreatedEvent } = require('./lib/epicMint.cjs');
+const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
+
+// ---------- origin session resolution (PRD 832) ----------
+// An Epic IS a tagged claude session — job rows carry the originating
+// claudeSessionId alongside sourcePromptId so every PRD stays traceable to
+// the session that spawned it. active-index.json is tiny; a short TTL cache
+// keeps reconcile (every 60s, N jobs) at one read per project per pass.
+const originIndexCache = new Map(); // cwd -> { at, sessions }
+const ORIGIN_CACHE_TTL_MS = 30_000;
+function resolveOriginSessionId(cwd, epicId) {
+  if (!cwd || !epicId) return null;
+  let entry = originIndexCache.get(cwd);
+  if (!entry || Date.now() - entry.at > ORIGIN_CACHE_TTL_MS) {
+    entry = { at: Date.now(), sessions: readActiveIndex(cwd).sessions };
+    originIndexCache.set(cwd, entry);
+  }
+  const session = entry.sessions[epicId];
+  return session && typeof session.claudeSessionId === 'string' ? session.claudeSessionId : null;
+}
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
@@ -911,7 +929,23 @@ async function listPrdFiles() {
 async function allocateParallelGroup(cwd) {
   const dir = prdDirForCwd(cwd);
   await fsp.mkdir(dir, { recursive: true });
-  return prdParser.allocateParallelGroup(dir);
+  // PRD 832: numbers are unique across the WHOLE project, not just the
+  // allocator's bookkeeping dir — scan every Epic prds/ dir plus the
+  // archive so a number used anywhere (even by a hand-authored or archived
+  // PRD) is never reissued. The reservation markers + high-water sidecar
+  // stay in `dir`; the cross-dir max only raises the floor.
+  const targetCwd = cwd || DEFAULT_PROJECT_CWD;
+  const extraDirs = [
+    ...listEpicPrdDirs(targetCwd),
+    path.join(prdDirForCwd(targetCwd), '..', 'prds-archived'),
+  ];
+  let extraFloor = 0;
+  for (const d of extraDirs) {
+    try {
+      extraFloor = Math.max(extraFloor, await prdParser.maxParallelGroupInUse(d));
+    } catch { /* missing dir — nothing allocated there */ }
+  }
+  return prdParser.allocateParallelGroup(dir, { extraFloor });
 }
 
 /**
@@ -1062,6 +1096,9 @@ async function reconcile(state) {
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: reconcileSourcePromptId(job, p.sourcePromptId),
       sourceTabId: p.sourceTabId,
+      dependsOn: p.dependsOn,
+      originSessionId: job.originSessionId
+        ?? resolveOriginSessionId(p.cwd, reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     });
   }
@@ -1120,6 +1157,8 @@ async function reconcile(state) {
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
       sourceTabId: p.sourceTabId,
+      dependsOn: p.dependsOn,
+      originSessionId: resolveOriginSessionId(p.cwd, p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       status: 'pending',
       runId: null,

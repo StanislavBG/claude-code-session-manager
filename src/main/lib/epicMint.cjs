@@ -141,4 +141,4 @@ function appendPrdCreatedEvent(cwd, epicId, prdSlug, text) {
   return true;
 }
 
-module.exports = { ensureEpic, appendPrdCreatedEvent, activeIndexPath };
+module.exports = { ensureEpic, appendPrdCreatedEvent, activeIndexPath, readActiveIndex };

@@ -48,7 +48,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, dependsOn,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -64,6 +64,8 @@ function buildPrdBody(input) {
   // Optional, additive: the user-selected Feature/Bug tag (PRD 774) carried
   // through from the originating PromptTicket — deterministic, never LLM-classified.
   if (tag) fmLines.push(`tag: ${tag}`);
+  // Explicit ordering (PRD 832): replaces the retired shared-NN convention.
+  if (dependsOn && dependsOn.length) fmLines.push(`dependsOn: [${dependsOn.join(', ')}]`);
   fmLines.push('---', '');
 
   const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');
@@ -125,10 +127,15 @@ async function createPrd(input, remote) {
     return { ok: false, status: 400, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' };
   }
 
-  // NN allocation is delegated to allocateParallelGroup() (PRD 548) via
-  // the injected remote — never re-derived here — unless the caller
-  // opted into an existing group explicitly.
-  const nn = input.parallelGroup ?? await remote.allocateParallelGroup(input.cwd);
+  // NN allocation is delegated to allocateParallelGroup() (PRD 548) via the
+  // injected remote — never re-derived here. `parallelGroup` input is
+  // DEPRECATED (PRD 832, user decision 2026-07-31): numbers are strictly
+  // unique per project; ordering is expressed via `dependsOn` frontmatter,
+  // never by sharing a number. An explicit parallelGroup is ignored.
+  if (input.parallelGroup != null) {
+    console.warn(`[prdCreate] parallelGroup input is deprecated and ignored (got ${input.parallelGroup}) — numbers are unique per project; use dependsOn for ordering`);
+  }
+  const nn = await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
 
   // An explicit `parallelGroup` bypasses allocateParallelGroup()'s

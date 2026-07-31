@@ -38,12 +38,44 @@ const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager
  *   human-readable reason text that would otherwise only reach console.log.
  */
 function pickForProject(projectJobs, runningSlugsInProject, slots) {
-  const pending = projectJobs.filter(
+  const projectCwd = (projectJobs.find((j) => j.cwd) || {}).cwd || DEFAULT_PROJECT_CWD;
+
+  // Explicit dependsOn eligibility (PRD 832). A dep slug is BLOCKING while a
+  // queue row for it exists in a non-completed state; a slug with no row is
+  // treated as already done (completed rows are retired to history shards,
+  // so absence is the normal end-state of a finished dep). A FAILED dep
+  // holds the dependent with an explicit reason, mirroring the failure gate.
+  // Legacy jobs without dependsOn keep the shared-NN group semantics below
+  // unchanged (lowest-number-first waves), so an in-flight mixed queue keeps
+  // its order without migration.
+  const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
+  const blockingDep = (j) => (j.dependsOn ?? []).find((slug) => {
+    const dep = rowBySlug.get(slug);
+    return dep && dep.status !== 'completed';
+  });
+
+  const allPending = projectJobs.filter(
     (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug),
   );
-  if (pending.length === 0) return { batch: [], reason: null };
+  if (allPending.length === 0) return { batch: [], reason: null };
 
-  const projectCwd = (projectJobs.find((j) => j.cwd) || {}).cwd || DEFAULT_PROJECT_CWD;
+  const pending = [];
+  const heldByFailedDep = [];
+  for (const j of allPending) {
+    const dep = blockingDep(j);
+    if (!dep) { pending.push(j); continue; }
+    if (rowBySlug.get(dep)?.status === 'failed') heldByFailedDep.push({ job: j, dep });
+    // running/pending/needs_review dep — simply not eligible this tick.
+  }
+  if (pending.length === 0) {
+    if (heldByFailedDep.length > 0) {
+      const detail = heldByFailedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
+      const reason = `[scheduler] depends-gate [${projectCwd}]: holding ${heldByFailedDep.length} job(s) behind failed dependencies [${detail}]. Reset or archive the dep to unblock.`;
+      console.log(reason);
+      return { batch: [], reason };
+    }
+    return { batch: [], reason: null };
+  }
 
   // Lowest pending group (computed up-front for the failure-gate check).
   const lowestPendingGroup = pending.reduce(

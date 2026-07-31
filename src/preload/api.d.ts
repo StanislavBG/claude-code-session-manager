@@ -398,7 +398,12 @@ export interface ScheduleJob {
    */
   verifierVerdict?: string;
   /** Per-job values carried in queue.json for dependency checking. */
+  /** Explicit cross-PRD ordering (PRD 832): slugs that must complete before
+   *  this job is eligible. Replaces the retired shared-NN-parallel convention. */
   dependsOn?: string[];
+  /** The originating claude session — the Epic's claudeSessionId, resolved
+   *  from active-index.json at ingest (PRD 832). An Epic IS a tagged session. */
+  originSessionId?: string | null;
   /** Originating tab id (PRD frontmatter `sourceTabId`), refreshed from the
    *  PRD file on every reconcile. When the PRD was authored from inside a
    *  PromptSessionConversation, this equals that PromptSession's own id

@@ -400,9 +400,13 @@ for the exact shape). **Trade-off:** this path has no atomic `NN` allocation. Th
 `allocateParallelGroup()` (PRD 548) exists specifically to close a race where two writers pick
 the same `NN` at once; a hand-written file bypasses that reservation entirely, so if another
 writer (a human, `/develop`, or another automation) picks the same `NN` around the same time, one
-file silently shadows or is shadowed by the other's parallel-group slot. Pick an `NN` by scanning
-the existing prds directory for the current max and incrementing, and treat a collision as
-possible, not merely theoretical.
+file silently shadows or is shadowed by the other's number. Pick an `NN` by scanning ALL of the
+project's prds dirs (`scheduler/epics/*/prds/` and `prds-archived/`) for the current max and
+incrementing, and treat a collision as possible, not merely theoretical. NN is strictly unique
+per project (PRD 832) — NEVER reuse an existing number to signal "runs in parallel"; that
+convention is retired. Express ordering with `dependsOn: [<slug>, ...]` frontmatter (the job is
+eligible once every listed slug's queue row is completed); independent PRDs omit it and the
+scheduler may run them concurrently.
 
 ### Ownership boundary
 

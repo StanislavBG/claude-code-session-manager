@@ -161,8 +161,9 @@ can't load skills.
    - **Evolving chain (3-5 PRDs).** Use this shape when the request is naturally a sequence of
      stages that build on each other rather than independent units — e.g. scaffold → core
      behavior → edge-case/interaction hardening → integration wiring → UI validation pass. Each
-     PRD in the chain: gets the **next sequential `NN`** (never the same `NN` as the PRD it
-     depends on — same-`NN` means "can run in parallel," which a chain link cannot), and its
+     PRD in the chain: gets its own unique `NN` (numbers are strictly unique per project —
+     PRD 832, user decision 2026-07-31) plus a `dependsOn: [<previous-link-slug>]`
+     frontmatter line expressing the chain edge explicitly, and its
      `# Implementation notes` states in one line what the *previous* link actually delivered
      (file paths/functions it added, referencing its real landed state — not the plan for it,
      since PRDs 1..k-1 may have adjusted scope during execution) and what this link is expected
@@ -184,11 +185,11 @@ can't load skills.
    (`mcp__session-manager-scheduler__scheduler_create_prd`) over hand-writing the file. Its input
    (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
    `outOfScope[]`) maps directly onto the sections below — pass them straight through. It
-   allocates the parallel-group `NN` atomically (no read-then-write race against another
-   concurrent `/develop`/`/process-feedback` invocation), derives and collision-checks the slug,
-   and embeds the standards pointer for you. Set `parallelGroup` explicitly only when this PRD
-   must share an existing sibling's `NN` (a logically independent PRD that can run in parallel
-   with one already queued); omit it to get the next free `NN` atomically.
+   allocates a strictly-unique `NN` atomically (no read-then-write race against another
+   concurrent `/develop`/`/process-feedback` invocation, never reused across the project — PRD
+   832), derives and collision-checks the slug, and embeds the standards pointer for you.
+   `parallelGroup` is DEPRECATED and ignored — express ordering with the `dependsOn` input
+   (slugs that must complete first); independent PRDs simply omit it and may run in parallel.
 
    **Fallback — only when the tool errors with "app not running" / admin API unreachable**
    (the session-manager Electron app must be running for this MCP tool to work; if it isn't,
@@ -200,9 +201,9 @@ can't load skills.
    ls <cwd>/session-manager-operations/scheduler/epics/*/prds/ <cwd>/session-manager-operations/scheduler/prds-archived/ 2>/dev/null | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
    ```
    (`<cwd>` is the target repo's absolute path — the same one this PRD's `cwd` field will use.)
-   The last line is the current max within that project. Then: same `NN` as a logically
-   independent sibling that can run in parallel; **next free `NN` = max+1** when this PRD
-   hard-depends on prior work or is unrelated to every existing group. This manual path has a
+   The last line is the current max within that project. Then: **always next free `NN` =
+   max+1** — never reuse a sibling's number (unique-per-project rule, PRD 832); express
+   ordering with `dependsOn: [<slug>]` frontmatter instead. This manual path has a
    small, accepted race (two concurrent authors could compute the same "next free" `NN`) —
    cosmetic (two unrelated groups end up sharing a number) rather than destructive, and only
    reachable when the atomic tool path above isn't available. Record each cross-PRD dependency
@@ -238,9 +239,9 @@ can't load skills.
    without being executed. PRD *source* files are per-project and per-Epic, resolved at runtime
    via `src/main/lib/prdLocations.cjs`.
 
-   **Filename rules.** `NN` is the 2-digit zero-padded parallel group (picked per the `ls`
-   command above — same `NN` as an independent sibling, or next free `NN` = max+1 when this PRD
-   hard-depends on prior work). `<kebab-slug>` is a short, descriptive kebab-case identifier
+   **Filename rules.** `NN` is the PRD's unique per-project number (always next free =
+   max+1 per the `ls` command above; ordering via `dependsOn` frontmatter, never via shared
+   numbers). `<kebab-slug>` is a short, descriptive kebab-case identifier
    (e.g. `voice-commands-send-cancel`, `ticker-velocity-mcp`), kept under 60 chars. Verify your
    chosen filename doesn't already exist before writing.
 

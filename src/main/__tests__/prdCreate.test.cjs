@@ -307,7 +307,7 @@ test('POST /admin/scheduler/create-prd rejects a title containing a newline (fro
   }
 });
 
-test('POST /admin/scheduler/create-prd with an explicit parallelGroup+slug that already exists on disk returns 409 and does not clobber the file', async () => {
+test('PRD 832: an explicit parallelGroup colliding with an existing file is ignored — a fresh unique NN is allocated and nothing is clobbered', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
   const { admin, port, token } = await startWithRemote(remote);
@@ -317,17 +317,18 @@ test('POST /admin/scheduler/create-prd with an explicit parallelGroup+slug that 
       method: 'POST', path: '/admin/scheduler/create-prd', token,
       body: validCreateBody({ slug: 'my-explicit-slug', parallelGroup: 777 }),
     });
-    expect(res.status).toBe(409);
-    expect(res.json.ok).toBe(false);
+    expect(res.status).toBe(200);
+    // Allocator scans past the existing 777 — unique per project, never reused.
+    expect(res.json.nn).toBe(778);
+    expect(res.json.filename).toBe('778-my-explicit-slug.md');
     const stillThere = await fsp.readFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'utf8');
-    // existing PRD file must not be overwritten
     expect(stillThere).toBe('ORIGINAL CONTENT\n');
   } finally {
     await admin.stop();
   }
 });
 
-test('POST /admin/scheduler/create-prd honors an explicit slug + parallelGroup instead of deriving/allocating', async () => {
+test('PRD 832: explicit parallelGroup input is deprecated and ignored — NN always comes from the allocator', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
   const { admin, port, token } = await startWithRemote(remote);
@@ -337,9 +338,9 @@ test('POST /admin/scheduler/create-prd honors an explicit slug + parallelGroup i
       body: validCreateBody({ slug: 'my-explicit-slug', parallelGroup: 777 }),
     });
     expect(res.status).toBe(200);
-    expect(res.json.nn).toBe(777);
-    expect(res.json.filename).toBe('777-my-explicit-slug.md');
-    expect(fs.existsSync(path.join(prdsDir, '777-my-explicit-slug.md'))).toBeTruthy();
+    expect(res.json.nn).toBe(1);
+    expect(res.json.filename).toBe('1-my-explicit-slug.md');
+    expect(fs.existsSync(path.join(prdsDir, '1-my-explicit-slug.md'))).toBeTruthy();
   } finally {
     await admin.stop();
   }
@@ -385,17 +386,22 @@ test('createPrd with a valid payload allocates a group, writes through remote.wr
   expect(written).toMatch(/# Goal/);
 });
 
-test('createPrd returns {ok:false, status:409} without clobbering an existing file at the same destination', async () => {
+test('createPrd returns {ok:false, status:409} without clobbering when the destination already exists', async () => {
   const prdsDir = await mkTmpPrdsDir();
+  // The existence guard survives PRD 832: whatever NN the allocator picks,
+  // a pre-existing file at that exact destination must 409, never clobber.
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
-  await fsp.writeFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'ORIGINAL CONTENT\n');
+  const realRead = remote.readPrd.bind(remote);
+  remote.readPrd = async (slug) => (slug.endsWith('my-explicit-slug') ? { ok: true, text: 'ORIGINAL' } : realRead(slug));
+  const writes = [];
+  const realWrite = remote.writePrd.bind(remote);
+  remote.writePrd = async (...a) => { writes.push(a[0]); return realWrite(...a); };
 
-  const result = await createPrd(validCreateBody({ slug: 'my-explicit-slug', parallelGroup: 777 }), remote);
+  const result = await createPrd(validCreateBody({ slug: 'my-explicit-slug' }), remote);
 
   expect(result.ok).toBe(false);
   expect(result.status).toBe(409);
-  const stillThere = await fsp.readFile(path.join(prdsDir, '777-my-explicit-slug.md'), 'utf8');
-  expect(stillThere).toBe('ORIGINAL CONTENT\n');
+  expect(writes).toEqual([]);
 });
 
 // ──────────────────────────────────────────── PRD 825: Epic PRD dir write grant + `~` cwd normalization
@@ -438,10 +444,10 @@ test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the cr
   try {
     const res = await request(port, {
       method: 'POST', path: '/admin/scheduler/create-prd', token,
-      body: validCreateBody({ slug: 'from-a-ticket', parallelGroup: 888, sourcePromptId: 'ticket-xyz-789' }),
+      body: validCreateBody({ slug: 'from-a-ticket', sourcePromptId: 'ticket-xyz-789' }),
     });
     expect(res.status).toBe(200);
-    const written = fs.readFileSync(path.join(prdsDir, '888-from-a-ticket.md'), 'utf8');
+    const written = fs.readFileSync(path.join(prdsDir, `${res.json.nn}-from-a-ticket.md`), 'utf8');
     expect(written).toMatch(/sourcePromptId: ticket-xyz-789/);
   } finally {
     await admin.stop();

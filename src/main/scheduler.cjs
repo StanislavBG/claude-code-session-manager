@@ -264,6 +264,27 @@ async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, 
   return committedInWindow(cwd, startedAt, untilIso);
 }
 
+/**
+ * Override for a SIGTERM'd (143) run when a commit landed in its window.
+ * Exit 143 alone doesn't prove the deliverable is missing — the 776/779
+ * incidents (2026-07-30) both died on a headless-incompatible interactive
+ * step (xvfb Electron screenshot / playwright electron.launch) AFTER their
+ * commit had already landed, and sat `failed` forever with a real deliverable
+ * on disk. A landed commit doesn't prove every AC line passed though (the
+ * step it died on is still unverified), so this routes to `needs_review`,
+ * never silently promotes to `completed`. Returns null for every other exit
+ * code, or for a 143 with no commit found in window — those fall through to
+ * the existing `failed` path unchanged. Pure/no I/O: the commit-window scan
+ * (committedInWindow) happens at the call site, not here.
+ */
+function classifySigtermWithCommit(exitCode, commitFoundInWindow) {
+  if (exitCode !== 143 || !commitFoundInWindow) return null;
+  return {
+    status: 'needs_review',
+    reason: 'SIGTERM after a commit landed — verify AC before treating as done',
+  };
+}
+
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
 const RUNS_DIR = path.join(ROOT, 'runs');
@@ -1994,6 +2015,23 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       }
     }
 
+    // SIGTERM commit check: reuse the same commit-window scan the exit=0
+    // guard uses above (one commit-detection path, not two) to see whether a
+    // 143 (SIGTERM) run still landed a deliverable before it died. Scoped
+    // narrowly to exit 143 — never applied to other non-zero exit codes or to
+    // rateLimited (already handled separately, above).
+    let sigtermCommitFound = false;
+    if (res.exitCode === 143 && !res.rateLimited) {
+      const guardHeadAtSigterm = await gitHead(guardCwd);
+      sigtermCommitFound = await computeCommittedDuringRun(
+        guardCwd,
+        guardHeadBefore,
+        guardHeadAtSigterm,
+        job.startedAt,
+        new Date().toISOString(),
+      );
+    }
+
     let actuallyFailed = false;
     let failedJobSnapshot = null;
     let needsInvestigationNow = false;
@@ -2009,7 +2047,14 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         } else {
           // Determine effective status, applying the verifier verdict for exit=0 runs.
           let effectiveStatus;
-          if (res.exitCode !== 0) {
+          let sigtermOverrideReason = null;
+          const sigtermOverride = res.exitCode !== 0
+            ? classifySigtermWithCommit(res.exitCode, sigtermCommitFound)
+            : null;
+          if (sigtermOverride) {
+            effectiveStatus = sigtermOverride.status;
+            sigtermOverrideReason = sigtermOverride.reason;
+          } else if (res.exitCode !== 0) {
             effectiveStatus = 'failed';
           } else if (
             !verifyResult
@@ -2033,7 +2078,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
           s.jobs[i2].error = effectiveStatus === 'needs_review'
-            ? (verifyResult?.reason ?? null)
+            ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
             : (res.error || null);
           // Persist the verifier's verdict string so the renderer can show it.
           if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
@@ -3454,4 +3499,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus };

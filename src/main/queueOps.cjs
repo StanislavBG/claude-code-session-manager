@@ -83,6 +83,50 @@ const LINE_RULES = [
   },
 ];
 
+// Interactive/GUI-rendering-as-headless-AC patterns (research: PRDs 776/779,
+// the 2026-07-30 exit143 incident — a claude -p executor hits a tool-use
+// rejection on these and hangs until the scheduler SIGTERMs it, even when
+// the step works fine run interactively). Keyed off AC-checkbox context
+// specifically (a "- [ ] " line via INTERACTIVE_AC_CHECKBOX_RE), not any
+// occurrence anywhere in the file — a PRD's Out-of-scope/Implementation-notes
+// prose explicitly telling the executor NOT to do this (e.g. "NOTE: do NOT
+// add a `playwright test ... under xvfb` acceptance criterion here", as in
+// PRDs 780/787/788) is plain prose, not a checkbox line, so it must not
+// trigger a false positive.
+const INTERACTIVE_AC_CHECKBOX_RE = /^\s*-\s*\[[ xX]\]/;
+const INTERACTIVE_AC_PATTERNS = [
+  {
+    id: 'interactive-xvfb',
+    re: /\bxvfb-run\b/i,
+    label: 'xvfb-run as a headless AC — cannot run under claude -p (see PRD_AUTHORING.md / 776+779 incidents)',
+  },
+  {
+    id: 'interactive-electron-launch',
+    re: /electron\.launch\b/i,
+    label: 'playwright electron.launch as a headless AC — interactive tool-use rejection hangs the executor',
+  },
+  {
+    id: 'interactive-playwright-test',
+    re: /\bplaywright\s+test\b/i,
+    label: '"playwright test" as a headless AC — GUI-rendering e2e cannot run headlessly',
+  },
+  {
+    id: 'interactive-launch-app',
+    re: /\blaunch(?:ing)?\s+the\s+app\b/i,
+    label: '"launch the app" as a headless AC — interactive/GUI step',
+  },
+  {
+    id: 'interactive-click-through',
+    re: /\bclick(?:ing)?\s+through\b/i,
+    label: '"click through" as a headless AC — interactive/GUI step',
+  },
+  {
+    id: 'interactive-screenshot',
+    re: /\bscreenshot/i,
+    label: 'screenshot capture as a headless AC — interactive/GUI-rendering step',
+  },
+];
+
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
 
 /**
@@ -163,6 +207,20 @@ function lintParsed(slug, raw) {
           snippet: `${rule.label} — ${line.trim().slice(0, 80)}`,
           severity: rule.severity,
         });
+      }
+    }
+    // Interactive-AC scan — only on checkbox-format AC lines, see the
+    // pattern-list comment above for why prose mentions must not match.
+    if (INTERACTIVE_AC_CHECKBOX_RE.test(line)) {
+      for (const rule of INTERACTIVE_AC_PATTERNS) {
+        if (rule.re.test(line)) {
+          findings.push({
+            rule: rule.id,
+            line: fmLineCount + i + 1,
+            snippet: `${rule.label} — ${line.trim().slice(0, 80)}`,
+            severity: 'warn',
+          });
+        }
       }
     }
   }

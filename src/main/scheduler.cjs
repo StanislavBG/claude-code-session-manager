@@ -1550,6 +1550,36 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
   return { action: 'retry', transientKind, retries };
 }
 
+/**
+ * Commit-guard verdict decision. Pure/no I/O so the false-positive defenses
+ * can be unit-tested directly rather than only through a live spawnJob run.
+ * Returns the flagged verifyResult replacement, or null if the guard should
+ * not fire (any of the four defenses applies).
+ *
+ * The fourth defense (legitimateNoOp) exists because runVerify.cjs's own
+ * pass_no_commit exemptions (COMPLETED_EQUIVALENT_VERDICTS members like
+ * pass_no_commit_already_shipped) already independently proved a truthful
+ * PASS-with-no-commit is correct; without this check the commit-guard
+ * double-punishes that same honest no-op for dirt a concurrent interactive
+ * session left behind (incidents: 655-needs-review-rca-feedback-hook,
+ * 672-fix-feedback-session-manager, 2026-07-31).
+ */
+function commitGuardVerdict({ newlyDirty, siblingRunning, jobSelfCommitted, legitimateNoOp, verifyResult }) {
+  if (!newlyDirty || newlyDirty.length === 0) return null;
+  if (siblingRunning || jobSelfCommitted || legitimateNoOp) return null;
+  const sample = newlyDirty.slice(0, 3).join(', ');
+  const carried = [...(verifyResult?.annotations ?? [])];
+  if (verifyResult && verifyResult.verdict !== 'clean') {
+    carried.push({ verdict: verifyResult.verdict, reason: verifyResult.reason });
+  }
+  return {
+    verdict: 'uncommitted_changes',
+    reason: `finish protocol incomplete: ${newlyDirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
+    downgradeTo: 'needs_review',
+    annotations: carried.length ? carried : undefined,
+  };
+}
+
 // ---------- execution ----------
 
 function pickRunDir() {
@@ -2263,6 +2293,17 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     //     deliverable; leftover dirt is presumptively a concurrent external edit
     //     (e.g. an interactive session editing the same repo), not the job's
     //     unsaved work — so skip rather than false-flag a completed job.
+    //   - legitimate-no-op skip: if the verifier already independently proved
+    //     this run's PASS-with-no-commit is truthful (verdict is one of
+    //     COMPLETED_EQUIVALENT_VERDICTS — pass_no_commit_target_verified,
+    //     _prior_run_verified, _already_shipped), the run itself did nothing
+    //     wrong; dirt left by a concurrent interactive session (e.g.
+    //     /process-feedback writing new PRD .md files into the same repo
+    //     while this job's own AC turned out to already be satisfied) is not
+    //     this job's unfinished work. Without this skip, runVerify.cjs's
+    //     exemption and this guard double-punish the same honest no-op from
+    //     two different code paths (incidents: 655-needs-review-rca-feedback-hook,
+    //     672-fix-feedback-session-manager, 2026-07-31).
     // Non-git cwds resolve to null and are skipped (the guard is best-effort).
     //
     // Runs even when a transcript-pattern verdict already fired: the commit-guard
@@ -2273,7 +2314,8 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // annotation, so a real "finish protocol incomplete" is distinguishable from
     // transcript noise in the queue (feedback 2026-06-10 addendum).
     const guardWillRefire = verifyResult && verifyResult.downgradeTo === 'pending';
-    if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire) {
+    const guardIsLegitimateNoOp = verifyResult && COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict);
+    if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire && !guardIsLegitimateNoOp) {
       const after = await uncommittedChanges(guardCwd);
       if (after && after.length > 0) {
         const baseSet = new Set(guardBaseline || []);
@@ -2284,19 +2326,15 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         );
         const guardHeadAfter = await gitHead(guardCwd);
         const jobSelfCommitted = guardHeadBefore && guardHeadAfter && guardHeadAfter !== guardHeadBefore;
-        if (newlyDirty.length > 0 && !siblingRunning && !jobSelfCommitted) {
-          const sample = newlyDirty.slice(0, 3).join(', ');
-          // Carry any prior transcript verdict + its annotations forward as notes.
-          const carried = [...(verifyResult?.annotations ?? [])];
-          if (verifyResult && verifyResult.verdict !== 'clean') {
-            carried.push({ verdict: verifyResult.verdict, reason: verifyResult.reason });
-          }
-          verifyResult = {
-            verdict: 'uncommitted_changes',
-            reason: `finish protocol incomplete: ${newlyDirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
-            downgradeTo: 'needs_review',
-            annotations: carried.length ? carried : undefined,
-          };
+        const guardVerdict = commitGuardVerdict({
+          newlyDirty,
+          siblingRunning,
+          jobSelfCommitted,
+          legitimateNoOp: guardIsLegitimateNoOp,
+          verifyResult,
+        });
+        if (guardVerdict) {
+          verifyResult = guardVerdict;
           console.log(`[scheduler] commit-guard: ${job.slug} left ${newlyDirty.length} files uncommitted → needs_review`);
         }
       }
@@ -3871,4 +3909,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

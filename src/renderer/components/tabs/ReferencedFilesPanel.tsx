@@ -28,23 +28,26 @@ export function ReferencedFilesPanel({ activePath }: Props) {
   const [imports, setImports] = useState<ImportRef[]>([])
   const [expandedPath, setExpandedPath] = useState<string | null>(null)
   const [expandedFiles, setExpandedFiles] = useState<Record<string, ExpandedFile>>({})
-  // Tracks the activePath a given readText() fetch was issued for, so a
-  // response that lands after the user has since switched scope/tab doesn't
-  // resurrect stale content under a path key the current activePath no
-  // longer references.
-  const activePathRef = useRef(activePath)
-  activePathRef.current = activePath
+  // Monotonic generation counter, bumped every time activePath changes.
+  // In-flight readText() fetches capture the generation they were issued
+  // under and compare against the current one on resolve — unlike comparing
+  // raw activePath values, this can't false-positive on an A->B->A round
+  // trip (a stale A-fetch resolving after the user has navigated back to A
+  // would otherwise pass a same-path check and resurrect stale content).
+  const generationRef = useRef(0)
 
   useEffect(() => {
+    generationRef.current += 1
     setExpandedPath(null)
     setExpandedFiles({})
     if (!activePath) {
       setImports([])
       return
     }
+    const generation = generationRef.current
     let cancelled = false
     window.api.config.parseImports(activePath).then((res) => {
-      if (cancelled) return
+      if (cancelled || generationRef.current !== generation) return
       if (res.ok) {
         setImports(res.imports)
       } else {
@@ -66,10 +69,10 @@ export function ReferencedFilesPanel({ activePath }: Props) {
     }
     setExpandedPath(path)
     if (!expandedFiles[path]) {
-      const requestedFor = activePathRef.current
+      const generation = generationRef.current
       setExpandedFiles((prev) => ({ ...prev, [path]: { loading: true, text: null, error: null } }))
       window.api.config.readText(path).then((res) => {
-        if (activePathRef.current !== requestedFor) return
+        if (generationRef.current !== generation) return
         setExpandedFiles((prev) => ({
           ...prev,
           [path]: { loading: false, text: res.text, error: res.error },
@@ -114,6 +117,8 @@ export function ReferencedFilesPanel({ activePath }: Props) {
               <div className="h-64 border-t border-line">
                 {!state || state.loading ? (
                   <div className="px-3 py-2 text-fg-faint">loading…</div>
+                ) : state.error ? (
+                  <div className="px-3 py-2 text-amber-400/90">{state.error}</div>
                 ) : (
                   <MarkdownEditor path={ref.path} value={state.text ?? ''} onChange={() => {}} readOnly />
                 )}

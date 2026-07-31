@@ -45,6 +45,10 @@ function mount(activePath: string | null) {
   return container
 }
 
+function rerender(activePath: string | null) {
+  act(() => root!.render(createElement(ReferencedFilesPanel, { activePath })))
+}
+
 async function flush() {
   await act(async () => {
     await Promise.resolve()
@@ -125,5 +129,62 @@ describe('ReferencedFilesPanel', () => {
 
     expect(toastError).toHaveBeenCalledWith('ipc boom')
     expect(el.innerHTML).toBe('')
+  })
+
+  it('renders a readText failure inline instead of a blank expanded panel', async () => {
+    const healthy = ref({ path: '/a/healthy.md' })
+    const parseImports = vi.fn().mockResolvedValue({ ok: true, imports: [healthy] })
+    const readText = vi.fn().mockResolvedValue({ exists: false, text: null, mtimeMs: 0, error: 'permission denied' })
+    installApi({ parseImports, readText })
+
+    const el = mount('/home/user/.claude/CLAUDE.md')
+    await flush()
+
+    const row = el.querySelector('[data-testid="referenced-file-row"] button') as HTMLButtonElement
+    act(() => row.click())
+    await flush()
+
+    expect(el.querySelector('[data-testid="markdown-editor"]')).toBeNull()
+    expect(el.textContent).toContain('permission denied')
+  })
+
+  it('does not resurrect a stale readText response after an A -> B -> A activePath round trip', async () => {
+    const rowA = ref({ path: '/a/from-a.md' })
+    const rowBackToA = ref({ path: '/a/from-a.md' })
+    const parseImports = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, imports: [rowA] }) // initial mount on A
+      .mockResolvedValueOnce({ ok: true, imports: [] }) // switch to B
+      .mockResolvedValueOnce({ ok: true, imports: [rowBackToA] }) // switch back to A
+
+    let resolveStaleReadText: (v: unknown) => void = () => {}
+    const readText = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStaleReadText = resolve
+        })
+    )
+    installApi({ parseImports, readText })
+
+    const el = mount('/a/CLAUDE.md')
+    await flush()
+
+    // Expand the row on A — kicks off a readText() that we'll keep pending.
+    const row = el.querySelector('[data-testid="referenced-file-row"] button') as HTMLButtonElement
+    act(() => row.click())
+    await flush()
+
+    // Navigate away to B, then back to A, before the stale readText resolves.
+    rerender('/b/CLAUDE.md')
+    await flush()
+    rerender('/a/CLAUDE.md')
+    await flush()
+
+    // Now the stale fetch from the first visit to A resolves.
+    act(() => resolveStaleReadText({ exists: true, text: 'STALE CONTENT', mtimeMs: 0, error: null }))
+    await flush()
+
+    // The stale content must not appear anywhere in the freshly re-mounted A view.
+    expect(el.textContent).not.toContain('STALE CONTENT')
   })
 })

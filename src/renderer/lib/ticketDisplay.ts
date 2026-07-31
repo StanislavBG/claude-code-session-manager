@@ -25,18 +25,39 @@ export function ticketDisplayStatus(status: PromptTicket['status']): PrdDisplayS
 }
 
 /**
- * Tone for a ticket's user-selected Feature/Bug tag (PRD 774) — the same
- * {bg,text,border,label} shape as sched-primitives.tsx's STATUS_TONE, so the
- * chip rendered in the queue panel reuses that tone pattern rather than
- * inventing a separate color system.
+ * The tag a user picks in the composer before starting an epic. 'feature' and
+ * 'bug' (PRD 774) both describe work to be built, so they stay eligible for
+ * the inline-vs-/develop classifier. 'discussion' is the odd one out: it
+ * declares up front that the goal is back-and-forth research with the agent,
+ * so it must never be routed to PRD authoring — see isDiscussionTag below.
  */
-const TAG_TONE: Record<'feature' | 'bug', { bg: string; text: string; border: boolean; label: string }> = {
+export type TicketTag = 'feature' | 'bug' | 'discussion'
+
+/**
+ * Tone for a ticket's user-selected tag — the same {bg,text,border,label}
+ * shape as sched-primitives.tsx's STATUS_TONE, so the chip rendered in the
+ * queue panel reuses that tone pattern rather than inventing a separate
+ * color system.
+ */
+const TAG_TONE: Record<TicketTag, { bg: string; text: string; border: boolean; label: string }> = {
   feature: { bg: 'bg-sage/20', text: 'text-sage', border: true, label: 'Feature' },
   bug: { bg: 'bg-accent/15', text: 'text-accent', border: true, label: 'Bug' },
+  discussion: { bg: 'bg-butter/25', text: 'text-fg-dim', border: true, label: 'Discussion' },
 }
 
-export function ticketTagTone(tag: 'feature' | 'bug') {
+export function ticketTagTone(tag: TicketTag) {
   return TAG_TONE[tag]
+}
+
+/**
+ * A 'discussion' ticket is an explicit statement of intent: the user wants an
+ * interactive research conversation, not decomposition into scheduled PRDs.
+ * dequeueNext() short-circuits the classifier on this, the same way it does
+ * for external-origin tickets — different reason, same guarantee that
+ * dispatchToPrd() is unreachable.
+ */
+export function isDiscussionTag(tag: TicketTag | undefined): boolean {
+  return tag === 'discussion'
 }
 
 /**

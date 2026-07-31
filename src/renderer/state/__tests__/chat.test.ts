@@ -405,6 +405,36 @@ describe('chat.ts prompt queue', () => {
     expect(useChat.getState().get('t1').running).toBe(true)
   })
 
+  it('never classifies or dispatches to PRD a ticket tagged "discussion" — it stays an inline conversation', async () => {
+    // The classifier is stubbed to 'develop', the verdict that WOULD author a
+    // PRD. A 'discussion' ticket must not even reach it: the tag is the user
+    // declaring the goal is research, not work to decompose.
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+    })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({
+      tabId: 't1', sessionId: 's1', cwd: '/proj',
+      prompt: 'how should we model epics vs sessions?', tag: 'discussion',
+    })
+    const queuedId = useChat.getState().get('t1').queue[0].id
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      prompt: 'how should we model epics vs sessions?', promptId: queuedId,
+    }))
+    expect(classifyTicket).not.toHaveBeenCalled()
+    expect(createPrd).not.toHaveBeenCalled()
+    expect(useChat.getState().get('t1').activeTicket?.status).toBe('running')
+  })
+
   it('transitions a dequeued ticket to dispatched-to-prd, calls createPrd with the mapped payload, and populates prdSlugs when classified "develop"', async () => {
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,

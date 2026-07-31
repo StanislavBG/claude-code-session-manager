@@ -42,6 +42,7 @@ export default defineConfig({
       'src/main/__tests__/browserView-destroyed-handler.test.cjs',
       'src/main/__tests__/scheduler-reset-job-fields-guard.test.cjs',
       'src/main/__tests__/scheduler-commit-guard-noop.test.cjs',
+      'src/main/__tests__/scheduler-unreadable-queue-guard.test.cjs',
       'scripts/__tests__/feedback-sweep.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',

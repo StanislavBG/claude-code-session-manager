@@ -15,9 +15,11 @@
  *   - sourceTabId: string (optional) — the tab that originated this PRD, used
  *     by the scheduler (PRD 761) to route a completion status prompt back
  *     into that tab's chat queue via enqueueExternalPrompt. Additive only.
- *   - tag: 'feature' | 'bug' (optional) — the user-selected composer tag
- *     (PRD 774) carried through from the originating PromptTicket. Additive
- *     only; absent on every PRD authored before this field existed.
+ *   - tag: 'feature' | 'bug' | 'discussion' (optional) — the user-selected
+ *     composer tag (PRD 774) carried through from the originating
+ *     PromptTicket. Additive only; absent on every PRD authored before this
+ *     field existed. A 'discussion' ticket never reaches PRD authoring, so
+ *     the value is only ever seen here on legacy or hand-edited files.
  *
  * Round-trip invariant: keys not in `PrdFrontmatter` are preserved verbatim
  * in their original line range via `extras`. Edits only touch lines that own
@@ -31,7 +33,7 @@ export type PrdFrontmatter = {
   parallelGroup?: number
   sourcePromptId?: string
   sourceTabId?: string
-  tag?: 'feature' | 'bug'
+  tag?: 'feature' | 'bug' | 'discussion'
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and

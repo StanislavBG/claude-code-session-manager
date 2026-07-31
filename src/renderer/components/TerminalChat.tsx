@@ -7,7 +7,7 @@ import { LearningPanel } from './LearningPanel'
 import { decideSubmitAction } from '../lib/slashCommand'
 import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
-import { mergeTicketsForDisplay, ticketDisplayStatus, ticketTagTone } from '../lib/ticketDisplay'
+import { mergeTicketsForDisplay, ticketDisplayStatus, ticketTagTone, type TicketTag } from '../lib/ticketDisplay'
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
 import { setPendingPromptSessionId } from '../lib/promptSessionDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
@@ -180,9 +180,9 @@ export function openPromptSession(promptSessionId: string): void {
   window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
 }
 
-// Small Feature/Bug chip for a ticket row — reuses ticketTagTone's
+// Small Feature/Bug/Discussion chip for a ticket row — reuses ticketTagTone's
 // STATUS_TONE-shaped tone object (ticketDisplay.ts) rather than a new color system.
-export function TagChip({ tag }: { tag: 'feature' | 'bug' }) {
+export function TagChip({ tag }: { tag: TicketTag }) {
   const tone = ticketTagTone(tag)
   return (
     <span
@@ -330,7 +330,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
   const pendingVoiceText = useChat((s) => s.chats[tabId]?.pendingVoiceText)
   const clearPendingVoiceText = useChat((s) => s.clearPendingVoiceText)
   const [draft, setDraft] = useState('')
-  const [composerTag, setComposerTag] = useState<'feature' | 'bug'>('feature')
+  const [composerTag, setComposerTag] = useState<TicketTag>('feature')
   // 'new' or the id of an open chain's ROOT ticket to continue (PRD 775).
   const [chainChoice, setChainChoice] = useState<string>('new')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -760,7 +760,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
             }
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
-          <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5" role="group" aria-label="Feature or bug tag">
+          <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5" role="group" aria-label="Epic tag">
             <button
               type="button"
               onClick={() => setComposerTag('feature')}
@@ -780,6 +780,17 @@ export function TerminalChat({ tabId, cwd }: Props) {
               }`}
             >
               Bug
+            </button>
+            <button
+              type="button"
+              onClick={() => setComposerTag('discussion')}
+              aria-pressed={composerTag === 'discussion'}
+              title="Research conversation — stays interactive, never dispatched to /develop"
+              className={`rounded px-2 py-1.5 text-xs font-medium ${
+                composerTag === 'discussion' ? 'bg-butter/25 text-fg-dim' : 'text-fg-faint hover:text-fg-dim'
+              }`}
+            >
+              Discussion
             </button>
           </div>
           {running && (

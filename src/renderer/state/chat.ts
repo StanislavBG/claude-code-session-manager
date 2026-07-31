@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { toast } from './toast'
 import { transcriptExists } from '../lib/transcriptExists'
 import { classifyPromptTicket } from '../lib/promptClassifier'
+import { isDiscussionTag, type TicketTag } from '../lib/ticketDisplay'
 import { useSessions } from './sessions'
 import { usePromptSessions } from './promptSessions'
 
@@ -61,7 +62,7 @@ export interface PromptTicket {
   questionTurnId?: string
   /** User-selected composer tag (PRD 774) — deterministic, never LLM-classified.
    *  Threaded into the PRD's frontmatter when this ticket dispatches to /develop. */
-  tag?: 'feature' | 'bug'
+  tag?: TicketTag
   /**
    * Set when the user explicitly chose "Continue: <open item>" in the
    * composer's chain picker (PRD 775) instead of "New item". Holds the id of
@@ -167,7 +168,7 @@ interface ChatState {
     sessionId: string
     cwd: string
     prompt: string
-    tag?: 'feature' | 'bug'
+    tag?: TicketTag
     /** Set when the composer's chain picker (PRD 775) chose "Continue: <open item>". */
     chainRootId?: string
     /** Set when this prompt originates from onExternalSend, not a human composer submit. */
@@ -401,7 +402,7 @@ function dispatchSend(args: {
   cwd: string
   text: string
   promptId?: string
-  tag?: 'feature' | 'bug'
+  tag?: TicketTag
   chainRootId?: string
 }): void {
   const { tabId, sessionId, cwd, text, promptId, tag, chainRootId } = args
@@ -468,6 +469,17 @@ function dequeueNext(tabId: string): void {
   // classifier and therefore can never be misrouted to dispatchToPrd().
   // Always dispatch inline, exactly like a non-'develop' verdict would.
   if (next.external) {
+    dispatchQueuedInline(tabId, next)
+    return
+  }
+
+  // A 'discussion' ticket is the user declaring intent up front: the goal is
+  // an interactive research conversation with the agent, not work to be
+  // decomposed. Classifying it anyway would let a well-argued research
+  // question read as 'develop' and silently become a queued PRD — the exact
+  // outcome the tag exists to rule out. Skip the classifier entirely (and its
+  // claude -p cost) and stay inline, permanently.
+  if (isDiscussionTag(next.tag)) {
     dispatchQueuedInline(tabId, next)
     return
   }

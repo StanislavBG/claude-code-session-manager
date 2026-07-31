@@ -687,22 +687,63 @@ function appendHeartbeat(entry) {
   }
 }
 
+// An empty queue and an unreadable queue are NOT the same thing, and
+// conflating them is destructive: reconcile() treats every PRD .md with no
+// matching jobs[] row as a brand-new goal and re-mints it as 'pending', so a
+// single failed read that yields `jobs: []` re-queues the entire archive of
+// already-completed work — then mutate() writes that empty array back and the
+// real statuses are gone. (2026-07-31: 189 completed jobs resurrected and
+// fired into an ENOENT retry storm.)
+//
+// So: a MISSING file is a legitimately empty queue (first boot). A file that
+// exists but won't read or parse is `unreadable` — a poison state that must
+// never reach reconcile() or writeQueue(). Callers get the flag, not a lie.
+const EMPTY_QUEUE = () => ({
+  config: { ...DEFAULT_CONFIG }, jobs: [], scheduledFor: null, lastRunAt: null, paused: null,
+});
+
+function shapeQueue(raw) {
+  const data = JSON.parse(raw);
+  return {
+    config: { ...DEFAULT_CONFIG, ...(data.config || {}) },
+    jobs: Array.isArray(data.jobs) ? data.jobs : [],
+    scheduledFor: data.scheduledFor ?? null,
+    lastRunAt: data.lastRunAt ?? null,
+    paused: data.paused ?? null,
+  };
+}
+
+// Quarantine a corrupt queue.json alongside itself (once per process — the
+// first copy is the one that matters; later ticks would just overwrite it
+// with the same bytes) so a human can diff it against the .bak-* snapshots.
+let quarantined = false;
+function unreadableQueue(e) {
+  const state = EMPTY_QUEUE();
+  state.unreadable = e?.message ?? 'queue.json read failed';
+  if (!quarantined) {
+    quarantined = true;
+    try {
+      fs.copyFileSync(QUEUE_PATH, `${QUEUE_PATH}.corrupt-${Date.now()}`);
+    } catch { /* best-effort: the read already failed, the copy may too */ }
+  }
+  console.error(`[scheduler] queue.json unreadable — refusing to treat as empty: ${state.unreadable}`);
+  logs.writeLine({
+    level: 'error', scope: 'scheduler',
+    message: 'queue.json unreadable — scheduling halted until it reads clean',
+    meta: { path: QUEUE_PATH, error: state.unreadable },
+  });
+  return state;
+}
+
 // Sync queue read — passed to the supervisor module (which calls it from
 // supervisorTick / applyAction with no await) and the heartbeat interval.
 // IPC handlers and mutate() use readQueue (async) below.
 function readQueueSync() {
   try {
-    const raw = fs.readFileSync(QUEUE_PATH, 'utf8');
-    const data = JSON.parse(raw);
-    return {
-      config: { ...DEFAULT_CONFIG, ...(data.config || {}) },
-      jobs: Array.isArray(data.jobs) ? data.jobs : [],
-      scheduledFor: data.scheduledFor ?? null,
-      lastRunAt: data.lastRunAt ?? null,
-      paused: data.paused ?? null,
-    };
-  } catch {
-    return { config: { ...DEFAULT_CONFIG }, jobs: [], scheduledFor: null, lastRunAt: null, paused: null };
+    return shapeQueue(fs.readFileSync(QUEUE_PATH, 'utf8'));
+  } catch (e) {
+    if (e?.code === 'ENOENT') return EMPTY_QUEUE();
+    return unreadableQueue(e);
   }
 }
 
@@ -711,21 +752,18 @@ function readQueueSync() {
 // hands control back to the renderer while the kernel paginates the file.
 async function readQueue() {
   try {
-    const raw = await fsp.readFile(QUEUE_PATH, 'utf8');
-    const data = JSON.parse(raw);
-    return {
-      config: { ...DEFAULT_CONFIG, ...(data.config || {}) },
-      jobs: Array.isArray(data.jobs) ? data.jobs : [],
-      scheduledFor: data.scheduledFor ?? null,
-      lastRunAt: data.lastRunAt ?? null,
-      paused: data.paused ?? null,
-    };
-  } catch {
-    return { config: { ...DEFAULT_CONFIG }, jobs: [], scheduledFor: null, lastRunAt: null, paused: null };
+    return shapeQueue(await fsp.readFile(QUEUE_PATH, 'utf8'));
+  } catch (e) {
+    if (e?.code === 'ENOENT') return EMPTY_QUEUE();
+    return unreadableQueue(e);
   }
 }
 
 async function writeQueue(state) {
+  // Last line of defence: never persist a state derived from a failed read.
+  if (state && state.unreadable) {
+    throw new Error(`refusing to write queue.json from an unreadable read (${state.unreadable})`);
+  }
   ensureDirs();
   await config.writeJson(QUEUE_PATH, state);
 }
@@ -741,6 +779,12 @@ let mutateTail = Promise.resolve();
 function mutate(fn) {
   const next = mutateTail.then(async () => {
     const state = await readQueue();
+    // Bail BEFORE fn runs: a mutator handed an unreadable (therefore empty)
+    // state would compute its result from a queue that isn't there, and
+    // writeQueue would then persist that fiction over the real file.
+    if (state.unreadable) {
+      throw new Error(`queue mutation skipped: queue.json unreadable (${state.unreadable})`);
+    }
     const ret = await fn(state);
     await writeQueue(state);
     return ret;
@@ -873,6 +917,12 @@ function validatePromptForSpawn(body, srcLabel) {
  * Newly-discovered PRDs land as `pending`.
  */
 async function reconcile(state) {
+  // Defence in depth — tickQueue already gates on this, but reconcile is the
+  // function that would do the damage (every unmatched PRD .md becomes a
+  // fresh 'pending' row), so it refuses the poison state itself.
+  if (state && state.unreadable) {
+    throw new Error(`reconcile skipped: queue.json unreadable (${state.unreadable})`);
+  }
   const files = await listPrdFiles();
   const onDisk = new Map();
   for (const f of files) {
@@ -2613,6 +2663,12 @@ let tickTail = Promise.resolve();
 function tickQueue() {
   const next = tickTail.then(async () => {
     const state = await readQueue();
+    // Never reconcile against an unreadable queue: reconcile() would see zero
+    // job rows for every PRD on disk and resurrect the lot as 'pending'.
+    if (state.unreadable) {
+      console.error('[scheduler] tickQueue skipped: queue.json unreadable');
+      return { fired: false, reason: 'unreadable' };
+    }
     if (state.paused) {
       console.log('[scheduler] tickQueue skipped: paused');
       return { fired: false, reason: 'paused' };
@@ -2698,6 +2754,8 @@ function forceTickOutcome(result) {
       return { ok: true, kind: 'info', message: `Already running — ${result.runningCount} job(s) in flight` };
     case 'paused':
       return { ok: true, kind: 'warn', message: 'Scheduler is paused' };
+    case 'unreadable':
+      return { ok: false, kind: 'error', message: 'queue.json is unreadable — scheduling halted; a .corrupt-<ts> copy was saved next to it' };
     case 'cancelled':
       return { ok: true, kind: 'warn', message: 'Batch cancelled — try again' };
     case 'memory-deferred':
@@ -2713,6 +2771,10 @@ function forceTickOutcome(result) {
 
 async function runDueJobs() {
   const state = await readQueue();
+  if (state.unreadable) {
+    console.error('[scheduler] runDueJobs skipped: queue.json unreadable');
+    return { fired: false, reason: 'unreadable' };
+  }
   if (state.paused) {
     console.log('[scheduler] runDueJobs skipped: paused');
     return { fired: false, reason: 'paused' };
@@ -3909,4 +3971,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

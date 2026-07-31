@@ -526,6 +526,80 @@ function dispatchQueuedInline(tabId: string, ticket: PromptTicket): void {
  * back to minting one if the root's id can't be resolved (defensive; should
  * not happen for a chain reachable via the composer's chain picker).
  */
+/**
+ * Appends the 'prd_created' PromptSessionEvent for a just-authored PRD,
+ * chained off the session's current tail event. Shared by dispatchToPrd
+ * (legacy tab-ticket flow) and dispatchPromptSessionToPrd (direct Epic
+ * conversation flow, PromptSessionConversation.tsx) so there is exactly one
+ * place that knows how to fold a new PRD into a PromptSession's audit chain.
+ * Best-effort: logs and returns on failure, never throws into the caller.
+ */
+function appendPrdCreatedEvent(promptSessionId: string, slug: string): void {
+  try {
+    const tail = usePromptSessions.getState().events[promptSessionId]?.slice(-1)[0]
+    if (!tail) {
+      window.api?.logs?.write(
+        'chat',
+        'warn',
+        `appendPrdCreatedEvent: PromptSession ${promptSessionId} has no tail event — skipping prd_created append for ${slug}`,
+      )
+      return
+    }
+    usePromptSessions.getState().appendPromptSessionEvent(promptSessionId, {
+      kind: 'prd_created',
+      causedByEventId: tail.id,
+      prdSlug: slug,
+    })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    window.api?.logs?.write('chat', 'warn', `appendPrdCreatedEvent failed for ${promptSessionId}: ${msg}`)
+  }
+}
+
+/**
+ * Dispatches a prompt straight from an Epic's own conversation
+ * (PromptSessionConversation.tsx) as a new PRD — the direct-Epic counterpart
+ * of dispatchToPrd, which only the legacy tab-ticket queue can reach. No
+ * PromptTicket/tabId queue machinery involved: the PromptSession IS the unit
+ * of work, so this only needs its id, cwd, the prompt text, and a tag.
+ * Returns the created PRD's slug on success, or null on failure (having
+ * already toasted the error).
+ */
+export async function dispatchPromptSessionToPrd(
+  promptSessionId: string,
+  cwd: string,
+  text: string,
+  tag: TicketTag,
+): Promise<string | null> {
+  try {
+    const result = await window.api.chat.createPrd({
+      title: deriveTitleFromTicketText(text),
+      cwd,
+      estimateMinutes: 15,
+      goal: text,
+      acceptanceCriteria: [
+        'Implement the request described in Goal.',
+        'timeout 300 npm run typecheck passes',
+      ],
+      implementationNotes: `Target project: ${cwd}`,
+      sourcePromptId: promptSessionId,
+      tag,
+    })
+    if (!result?.ok) {
+      toast.error(`PRD authoring failed: ${result?.error ?? 'unknown error'}`)
+      return null
+    }
+    const filename = result.filename
+    const slug = filename.endsWith('.md') ? filename.slice(0, -3) : filename
+    appendPrdCreatedEvent(promptSessionId, slug)
+    return slug
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    toast.error(`PRD authoring failed: ${msg}`)
+    return null
+  }
+}
+
 function resolveDispatchPromptSessionId(tabId: string, ticket: PromptTicket): string {
   if (ticket.chainRootId) {
     const cur = useChat.getState().chats[tabId] ?? EMPTY
@@ -586,26 +660,8 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
       // tail, a missing session) must never fall through to the outer
       // .catch() and get this dispatch mislabeled 'failed' — that would
       // leave a real PRD orphaned with no prdSlugs and invite a duplicate
-      // re-dispatch. Best-effort only; log and move on.
-      try {
-        const tail = usePromptSessions.getState().events[promptSessionId]?.slice(-1)[0]
-        if (tail) {
-          usePromptSessions.getState().appendPromptSessionEvent(promptSessionId, {
-            kind: 'prd_created',
-            causedByEventId: tail.id,
-            prdSlug: slug,
-          })
-        } else {
-          window.api?.logs?.write(
-            'chat',
-            'warn',
-            `dispatchToPrd: PromptSession ${promptSessionId} has no tail event — skipping prd_created append for ${slug}`,
-          )
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        window.api?.logs?.write('chat', 'warn', `dispatchToPrd: appendPromptSessionEvent failed for ${promptSessionId}: ${msg}`)
-      }
+      // re-dispatch. appendPrdCreatedEvent is itself best-effort (never throws).
+      appendPrdCreatedEvent(promptSessionId, slug)
       // A continuation does NOT carry prdSlugs on its own history entry — the
       // slug is appended to the ROOT ticket's prdSlugs below instead, so the
       // chip UI (which iterates a ticket's prdSlugs) shows the whole chain

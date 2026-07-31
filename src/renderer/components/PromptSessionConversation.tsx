@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useChat } from '../state/chat'
-import { usePromptSessions, type PromptSession } from '../state/promptSessions'
+import { useChat, dispatchPromptSessionToPrd } from '../state/chat'
+import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../state/promptSessions'
 import { Turn } from './ChatTranscriptTurn'
+import { TagSelector, openPrdSlug } from './TerminalChat'
+import type { TicketTag } from '../lib/ticketDisplay'
 
 /**
  * Assistant-turn ids already folded into a 'response' PromptSessionEvent, per
@@ -14,6 +16,12 @@ import { Turn } from './ChatTranscriptTurn'
  * this event-chaining concern.
  */
 const respondedTurnIds = new Map<string, Set<string>>()
+
+// Stable fallback for the sessionEvents selector below — an inline `?? []`
+// would mint a fresh array every getSnapshot call, which useSyncExternalStore
+// treats as a changed snapshot (React #185 / blank-app risk, per this repo's
+// zustand-selector-stability rule).
+const EMPTY_EVENTS: PromptSessionEvent[] = []
 
 /**
  * Dedicated conversation view for a single PromptSession (PRD 802/803) — a
@@ -43,8 +51,11 @@ export function PromptSessionConversation({ promptSession }: Props) {
   const send = useChat((s) => s.send)
   const hydrate = useChat((s) => s.hydrate)
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
+  const sessionEvents = usePromptSessions((s) => s.events[promptSession.id]) ?? EMPTY_EVENTS
 
   const [draft, setDraft] = useState('')
+  const [composerTag, setComposerTag] = useState<TicketTag>('feature')
+  const [dispatching, setDispatching] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -57,6 +68,21 @@ export function PromptSessionConversation({ promptSession }: Props) {
   const running = chat?.running ?? false
   const stream = chat?.stream ?? ''
   const queuedPosition = chat?.queuedPosition ?? 0
+
+  // Interleave the PromptSession's own 'prd_created'/'closed' audit events
+  // into the turn transcript, ordered by time — so an Epic's conversation
+  // shows every PRD it spawned (and its closure) inline, traceable in
+  // context, not just in a separate side panel. 'prompt' (the session's own
+  // opening goal) and 'response' events are NOT re-rendered here: they're
+  // already covered by the empty-state message and the turn list itself.
+  const timeline = [
+    ...turns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
+    ...sessionEvents
+      .filter((e): e is PromptSessionEvent & { kind: 'prd_created' | 'closed' } =>
+        e.kind === 'prd_created' || e.kind === 'closed',
+      )
+      .map((e) => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
+  ].sort((a, b) => a.at - b.at)
 
   // Fold each newly-completed assistant turn into the PromptSession's own
   // audit chain as a 'response' event, chained off whatever the session's
@@ -85,8 +111,16 @@ export function PromptSessionConversation({ promptSession }: Props) {
 
   const submit = () => {
     if (!draft.trim()) return
-    send({ tabId: chatKey, sessionId, cwd, prompt: draft })
+    const text = draft.trim()
     setDraft('')
+    if (composerTag === 'discussion') {
+      // Discussion stays interactive — never dispatched to /develop, same
+      // rule TerminalChat's composer already enforces for this tag.
+      send({ tabId: chatKey, sessionId, cwd, prompt: text })
+      return
+    }
+    setDispatching(true)
+    void dispatchPromptSessionToPrd(promptSession.id, cwd, text, composerTag).finally(() => setDispatching(false))
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -119,20 +153,49 @@ export function PromptSessionConversation({ promptSession }: Props) {
             Send a message to work this goal.
           </div>
         )}
-        {turns.map((t, i) => (
-          <div key={t.id} id={`prompt-session-turn-${t.id}`} className="rounded-[14px]">
-            <Turn
-              turn={t}
-              cwd={cwd}
-              tabId={chatKey}
-              runActive={running && t.role === 'assistant' && i === turns.length - 1}
-              consentActionDisabled={running}
-              enableRawSessionActions={false}
-              linkTarget="browser"
-              inlineFilePreview
-            />
-          </div>
-        ))}
+        {timeline.map((item) => {
+          if (item.kind === 'turn') {
+            const t = item.turn
+            const i = turns.indexOf(t)
+            return (
+              <div key={t.id} id={`prompt-session-turn-${t.id}`} className="rounded-[14px]">
+                <Turn
+                  turn={t}
+                  cwd={cwd}
+                  tabId={chatKey}
+                  runActive={running && t.role === 'assistant' && i === turns.length - 1}
+                  consentActionDisabled={running}
+                  enableRawSessionActions={false}
+                  linkTarget="browser"
+                  inlineFilePreview
+                />
+              </div>
+            )
+          }
+          const e = item.event
+          if (e.kind === 'prd_created') {
+            return (
+              <div key={e.id} data-testid="prompt-session-prd-event" className="flex justify-center">
+                <button
+                  onClick={() => openPrdSlug(e.prdSlug!)}
+                  title={`Open PRD "${e.prdSlug}" in Scheduler`}
+                  className="rounded-full border border-line px-2.5 py-1 font-mono text-[11px] text-accent hover:bg-hi"
+                >
+                  → dispatched to PRD #{e.prdSlug}
+                </button>
+              </div>
+            )
+          }
+          return (
+            <div
+              key={e.id}
+              data-testid="prompt-session-closed-event"
+              className="text-center text-[11px] text-fg-faint"
+            >
+              — Epic marked completed —
+            </div>
+          )
+        })}
         {running && (
           <div className="max-w-[90%]">
             <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
@@ -169,6 +232,7 @@ export function PromptSessionConversation({ promptSession }: Props) {
             }
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
+          <TagSelector value={composerTag} onChange={setComposerTag} disabled={dispatching} />
           {running && (
             <button
               onClick={() => window.api.chat.cancel(chatKey)}
@@ -179,10 +243,10 @@ export function PromptSessionConversation({ promptSession }: Props) {
           )}
           <button
             onClick={submit}
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || dispatching}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-40"
           >
-            Send
+            {dispatching ? 'Dispatching…' : 'Send'}
           </button>
         </div>
       </div>

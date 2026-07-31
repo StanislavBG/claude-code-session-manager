@@ -164,12 +164,15 @@ export function App() {
   activeTabIdRef.current = activeTabId
   const hotkeyModeRef = useRef<HotkeyMode>('hold')
 
+  // "+ New session" now opens the Epics landing page rather than picking a
+  // directory and creating a legacy dormant SessionTab — the Epics nav
+  // ('terminal') is exclusively the PromptSession/Epic experience
+  // (ProjectsLanding's own "New starting prompt" form creates the Epic).
+  // createPickedSession/legacy SessionTab creation remains reachable via the
+  // Command Palette's new-tab-here/new-tab-pick commands for power users —
+  // this button was the only caller that force-navigated to the Epics nav.
   const handleNewSession = useCallback(() => {
     useLayout.getState().openPanel('terminal')
-    createPickedSession().catch((e) => {
-      console.error('[App] new session failed:', e)
-      toast.error('Could not start new session. The directory picker failed.')
-    })
   }, [])
 
   // Eager preload of the speech model + permission subscription.

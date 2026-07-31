@@ -49,7 +49,7 @@ const RAIL_BREAKPOINT = 1180
 
 const NAV_LABELS: Record<NavKey, string> = {
   overview: 'Overview',
-  terminal: 'Terminal',
+  terminal: 'Epics',
   browser: 'Browser',
   'system-prompt': 'System Prompt',
   settings: 'Settings',
@@ -190,6 +190,59 @@ export function TagChip({ tag }: { tag: TicketTag }) {
     >
       {tone.label}
     </span>
+  )
+}
+
+// Feature/Bug/Discussion composer tag selector — extracted so both
+// TerminalChat's legacy composer and PromptSessionConversation's Epic
+// composer share exactly one implementation (API-reuse standard), rather
+// than a second copy of the same three buttons/tones.
+export function TagSelector({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: TicketTag
+  onChange: (tag: TicketTag) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5" role="group" aria-label="Epic tag">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange('feature')}
+        aria-pressed={value === 'feature'}
+        className={`rounded px-2 py-1.5 text-xs font-medium disabled:opacity-40 ${
+          value === 'feature' ? 'bg-sage/25 text-sage' : 'text-fg-faint hover:text-fg-dim'
+        }`}
+      >
+        Feature
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange('bug')}
+        aria-pressed={value === 'bug'}
+        className={`rounded px-2 py-1.5 text-xs font-medium disabled:opacity-40 ${
+          value === 'bug' ? 'bg-accent/15 text-accent' : 'text-fg-faint hover:text-fg-dim'
+        }`}
+      >
+        Bug
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange('discussion')}
+        aria-pressed={value === 'discussion'}
+        title="Research conversation — stays interactive, never dispatched to /develop"
+        className={`rounded px-2 py-1.5 text-xs font-medium disabled:opacity-40 ${
+          value === 'discussion' ? 'bg-butter/25 text-fg-dim' : 'text-fg-faint hover:text-fg-dim'
+        }`}
+      >
+        Discussion
+      </button>
+    </div>
   )
 }
 
@@ -760,39 +813,7 @@ export function TerminalChat({ tabId, cwd }: Props) {
             }
             className="flex-1 resize-none rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none disabled:opacity-50"
           />
-          <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5" role="group" aria-label="Epic tag">
-            <button
-              type="button"
-              onClick={() => setComposerTag('feature')}
-              aria-pressed={composerTag === 'feature'}
-              className={`rounded px-2 py-1.5 text-xs font-medium ${
-                composerTag === 'feature' ? 'bg-sage/25 text-sage' : 'text-fg-faint hover:text-fg-dim'
-              }`}
-            >
-              Feature
-            </button>
-            <button
-              type="button"
-              onClick={() => setComposerTag('bug')}
-              aria-pressed={composerTag === 'bug'}
-              className={`rounded px-2 py-1.5 text-xs font-medium ${
-                composerTag === 'bug' ? 'bg-accent/15 text-accent' : 'text-fg-faint hover:text-fg-dim'
-              }`}
-            >
-              Bug
-            </button>
-            <button
-              type="button"
-              onClick={() => setComposerTag('discussion')}
-              aria-pressed={composerTag === 'discussion'}
-              title="Research conversation — stays interactive, never dispatched to /develop"
-              className={`rounded px-2 py-1.5 text-xs font-medium ${
-                composerTag === 'discussion' ? 'bg-butter/25 text-fg-dim' : 'text-fg-faint hover:text-fg-dim'
-              }`}
-            >
-              Discussion
-            </button>
-          </div>
+          <TagSelector value={composerTag} onChange={setComposerTag} />
           {running && (
             <button
               onClick={() => window.api.chat.cancel(tabId)}

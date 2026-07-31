@@ -130,6 +130,14 @@ describe('PromptSessionConversation (PRD 804)', () => {
 
       const textarea = container.querySelector('textarea') as HTMLTextAreaElement
       const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
+      const discussionButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Discussion') as HTMLButtonElement
+
+      // Discussion tag: stays interactive / runs through chatRunner, never
+      // dispatched to a PRD (Feature/Bug tags dispatch instead — covered by
+      // chat.test.ts's dispatchPromptSessionToPrd coverage).
+      act(() => {
+        discussionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
 
       // React tracks a controlled element's last-known value via a patched
       // value setter; a plain `el.value = x` updates that tracker too, so a
@@ -189,6 +197,10 @@ describe('PromptSessionConversation (PRD 804)', () => {
 
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
+    const discussionButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Discussion') as HTMLButtonElement
+    act(() => {
+      discussionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
     act(() => {
       setter.call(textarea, 'first message')
@@ -219,6 +231,56 @@ describe('PromptSessionConversation (PRD 804)', () => {
 
     act(() => { root.unmount() })
     container.remove()
+  })
+
+  it('sending a Feature-tagged prompt dispatches a PRD and renders it as a clickable chip, chained off the tail event', async () => {
+    const { api } = installWindowApiMock()
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship the thing')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(createElement(PromptSessionConversation, { promptSession: session }))
+      })
+
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+      const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement
+      // Feature is the composer's default tag — no extra click needed.
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
+      act(() => {
+        setter.call(textarea, 'build the widget')
+        textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      await act(async () => {
+        sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+
+      await vi.waitFor(() => expect(api.chat.createPrd).toHaveBeenCalled())
+      expect(api.chat.createPrd).toHaveBeenCalledWith(
+        expect.objectContaining({ goal: 'build the widget', cwd: session.cwd, sourcePromptId: session.id, tag: 'feature' }),
+      )
+
+      const events = usePromptSessions.getState().events[session.id]
+      const created = events[events.length - 1]
+      expect(created.kind).toBe('prd_created')
+      expect(created.prdSlug).toBe('1-fake')
+      expect(created.causedByEventId).toBe(initialEvent.id)
+
+      await vi.waitFor(() =>
+        expect(container.querySelector('[data-testid="prompt-session-prd-event"]')).not.toBeNull(),
+      )
+      expect(container.querySelector('[data-testid="prompt-session-prd-event"]')!.textContent).toContain('1-fake')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
   })
 
   it('clicking an http(s) link in the conversation view opens it via the embedded Browser, not shell.openExternal', async () => {

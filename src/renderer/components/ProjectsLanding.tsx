@@ -139,7 +139,7 @@ export function ProjectsLanding() {
             onClick={() => setOpenedArchiveId(null)}
             className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
           >
-            ← Back to Projects
+            ← Back to Epics
           </button>
           <button
             data-testid="prompt-session-resume"
@@ -165,7 +165,7 @@ export function ProjectsLanding() {
             onClick={() => setOpenedId(null)}
             className="rounded border border-line px-2 py-1 text-xs text-fg-dim hover:bg-elev hover:text-fg"
           >
-            ← Back to Projects
+            ← Back to Epics
           </button>
           <button
             data-testid="prompt-session-mark-completed"
@@ -187,9 +187,9 @@ export function ProjectsLanding() {
     <div className="h-full overflow-auto bg-bg" data-testid="projects-landing">
       <div className="max-w-2xl mx-auto px-6 py-8">
         <div className="mb-6">
-          <h1 className="font-serif text-[20px] font-medium text-fg">Projects</h1>
+          <h1 className="font-serif text-[20px] font-medium text-fg">Epics</h1>
           <p className="text-[12.5px] text-fg-faint mt-1">
-            Each row is an independent goal-oriented session you can jump into.
+            Each row is an independent Epic you can jump into.
           </p>
         </div>
 
@@ -232,7 +232,11 @@ export function ProjectsLanding() {
             No prompt sessions yet — start one above.
           </div>
         ) : (
-          groups.map(([groupCwd, groupSessions]) => (
+          <>
+          <div className="mb-2 text-[11px] font-semibold tracking-[0.05em] text-fg-faint uppercase">
+            Epic queue
+          </div>
+          {groups.map(([groupCwd, groupSessions]) => (
             <div key={groupCwd} data-testid="prompt-session-group" className="mb-6">
               <div
                 className="text-[11.5px] font-mono text-fg-faint mb-1.5 truncate"
@@ -252,7 +256,8 @@ export function ProjectsLanding() {
                 ))}
               </div>
             </div>
-          ))
+          ))}
+          </>
         )}
 
         <div className="mt-10">

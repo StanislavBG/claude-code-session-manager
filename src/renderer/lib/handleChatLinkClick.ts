@@ -1,6 +1,7 @@
 import type { MouseEvent } from 'react'
 import { useEditor } from '../state/editor'
 import { useSessions } from '../state/sessions'
+import { useBrowserState } from '../state/browser'
 import { toast } from '../state/toast'
 import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
 
@@ -12,13 +13,19 @@ import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
 // post-process pass (bare mentions like "docs/README.md" that `marked` never
 // turns into a real <a>). `cwd` resolves relative paths the same way
 // Terminal.tsx's xterm link provider does.
+type ResolvedFile = ReturnType<typeof resolveFileLinkTarget>
+
 /**
- * Opens a linkified file-path token (e.g. "src/foo.ts:42:8") in the Editor.
- * Shared by the inline click handler below and FileCallout's click-to-open
- * (TerminalChat.tsx) so both surfaces validate/resolve identically.
+ * Resolves a linkified file-path token to an actually-existing file, reading
+ * its text along the way — shared by openLinkifiedFilePath (opens in the
+ * Editor) and readLinkifiedFileText (read-only, for inline preview). Tries
+ * the given cwd first, then falls back to other open tabs' cwds for a
+ * relative token, exactly as before this was split out.
  */
-export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void> {
-  if (!raw) return
+async function resolveReadableFile(
+  raw: string,
+  cwd: string,
+): Promise<{ target: ResolvedFile; text: string } | null> {
   const filePath = raw.replace(/(?::\d+)+$/, '')
 
   const primary = resolveFileLinkTarget(raw, cwd)
@@ -32,10 +39,10 @@ export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void
   const primaryRead = await window.api.files.read(primary.absPath)
   if (!primaryRead.ok && primaryRead.error === 'path outside home') {
     toast.error("That path is outside the project and can't be opened.")
-    return
+    return null
   }
+  if (primaryRead.ok) return { target: primary, text: primaryRead.text }
 
-  let target = primaryRead.ok ? primary : null
   let triedOtherTabs = 0
 
   // A mention like "projectsRegistry.ts" may name a real file that simply
@@ -43,7 +50,7 @@ export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void
   // in (the assistant can discuss another project mid-conversation). Only
   // relative tokens benefit — an absolute path resolves the same regardless
   // of cwd, so there's nothing to retry.
-  if (!target && !filePath.startsWith('/')) {
+  if (!filePath.startsWith('/')) {
     const otherCwds = Array.from(
       new Set(useSessions.getState().tabs.map((t) => t.cwd).filter((c) => c && c !== cwd)),
     )
@@ -51,33 +58,73 @@ export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void
       const candidate = resolveFileLinkTarget(raw, otherCwd)
       const candidateRead = await window.api.files.read(candidate.absPath)
       triedOtherTabs++
-      if (candidateRead.ok) {
-        target = candidate
-        break
-      }
+      if (candidateRead.ok) return { target: candidate, text: candidateRead.text }
       // Outside-home or ENOENT — either way this candidate isn't a match;
       // move on to the next open tab's cwd.
     }
   }
 
-  if (!target) {
-    const tabWord = triedOtherTabs === 1 ? 'tab' : 'tabs'
-    toast.error(`${primaryRead.error || 'Not found'} under ${cwd} (tried ${triedOtherTabs} other open ${tabWord})`)
-    return
-  }
+  const tabWord = triedOtherTabs === 1 ? 'tab' : 'tabs'
+  toast.error(`${primaryRead.error || 'Not found'} under ${cwd} (tried ${triedOtherTabs} other open ${tabWord})`)
+  return null
+}
 
-  useEditor.getState().openFile(target.absPath, { line: target.line, col: target.col })
+/**
+ * Opens a linkified file-path token (e.g. "src/foo.ts:42:8") in the Editor.
+ * Shared by the inline click handler below and FileCallout's click-to-open
+ * (TerminalChat.tsx) so both surfaces validate/resolve identically.
+ */
+export async function openLinkifiedFilePath(raw: string, cwd = ''): Promise<void> {
+  if (!raw) return
+  const resolved = await resolveReadableFile(raw, cwd)
+  if (!resolved) return
+  useEditor.getState().openFile(resolved.target.absPath, { line: resolved.target.line, col: resolved.target.col })
   window.dispatchEvent(new CustomEvent('sm:open-editor'))
 }
 
-export async function handleChatLinkClick(e: MouseEvent, cwd = ''): Promise<void> {
+/**
+ * Read-only counterpart to openLinkifiedFilePath — resolves + reads the same
+ * way, but returns the file's text instead of opening a full Editor tab.
+ * Used by PromptSessionConversation's inline reference preview (PRD 805),
+ * which renders the result through MarkdownPreview rather than navigating
+ * away from the scoped conversation.
+ */
+export async function readLinkifiedFileText(raw: string, cwd = ''): Promise<string | null> {
+  if (!raw) return null
+  const resolved = await resolveReadableFile(raw, cwd)
+  return resolved?.text ?? null
+}
+
+/**
+ * Opens a URL in the embedded Browser (state/browser.ts) instead of the OS
+ * browser, then switches the app to the Browser screen — the same 'sm:navigate'
+ * plumbing AlmanacFooter/TerminalChat use for cross-screen navigation, and the
+ * same openTab() call Browser.tsx itself uses for a new sub-tab. Used by
+ * PromptSessionConversation (PRD 805) so links clicked from the scoped
+ * conversation stay inside the app rather than shelling out via
+ * shell.openExternal.
+ */
+export function openUrlInBrowserTab(url: string): void {
+  useBrowserState.getState().openTab({ url })
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'browser' }))
+}
+
+export async function handleChatLinkClick(
+  e: MouseEvent,
+  cwd = '',
+  linkTarget: 'external' | 'browser' = 'external',
+): Promise<void> {
   const target = e.target as HTMLElement
   const a = target.closest('a')
   if (a) {
     const href = a.getAttribute('href') || ''
     if (/^https?:\/\//i.test(href)) {
       e.preventDefault()
-      window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
+      if (linkTarget === 'browser') {
+        openUrlInBrowserTab(href)
+      } else {
+        window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
+      }
     }
     return
   }

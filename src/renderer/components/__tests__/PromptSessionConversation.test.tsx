@@ -22,6 +22,9 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 function installWindowApiMock() {
   const run = vi.fn().mockResolvedValue(undefined)
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
+  const shellOpen = vi.fn().mockResolvedValue(undefined)
+  const filesRead = vi.fn().mockResolvedValue({ ok: true, text: '# Doc\n\nbody', error: null, size: 20 })
+  const browserCreate = vi.fn().mockResolvedValue(undefined)
   const api = {
     chat: {
       run,
@@ -51,6 +54,13 @@ function installWindowApiMock() {
       writeText: vi.fn().mockResolvedValue({ ok: true }),
     },
     logs: { write: vi.fn() },
+    shell: { open: shellOpen },
+    files: { read: filesRead },
+    browser: {
+      create: browserCreate,
+      navigate: vi.fn().mockResolvedValue(undefined),
+      onNavState: vi.fn(() => () => {}),
+    },
   }
   // Assign directly onto the real jsdom `window` (rather than vi.stubGlobal
   // replacing the whole object) — replacing `window` wholesale drops
@@ -58,7 +68,7 @@ function installWindowApiMock() {
   // React's test renderer needs, which manifests as an opaque "Should not
   // already be working" act() error.
   ;(window as unknown as { api: typeof api }).api = api
-  return { api, run, getCompleteHandler: () => completeHandler }
+  return { api, run, getCompleteHandler: () => completeHandler, shellOpen, filesRead, browserCreate }
 }
 
 describe('PromptSessionConversation (PRD 804)', () => {
@@ -209,5 +219,97 @@ describe('PromptSessionConversation (PRD 804)', () => {
 
     act(() => { root.unmount() })
     container.remove()
+  })
+
+  it('clicking an http(s) link in the conversation view opens it via the embedded Browser, not shell.openExternal', async () => {
+    const { shellOpen, browserCreate } = installWindowApiMock()
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+    const { useChat } = await import('../../state/chat')
+    const { useBrowserState } = await import('../../state/browser')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship the thing')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            { id: 't1', role: 'assistant', text: 'See https://example.com/page for the docs.', at: Date.now() },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(createElement(PromptSessionConversation, { promptSession: session }))
+      })
+
+      const link = container.querySelector('a[href="https://example.com/page"]') as HTMLAnchorElement
+      expect(link).not.toBeNull()
+
+      act(() => {
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      })
+
+      await vi.waitFor(() => expect(browserCreate).toHaveBeenCalled())
+      expect(shellOpen).not.toHaveBeenCalled()
+      expect(useBrowserState.getState().tabs.some((t) => t.url === 'https://example.com/page')).toBe(true)
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('renders a .md file reference via the shared MarkdownPreview component, not renderChatMarkdown', async () => {
+    const { filesRead } = installWindowApiMock()
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+    const { useChat } = await import('../../state/chat')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship the thing')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            { id: 't1', role: 'assistant', text: 'See PLAN.md for the write-up.', at: Date.now() },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(createElement(PromptSessionConversation, { promptSession: session }))
+      })
+
+      const previewButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Preview') as HTMLButtonElement
+      expect(previewButton).not.toBeUndefined()
+
+      await act(async () => {
+        previewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+
+      await vi.waitFor(() => expect(filesRead).toHaveBeenCalled())
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="file-inline-preview"] .markdown-body')).not.toBeNull()
+      })
+      expect(container.querySelector('[data-testid="file-inline-preview"] h1')?.textContent).toBe('Doc')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
   })
 })

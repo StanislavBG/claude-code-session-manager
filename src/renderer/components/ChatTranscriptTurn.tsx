@@ -5,8 +5,9 @@ import { type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { extractUrls } from '../lib/extractUrls'
 import { toast } from '../state/toast'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
-import { handleChatLinkClick, openLinkifiedFilePath } from '../lib/handleChatLinkClick'
+import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
+import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 
 /**
  * Turn rendering — extracted from TerminalChat.tsx (PRD 319+) so it can be
@@ -61,12 +62,32 @@ function UrlCallout({ url }: { url: string }) {
   )
 }
 
+// A file mention is previewable inline (via MarkdownPreview) only when it
+// looks like markdown — code/other files still just open in the Editor.
+const MARKDOWN_PATH_RE = /\.(?:md|markdown)(?::\d+)*$/i
+
 // Same callout shape as UrlCallout, for bare file-path mentions (e.g. a pasted
 // clipboard image path) — the label opens the file (reusing the same
 // resolve/validate/open path as inline chat-file-link clicks) instead of
 // external-opening a URL.
-function FileCallout({ path, cwd }: { path: string; cwd: string }) {
+function FileCallout({
+  path,
+  cwd,
+  inlinePreview = false,
+}: {
+  path: string
+  cwd: string
+  /** Renders a "Preview" toggle that shows the file's content inline via
+   *  MarkdownPreview instead of navigating away to the Editor screen — set
+   *  only by PromptSessionConversation (PRD 805), which has no Editor screen
+   *  of its own to switch to. TerminalChat.tsx leaves this false/unset and
+   *  keeps today's Open-in-Editor-only behavior. */
+  inlinePreview?: boolean
+}) {
   const [copied, setCopied] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewText, setPreviewText] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const onCopy = () => {
     copyToClipboard(path, (ok) => {
       if (ok) {
@@ -78,24 +99,60 @@ function FileCallout({ path, cwd }: { path: string; cwd: string }) {
     })
   }
   const onOpen = () => { void openLinkifiedFilePath(path, cwd) }
+  const canPreview = inlinePreview && MARKDOWN_PATH_RE.test(path)
+  const onTogglePreview = async () => {
+    if (previewOpen) {
+      setPreviewOpen(false)
+      return
+    }
+    setPreviewOpen(true)
+    if (previewText === null && !previewLoading) {
+      setPreviewLoading(true)
+      const text = await readLinkifiedFileText(path, cwd)
+      setPreviewLoading(false)
+      setPreviewText(text ?? '')
+    }
+  }
   return (
-    <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-line bg-elev px-2.5 py-1.5 text-xs">
-      <span aria-hidden className="text-fg-dim">
-        📄
-      </span>
-      <button
-        onClick={onOpen}
-        title="Open in Editor"
-        className="min-w-0 flex-1 truncate text-left font-mono text-fg-dim hover:text-fg hover:underline"
-      >
-        {path}
-      </button>
-      <button
-        onClick={onCopy}
-        className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+    <div className="mt-1.5">
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-elev px-2.5 py-1.5 text-xs">
+        <span aria-hidden className="text-fg-dim">
+          📄
+        </span>
+        <button
+          onClick={onOpen}
+          title="Open in Editor"
+          className="min-w-0 flex-1 truncate text-left font-mono text-fg-dim hover:text-fg hover:underline"
+        >
+          {path}
+        </button>
+        {canPreview && (
+          <button
+            onClick={() => { void onTogglePreview() }}
+            className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"
+          >
+            {previewOpen ? 'Hide preview' : 'Preview'}
+          </button>
+        )}
+        <button
+          onClick={onCopy}
+          className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      {canPreview && previewOpen && (
+        <div
+          className="mt-1 max-h-80 overflow-hidden rounded-lg border border-line"
+          data-testid="file-inline-preview"
+        >
+          {previewLoading ? (
+            <div className="px-3 py-2 text-xs text-fg-dim">Loading preview…</div>
+          ) : (
+            <MarkdownPreview text={previewText ?? ''} flush />
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -194,6 +251,8 @@ export function Turn({
   runActive = false,
   consentActionDisabled = false,
   enableRawSessionActions = true,
+  linkTarget = 'external',
+  inlineFilePreview = false,
 }: {
   turn: ChatTurn
   cwd: string
@@ -204,6 +263,15 @@ export function Turn({
    *  PRD 804) — hides the "Grant consent" action, which drives a real tab's raw
    *  xterm session via useSessions and has no equivalent there. */
   enableRawSessionActions?: boolean
+  /** 'browser' routes http(s) link clicks through the embedded Browser
+   *  (state/browser.ts) instead of shell.openExternal — set only by
+   *  PromptSessionConversation (PRD 805). TerminalChat.tsx keeps the default
+   *  'external' behavior unchanged. */
+  linkTarget?: 'external' | 'browser'
+  /** Renders file/markdown references with an inline MarkdownPreview toggle
+   *  instead of Open-in-Editor-only — set only by PromptSessionConversation
+   *  (PRD 805), which has no Editor screen to navigate to. */
+  inlineFilePreview?: boolean
 }) {
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
@@ -316,7 +384,7 @@ export function Turn({
             <div
               ref={bodyRef}
               className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
-              onClick={(e) => { void handleChatLinkClick(e, cwd) }}
+              onClick={(e) => { void handleChatLinkClick(e, cwd, linkTarget) }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
             />
@@ -324,7 +392,7 @@ export function Turn({
               <UrlCallout key={url} url={url} />
             ))}
             {filePaths.map((path) => (
-              <FileCallout key={path} path={path} cwd={cwd} />
+              <FileCallout key={path} path={path} cwd={cwd} inlinePreview={inlineFilePreview} />
             ))}
           </>
         )}

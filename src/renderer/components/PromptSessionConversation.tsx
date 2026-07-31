@@ -128,6 +128,8 @@ export function PromptSessionConversation({ promptSession }: Props) {
               runActive={running && t.role === 'assistant' && i === turns.length - 1}
               consentActionDisabled={running}
               enableRawSessionActions={false}
+              linkTarget="browser"
+              inlineFilePreview
             />
           </div>
         ))}

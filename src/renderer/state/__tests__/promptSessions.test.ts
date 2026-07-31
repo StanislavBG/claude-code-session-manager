@@ -258,9 +258,14 @@ describe('promptSessions.ts', () => {
     expect(events[events.length - 1].kind).toBe('closed')
     expect(events[events.length - 1].causedByEventId).toBe(events[events.length - 2].id)
 
-    expect(api.config.writeJson).toHaveBeenCalledTimes(1)
-    const [archivePath, archive] = api.config.writeJson.mock.calls[0]
-    expect(archivePath).toBe(promptSessionArchivePath('/proj', session.id))
+    // writeJson also fires for the active-index persistence (on create,
+    // append, and the completion-triggered removal) — isolate the one
+    // archive write among them by path.
+    const archiveCall = api.config.writeJson.mock.calls.find(
+      (c) => c[0] === promptSessionArchivePath('/proj', session.id),
+    )
+    expect(archiveCall).toBeDefined()
+    const [archivePath, archive] = archiveCall!
     expect(archive.session).toEqual(updated)
     expect(archive.events).toEqual(events)
     expect(archive.transcript).toBe('transcript body')
@@ -301,5 +306,67 @@ describe('promptSessions.ts', () => {
 
     // The archived session's own record is untouched by the resume.
     expect(usePromptSessions.getState().sessions[archived.id].status).toBe('completed')
+  })
+
+  it('persists an active session + its events to disk on create/append, and round-trips id/claudeSessionId/events through hydrate() after a simulated reload', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the widget')
+    store.appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: usePromptSessions.getState().events[session.id][0].id,
+      text: 'progress update',
+    })
+
+    // persistActiveIndex serializes writes to the same path behind a
+    // microtask chain (to preserve issue order across concurrent mutations),
+    // so the write lands a tick after the synchronous store call returns.
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    const lastCall = api.config.writeJson.mock.calls[api.config.writeJson.mock.calls.length - 1]
+    expect(lastCall[0]).toBe(promptSessionActiveIndexPath('/proj'))
+    const persisted = lastCall[1] as { sessions: Record<string, unknown>; events: Record<string, unknown[]> }
+    expect(persisted.sessions[session.id]).toEqual(session)
+    expect(persisted.events[session.id]).toHaveLength(2)
+
+    // Simulate an app reload: a brand-new module (fresh, empty store), disk
+    // still has what the prior instance wrote.
+    vi.resetModules()
+    api.config.readJson.mockResolvedValue({
+      exists: true,
+      raw: '',
+      data: persisted,
+      parseError: null,
+      mtimeMs: 0,
+      error: null,
+    })
+    const fresh = await import('../promptSessions')
+    expect(fresh.usePromptSessions.getState().sessions[session.id]).toBeUndefined()
+
+    await fresh.usePromptSessions.getState().hydrate('/proj')
+
+    const rehydrated = fresh.usePromptSessions.getState().sessions[session.id]
+    expect(rehydrated).toEqual(session)
+    expect(rehydrated.claudeSessionId).toBe(session.claudeSessionId)
+    expect(fresh.usePromptSessions.getState().events[session.id]).toEqual(persisted.events[session.id])
+  })
+
+  it('drops a session out of the active index once it is marked completed', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the widget')
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    // persistActiveIndex's writes are chained microtasks — give the last one
+    // (fired from markCompleted, after status flips to 'completed') a tick.
+    await vi.waitFor(() => {
+      const calls = api.config.writeJson.mock.calls.filter((c) => c[0] === promptSessionActiveIndexPath('/proj'))
+      expect(calls.length).toBeGreaterThan(0)
+      const persisted = calls[calls.length - 1][1] as { sessions: Record<string, unknown> }
+      expect(persisted.sessions[session.id]).toBeUndefined()
+    })
   })
 })

@@ -3,6 +3,7 @@ import { toast } from './toast'
 import { transcriptExists } from '../lib/transcriptExists'
 import { classifyPromptTicket } from '../lib/promptClassifier'
 import { useSessions } from './sessions'
+import { usePromptSessions } from './promptSessions'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -71,6 +72,15 @@ export interface PromptTicket {
    * prdSlugs, not this ticket's. Never set for a "New item" choice.
    */
   chainRootId?: string
+  /**
+   * Set once this ticket (or, for a continuation, its chain root) has minted
+   * a real PromptSession (promptSessions.ts) and dispatched to a PRD — the
+   * PromptSession's own `id`, passed to chat:create-prd as `sourcePromptId`
+   * so a later deep link (PRD 807) has something real to resolve to. Unset
+   * until dispatchToPrd() actually runs (classification/queueing may still
+   * fail before that point).
+   */
+  promptSessionId?: string
   /**
    * Set when this ticket originated from an external source (Web Remote,
    * admin HTTP route, MCP tool, or the scheduler's own completion
@@ -495,6 +505,29 @@ function dispatchQueuedInline(tabId: string, ticket: PromptTicket): void {
  * transitions the ticket to 'dispatched-to-prd' with prdSlugs populated on
  * success, or 'failed' with a notice turn on failure.
  */
+/**
+ * Resolves the real, independently-sessioned PromptSession (promptSessions.ts)
+ * this dispatch's PRD should be linked to. A "New item" ticket (no
+ * chainRootId) mints a fresh PromptSession. A continuation ("Continue: <open
+ * item>") reuses the ROOT ticket's already-minted PromptSession, looked up
+ * from ticketHistory — never mints a second one for the same chain. Falls
+ * back to minting one if the root's id can't be resolved (defensive; should
+ * not happen for a chain reachable via the composer's chain picker).
+ */
+function resolveDispatchPromptSessionId(tabId: string, ticket: PromptTicket): string {
+  if (ticket.chainRootId) {
+    const cur = useChat.getState().chats[tabId] ?? EMPTY
+    const root = (cur.ticketHistory ?? []).find((t) => t.id === ticket.chainRootId)
+    if (root?.promptSessionId) return root.promptSessionId
+    window.api?.logs?.write(
+      'chat',
+      'warn',
+      `continuation ticket ${ticket.id}: no resolvable PromptSession for chainRootId ${ticket.chainRootId} — minting a new one`,
+    )
+  }
+  return usePromptSessions.getState().createPromptSession(ticket.cwd, ticket.text).id
+}
+
 function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
   const failPrd = (message: string): void => {
     patch(tabId, (c) => ({
@@ -509,6 +542,8 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
     dequeueNext(tabId)
   }
 
+  const promptSessionId = resolveDispatchPromptSessionId(tabId, ticket)
+
   window.api.chat
     .createPrd({
       title: deriveTitleFromTicketText(ticket.text),
@@ -520,9 +555,10 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
         'timeout 300 npm run typecheck passes',
       ],
       implementationNotes: `Target project: ${ticket.cwd}`,
-      // A continuation reuses the ROOT ticket's id as sourcePromptId, not
-      // this follow-up ticket's own id (PRD 775).
-      sourcePromptId: ticket.chainRootId ?? ticket.id,
+      // The real PromptSession this dispatch is linked to — freshly minted
+      // for a "New item" ticket, or the ROOT ticket's existing one for a
+      // continuation (PRD 775/813).
+      sourcePromptId: promptSessionId,
       sourceTabId: ticket.tabId,
       tag: ticket.tag,
     })
@@ -533,6 +569,31 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
       }
       const filename = result.filename
       const slug = filename.endsWith('.md') ? filename.slice(0, -3) : filename
+      // Isolated from the ticket-finalization path below: the PRD file is
+      // already written and real by this point, so a throw here (a stale
+      // tail, a missing session) must never fall through to the outer
+      // .catch() and get this dispatch mislabeled 'failed' — that would
+      // leave a real PRD orphaned with no prdSlugs and invite a duplicate
+      // re-dispatch. Best-effort only; log and move on.
+      try {
+        const tail = usePromptSessions.getState().events[promptSessionId]?.slice(-1)[0]
+        if (tail) {
+          usePromptSessions.getState().appendPromptSessionEvent(promptSessionId, {
+            kind: 'prd_created',
+            causedByEventId: tail.id,
+            prdSlug: slug,
+          })
+        } else {
+          window.api?.logs?.write(
+            'chat',
+            'warn',
+            `dispatchToPrd: PromptSession ${promptSessionId} has no tail event — skipping prd_created append for ${slug}`,
+          )
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        window.api?.logs?.write('chat', 'warn', `dispatchToPrd: appendPromptSessionEvent failed for ${promptSessionId}: ${msg}`)
+      }
       // A continuation does NOT carry prdSlugs on its own history entry — the
       // slug is appended to the ROOT ticket's prdSlugs below instead, so the
       // chip UI (which iterates a ticket's prdSlugs) shows the whole chain
@@ -541,6 +602,7 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
         ...ticket,
         status: 'dispatched-to-prd',
         completedAt: Date.now(),
+        promptSessionId,
         ...(ticket.chainRootId ? {} : { prdSlugs: [slug] }),
       }
       applyNotice(tabId, dispatched.sessionId, `→ dispatched to PRD ${filename} (ticket ${dispatched.id})`)

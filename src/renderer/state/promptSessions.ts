@@ -39,6 +39,20 @@ export function promptSessionArchivePath(cwd: string, promptSessionId: string): 
   return `${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/${promptSessionId}.json`
 }
 
+/** Where a cwd's *active* (not-yet-completed) PromptSessions + their event
+ *  chains are persisted — a single per-cwd index, written on every create/
+ *  append so a reload never loses in-progress work (unlike the archive,
+ *  which is written once at completion). Sibling of promptSessionArchivePath
+ *  under the same prompt-sessions/ root, so both live in one place to grep. */
+export function promptSessionActiveIndexPath(cwd: string): string {
+  return `${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/active-index.json`
+}
+
+interface PromptSessionActiveIndex {
+  sessions: Record<string, PromptSession>
+  events: Record<string, PromptSessionEvent[]>
+}
+
 /**
  * One step in a PromptSession's Prompt → PRD → Response → ... → Closed
  * chain. `causedByEventId` strongly links each event to the exact prior
@@ -78,12 +92,56 @@ interface PromptSessionsState {
    *  the archived one is dead) that carries a traceability link back to the
    *  archived session it follows on from. */
   resumeArchived: (archivedId: string) => PromptSession
+  /** Reads a cwd's active-session index back from disk and merges it into
+   *  the store — best-effort, one-shot per cwd at call time (safe to call
+   *  repeatedly as ProjectsLanding discovers known cwds). In-memory state
+   *  always wins over disk on id collision. No-ops if the index doesn't
+   *  exist yet or window.api is unavailable (tests, non-renderer contexts). */
+  hydrate: (cwd: string) => Promise<void>
 }
 
 let seq = 0
 function mintId(prefix: string): string {
   seq += 1
   return `${prefix}-${Date.now().toString(36)}-${seq}`
+}
+
+// Two independent fire-and-forget writes to the SAME path (e.g.
+// resumeArchived's createPromptSession call immediately followed by its own
+// persistActiveIndex call) are each an unawaited tmp+rename IPC round-trip —
+// without serialization, whichever rename lands on disk *last* wins, not
+// whichever was *issued* last, which could silently drop the later write's
+// data. Chaining every write for a given path behind the previous one's
+// settlement (success or failure) preserves issue order without the callers
+// (synchronous store actions) needing to await anything.
+const pendingWritesByPath = new Map<string, Promise<void>>()
+
+/** Fire-and-forget persist of a cwd's active-session slice — called after
+ *  every mutation so a reload never loses in-progress work. Best-effort: a
+ *  write failure is logged, never thrown into the caller (createPromptSession
+ *  and appendPromptSessionEvent are synchronous APIs their callers don't
+ *  await). No-ops outside a renderer (tests that never stub window.api). */
+function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>, events: Record<string, PromptSessionEvent[]>): void {
+  if (typeof window === 'undefined' || !window.api?.config?.writeJson) return
+  const index: PromptSessionActiveIndex = {
+    sessions: Object.fromEntries(
+      Object.entries(sessions).filter(([, s]) => s.cwd === cwd && s.status === 'active'),
+    ),
+    events: {},
+  }
+  for (const id of Object.keys(index.sessions)) {
+    index.events[id] = events[id] ?? []
+  }
+  const path = promptSessionActiveIndexPath(cwd)
+  const prior = pendingWritesByPath.get(path) ?? Promise.resolve()
+  const next = prior.then(() => window.api!.config.writeJson(path, index)).then(
+    () => undefined,
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('promptSessions', 'warn', `persistActiveIndex failed for ${cwd}: ${msg}`)
+    },
+  )
+  pendingWritesByPath.set(path, next)
 }
 
 export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
@@ -108,10 +166,10 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       at: now,
       text: goalText,
     }
-    set({
-      sessions: { ...get().sessions, [session.id]: session },
-      events: { ...get().events, [session.id]: [firstEvent] },
-    })
+    const sessions = { ...get().sessions, [session.id]: session }
+    const events = { ...get().events, [session.id]: [firstEvent] }
+    set({ sessions, events })
+    persistActiveIndex(cwd, sessions, events)
     return session
   },
   appendPromptSessionEvent: (promptSessionId, event) => {
@@ -142,9 +200,10 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       promptSessionId,
       at: new Date().toISOString(),
     }
-    set({
-      events: { ...get().events, [promptSessionId]: [...existing, fullEvent] },
-    })
+    const events = { ...get().events, [promptSessionId]: [...existing, fullEvent] }
+    set({ events })
+    const session = get().sessions[promptSessionId]
+    persistActiveIndex(session.cwd, get().sessions, events)
     return fullEvent
   },
   markCompleted: async (promptSessionId) => {
@@ -173,7 +232,11 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
 
     const now = new Date().toISOString()
     const completed: PromptSession = { ...session, status: 'completed', completedAt: now }
-    set({ sessions: { ...get().sessions, [promptSessionId]: completed } })
+    const sessions = { ...get().sessions, [promptSessionId]: completed }
+    set({ sessions })
+    // Status flipped to 'completed' — persisting now drops it out of the
+    // active index (persistActiveIndex only keeps status === 'active').
+    persistActiveIndex(session.cwd, sessions, get().events)
 
     let transcript = ''
     try {
@@ -199,7 +262,38 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     }
     const session = get().createPromptSession(archived.cwd, archived.goalText)
     const linked: PromptSession = { ...session, resumedFromId: archivedId }
-    set({ sessions: { ...get().sessions, [session.id]: linked } })
+    const sessions = { ...get().sessions, [session.id]: linked }
+    set({ sessions })
+    persistActiveIndex(session.cwd, sessions, get().events)
     return linked
+  },
+  hydrate: async (cwd) => {
+    if (typeof window === 'undefined' || !window.api?.config?.readJson) return
+    try {
+      const result = await window.api.config.readJson(promptSessionActiveIndexPath(cwd))
+      if (!result.exists || !result.data) return
+      const disk = result.data as Partial<PromptSessionActiveIndex>
+      const diskSessions = disk.sessions ?? {}
+      const diskEvents = disk.events ?? {}
+      // In-memory state always wins over disk on id collision — disk is only
+      // there to backfill sessions this app instance hasn't loaded yet. Only
+      // touch the store (and thus only re-render subscribers) when there's a
+      // genuinely new id — an unconditional set() here would hand back a
+      // fresh object reference on every call even when nothing changed,
+      // which is exactly the shape of an effect-driven re-render loop.
+      const existingSessions = get().sessions
+      const newIds = Object.keys(diskSessions).filter((id) => !existingSessions[id])
+      if (newIds.length === 0) return
+      const sessions = { ...existingSessions }
+      const events = { ...get().events }
+      for (const id of newIds) {
+        sessions[id] = diskSessions[id]
+        events[id] = diskEvents[id] ?? []
+      }
+      set({ sessions, events })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('promptSessions', 'warn', `hydrate failed for ${cwd}: ${msg}`)
+    }
   },
 }))

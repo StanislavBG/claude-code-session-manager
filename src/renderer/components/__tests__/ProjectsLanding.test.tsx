@@ -157,8 +157,12 @@ describe('ProjectsLanding', () => {
     // Named reuse path from the AC, also hit defensively.
     expect(api.pty.kill).toHaveBeenCalledWith(session!.claudeSessionId)
 
-    const [archivePath, archiveData] = api.config.writeJson.mock.calls[0]
-    expect(archivePath).toBe(`/home/bilko/Projects/alpha/session-manager-operations/prompt-sessions/${session!.id}.json`)
+    // writeJson also fires for the active-index persistence (on create and
+    // on the completion-triggered removal) — isolate the archive write by path.
+    const expectedArchivePath = `/home/bilko/Projects/alpha/session-manager-operations/prompt-sessions/${session!.id}.json`
+    const archiveCall = api.config.writeJson.mock.calls.find((c) => c[0] === expectedArchivePath)
+    expect(archiveCall).toBeDefined()
+    const [archivePath, archiveData] = archiveCall!
     expect(archiveData.session.status).toBe('completed')
     expect(archiveData.session.completedAt).toBeTruthy()
     expect(archiveData.events.some((e: { kind: string }) => e.kind === 'closed')).toBe(true)

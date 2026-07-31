@@ -68,6 +68,19 @@ export function ProjectsLanding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Backfill any active PromptSessions persisted from a prior app run — best
+  // effort, one call per known cwd as they're discovered. Keyed off a joined
+  // string (not the `knownCwds` array itself, which useKnownProjects hands
+  // back as a fresh reference on every render) so this doesn't refire every
+  // render — hydrate() itself is also a safe no-op re-call since it only
+  // mutates the store when it finds a session not already in memory.
+  const knownCwdsKey = knownCwds.join('\n')
+  useEffect(() => {
+    for (const c of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
+      void usePromptSessions.getState().hydrate(c)
+    }
+  }, [knownCwdsKey])
+
   // Only active sessions appear in the working Projects list — a completed
   // session is removed from here and moves to the read-only History section
   // below, per the explicit user requirement that completion never happens

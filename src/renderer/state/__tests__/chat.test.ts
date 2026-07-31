@@ -424,6 +424,11 @@ describe('chat.ts prompt queue', () => {
     await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build a whole feature' }))
     await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
 
+    const createPrdCall = createPrd.mock.calls[0][0] as { sourcePromptId: string }
+    // A "New item" dev-work ticket mints its own real PromptSession — the
+    // sourcePromptId is that session's id, never the ticket's own id.
+    expect(createPrdCall.sourcePromptId).not.toBe(queuedTicket.id)
+    expect(typeof createPrdCall.sourcePromptId).toBe('string')
     expect(createPrd).toHaveBeenCalledWith({
       title: 'build a whole feature',
       cwd: '/proj',
@@ -431,7 +436,7 @@ describe('chat.ts prompt queue', () => {
       goal: 'build a whole feature',
       acceptanceCriteria: ['Implement the request described in Goal.', 'timeout 300 npm run typecheck passes'],
       implementationNotes: 'Target project: /proj',
-      sourcePromptId: queuedTicket.id,
+      sourcePromptId: createPrdCall.sourcePromptId,
       sourceTabId: 't1',
     })
 
@@ -504,6 +509,40 @@ describe('chat.ts prompt queue', () => {
 
     const after = useChat.getState().get('t1')
     expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('PRD authoring failed') && t.text.includes('cwd rejected'))).toBe(true)
+  })
+
+  it('a throwing appendPromptSessionEvent does not mislabel a successful PRD creation as failed (PRD 813)', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 22, filename: '22-real-prd.md' }),
+    })
+    const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    // Force the PromptSession's own event-chain append to throw (e.g. a
+    // stale tail) — the PRD file was still written successfully by this
+    // point, so this must never surface as a 'failed' ticket.
+    vi.spyOn(usePromptSessions.getState(), 'appendPromptSessionEvent').mockImplementation(() => {
+      throw new Error('boom: stale tail')
+    })
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build a whole feature' })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalled())
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+
+    await vi.waitFor(() => {
+      const after = useChat.getState().get('t1')
+      const dispatched = after.ticketHistory?.find((t) => t.text === 'build a whole feature')
+      expect(dispatched?.status).toBe('dispatched-to-prd')
+      expect(dispatched?.prdSlugs).toEqual(['22-real-prd'])
+    })
+    const after = useChat.getState().get('t1')
+    expect(after.ticketHistory?.some((t) => t.status === 'failed')).toBe(false)
+    expect(after.turns.some((t) => t.role === 'notice' && t.text.includes('PRD authoring failed'))).toBe(false)
   })
 
   it('threads the composer-selected tag from send() through the queued ticket and into the createPrd payload (PRD 774)', async () => {
@@ -714,6 +753,7 @@ describe('chat.ts chain continuation (PRD 775)', () => {
               createdAt: 1,
               completedAt: 2,
               prdSlugs: ['9-first-prd'],
+              promptSessionId: 'psess-root-1',
             },
           ],
         },
@@ -739,7 +779,9 @@ describe('chat.ts chain continuation (PRD 775)', () => {
 
     await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'continue the initiative' }))
     await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
-    expect(createPrd).toHaveBeenCalledWith(expect.objectContaining({ sourcePromptId: 'root-1' }))
+    // A continuation reuses the ROOT ticket's already-minted PromptSession
+    // id — never mints a second one for the same chain.
+    expect(createPrd).toHaveBeenCalledWith(expect.objectContaining({ sourcePromptId: 'psess-root-1' }))
 
     await vi.waitFor(() => {
       const after = useChat.getState().get('t1')
@@ -802,8 +844,12 @@ describe('chat.ts chain continuation (PRD 775)', () => {
     await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'a totally new thing' }))
     await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
 
+    // "New item" mints its own independent PromptSession — sourcePromptId is
+    // that fresh session's id, never the ticket's own id or the open root's.
     const newTicketId = queuedTicket.id
-    expect(createPrd).toHaveBeenCalledWith(expect.objectContaining({ sourcePromptId: newTicketId }))
+    const createPrdCall = createPrd.mock.calls[0][0] as { sourcePromptId: string }
+    expect(createPrdCall.sourcePromptId).not.toBe(newTicketId)
+    expect(typeof createPrdCall.sourcePromptId).toBe('string')
 
     await vi.waitFor(() => {
       const after = useChat.getState().get('t1')
@@ -815,6 +861,49 @@ describe('chat.ts chain continuation (PRD 775)', () => {
     const after = useChat.getState().get('t1')
     const root = after.ticketHistory?.find((t) => t.id === 'root-1')
     expect(root?.prdSlugs).toEqual(['9-first-prd'])
+  })
+
+  it('mints exactly one real PromptSession for a fresh dev-work ticket, and a continuation reuses it without minting a second one (PRD 813)', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 20, filename: '20-first-prd.md' }),
+    })
+    const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off 1' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'new dev work' })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with kickoff 1' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'new dev work' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+    expect(createSpy).toHaveBeenCalledTimes(1)
+
+    const root = useChat.getState().get('t1').ticketHistory?.find((t) => t.text === 'new dev work')
+    expect(root?.promptSessionId).toBeTruthy()
+    expect(usePromptSessions.getState().sessions[root!.promptSessionId!]).toBeDefined()
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off 2' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    useChat.getState().send({
+      tabId: 't1',
+      sessionId: 's1',
+      cwd: '/proj',
+      prompt: 'continue dev work',
+      chainRootId: root!.id,
+    })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with kickoff 2' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'continue dev work' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(2))
+
+    // Still exactly one PromptSession minted overall — the continuation
+    // reused the root's, it did not mint a second one.
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(createPrd.mock.calls[1][0]).toMatchObject({ sourcePromptId: root!.promptSessionId })
   })
 })
 

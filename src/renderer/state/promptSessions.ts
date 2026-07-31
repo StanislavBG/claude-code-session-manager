@@ -21,6 +21,10 @@ export interface PromptSession {
    *  completed/archived PromptSession this one follows on from. The
    *  archived session's claudeSessionId is dead and never reused. */
   resumedFromId?: string | null
+  /** Epic-level intent tag. Also written by src/main/lib/epicMint.cjs for
+   *  Epics auto-minted from a headless PRD dispatch — stay shape-compatible
+   *  so hydrate() reading a main-written active-index.json round-trips it. */
+  tag?: 'feature' | 'bug' | 'discussion'
 }
 
 /** On-disk archive shape written by markCompleted and read back by any
@@ -78,7 +82,7 @@ export interface PromptSessionEvent {
 interface PromptSessionsState {
   sessions: Record<string, PromptSession>
   events: Record<string, PromptSessionEvent[]>
-  createPromptSession: (cwd: string, goalText: string) => PromptSession
+  createPromptSession: (cwd: string, goalText: string, tag?: PromptSession['tag']) => PromptSession
   appendPromptSessionEvent: (
     promptSessionId: string,
     event: Omit<PromptSessionEvent, 'id' | 'promptSessionId' | 'at'>,
@@ -98,6 +102,13 @@ interface PromptSessionsState {
    *  always wins over disk on id collision. No-ops if the index doesn't
    *  exist yet or window.api is unavailable (tests, non-renderer contexts). */
   hydrate: (cwd: string) => Promise<void>
+  /** Reads every completed Epic's archive file
+   *  (session-manager-operations/prompt-sessions/*.json, excluding
+   *  active-index.json) back from disk and merges them in as
+   *  status: 'completed' sessions with their events — the completed-Epic
+   *  counterpart of hydrate(). Same in-memory-wins-on-collision, best-effort,
+   *  no-op-if-window.api-unavailable semantics. */
+  hydrateArchived: (cwd: string) => Promise<void>
 }
 
 let seq = 0
@@ -147,7 +158,7 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
 export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   sessions: {},
   events: {},
-  createPromptSession: (cwd, goalText) => {
+  createPromptSession: (cwd, goalText, tag) => {
     const now = new Date().toISOString()
     const session: PromptSession = {
       id: mintId('psess'),
@@ -157,6 +168,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       status: 'active',
       createdAt: now,
       completedAt: null,
+      ...(tag ? { tag } : {}),
     }
     const firstEvent: PromptSessionEvent = {
       id: mintId('pevt'),
@@ -294,6 +306,36 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       window.api?.logs?.write('promptSessions', 'warn', `hydrate failed for ${cwd}: ${msg}`)
+    }
+  },
+  hydrateArchived: async (cwd) => {
+    if (typeof window === 'undefined' || !window.api?.config?.listDir || !window.api?.config?.readJson) return
+    try {
+      const dir = `${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions`
+      const result = await window.api.config.listDir(dir, { filesOnly: true })
+      if (!result.ok) return
+      const existingSessions = get().sessions
+      const sessions = { ...existingSessions }
+      const events = { ...get().events }
+      let changed = false
+      for (const entry of result.entries) {
+        if (!entry.name.endsWith('.json') || entry.name === 'active-index.json') continue
+        const id = entry.name.slice(0, -'.json'.length)
+        // In-memory state always wins over disk on id collision, same as hydrate().
+        if (sessions[id]) continue
+        const fileResult = await window.api.config.readJson(entry.path)
+        if (!fileResult.exists || !fileResult.data) continue
+        const archive = fileResult.data as Partial<PromptSessionArchive>
+        if (!archive.session || archive.session.id !== id) continue
+        sessions[id] = { ...archive.session, status: 'completed' }
+        events[id] = archive.events ?? []
+        changed = true
+      }
+      if (!changed) return
+      set({ sessions, events })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('promptSessions', 'warn', `hydrateArchived failed for ${cwd}: ${msg}`)
     }
   },
 }))

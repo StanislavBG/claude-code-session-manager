@@ -115,7 +115,7 @@ export function isChainResolved(ticket: PromptTicket, jobs: ChainJobStatus[]): b
   return slugs.every((slug) => jobs.find((j) => j.slug === slug)?.status === 'completed')
 }
 
-interface TabChat {
+export interface TabChat {
   turns: ChatTurn[]
   /** A run is in flight OR waiting in the queue — input is disabled. */
   running: boolean

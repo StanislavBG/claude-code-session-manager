@@ -29,6 +29,7 @@ function installWindowApiMock() {
       readText: vi.fn().mockResolvedValue({ exists: true, text: 'transcript body', mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }),
+      listDir: vi.fn().mockResolvedValue({ ok: true, entries: [], error: null }),
     },
   }
   vi.stubGlobal('window', { api })
@@ -368,5 +369,115 @@ describe('promptSessions.ts', () => {
       const persisted = calls[calls.length - 1][1] as { sessions: Record<string, unknown> }
       expect(persisted.sessions[session.id]).toBeUndefined()
     })
+  })
+
+  it('round-trips an Epic-level tag through persistActiveIndex and hydrate()', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the widget', 'bug')
+    expect(session.tag).toBe('bug')
+
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    const lastCall = api.config.writeJson.mock.calls[api.config.writeJson.mock.calls.length - 1]
+    const persisted = lastCall[1] as { sessions: Record<string, { tag?: string }> }
+    expect(persisted.sessions[session.id].tag).toBe('bug')
+
+    // Simulate a reload from a main-minted active-index.json (epicMint.cjs
+    // writes `tag` the same shape) — hydrate() must read it back untouched.
+    vi.resetModules()
+    api.config.readJson.mockResolvedValue({
+      exists: true,
+      raw: '',
+      data: persisted,
+      parseError: null,
+      mtimeMs: 0,
+      error: null,
+    })
+    const fresh = await import('../promptSessions')
+    await fresh.usePromptSessions.getState().hydrate('/proj')
+    expect(fresh.usePromptSessions.getState().sessions[session.id].tag).toBe('bug')
+  })
+
+  it('hydrateArchived() loads completed-Epic archive files as status:completed sessions, skipping active-index.json', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+
+    const archivedSession = {
+      id: 'psess-archived-1',
+      cwd: '/proj',
+      goalText: 'Old goal',
+      claudeSessionId: 'claude-archived-1',
+      status: 'completed' as const,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      completedAt: '2026-07-02T00:00:00.000Z',
+    }
+    const archivedEvents = [
+      { id: 'e1', promptSessionId: 'psess-archived-1', kind: 'prompt' as const, causedByEventId: null, at: '2026-07-01T00:00:00.000Z', text: 'Old goal' },
+    ]
+    const archivePath = promptSessionArchivePath('/proj', 'psess-archived-1')
+
+    api.config.listDir.mockResolvedValue({
+      ok: true,
+      error: null,
+      entries: [
+        { name: 'active-index.json', path: '/proj/session-manager-operations/prompt-sessions/active-index.json', isDirectory: false, isFile: true, mtimeMs: 0, size: 0 },
+        { name: 'psess-archived-1.json', path: archivePath, isDirectory: false, isFile: true, mtimeMs: 0, size: 0 },
+      ],
+    })
+    api.config.readJson.mockImplementation(async (path: string) => {
+      if (path === archivePath) {
+        return {
+          exists: true,
+          raw: '',
+          data: { session: archivedSession, events: archivedEvents, transcript: '', archivedAt: '2026-07-02T00:00:00.000Z' },
+          parseError: null,
+          mtimeMs: 0,
+          error: null,
+        }
+      }
+      return { exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }
+    })
+
+    await usePromptSessions.getState().hydrateArchived('/proj')
+
+    const loaded = usePromptSessions.getState().sessions['psess-archived-1']
+    expect(loaded).toBeDefined()
+    expect(loaded.status).toBe('completed')
+    expect(loaded.goalText).toBe('Old goal')
+    expect(usePromptSessions.getState().events['psess-archived-1']).toEqual(archivedEvents)
+    // active-index.json must never be treated as an archived Epic.
+    expect(usePromptSessions.getState().sessions['active-index']).toBeUndefined()
+  })
+
+  it('hydrateArchived() never overwrites an in-memory session on id collision', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Live in memory')
+    const archivePath = promptSessionArchivePath('/proj', session.id)
+
+    api.config.listDir.mockResolvedValue({
+      ok: true,
+      error: null,
+      entries: [
+        { name: `${session.id}.json`, path: archivePath, isDirectory: false, isFile: true, mtimeMs: 0, size: 0 },
+      ],
+    })
+    api.config.readJson.mockResolvedValue({
+      exists: true,
+      raw: '',
+      data: { session: { ...session, goalText: 'stale disk copy', status: 'completed' }, events: [], transcript: '', archivedAt: 'x' },
+      parseError: null,
+      mtimeMs: 0,
+      error: null,
+    })
+
+    await usePromptSessions.getState().hydrateArchived('/proj')
+
+    expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('Live in memory')
+    expect(usePromptSessions.getState().sessions[session.id].status).toBe('active')
   })
 })

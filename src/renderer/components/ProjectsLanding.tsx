@@ -78,6 +78,7 @@ export function ProjectsLanding() {
   useEffect(() => {
     for (const c of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
       void usePromptSessions.getState().hydrate(c)
+      void usePromptSessions.getState().hydrateArchived(c)
     }
   }, [knownCwdsKey])
 

@@ -405,9 +405,10 @@ export interface ScheduleJob {
    *  (its chat key) — lets the Scheduler UI trace a job back to the
    *  PromptSession that spawned it. */
   sourceTabId?: string | null;
-  /** Originating prompt id (PRD frontmatter `sourcePromptId`) — the chain-root
-   *  PromptTicket id this PRD was dispatched from. Kept alongside `sourceTabId`
-   *  for referential tracing even when the tab/session no longer resolves. */
+  /** Originating prompt id (PRD frontmatter `sourcePromptId`) — the
+   *  PromptSession (Epic) id this PRD was dispatched from. Kept alongside
+   *  `sourceTabId` for referential tracing even when the tab/session no
+   *  longer resolves. */
   sourcePromptId?: string | null;
 }
 
@@ -450,6 +451,9 @@ export interface PrdListItem {
   cwd: string;
   estimateMinutes: number | null;
   mtimeMs: number;
+  /** PRD frontmatter `sourcePromptId` — the PromptSession (Epic) id this PRD
+   *  was dispatched from, if any. */
+  sourcePromptId?: string | null;
 }
 
 export interface SupervisorConfig {

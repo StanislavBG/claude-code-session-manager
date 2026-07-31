@@ -223,13 +223,14 @@ function create({ viewId, partition }) {
     },
   });
   views.set(viewId, view);
-  browserViewContentsIds.add(view.webContents.id);
-  contentsIdToViewId.set(view.webContents.id, viewId);
+  const wcId = view.webContents.id;
+  browserViewContentsIds.add(wcId);
+  contentsIdToViewId.set(wcId, viewId);
   view.webContents.setZoomFactor(lastZoomFactor);
   wireNavEvents(viewId, view);
   view.webContents.once('destroyed', () => {
-    browserViewContentsIds.delete(view.webContents.id);
-    contentsIdToViewId.delete(view.webContents.id);
+    browserViewContentsIds.delete(wcId);
+    contentsIdToViewId.delete(wcId);
     recordingViewIds.delete(viewId);
     stepCounters.delete(viewId);
     recordTokens.delete(viewId);

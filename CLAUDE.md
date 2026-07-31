@@ -1,6 +1,6 @@
 # Claude Code Session Manager
 
-Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, Usage, History, Scheduler, Knowledge Graph, Web Remote, Memory, Permissions, etc.). Mobile web cockpit at bilko.run (v2: same-origin relay + session state/summary protocol).
+Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, History, Scheduler, Knowledge Graph, Web Remote, Memory, Permissions, etc.). Mobile web cockpit at bilko.run (v2: same-origin relay + session state/summary protocol).
 
 All session-manager per-project operations (feedback intake, the `/explain-to-me` knowledge base) live under `session-manager-operations/` at the repo root — e.g. `session-manager-operations/feedback/`, `session-manager-operations/HUMAN_LEARN/`.
 
@@ -53,7 +53,7 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `components/SchedulePanel.tsx` — modular pane (Queue/PRDs/History tabs). Extracted 2026-06 to be reusable by Scheduler tab + web-remote. Owns filter state.
 - `components/tabs/scheduler/sched-primitives.tsx` — Almanac design shared: SchBadge (status color/mark), ProjectTag, DetailBlock/Line (project dots hashed-color palette).
 - `components/ui/` — shared primitives (Panel, ScopeSwitcher, SaveBar, JsonEditor, KVTable, ListDetail, Toggle, EmptyState).
-- `components/layout/AlmanacFooter.tsx` — global chip strip (connected dot, 5h-usage, conditional scheduler-paused pill, active tab + branch via `lib/useBranch.ts`, last-activity, todos, app version). Pills navigate to Settings / Usage / Scheduler on click. (Renamed/redesigned from the pre-Almanac `AppStatusBar.tsx`, which no longer exists — it had no model/effort/team/voice pills; the team chip lives only in `components/ui/TeamsCard.tsx` now.)
+- `components/layout/AlmanacFooter.tsx` — global chip strip (connected dot, 5h-usage, conditional scheduler-paused pill, active tab + branch via `lib/useBranch.ts`, last-activity, todos, app version). Pills navigate to Settings / Home / Scheduler on click. (Renamed/redesigned from the pre-Almanac `AppStatusBar.tsx`, which no longer exists — it had no model/effort/team/voice pills; the team chip lives only in `components/ui/TeamsCard.tsx` now.)
 - `components/CommandPalette.tsx` — Cmd-K palette with fuzzy filter + emit-only dispatch. Suppressed inside Monaco / text inputs.
 - `components/ui/Toast.tsx` — non-fatal error surfacing. `info / warn / error`. Mounted above modals, below RecordingStatus.
 - `lib/prdFrontmatter.ts` — round-trip YAML preservation for SchedulerPrdsView.

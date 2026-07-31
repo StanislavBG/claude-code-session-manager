@@ -11,15 +11,17 @@
  * Data sources are all existing zustand stores; nothing new on the backend.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useEffect, useState } from 'react'
 import type { NavKey } from '../LeftNav'
-import { useBilling, getBillingData } from '../../state/billing'
+import { useBilling, getBillingData, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath } from '../../lib/useKnownProjects'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
+import { UsageMeters } from './home/UsageMeters'
+import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import type { DirEntry, ScheduleJob } from '../../../preload/api'
 
 interface HomeProps {
@@ -43,7 +45,7 @@ export function Home({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }:
       <div className="mx-auto max-w-[1100px] px-10 py-9 text-fg">
         <Hero greeting={greeting} />
         <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: '1.25fr 1fr' }}>
-          <BillingWindowCard />
+          <BillingCard />
           <QuickStartCard
             onNewSession={onNewSession}
             onOpenVoice={onOpenVoice}
@@ -104,68 +106,22 @@ function Mascot({ size = 28 }: { size?: number }) {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// 5-hour billing window
+// Billing meters — Session 5-hour + Weekly windows (moved from the
+// now-removed Usage tab; same useBilling store Home already read from).
 // ────────────────────────────────────────────────────────────────────
-function BillingWindowCard() {
+function BillingCard() {
   const billing = useBilling((s) => s.data)
   const data = getBillingData(billing)
-  const fiveHour = data?.usage.five_hour ?? null
-  const util = fiveHour?.utilization ?? 0
-  const elapsedPct = Math.min(100, Math.max(0, util))
-  const resetsAt = fiveHour?.resets_at ?? null
-  const remaining = useCountdown(resetsAt)
 
   return (
-    <div className="bg-bg-hi border border-line rounded-[14px] px-5 py-[18px]">
-      <div className="flex items-baseline justify-between mb-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-accent inline-flex"><AlmanacIcon name="clock" size={16} /></span>
-          <span className="font-serif text-[18px] font-medium">5-hour window</span>
-        </div>
-        <span className="font-mono text-[12px] text-fg-faint">
-          {resetsAt ? `resets ${formatLocalTime(resetsAt)}` : '—'}
-        </span>
-      </div>
-      <div className="h-2.5 bg-bg rounded-full overflow-hidden border border-rule">
-        <div
-          className="h-full transition-[width] duration-300"
-          style={{
-            width: `${elapsedPct}%`,
-            background: 'linear-gradient(90deg, #b85c34, #e8a988)',
-          }}
-        />
-      </div>
-      <div className="flex justify-between mt-3 text-[13px] text-fg-dim">
-        <span>
-          <strong className="text-fg font-mono">{Math.round(util)}%</strong> used
-        </span>
-        <span className="text-sage">{remaining ?? '—'} remaining</span>
-      </div>
+    <div className="space-y-3">
+      {billing && billing.kind !== 'ok' && billing.kind !== 'ok-stale' && (
+        <BillingStatusOverlay result={billing} onRetry={refreshBilling} />
+      )}
+      {!billing && <div className="text-xs text-fg-faint">loading usage…</div>}
+      {data && <UsageMeters data={data} updatedAt={data.fetchedAt} />}
     </div>
   )
-}
-
-function useCountdown(iso: string | null): string | null {
-  const [, force] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => force((n) => n + 1), 30_000)
-    return () => clearInterval(id)
-  }, [])
-  if (!iso) return null
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return null
-  const diff = t - Date.now()
-  if (diff <= 0) return '0m'
-  const h = Math.floor(diff / 3_600_000)
-  const m = Math.floor((diff % 3_600_000) / 60_000)
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function formatLocalTime(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  } catch { return '' }
 }
 
 // ────────────────────────────────────────────────────────────────────

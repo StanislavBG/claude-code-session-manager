@@ -1,4 +1,4 @@
-// Shared Almanac tone helper for Usage tab (meters + burn-rate projection).
+// Shared Almanac tone helper for the Home billing meters card.
 // Single source of truth for the 70/90 thresholds and tone→class mapping.
 
 export type TierTone = {
@@ -16,8 +16,3 @@ export function tierTone(util: number): TierTone {
     return { dot: 'bg-honey', bar: 'bg-honey', track: 'bg-honey/15', text: 'text-honey-dark' }
   return { dot: 'bg-sage', bar: 'bg-sage', track: 'bg-sage/15', text: 'text-sage' }
 }
-
-// Compact token-count formatting (1.2M / 340k / 12) — shared by TopologyHeader,
-// SessionMatrix, and HistoryDashboard so token-count displays never drift apart.
-// Thin re-export of the canonical implementation in lib/formatCompactCount.
-export { formatCompactCount } from '../../../lib/formatCompactCount'

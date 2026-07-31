@@ -31,7 +31,6 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project' },
   { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs' },
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable' },
-  { key: 'usage',      group: 'Workspace', label: 'Usage',      icon: 'usage',        hint: 'Tokens, cost, sessions per day' },
 
   // Configure
   { key: 'skills',        group: 'Configure', label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads' },

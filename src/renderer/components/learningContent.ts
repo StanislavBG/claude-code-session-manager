@@ -30,7 +30,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         {
           title: 'What you see',
           items: [
-            { term: '5-hour window', body: 'A live read of your subscription usage for the current 5-hour rolling bucket: a bar that fills as you use it, the percent used, the local time it resets, and a live countdown of time remaining. Same data the Usage tab and the CLI /usage command read.' },
+            { term: 'Billing meters', body: 'A live read of your subscription usage — plan chip, the current 5-hour rolling window, and the weekly windows — each with percent used, a color bar, and the reset time. Same data the CLI /usage command reads.' },
             { term: 'Quick start', body: 'Four buttons — Start a session, Resume last (opens History), Draft a PRD (opens Scheduler), and Add a project (opens Projects) — plus a microphone button that opens voice input.' },
             { term: 'Recent sessions', body: 'Your four most-recently-touched transcripts, scanned from ~/.claude/projects. Each row shows the project, the short session id, the transcript size, and how long ago it was active. Click a row to reopen that session with claude --resume.' },
             { term: 'In the scheduler', body: 'A peek at the first three jobs in the scheduler queue, each tagged running or queued with a rough time estimate. “Open scheduler →” jumps to the full Scheduler tab.' },
@@ -465,33 +465,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     tips: [
       'Presets replace the whole file — Save commits, Revert restores what was on disk. Editing any binding turns a preset into a "custom layout".',
       'Defaults stay in effect for any key you don\'t override; after saving, restart Claude Code so the CLI picks up changes. The "reference ↗" link opens the official docs.',
-    ],
-  },
-  'usage': {
-    headline: 'Your subscription\'s rolling-window limits — the same data as /usage',
-    intro:
-      'This is the in-app mirror of the claude /usage command: how much of your plan you have consumed in each rolling window, pulled live from the billing API (api.anthropic.com/api/oauth/usage) using the OAuth token in ~/.claude/.credentials.json. It refreshes about once a minute. Use it to answer one question — "am I about to hit a limit?" — without dropping to a terminal.',
-    sections: [
-      {
-        title: 'The windows',
-        items: [
-          { term: 'Session · 5-hour', body: 'The rolling 5-hour block. Every meter shows percent used, a color bar (green → yellow at 70% → red at 90%), and the reset as both a countdown and an absolute Pacific time.' },
-          { term: 'Weekly · all models', body: 'The 7-day cap across every model. Resets are multi-day, so they show a weekday (e.g. "Tue 3:00 PM PT").' },
-          { term: 'Weekly · Opus / Sonnet / OAuth apps', body: 'Per-model and per-integration weekly sub-limits. They appear only on plans that have them, so the layout stays clean.' },
-          { term: 'Extra usage', body: 'Pay-as-you-go credits, shown only when enabled — used vs. monthly limit. Any meter over 100% caps the bar at full and shows an "over limit" badge.' },
-        ],
-      },
-      {
-        title: 'Beyond raw /usage',
-        items: [
-          { term: 'Burn rate', body: 'Extrapolates the 5-hour window: current %, projected % at reset, and an estimated exhaust time if you are trending over 100%. A pill reads On track / Warning / Critical, and a desktop notification fires once per window when projected passes 80% then 95%.' },
-          { term: 'Session topology', body: 'A secondary, collapsible view (not part of /usage): live activity across every open tab — workspace, state, turns, tokens/min, cache warmth, and active subagents — plus an alerts strip flagging things like runaway context growth or cold caches.' },
-        ],
-      },
-    ],
-    tips: [
-      'Percentages can read over 100% — the API reports raw utilization; the meter caps the bar at full but shows the true number in red with an "over limit" badge.',
-      'Data is cached; if a fetch is rate-limited or the token expired you will see a stale chip with a Retry button rather than a blank page.',
     ],
   },
   'scheduler': {

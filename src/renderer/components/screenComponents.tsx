@@ -3,7 +3,6 @@ import type { NavKey } from './LeftNav'
 import { Home } from './tabs/Home'
 import { Skills } from './tabs/Skills'
 import { History } from './tabs/History'
-import { Usage } from './tabs/Usage'
 import { EditorView } from './tabs/EditorView'
 import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
 import { SearchModal, type SearchMode } from './modals/SearchModal'
@@ -46,7 +45,6 @@ interface PageConfig {
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'skills':        { title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
   'history':       { title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
-  'usage':         { title: 'Usage & limits',            intro: 'The in-app /usage view: your plan\'s rolling-window consumption — 5-hour session and weekly limits — live from the billing API, with a burn-rate projection for the active window.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'plugins':       { title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
@@ -97,7 +95,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
     switch (active) {
       case 'skills':        return <Skills />
       case 'history':       return <History />
-      case 'usage':         return <Usage />
       case 'scheduler':     return <Scheduler />
       case 'plugins':       return <Plugins />
       case 'mcp':           return <McpServers />

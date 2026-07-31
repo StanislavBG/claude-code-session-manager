@@ -5,7 +5,7 @@ import type { SessionTab } from './sessions'
 
 /**
  * Per-tab live state derived from the session transcript JSONL. Consumers
- * (Tasks, Subagents, Plans, Usage tabs) read slices of this.
+ * (AlmanacFooter's todo chip, Home's recent-sessions, etc.) read slices of this.
  *
  * One subscription per tab; ref-counted so multiple components can observe
  * without double-subscribing.

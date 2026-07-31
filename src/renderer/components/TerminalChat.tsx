@@ -223,7 +223,6 @@ const NAV_LABELS: Record<NavKey, string> = {
   projects: 'Projects',
   history: 'History',
   keybindings: 'Keybindings',
-  usage: 'Usage',
   scheduler: 'Scheduler',
   editor: 'Editor',
   voice: 'Voice',

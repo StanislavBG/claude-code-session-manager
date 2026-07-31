@@ -3,8 +3,9 @@
  * One 30px strip: connected dot · 5h window state · prompts/cost · branch · version.
  *
  * Click handlers route through props rather than navigate-directly so the
- * App owns routing — clicking the 5h pill opens Usage, branch opens nothing
- * (informational), connected dot opens Settings.
+ * App owns routing — clicking the 5h pill opens Home (where the billing
+ * meters live), branch opens nothing (informational), connected dot opens
+ * Settings.
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react'
@@ -73,9 +74,9 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       </button>
 
       <button
-        onClick={() => onNavigate?.('usage')}
+        onClick={() => onNavigate?.('overview')}
         className="hover:text-fg transition-colors"
-        title="Open Usage"
+        title="Open Home"
       >
         {util != null ? `${util}% of 5h window used` : '5h —'}
       </button>

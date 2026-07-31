@@ -18,7 +18,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'browser',
   'scheduler',
   'history',
-  'usage',
   // Configure
   'skills',
   'plugins',

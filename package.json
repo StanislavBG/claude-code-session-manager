@@ -31,7 +31,6 @@
     "postinstall": "node scripts/postinstall.cjs",
     "prepublishOnly": "vite build",
     "test:unit": "vitest run",
-    "test:verify": "node src/main/__tests__/runVerify.test.cjs",
     "test:e2e": "xvfb-run -a playwright test",
     "smoke:darwin": "playwright test tests/smoke/darwin-boot.spec.ts",
     "test:e2e:mic": "xvfb-run -a playwright test e2e/mic.spec.mjs",

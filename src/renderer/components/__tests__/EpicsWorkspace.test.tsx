@@ -5,6 +5,8 @@ import { act } from 'react-dom/test-utils'
 import { EpicsWorkspace } from '../epics/EpicsWorkspace'
 import { usePromptSessions } from '../../state/promptSessions'
 import { useEpicsPrefs } from '../../state/epicsPrefs'
+import { useChat } from '../../state/chat'
+import { useScheduleState } from '../../state/scheduleState'
 
 /**
  * EpicsWorkspace (PRD 829) — the two-pane Epics workspace that replaced
@@ -76,6 +78,8 @@ beforeEach(() => {
   usePromptSessions.setState({ createPromptSession: createPromptSessionSpy })
   createPromptSessionSpy.mockClear()
   useEpicsPrefs.setState({ pins: {}, group: 'status', sort: 'recent', compact: false, hydrated: true })
+  useChat.setState({ chats: {}, hydratedTabs: {} })
+  useScheduleState.setState({ snapshot: null })
 })
 
 afterEach(() => {

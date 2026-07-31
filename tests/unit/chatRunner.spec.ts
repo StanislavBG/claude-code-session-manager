@@ -70,6 +70,9 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   splitStopSignal: (text: string) => { answerBody: string; questions: string[] } | null
   STOP_SENTINEL: string
   CHAT_MODE_TRUTH_INSTRUCTION: string
+  KILL_CEILING_MS: number
+  KILL_CEILING_MIN: number
+  WARN_CEILING_MS: number
   enqueueExternalPrompt: (tabId: string, prompt: string) => void
   registerAdminRoute: (adminHttp: { registerRoute: (method: string, url: string, handler: (req: unknown, res: unknown) => Promise<void>) => void }) => void
 }
@@ -535,6 +538,97 @@ describe('needs-input payload (real executeRun path via a faked child process)',
     const opts = call[0] as { result: string }
     expect(opts.result).toContain('1. one\n2. two\n3. three\n4. four\n5. five')
     expect(opts.result).toContain('[asked: Proceed with step 6?]')
+  })
+})
+
+describe('kill-ceiling budget instruction (Ask 1)', () => {
+  it('CHAT_MODE_TRUTH_INSTRUCTION states the same minute value as KILL_CEILING_MS / 60_000', () => {
+    const expectedMinutes = String(chatRunner.KILL_CEILING_MS / 60_000)
+    expect(chatRunner.CHAT_MODE_TRUTH_INSTRUCTION).toContain(`${expectedMinutes} minutes of wall-clock`)
+  })
+})
+
+describe('80% warning + kill-message enrichment (Asks 2 & 3, real executeRun via fake timers)', () => {
+  beforeEach(() => {
+    chatRunner.__setExecutor(null) // restore the real executeRun
+    nextChild = null
+    lastSpawnArgs = null
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('warns at 80% but never reaches doKill when the run settles before the ceiling', async () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.run({ tabId: 'tab-warn-settle', sessionId: 'sess-warn-settle', prompt: 'do a long poll', cwd: '/tmp', resume: false })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(nextChild).not.toBeNull()
+    const killSpy = vi.fn()
+    nextChild!.kill = killSpy
+
+    // Advance to the 80% warning point.
+    await vi.advanceTimersByTimeAsync(chatRunner.WARN_CEILING_MS)
+    const notice = sent.find((e) => e.channel === 'chat:run:notice')
+    expect(notice).toBeTruthy()
+    expect(notice?.payload.message).toMatch(/wrap up/i)
+
+    // The run settles (child exits normally) before the ceiling fires.
+    emitResultLine(nextChild!, 'done before the ceiling')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true)
+
+    // Advancing past the (now-cleared) kill ceiling must not trigger a kill.
+    await vi.advanceTimersByTimeAsync(chatRunner.KILL_CEILING_MS)
+    expect(killSpy).not.toHaveBeenCalled()
+    expect(sent.some((e) => e.channel === 'chat:run:error')).toBe(false)
+  })
+
+  it('still kills at the unchanged ceiling when the run ignores the 80% warning, and the error payload is actionable', async () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+
+    chatRunner.run({ tabId: 'tab-warn-ignore', sessionId: 'sess-warn-ignore', prompt: 'do a long poll', cwd: '/tmp', resume: false })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(nextChild).not.toBeNull()
+    const killSpy = vi.fn()
+    nextChild!.kill = killSpy
+
+    // Emit a recent tool_use so the kill message has something concrete to cite.
+    const toolUseLine = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Bash', input: { command: 'eas submit --platform ios' } }] },
+    })
+    nextChild!.stdout.emit('data', Buffer.from(`${toolUseLine}\n`))
+
+    await vi.advanceTimersByTimeAsync(chatRunner.WARN_CEILING_MS)
+    expect(sent.some((e) => e.channel === 'chat:run:notice')).toBe(true)
+
+    // Ignore the warning; advance to the hard ceiling.
+    await vi.advanceTimersByTimeAsync(chatRunner.KILL_CEILING_MS - chatRunner.WARN_CEILING_MS)
+    expect(killSpy).toHaveBeenCalled()
+
+    const killError = sent.find((e) => e.channel === 'chat:run:error')
+    expect(killError).toBeTruthy()
+    expect(killError?.payload.elapsedMs).toBeGreaterThanOrEqual(chatRunner.KILL_CEILING_MS)
+    expect(killError?.payload.ceilingMs).toBe(chatRunner.KILL_CEILING_MS)
+    expect(Array.isArray(killError?.payload.lastToolUses)).toBe(true)
+    expect((killError?.payload.lastToolUses as unknown[]).length).toBeGreaterThan(0)
+    expect(killError?.payload.message).toContain('Bash')
+    expect(killError?.payload.message).toMatch(/verify before retrying/i)
+
+    // Flush the resulting close event so the test doesn't leave a dangling handle.
+    nextChild!.emit('close', null, 'SIGTERM')
+    await vi.advanceTimersByTimeAsync(0)
   })
 })
 

@@ -36,7 +36,12 @@
  *   chat:run:complete   { tabId, sessionId, finalMessage }
  *   chat:run:needs-input { tabId, sessionId, questions, raw }
  *   chat:run:error      { tabId, sessionId, message }
+ *                         — the kill-ceiling variant additionally carries
+ *                           { elapsedMs, ceilingMs, lastToolUses } so a resumed
+ *                           turn can tell whether an external side effect
+ *                           landed before verifying/retrying
  *   chat:run:notice     { tabId, sessionId, message }        — informational, not terminal
+ *                         (also fires at 80% of the kill ceiling as a wrap-up nudge)
  *   chat:context-usage  { tabId, sessionId, usedTokens, totalTokens, usedPct, categories }
  *                                                             — result of a silent `/context` probe
  */
@@ -239,6 +244,34 @@ function hasMcpConsentDenial(text) {
   return MCP_CONSENT_DENIAL_MARKERS.some((marker) => lower.includes(marker));
 }
 
+// Number of recent tool uses kept for the kill-message context (Ask 3).
+const RECENT_TOOL_USE_LIMIT = 3;
+const TOOL_USE_DETAIL_MAX_LEN = 60;
+
+// Renders a single classified tool_use (from classifyToolUse) plus a short
+// input-derived detail string into a human-readable descriptor, e.g.
+// "Bash(eas submit --platform ios …)". Pure formatting — no new stream
+// parsing; `detail` is lifted from the same already-parsed block.
+function renderToolUseDescriptor({ label, detail }) {
+  if (!detail) return label;
+  const truncated = detail.length > TOOL_USE_DETAIL_MAX_LEN
+    ? `${detail.slice(0, TOOL_USE_DETAIL_MAX_LEN)}…`
+    : detail;
+  return `${label}(${truncated})`;
+}
+
+// Pulls a short descriptive string out of a tool_use block's input, reusing
+// fields already present on the already-parsed block — not a new parser.
+function describeToolUseInput(block) {
+  const input = block?.input;
+  if (!input || typeof input !== 'object') return '';
+  if (typeof input.command === 'string') return input.command;
+  if (typeof input.description === 'string') return input.description;
+  if (typeof input.pattern === 'string') return input.pattern;
+  if (typeof input.file_path === 'string') return input.file_path;
+  return '';
+}
+
 // Instruction prepended to every prompt. Tells the agent how to signal that
 // it needs clarification vs. having completed the task.
 const STOP_SIGNAL_INSTRUCTION =
@@ -251,6 +284,17 @@ const STOP_SIGNAL_INSTRUCTION =
   `Never make the question your entire reply when the user asked for content — do NOT ` +
   `guess on what's genuinely blocked, but always answer what you can first. ` +
   `Otherwise complete the task and end with a concise summary of what you did.\n\n`;
+
+// ─── Hard wall-clock kill ceiling ────────────────────────────────────────
+// Defined here (ahead of CHAT_MODE_TRUTH_INSTRUCTION) so the prompt's stated
+// budget is always derived from this single constant — never a hand-written
+// duplicate that could drift from the real timer below.
+const KILL_CEILING_MS = 30 * 60 * 1000; // 30 minutes
+const KILL_CEILING_MIN = KILL_CEILING_MS / 60_000;
+// 80% warning point — gives the model a turn-visible nudge to wrap up before
+// the hard kill fires at 100%. Not configurable; see PRD out-of-scope note
+// re: making KILL_CEILING_MS itself configurable.
+const WARN_CEILING_MS = Math.floor(KILL_CEILING_MS * 0.8);
 
 // Instruction prepended to every prompt. Tells the agent the truth about this
 // execution mode: this Chat tab is a one-shot headless `claude -p` run — no
@@ -265,9 +309,12 @@ const CHAT_MODE_TRUTH_INSTRUCTION =
   `there is no later turn in which that could happen, so that promise would ` +
   `go unfulfilled and leave the user waiting with no explanation. If you need ` +
   `to poll something, do it synchronously within this turn with a bounded ` +
-  `timeout, then report the actual result. End this turn with either a real ` +
-  `result or an explicit statement that the user needs to reply for the work ` +
-  `to continue.\n\n`;
+  `timeout, then report the actual result. This turn is hard-killed after ` +
+  `${KILL_CEILING_MIN} minutes of wall-clock. Size every synchronous poll to ` +
+  `finish inside that budget; if the work cannot fit, do the part that fits, ` +
+  `report exactly what landed, and say what remains. End this turn with ` +
+  `either a real result or an explicit statement that the user needs to ` +
+  `reply for the work to continue.\n\n`;
 
 // ─── Serial run queue (v0.34) ───────────────────────────────────────────────
 // CONCURRENCY_CAP=2 (default) governs ALL runs — silent probes and manual
@@ -298,9 +345,6 @@ let activeCount = 0;
 // Indirection so tests can stub the spawn without launching claude.
 let executor = executeRun;
 function __setExecutor(fn) { executor = fn || executeRun; }
-
-// ─── Hard wall-clock kill ceiling ────────────────────────────────────────
-const KILL_CEILING_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Window reference (set by attachWindow) ────────────────────────────────
 
@@ -378,6 +422,10 @@ function pump() {
  */
 function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, promptId }) {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    // Last few tool_use blocks seen on the stream, oldest first — surfaced in
+    // the kill message (Ask 3) so a resumed turn knows what might have landed.
+    const recentToolUses = [];
     let settled = false;
     // Frees the lane exactly once: drops the cancel fn and resolves the promise
     // the pump is awaiting. Both exit and error paths funnel through here.
@@ -487,12 +535,40 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // executor invocation returns — see comment above the inFlight Map decl.
     inFlight.set(tabId, { cancelFn, donePromise: null });
 
+    // 80%-of-ceiling warning — a turn-visible nudge to wrap up before the hard
+    // kill fires at 100%. Does not extend or otherwise affect the kill timer
+    // below; it is purely informational (Ask 2).
+    const warnTimer = setTimeout(() => {
+      if (silent) return; // silent probes are short-lived; nothing to warn
+      broadcast('chat:run:notice', {
+        tabId,
+        sessionId,
+        message:
+          `Heads up: this turn has been running for ${Math.round(WARN_CEILING_MS / 60_000)} ` +
+          `minutes and will be force-killed at the ${KILL_CEILING_MIN}-minute ceiling if it's ` +
+          `still going. Wrap up now — report exactly what has landed so far and what remains, ` +
+          `before the hard kill fires.`,
+      });
+    }, WARN_CEILING_MS);
+    if (warnTimer.unref) warnTimer.unref();
+
     // Hard wall-clock ceiling — SIGTERM + SIGKILL on expiry
     const killTimer = setTimeout(() => {
+      const elapsedMs = Date.now() - startedAt;
+      const lastToolUses = recentToolUses.slice();
+      const lastActionsText = lastToolUses.length > 0
+        ? lastToolUses.map(renderToolUseDescriptor).join(', ')
+        : 'none observed';
       emitTerminal('chat:run:error', {
         tabId,
         sessionId,
-        message: 'run exceeded 30-minute wall-clock ceiling',
+        elapsedMs,
+        ceilingMs: KILL_CEILING_MS,
+        lastToolUses,
+        message:
+          `Killed after ${Math.round(elapsedMs / 60_000)}m (ceiling ${KILL_CEILING_MIN}m). ` +
+          `Last actions: ${lastActionsText}. External side effects may have completed — verify ` +
+          `before retrying.`,
       });
       cancelFn();
     }, KILL_CEILING_MS);
@@ -520,6 +596,8 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             if (!silent) broadcast('chat:run:output', { tabId, delta: block.text });
           } else if (block.type === 'tool_use' && typeof block.name === 'string') {
             const classified = classifyToolUse(block);
+            recentToolUses.push({ ...classified, detail: describeToolUseInput(block) });
+            if (recentToolUses.length > RECENT_TOOL_USE_LIMIT) recentToolUses.shift();
             if (!silent) broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified });
           }
         }
@@ -602,6 +680,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
 
     child.on('error', (err) => {
       clearTimeout(killTimer);
+      clearTimeout(warnTimer);
       emitTerminal('chat:run:error', {
         tabId,
         sessionId,
@@ -618,6 +697,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // terminalSent latch.
     child.on('close', (code, signal) => {
       clearTimeout(killTimer);
+      clearTimeout(warnTimer);
       // Flush any partial line that didn't end with \n
       if (lineBuffer.trim()) processLine(lineBuffer.trim());
 
@@ -759,6 +839,9 @@ module.exports = {
   probeContextUsage,
   STOP_SENTINEL,
   CHAT_MODE_TRUTH_INSTRUCTION,
+  KILL_CEILING_MS,
+  KILL_CEILING_MIN,
+  WARN_CEILING_MS,
   __setExecutor,
   enqueueExternalPrompt,
   registerAdminRoute,

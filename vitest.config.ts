@@ -32,6 +32,7 @@ export default defineConfig({
       'src/main/lib/__tests__/importReferences.spec.cjs',
       'src/main/__tests__/prdLocations.test.cjs',
       'src/main/__tests__/prdMigration.test.cjs',
+      'src/main/__tests__/scheduler-find-prd-dir.test.cjs',
     ],
     globals: true,
   },

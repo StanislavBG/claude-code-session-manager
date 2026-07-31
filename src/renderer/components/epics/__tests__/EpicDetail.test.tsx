@@ -224,7 +224,76 @@ describe('EpicDetail (PRD 827)', () => {
     const questionCard = el.querySelector('[data-testid="chat-turn-question"]')
     expect(questionCard).not.toBeNull()
     expect(questionCard!.textContent).toContain('NEEDS YOUR DECISION')
-    expect(questionCard!.className).toContain('border-[#b8443c]/40')
+    const tintedCard = questionCard!.querySelector('.border-\\[\\#b8443c\\]\\/40')
+    expect(tintedCard).not.toBeNull()
+  })
+
+  it('clicking a needs-input option button submits the answer through chat.send', async () => {
+    const { api } = installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            {
+              id: 't-question',
+              role: 'question',
+              text: 'Cap at archive depth or extrapolate?',
+              questions: ['Cap at archive depth', 'Extrapolate'],
+              at: Date.now(),
+            },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const questionCard = el.querySelector('[data-testid="chat-turn-question"]')!
+    const buttons = Array.from(questionCard.querySelectorAll('button')).filter((b) => b.textContent === 'Extrapolate')
+    expect(buttons).toHaveLength(1)
+
+    await act(async () => {
+      buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(api.chat.run).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: session.id, sessionId: session.claudeSessionId, prompt: 'Extrapolate' }),
+    )
+  })
+
+  it('renders "claude · <age>" and "you · <age>" captions above turns', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            { id: 't-user', role: 'user', text: 'Hello', at: Date.now() },
+            { id: 't-assistant', role: 'assistant', text: 'Hi there', at: Date.now() },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    expect(el.textContent).toContain('you · just now')
+    expect(el.textContent).toContain('claude · just now')
   })
 
   it('resets the view tab back to Discussion when the Epic changes', async () => {

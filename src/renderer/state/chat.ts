@@ -41,6 +41,10 @@ export interface ChatTurn {
   at: number
   /** Tools/skills/MCP calls that fired while producing this turn (assistant turns only). */
   toolUses?: ToolUseTrace[]
+  /** Short sage-colored outcome label for a finished agent turn (e.g. "PRD ready for
+   *  review") — mirrors epics-mock.jsx's Turn `outcome` field. Unset today (no producer
+   *  populates it yet); rendered only when present. */
+  outcome?: string
 }
 
 /**

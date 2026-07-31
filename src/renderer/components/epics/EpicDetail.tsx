@@ -375,6 +375,7 @@ export function EpicDetail({ promptSession }: Props) {
           <MetaItem label="last activity" value={formatWhen(lastActivityAt(promptSession, sessionEvents, turns))} />
           {stats && <MetaItem label="turns" value={String(stats.turns)} />}
           {stats && <MetaItem label="tool calls" value={String(stats.toolCalls)} />}
+          {stats?.tokens && <MetaItem label="tokens" value={stats.tokens} />}
         </div>
 
         {mode === 'chat' && (
@@ -431,6 +432,7 @@ export function EpicDetail({ promptSession }: Props) {
                       turn={t}
                       cwd={cwd}
                       tabId={epicId}
+                      sessionId={sessionId}
                       runActive={running && t.role === 'assistant' && i === turns.length - 1}
                       consentActionDisabled={running}
                       enableRawSessionActions={false}

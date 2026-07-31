@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
 import { useSessions } from '../state/sessions'
-import { type ChatTurn, type ToolUseTrace } from '../state/chat'
+import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { extractUrls } from '../lib/extractUrls'
 import { toast } from '../state/toast'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
+import { formatAgo } from '../lib/formatTime'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 
 /**
@@ -294,6 +295,7 @@ export function Turn({
   turn,
   cwd,
   tabId,
+  sessionId,
   runActive = false,
   consentActionDisabled = false,
   enableRawSessionActions = true,
@@ -305,6 +307,9 @@ export function Turn({
   turn: ChatTurn
   cwd: string
   tabId: string
+  /** The tab's claude session id — needed only to submit an inline needs-input
+   *  answer button through the same chat send() path the composer uses. */
+  sessionId: string
   runActive?: boolean
   consentActionDisabled?: boolean
   /** False for views with no backing SessionTab/PTY (e.g. PromptSessionConversation,
@@ -335,6 +340,9 @@ export function Turn({
   // happen after these hooks run.
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const presentation = turn.role === 'assistant' ? assistantTurnPresentation(turn, runActive) : null
+  // Only needed to disable/enable the question turn's inline answer buttons
+  // while a later run is already in flight for this tab.
+  const chatRunning = useChat((s) => s.chats[tabId]?.running ?? false)
   useEffect(() => {
     if (turn.role === 'assistant' && presentation === 'text' && bodyRef.current) {
       linkifyFilePaths(bodyRef.current)
@@ -343,7 +351,8 @@ export function Turn({
 
   if (turn.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="grid justify-items-end gap-1">
+        <span className="font-mono text-[10.5px] text-fg-faint">you · {formatAgo(turn.at, Date.now())}</span>
         <div className="max-w-[80%] rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
           {turn.text}
         </div>
@@ -361,26 +370,51 @@ export function Turn({
     const tint = needsDecisionStyle ? ERROR_TINT : AMBER_TINT
     const text = needsDecisionStyle ? ERROR_TEXT : AMBER_TEXT
     const label = needsDecisionStyle ? 'NEEDS YOUR DECISION' : 'Needs your answer'
+    const options = turn.questions ?? [turn.text]
+    const onAnswer = (answer: string) => {
+      useChat.getState().send({ tabId, sessionId, cwd, prompt: answer })
+    }
     return (
-      <div className={`rounded-[14px] border px-4 py-3 text-sm ${tint} ${text}`} data-testid="chat-turn-question">
-        {toolStripVariant === 'collapsible' ? (
-          <CollapsibleToolStrip items={turn.toolUses} />
-        ) : (
-          <ToolUseTraceStrip items={turn.toolUses} />
-        )}
-        <div
-          className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${needsDecisionStyle ? 'font-mono' : ''} ${text}`}
-        >
-          <span aria-hidden>❓</span>
-          {label}
+      <div className="flex max-w-[90%] items-start gap-2" data-testid="chat-turn-question">
+        <div className={`flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border text-xs font-semibold ${tint} ${text}`}>
+          C
         </div>
-        <ul className="list-disc space-y-1 pl-5">
-          {(turn.questions ?? [turn.text]).map((q, i) => (
-            <li key={i}>{q}</li>
-          ))}
-        </ul>
-        <div className={`mt-2 border-t pt-2 text-[11px] opacity-70 ${tint}`}>
-          Reply in the composer below to answer.
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] text-fg-faint">
+            <span>claude · {formatAgo(turn.at, Date.now())}</span>
+          </div>
+          {toolStripVariant === 'collapsible' ? (
+            <CollapsibleToolStrip items={turn.toolUses} />
+          ) : (
+            <ToolUseTraceStrip items={turn.toolUses} />
+          )}
+          <div className={`rounded-tl-sm rounded-tr-lg rounded-br-lg rounded-bl-lg border px-4 py-3 text-sm ${tint} ${text}`}>
+            <div
+              className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${needsDecisionStyle ? 'font-mono' : ''} ${text}`}
+            >
+              <span aria-hidden>❓</span>
+              {label}
+            </div>
+            <ul className="list-disc space-y-1 pl-5">
+              {options.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ul>
+            <div className={`mt-2 flex flex-wrap gap-2 border-t pt-2 ${tint}`}>
+              {options.map((q, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onAnswer(q)}
+                  disabled={chatRunning}
+                  title={q}
+                  className={`max-w-full truncate rounded-lg border border-current px-3 py-1.5 text-xs font-semibold hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent ${text}`}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -427,33 +461,45 @@ export function Turn({
   const urls = extractUrls(turn.text)
   const filePaths = extractFilePaths(turn.text)
   const isPlan = hasMarkdownList(turn.text)
+  const isRunning = presentation === 'working'
+  const bubbleCorners = 'rounded-tl-sm rounded-tr-lg rounded-br-lg rounded-bl-lg'
   return (
     <div className="flex max-w-[90%] items-start gap-2">
-      <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
+      <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
         C
       </div>
       <div className="min-w-0 flex-1">
+        <div className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] text-fg-faint">
+          <span>claude · {formatAgo(turn.at, Date.now())}</span>
+          {isRunning && (
+            <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] font-semibold text-accent">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+              running
+            </span>
+          )}
+          {turn.outcome && <span className="font-mono text-[10.5px] font-semibold text-sage">{turn.outcome}</span>}
+        </div>
         {toolStripVariant === 'collapsible' ? (
           <CollapsibleToolStrip items={turn.toolUses} running={presentation === 'working'} />
         ) : (
           <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
         )}
         {presentation === 'working' ? (
-          <div className="rounded-lg bg-elev px-3 py-2 text-sm text-fg-dim">
+          <div className={`bg-elev px-3 py-2 text-sm text-fg-dim ${bubbleCorners}`}>
             <span className="inline-flex items-center gap-2">
               <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
               working…
             </span>
           </div>
         ) : presentation === 'placeholder' ? (
-          <div className="rounded-lg bg-elev px-3 py-2 text-sm italic text-fg-dim">
+          <div className={`bg-elev px-3 py-2 text-sm italic text-fg-dim ${bubbleCorners}`}>
             (no textual reply — see tool activity above)
           </div>
         ) : (
           <>
             <div
               ref={bodyRef}
-              className={`prose-chat rounded-lg bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${isPlan ? 'prose-chat--plan' : ''}`}
+              className={`prose-chat bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd, linkTarget) }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}

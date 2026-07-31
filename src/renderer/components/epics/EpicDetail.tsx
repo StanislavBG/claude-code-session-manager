@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useChat } from '../../state/chat'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
-import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots } from '../../lib/epicDerive'
+import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag } from './epic-primitives'
-import { ProjectTag } from '../tabs/scheduler/sched-primitives'
+import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn } from '../ChatTranscriptTurn'
 import { openPrdSlug } from '../TerminalChat'
 import { ViewTabs } from '../ui/ViewTabs'
+import { AlmanacIcon } from '../layout/AlmanacIcon'
+import { RunLogViewer } from '../tabs/plans/RunLogViewer'
+import { formatAgo, formatDuration, formatTimingLabel } from '../../lib/formatTime'
 import type { ScheduleJob, PrdListItem } from '../../../preload/api'
 
 /**
@@ -56,6 +59,86 @@ function EmptyPlaceholder({ text }: { text: string }) {
 function formatWhen(value: string | number): string {
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
+}
+
+/** A PRD file with no matching queue.json job row reads 'draft'
+ *  (epicPrds.status carries the raw ScheduleJobStatus otherwise) — map the
+ *  one status word STATUS_TONE doesn't key on ('pending') to its Almanac
+ *  display name ('queued') rather than forking a second tone table. */
+function prdPillStatus(status: EpicPrd['status']): PrdDisplayStatus {
+  return status === 'pending' ? 'queued' : (status as PrdDisplayStatus)
+}
+
+function PrdCard({ prd }: { prd: EpicPrd }) {
+  return (
+    <div
+      className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-3 rounded-xl border border-line bg-bg-hi p-3.5"
+      data-testid="epic-prd-card"
+    >
+      <span className="mt-0.5 text-accent" aria-hidden="true">
+        <AlmanacIcon name="file" size={16} />
+      </span>
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[12.5px] font-semibold text-fg">{prd.slug}</span>
+          <PrdStatusPill status={prdPillStatus(prd.status)} />
+        </span>
+        {prd.title && <span className="mt-1 block text-[12.5px] leading-relaxed text-fg-faint">{prd.title}</span>}
+      </span>
+      <button
+        type="button"
+        onClick={() => openPrdSlug(prd.slug)}
+        title={`Open PRD "${prd.slug}" in Scheduler`}
+        data-testid="epic-prd-open"
+        className="inline-flex items-center text-fg-faint hover:text-fg-dim"
+      >
+        <AlmanacIcon name="arrowright" size={15} />
+      </button>
+    </div>
+  )
+}
+
+function RunCard({ job }: { job: ScheduleJob }) {
+  const [showLog, setShowLog] = useState(false)
+  const startedMs = job.startedAt ? Date.parse(job.startedAt) : null
+  const finishedMs = job.finishedAt ? Date.parse(job.finishedAt) : null
+  const runtime =
+    startedMs !== null && finishedMs !== null
+      ? formatTimingLabel(finishedMs - startedMs)
+      : startedMs !== null && job.status === 'running'
+        ? formatDuration(Date.now() - startedMs)
+        : null
+
+  return (
+    <div className="grid gap-2 rounded-xl border border-line bg-bg-hi p-3.5" data-testid="epic-run-card">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="font-mono text-[12.5px] font-semibold text-fg">{job.slug}</span>
+        <SchBadge status={job.status} />
+        {runtime && <span className="font-mono text-[11px] text-fg-faint">{runtime}</span>}
+        {job.exitCode !== null && <span className="font-mono text-[11px] text-fg-faint">exit {job.exitCode}</span>}
+        {job.verifierVerdict && (
+          <span className="font-mono text-[11px] text-fg-faint">{verdictLabel(job.verifierVerdict)}</span>
+        )}
+        {job.runId && (
+          <button
+            type="button"
+            onClick={() => setShowLog(true)}
+            data-testid="epic-run-view-log"
+            className="ml-auto text-[11.5px] font-semibold text-fg-dim hover:text-fg"
+          >
+            View log →
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-3 font-mono text-[11px] text-fg-faint">
+        <span>started {startedMs !== null ? formatAgo(startedMs, Date.now()) : '—'}</span>
+        <span>finished {finishedMs !== null ? formatAgo(finishedMs, Date.now()) : '—'}</span>
+      </div>
+      {showLog && job.runId && (
+        <RunLogViewer runId={job.runId} slug={job.slug} title={job.title || job.slug} onClose={() => setShowLog(false)} />
+      )}
+    </div>
+  )
 }
 
 /** NewEpicCard.tsx writes goalText as `${title}\n\n${goal}` (no separate
@@ -128,7 +211,10 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
     return () => {
       alive = false
     }
-  }, [epicId])
+    // Re-fetch on every schedule snapshot broadcast (scheduleJobs reference
+    // changes) so a PRD file dropped by a running job attaches without a
+    // manual refresh — listPrds() itself has no dedicated broadcast.
+  }, [epicId, scheduleJobs])
 
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
@@ -157,14 +243,16 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
   const stats = epicStats(epicId, snapshots)
 
   const projectName = cwd.replace(/\/+$/, '').split('/').filter(Boolean).pop() ?? cwd
-  const runsCount = turns.filter((t) => (t.toolUses?.length ?? 0) > 0).length
+  // Job row is the source of truth for Runs (not the PRD join) so a job
+  // whose PRD file was later archived still lists.
+  const epicRuns = scheduleJobs.filter((j) => j.sourcePromptId === epicId)
 
   const { title, goal } = splitTitleAndGoal(promptSession.goalText)
 
   const views: { key: ViewKey; label: string }[] = [
     { key: 'discussion', label: `Discussion ${timeline.length}` },
     { key: 'prds', label: `PRDs ${attachedPrds.length}` },
-    { key: 'runs', label: `Runs ${runsCount}` },
+    { key: 'runs', label: `Runs ${epicRuns.length}` },
   ]
 
   const onMarkCompleted = () => {
@@ -303,14 +391,31 @@ export function EpicDetail({ promptSession, onOpenRawSession }: Props) {
         )}
 
         {view === 'prds' && (
-          <div className="max-w-[900px]" data-testid="epic-prds-placeholder">
-            <EmptyPlaceholder text="PRDs for this Epic will appear here." />
+          <div className="grid max-w-[900px] gap-4" data-testid="epic-prds-placeholder">
+            {attachedPrds.length === 0 ? (
+              <EmptyPlaceholder text="No PRD yet for this Epic. Ask Claude in the thread — it will attach here." />
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  {attachedPrds.map((p) => (
+                    <PrdCard key={p.slug} prd={p} />
+                  ))}
+                </div>
+                <p className="m-0 text-[12.5px] leading-relaxed text-fg-faint">
+                  Accepting a PRD hands it to the Scheduler as a <span className="font-mono">claude -p</span> job.
+                </p>
+              </>
+            )}
           </div>
         )}
 
         {view === 'runs' && (
-          <div className="max-w-[900px]" data-testid="epic-runs-placeholder">
-            <EmptyPlaceholder text="Agent runs for this Epic will appear here." />
+          <div className="grid max-w-[900px] gap-2" data-testid="epic-runs-placeholder">
+            {epicRuns.length === 0 ? (
+              <EmptyPlaceholder text="No agent runs in this Epic yet." />
+            ) : (
+              epicRuns.map((j) => <RunCard key={j.slug} job={j} />)
+            )}
           </div>
         )}
       </div>

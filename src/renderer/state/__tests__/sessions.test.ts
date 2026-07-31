@@ -137,6 +137,101 @@ describe('sessions.ts newSession()', () => {
   })
 })
 
+describe('sessions.ts groupTabsByCwd()', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('returns an empty array for 0 tabs', async () => {
+    const { groupTabsByCwd } = await import('../sessions')
+    expect(groupTabsByCwd([])).toEqual([])
+  })
+
+  it('groups a single project with a single tab', async () => {
+    installWindowApiMock()
+    const { useSessions, groupTabsByCwd } = await import('../sessions')
+
+    useSessions.getState().addTab({ cwd: '/proj-a', startupCommand: null, dormant: true })
+
+    const groups = groupTabsByCwd(useSessions.getState().tabs)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].cwd).toBe('/proj-a')
+    expect(groups[0].tabs).toHaveLength(1)
+  })
+
+  it('groups 2+ tabs sharing one cwd together', async () => {
+    installWindowApiMock()
+    const { useSessions, groupTabsByCwd } = await import('../sessions')
+
+    useSessions.getState().addTab({ cwd: '/proj-a', startupCommand: null, dormant: true })
+    useSessions.getState().addTab({ cwd: '/proj-a', startupCommand: null, dormant: true })
+
+    const groups = groupTabsByCwd(useSessions.getState().tabs)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].cwd).toBe('/proj-a')
+    expect(groups[0].tabs).toHaveLength(2)
+  })
+
+  it('produces a separate group per distinct cwd, ordered by first appearance', async () => {
+    installWindowApiMock()
+    const { useSessions, groupTabsByCwd } = await import('../sessions')
+
+    useSessions.getState().addTab({ cwd: '/proj-b', startupCommand: null, dormant: true })
+    useSessions.getState().addTab({ cwd: '/proj-a', startupCommand: null, dormant: true })
+    useSessions.getState().addTab({ cwd: '/proj-b', startupCommand: null, dormant: true })
+
+    const groups = groupTabsByCwd(useSessions.getState().tabs)
+    expect(groups).toHaveLength(2)
+    expect(groups.map((g) => g.cwd)).toEqual(['/proj-b', '/proj-a'])
+    expect(groups[0].tabs).toHaveLength(2)
+    expect(groups[1].tabs).toHaveLength(1)
+  })
+})
+
+describe('sessions.ts addSessionToProject()', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('creates a dormant tab pinned to the given cwd with a fresh id/sessionId', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+
+    const id = useSessions.getState().addSessionToProject('/proj-c')
+
+    const tab = useSessions.getState().tabs.find((t) => t.id === id)!
+    expect(tab).toBeTruthy()
+    expect(tab.cwd).toBe('/proj-c')
+    expect(tab.status).toBe('dormant')
+    expect(tab.sessionId).toBe(id)
+  })
+
+  it('creates independent tabs on repeated calls for the same cwd', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+
+    const id1 = useSessions.getState().addSessionToProject('/proj-c')
+    const id2 = useSessions.getState().addSessionToProject('/proj-c')
+
+    expect(id1).not.toBe(id2)
+    const tabs = useSessions.getState().tabs.filter((t) => t.cwd === '/proj-c')
+    expect(tabs).toHaveLength(2)
+  })
+
+  it('passes through opts.label and opts.presetId', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+
+    const id = useSessions.getState().addSessionToProject('/proj-c', { label: 'custom', presetId: 'preset-x' })
+
+    const tab = useSessions.getState().tabs.find((t) => t.id === id)!
+    expect(tab.label).toBe('custom')
+    expect(tab.presetId).toBe('preset-x')
+  })
+})
+
 /**
  * PRD 718: wakeTab (opening a raw session) must not race chatRunner's
  * headless `claude -p --resume <sessionId>` — cancel it and wait before

@@ -55,6 +55,11 @@ interface SessionsState {
   sleepTab: (id: string) => void
   /** Mint a fresh sessionId for the tab, starting a brand-new session. */
   newSession: (id: string) => void
+  /** Create a fresh dormant tab pinned to an explicit cwd (not the active tab's). Returns the new tab's id. */
+  addSessionToProject: (
+    cwd: string,
+    opts?: { label?: string; presetId?: string | null },
+  ) => string
   /** One-shot command typed into a tab's PTY once it's next confirmed spawned/ready. */
   pendingRawCommand: Record<string, string>
   /** Queue a command to auto-type once this tab's raw PTY is ready (e.g. wakeTab + a slash command). */
@@ -247,7 +252,35 @@ export const useSessions = create<SessionsState>((set, get) => ({
       tabs: get().tabs.map((t) => (t.id === id ? { ...t, sessionId: crypto.randomUUID() } : t)),
     })
   },
+  addSessionToProject: (cwd, opts) =>
+    get().addTab({ cwd, startupCommand: null, dormant: true, ...opts }),
 }))
+
+/**
+ * Groups a flat tabs array into per-cwd project groups, ordered by each
+ * cwd's first appearance in the input array. Pure — no store dependency —
+ * so it can be reused by both a selector hook and non-React callers.
+ */
+export function groupTabsByCwd(tabs: SessionTab[]): { cwd: string; tabs: SessionTab[] }[] {
+  const order: string[] = []
+  const byCwd = new Map<string, SessionTab[]>()
+  for (const tab of tabs) {
+    let group = byCwd.get(tab.cwd)
+    if (!group) {
+      group = []
+      byCwd.set(tab.cwd, group)
+      order.push(tab.cwd)
+    }
+    group.push(tab)
+  }
+  return order.map((cwd) => ({ cwd, tabs: byCwd.get(cwd)! }))
+}
+
+/** Selector hook: derives project groups from the live tabs array. */
+export function useProjectGroups(): { cwd: string; tabs: SessionTab[] }[] {
+  const tabs = useSessions((s) => s.tabs)
+  return groupTabsByCwd(tabs)
+}
 
 /**
  * Hydrate the store from disk on boot, then wire up autosave. Persists only

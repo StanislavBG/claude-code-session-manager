@@ -1,15 +1,18 @@
 ---
 name: develop
 description: >-
-  Lead a software-development task by decomposing a feature/refactor/bugfix prompt into a
-  series of self-contained PRDs queued for the session-manager scheduler, each pointing the
-  headless executor at the engineering standards file to read at runtime — then track those
-  PRDs to completion, verify them against their acceptance criteria, and report back. Use whenever
-  the user says "/develop", "develop X", "build me X", "implement X", "let's code X", or
-  otherwise starts dev work that should run as scheduled PRDs rather than inline now. This
-  skill is the home for the developer-only guidance (performance, debugging, API-reuse, TDD)
-  that was removed from the always-on global CLAUDE.md. Keywords: develop, build, implement,
-  code, feature, refactor, bugfix, queue dev work, PRDs.
+  Lead a software-development task by analyzing it from multiple angles (positive path, edge
+  cases, interaction effects, integration, UI validation) and decomposing it into a series of
+  self-contained PRDs — either a handful of independent small PRDs, or a 3-5 PRD evolving chain
+  with sub-tasked acceptance criteria for larger asks — queued for the session-manager
+  scheduler, each pointing the headless executor at the engineering standards file to read at
+  runtime — then track those PRDs to completion, verify them against their acceptance criteria,
+  and report back. Use whenever the user says "/develop", "develop X", "build me X", "implement
+  X", "let's code X", or otherwise starts dev work that should run as scheduled PRDs rather than
+  inline now. This skill is the home for the developer-only guidance (performance, debugging,
+  API-reuse, TDD) that was removed from the always-on global CLAUDE.md. Keywords: develop,
+  build, implement, code, feature, refactor, bugfix, queue dev work, PRDs, PRD chain, multi-angle
+  analysis.
 ---
 
 # /develop — prompt → scheduled PRDs → tracked to done
@@ -74,33 +77,64 @@ can't load skills.
    do they actually share the same shape, or only look similar — confirm by reading, don't
    assume: a wrong assumption here means an inaccurate PRD, discovered only after the executor
    runs it), check existing tests for the area, and check whether a prior PRD already touched
-   this subsystem (`ls ~/.claude/session-manager/scheduled-plans/prds/` for related slugs) —
-   duplicating or contradicting a still-queued PRD is a real failure mode, not a hypothetical one.
+   this subsystem (`ls <cwd>/session-manager-operations/scheduler/prds/` for related slugs, in
+   the target repo) — duplicating or contradicting a still-queued PRD is a real failure mode,
+   not a hypothetical one.
 
-3. **Draft a candidate decomposition, then run a completeness pass before finalizing it.** This
-   step exists because small, bounded individual PRDs (step 4) are correct and non-negotiable —
-   but a *set* of small PRDs can still be incomplete if the upfront decomposition missed
-   something. Keeping PRDs small is not a substitute for getting the decomposition right; it's a
-   separate concern, and this step is where decomposition quality gets checked.
-   - For a **genuinely trivial ask** (one obvious PRD, no cross-file consequences) — skip
-     straight to step 4, no ceremony needed.
+3. **Analyze the request through five named lenses, draft a candidate decomposition, then run
+   a completeness pass before finalizing it.** This step exists because small, bounded individual
+   PRDs (step 4) are correct and non-negotiable — but a *set* of small PRDs can still be
+   incomplete if the upfront decomposition missed something. Keeping PRDs small is not a
+   substitute for getting the decomposition right; it's a separate concern, and this step is
+   where decomposition depth and breadth get checked.
+
+   **The five lenses.** Before drafting the PRD list, look at the request through each of these
+   explicitly — not as a vague "think it through" gesture, but as five concrete questions you can
+   answer in a sentence each. Skipping a lens silently is how a decomposition ships narrow:
+   - **Positive path.** What does the request look like when everything goes right? Name the
+     concrete user-visible or system-visible outcome — this anchors the core PRD(s).
+   - **Edge cases.** What inputs/states break the happy-path assumption? Empty/zero/max states,
+     concurrent access, malformed input, permission boundaries, network/process failure.
+   - **Interaction effects.** Does this change anything that another feature, panel, store, or
+     in-flight state already depends on? A layout change can break a responsive breakpoint; a
+     new field can desync two stores that used to agree; a UI merge can silently drop a
+     conditional-render gate another feature relied on. Naming this explicitly is what catches
+     the "it works in isolation but breaks its neighbor" class of bug.
+   - **Integration.** Does this correctly compose with the existing architecture at its
+     boundaries — the IPC schema, the shared store, an existing API contract, an established
+     design-primitive file — rather than reimplementing a parallel path? This is the API-reuse
+     standard (`standards.md`) applied at the planning stage, before code exists to duplicate.
+   - **Validation (UI/visual, planned up front — not just checked at the end).** For any ask
+     that touches UI or visual output, decide *now*, while drafting, exactly how it will be
+     confirmed working before it's called done: what screenshot/state to capture, light AND dark
+     mode if the project has both, and which specific acceptance line will prove it (not "looks
+     right" — a concrete, checkable claim). Bake that plan into the PRD's own Acceptance
+     Criteria (see step 4's sub-tasked AC) rather than leaving visual confirmation as an
+     afterthought bolted on at the step 8 gate — deciding the validation method during design
+     surfaces gaps (e.g. "there's no existing screenshot tooling for this surface") while there's
+     still time to plan around them, instead of discovering it mid-execution.
+
+   - For a **genuinely trivial ask** (one obvious PRD, no cross-file consequences, all five
+     lenses come back empty) — skip straight to step 4, no ceremony needed.
    - For anything **larger than one or two obvious PRDs, or touching more than one
      component/subsystem** — before finalizing, dispatch a second, independent agent (the Agent
      tool, `subagent_type: "Explore"` or `"general-purpose"` — this is a single extra dispatch,
      not the full multi-agent Workflow tool, and needs no special opt-in) with: the original ask
-     verbatim, your draft PRD list (titles + one-line goals), and the instruction to find what's
-     missing — uncovered edge cases, error-handling paths, tests, cross-file consequences,
-     components that share the same pattern but weren't included, anything the draft assumed
-     without verifying. Treat its findings as a second opinion to weigh, not an automatic
-     addition — fold real, concrete gaps into the PRD set (add, split, or adjust a PRD); dismiss
-     vague or speculative ones. For a large, multi-subsystem ask, it's fine to repeat this once
-     more after folding in the first round's findings (a second completeness pass on the revised
-     set) — stop once a pass turns up nothing new, don't loop indefinitely.
+     verbatim, your draft PRD list (titles + one-line goals), and the five lenses above by name,
+     instructing it to find what's missing under each one — uncovered edge cases, error-handling
+     paths, tests, cross-feature/cross-state interaction effects, integration points that would
+     be reimplemented instead of reused, components that share the same pattern but weren't
+     included, anything the draft assumed without verifying. Treat its findings as a second
+     opinion to weigh, not an automatic addition — fold real, concrete gaps into the PRD set (add,
+     split, or adjust a PRD); dismiss vague or speculative ones. For a large, multi-subsystem ask,
+     it's fine to repeat this once more after folding in the first round's findings (a second
+     completeness pass on the revised set) — stop once a pass turns up nothing new, don't loop
+     indefinitely.
    - **Check each drafted PRD against explicit concern dimensions, not just "does the feature
-     work"**: missing features/edge cases beyond the happy path, tests, security, and quality
-     (perf, error handling). This is where depth actually comes from — a decomposition that only
-     ever asks "what file does this touch" produces exactly the narrow, single-concern PRDs this
-     step exists to catch.
+     work"**: missing features/edge cases beyond the happy path, interaction effects, integration,
+     tests, security, and quality (perf, error handling). This is where depth actually comes
+     from — a decomposition that only ever asks "what file does this touch" produces exactly the
+     narrow, single-concern PRDs this step exists to catch.
      - **Tests and security are NOT separate follow-up PRDs — they are mandatory AC lines inside
        the SAME PRD as the feature they belong to.** This is non-negotiable: `standards.md`'s TDD
        rule requires the test before/with the implementation, not after, and a security concern
@@ -120,6 +154,32 @@ can't load skills.
 4. **Decompose into a series of SMALL, bounded PRDs.** Split the (now completeness-checked)
    decomposition into individually small PRDs and sequence them.
 
+   **Two shapes — pick per request, don't default to one:**
+   - **Independent set.** Most requests: a handful of small PRDs that can mostly run in
+     parallel, each a self-contained unit (this is what "genuinely separable work" in step 3
+     produces).
+   - **Evolving chain (3-5 PRDs).** Use this shape when the request is naturally a sequence of
+     stages that build on each other rather than independent units — e.g. scaffold → core
+     behavior → edge-case/interaction hardening → integration wiring → UI validation pass. Each
+     PRD in the chain: gets the **next sequential `NN`** (never the same `NN` as the PRD it
+     depends on — same-`NN` means "can run in parallel," which a chain link cannot), and its
+     `# Implementation notes` states in one line what the *previous* link actually delivered
+     (file paths/functions it added, referencing its real landed state — not the plan for it,
+     since PRDs 1..k-1 may have adjusted scope during execution) and what this link is expected
+     to build on top of. Do not chain more than 5 deep — beyond that, re-run step 3's
+     completeness pass instead of extending the chain further; a chain that long is a sign the
+     original decomposition was wrong, not that it needs one more link. A chain does not relax
+     the ~15-min/30-min-ceiling sizing below — each link is still individually small.
+   - **Sub-tasked Acceptance Criteria** (either shape, when a single PRD legitimately spans more
+     than one concern dimension from step 3 — e.g. it has both core-functionality and
+     edge-case/interaction-effect checks): group the `# Acceptance criteria` checklist under
+     sub-headings instead of one flat list, e.g. `## Core functionality`, `## Edge cases`,
+     `## Interaction / integration`, `## Tests`. This is additive structure only — it does not
+     change what step 4's "Required body sections" template requires (still exactly one
+     `# Acceptance criteria` section overall), and it does not license combining what should be
+     separate PRDs into one oversized one; if the sub-task groups would each take real time on
+     their own, that's a signal to split into a chain link instead of one bloated PRD.
+
    **Prefer creating each PRD via the `scheduler_create_prd` MCP tool**
    (`mcp__session-manager-scheduler__scheduler_create_prd`) over hand-writing the file. Its input
    (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
@@ -134,17 +194,19 @@ can't load skills.
    (the session-manager Electron app must be running for this MCP tool to work; if it isn't,
    don't block on it): compute the highest in-use number deterministically yourself — never
    eyeball or narrow-grep the `ls` (a narrowed pattern like `'^10[0-9]'` silently misses `110+`
-   and collides):
+   and collides). PRDs are stored per-project, so `NN` allocation for a given PRD only needs
+   *that project's own* prds directory scanned — not every project's:
    ```bash
-   ls ~/.claude/session-manager/scheduled-plans/prds/ | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
+   ls <cwd>/session-manager-operations/scheduler/prds/ | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
    ```
-   The last line is the current max. Then: same `NN` as a logically independent sibling that
-   can run in parallel; **next free `NN` = max+1** when this PRD hard-depends on prior work or
-   is unrelated to every existing group. This manual path has a small, accepted race (two
-   concurrent authors could compute the same "next free" `NN`) — cosmetic (two unrelated groups
-   end up sharing a number) rather than destructive, and only reachable when the atomic tool
-   path above isn't available. Record each cross-PRD dependency in the dependent PRD's notes
-   either way.
+   (`<cwd>` is the target repo's absolute path — the same one this PRD's `cwd` field will use.)
+   The last line is the current max within that project. Then: same `NN` as a logically
+   independent sibling that can run in parallel; **next free `NN` = max+1** when this PRD
+   hard-depends on prior work or is unrelated to every existing group. This manual path has a
+   small, accepted race (two concurrent authors could compute the same "next free" `NN`) —
+   cosmetic (two unrelated groups end up sharing a number) rather than destructive, and only
+   reachable when the atomic tool path above isn't available. Record each cross-PRD dependency
+   in the dependent PRD's notes either way.
 
    ### PRD structure and location
 
@@ -156,15 +218,19 @@ can't load skills.
    system that runs `claude -p <prd-body> --dangerously-skip-permissions` jobs around 5-hour
    token-window resets, with auto-pause on rate-limit and auto-resume.
 
-   **Canonical location — non-negotiable.** PRDs MUST be written to:
+   **Canonical location — non-negotiable.** PRDs MUST be written to, inside the target repo:
    ```
-   ~/.claude/session-manager/scheduled-plans/prds/<NN>-<kebab-slug>.md
+   <cwd>/session-manager-operations/scheduler/prds/<NN>-<kebab-slug>.md
    ```
    **Anywhere else doesn't get scheduled.** If you write to `data/prds/`, `docs/prds/`, or the
-   project root, the scheduler will not see it and the user loses their token-budget-managed
-   execution. There is exactly one queue for all projects — that's intentional, because the
-   5-hour token budget is global across all of the user's Claude work. The `~` expands to
-   `os.homedir()` so the same convention works for any user on any machine.
+   old, now-retired global `prds/` dir under `~/.claude/session-manager/scheduled-plans/`,
+   the scheduler will not see it and the user loses their token-budget-managed execution. PRD
+   *source* files are per-project — each active project's own
+   `session-manager-operations/scheduler/prds/` directory, resolved at runtime from active
+   session cwds (`src/main/lib/prdLocations.cjs`) — but there is still exactly one **queue**
+   across all projects (`queue.json`/`history.jsonl`/`runs/` under
+   `~/.claude/session-manager/scheduled-plans/` remain global bookkeeping), because the 5-hour
+   token budget is global across all of the user's Claude work.
 
    **Filename rules.** `NN` is the 2-digit zero-padded parallel group (picked per the `ls`
    command above — same `NN` as an independent sibling, or next free `NN` = max+1 when this PRD
@@ -211,6 +277,11 @@ can't load skills.
 
    <short bulleted list of what NOT to build, to prevent scope creep>
    ```
+   (When a PRD spans multiple step-3 concern dimensions, replace the flat `# Acceptance criteria`
+   list above with sub-headings — `## Core functionality`, `## Edge cases`,
+   `## Interaction / integration`, `## Tests` — each still a checklist of verifiable lines. See
+   step 4's "Sub-tasked Acceptance Criteria" note. This is the only body section that may gain
+   sub-headings; Goal, Implementation notes, and Out of scope stay flat.)
 
    **Self-containment is load-bearing.** The executor (`claude -p`) starts with NO conversation
    context — only the PRD body and the project files. So: include exact file paths (e.g.
@@ -318,3 +389,7 @@ single definition of "tracked to done" for both entry paths.
 - Don't write a PRD to `data/prds/`, `docs/prds/`, the project's own folder, or anywhere outside
   the canonical path. The user has explicitly flagged this as a recurring problem.
 - Don't leave `cwd` unset hoping for the default. Be explicit.
+- Don't skip a step-3 lens silently and don't force every request into a chain — most asks are
+  still an independent set of small PRDs; reach for the 3-5-PRD evolving chain only when the
+  work is genuinely sequential (each link depends on the previous one's landed state), and never
+  chain past 5 links.

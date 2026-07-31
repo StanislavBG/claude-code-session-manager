@@ -103,6 +103,22 @@ test('migratePrds ignores non-.md and dotfiles, and no-ops on a missing legacy d
   expect(missing).toEqual({ moved: 0, skipped: 0, unresolved: [] });
 });
 
+test('migratePrds expands a tilde-prefixed cwd and moves the file', async () => {
+  const legacyDir = await mkLegacyDir();
+  const projectCwd = await fsp.mkdtemp(path.join(os.homedir(), '.sm-prdmigration-tilde-'));
+  tmpDirs.push(projectCwd);
+  const tildeCwd = path.join('~', path.relative(os.homedir(), projectCwd));
+  const body = `---\ntitle: Tilde cwd\ncwd: ${tildeCwd}\nestimateMinutes: 15\n---\n\nBody.\n`;
+  await fsp.writeFile(path.join(legacyDir, '07-tilde.md'), body, 'utf8');
+
+  const result = await migratePrds(legacyDir);
+
+  expect(result.moved).toBe(1);
+  expect(result.unresolved).toEqual([]);
+  const dest = path.join(resolvePrdWriteDir(projectCwd), '07-tilde.md');
+  expect(fs.existsSync(dest)).toBe(true);
+});
+
 test('migratePrds moves multiple PRDs to different projects independently', async () => {
   const legacyDir = await mkLegacyDir();
   const cwdA = await mkProjectCwd();

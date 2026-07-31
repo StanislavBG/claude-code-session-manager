@@ -18,6 +18,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
+const { expandHome } = require('./expandHome.cjs');
 
 /**
  * Move every `.md` file in legacyPrdsDir whose frontmatter `cwd` resolves to
@@ -55,13 +56,14 @@ async function migratePrds(legacyPrdsDir) {
     }
 
     const { fm } = splitFrontmatter(raw);
-    const cwd = fm.cwd && fm.cwd.trim();
-    if (!cwd) {
+    const rawCwd = fm.cwd && fm.cwd.trim();
+    if (!rawCwd) {
       unresolved.push({ file: name, reason: 'no cwd in frontmatter' });
       continue;
     }
+    const cwd = expandHome(rawCwd);
     if (!fs.existsSync(cwd)) {
-      unresolved.push({ file: name, reason: `cwd does not exist on disk: ${cwd}` });
+      unresolved.push({ file: name, reason: `cwd does not exist on disk: ${rawCwd}` });
       continue;
     }
 

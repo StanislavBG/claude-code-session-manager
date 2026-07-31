@@ -566,12 +566,30 @@ function isAncestorCommit({ cwd, sha, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl 
 
 const PRD_DELIVERABLE_PATH_RE = /(?:^|[`\s(])((?:src|scripts|session-manager-operations|test|tests|docs|bin)\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)\b/g;
 
+// Repo-root config files a PRD can legitimately name as its only deliverable.
+// Deliberately an exact-name allowlist, not a general root-file pattern:
+// a loose rule would match prose mentions (README.md, queue.json) and grant
+// false exemptions. Incident: PRD 816 named vitest.config.ts as its primary
+// deliverable and it was silently dropped from extraction.
+const PRD_ROOT_CONFIG_DELIVERABLES = [
+  'package.json',
+  'tsconfig.json',
+  'vitest.config.ts',
+  'vite.config.ts',
+  'playwright.config.ts',
+  'eslint.config.js',
+  'tailwind.config.js',
+  'postcss.config.js',
+];
+
 /**
  * Extract the deliverable file paths a PRD body names — backticked or bare
  * paths under a source dir with a file extension (e.g. `src/main/lib/foo.cjs`,
- * `src/renderer/components/Bar.tsx`, `scripts/baz.cjs`). Deliberately narrow:
- * only repo-relative paths under a known source root, no globs, no
- * node_modules, no URLs. O(n) over the PRD body length.
+ * `src/renderer/components/Bar.tsx`, `scripts/baz.cjs`), plus any allowlisted
+ * repo-root config filename named as a whole word (e.g. `vitest.config.ts`).
+ * Deliberately narrow: only repo-relative paths under a known source root or
+ * an exact-name root-config allowlist, no globs, no node_modules, no URLs.
+ * O(n) over the PRD body length.
  */
 function extractPrdDeliverablePaths(prdBody) {
   if (typeof prdBody !== 'string' || !prdBody) return [];
@@ -584,6 +602,15 @@ function extractPrdDeliverablePaths(prdBody) {
     if (p.includes('node_modules') || p.includes('..') || seen.has(p)) continue;
     seen.add(p);
     out.push(p);
+  }
+  for (const name of PRD_ROOT_CONFIG_DELIVERABLES) {
+    if (seen.has(name)) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:^|[\`\\s(])${escaped}(?:[\`\\s)]|$)`);
+    if (re.test(prdBody)) {
+      seen.add(name);
+      out.push(name);
+    }
   }
   return out;
 }

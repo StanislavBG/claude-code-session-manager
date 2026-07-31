@@ -1248,6 +1248,52 @@ test('allDeliverablesAlreadyTracked: fail-safe on empty paths, non-git cwd, and 
   }), true);
 });
 
+// ─── repo-root config deliverable extraction ────────────────────────────────
+// (incident: 816-vitest-register-runverify-test, 2026-07-31 — PRD named only
+// `vitest.config.ts` as its deliverable; the source-dir-only regex extracted
+// nothing, so allDeliverablesAlreadyTracked early-returned false even though
+// the config edit was already tracked in git)
+
+test('extractPrdDeliverablePaths: extracts a root-config file alongside a src path', () => {
+  const body = 'Register the test in `vitest.config.ts` and port `src/main/__tests__/runVerify.test.cjs` onto vitest.';
+  const paths = extractPrdDeliverablePaths(body);
+  assert.deepEqual(new Set(paths), new Set(['vitest.config.ts', 'src/main/__tests__/runVerify.test.cjs']));
+});
+
+test('extractPrdDeliverablePaths: root-config-only PRD body yields a non-empty result', () => {
+  const body = 'The only deliverable is `vitest.config.ts` — add the missing test.include entry.';
+  const paths = extractPrdDeliverablePaths(body);
+  assert.deepEqual(paths, ['vitest.config.ts']);
+});
+
+test('extractPrdDeliverablePaths: nested or non-allowlisted root files do not produce spurious root-config entries', () => {
+  const body = 'See `some/nested/package.json` for the dependency, and update README.md with notes.';
+  const paths = extractPrdDeliverablePaths(body);
+  assert.equal(paths.includes('package.json'), false);
+  assert.equal(paths.includes('README.md'), false);
+  assert.deepEqual(paths, []);
+});
+
+test('pass_no_commit: root-config-only PRD, PASS no commit, config already tracked → pass_no_commit_already_shipped', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '816-vitest-register-runverify-test';
+    writeLog(tmp, slug, noOpRunEvents('Registered already in vitest.config.ts; 48 tests green.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'Deliverable: register the test file in `vitest.config.ts`.');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'pass_no_commit_already_shipped', `expected already-shipped exemption, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
 // ─── pass_no_commit_prior_run_verified: re-fired slug whose PRIOR run landed ─
 // (incident: 812-workbench-review-nits-cleanup, 2026-07-31)
 

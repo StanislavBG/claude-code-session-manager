@@ -24,6 +24,14 @@ const HIDDEN_KEY = 'sm.scheduler.hiddenCompletedSlugs'
 const FOCUSED_IDX_KEY = 'sm.scheduler.focusedJobIndex'
 const LS_FILTER_KEY = 'sm.scheduler.queueFilter'
 
+/** Truncates a job row's linked-prompt-session label to keep the collapsed
+ *  row a single line. */
+function truncateLabel(text: string, max = 60): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= max) return trimmed
+  return `${trimmed.slice(0, max - 1)}…`
+}
+
 type FilterStatus = 'all' | 'running' | 'pending' | 'completed' | 'needs_review' | 'failed'
 interface QueueFilter { text: string; status: FilterStatus }
 
@@ -747,7 +755,7 @@ function etaForJob(
   return `~${formatTimingLabel(estMs)}`
 }
 
-function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
+export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
   job: ScheduleJob
   eta: string | null
   now: number
@@ -767,6 +775,11 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
   const linkedPromptSession = usePromptSessions((s) =>
     job.sourceTabId ? (s.sessions[job.sourceTabId] ?? null) : null,
   )
+
+  const navigateToPromptSession = useCallback((id: string) => {
+    setPendingPromptSessionId(id)
+    window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
+  }, [])
 
   const isRunning = job.status === 'running'
   const isFailed = job.status === 'failed'
@@ -820,6 +833,37 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
               {note}
             </div>
           )}
+          {linkedPromptSession ? (
+            <span
+              role="button"
+              tabIndex={0}
+              data-testid="job-row-prompt-session-chip"
+              title={linkedPromptSession.goalText}
+              onClick={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                navigateToPromptSession(linkedPromptSession.id)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  navigateToPromptSession(linkedPromptSession.id)
+                }
+              }}
+              className="inline-block mt-0.5 text-[12.5px] text-accent hover:text-accent/80 cursor-pointer truncate max-w-full"
+            >
+              {truncateLabel(linkedPromptSession.goalText) || linkedPromptSession.id.slice(0, 8)}
+            </span>
+          ) : (job.sourcePromptId || job.sourceTabId) ? (
+            <span
+              data-testid="job-row-prompt-session-chip"
+              title="Source prompt session is not currently loaded"
+              className="inline-block mt-0.5 text-[12.5px] text-fg-faint truncate max-w-full"
+            >
+              {(job.sourcePromptId ?? job.sourceTabId ?? '').slice(0, 8)}
+            </span>
+          ) : null}
         </div>
         <ProjectTag cwd={job.cwd} />
         <span className="inline-flex items-center gap-2.5 font-mono text-xs text-fg-faint shrink-0">
@@ -881,6 +925,8 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
           <DetailBlock label="Location">
             <DetailLine k="group" v={`${job.parallelGroup} · ${job.slug}`} />
             <DetailLine k="cwd" v={job.cwd ?? '—'} wrap />
+            <DetailLine k="prompt id" v={job.sourcePromptId ?? '—'} wrap />
+            <DetailLine k="source tab" v={job.sourceTabId ?? '—'} wrap />
           </DetailBlock>
 
           <DetailBlock label="Actions">
@@ -890,10 +936,7 @@ function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
                   type="button"
                   data-testid="job-row-prompt-session-link"
                   title={linkedPromptSession.goalText}
-                  onClick={() => {
-                    setPendingPromptSessionId(linkedPromptSession.id)
-                    window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
-                  }}
+                  onClick={() => navigateToPromptSession(linkedPromptSession.id)}
                   className="text-[13px] font-semibold text-accent hover:text-accent/80 bg-transparent border-0 cursor-pointer p-0"
                 >
                   view prompt session →

@@ -62,6 +62,7 @@ const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
+const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
 const logs = require('./logs.cjs');
@@ -1401,24 +1402,41 @@ function isNotifiableTerminalStatus(effectiveStatus) {
  * notifyOriginatingTab(job) → void
  *
  * On a true terminal transition (completed/failed — never the benign
- * rateLimited auto-pause, which resets the job to pending instead), push a
- * short status prompt into the chat tab that queued this PRD via
- * enqueueExternalPrompt (PRD 753). Resolution order: (1) the PRD's own
- * `sourceTabId` frontmatter, captured at creation time; (2) the first open
- * tab (per sessionsStore's persisted tabs.json) whose cwd matches the job's
- * cwd — first match only, no fan-out to multiple matching tabs; (3) no-op.
- * Never throws to the caller (fire-and-forget from spawnJob). Deps are
- * injectable (mirrors partitionBootOrphans's isAlive param) so unit tests can
- * exercise the resolution logic without touching disk/electron.
+ * rateLimited auto-pause, which resets the job to pending instead), publish
+ * a short status notification for the PRD that queued this job.
+ *
+ * Resolution order (PRD 814): (1) if the PRD's `sourcePromptId` resolves to
+ * a known, still-active PromptSession (minted for a dev-work dispatch, PRD
+ * 813) under the job's cwd, append a 'response' PromptSessionEvent to THAT
+ * session's own event chain — its own scoped PromptSessionConversation, not
+ * whatever tab happens to be active — and stop; (2) otherwise, fall back to
+ * today's behavior: push a short status prompt into the chat tab that queued
+ * this PRD via enqueueExternalPrompt (PRD 753), resolved via the PRD's own
+ * `sourceTabId` frontmatter, then the first open tab (per sessionsStore's
+ * persisted tabs.json) whose cwd matches the job's cwd — first match only,
+ * no fan-out to multiple matching tabs; (3) no-op. Never throws to the
+ * caller (fire-and-forget from spawnJob). Deps are injectable (mirrors
+ * partitionBootOrphans's isAlive param) so unit tests can exercise the
+ * resolution logic without touching disk/electron.
  */
 async function notifyOriginatingTab(job, {
   parsePrdRaw = prdParser.parsePrdRaw,
   loadSessions = sessionsStore.load,
   sendPrompt = enqueueExternalPrompt,
+  appendResponseEvent = appendResponseEventIfKnown,
 } = {}) {
   try {
     const prdPath = prdPathForJob(job);
     const prd = await parsePrdRaw(prdPath).catch(() => null);
+    const message = `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`;
+
+    if (prd?.sourcePromptId) {
+      const routed = await appendResponseEvent(job.cwd || null, prd.sourcePromptId, message).catch((e) => {
+        console.error('[scheduler] notifyOriginatingTab appendResponseEvent error', job?.slug, e);
+        return false;
+      });
+      if (routed) return;
+    }
 
     let targetTabId = prd?.sourceTabId || null;
     if (!targetTabId) {
@@ -1434,7 +1452,7 @@ async function notifyOriginatingTab(job, {
       return;
     }
 
-    sendPrompt(targetTabId, `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`);
+    sendPrompt(targetTabId, message);
   } catch (e) {
     console.error('[scheduler] notifyOriginatingTab error', job?.slug, e);
   }

@@ -9,6 +9,7 @@ import { toast } from '../state/toast'
 import { resolveChatPaste } from '../lib/pasteImageIntoChat'
 import { mergeTicketsForDisplay, ticketDisplayStatus, ticketTagTone } from '../lib/ticketDisplay'
 import { setPendingPrdSlug } from '../lib/prdDeepLink'
+import { setPendingPromptSessionId } from '../lib/promptSessionDeepLink'
 import { PrdStatusPill } from './tabs/scheduler/sched-primitives'
 import { TicketDetailView } from './TicketDetailView'
 import { PasteThumbnail } from './PasteThumbnail'
@@ -169,6 +170,16 @@ export function openPrdSlug(slug: string): void {
   window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'scheduler' }))
 }
 
+// Navigates to Projects ('terminal' nav) and opens the PromptSession a
+// dev-work ticket dispatched to (PRD 813's ticket.promptSessionId) — the
+// SAME open mechanism SchedulePanel's job-row chip (PRD 807) and
+// ProjectsLanding's own deep-link listener use, so there is only ever one
+// way to jump into a PromptSessionConversation from elsewhere in the app.
+export function openPromptSession(promptSessionId: string): void {
+  setPendingPromptSessionId(promptSessionId)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
+}
+
 // Small Feature/Bug chip for a ticket row — reuses ticketTagTone's
 // STATUS_TONE-shaped tone object (ticketDisplay.ts) rather than a new color system.
 export function TagChip({ tag }: { tag: 'feature' | 'bug' }) {
@@ -278,6 +289,19 @@ export function QueueTicketPanel({
                     </button>
                   ))}
                 </div>
+              )}
+              {t.status === 'dispatched-to-prd' && !!t.promptSessionId && (
+                <button
+                  data-testid="ticket-open-prompt-session"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openPromptSession(t.promptSessionId!)
+                  }}
+                  title="Open this ticket's own conversation"
+                  className="mt-1.5 block text-[11px] text-accent hover:text-accent/80"
+                >
+                  Open conversation →
+                </button>
               )}
             </li>
             )

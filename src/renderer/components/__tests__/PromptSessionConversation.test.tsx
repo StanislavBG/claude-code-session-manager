@@ -266,6 +266,58 @@ describe('PromptSessionConversation (PRD 804)', () => {
     }
   })
 
+  // PRD 814: a dispatched-to-prd ticket now opens its own PromptSession's
+  // conversation (chat.ts:promptSessionId, set at dispatch by PRD 813) via
+  // the same chatKey-scoping this component already relies on — a second,
+  // unrelated ticket's session must never leak turns into it.
+  it('scopes its transcript to its own PromptSession id — a second unrelated session\'s turns never appear', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../state/promptSessions')
+    const { PromptSessionConversation } = await import('../PromptSessionConversation')
+    const { useChat } = await import('../../state/chat')
+
+    const sessionA = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ticket A goal')
+    const sessionB = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ticket B goal')
+    useChat.setState({
+      chats: {
+        [sessionA.id]: {
+          turns: [{ id: 'a1', role: 'assistant', text: 'Reply for A only', at: Date.now() }],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+        [sessionB.id]: {
+          turns: [{ id: 'b1', role: 'assistant', text: 'Reply for B only', at: Date.now() }],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(createElement(PromptSessionConversation, { promptSession: sessionA }))
+      })
+      expect(container.textContent).toContain('Reply for A only')
+      expect(container.textContent).not.toContain('Reply for B only')
+
+      act(() => { root.unmount() })
+      const root2 = createRoot(container)
+      act(() => {
+        root2.render(createElement(PromptSessionConversation, { promptSession: sessionB }))
+      })
+      expect(container.textContent).toContain('Reply for B only')
+      expect(container.textContent).not.toContain('Reply for A only')
+      act(() => { root2.unmount() })
+    } finally {
+      container.remove()
+    }
+  })
+
   it('renders a .md file reference via the shared MarkdownPreview component, not renderChatMarkdown', async () => {
     const { filesRead } = installWindowApiMock()
     const { usePromptSessions } = await import('../../state/promptSessions')

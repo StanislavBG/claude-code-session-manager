@@ -97,3 +97,71 @@ test('no-ops when parsing the PRD frontmatter throws', async () => {
 
   expect(sendPrompt).not.toHaveBeenCalled();
 });
+
+// PRD 814: a dev-work ticket's completion notification routes into its own
+// PromptSession's event chain instead of an unrelated tab, when the PRD's
+// sourcePromptId resolves to a known, still-active PromptSession.
+test('routes into the known PromptSession event chain and never falls back to a tab prompt', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => true);
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1', sourceTabId: 'tab-x' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  await notifyOriginatingTab(
+    { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalledWith(
+    '/some/cwd',
+    'psess-1',
+    expect.stringContaining('814-notify'),
+  );
+  expect(sendPrompt).not.toHaveBeenCalled();
+});
+
+test('falls back to the tab-external-ticket path when sourcePromptId does not resolve to a known PromptSession', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => false);
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-unknown', sourceTabId: 'tab-x' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  await notifyOriginatingTab(
+    { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalled();
+  expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+});
+
+test('falls back to the tab-external-ticket path when the PRD has no sourcePromptId at all (pre-813 PRD)', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => true);
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: null, sourceTabId: 'tab-x' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  await notifyOriginatingTab(
+    { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+  );
+
+  expect(appendResponseEvent).not.toHaveBeenCalled();
+  expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+});
+
+test('falls back to the tab-external-ticket path when appendResponseEvent itself throws', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => { throw new Error('disk error'); });
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1', sourceTabId: 'tab-x' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  await expect(
+    notifyOriginatingTab(
+      { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+    ),
+  ).resolves.not.toThrow();
+
+  expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+});

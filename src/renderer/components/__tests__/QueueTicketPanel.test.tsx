@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { QueueTicketPanel } from '../TerminalChat'
+import { QueueTicketPanel, openPromptSession } from '../TerminalChat'
 import type { PromptTicket } from '../../state/chat'
 
 // Covers the AC: the panel is always rendered (never returns null on an
@@ -125,6 +125,78 @@ describe('QueueTicketPanel', () => {
     expect(items[0].textContent).toContain('Bug')
     expect(items[1].textContent).not.toContain('Feature')
     expect(items[1].textContent).not.toContain('Bug')
+  })
+
+  // PRD 814: a dispatched-to-prd ticket with a minted promptSessionId (PRD
+  // 813) renders a link into its own scoped PromptSessionConversation, using
+  // the SAME open mechanism (sm:select-prompt-session via
+  // promptSessionDeepLink.ts) SchedulePanel's job-row chip and
+  // ProjectsLanding's deep-link listener already use — never a second path.
+  it('renders an "Open conversation" link for a dispatched-to-prd ticket with a promptSessionId, and navigates via the shared deep-link event on click', () => {
+    const navHandler = vi.fn()
+    window.addEventListener('sm:navigate', navHandler)
+    const selectHandler = vi.fn()
+    window.addEventListener('sm:select-prompt-session', selectHandler)
+    try {
+      const ticket: PromptTicket = {
+        id: 't-dispatched',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+        cwd: '/proj',
+        text: 'build the thing',
+        status: 'dispatched-to-prd',
+        createdAt: Date.now(),
+        promptSessionId: 'psess-123',
+        prdSlugs: ['814-build-the-thing'],
+      }
+      const el = mount(<QueueTicketPanel tickets={[ticket]} />)
+      const link = el.querySelector('[data-testid="ticket-open-prompt-session"]') as HTMLButtonElement
+      expect(link).not.toBeNull()
+
+      act(() => {
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+
+      expect(selectHandler).toHaveBeenCalledTimes(1)
+      expect((selectHandler.mock.calls[0][0] as CustomEvent<string>).detail).toBe('psess-123')
+      expect(navHandler).toHaveBeenCalledTimes(1)
+      expect((navHandler.mock.calls[0][0] as CustomEvent<string>).detail).toBe('terminal')
+    } finally {
+      window.removeEventListener('sm:navigate', navHandler)
+      window.removeEventListener('sm:select-prompt-session', selectHandler)
+    }
+  })
+
+  it('does not render the "Open conversation" link when the ticket has no promptSessionId', () => {
+    const ticket: PromptTicket = {
+      id: 't-no-session',
+      tabId: 'tab-1',
+      sessionId: 'sess-1',
+      cwd: '/proj',
+      text: 'pre-813 dispatched ticket',
+      status: 'dispatched-to-prd',
+      createdAt: Date.now(),
+      prdSlugs: ['700-pre-813'],
+    }
+    const el = mount(<QueueTicketPanel tickets={[ticket]} />)
+    expect(el.querySelector('[data-testid="ticket-open-prompt-session"]')).toBeNull()
+  })
+
+  it('openPromptSession helper sets the pending id and dispatches sm:navigate to terminal', () => {
+    const navHandler = vi.fn()
+    const selectHandler = vi.fn()
+    window.addEventListener('sm:navigate', navHandler)
+    window.addEventListener('sm:select-prompt-session', selectHandler)
+    try {
+      openPromptSession('psess-abc')
+      expect(selectHandler).toHaveBeenCalledTimes(1)
+      expect((selectHandler.mock.calls[0][0] as CustomEvent<string>).detail).toBe('psess-abc')
+      expect(navHandler).toHaveBeenCalledTimes(1)
+      expect((navHandler.mock.calls[0][0] as CustomEvent<string>).detail).toBe('terminal')
+    } finally {
+      window.removeEventListener('sm:navigate', navHandler)
+      window.removeEventListener('sm:select-prompt-session', selectHandler)
+    }
   })
 
   // Covers the scroll-stabilization fix: the panel container is a plain

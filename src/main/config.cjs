@@ -143,6 +143,15 @@ function validateWrite(realAbs) {
       if (realAbs === feedbackSub || realAbs.startsWith(feedbackSub + path.sep)) {
         return;
       }
+      // PromptSession persistence (active-index.json + per-session archives,
+      // promptSessions.ts) and the scheduler's own read-modify-write of that
+      // same active index (promptSessionEvents.cjs, PRD 814) — narrowly
+      // scoped to session-manager-operations/prompt-sessions/, this repo's
+      // existing per-project artifact-store convention.
+      const promptSessionsSub = path.join(realRoot, 'session-manager-operations', 'prompt-sessions');
+      if (realAbs === promptSessionsSub || realAbs.startsWith(promptSessionsSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

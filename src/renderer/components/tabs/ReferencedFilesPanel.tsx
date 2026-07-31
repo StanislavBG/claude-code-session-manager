@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { toast } from '../../state/toast'
 import type { ImportRef } from '../../../preload/api'
@@ -28,6 +28,12 @@ export function ReferencedFilesPanel({ activePath }: Props) {
   const [imports, setImports] = useState<ImportRef[]>([])
   const [expandedPath, setExpandedPath] = useState<string | null>(null)
   const [expandedFiles, setExpandedFiles] = useState<Record<string, ExpandedFile>>({})
+  // Tracks the activePath a given readText() fetch was issued for, so a
+  // response that lands after the user has since switched scope/tab doesn't
+  // resurrect stale content under a path key the current activePath no
+  // longer references.
+  const activePathRef = useRef(activePath)
+  activePathRef.current = activePath
 
   useEffect(() => {
     setExpandedPath(null)
@@ -60,8 +66,10 @@ export function ReferencedFilesPanel({ activePath }: Props) {
     }
     setExpandedPath(path)
     if (!expandedFiles[path]) {
+      const requestedFor = activePathRef.current
       setExpandedFiles((prev) => ({ ...prev, [path]: { loading: true, text: null, error: null } }))
       window.api.config.readText(path).then((res) => {
+        if (activePathRef.current !== requestedFor) return
         setExpandedFiles((prev) => ({
           ...prev,
           [path]: { loading: false, text: res.text, error: res.error },

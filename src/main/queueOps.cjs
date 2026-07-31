@@ -128,6 +128,27 @@ const INTERACTIVE_AC_PATTERNS = [
 ];
 
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
+const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
+
+// PRD 808: PRDS_DIR is now the LEGACY global dir — kept as a migration
+// source and search fallback for not-yet-migrated files. Live PRDs resolve
+// per-project via prdLocations.cjs's resolvePrdsDirs(). candidatePrdsDirs()
+// aggregates both so the linter/archive/retag operations still see every
+// PRD regardless of which dir it currently lives in.
+function candidatePrdsDirs() {
+  return [PRDS_DIR, ...resolvePrdsDirs()];
+}
+
+/** Search every candidate PRD dir for `<slug>.md`; returns the containing dir or null. */
+async function findPrdDir(slug) {
+  for (const dir of candidatePrdsDirs()) {
+    try {
+      await fsp.access(path.join(dir, `${slug}.md`));
+      return dir;
+    } catch { /* not here — try the next candidate dir */ }
+  }
+  return null;
+}
 
 /**
  * Lint a single PRD asynchronously. Returns { slug, findings: [...] }.
@@ -237,16 +258,18 @@ function lintParsed(slug, raw) {
  * so Promise.all never rejects under normal use.
  */
 async function lintAll() {
-  let entries = [];
-  try {
-    entries = await fsp.readdir(PRDS_DIR);
-  } catch {
-    return { reports: [], scannedAt: Date.now() };
-  }
   const paths = [];
-  for (const name of entries) {
-    if (!name.endsWith('.md') || name.startsWith('.')) continue;
-    paths.push(path.join(PRDS_DIR, name));
+  for (const dir of candidatePrdsDirs()) {
+    let entries;
+    try {
+      entries = await fsp.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.md') || name.startsWith('.')) continue;
+      paths.push(path.join(dir, name));
+    }
   }
   const reports = await Promise.all(paths.map(async (filePath) => {
     try {
@@ -270,8 +293,10 @@ async function lintAll() {
  */
 async function archiveOne(slug, archiveDir) {
   if (!SLUG_RE.test(slug)) return { ok: false, slug, error: 'invalid slug' };
-  const src = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
-  if (!src.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'path escape (src)' };
+  const srcDir = await findPrdDir(slug);
+  if (!srcDir) return { ok: false, slug, error: 'not found in any PRDs dir' };
+  const src = path.resolve(path.join(srcDir, `${slug}.md`));
+  if (!src.startsWith(srcDir + path.sep)) return { ok: false, slug, error: 'path escape (src)' };
   const dst = path.resolve(path.join(archiveDir, `${slug}.md`));
   if (!dst.startsWith(PRDS_ARCHIVE_DIR + path.sep)) return { ok: false, slug, error: 'path escape (dst)' };
   try {
@@ -407,8 +432,10 @@ async function autoArchiveCompleted(state, { nowMs } = {}) {
  */
 async function retagOne({ slug, parallelGroup, estimateMinutes }) {
   if (!SLUG_RE.test(slug)) return { ok: false, slug, error: 'invalid slug' };
-  const src = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
-  if (!src.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'path escape' };
+  const dir = await findPrdDir(slug);
+  if (!dir) return { ok: false, slug, error: 'not found in any PRDs dir' };
+  const src = path.resolve(path.join(dir, `${slug}.md`));
+  if (!src.startsWith(dir + path.sep)) return { ok: false, slug, error: 'path escape' };
 
   let raw;
   try {
@@ -470,8 +497,8 @@ async function retagOne({ slug, parallelGroup, estimateMinutes }) {
     }
     if (!SLUG_RE.test(newSlug)) return { ok: false, slug, error: 'new slug would be invalid' };
   }
-  const dst = path.resolve(path.join(PRDS_DIR, `${newSlug}.md`));
-  if (!dst.startsWith(PRDS_DIR + path.sep)) return { ok: false, slug, error: 'new path escape' };
+  const dst = path.resolve(path.join(dir, `${newSlug}.md`));
+  if (!dst.startsWith(dir + path.sep)) return { ok: false, slug, error: 'new path escape' };
 
   // Atomic write via shared helper. If slug changed, write at the new path
   // and unlink the old slug.
@@ -551,4 +578,6 @@ module.exports = {
   retagMany,
   PRDS_DIR,
   PRDS_ARCHIVE_DIR,
+  candidatePrdsDirs,
+  findPrdDir,
 };

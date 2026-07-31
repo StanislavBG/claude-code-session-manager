@@ -30,6 +30,8 @@ export default defineConfig({
       'src/main/__tests__/queueOps-interactive-ac-lint.test.cjs',
       'src/main/lib/__tests__/localAdminHttp.test.cjs',
       'src/main/lib/__tests__/importReferences.spec.cjs',
+      'src/main/__tests__/prdLocations.test.cjs',
+      'src/main/__tests__/prdMigration.test.cjs',
     ],
     globals: true,
   },

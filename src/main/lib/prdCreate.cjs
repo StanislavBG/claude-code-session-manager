@@ -122,7 +122,7 @@ async function createPrd(input, remote) {
   // NN allocation is delegated to allocateParallelGroup() (PRD 548) via
   // the injected remote — never re-derived here — unless the caller
   // opted into an existing group explicitly.
-  const nn = input.parallelGroup ?? await remote.allocateParallelGroup();
+  const nn = input.parallelGroup ?? await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
 
   // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
@@ -131,13 +131,13 @@ async function createPrd(input, remote) {
   // no existence guard (by design, it doubles as the edit-in-place
   // path for Scheduler UI PRD edits), so "create" must not silently
   // clobber an existing job's PRD.
-  const existing = await remote.readPrd(filenameSlug);
+  const existing = await remote.readPrd(filenameSlug, input.cwd);
   if (existing?.ok) {
     return { ok: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
   }
 
   const body = buildPrdBody(input);
-  const writeResult = await remote.writePrd(filenameSlug, body);
+  const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
   if (!writeResult?.ok) {
     return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };
   }

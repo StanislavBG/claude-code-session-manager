@@ -83,6 +83,8 @@ const queueOps = require('./queueOps.cjs');
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
 const { sweep: sweepFeedback } = require('../../scripts/lib/watchdogHelpers.cjs');
+const { resolvePrdsDirs, resolvePrdWriteDir } = require('./lib/prdLocations.cjs');
+const { migratePrds } = require('./lib/prdMigration.cjs');
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -407,17 +409,71 @@ function biasJobOomScore(pid) {
 
 // ---------- fs helpers ----------
 
+// ---------- per-project PRD dir resolution (PRD 808) ----------
+//
+// PRDS_DIR above is now the LEGACY global dir — kept only as a migration
+// source and a search fallback. Live PRDs resolve per-job to
+// `<job.cwd>/session-manager-operations/scheduler/prds/` via prdLocations.cjs.
+
 /**
- * Resolve PRDS_DIR/<slug>.md and enforce path containment. Returns the
+ * Every PRD-source directory currently in play: the legacy global dir (still
+ * searched so a not-yet-migrated file is never invisible) plus every active
+ * project's own PRDs dir. Used by scans that enumerate PRDs across projects
+ * (reconcile, list-prds, lint, rescan).
+ */
+function candidatePrdsDirs() {
+  return [PRDS_DIR, ...resolvePrdsDirs()];
+}
+
+/** The PRD-source directory for a given job cwd (falls back to DEFAULT_PROJECT_CWD). */
+function prdDirForCwd(cwd) {
+  return resolvePrdWriteDir(cwd || DEFAULT_PROJECT_CWD);
+}
+
+/** Absolute path to `<job's project PRDs dir>/<job.slug>.md`. */
+function prdPathForJob(job) {
+  return path.join(prdDirForCwd(job && job.cwd), `${job && job.slug}.md`);
+}
+
+/**
+ * Search every candidate PRD dir for `<slug>.md` (legacy dir first, then
+ * each active project's dir). Returns the containing dir, or null if the
+ * slug isn't found anywhere. Used by slug-only callers (IPC handlers) that
+ * don't have a job's cwd on hand.
+ */
+async function findPrdDir(slug) {
+  for (const dir of candidatePrdsDirs()) {
+    try {
+      await fsp.access(path.join(dir, `${slug}.md`));
+      return dir;
+    } catch { /* not here — try the next candidate dir */ }
+  }
+  return null;
+}
+
+/**
+ * Resolve `<dir>/<slug>.md` for a directory already known to contain (or be
+ * about to receive) the slug, and enforce path containment. Returns the
  * absolute path on success, null on slug-escape attempts. The zod schema
  * for slugs already blocks `..` because the SLUG_RE excludes `/`, but
  * defense-in-depth: a second containment check after path.resolve costs
  * nothing and catches future regex laxity.
  */
-function safeSlugPath(slug) {
-  const resolved = path.resolve(path.join(PRDS_DIR, `${slug}.md`));
-  if (!resolved.startsWith(PRDS_DIR + path.sep)) return null;
+function safeSlugPathIn(dir, slug) {
+  const resolved = path.resolve(path.join(dir, `${slug}.md`));
+  if (!resolved.startsWith(dir + path.sep)) return null;
   return resolved;
+}
+
+/**
+ * Locate an EXISTING `<slug>.md` across every candidate PRD dir and return
+ * its safe, containment-checked absolute path — or null if the slug isn't
+ * found anywhere (or would escape its containing dir).
+ */
+async function safeSlugPath(slug) {
+  const dir = await findPrdDir(slug);
+  if (!dir) return null;
+  return safeSlugPathIn(dir, slug);
 }
 
 // Bundled authoring guide seeded into the scheduler dir so the session-manager-dev
@@ -435,6 +491,37 @@ function ensureDirs() {
       fs.copyFileSync(PRD_AUTHORING_TEMPLATE, PRD_AUTHORING_DEST);
     }
   } catch { /* non-fatal: the guide is a convenience, not load-bearing for a run */ }
+}
+
+/**
+ * One-time, idempotent migration (PRD 808): move every PRD source .md file
+ * still sitting in the legacy global PRDS_DIR into its own project's
+ * `<cwd>/session-manager-operations/scheduler/prds/`, based on that PRD's
+ * own frontmatter `cwd`. Runs at every boot — a no-op fs.readdir once
+ * nothing is left to move. Files migratePrds couldn't resolve (missing/
+ * unparseable cwd, cwd not on disk) are left in place and logged as a
+ * warning — never silently dropped — so a human can fix the frontmatter.
+ */
+async function runPrdMigration() {
+  let result;
+  try {
+    result = await migratePrds(PRDS_DIR);
+  } catch (e) {
+    logs.writeLine({ level: 'error', scope: 'scheduler', message: 'PRD migration failed', meta: { error: e?.message } });
+    return;
+  }
+  console.log(`[scheduler] PRD migration: moved ${result.moved}, skipped ${result.skipped}`);
+  if (result.unresolved.length > 0) {
+    logs.writeLine({
+      level: 'warn',
+      scope: 'scheduler',
+      message: `PRD migration: ${result.unresolved.length} file(s) left in legacy dir`,
+      meta: { legacyDir: PRDS_DIR, unresolved: result.unresolved },
+    });
+    for (const u of result.unresolved) {
+      console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
+    }
+  }
 }
 
 // Matches only numbered timestamp backups (queue.json.bak-<epoch>), not the
@@ -611,20 +698,31 @@ function mutate(fn) {
 // preserve the existing call shape (callers don't need to thread PRDS_DIR).
 const parsePrdRaw = prdParser.parsePrdRaw;
 const parsePrd = prdParser.parsePrd;
+// Aggregates every candidate PRD dir's files into one flat, sorted list.
+// prdParser's dir-mtime cache is keyed per-dir internally by its own single
+// mtime var, so scanning N dirs here costs N stat+readdir passes rather than
+// one — acceptable: PRD counts per project are bounded (hundreds, not
+// millions), and correctness across multiple project dirs matters more than
+// preserving the single-dir cache's steady-state zero-read fast path.
 async function listPrdFiles() {
   ensureDirs();
-  return prdParser.listPrdFiles(PRDS_DIR);
+  const dirs = candidatePrdsDirs();
+  const perDir = await Promise.all(dirs.map((dir) => prdParser.listPrdFiles(dir)));
+  return perDir.flat().sort();
 }
 
 /**
  * Atomically mint a brand-new parallel-group NN for a PRD about to be
- * authored under PRDS_DIR. See prdParser.allocateParallelGroup for the
- * collision-proof mechanics. Callers wanting to join an EXISTING group
- * (deliberate parallel siblings) skip this and just reuse the NN prefix.
+ * authored under the given project's own PRDs dir (falls back to
+ * DEFAULT_PROJECT_CWD's dir when no cwd is supplied). See
+ * prdParser.allocateParallelGroup for the collision-proof mechanics. Callers
+ * wanting to join an EXISTING group (deliberate parallel siblings) skip this
+ * and just reuse the NN prefix.
  */
-async function allocateParallelGroup() {
-  ensureDirs();
-  return prdParser.allocateParallelGroup(PRDS_DIR);
+async function allocateParallelGroup(cwd) {
+  const dir = prdDirForCwd(cwd);
+  await fsp.mkdir(dir, { recursive: true });
+  return prdParser.allocateParallelGroup(dir);
 }
 
 /**
@@ -1243,7 +1341,7 @@ async function notifyOriginatingTab(job, {
   sendPrompt = enqueueExternalPrompt,
 } = {}) {
   try {
-    const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+    const prdPath = prdPathForJob(job);
     const prd = await parsePrdRaw(prdPath).catch(() => null);
 
     let targetTabId = prd?.sourceTabId || null;
@@ -1392,7 +1490,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
 
   // Read full PRD body fresh from disk (queue stored only the preview).
   let prompt;
-  const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+  const prdPath = prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
     // Centrally enforce the review → security-review → verify → commit finish
@@ -1759,7 +1857,7 @@ async function spawnInvestigation(failedJob, runDir) {
 
   let originalBody = '';
   try {
-    originalBody = (await parsePrd(path.join(PRDS_DIR, `${failedJob.slug}.md`))).body;
+    originalBody = (await parsePrd(prdPathForJob(failedJob))).body;
   } catch {
     originalBody = failedJob.bodyPreview || '(original PRD missing from disk)';
   }
@@ -1769,7 +1867,7 @@ async function spawnInvestigation(failedJob, runDir) {
   const baseSlug = failedJob.slug.replace(/^\d+-/, '');
   const group = failedJob.parallelGroup ?? 99;
   const fixSlug = `${String(group).padStart(2, '0')}-fix-${baseSlug}`;
-  const fixPath = path.join(PRDS_DIR, `${fixSlug}.md`);
+  const fixPath = path.join(prdDirForCwd(failedJob.cwd), `${fixSlug}.md`);
 
   if (fs.existsSync(fixPath)) {
     console.log(`[scheduler] skip investigation: fix plan already exists at ${fixPath}`);
@@ -1945,7 +2043,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         new Date().toISOString(),
       );
 
-      const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+      const prdPath = prdPathForJob(job);
       const stateForDeps = await readQueue();
       verifyResult = await verifyRun({
         runDir,
@@ -2121,7 +2219,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             // investigation fires (mirrors reverifyNeedsReview's auto-fix section)
             // so the periodic pass 10 min later sees it already attempted and
             // does not spawn a duplicate.
-            const fixSlugExists = (slug) => fs.existsSync(path.join(PRDS_DIR, `${slug}.md`));
+            const fixSlugExists = (slug) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${slug}.md`)));
             if (
               process.env.SM_AUTOFIX_DISABLE !== '1' &&
               isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists)
@@ -2779,7 +2877,7 @@ async function reverifyNeedsReview() {
   const leftForReview = [];
   for (const job of candidates) {
     const runDir = path.join(RUNS_DIR, job.runId || resolveRunId(job));
-    const prdPath = path.join(PRDS_DIR, `${job.slug}.md`);
+    const prdPath = prdPathForJob(job);
     // Derive committedDuringRun from the recorded run window. The live
     // commit-guard uses gitHead() (before/after HEAD diff); here the run is
     // already over so we query git log filtered to [startedAt, finishedAt+60s].
@@ -2899,7 +2997,7 @@ async function reverifyNeedsReview() {
   if (process.env.SM_AUTOFIX_DISABLE !== '1') {
     const afterHeal = await readQueue();
     const targets = selectAutoFixTargets(afterHeal.jobs, {
-      fixSlugExists: (s) => fs.existsSync(path.join(PRDS_DIR, `${s}.md`)),
+      fixSlugExists: (s) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
     });
     for (const job of targets) {
       const runId = job.runId || resolveRunId(job);
@@ -2995,7 +3093,7 @@ function registerScheduleHandlers() {
   }));
 
   ipcMain.handle('schedule:reset-job', validated(schemas.scheduleSlug, async ({ slug }) => {
-    if (!safeSlugPath(slug)) return { ok: false, error: 'invalid slug' };
+    if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
     const found = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return false;
@@ -3056,8 +3154,9 @@ function registerScheduleHandlers() {
     await fsp.mkdir(archiveDir, { recursive: true });
     let archived = 0;
     for (const job of victims) {
-      const src = path.resolve(path.join(PRDS_DIR, `${job.slug}.md`));
-      if (!src.startsWith(PRDS_DIR + path.sep)) continue;
+      const srcDir = await findPrdDir(job.slug) ?? prdDirForCwd(job.cwd);
+      const src = path.resolve(path.join(srcDir, `${job.slug}.md`));
+      if (!src.startsWith(srcDir + path.sep)) continue;
       const dst = path.join(archiveDir, `${job.slug}.md`);
       try {
         await fsp.rename(src, dst);
@@ -3087,7 +3186,7 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:read-prd', validated(schemas.scheduleSlug, async ({ slug }) => {
-    const filePath = safeSlugPath(slug);
+    const filePath = await safeSlugPath(slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
       const text = await fsp.readFile(filePath, 'utf8');
@@ -3113,7 +3212,14 @@ function registerScheduleHandlers() {
   }));
 
   ipcMain.handle('schedule:write-prd', validated(schemas.scheduleWritePrd, async (data) => {
-    const resolved = safeSlugPath(data.slug);
+    // Editing an existing PRD writes back to whichever dir it already lives
+    // in; a brand-new slug (no cwd known yet — e.g. the renderer's "New PRD"
+    // template, authored before the user fills in `cwd`) falls back to the
+    // legacy global dir until it's re-saved with a real cwd and migrated by
+    // the next reconcile-driven scan.
+    const dir = (await findPrdDir(data.slug)) ?? PRDS_DIR;
+    if (dir === PRDS_DIR) ensureDirs();
+    const resolved = safeSlugPathIn(dir, data.slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
       await config.writeTextAtomic(resolved, data.body);
@@ -3130,31 +3236,35 @@ function registerScheduleHandlers() {
 
   ipcMain.handle('schedule:list-prds', async () => {
     ensureDirs();
-    let entries;
-    try {
-      entries = await fsp.readdir(PRDS_DIR);
-    } catch (e) {
-      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: readdir failed', meta: { error: e?.message } });
-      return [];
-    }
     const out = [];
-    for (const name of entries) {
-      if (!name.endsWith('.md') || name.startsWith('.')) continue;
-      const filePath = path.join(PRDS_DIR, name);
+    for (const dir of candidatePrdsDirs()) {
+      let entries;
       try {
-        const parsed = await parsePrd(filePath);
-        const stat = await fsp.stat(filePath);
-        out.push({
-          slug: parsed.slug,
-          parallelGroup: parsed.parallelGroup,
-          title: parsed.title,
-          cwd: parsed.cwd || '',
-          estimateMinutes: parsed.estimateMinutes,
-          sourcePromptId: parsed.sourcePromptId,
-          mtimeMs: stat.mtimeMs,
-        });
+        entries = await fsp.readdir(dir);
       } catch (e) {
-        logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
+        if (e?.code !== 'ENOENT') {
+          logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: readdir failed', meta: { dir, error: e?.message } });
+        }
+        continue;
+      }
+      for (const name of entries) {
+        if (!name.endsWith('.md') || name.startsWith('.')) continue;
+        const filePath = path.join(dir, name);
+        try {
+          const parsed = await parsePrd(filePath);
+          const stat = await fsp.stat(filePath);
+          out.push({
+            slug: parsed.slug,
+            parallelGroup: parsed.parallelGroup,
+            title: parsed.title,
+            cwd: parsed.cwd || '',
+            estimateMinutes: parsed.estimateMinutes,
+            sourcePromptId: parsed.sourcePromptId,
+            mtimeMs: stat.mtimeMs,
+          });
+        } catch (e) {
+          logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
+        }
       }
     }
     out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
@@ -3177,6 +3287,7 @@ function registerScheduleHandlers() {
 
 async function init() {
   ensureDirs();
+  await runPrdMigration();
   sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
 
   // Hydrate cached state from the sidecar before any scheduling decisions.
@@ -3361,14 +3472,20 @@ const remote = {
     return buildScheduleStatePayload(state, { withPaths: true });
   },
 
-  async readPrd(slug) {
-    const filePath = safeSlugPath(slug);
+  // `cwd` is optional: prdCreate.cjs's create flow passes the target
+  // project's cwd explicitly (the file may not exist yet, so there's
+  // nothing for findPrdDir to search for); the renderer's slug-only IPC
+  // path (editing an already-queued PRD) omits it and relies on findPrdDir.
+  async readPrd(slug, cwd) {
+    const dir = cwd ? prdDirForCwd(cwd) : await findPrdDir(slug);
+    if (!dir) return { ok: false, error: 'invalid slug' };
+    const filePath = safeSlugPathIn(dir, slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
       // realpath resolves symlinks; re-check boundary to block a rogue agent job
-      // that places a symlink inside PRDS_DIR pointing outside the safe root.
+      // that places a symlink inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(PRDS_DIR + path.sep)) {
+      if (!real.startsWith(dir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
       const text = await fsp.readFile(real, 'utf8');
@@ -3397,17 +3514,29 @@ const remote = {
     }
   },
 
-  async writePrd(slug, body) {
-    const resolved = safeSlugPath(slug);
+  // `cwd` optional — see readPrd's comment above; prdCreate.cjs's create
+  // flow supplies it (the destination project dir for a brand-new file that
+  // doesn't exist yet, so findPrdDir would return nothing to write into).
+  async writePrd(slug, body, cwd) {
+    let dir;
+    if (cwd) {
+      dir = prdDirForCwd(cwd);
+      await fsp.mkdir(dir, { recursive: true });
+    } else {
+      dir = (await findPrdDir(slug)) ?? PRDS_DIR;
+      if (dir === PRDS_DIR) ensureDirs();
+    }
+    const resolved = safeSlugPathIn(dir, slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
-      // Symlink defense, matching readPrd/readLog: safeSlugPath is lexical and
-      // does NOT resolve symlinks, so a rogue job could plant prds/x.md → an
-      // arbitrary $HOME path and have writeTextAtomic clobber it. Resolve the
-      // real parent dir (the file itself may not exist yet) and re-assert
-      // containment; also reject the target if it is already a symlink.
+      // Symlink defense, matching readPrd/readLog: safeSlugPathIn is lexical
+      // and does NOT resolve symlinks, so a rogue job could plant a PRDs-dir
+      // entry → an arbitrary $HOME path and have writeTextAtomic clobber it.
+      // Resolve the real parent dir (the file itself may not exist yet) and
+      // re-assert containment; also reject the target if it is already a
+      // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
-      if (realParent !== PRDS_DIR && !realParent.startsWith(PRDS_DIR + path.sep)) {
+      if (realParent !== dir && !realParent.startsWith(dir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
       const existing = await fsp.lstat(resolved).catch(() => null);
@@ -3423,7 +3552,7 @@ const remote = {
   },
 
   async resetJob(slug) {
-    if (!safeSlugPath(slug)) return { ok: false, error: 'invalid slug' };
+    if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
     const found = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return false;
@@ -3501,4 +3630,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, findPrdDir, runPrdMigration };

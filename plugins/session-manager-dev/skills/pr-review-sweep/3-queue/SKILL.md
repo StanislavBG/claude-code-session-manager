@@ -34,7 +34,14 @@ existing PR's branch), and the standard two independent verification passes befo
 - **`bug` bundle** — additionally require: reproduce each defect described in the bundled
   threads, write a regression test per defect that fails before the fix and passes after,
   then fix. The PRD body should quote the reviewer's exact wording per thread so the
-  executor root-causes the actual reported defect, not a guessed one.
+  executor root-causes the actual reported defect, not a guessed one. If `:classify` flagged
+  a thread as matching a known documented pattern (see its "Known-pattern check"), the PRD
+  must say so explicitly and instruct the executor to **grep the rest of the codebase for
+  the same pattern, not just fix the one flagged instance** — several of sigma's own
+  documented patterns (e.g. an SSR-unsafe `useLayoutEffect`, an un-deduped array into a D1
+  `IN (...)`) turned out to be the exact same bug copy-pasted across 5+ sibling files, each
+  caught as a separate review comment on a separate PR because the first fix never swept the
+  rest. One PRD closing all occurrences beats N PRDs closing them one review cycle at a time.
 - **`feature` bundle** — additionally require: scope the change to exactly what each
   bundled thread asked for (no piggybacked scope creep across threads even though they're
   bundled together), match existing patterns/conventions in the touched files, and add a

@@ -74,7 +74,7 @@ project (+ optional feature name)
 |---|---|---|---|
 | 0. `:select` | project (cwd or named) + optional feature hint | one confirmed project + one confirmed feature name + why it's demo-worthy | **STOP** — report if no clear feature can be confirmed (don't guess) |
 | 1. `:research` | confirmed project + feature | mission/description (project-level), feature description, key files, how it actually works | n/a — always produces notes, flags gaps explicitly rather than inventing claims |
-| 2. `:storyboard` | mission + feature notes | ordered list of `{step, action, expected_screen, caption}` — one aspect per step | n/a — storyboard is a draft, `:capture` is allowed to correct it |
+| 2. `:storyboard` | mission + feature notes | ordered list of `{step, action, expected_screen, capture_scope, caption}`, 5-10 steps, a deliberate mix of full-page and component-scoped shots | n/a — storyboard is a draft, `:capture` is allowed to correct it |
 | 3. `:capture` | storyboard | one real screenshot file per step + any corrected captions | **STOP** on that step — report what's missing; never substitute a placeholder/mockup image |
 | 4. `:draft-copy` | research notes + captured captions | final Mission & Feature Description prose + one-sentence essence line | n/a — always produces final text, gaps stay explicit |
 | 5. `:illustrate` | the essence line (text must exist first) | one companion illustration, tagged distinct from screenshots — or an explicit omission note | never blocks — skips cleanly if no image generator is configured, or after one off-brief retry |
@@ -93,8 +93,12 @@ step is dropped and reported, not faked.** A shorter, honest demo beats a comple
 ## Output
 
 Default: one self-contained `.html` file (inline CSS/JS, base64-embedded images) written to
-`docs/feature-showcase/<feature-slug>.html` inside the target project — see
-`feature.config.yaml` for the exact path convention, size ceiling, and the single-file vs.
+`docs/feature-showcase/<project-slug>-<feature-slug>.html` inside **`~/Projects/Bilko`** —
+never inside the showcased project's own repo, even when the feature being showcased belongs
+to a different project entirely. Bilko is the author/publisher of every showcase (same as
+`blog-from-git`'s posts), is guaranteed to be locally writable across sessions, and these pages
+are destined to eventually post to bilko.run — so output collects in one place from the start.
+See `feature.config.yaml` for the exact path convention, size ceiling, and the single-file vs.
 folder fallback (used when embedded images would blow past the size ceiling). This is what
 "uploadable anywhere" means: no server, no relative asset paths, no build step — open the file
 or drop it on any static host and it works.

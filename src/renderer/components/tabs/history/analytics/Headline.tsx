@@ -44,7 +44,9 @@ export function Headline({ measure, headline, activeDays, projectsTouched, total
             <div className="text-xs text-fg-faint mt-2">no prior window to compare</div>
           )}
         </div>
-        <Sparkline series={headline.series} />
+        <div className="flex-1 min-w-0 self-stretch">
+          <Sparkline series={headline.series} />
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-3 mt-4 pt-3 border-t border-line">
         <SubStat label="per active day" value={formatMeasureValue(measure, perActiveDay)} />
@@ -68,7 +70,7 @@ function SubStat({ label, value }: { label: string; value: string }) {
 function Sparkline({ series }: { series: number[] }) {
   const width = 160
   const height = 48
-  if (series.length < 2) return <div style={{ width, height }} />
+  if (series.length < 2) return null
   const max = Math.max(...series, 0)
   const min_ = Math.min(...series, 0)
   const range = max - min_ || 1
@@ -76,9 +78,9 @@ function Sparkline({ series }: { series: number[] }) {
   const points = series.map((v, i) => `${i * step},${height - ((v - min_) / range) * height}`).join(' ')
   const areaPoints = `0,${height} ${points} ${width},${height}`
   return (
-    <svg width={width} height={height} className="shrink-0">
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full h-full min-h-[48px]">
       <polygon points={areaPoints} fill="#b85c34" opacity={0.15} />
-      <polyline points={points} fill="none" stroke="#b85c34" strokeWidth={1.5} />
+      <polyline points={points} fill="none" stroke="#b85c34" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }

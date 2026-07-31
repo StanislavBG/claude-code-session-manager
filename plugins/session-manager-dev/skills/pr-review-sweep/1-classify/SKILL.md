@@ -38,6 +38,17 @@ there's a concrete failing case (a real input that breaks today); otherwise **fe
 Record the reasoning either way — `pr-review-sweep:queue` uses it to pick the PRD template,
 and a future reader should be able to see why a borderline call went the way it did.
 
+## Known-pattern check (if the project curates one)
+
+Before finalizing type/reasoning, check whether the thread matches an already-documented
+recurring pattern. Some projects keep a curated, evolving corpus of past review findings
+(commonly `docs/review-*.md`, indexed from `docs/README.md`, fed by a project-local
+`project-status-local` mining step — sigma is the reference example). If such docs exist in
+this repo and the thread matches a named pattern there, say so in the reasoning and cite the
+doc/section — it strengthens the bug-vs-feature call (a documented recurring bug is bug,
+full stop) and carries forward to `:queue`. If no such docs exist, or the thread doesn't
+match anything in them, this is a no-op — don't go hunting for docs a project doesn't have.
+
 ## Output
 
 Per thread: `{disposition, type | null, reasoning}`. Needs-my-decision threads carry the

@@ -18,15 +18,18 @@ its omission-reason (from `:illustrate`).
    the `folder_fallback_layout` instead (html + `screenshots/` dir, relative paths).
 
 2. **Build the page**, self-contained (inline `<style>`/`<script>`, no external CDN/font/JS
-   requests — must work fully offline via `file://`), with exactly the three required sections
-   in order:
+   requests — must work fully offline via `file://`), with exactly the three required sections,
+   **Click-Through Demo first** — the real screenshots are the most persuasive thing on the page,
+   so they lead, above the fold, before any prose:
+   - **Click-Through Demo** — the captured steps rendered as a one-step-at-a-time viewer
+     (numbered tabs or next/prev buttons — vanilla JS, no framework). Each step's real image
+     renders on top, full width within the viewer, with its caption directly below it — image
+     first, caption second, never the reverse. Screenshots only — the illustration never appears
+     in this section. This section opens the page, immediately above the fold.
    - **Project Mission & Description** — the finalized text from `:draft-copy`, verbatim
    - **Feature Description** — the finalized text from `:draft-copy`, verbatim. If a companion
      illustration exists, place it here as a header/hero image for the section — never inside
      the Click-Through Demo viewer, so it's never confusable with a real screenshot
-   - **Click-Through Demo** — the captured steps rendered as a one-step-at-a-time viewer
-     (numbered tabs or next/prev buttons — vanilla JS, no framework), each step showing its real
-     image + caption. Screenshots only — the illustration never appears in this section
    - If `:illustrate` reported an omission, skip the hero image silently (it's an optional
      companion, not a required section) — do not note the omission on the page itself
 

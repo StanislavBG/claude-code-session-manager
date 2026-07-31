@@ -24,13 +24,16 @@ Check every item in `feature.config.yaml`'s `gates` list against the actual file
 3. Confirm all three required sections are present and non-empty (or explicitly gap-noted per
    `:compose` step 5, which is an acceptable non-empty state). The companion illustration is
    optional — its absence is never a gate failure.
-4. Confirm the demo is genuinely click-through — the next/prev or tab controls exist and their
+4. Confirm the section order matches `feature.config.yaml`'s `content.sections_required` —
+   Click-Through Demo leads the page (above the fold, before the prose sections), each visible
+   step showing its real image on top and the caption directly below it.
+5. Confirm the demo is genuinely click-through — the next/prev or tab controls exist and their
    JS actually switches the visible step (not just a cosmetic active-class flip with all steps
    rendered stacked underneath).
-5. Confirm no external network calls (grep for `http://`/`https://` in `<script src>`,
+6. Confirm no external network calls (grep for `http://`/`https://` in `<script src>`,
    `<link href>`, `fetch(`, `@import` — should be none).
-6. Confirm the size ceiling was respected for the mode chosen.
-7. Spot-check 2-3 sentences in the Mission/Feature sections against `:research`'s notes for
+7. Confirm the size ceiling was respected for the mode chosen.
+8. Spot-check 2-3 sentences in the Mission/Feature sections against `:research`'s notes for
    traceability — flag anything that reads like invented marketing language.
 
 ## On failure

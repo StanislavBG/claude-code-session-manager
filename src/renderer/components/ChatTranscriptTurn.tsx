@@ -303,6 +303,7 @@ export function Turn({
   inlineFilePreview = false,
   toolStripVariant = 'inline',
   needsDecisionStyle = false,
+  precedingUserPrompt,
 }: {
   turn: ChatTurn
   cwd: string
@@ -335,6 +336,15 @@ export function Turn({
    *  the default amber "Needs your answer" — set only by EpicDetail
    *  (PRD 827), per the Epics design spec's needs-you treatment. */
   needsDecisionStyle?: boolean
+  /** The text of the chat turn immediately preceding this one, ONLY when that
+   *  turn is a plain user prompt — set by the caller (which owns the full
+   *  turns array; this component only ever sees one turn at a time). Used
+   *  exclusively by the consent-notice 'Retry' button below to resend the
+   *  prompt that originally triggered the MCP consent denial. Left undefined
+   *  when there's no confidently-identifiable preceding prompt (e.g. the
+   *  notice is the first turn) — the Retry button is omitted in that case
+   *  rather than guessing. */
+  precedingUserPrompt?: string
 }) {
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
@@ -352,9 +362,11 @@ export function Turn({
   // `chatRunning` selector flipping) would tear the widget's effect down and
   // never respawn it (spawnedRef guards re-spawn to the first mount only).
   const [consentExpanded, setConsentExpanded] = useState(false)
+  const [consentGranted, setConsentGranted] = useState(false)
   const onConsentGranted = useCallback(() => {
     toast.info('Consent granted — you can retry the run now.')
     setConsentExpanded(false)
+    setConsentGranted(true)
   }, [])
   const onConsentClose = useCallback(() => setConsentExpanded(false), [])
   useEffect(() => {
@@ -447,6 +459,10 @@ export function Turn({
       }
       setConsentExpanded(true)
     }
+    const onRetry = () => {
+      if (!precedingUserPrompt) return
+      useChat.getState().send({ tabId, sessionId, cwd, prompt: precedingUserPrompt })
+    }
     return (
       <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
         <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${AMBER_TEXT}`}>
@@ -466,6 +482,17 @@ export function Turn({
                   onClose={onConsentClose}
                 />
               </div>
+            ) : consentGranted ? (
+              precedingUserPrompt ? (
+                <button
+                  onClick={onRetry}
+                  disabled={chatRunning}
+                  title={chatRunning ? 'Wait for the current run to finish before retrying' : 'Resend your original prompt now that consent is granted'}
+                  className={`rounded border px-2 py-1 text-xs font-medium hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent ${AMBER_TEXT} border-current`}
+                >
+                  Retry →
+                </button>
+              ) : null
             ) : (
               <button
                 onClick={() => { void onGrantConsent() }}

@@ -606,6 +606,8 @@ export function EpicDetail({ promptSession }: Props) {
               if (item.kind === 'turn') {
                 const t = item.turn
                 const i = turns.indexOf(t)
+                const prevTurn = i > 0 ? turns[i - 1] : undefined
+                const precedingUserPrompt = prevTurn?.role === 'user' ? prevTurn.text : undefined
                 return (
                   <div key={t.id} id={`epic-detail-turn-${t.id}`}>
                     <Turn
@@ -620,6 +622,7 @@ export function EpicDetail({ promptSession }: Props) {
                       inlineFilePreview
                       toolStripVariant="collapsible"
                       needsDecisionStyle
+                      precedingUserPrompt={precedingUserPrompt}
                     />
                   </div>
                 )

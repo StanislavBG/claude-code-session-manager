@@ -143,7 +143,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const indicators = useLiveIndicators()
 
-  const navFace: NavFace = deriveNavFace(active, !!activeTab)
+  const navFace: NavFace = deriveNavFace(active)
   const items = getNavItemsForFace(navFace)
   const workspace = items.filter((item) => item.group === 'Workspace')
   const configure = items.filter((item) => item.group === 'Configure')

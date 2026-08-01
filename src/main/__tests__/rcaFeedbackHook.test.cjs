@@ -147,6 +147,87 @@ test('fileRcaFeedback: files into the job\'s own project, no feedback dir requir
   expect(readSessions(cwd)[res.epicId].status).toBe('proposed');
 });
 
+// ─── epic targeting (job.epicId → preferred join target) ───────────────────
+
+function writeActiveIndex(cwd, sessions) {
+  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  const events = {};
+  for (const id of Object.keys(sessions)) {
+    events[id] = [{ id: `${id}-e0`, promptSessionId: id, kind: 'prompt', causedByEventId: null, at: new Date(0).toISOString(), text: sessions[id].goalText }];
+  }
+  fs.writeFileSync(path.join(dir, 'active-index.json'), JSON.stringify({ sessions, events }));
+}
+
+test('fileRcaFeedback: joins the job\'s known origin Epic when it is still open, and tags source', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+
+  writeActiveIndex(cwd, {
+    'origin-epic-1': { id: 'origin-epic-1', cwd, goalText: 'Unrelated title text', status: 'proposed', createdAt: new Date(0).toISOString(), completedAt: null },
+  });
+
+  const res = await rcaFeedbackHook.fileRcaFeedback({
+    job: baseJob({ cwd, epicId: 'origin-epic-1' }), runDir, verdict: 'transcript_errors',
+  });
+
+  expect(res.filed).toBe(true);
+  expect(res.epicId).toBe('origin-epic-1');
+  expect(res.created).toBe(false);
+  expect(Object.keys(readSessions(cwd)).length).toBe(1);
+});
+
+test('fileRcaFeedback: does not join a completed origin Epic, falls through to mint', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+
+  writeActiveIndex(cwd, {
+    'origin-epic-1': { id: 'origin-epic-1', cwd, goalText: 'Unrelated title text', status: 'completed', createdAt: new Date(0).toISOString(), completedAt: new Date(0).toISOString() },
+  });
+
+  const res = await rcaFeedbackHook.fileRcaFeedback({
+    job: baseJob({ cwd, epicId: 'origin-epic-1' }), runDir, verdict: 'transcript_errors',
+  });
+
+  expect(res.filed).toBe(true);
+  expect(res.epicId).not.toBe('origin-epic-1');
+  expect(res.created).toBe(true);
+  const sessions = readSessions(cwd);
+  expect(sessions[res.epicId].source).toEqual({ producer: 'rca-hook', prdSlug: 'testslug', runId: baseJob().runId });
+});
+
+test('fileRcaFeedback: a nonexistent job.epicId falls through to mint without erroring', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+
+  const res = await rcaFeedbackHook.fileRcaFeedback({
+    job: baseJob({ cwd, epicId: 'does-not-exist' }), runDir, verdict: 'transcript_errors',
+  });
+
+  expect(res.filed).toBe(true);
+  expect(res.epicId).not.toBe('does-not-exist');
+  expect(res.created).toBe(true);
+});
+
+test('fileRcaFeedback: no job.epicId preserves current mint-or-reuseByGoal behavior', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+
+  const res = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
+  expect(res.filed).toBe(true);
+  expect(res.created).toBe(true);
+  const sessions = readSessions(cwd);
+  expect(sessions[res.epicId].source).toEqual({ producer: 'rca-hook', prdSlug: 'testslug', runId: baseJob().runId });
+});
+
 test('fileRcaFeedback: rejects a slug containing path-traversal segments', async () => {
   const cwd = makeProjectWithInbox();
   const runDir = path.join(tmpHome, 'run1');

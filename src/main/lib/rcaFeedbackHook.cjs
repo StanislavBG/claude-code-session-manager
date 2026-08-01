@@ -28,7 +28,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { ensureEpic } = require('./epicMint.cjs');
+const { ensureEpic, findJoinableEpic } = require('./epicMint.cjs');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readTail } = require('./fileTail.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
@@ -294,7 +294,7 @@ function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, i
  * duplicate. A different runId (new run of the same slug) files a new RCA.
  *
  * @param {object} opts
- * @param {{slug: string, cwd?: string, runId: string, exitCode?: number, error?: string}} opts.job
+ * @param {{slug: string, cwd?: string, runId: string, exitCode?: number, error?: string, epicId?: string}} opts.job
  * @param {string} [opts.runDir]   Run directory containing <slug>.log / <slug>.meta.json.
  * @param {string} opts.verdict    Verifier verdict string (e.g. 'uncommitted_changes').
  * @param {Array}  [opts.annotations]  Non-blocking verifier annotations (currently unused
@@ -351,12 +351,33 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
     // the old live/processed existence checks were for.
     config.addAllowedRoot(dest.allowlistRoot);
     const title = rcaProposalTitle(job, verdict);
+
+    // job.epicId (present on jobs authored after Epic-gating landed; absent
+    // on legacy PRDs) is the known origin Epic this failing job belonged to.
+    // Passing it straight through as ensureEpic's `epicId` would hit its
+    // explicitEpicId join-only branch, which joins unconditionally — even a
+    // 'completed' Epic. findJoinableEpic's preferEpicId strategy is the one
+    // that only joins when the Epic is still open ('proposed'/'active'), so
+    // resolve it here and only forward it when that strategy actually fires
+    // — otherwise fall through to the existing reuseByGoal/mint behavior.
+    // Once forwarded, ensureEpic joins it unconditionally by id (no second
+    // status check) — the status gate lives entirely in this resolve step.
+    let preferredEpicId;
+    if (typeof job.epicId === 'string' && job.epicId) {
+      const joinable = findJoinableEpic(dest.cwd, { goalText: title, preferEpicId: job.epicId, status: 'proposed' });
+      if (joinable && joinable.matchedBy === 'preferEpicId') {
+        preferredEpicId = joinable.epicId;
+      }
+    }
+
     const { epicId, created } = await ensureEpic(dest.cwd, {
       goalText: title,
       tag: 'bug',
       status: 'proposed',
       reuseByGoal: true,
       openingPrompt: markdown,
+      epicId: preferredEpicId,
+      source: { producer: 'rca-hook', prdSlug: job.slug, runId: job.runId },
     });
 
     console.log(`[rca] ${created ? 'proposed' : 'joined'} epic ${epicId} for ${job.slug}`);

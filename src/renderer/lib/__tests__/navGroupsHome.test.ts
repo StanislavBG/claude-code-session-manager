@@ -59,6 +59,23 @@ describe('project-home is project-only', () => {
   })
 })
 
+describe('browser is home-only', () => {
+  it('NAV_ITEMS tags browser with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'browser')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes browser', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('browser')
+  })
+
+  it('home face includes browser', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('browser')
+  })
+})
+
 describe('NAV_ITEMS face-coverage invariant', () => {
   it('every NAV_ITEMS entry has a non-empty faces array', () => {
     for (const item of NAV_ITEMS) {

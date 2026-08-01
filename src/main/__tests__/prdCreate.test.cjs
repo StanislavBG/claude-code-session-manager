@@ -437,6 +437,57 @@ test('createPrd normalizes a `~`-prefixed cwd via expandHome before calling remo
   }
 });
 
+// ──────────────────────────────────────────── PRD 862: register cwd as an
+// allowed write root at createPrd() time, not only at pty.spawn() time
+//
+// Before this fix, config.cjs's allowedRoots (the write-boundary allowlist)
+// only ever grew via pty.cjs's addAllowedRoot call inside pty.spawn(). A
+// chat-only Epic (headless `claude -p --resume`, no Terminal PTY ever
+// spawned for its project cwd) reached createPrd() -> remote.writePrd() ->
+// config.writeTextAtomic() -> config.validateWrite() and failed with "Write
+// outside allowed write boundaries", purely because no PTY had registered
+// that cwd yet in this process's lifetime. This test reproduces that exact
+// scenario: a brand-new project root that has NEVER had config.addAllowedRoot
+// called for it (mirroring pty.spawn() never having run), writing through the
+// real config.writeTextAtomic into the real session-manager-operations/
+// scheduler/ subtree (not the mocked-remote temp dirs the other tests here
+// use, which pre-register their root via addAllowedRoot in mkTmpPrdsDir).
+test('createPrd registers cwd as an allowed write root itself, so a chat-only Epic (no Terminal PTY ever spawned for this cwd) can still write its PRD', async () => {
+  // Must live under $HOME: validatePath's read boundary is home-dir-wide
+  // regardless of allowedRoots registration (matching every real project
+  // cwd, which checkInsideHome forces inside $HOME) — the bug this test
+  // reproduces is specifically about the *write* boundary (validateWrite),
+  // not the read one.
+  const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-chat-only-epic-'));
+  // Deliberately do NOT call config.addAllowedRoot(root) here — pty.spawn()
+  // is the only other caller of addAllowedRoot, and it never runs for a
+  // chat-only Epic. createPrd() itself must perform this registration.
+  const prdsEpicDir = path.join(root, 'session-manager-operations', 'scheduler', 'epics', 'chat-only-epic', 'prds');
+
+  try {
+    const remote = {
+      async allocateParallelGroup() { return 1; },
+      async readPrd() { return { ok: false }; },
+      async writePrd(slug, body) {
+        await fsp.mkdir(prdsEpicDir, { recursive: true });
+        const filePath = path.join(prdsEpicDir, `${slug}.md`);
+        // Real config.cjs write path — this is what threw
+        // "Write outside allowed write boundaries" before the fix.
+        await config.writeTextAtomic(filePath, body);
+        return { ok: true };
+      },
+    };
+
+    const result = await createPrd(validCreateBody({ cwd: root }), remote);
+
+    expect(result.ok).toBe(true);
+    const written = await fsp.readFile(path.join(prdsEpicDir, result.filename), 'utf8');
+    expect(written).toMatch(/title: Add widget frobnication/);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the created PRD frontmatter', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);

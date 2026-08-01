@@ -115,11 +115,19 @@ async function createPrd(input, remote) {
   // joins that treat it as a literal path segment, so an unexpanded `~/...`
   // fails downstream as a bare "invalid slug" instead of a clear cwd error.
   const cwd = expandHome(input.cwd);
+  let realCwd;
   try {
-    config.validatePath(cwd);
+    realCwd = config.validatePath(cwd);
   } catch (e) {
     return { ok: false, status: 400, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` };
   }
+  // Register this project's cwd as a write-allowed root (config.cjs's
+  // validateWrite gate). Chat-only Epics (headless claude -p, no Terminal
+  // PTY ever spawned for this cwd) reach this code path without pty.cjs's
+  // addAllowedRoot call ever having run — without this, every PRD write for
+  // such a project fails with "Write outside allowed write boundaries" even
+  // though validatePath (the read boundary) just passed above.
+  config.addAllowedRoot(realCwd);
   input = { ...input, cwd };
 
   const slug = input.slug || deriveSlugFromTitle(input.title);

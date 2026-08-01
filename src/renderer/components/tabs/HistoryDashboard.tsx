@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import type { HistoryDashboardDay, HistoryDashboardResult, HistoryDashboardTotals } from '../../../preload/api'
 import { facetSlice } from '../../lib/historyFacet'
 import { buildHeadline, buildProjectRows, measureValue, type Measure } from '../../lib/analyticsViewModel'
 import { buildUsageCsv } from '../../lib/usageCsv'
 import { toast } from '../../state/toast'
+import { useLayout } from '../../state/layout'
+import { useSessions } from '../../state/sessions'
+import { deriveNavFace } from '../../lib/navFace'
 import { ControlBar, type RangeDays } from './history/analytics/ControlBar'
 import { Headline } from './history/analytics/Headline'
 import { BudgetStrip } from './history/analytics/BudgetStrip'
@@ -48,7 +51,26 @@ function emptyTotals(): HistoryDashboardTotals {
 export function HistoryDashboard() {
   const [measure, setMeasure] = useState<Measure>(loadMeasure)
   const [range, setRange] = useState<RangeDays>(loadRange)
-  const [keep, setKeep] = useState<Set<string> | null>(null)
+
+  // The project facet defaults from the NavFace (leftnav-two-face-framework):
+  // Home face -> all projects (unchanged default), Project face -> the active
+  // tab's cwd isolated. Mirrors Scheduler's manuallyTouchedRef +
+  // prevNavFaceRef pattern so the default only re-applies on an actual face
+  // transition, never on a same-face re-render, and never once the user has
+  // manually changed the filter since the last transition. `keep`'s initial
+  // value is seeded from the NavFace too, so mounting directly on the
+  // project face (not just transitioning into it) isolates immediately.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const tabs = useSessions((s) => s.tabs)
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+
+  const [keep, setKeep] = useState<Set<string> | null>(() => (
+    navFace === 'project' && activeCwd ? new Set([activeCwd]) : null
+  ))
   const [selected, setSelected] = useState<string | null>(null)
   const [raw, setRaw] = useState<HistoryDashboardResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,8 +94,28 @@ export function HistoryDashboard() {
   }, [range, tick])
 
   // Reset facet + selection when the range changes so a stale project key from
-  // a prior range doesn't linger in `keep`.
-  useEffect(() => { setKeep(null); setSelected(null) }, [range])
+  // a prior range doesn't linger in `keep`. Skips the initial mount so it
+  // doesn't clobber the NavFace-seeded initial value above.
+  const rangeMountedRef = useRef(false)
+  useEffect(() => {
+    if (!rangeMountedRef.current) { rangeMountedRef.current = true; return }
+    setKeep(null)
+    setSelected(null)
+  }, [range])
+
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    if (navFace === 'project' && activeCwd) {
+      isolateProject(activeCwd)
+    } else if (navFace === 'home') {
+      showAll()
+    }
+  }, [navFace, activeCwd])
 
   const facet = useMemo(() => (raw ? facetSlice(raw, keep) : null), [raw, keep])
 
@@ -218,9 +260,9 @@ export function HistoryDashboard() {
         <ProjectFacet
           chips={allProjectRows.map((r) => ({ projectDir: r.projectDir, value: r.value }))}
           keep={keep}
-          onToggle={toggleProject}
-          onIsolate={isolateProject}
-          onShowAll={showAll}
+          onToggle={(projectDir) => { manuallyTouchedRef.current = true; toggleProject(projectDir) }}
+          onIsolate={(projectDir) => { manuallyTouchedRef.current = true; isolateProject(projectDir) }}
+          onShowAll={() => { manuallyTouchedRef.current = true; showAll() }}
         />
         <StackedTrend days={stackedDays} measure={measure} selected={selected} onSelect={setSelected} />
         <Ranking rows={projectRows} measure={measure} selected={selected} onSelect={setSelected} />

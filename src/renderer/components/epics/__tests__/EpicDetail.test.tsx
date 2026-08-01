@@ -188,6 +188,55 @@ describe('EpicDetail (PRD 827)', () => {
     expect(rendered[2].textContent).toContain('latest turn')
   })
 
+  it('wires onQuote into the Discussion timeline\'s Turn so its hover Quote button reports the turn text', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [{ id: 't-1', role: 'user', text: 'quote me please', at: 1000 }],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const onQuote = vi.fn()
+    const el = mount(createElement(EpicDetail, { promptSession: session, onQuote }))
+
+    const quoteBtn = el.querySelector('[data-testid="chat-turn-quote"]') as HTMLButtonElement
+    expect(quoteBtn).not.toBeNull()
+    act(() => quoteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(onQuote).toHaveBeenCalledWith('quote me please')
+  })
+
+  it('omits the Quote button entirely when onQuote is not passed', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [{ id: 't-1', role: 'user', text: 'no quote here', at: 1000 }],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    expect(el.querySelector('[data-testid="chat-turn-quote"]')).toBeNull()
+  })
+
   it('renders a needs-input turn with the red "NEEDS YOUR DECISION" styling', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

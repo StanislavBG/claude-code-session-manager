@@ -38,6 +38,13 @@ interface Props {
   epic: PromptSession
   snapshots: EpicSnapshots
   onSent?: () => void
+  /** Quoted snippet from a turn's "Quote" button (ChatTranscriptTurn.tsx),
+   *  owned by the shared parent (EpicsWorkspace) since it spans both the
+   *  Discussion timeline (EpicDetail) and this composer, rendered as
+   *  siblings. Purely a visual reply-context affordance — never prepended
+   *  into the sent prompt text. */
+  quote?: string
+  onClearQuote?: () => void
 }
 
 /**
@@ -46,7 +53,7 @@ interface Props {
  * Chat -> useChat().send, Dispatch -> dispatchPromptSessionToPrd. Design:
  * session-manager-operations/design-mocks/epics/DESIGN_SPEC.md §"Composer".
  */
-export function EpicComposer({ epic, snapshots, onSent }: Props) {
+export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: Props) {
   const status = epicDisplayStatus(epic.id, snapshots)
   const running = status === 'running' || status === 'queued'
 
@@ -122,6 +129,7 @@ export function EpicComposer({ epic, snapshots, onSent }: Props) {
       } else {
         await dispatchPromptSessionToPrd(epic.id, epic.cwd, prompt, dispatchTag(epic.tag))
       }
+      onClearQuote?.()
       onSent?.()
     } finally {
       setSending(false)
@@ -149,7 +157,7 @@ export function EpicComposer({ epic, snapshots, onSent }: Props) {
       onDrop={onDrop}
       className={`border-t px-[22px] pb-3 pt-2 ${dragOver ? 'border-accent bg-accent/5' : 'border-rule bg-bg'}`}
     >
-      <div className="mb-1.5 flex items-center gap-2" data-testid="epic-composer-context">
+      <div className="mb-2 flex items-center gap-2 border-b border-line pb-2" data-testid="epic-composer-context">
         <span className="font-mono text-[10.5px] text-fg-faint">iterating in</span>
         <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] font-semibold text-fg">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${epicStatusDotClass(status)}`} aria-hidden="true" />
@@ -185,6 +193,24 @@ export function EpicComposer({ epic, snapshots, onSent }: Props) {
       </div>
 
       <AttachTray att={att} testId="epic-composer-attach-tray" />
+
+      {quote && (
+        <div
+          className="mt-2 flex items-start gap-2 rounded-md border-l-2 border-accent bg-bg-hi py-1.5 pl-2.5 pr-2"
+          data-testid="epic-composer-quote-strip"
+        >
+          <p className="min-w-0 flex-1 line-clamp-2 text-[12.5px] leading-relaxed text-fg-dim">{quote}</p>
+          <button
+            type="button"
+            onClick={() => onClearQuote?.()}
+            data-testid="epic-composer-quote-clear"
+            aria-label="Clear quoted text"
+            className="shrink-0 text-fg-faint hover:text-fg"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="mt-2 flex items-end gap-2">
         <div

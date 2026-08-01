@@ -53,6 +53,10 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showNewEpic, setShowNewEpic] = useState(false)
   const prds = useScheduledPrds()
+  // Reply-context quote (Turn's hover "Quote" button -> EpicComposer's
+  // dismissible strip) — held here since EpicDetail (Turn) and EpicComposer
+  // are rendered as siblings, not parent/child.
+  const [quote, setQuote] = useState<string | undefined>(undefined)
 
   const knownCwds = useMemo(() => {
     const seen = new Set<string>()
@@ -230,6 +234,11 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   // hidden here too rather than EpicDetail reaching out to unmount it.
   const selectedMode = useEpicTerminal((s) => s.modes[selectedId ?? ''] ?? 'chat')
 
+  // A quoted turn belongs to the Epic it was quoted from — drop it on switch.
+  useEffect(() => {
+    setQuote(undefined)
+  }, [selectedId])
+
   const handleSelect = (id: string) => {
     setShowNewEpic(false)
     setSelectedId(id)
@@ -280,12 +289,17 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
         <NewEpicCard onCreated={handleCreated} onCancel={() => setShowNewEpic(false)} />
       ) : selectedEpic ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <EpicDetail promptSession={selectedEpic} />
+          <EpicDetail promptSession={selectedEpic} onQuote={setQuote} />
           {selectedEpic.status === 'proposed' ? (
             <EpicApprovalBar epic={selectedEpic} />
           ) : (
             selectedMode === 'chat' && canCompose(selectedEpic) && (
-              <EpicComposer epic={selectedEpic} snapshots={snapshots} />
+              <EpicComposer
+                epic={selectedEpic}
+                snapshots={snapshots}
+                quote={quote}
+                onClearQuote={() => setQuote(undefined)}
+              />
             )
           )}
         </div>

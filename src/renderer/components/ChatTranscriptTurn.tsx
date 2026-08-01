@@ -304,6 +304,7 @@ export function Turn({
   toolStripVariant = 'inline',
   needsDecisionStyle = false,
   precedingUserPrompt,
+  onQuote,
 }: {
   turn: ChatTurn
   cwd: string
@@ -345,6 +346,11 @@ export function Turn({
    *  notice is the first turn) — the Retry button is omitted in that case
    *  rather than guessing. */
   precedingUserPrompt?: string
+  /** Shows a hover "Quote" button on this turn that calls onQuote(turn.text)
+   *  when clicked — omitted (no button rendered) when not passed, so callers
+   *  with no reply-context affordance (Terminal transcript, raw session view)
+   *  are unaffected. Set only by EpicDetail's Discussion timeline. */
+  onQuote?: (text: string) => void
 }) {
   // Declared unconditionally (rules of hooks) even though only the assistant
   // 'text' branch below uses them — the early returns for other turn roles
@@ -377,11 +383,23 @@ export function Turn({
 
   if (turn.role === 'user') {
     return (
-      <div className="grid justify-items-end gap-1">
+      <div className="group grid justify-items-end gap-1">
         <span className="font-mono text-[10.5px] text-fg-faint">you · {formatAgo(turn.at, Date.now())}</span>
-        <div className="max-w-[80%] rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
+        <div className="max-w-[80%] break-words rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
           {turn.text}
         </div>
+        {onQuote && (
+          <button
+            type="button"
+            onClick={() => onQuote(turn.text)}
+            data-testid="chat-turn-quote"
+            title="Quote this message in your reply"
+            aria-label="Quote this message"
+            className="font-mono text-[10.5px] text-fg-faint opacity-0 hover:text-accent group-hover:opacity-100"
+          >
+            Quote
+          </button>
+        )}
       </div>
     )
   }
@@ -520,7 +538,7 @@ export function Turn({
   const isRunning = presentation === 'working'
   const bubbleCorners = 'rounded-tl-sm rounded-tr-lg rounded-br-lg rounded-bl-lg'
   return (
-    <div className="flex max-w-[90%] items-start gap-2">
+    <div className="group flex max-w-[90%] items-start gap-2">
       <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
         C
       </div>
@@ -534,6 +552,18 @@ export function Turn({
             </span>
           )}
           {turn.outcome && <span className="font-mono text-[10.5px] font-semibold text-sage">{turn.outcome}</span>}
+          {onQuote && presentation === 'text' && (
+            <button
+              type="button"
+              onClick={() => onQuote(turn.text)}
+              data-testid="chat-turn-quote"
+              title="Quote this message in your reply"
+              aria-label="Quote this message"
+              className="opacity-0 hover:text-accent group-hover:opacity-100"
+            >
+              Quote
+            </button>
+          )}
         </div>
         {toolStripVariant === 'collapsible' ? (
           <CollapsibleToolStrip items={turn.toolUses} running={presentation === 'working'} />

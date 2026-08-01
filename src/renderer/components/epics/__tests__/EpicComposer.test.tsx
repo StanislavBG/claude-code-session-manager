@@ -243,6 +243,40 @@ describe('EpicComposer', () => {
     expect(micBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
+  it('shows the quote strip when quote is set, clears it via the X button, and never prepends it into the sent prompt', async () => {
+    const send = vi.fn()
+    useChat.setState({ send } as any)
+    const onClearQuote = vi.fn()
+    const e = epic()
+    const el = mount(createElement(EpicComposer, { epic: e, snapshots: snapshots(), quote: 'earlier claude reply', onClearQuote }))
+    expect(el.querySelector('[data-testid="epic-composer-quote-strip"]')?.textContent).toContain('earlier claude reply')
+
+    const clearBtn = el.querySelector('[data-testid="epic-composer-quote-clear"]') as HTMLButtonElement
+    act(() => clearBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(onClearQuote).toHaveBeenCalledTimes(1)
+
+    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
+    act(() => setNativeValue(textarea, 'my follow-up'))
+    const sendBtn = el.querySelector('[data-testid="epic-composer-send"]') as HTMLButtonElement
+    sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushAsync(2)
+    expect(send).toHaveBeenCalledWith({ tabId: 'epic-1', sessionId: 'sess-1', cwd: e.cwd, prompt: 'my follow-up' })
+  })
+
+  it('clears the quote after a successful send', async () => {
+    const send = vi.fn()
+    useChat.setState({ send } as any)
+    const onClearQuote = vi.fn()
+    const e = epic()
+    const el = mount(createElement(EpicComposer, { epic: e, snapshots: snapshots(), quote: 'earlier claude reply', onClearQuote }))
+    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
+    act(() => setNativeValue(textarea, 'my follow-up'))
+    const sendBtn = el.querySelector('[data-testid="epic-composer-send"]') as HTMLButtonElement
+    sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushAsync(2)
+    expect(onClearQuote).toHaveBeenCalledTimes(1)
+  })
+
   it('does not treat a dictated voice command specially — delivered as literal appended text', async () => {
     const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
     const micBtn = el.querySelector('[data-testid="epic-composer-mic"]') as HTMLButtonElement

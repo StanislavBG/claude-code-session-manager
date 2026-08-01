@@ -161,6 +161,23 @@ describe('remote is home-only', () => {
   })
 })
 
+describe('sm-config is home-only', () => {
+  it('NAV_ITEMS tags sm-config with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'sm-config')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes sm-config', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('sm-config')
+  })
+
+  it('home face includes sm-config', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('sm-config')
+  })
+})
+
 describe('NAV_ITEMS face-coverage invariant', () => {
   it('every NAV_ITEMS entry has a non-empty faces array', () => {
     for (const item of NAV_ITEMS) {

@@ -76,6 +76,23 @@ describe('browser is home-only', () => {
   })
 })
 
+describe('plugins is home-only', () => {
+  it('NAV_ITEMS tags plugins with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'plugins')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes plugins', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('plugins')
+  })
+
+  it('home face includes plugins', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('plugins')
+  })
+})
+
 describe('projects is project-only', () => {
   it('NAV_ITEMS tags projects with faces: [project]', () => {
     const item = NAV_ITEMS.find((i) => i.key === 'projects')

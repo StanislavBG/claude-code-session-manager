@@ -12,8 +12,12 @@ const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: st
   running:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'running' },
   needs:     { bg: 'bg-delta-bad/15',   text: 'text-delta-bad',   dot: 'bg-delta-bad',   label: 'needs you' },
   // Mock (epics-mock.jsx E_STATUS): queued is a FILLED tan pill (#ece0c6) —
-  // only draft is the outline variant.
-  queued:    { bg: 'bg-muteband/60',    text: 'text-fg-dim',      dot: 'bg-fg-faint',    label: 'queued' },
+  // only draft is the outline variant. Dot is solid muteband (tan), distinct
+  // from draft's fg-faint grey — in compact rows (dot only, no label text)
+  // those two states would otherwise render as the identical dot color,
+  // making a run genuinely queued behind the session-slot pool look
+  // indistinguishable from an Epic that never started anything.
+  queued:    { bg: 'bg-muteband/60',    text: 'text-fg-dim',      dot: 'bg-muteband',    label: 'queued' },
   draft:     { bg: 'transparent',       text: 'text-fg-faint',    dot: 'bg-fg-faint',    label: 'draft', ring: true },
   // Filed by automation, waiting on a human to approve before it spends
   // anything — the state that replaced the feedback-folder inbox.
@@ -29,12 +33,24 @@ export function epicStatusLabel(status: EpicDisplayStatus): string {
   return STATUS_TONE[status].label
 }
 
-export function EpicStatusChip({ status, small }: { status: EpicDisplayStatus; small?: boolean }) {
+export function EpicStatusChip({
+  status,
+  small,
+  detail,
+}: {
+  status: EpicDisplayStatus
+  small?: boolean
+  /** Optional longer explanation (e.g. "waiting on a session slot") — shown as
+   *  a hover tooltip and appended to the aria-label so a queued-but-not-yet-
+   *  running Epic reads as more than just "queued". */
+  detail?: string
+}) {
   const tone = STATUS_TONE[status]
   return (
     <span
       role="status"
-      aria-label={`Status: ${tone.label}`}
+      title={detail}
+      aria-label={detail ? `Status: ${tone.label} — ${detail}` : `Status: ${tone.label}`}
       className={`inline-flex items-center gap-1.5 shrink-0 rounded-full font-semibold tracking-wide whitespace-nowrap ${
         small ? 'px-2 py-0.5 text-[10.5px]' : 'px-2.5 py-1 text-xs'
       } ${tone.bg} ${tone.text}${tone.ring ? ' ring-1 ring-inset ring-line' : ''}`}

@@ -12,7 +12,14 @@
  */
 import { useMemo, useState, type ReactNode } from 'react'
 import type { PromptSession, PromptSessionEvent } from '../../state/promptSessions'
-import { epicDisplayStatus, epicPrds, epicStats, type EpicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
+import {
+  epicDisplayStatus,
+  epicPrds,
+  epicQueuedDetail,
+  epicStats,
+  type EpicDisplayStatus,
+  type EpicSnapshots,
+} from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
@@ -64,6 +71,7 @@ interface QueueRowProps {
 
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
   const age = activityAgeLabel(epic.id, epic, events, now)
+  const queuedDetail = status === 'queued' ? epicQueuedDetail(epic.id, snapshots) : undefined
 
   if (compact) {
     return (
@@ -73,6 +81,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           onClick={() => onSelect(epic.id)}
           data-testid="epic-queue-row"
           data-epic-id={epic.id}
+          title={queuedDetail}
           className={`w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2 rounded-md py-1.5 px-2 text-left border-l-2 ${
             selected ? 'bg-bg-hi border-l-accent' : 'border-l-transparent hover:bg-bg-hi/60'
           } ${onPin ? 'pr-6' : ''}`}
@@ -121,7 +130,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           <span className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${epicStatusDotClass(status)}`} aria-hidden="true" />
         )}
         <span className="flex items-center gap-1.5">
-          <EpicStatusChip status={status} small />
+          <EpicStatusChip status={status} small detail={queuedDetail} />
           <EpicKindTag kind={epic.tag} small />
           <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-4">{age}</span>
         </span>

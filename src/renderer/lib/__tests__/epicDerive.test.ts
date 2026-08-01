@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots } from '../epicDerive'
+import { epicDisplayStatus, epicPrds, epicQueuedDetail, epicStats, type EpicSnapshots } from '../epicDerive'
 import type { PromptSession } from '../../state/promptSessions'
 import type { TabChat } from '../../state/chat'
 import type { ScheduleJob, PrdListItem } from '../../../preload/api'
@@ -115,6 +115,29 @@ describe('epicDerive.epicDisplayStatus', () => {
       jobs: [makeJob({ status: 'pending' })],
     })
     expect(epicDisplayStatus('epic-1', snapshots)).toBe('queued')
+  })
+})
+
+describe('epicDerive.epicQueuedDetail', () => {
+  it('names the session-slot pool when the chat run is queued behind it, with position', () => {
+    const snapshots = makeSnapshots({
+      chats: { 'epic-1': makeChat({ running: true, queuedPosition: 2 }) },
+    })
+    expect(epicQueuedDetail('epic-1', snapshots)).toBe('queued — waiting on a session slot (position 2)')
+  })
+
+  it('names the scheduler when a PRD job is pending with no chat queue position', () => {
+    const snapshots = makeSnapshots({
+      jobs: [makeJob({ status: 'pending' })],
+    })
+    expect(epicQueuedDetail('epic-1', snapshots)).toBe('queued — waiting for the scheduler')
+  })
+
+  it('returns undefined when nothing is queued', () => {
+    const snapshots = makeSnapshots({
+      chats: { 'epic-1': makeChat({ running: true, queuedPosition: 0 }) },
+    })
+    expect(epicQueuedDetail('epic-1', snapshots)).toBeUndefined()
   })
 
   it('returns draft when active with no runs/PRDs/needs-input', () => {

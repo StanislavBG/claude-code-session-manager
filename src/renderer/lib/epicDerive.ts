@@ -55,6 +55,27 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
   return 'draft'
 }
 
+/**
+ * Human-readable detail for a 'queued' Epic — distinguishes "the chat run is
+ * literally waiting on the machine-wide session-slot pool" (chatRunner.cjs's
+ * chat:run:queued position) from "a PRD is queued behind the scheduler" so a
+ * hover/hidden-when-idle tooltip can say something more specific than the
+ * bare 'queued' chip label. Returns undefined for any other status (or when
+ * no queue signal is currently present).
+ */
+export function epicQueuedDetail(epicId: string, snapshots: EpicSnapshots): string | undefined {
+  const chat = snapshots.chats[epicId]
+  const chatQueuedPosition = chat?.queuedPosition ?? 0
+  if (chat?.running === true && chatQueuedPosition > 0) {
+    return `queued — waiting on a session slot (position ${chatQueuedPosition})`
+  }
+  const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
+  if (epicJobs.some((j) => j.status === 'pending')) {
+    return 'queued — waiting for the scheduler'
+  }
+  return undefined
+}
+
 export interface EpicPrd {
   slug: string
   title: string

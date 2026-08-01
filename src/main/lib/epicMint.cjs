@@ -54,8 +54,31 @@ function slugify(text) {
     .slice(0, 48) || 'epic';
 }
 
+// Serializes read-modify-write cycles per active-index.json path, mirroring
+// promptSessionEvents.cjs's own pendingWritesByPath/withPathLock. The current
+// read/write pair below is synchronous (fs.readFileSync/writeFileSync), so
+// there is no await between them today and no real interleaving is possible
+// — but wrapping every read-modify-write in the same lock the sibling module
+// uses means the two files no longer diverge on this pattern, and the lock
+// is already in place if either function's I/O ever becomes async.
+const pendingWritesByPath = new Map();
+
+function withPathLock(lockPath, task) {
+  const prior = pendingWritesByPath.get(lockPath) || Promise.resolve();
+  const settle = () => task();
+  const run = prior.then(settle, settle);
+  pendingWritesByPath.set(
+    lockPath,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal? }) → { epicId, prdDir, created }
+ * ensureEpic(cwd, { goalText, tag?, reuseByGoal? }) → Promise<{ epicId, prdDir, created }>
  *
  * Mints a new Epic — or, with `reuseByGoal`, joins the existing ACTIVE Epic
  * whose goalText matches (used by the recurring feedback sweep so successive
@@ -66,79 +89,84 @@ function slugify(text) {
  */
 function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
-  const index = readActiveIndex(cwd);
+  return withPathLock(activeIndexPath(cwd), () => {
+    const index = readActiveIndex(cwd);
 
-  // A dispatch that already knows its Epic (sourcePromptId frontmatter from
-  // an Epic-conversation dispatch) joins it rather than minting a sibling.
-  if (explicitEpicId && index.sessions[explicitEpicId]) {
-    const prdDir = resolveEpicPrdWriteDir(cwd, explicitEpicId);
-    fs.mkdirSync(prdDir, { recursive: true });
-    return { epicId: explicitEpicId, prdDir, created: false };
-  }
+    // A dispatch that already knows its Epic (sourcePromptId frontmatter from
+    // an Epic-conversation dispatch) joins it rather than minting a sibling.
+    if (explicitEpicId && index.sessions[explicitEpicId]) {
+      const prdDir = resolveEpicPrdWriteDir(cwd, explicitEpicId);
+      fs.mkdirSync(prdDir, { recursive: true });
+      return { epicId: explicitEpicId, prdDir, created: false };
+    }
 
-  if (reuseByGoal) {
-    for (const s of Object.values(index.sessions)) {
-      if (s && s.status === 'active' && s.goalText === goalText) {
-        const prdDir = resolveEpicPrdWriteDir(cwd, s.id);
-        fs.mkdirSync(prdDir, { recursive: true });
-        return { epicId: s.id, prdDir, created: false };
+    if (reuseByGoal) {
+      for (const s of Object.values(index.sessions)) {
+        if (s && s.status === 'active' && s.goalText === goalText) {
+          const prdDir = resolveEpicPrdWriteDir(cwd, s.id);
+          fs.mkdirSync(prdDir, { recursive: true });
+          return { epicId: s.id, prdDir, created: false };
+        }
       }
     }
-  }
 
-  const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
-  const now = new Date().toISOString();
-  const session = {
-    id: epicId,
-    cwd,
-    goalText: String(goalText || ''),
-    // Independently minted, never shared with a SessionTab — same invariant
-    // as renderer-created PromptSessions (state/promptSessions.ts).
-    claudeSessionId: crypto.randomUUID(),
-    status: 'active',
-    createdAt: now,
-    completedAt: null,
-    ...(tag ? { tag } : {}),
-  };
-  const firstEvent = {
-    id: crypto.randomUUID(),
-    promptSessionId: epicId,
-    kind: 'prompt',
-    causedByEventId: null,
-    at: now,
-    text: String(goalText || ''),
-  };
-  index.sessions[epicId] = session;
-  index.events[epicId] = [firstEvent];
-  writeActiveIndex(cwd, index);
+    const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date().toISOString();
+    const session = {
+      id: epicId,
+      cwd,
+      goalText: String(goalText || ''),
+      // Independently minted, never shared with a SessionTab — same invariant
+      // as renderer-created PromptSessions (state/promptSessions.ts).
+      claudeSessionId: crypto.randomUUID(),
+      status: 'active',
+      createdAt: now,
+      completedAt: null,
+      ...(tag ? { tag } : {}),
+    };
+    const firstEvent = {
+      id: crypto.randomUUID(),
+      promptSessionId: epicId,
+      kind: 'prompt',
+      causedByEventId: null,
+      at: now,
+      text: String(goalText || ''),
+    };
+    index.sessions[epicId] = session;
+    index.events[epicId] = [firstEvent];
+    writeActiveIndex(cwd, index);
 
-  const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
-  fs.mkdirSync(prdDir, { recursive: true });
-  return { epicId, prdDir, created: true };
+    const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
+    fs.mkdirSync(prdDir, { recursive: true });
+    return { epicId, prdDir, created: true };
+  });
 }
 
 /**
  * appendPrdCreatedEvent(cwd, epicId, prdSlug) — record a PRD dispatch on the
  * Epic's event chain, FK-linked to the current tail (chain, not tree — the
- * referential-integrity requirement from promptSessions.ts).
+ * referential-integrity requirement from promptSessions.ts). Returns a
+ * Promise<boolean>.
  */
 function appendPrdCreatedEvent(cwd, epicId, prdSlug, text) {
-  const index = readActiveIndex(cwd);
-  if (!index.sessions[epicId]) return false;
-  const chain = Array.isArray(index.events[epicId]) ? index.events[epicId] : [];
-  const tail = chain.length ? chain[chain.length - 1] : null;
-  chain.push({
-    id: crypto.randomUUID(),
-    promptSessionId: epicId,
-    kind: 'prd_created',
-    causedByEventId: tail ? tail.id : null,
-    at: new Date().toISOString(),
-    prdSlug,
-    ...(text ? { text } : {}),
+  return withPathLock(activeIndexPath(cwd), () => {
+    const index = readActiveIndex(cwd);
+    if (!index.sessions[epicId]) return false;
+    const chain = Array.isArray(index.events[epicId]) ? index.events[epicId] : [];
+    const tail = chain.length ? chain[chain.length - 1] : null;
+    chain.push({
+      id: crypto.randomUUID(),
+      promptSessionId: epicId,
+      kind: 'prd_created',
+      causedByEventId: tail ? tail.id : null,
+      at: new Date().toISOString(),
+      prdSlug,
+      ...(text ? { text } : {}),
+    });
+    index.events[epicId] = chain;
+    writeActiveIndex(cwd, index);
+    return true;
   });
-  index.events[epicId] = chain;
-  writeActiveIndex(cwd, index);
-  return true;
 }
 
 /**

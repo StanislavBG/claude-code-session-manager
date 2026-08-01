@@ -294,7 +294,7 @@ function hasOpenFeedback(cwd) {
  *
  * Complexity: O(P) over PRD files in prdsDir + O(J) over queue jobs.
  */
-function emitFeedbackPRD(cwd, {
+async function emitFeedbackPRD(cwd, {
   prdsDir,
   queuePath,
   skillPath,
@@ -313,7 +313,7 @@ function emitFeedbackPRD(cwd, {
     // Every PRD belongs to an Epic (CLAUDE.md domain model). The sweep joins
     // one standing "Inbound feedback" Epic per project (reuseByGoal) so
     // recurring ticks chain into a single Epic rather than minting one each.
-    const epic = ensureEpic(cwd, {
+    const epic = await ensureEpic(cwd, {
       goalText: 'Inbound feedback processing',
       tag: 'discussion',
       reuseByGoal: true,
@@ -474,7 +474,7 @@ function emitFeedbackPRD(cwd, {
     if (epicId !== null) {
       // Trace the dispatch on the Epic's event chain (prompt → prd_created →
       // ...) so the Epic conversation shows the PRD it spawned.
-      try { appendPrdCreatedEvent(cwd, epicId, slug, `Feedback sweep emitted ${slug}`); } catch { /* trace is best-effort */ }
+      try { await appendPrdCreatedEvent(cwd, epicId, slug, `Feedback sweep emitted ${slug}`); } catch { /* trace is best-effort */ }
     }
   } catch (e) {
     try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
@@ -655,7 +655,7 @@ function maybeRelaunchApp({
  *   projectsDir  — forwarded to activeProjectCwds for testing
  *   prdsDir, queuePath, skillPath, standardsPath — forwarded to emitFeedbackPRD
  */
-function sweep({
+async function sweep({
   projectsDir,
   prdsDir,
   queuePath,
@@ -679,7 +679,7 @@ function sweep({
     // dir); an explicit override (tests) is forwarded verbatim to every cwd.
     let result;
     try {
-      result = emitFeedbackPRD(cwd, { prdsDir, queuePath, skillPath, standardsPath });
+      result = await emitFeedbackPRD(cwd, { prdsDir, queuePath, skillPath, standardsPath });
     } catch (e) {
       process.stderr.write(`[sweep] error emitting PRD for ${cwd}: ${e?.message}\n`);
       continue;

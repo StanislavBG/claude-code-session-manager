@@ -4026,11 +4026,12 @@ async function init() {
     feedbackSweepTickCount++;
     if (feedbackSweepDue(feedbackSweepTickCount, FEEDBACK_SWEEP_TICK_INTERVAL)) {
       feedbackSweepTickCount = 0;
-      try {
-        sweepFeedback();
-      } catch (e) {
+      // sweepFeedback() is async (epicMint.cjs's ensureEpic/appendPrdCreatedEvent
+      // now serialize through withPathLock); the setInterval callback itself
+      // stays sync, so this is fire-and-forget with its own rejection handler.
+      sweepFeedback().catch((e) => {
         console.warn('[scheduler] feedback sweep failed', e?.message);
-      }
+      });
     }
   }, 60_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
@@ -4141,7 +4142,7 @@ const remote = {
       if (!dir) {
         try {
           const { fm } = splitFrontmatter(body);
-          const epic = ensureEpic(cwd, {
+          const epic = await ensureEpic(cwd, {
             goalText: fm.title || slug,
             tag: fm.tag,
             // An Epic-conversation dispatch already has its Epic — join it.
@@ -4217,7 +4218,7 @@ const remote = {
       const stat = await fsp.stat(resolved);
       if (epicTrace) {
         // Best-effort: record the dispatch on the minted Epic's event chain.
-        try { appendPrdCreatedEvent(cwd, epicTrace, slug); } catch { /* trace only */ }
+        try { await appendPrdCreatedEvent(cwd, epicTrace, slug); } catch { /* trace only */ }
       }
       return { ok: true, bytesWritten: stat.size };
     } catch (e) {

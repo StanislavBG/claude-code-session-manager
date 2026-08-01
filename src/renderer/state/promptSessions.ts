@@ -79,6 +79,32 @@ export interface PromptSessionEvent {
   text?: string
 }
 
+/**
+ * Orders two events primarily by wall-clock `at`, falling back to the
+ * causal `causedByEventId` chain when timestamps tie or fail to parse (equal
+ * millisecond between an optimistic renderer append and a broadcasted
+ * main-process append, or clock skew across machines). This is a tie-break
+ * heuristic, not a full topological sort of the chain — out of scope per the
+ * chain's own single-tail-FK model (see PromptSessionEvent's doc comment):
+ * every event but the first has exactly one `causedByEventId`, so a direct
+ * caused-by check is enough to fix the only two events that can actually
+ * collide (a cause and its immediate effect); non-adjacent ties keep
+ * wall-clock order.
+ */
+function compareEventsChainAware(a: PromptSessionEvent, b: PromptSessionEvent): number {
+  const ta = Date.parse(a.at)
+  const tb = Date.parse(b.at)
+  const aValid = !Number.isNaN(ta)
+  const bValid = !Number.isNaN(tb)
+  if (aValid && bValid && ta !== tb) return ta - tb
+  if (b.causedByEventId === a.id) return -1
+  if (a.causedByEventId === b.id) return 1
+  if (aValid && bValid) return 0
+  if (aValid) return -1
+  if (bValid) return 1
+  return 0
+}
+
 interface PromptSessionsState {
   sessions: Record<string, PromptSession>
   events: Record<string, PromptSessionEvent[]>
@@ -365,7 +391,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
         const existingIds = new Set(existingEvts.map((e) => e.id))
         const missing = diskEvts.filter((e) => !existingIds.has(e.id))
         if (missing.length > 0) {
-          events[id] = [...existingEvts, ...missing].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+          events[id] = [...existingEvts, ...missing].sort(compareEventsChainAware)
           changed = true
         }
       }
@@ -413,7 +439,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (existing.some((e) => e.id === event.id)) return
     const events = {
       ...get().events,
-      [promptSessionId]: [...existing, event].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
+      [promptSessionId]: [...existing, event].sort(compareEventsChainAware),
     }
     set({ events })
   },

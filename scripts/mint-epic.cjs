@@ -21,6 +21,8 @@ if (!cwd || !goalText) {
   process.exit(1);
 }
 
-const { epicId, prdDir, created } = ensureEpic(cwd, { goalText, tag, reuseByGoal: true });
-process.stderr.write(`${created ? 'minted' : 'joined'} epic ${epicId}\n`);
-process.stdout.write(`${prdDir}\n`);
+(async () => {
+  const { epicId, prdDir, created } = await ensureEpic(cwd, { goalText, tag, reuseByGoal: true });
+  process.stderr.write(`${created ? 'minted' : 'joined'} epic ${epicId}\n`);
+  process.stdout.write(`${prdDir}\n`);
+})();

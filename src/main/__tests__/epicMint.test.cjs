@@ -34,7 +34,7 @@ test('ensureEpic mints a new Epic when explicit epicId matches no existing Epic 
   const cwd = await mkCwd();
   const notAPromptSessionId = 'ticket-abc123';
 
-  const result = ensureEpic(cwd, { goalText: 'do the thing', epicId: notAPromptSessionId });
+  const result = await ensureEpic(cwd, { goalText: 'do the thing', epicId: notAPromptSessionId });
 
   expect(result.created).toBe(true);
   expect(result.epicId).not.toBe(notAPromptSessionId);
@@ -48,10 +48,10 @@ test('ensureEpic mints a new Epic when explicit epicId matches no existing Epic 
 test('ensureEpic joins the existing Epic when explicit epicId equals its promptSessionId', async () => {
   const cwd = await mkCwd();
 
-  const first = ensureEpic(cwd, { goalText: 'initial epic goal' });
+  const first = await ensureEpic(cwd, { goalText: 'initial epic goal' });
   expect(first.created).toBe(true);
 
-  const second = ensureEpic(cwd, { goalText: 'a different PRD title', epicId: first.epicId });
+  const second = await ensureEpic(cwd, { goalText: 'a different PRD title', epicId: first.epicId });
 
   expect(second.created).toBe(false);
   expect(second.epicId).toBe(first.epicId);
@@ -63,7 +63,7 @@ test('ensureEpic joins the existing Epic when explicit epicId equals its promptS
 
 test('removeEpic deletes a minted Epic from both sessions and events maps', async () => {
   const cwd = await mkCwd();
-  const minted = ensureEpic(cwd, { goalText: 'to be rolled back' });
+  const minted = await ensureEpic(cwd, { goalText: 'to be rolled back' });
   expect(readActiveIndex(cwd).sessions[minted.epicId]).toBeDefined();
 
   const removed = removeEpic(cwd, minted.epicId);
@@ -76,7 +76,7 @@ test('removeEpic deletes a minted Epic from both sessions and events maps', asyn
 
 test('removeEpic is a no-op (returns false) for an unknown epicId', async () => {
   const cwd = await mkCwd();
-  ensureEpic(cwd, { goalText: 'unrelated epic' });
+  await ensureEpic(cwd, { goalText: 'unrelated epic' });
 
   const removed = removeEpic(cwd, 'nonexistent-epic-id');
 

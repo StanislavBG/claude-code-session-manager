@@ -563,14 +563,14 @@ export function EpicDetail({ promptSession }: Props) {
             {running &&
               (chat && chat.queuedPosition > 0 ? (
                 <div
-                  key="epic-live-queued"
+                  key={`epic-live-queued-${epicId}`}
                   data-testid="epic-queued-position"
                   className="text-center text-[11px] text-fg-faint"
                 >
                   queued · position {chat.queuedPosition}
                 </div>
               ) : (
-                <div key="epic-live-turn" data-testid="epic-live-turn">
+                <div key={`epic-live-turn-${epicId}`} data-testid="epic-live-turn">
                   <Turn
                     turn={{
                       id: `${epicId}-live`,

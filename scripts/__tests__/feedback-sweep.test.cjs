@@ -60,7 +60,7 @@ function makeSkillFiles(base) {
 
 // ── (a) open session-manager-operations/feedback/2026-01-01-foo.md → hasOpenFeedback true + PRD written ─
 
-test('(a) open feedback file → hasOpenFeedback true and PRD emitted with correct content', () => {
+test('(a) open feedback file → hasOpenFeedback true and PRD emitted with correct content', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -75,7 +75,7 @@ test('(a) open feedback file → hasOpenFeedback true and PRD emitted with corre
     const queuePath = makeQueue(base);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, true, 'PRD should be emitted');
 
     const prdFiles = fs.readdirSync(prdsDir);
@@ -106,7 +106,7 @@ test('(a) open feedback file → hasOpenFeedback true and PRD emitted with corre
 
 // ── (b) only feedback/processed/old.md → hasOpenFeedback false ───────────────
 
-test('(b) only processed/ subdir → hasOpenFeedback false', () => {
+test('(b) only processed/ subdir → hasOpenFeedback false', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -123,7 +123,7 @@ test('(b) only processed/ subdir → hasOpenFeedback false', () => {
 
 // ── (b2) no feedback dir at all → hasOpenFeedback false ──────────────────────
 
-test('(b2) no feedback dir → hasOpenFeedback false', () => {
+test('(b2) no feedback dir → hasOpenFeedback false', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'emptyproject');
@@ -137,7 +137,7 @@ test('(b2) no feedback dir → hasOpenFeedback false', () => {
 
 // ── (b3) legacy <cwd>/feedback/ with open file → hasOpenFeedback true (fallback) ─
 
-test('(b3) legacy feedback/ with open .md and no session-manager-operations/ → hasOpenFeedback true', () => {
+test('(b3) legacy feedback/ with open .md and no session-manager-operations/ → hasOpenFeedback true', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -154,7 +154,7 @@ test('(b3) legacy feedback/ with open .md and no session-manager-operations/ →
 
 // ── (c) pending feedback job in queue → no duplicate PRD emitted ─────────────
 
-test('(c) pending feedback job already queued → no duplicate PRD', () => {
+test('(c) pending feedback job already queued → no duplicate PRD', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -171,7 +171,7 @@ test('(c) pending feedback job already queued → no duplicate PRD', () => {
     fs.mkdirSync(prdsDir);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, false, 'should not emit duplicate PRD');
     assert.equal(result.reason, 'duplicate', 'reason should be duplicate');
 
@@ -184,7 +184,7 @@ test('(c) pending feedback job already queued → no duplicate PRD', () => {
 
 // ── (c2) running feedback job in queue → no duplicate PRD ────────────────────
 
-test('(c2) running feedback job in queue → no duplicate PRD', () => {
+test('(c2) running feedback job in queue → no duplicate PRD', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -200,7 +200,7 @@ test('(c2) running feedback job in queue → no duplicate PRD', () => {
     fs.mkdirSync(prdsDir);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, false, 'should not emit duplicate PRD for running job');
     assert.equal(result.reason, 'duplicate');
   } finally {
@@ -210,7 +210,7 @@ test('(c2) running feedback job in queue → no duplicate PRD', () => {
 
 // ── NN selection: next after highest existing ─────────────────────────────────
 
-test('NN selection picks next after highest existing in prdsDir', () => {
+test('NN selection picks next after highest existing in prdsDir', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'aproject');
@@ -227,7 +227,7 @@ test('NN selection picks next after highest existing in prdsDir', () => {
     const queuePath = makeQueue(base);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, true);
     // NN should be 08 (max is 07)
     assert.ok(result.slug.startsWith('08-'), `slug should start with 08-, got: ${result.slug}`);
@@ -238,7 +238,7 @@ test('NN selection picks next after highest existing in prdsDir', () => {
 
 // ── resolver: repo-local plugin fixtures → PRD emitted with both bodies ──────
 
-test('resolver: repo-local plugins/session-manager-dev fixtures → PRD populated from both', () => {
+test('resolver: repo-local plugins/session-manager-dev fixtures → PRD populated from both', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -258,7 +258,7 @@ test('resolver: repo-local plugins/session-manager-dev fixtures → PRD populate
     const queuePath = makeQueue(base);
     const pluginCacheRoot = path.join(base, 'no-cache-here'); // absent — forces repo-local + legacy only
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
     assert.equal(result.emitted, true, 'PRD should be emitted from repo-local plugin fixtures');
 
     const prdContent = fs.readFileSync(result.prdPath, 'utf8');
@@ -271,7 +271,7 @@ test('resolver: repo-local plugins/session-manager-dev fixtures → PRD populate
 
 // ── resolver: neither inline resolves → refusal, no file written ────────────
 
-test('resolver: no candidate resolves → emitted false, reason missing-inline, no file written', () => {
+test('resolver: no candidate resolves → emitted false, reason missing-inline, no file written', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -284,7 +284,7 @@ test('resolver: no candidate resolves → emitted false, reason missing-inline, 
     const queuePath = makeQueue(base);
     const pluginCacheRoot = path.join(base, 'no-cache-here');
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
     assert.equal(result.emitted, false, 'should refuse to emit when no inline resolves');
     assert.equal(result.reason, 'missing-inline');
 
@@ -297,7 +297,7 @@ test('resolver: no candidate resolves → emitted false, reason missing-inline, 
 
 // ── resolver: skill resolves, standards does not → refusal ──────────────────
 
-test('resolver: standards missing only → refusal with no file written', () => {
+test('resolver: standards missing only → refusal with no file written', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -315,7 +315,7 @@ test('resolver: standards missing only → refusal with no file written', () => 
     const queuePath = makeQueue(base);
     const pluginCacheRoot = path.join(base, 'no-cache-here');
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir, queuePath, pluginCacheRoot });
     assert.equal(result.emitted, false, 'should refuse to emit when standards inline is missing');
     assert.equal(result.reason, 'missing-inline');
 
@@ -328,7 +328,7 @@ test('resolver: standards missing only → refusal with no file written', () => 
 
 // ── resolver: plugin-cache candidate picks the newest version dir ───────────
 
-test('resolver: plugin-cache candidate picks highest version when two exist', () => {
+test('resolver: plugin-cache candidate picks highest version when two exist', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -351,7 +351,7 @@ test('resolver: plugin-cache candidate picks highest version when two exist', ()
 
 // ── resolver: version compare is numeric, not lexicographic ──────────────────
 
-test('resolver: plugin-cache version pick is numeric — 0.10.0 beats 0.2.0', () => {
+test('resolver: plugin-cache version pick is numeric — 0.10.0 beats 0.2.0', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -375,7 +375,7 @@ test('resolver: plugin-cache version pick is numeric — 0.10.0 beats 0.2.0', ()
 
 // ── sweep() returns { scanned, emitted, skipped } ────────────────────────────
 
-test('sweep() returns correct summary counts', () => {
+test('sweep() returns correct summary counts', async () => {
   const base = makeTmpDir();
   try {
     // Project 1: has open feedback → should emit
@@ -404,7 +404,7 @@ test('sweep() returns correct summary counts', () => {
     const queuePath = makeQueue(base);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = sweep({
+    const result = await sweep({
       projectsDir,
       prdsDir,
       queuePath,
@@ -426,7 +426,7 @@ test('sweep() returns correct summary counts', () => {
 // Epic under session-manager-operations/scheduler/epics/<id>/prds/ and
 // registers that Epic in prompt-sessions/active-index.json.
 
-test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic prds dir', () => {
+test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic prds dir', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -437,7 +437,7 @@ test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic p
     const queuePath = makeQueue(base);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = emitFeedbackPRD(projectDir, { queuePath, skillPath, standardsPath });
+    const result = await emitFeedbackPRD(projectDir, { queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, true, 'PRD should be emitted');
 
     const epicsRoot = path.join(projectDir, 'session-manager-operations', 'scheduler', 'epics');
@@ -467,7 +467,7 @@ test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic p
 
 // ── explicit prdsDir override still honored verbatim (regression guard) ─────
 
-test('emitFeedbackPRD with an explicit prdsDir still writes there, not the project dir', () => {
+test('emitFeedbackPRD with an explicit prdsDir still writes there, not the project dir', async () => {
   const base = makeTmpDir();
   try {
     const projectDir = path.join(base, 'myproject');
@@ -480,7 +480,7 @@ test('emitFeedbackPRD with an explicit prdsDir still writes there, not the proje
     const queuePath = makeQueue(base);
     const { skillPath, standardsPath } = makeSkillFiles(base);
 
-    const result = emitFeedbackPRD(projectDir, { prdsDir: explicitDir, queuePath, skillPath, standardsPath });
+    const result = await emitFeedbackPRD(projectDir, { prdsDir: explicitDir, queuePath, skillPath, standardsPath });
     assert.equal(result.emitted, true, 'PRD should be emitted');
     assert.equal(path.dirname(result.prdPath), explicitDir, 'explicit prdsDir override must be honored verbatim');
 

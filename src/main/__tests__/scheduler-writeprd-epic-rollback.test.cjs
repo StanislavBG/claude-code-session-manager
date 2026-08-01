@@ -59,7 +59,7 @@ test('writePrd: invalid-slug failure after a fresh Epic mint leaves zero residua
 test('writePrd: invalid-slug failure when joining a pre-existing Epic leaves that Epic untouched', async () => {
   const cwd = makeFixtureCwd();
 
-  const preexisting = ensureEpic(cwd, { goalText: 'pre-existing epic goal' });
+  const preexisting = await ensureEpic(cwd, { goalText: 'pre-existing epic goal' });
   expect(preexisting.created).toBe(true);
 
   const beforeIndex = readActiveIndex(cwd);

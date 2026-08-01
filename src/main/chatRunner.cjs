@@ -18,13 +18,11 @@
  * Public surface:
  *   run({ tabId, sessionId, prompt, cwd, resume, silent }): void  — fire-and-forget enqueue.
  *     Both silent (PRD 470) and manual runs go through the same CONCURRENCY_CAP FIFO lane.
- *     Silent runs additionally suppress the six turn-affecting broadcasts + recordExchange
- *     (see probeContextUsage below).
+ *     Silent runs additionally suppress the six turn-affecting broadcasts + recordExchange.
  *   cancel(tabId): Promise<void>  — resolves once the cancelled run fully settles
  *   parseStopSignal(finalText): { questions: string[] } | null     — exported for reuse
  *   parseContextUsageMarkdown(text): { usedTokens, totalTokens, usedPct, categories } | null
  *                                                                    — pure parser for `/context`
- *   probeContextUsage({ tabId, sessionId, cwd }): void  — fire-and-forget silent `/context` probe
  *   STOP_SENTINEL: string                                           — exported for tests
  *   __setExecutor(fn): void                                         — test seam
  *
@@ -42,8 +40,6 @@
  *                           landed before verifying/retrying
  *   chat:run:notice     { tabId, sessionId, message }        — informational, not terminal
  *                         (also fires at 80% of the kill ceiling as a wrap-up nudge)
- *   chat:context-usage  { tabId, sessionId, usedTokens, totalTokens, usedPct, categories }
- *                                                             — result of a silent `/context` probe
  */
 
 const { spawn } = require('node:child_process');
@@ -182,41 +178,6 @@ function parseContextUsageMarkdown(text) {
   }
 
   return { usedTokens, totalTokens, usedPct, categories };
-}
-
-/**
- * Fire-and-forget silent probe of the resumed session's context usage. Reuses
- * the normal `run()` queue/lane (resume: true, silent: true) so it can never
- * race a real chat run against the same `--resume sessionId`. Broadcasts
- * `chat:context-usage` on success; logs (never throws/broadcasts) on a parse
- * failure.
- *
- * @param {{ tabId: string, sessionId: string, cwd: string }} params
- */
-function probeContextUsage({ tabId, sessionId, cwd }) {
-  run({
-    tabId,
-    sessionId,
-    prompt: '/context',
-    cwd,
-    resume: true,
-    silent: true,
-    onSilentResult: (text) => {
-      const parsed = parseContextUsageMarkdown(text);
-      if (!parsed) {
-        console.error('[chatRunner] parseContextUsageMarkdown failed to parse /context probe output');
-        return;
-      }
-      broadcast('chat:context-usage', {
-        tabId,
-        sessionId,
-        usedTokens: parsed.usedTokens,
-        totalTokens: parsed.totalTokens,
-        usedPct: parsed.usedPct,
-        categories: parsed.categories,
-      });
-    },
-  });
 }
 
 // ─── MCP consent-denial detection ──────────────────────────────────────────
@@ -686,7 +647,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         if (event.subtype === 'success') {
           if (silent) {
             // Silent probe: no turn broadcast, no recordExchange — just hand
-            // the final text to whoever enqueued the probe (e.g. probeContextUsage).
+            // the final text to whoever enqueued the probe.
             emitTerminal('chat:run:complete', { tabId, sessionId, finalMessage: text });
             if (typeof onSilentResult === 'function') onSilentResult(text);
           } else {
@@ -888,10 +849,6 @@ function registerChatHandlers() {
     await cancel(tabId);
   });
 
-  ipcMain.handle('chat:probe-context', validated(schemas.chatProbeContext, async ({ tabId, sessionId, cwd }) => {
-    probeContextUsage({ tabId, sessionId, cwd });
-    return { ok: true };
-  }));
 }
 
 module.exports = {
@@ -903,7 +860,6 @@ module.exports = {
   parseStopSignal,
   splitStopSignal,
   parseContextUsageMarkdown,
-  probeContextUsage,
   STOP_SENTINEL,
   CHAT_MODE_TRUTH_INSTRUCTION,
   KILL_CEILING_MS,

@@ -76,8 +76,8 @@ interface Props {
 }
 
 /**
- * Epic-scoped composer — replaces the composer embedded in
- * PromptSessionConversation.tsx. Preserves its dispatch mechanism exactly:
+ * Epic-scoped composer — replaces the composer embedded in the retired
+ * PromptSessionConversation.tsx (PRDs 827/829). Preserves its dispatch mechanism exactly:
  * Chat -> useChat().send, Dispatch -> dispatchPromptSessionToPrd. Design:
  * session-manager-operations/design-mocks/epics/DESIGN_SPEC.md §"Composer".
  */

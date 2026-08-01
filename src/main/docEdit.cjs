@@ -169,13 +169,12 @@ const SESSION_EDIT_TIMEOUT_MS = 120_000;
 /**
  * Route a doc edit into an already-open, currently-idle chat session (PRD 680)
  * instead of an isolated one-shot `claude -p`. Reuses chatRunner.cjs's silent/
- * resumed run path verbatim (the same mechanism `probeContextUsage` uses) so
- * the edit lands as one more turn of the session's own transcript.
+ * resumed run path verbatim so the edit lands as one more turn of the
+ * session's own transcript.
  *
  * Fire-and-forget: the result reaches the renderer via a `docedit:session-result`
  * broadcast (tagged with `requestId`) once chatRunner's onSilentResult fires, or
- * once SESSION_EDIT_TIMEOUT_MS elapses without one (see above) — the same
- * indirection probeContextUsage uses for `chat:context-usage`, plus the bound.
+ * once SESSION_EDIT_TIMEOUT_MS elapses without one (see above).
  *
  * @param {{ tabId: string, sessionId: string, cwd: string, before: string, instruction: string, documentText?: string, requestId: string }} params
  */

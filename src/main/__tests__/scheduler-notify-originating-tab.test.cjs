@@ -150,6 +150,27 @@ test('falls back to the tab-external-ticket path when the PRD has no sourcePromp
   expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
 });
 
+// PRD 854: a PRD dispatched straight from an Epic's own composer
+// (dispatchPromptSessionToPrd) never sets sourceTabId — only sourcePromptId.
+// If the Epic has since gone completed (appendResponseEvent returns false),
+// the fallback must still target sourcePromptId itself as the chat:external-
+// send id, since the renderer now resolves that id against known Epics too.
+test('falls back to sourcePromptId as the external-send target when sourceTabId is absent', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => false);
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'epic-1', sourceTabId: null }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  await notifyOriginatingTab(
+    { slug: '854-notify', status: 'completed', cwd: '/some/cwd' },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalled();
+  expect(loadSessions).not.toHaveBeenCalled();
+  expect(sendPrompt).toHaveBeenCalledWith('epic-1', expect.stringContaining('854-notify'));
+});
+
 test('falls back to the tab-external-ticket path when appendResponseEvent itself throws', async () => {
   const sendPrompt = vi.fn();
   const appendResponseEvent = vi.fn(async () => { throw new Error('disk error'); });

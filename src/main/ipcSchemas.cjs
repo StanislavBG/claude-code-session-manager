@@ -516,12 +516,6 @@ const chatCancel = z.object({
   tabId: z.string().min(1).max(128),
 });
 
-const chatProbeContext = z.object({
-  tabId: z.string().min(1).max(128),
-  sessionId: z.string().min(1).max(128),
-  cwd: z.string().min(1).max(4096),
-});
-
 const chatClassifyTicket = z.object({
   text: z.string().min(1).refine(
     (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
@@ -830,7 +824,6 @@ module.exports = {
     docEditRunInSession,
     chatRun,
     chatCancel,
-    chatProbeContext,
     chatClassifyTicket,
     chatExternalSend,
     exchangesList,

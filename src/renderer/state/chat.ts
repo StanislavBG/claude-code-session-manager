@@ -542,7 +542,7 @@ function dispatchQueuedInline(tabId: string, ticket: PromptTicket): void {
  * Appends the 'prd_created' PromptSessionEvent for a just-authored PRD,
  * chained off the session's current tail event. Shared by dispatchToPrd
  * (legacy tab-ticket flow) and dispatchPromptSessionToPrd (direct Epic
- * conversation flow, PromptSessionConversation.tsx) so there is exactly one
+ * conversation flow, EpicDetail.tsx/EpicComposer.tsx) so there is exactly one
  * place that knows how to fold a new PRD into a PromptSession's audit chain.
  * Best-effort: logs and returns on failure, never throws into the caller.
  */
@@ -570,7 +570,7 @@ function appendPrdCreatedEvent(promptSessionId: string, slug: string): void {
 
 /**
  * Dispatches a prompt straight from an Epic's own conversation
- * (PromptSessionConversation.tsx) as a new PRD — the direct-Epic counterpart
+ * (EpicDetail.tsx/EpicComposer.tsx) as a new PRD — the direct-Epic counterpart
  * of dispatchToPrd, which only the legacy tab-ticket queue can reach. No
  * PromptTicket/tabId queue machinery involved: the PromptSession IS the unit
  * of work, so this only needs its id, cwd, the prompt text, and a tag.
@@ -809,16 +809,41 @@ if (typeof window !== 'undefined' && window.api?.chat) {
     applyNotice(tabId, sessionId, message)
   })
   // External caller (Web Remote / admin HTTP route / MCP tool, PRD 753)
-  // pushing a prompt into an open tab's queue from outside the renderer.
-  // Resolves the tab's live sessionId/cwd from useSessions and hands off to
-  // the SAME send() path a manual composer submit uses — no separate queuing
-  // logic. No-ops (with a log line) if the tab isn't open.
+  // pushing a prompt into an open tab's queue from outside the renderer. The
+  // target id may be either an open SessionTab id or an Epic (PromptSession)
+  // id — a scheduler-originated status prompt (scheduler.cjs's
+  // notifyOriginatingTab) can carry either, since a PRD dispatched straight
+  // from an Epic's own composer never had a SessionTab in the first place.
+  // Resolves the live sessionId/cwd from whichever store actually has it and
+  // hands off to the SAME send() path a manual composer submit uses — no
+  // separate queuing logic. A completed/archived Epic is refused outright
+  // (its claudeSessionId is dead, see CLAUDE.md); the mutual-exclusivity
+  // Terminal guard in send() (PRD 831) still applies since we pass the same
+  // tabId an Epic's Terminal attachment is keyed by. No-ops (with a log line
+  // naming both lookups) if neither an open tab nor a known Epic matches.
   window.api.chat.onExternalSend(({ tabId, prompt }) => {
     const tab = useSessions.getState().tabs.find((t) => t.id === tabId)
-    if (!tab) {
-      window.api?.logs?.write('chat', 'warn', `external send ignored: tab ${tabId} is not open`)
+    if (tab) {
+      useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt, external: true })
       return
     }
-    useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt, external: true })
+    const epic = usePromptSessions.getState().sessions[tabId]
+    if (epic) {
+      if (epic.status === 'completed') {
+        window.api?.logs?.write(
+          'chat',
+          'warn',
+          `external send ignored: Epic ${tabId} is completed/archived — its claudeSessionId is dead`,
+        )
+        return
+      }
+      useChat.getState().send({ tabId, sessionId: epic.claudeSessionId, cwd: epic.cwd, prompt, external: true })
+      return
+    }
+    window.api?.logs?.write(
+      'chat',
+      'warn',
+      `external send ignored: ${tabId} matches neither an open tab nor a known Epic`,
+    )
   })
 }

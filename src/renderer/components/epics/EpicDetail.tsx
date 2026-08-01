@@ -253,7 +253,7 @@ export function EpicDetail({ promptSession }: Props) {
 
   // Merged timeline: chat turns + this Epic's own 'prd_created'/'closed'/
   // 'response' (Terminal-stint marker, PRD 831) audit events, ordered by
-  // time — mirrors PromptSessionConversation.tsx's timeline construction.
+  // time — the same timeline construction the retired PromptSessionConversation.tsx used.
   const timeline = [
     ...turns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
     ...sessionEvents

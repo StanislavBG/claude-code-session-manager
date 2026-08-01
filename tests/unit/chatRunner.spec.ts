@@ -70,7 +70,6 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
     usedPct: number
     categories: Array<{ category: string; tokens: number; pct: number }>
   } | null
-  probeContextUsage: (opts: { tabId: string; sessionId: string; cwd: string }) => void
   __setExecutor: (fn: ((job: Record<string, unknown>) => Promise<void>) | null) => void
   __resetQueueForTests: () => void
   parseStopSignal: (text: string) => { questions: string[] } | null
@@ -174,58 +173,6 @@ describe('silent flag threading (run -> waiting -> executor)', () => {
     expect(captured[0].silent).toBeUndefined()
   })
 
-  it('probeContextUsage enqueues a silent, resumed /context run with an onSilentResult hook', async () => {
-    chatRunner.probeContextUsage({ tabId: 'tab-probe', sessionId: 'sess-3', cwd: '/repo' })
-    await new Promise((r) => setTimeout(r, 0))
-    expect(captured).toHaveLength(1)
-    const job = captured[0]
-    expect(job.prompt).toBe('/context')
-    expect(job.resume).toBe(true)
-    expect(job.silent).toBe(true)
-    expect(typeof job.onSilentResult).toBe('function')
-  })
-
-  it('probeContextUsage\'s onSilentResult callback parses + broadcasts chat:context-usage', async () => {
-    const sent: Array<[string, unknown]> = []
-    chatRunner.attachWindow({
-      isDestroyed: () => false,
-      webContents: { isDestroyed: () => false, send: (ch: string, payload: unknown) => sent.push([ch, payload]) },
-    })
-
-    chatRunner.probeContextUsage({ tabId: 'tab-probe-2', sessionId: 'sess-4', cwd: '/repo' })
-    await new Promise((r) => setTimeout(r, 0))
-    const onSilentResult = captured[0].onSilentResult as (text: string) => void
-    onSilentResult(CONTEXT_MARKDOWN)
-
-    expect(sent).toHaveLength(1)
-    const [channel, payload] = sent[0]
-    expect(channel).toBe('chat:context-usage')
-    expect(payload).toMatchObject({
-      tabId: 'tab-probe-2',
-      sessionId: 'sess-4',
-      usedTokens: 40000,
-      totalTokens: 967000,
-      usedPct: 4,
-    })
-  })
-
-  it('onSilentResult does NOT broadcast when parseContextUsageMarkdown returns null', async () => {
-    const sent: Array<[string, unknown]> = []
-    chatRunner.attachWindow({
-      isDestroyed: () => false,
-      webContents: { isDestroyed: () => false, send: (ch: string, payload: unknown) => sent.push([ch, payload]) },
-    })
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    chatRunner.probeContextUsage({ tabId: 'tab-probe-3', sessionId: 'sess-5', cwd: '/repo' })
-    await new Promise((r) => setTimeout(r, 0))
-    const onSilentResult = captured[0].onSilentResult as (text: string) => void
-    onSilentResult('garbage with no sections')
-
-    expect(sent).toHaveLength(0)
-    expect(errSpy).toHaveBeenCalled()
-    errSpy.mockRestore()
-  })
 })
 
 describe('concurrency (default cap = 2)', () => {

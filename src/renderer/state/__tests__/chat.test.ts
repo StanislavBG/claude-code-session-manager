@@ -212,18 +212,91 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
     expect(chat.turns.some((t) => t.role === 'user' && t.text === 'hello from outside')).toBe(true)
   })
 
-  it('no-ops and logs a warning when the tab is unknown/closed', async () => {
+  it('no-ops and logs a warning naming both lookups when neither a tab nor an Epic matches', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: true })
     const { useSessions } = await import('../sessions')
+    const { usePromptSessions } = await import('../promptSessions')
     await import('../chat')
 
     useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({ sessions: {}, events: {} })
 
     const handler = api.chat.onExternalSend.mock.calls[0][0]
     handler({ tabId: 'unknown-tab', prompt: 'hello' })
 
     expect(run).not.toHaveBeenCalled()
-    expect(api.logs.write).toHaveBeenCalledWith('chat', 'warn', expect.stringContaining('unknown-tab'))
+    expect(api.logs.write).toHaveBeenCalledWith(
+      'chat',
+      'warn',
+      expect.stringMatching(/unknown-tab.*open tab.*Epic/),
+    )
+  })
+
+  it('resolves the target from usePromptSessions and hands off to send() when it is an active Epic', async () => {
+    const { api, run } = installWindowApiMock({ transcriptExists: true })
+    const { useSessions } = await import('../sessions')
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useChat } = await import('../chat')
+
+    useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({
+      sessions: {
+        'epic-1': {
+          id: 'epic-1',
+          cwd: '/proj/epic',
+          goalText: 'ship the thing',
+          claudeSessionId: 'epic-sess-1',
+          status: 'active',
+          createdAt: '2026-07-31T00:00:00.000Z',
+          completedAt: null,
+        },
+      },
+      events: {},
+    })
+
+    const handler = api.chat.onExternalSend.mock.calls[0][0]
+    handler({ tabId: 'epic-1', prompt: 'status update from scheduler' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 'epic-1', sessionId: 'epic-sess-1', prompt: 'status update from scheduler' }),
+    )
+
+    const chat = useChat.getState().get('epic-1')
+    expect(chat.turns.some((t) => t.role === 'user' && t.text === 'status update from scheduler')).toBe(true)
+  })
+
+  it('refuses a completed/archived Epic instead of resuming its dead claudeSessionId', async () => {
+    const { api, run } = installWindowApiMock({ transcriptExists: true })
+    const { useSessions } = await import('../sessions')
+    const { usePromptSessions } = await import('../promptSessions')
+    await import('../chat')
+
+    useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({
+      sessions: {
+        'epic-done': {
+          id: 'epic-done',
+          cwd: '/proj/epic',
+          goalText: 'already shipped',
+          claudeSessionId: 'epic-sess-done',
+          status: 'completed',
+          createdAt: '2026-07-30T00:00:00.000Z',
+          completedAt: '2026-07-31T00:00:00.000Z',
+        },
+      },
+      events: {},
+    })
+
+    const handler = api.chat.onExternalSend.mock.calls[0][0]
+    handler({ tabId: 'epic-done', prompt: 'status update from scheduler' })
+
+    expect(run).not.toHaveBeenCalled()
+    expect(api.logs.write).toHaveBeenCalledWith(
+      'chat',
+      'warn',
+      expect.stringMatching(/epic-done.*(completed|archived)/),
+    )
   })
 })
 

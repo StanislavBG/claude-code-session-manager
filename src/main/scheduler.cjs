@@ -1630,19 +1630,29 @@ function isNotifiableTerminalStatus(effectiveStatus) {
  * rateLimited auto-pause, which resets the job to pending instead), publish
  * a short status notification for the PRD that queued this job.
  *
- * Resolution order (PRD 814): (1) if the PRD's `sourcePromptId` resolves to
- * a known, still-active PromptSession (minted for a dev-work dispatch, PRD
- * 813) under the job's cwd, append a 'response' PromptSessionEvent to THAT
- * session's own event chain — its own scoped PromptSessionConversation, not
- * whatever tab happens to be active — and stop; (2) otherwise, fall back to
- * today's behavior: push a short status prompt into the chat tab that queued
- * this PRD via enqueueExternalPrompt (PRD 753), resolved via the PRD's own
- * `sourceTabId` frontmatter, then the first open tab (per sessionsStore's
- * persisted tabs.json) whose cwd matches the job's cwd — first match only,
- * no fan-out to multiple matching tabs; (3) no-op. Never throws to the
- * caller (fire-and-forget from spawnJob). Deps are injectable (mirrors
- * partitionBootOrphans's isAlive param) so unit tests can exercise the
- * resolution logic without touching disk/electron.
+ * Resolution order (PRD 814, extended by PRD 854): (1) if the PRD's
+ * `sourcePromptId` resolves to a known, still-active PromptSession (minted
+ * for a dev-work dispatch, PRD 813) under the job's cwd, append a 'response'
+ * PromptSessionEvent to THAT session's own event chain — its own scoped Epic
+ * conversation (EpicDetail.tsx), not whatever tab happens to be active — and
+ * stop; (2) otherwise, fall back to pushing a short status prompt via
+ * enqueueExternalPrompt (PRD 753) at a target id resolved from, in order,
+ * the PRD's own `sourceTabId` frontmatter, then `sourcePromptId` again (a PRD
+ * dispatched straight from an Epic's composer, dispatchPromptSessionToPrd,
+ * never sets sourceTabId — sourcePromptId IS the Epic id and is a valid
+ * chat:external-send target too, which the renderer now resolves against
+ * both open tabs and known Epics, refusing a completed one), then the first
+ * open tab (per sessionsStore's persisted tabs.json) whose cwd matches the
+ * job's cwd — first match only, no fan-out to multiple matching tabs; (3)
+ * no-op. The cwd-match step only runs when NEITHER sourceTabId nor
+ * sourcePromptId is present in frontmatter at all — `sendPrompt` (
+ * enqueueExternalPrompt) is fire-and-forget IPC with no ack, so once step
+ * (2) picks either id it is not retried even if the renderer can't resolve
+ * it either (e.g. a stale/garbage id) — same non-guaranteed-delivery
+ * tradeoff this function already accepted for sourceTabId pre-PRD-854.
+ * Never throws to the caller (fire-and-forget from spawnJob). Deps are
+ * injectable (mirrors partitionBootOrphans's isAlive param) so unit tests
+ * can exercise the resolution logic without touching disk/electron.
  */
 async function notifyOriginatingTab(job, {
   parsePrdRaw = prdParser.parsePrdRaw,
@@ -1663,7 +1673,13 @@ async function notifyOriginatingTab(job, {
       if (routed) return;
     }
 
-    let targetTabId = prd?.sourceTabId || null;
+    // appendResponseEvent already refused above (unknown id, completed
+    // Epic, or disk error) — the sourcePromptId fallback below re-sends to
+    // the SAME id via chat:external-send, which the renderer independently
+    // re-checks against its own live PromptSession store. Deliberate
+    // defense-in-depth (main's disk-backed check vs. the renderer's
+    // in-memory one can disagree/race), not a redundant duplicate to prune.
+    let targetTabId = prd?.sourceTabId || prd?.sourcePromptId || null;
     if (!targetTabId) {
       const jobCwd = job.cwd || null;
       if (jobCwd) {
@@ -1673,7 +1689,7 @@ async function notifyOriginatingTab(job, {
       }
     }
     if (!targetTabId) {
-      console.log(`[scheduler] notifyOriginatingTab: no target tab for ${job.slug}, skipping`);
+      console.log(`[scheduler] notifyOriginatingTab: no open tab and no Epic for ${job.slug}, skipping`);
       return;
     }
 

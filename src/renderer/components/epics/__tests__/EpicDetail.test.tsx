@@ -318,6 +318,190 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.querySelector('[data-testid="epic-seed-goal"]')).not.toBeNull()
   })
 
+  it('renders the accumulating chat.stream as a live assistant bubble while a turn is in flight', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [{ id: 't-user', role: 'user', text: 'go', at: Date.now() }],
+          running: true,
+          queuedPosition: 0,
+          started: true,
+          stream: 'Working on it',
+          liveToolUses: [{ id: 'tu-1', kind: 'tool', label: 'Bash' }],
+          queue: [],
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const live = el.querySelector('[data-testid="epic-live-turn"]')
+    expect(live).not.toBeNull()
+    expect(live!.textContent).toContain('Working on it')
+    expect(live!.querySelector('[data-testid="tool-strip-toggle"]')?.textContent).toContain('used 1 tool')
+  })
+
+  it('replaces the live bubble with the finished turn on chat:run:complete, with no duplicated text', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [{ id: 't-user', role: 'user', text: 'go', at: Date.now() }],
+          running: true,
+          queuedPosition: 0,
+          started: true,
+          stream: 'partial reply',
+          liveToolUses: [],
+          queue: [],
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    expect(el.querySelector('[data-testid="epic-live-turn"]')).not.toBeNull()
+
+    // Mirrors pushTurn's single atomic transition (chat.ts:350) — the real
+    // turn appears and running/stream flip in one set() call.
+    act(() => {
+      useChat.setState((s) => ({
+        chats: {
+          ...s.chats,
+          [session.id]: {
+            ...s.chats[session.id],
+            turns: [...s.chats[session.id].turns, { id: 't-final', role: 'assistant', text: 'partial reply done', at: Date.now() }],
+            running: false,
+            queuedPosition: 0,
+            stream: '',
+            liveToolUses: [],
+          },
+        },
+      }))
+    })
+
+    expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
+    const occurrences = (el.textContent?.match(/partial reply done/g) ?? []).length
+    expect(occurrences).toBe(1)
+  })
+
+  it('shows the queue position instead of an empty live bubble while chat:run:queued', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [],
+          running: true,
+          queuedPosition: 2,
+          started: true,
+          stream: '',
+          liveToolUses: [],
+          queue: [],
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
+    const queued = el.querySelector('[data-testid="epic-queued-position"]')
+    expect(queued).not.toBeNull()
+    expect(queued!.textContent).toContain('2')
+  })
+
+  it('resets to no live bubble on chat:run:error (stream cleared, running false)', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [],
+          running: true,
+          queuedPosition: 0,
+          started: true,
+          stream: 'streaming when it broke',
+          liveToolUses: [{ id: 'tu-1', kind: 'tool', label: 'Bash' }],
+          queue: [],
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    expect(el.querySelector('[data-testid="epic-live-turn"]')).not.toBeNull()
+
+    // Mirrors applyError -> pushTurn (chat.ts:713/350): error turn appended,
+    // running/stream/liveToolUses reset in the same atomic transition.
+    act(() => {
+      useChat.setState((s) => ({
+        chats: {
+          ...s.chats,
+          [session.id]: {
+            ...s.chats[session.id],
+            turns: [...s.chats[session.id].turns, { id: 't-err', role: 'error', text: 'boom', at: Date.now() }],
+            running: false,
+            queuedPosition: 0,
+            stream: '',
+            liveToolUses: [],
+          },
+        },
+      }))
+    })
+
+    expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
+    expect(el.textContent).not.toContain('streaming when it broke')
+  })
+
+  it('keys the live bubble by epic id — switching Epics does not leak the previous partial stream', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const sessionA = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
+    const sessionB = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
+    useChat.setState({
+      chats: {
+        [sessionA.id]: {
+          turns: [],
+          running: true,
+          queuedPosition: 0,
+          started: true,
+          stream: "Epic A's in-flight stream",
+          liveToolUses: [],
+          queue: [],
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: sessionA }))
+    expect(el.textContent).toContain("Epic A's in-flight stream")
+
+    act(() => {
+      root!.render(createElement(EpicDetail, { promptSession: sessionB }))
+    })
+
+    expect(el.textContent).not.toContain("Epic A's in-flight stream")
+    expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
+  })
+
   it('shows the goal as seed context with no crash when there are no chat turns yet', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

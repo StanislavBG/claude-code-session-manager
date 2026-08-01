@@ -266,8 +266,10 @@ export function EpicDetail({ promptSession }: Props) {
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-    // Auto-scroll to bottom on Epic switch and on switching back to Discussion.
-  }, [epicId, view, timeline.length])
+    // Auto-scroll to bottom on Epic switch, on switching back to Discussion,
+    // and as the live stream grows (chat?.stream.length keeps this firing
+    // while a turn is still in flight, not just once it lands in `turns`).
+  }, [epicId, view, timeline.length, running, chat?.stream.length])
 
   // Narrow chats snapshot: the derive helpers only index this Epic's own
   // entry, and subscribing to the whole `chats` record would re-render this
@@ -547,6 +549,49 @@ export function EpicDetail({ promptSession }: Props) {
                 </div>
               )
             })}
+
+            {/* In-flight turn: chat.stream/liveToolUses accumulate on
+                chat:run:output/tool-use deltas but never land in `turns`
+                until pushTurn fires on complete/error/needs-input — without
+                this the whole turn was dead air (PRD 837). Keyed by epicId
+                (chat is `chats[epicId]`), so switching Epics swaps in that
+                Epic's own in-flight state, never leaking the previous one's
+                partial stream. Replaced by the real turn the instant
+                pushTurn's single atomic set() flips running:false and
+                appends it — no separate teardown step, so no flicker of
+                both being on screen together. */}
+            {running &&
+              (chat && chat.queuedPosition > 0 ? (
+                <div
+                  key="epic-live-queued"
+                  data-testid="epic-queued-position"
+                  className="text-center text-[11px] text-fg-faint"
+                >
+                  queued · position {chat.queuedPosition}
+                </div>
+              ) : (
+                <div key="epic-live-turn" data-testid="epic-live-turn">
+                  <Turn
+                    turn={{
+                      id: `${epicId}-live`,
+                      role: 'assistant',
+                      text: chat?.stream ?? '',
+                      toolUses: chat?.liveToolUses,
+                      at: Date.now(),
+                    }}
+                    cwd={cwd}
+                    tabId={epicId}
+                    sessionId={sessionId}
+                    runActive
+                    consentActionDisabled={running}
+                    enableRawSessionActions={false}
+                    linkTarget="browser"
+                    inlineFilePreview
+                    toolStripVariant="collapsible"
+                    needsDecisionStyle
+                  />
+                </div>
+              ))}
           </div>
         )}
 

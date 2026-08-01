@@ -632,6 +632,8 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
       ...c,
       running: false,
       queuedPosition: 0,
+      stream: '',
+      liveToolUses: [],
       activeTicket: null,
       ticketHistory: appendTicketHistory(c.ticketHistory ?? [], { ...ticket, status: 'failed', completedAt: Date.now() }),
     }))
@@ -698,6 +700,8 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
           ...c,
           running: false,
           queuedPosition: 0,
+          stream: '',
+          liveToolUses: [],
           activeTicket: null,
           ticketHistory: history,
         }

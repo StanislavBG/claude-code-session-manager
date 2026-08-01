@@ -6,6 +6,14 @@ import { useChat, type TabChat } from '../state/chat'
  * derive helpers (epicDisplayStatus/epicStats) actually read — running flag,
  * queue position, needs-input, turn count, tool-call count — and nothing
  * token-level (`stream` grows on every delta and is deliberately excluded).
+ *
+ * `stream` DOES have a consumer now (EpicDetail.tsx's live turn bubble,
+ * PRD 837) — it just doesn't come through this hook. EpicDetail subscribes
+ * directly to its own single chat slice (`useChat((s) => s.chats[epicId])`),
+ * which is already scoped to one Epic, so per-token re-renders there only
+ * repaint that Epic's own pane. Folding `stream` into this signature would
+ * re-render the whole Epics workspace (every card, via this hook) on every
+ * delta of any running Epic — the exact fan-out this hook exists to avoid.
  */
 function signatureOf(chats: Record<string, TabChat>): string {
   const parts: string[] = []

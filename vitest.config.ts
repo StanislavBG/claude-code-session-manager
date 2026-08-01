@@ -51,6 +51,7 @@ export default defineConfig({
       'src/main/__tests__/runVerify.test.cjs',
       'src/main/__tests__/scheduler-meta-code-sha.test.cjs',
       'src/main/__tests__/browserView-destroyed-handler.test.cjs',
+      'src/main/__tests__/browserView-oauth-popup.test.cjs',
       'src/main/__tests__/scheduler-reset-job-fields-guard.test.cjs',
       'src/main/__tests__/scheduler-commit-guard-noop.test.cjs',
       'src/main/__tests__/scheduler-unreadable-queue-guard.test.cjs',

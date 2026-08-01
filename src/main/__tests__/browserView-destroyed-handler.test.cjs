@@ -32,6 +32,7 @@ class FakeWebContents extends EventEmitter {
     this.session = { on() {} };
   }
   setZoomFactor() {}
+  setUserAgent() {}
   setWindowOpenHandler() {}
   isDestroyed() { return false; }
 }

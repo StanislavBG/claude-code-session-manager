@@ -36,6 +36,39 @@ const HISTORY_PATH = path.join(BROWSER_DATA_DIR, 'history.json');
 const ZOOM_PATH = path.join(BROWSER_DATA_DIR, 'zoom.json');
 const HISTORY_MAX = 500;
 
+// ── Identity-provider OAuth popup allowlist ───────────────────────────
+// window.open() popups from these hosts get a REAL child BrowserWindow
+// (setWindowOpenHandler returns `allow`) instead of the default deny —
+// Google's GIS/FedCM handshake (and equivalent flows from other providers)
+// needs a genuine window.opener to postMessage the credential back to.
+// Every other popup keeps the existing deny + browser:open-tab-request
+// broadcast. Add appleid.apple.com / login.microsoftonline.com / github.com
+// here when those flows need the same treatment — no restructuring needed.
+const IDENTITY_PROVIDER_HOSTS = ['accounts.google.com'];
+
+function isIdentityProviderUrl(rawUrl) {
+  try {
+    return IDENTITY_PROVIDER_HOSTS.includes(new URL(rawUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+// A realistic desktop Chrome UA built from this Electron build's OWN
+// Chromium version (process.versions.chrome) rather than a hardcoded string
+// that drifts stale — OAuth endpoints can flag Electron's default UA
+// ("… Electron/x.y.z …") under a disallowed_useragent policy for embedded
+// webviews.
+function buildChromeUserAgent() {
+  const chromeVersion = process.versions.chrome;
+  const platformToken = process.platform === 'win32'
+    ? 'Windows NT 10.0; Win64; x64'
+    : process.platform === 'darwin'
+      ? 'Macintosh; Intel Mac OS X 10_15_7'
+      : 'X11; Linux x86_64';
+  return `Mozilla/5.0 (${platformToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+}
+
 let lastZoomFactor = 1;
 // Startup-only, fixed constant path (not user input) — a plain sync read is
 // simpler than threading an async load through registerBrowserView's callers.
@@ -189,10 +222,37 @@ function wireNavEvents(viewId, view) {
   });
 
   wc.setWindowOpenHandler(({ url }) => {
+    if (isIdentityProviderUrl(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+        },
+      };
+    }
     if (/^https?:\/\//i.test(url)) {
       sendIfAlive(win, 'browser:open-tab-request', { url });
     }
     return { action: 'deny' };
+  });
+
+  // Fires only when setWindowOpenHandler above returned `allow` — i.e. only
+  // for identity-provider popups. Sets a real Chrome UA on the popup (same
+  // reasoning as the main view below) and registers its webContents.id in
+  // browserViewContentsIds so index.cjs's global will-navigate lock exempts
+  // it too — an OAuth popup needs to navigate through several redirects
+  // (consent screen, callback) exactly like the main Browser view already
+  // does, otherwise the very handshake this fix enables would immediately
+  // get nav-locked shut. Cleaned up on the popup's own 'destroyed' event,
+  // following create()'s `view.webContents.once('destroyed', ...)` pattern
+  // so nothing dangles once the popup closes.
+  wc.on('did-create-window', (childWindow) => {
+    const childWc = childWindow.webContents;
+    childWc.setUserAgent(buildChromeUserAgent());
+    browserViewContentsIds.add(childWc.id);
+    childWc.once('destroyed', () => {
+      browserViewContentsIds.delete(childWc.id);
+    });
   });
 
   wc.session.on('will-download', (event) => {
@@ -227,6 +287,7 @@ function create({ viewId, partition }) {
   browserViewContentsIds.add(wcId);
   contentsIdToViewId.set(wcId, viewId);
   view.webContents.setZoomFactor(lastZoomFactor);
+  view.webContents.setUserAgent(buildChromeUserAgent());
   wireNavEvents(viewId, view);
   view.webContents.once('destroyed', () => {
     browserViewContentsIds.delete(wcId);

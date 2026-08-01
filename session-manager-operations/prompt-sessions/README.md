@@ -131,13 +131,38 @@ spent nothing, which is exactly what `proposed` already means. "The human is sti
 human to commit*. Adding a fourth state to encode who authored it would put authorship in the
 status field, where it does not belong.
 
+### Every Epic is born `proposed`
+
+`proposed` is the birth state for **every** Epic, whoever authored it. Nothing is ever created
+directly as `active`. An Epic becomes `active` only by an explicit start transition — never as a
+side effect of being created.
+
 ### The one way an Epic starts
 
-Both doors — approving an agent's proposal, and finishing your own draft — are the **same
-transition**, `proposed → active`, and must run one code path: send the Epic's `openingPrompt`
-(falling back to `goalText`) as the first message of its own `claudeSessionId`. Today that is
+There is one transition, `proposed → active`, reached by two equivalent human acts:
+
+- **Approve & start** on an agent's proposal (`EpicApprovalBar`)
+- **Submitting the first prompt** in the New Epic flow — giving it a title and starting prompt and
+  hitting send IS the transition, not a separate kind of creation
+
+Both must run one code path: send the Epic's `openingPrompt` (falling back to `goalText`) as the
+first message of its own `claudeSessionId`. Today that is
 `useChat.send({ tabId: epic.id, sessionId: epic.claudeSessionId, cwd, prompt: openingPrompt || goalText })`,
 which is the behavior to preserve. An Epic can never begin two different ways.
+
+### A `proposed` Epic is a minimal row, and is never erased
+
+A `proposed` Epic needs only **`id` and `claudeSessionId`** (plus `cwd` and `status`) to be a
+valid, durable row — an Epic reserved and ready to be spawned. `goalText`, `openingPrompt` and
+`tag` may be empty and fill in later; they are not required for the row to exist or to persist.
+
+This is what makes "no `draft` state" work without losing anything. The New Epic flow can mint the
+minimal `proposed` row up front and fill fields in as they are typed: what is *not* persisted is a
+separate draft **state**, not the Epic itself. There is still one birth state and one start path,
+and a human Epic can be parked as a proposal indefinitely without being started.
+
+Because such a row is legitimate, **nothing about a `proposed` Epic is ever erased** — a
+persister that cannot see a use for a sparse row must still keep it. See gap 3.
 
 Once `active`, the Epic's session is what authors PRDs (via `scheduler_create_prd` / `chat:create-prd`,
 carrying `sourcePromptId` = this Epic's id) and what the scheduler reports back into as
@@ -172,11 +197,12 @@ and an Epic that is `active` says nothing about whether a run is in flight right
 
 ### Known gaps (as of 2026-08-01)
 
-1. **A human-typed Epic never passes through `proposed`.** `NewEpicCard` holds title/goal/tag in
-   ephemeral React `useState` and calls `createPromptSession(cwd, goalText, tag)` with the default
-   status `'active'` — so it starts the session immediately and an in-progress draft is lost on
-   navigate or reload. It should create the Epic as `proposed` as soon as there is something to
-   keep, and take the same `proposed → active` transition on submit that Approve takes.
+1. **A human-typed Epic is born `active`, skipping both the birth state and the shared
+   transition.** `NewEpicCard` calls `createPromptSession(cwd, goalText, tag)`, whose status
+   argument defaults to `'active'`, and separately fires the opening prompt — so `active` gets set
+   by the act of creation rather than by starting, and the New Epic path never touches the
+   `proposed → active` transition that Approve uses. It should create the Epic `proposed` and then
+   take that same transition, so there is one birth state and one start path.
 2. **`epicDisplayStatus` invents state that isn't state.** `src/renderer/lib/epicDerive.ts`
    returns a six-value `EpicDisplayStatus` (`running`/`needs`/`queued`/`completed`/`proposed`/`draft`)
    from one function, mixing all three entities: `completed`/`proposed` are real Epic status,
@@ -190,10 +216,16 @@ and an Epic that is `active` says nothing about whether a run is in flight right
    writes `proposed` Epics into `active-index.json`, but `persistActiveIndex` (renderer) rewrites
    that same file filtered to `status === 'active'` only. Any renderer mutation therefore drops
    every `proposed` Epic on disk; they survive in the renderer store until reload, then are gone.
-   This silently destroys the agent-proposal intake that replaced the feedback folder. The filter
-   must keep `proposed` as well as `active` (both are "not yet archived"), which also resolves the
-   contradiction between this file's storage-layout note and the `active-index.json` shape note
-   above.
+   This silently destroys the agent-proposal intake that replaced the feedback folder, and it
+   blocks the minimal-row model above: a reserved `proposed` Epic cannot survive to be spawned if
+   the next write deletes it.
+
+   Fix: `persistActiveIndex` must keep `proposed` as well as `active` — the file holds everything
+   **not yet archived**, and a sparse `proposed` row (`id` + `claudeSessionId` only) is valid
+   content, not junk to be filtered out. Nothing about a `proposed` Epic is ever erased; only
+   `markCompleted` removes a row from this file, by moving it to its archive. This also resolves
+   the contradiction between this file's storage-layout note and the `active-index.json` shape
+   note above.
 
 ### Transitions in detail
 

@@ -1,6 +1,6 @@
 {
   "name": "claude-code-session-manager",
-  "version": "0.41.1",
+  "version": "0.42.0",
   "description": "Local cockpit for the Claude Code CLI — multi-tab terminal, full config surface, scheduler, voice dictation, and live observability.",
   "type": "module",
   "main": "src/main/index.cjs",

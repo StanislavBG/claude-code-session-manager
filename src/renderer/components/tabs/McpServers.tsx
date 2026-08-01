@@ -11,6 +11,8 @@ import type { ProvenanceInput } from '../../lib/provenance'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useLayout } from '../../state/layout'
+import { deriveNavFace } from '../../lib/navFace'
 import type { Scope } from '../../lib/scopes'
 import { McpLibrary, ViewSwitcher } from './Library'
 import { toast } from '../../state/toast'
@@ -105,10 +107,33 @@ export function McpServers() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
-  const [scope, setScope] = useState<Scope>('user')
+
+  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
+  // -> 'user', Project face -> 'project' (falling back to 'user' when no
+  // active-tab cwd resolves). Mirrors SystemPrompt/Skills/HistoryDashboard's
+  // manuallyTouchedRef + prevNavFaceRef pattern so the default only re-applies
+  // on an actual face transition, never on a same-face re-render, and never
+  // once the user has manually changed the scope since the last transition.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+
+  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [view, setView] = useState<'installed' | 'library'>('installed')
   const [filter, setFilter] = useState('')
+
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    setScope(navFace === 'project' && cwd ? 'project' : 'user')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFace, cwd])
 
   const path = useMemo(() => (home ? pathFor(scope, home, cwd) : null), [home, scope, cwd])
 
@@ -178,7 +203,7 @@ export function McpServers() {
           <>
             <ViewSwitcher active={view} onChange={setView} />
             <span className="mx-2 text-fg-faint">·</span>
-            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
+            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           </>
         }
       >
@@ -226,7 +251,7 @@ export function McpServers() {
         <>
           <ViewSwitcher active={view} onChange={setView} />
           <span className="mx-2 text-fg-faint">·</span>
-          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
+          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           <span className="ml-3 px-1.5 py-0.5 text-[10px] rounded border border-line text-fg-faint">
             {names.length} server{names.length === 1 ? '' : 's'}
           </span>

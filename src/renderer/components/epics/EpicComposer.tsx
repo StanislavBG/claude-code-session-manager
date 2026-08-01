@@ -11,8 +11,11 @@ import { copyFor } from '../../lib/voiceCopy'
 
 type ComposerAction = 'chat' | 'dispatch'
 
-function defaultAction(tag: PromptSession['tag']): ComposerAction {
-  return tag === 'discussion' ? 'chat' : 'dispatch'
+/** "Dispatch as PRD" must always be an explicit user choice — never the
+ *  composer's default selection, regardless of the Epic's tag. Auto-selecting
+ *  it has tricked the user into dispatching a message they meant as chat. */
+function defaultAction(_tag: PromptSession['tag']): ComposerAction {
+  return 'chat'
 }
 
 /** Tag passed to dispatchPromptSessionToPrd when the "Dispatch as PRD" action

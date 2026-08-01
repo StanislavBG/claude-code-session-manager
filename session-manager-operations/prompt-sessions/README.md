@@ -54,6 +54,7 @@ interface PromptSession {
   resumedFromId?: string | null          // set only when minted via resumeArchived()
   tag?: 'feature' | 'bug' | 'discussion' // Epic-level intent tag
   openingPrompt?: string | null          // full first-prompt body, when it differs from goalText
+  source?: EpicSource                    // which automated producer minted this Epic (absent if human-created)
 }
 ```
 

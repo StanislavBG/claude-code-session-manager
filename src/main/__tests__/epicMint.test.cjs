@@ -108,3 +108,22 @@ test('removeEpic refuses to report success for the prototype-chain key "__proto_
   const removed = removeEpic(cwd, '__proto__');
   expect(removed).toBe(false);
 });
+
+test('ensureEpic persists the passed source onto the written active-index.json session record', async () => {
+  const cwd = await mkCwd();
+  const source = { producer: 'rca-hook', prdSlug: 'x', runId: 'y' };
+
+  const minted = await ensureEpic(cwd, { goalText: 'auto-filed epic', source });
+
+  const index = readActiveIndex(cwd);
+  expect(index.sessions[minted.epicId].source).toEqual(source);
+});
+
+test('ensureEpic omits source from the written record when not passed', async () => {
+  const cwd = await mkCwd();
+
+  const minted = await ensureEpic(cwd, { goalText: 'human-filed epic' });
+
+  const index = readActiveIndex(cwd);
+  expect('source' in index.sessions[minted.epicId]).toBe(false);
+});

@@ -7,6 +7,18 @@ import { create } from 'zustand'
  * sessionId. A PromptSession mints its own claudeSessionId, never derived
  * from or shared with any SessionTab.
  */
+/** Structured trace of which automated producer minted an Epic — replaces
+ *  burying that info as markdown frontmatter text inside openingPrompt.
+ *  Written by src/main/lib/epicMint.cjs for auto-minted Epics; absent for
+ *  human-created ones (New Epic UI, /propose-epic approvals go through the
+ *  same mint path but a human still pressed the button). */
+export interface EpicSource {
+  producer: 'rca-hook' | 'feedback-sweep' | 'propose-epic' | 'scheduler-dispatch'
+  prdSlug?: string
+  runId?: string
+  sourceTabId?: string
+}
+
 export interface PromptSession {
   id: string
   cwd: string
@@ -37,6 +49,10 @@ export interface PromptSession {
    *  the RCA/analysis body). Sent verbatim on approval; falls back to
    *  goalText when absent. Written by src/main/lib/epicMint.cjs too. */
   openingPrompt?: string | null
+  /** Which automated producer minted this Epic, for tracing a rogue/unexpected
+   *  Epic back to its origin. Written by src/main/lib/epicMint.cjs; absent for
+   *  human-created Epics. */
+  source?: EpicSource
 }
 
 /** On-disk archive shape written by markCompleted and read back by any

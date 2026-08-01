@@ -94,7 +94,7 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, mintIfMissing? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, openingPrompt?, mintIfMissing?, source? }) → Promise<{ epicId, prdDir, created }>
  *
  * `status` defaults to 'proposed' — a fail-safe default so any caller that
  * forgets to pass it files an Epic that waits for human approval rather than
@@ -118,7 +118,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true } = {}) {
+function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   return withPathLock(activeIndexPath(cwd), () => {
     const index = readActiveIndex(cwd);
@@ -183,6 +183,9 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       // Full body for a proposal whose goalText is only a one-line title;
       // sent verbatim as the first prompt when a human approves it.
       ...(openingPrompt ? { openingPrompt: String(openingPrompt) } : {}),
+      // Structured trace of which automated producer minted this Epic — see
+      // EpicSource in state/promptSessions.ts.
+      ...(source ? { source } : {}),
     };
     const firstEvent = {
       id: crypto.randomUUID(),
@@ -199,7 +202,7 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
     // Every mint is logged, whether the Epic starts 'proposed' (human gate
     // ahead) or 'active' (started immediately) — this is the trace-back point
     // for "who/what created this Epic" (see auditLog.cjs).
-    appendAuditEvent('epic_mint', { cwd, epicId, status, tag: tag ?? null, goalText: session.goalText });
+    appendAuditEvent('epic_mint', { cwd, epicId, status, tag: tag ?? null, goalText: session.goalText, source: source ?? null });
 
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
     fs.mkdirSync(prdDir, { recursive: true });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useLayout, DEFAULT_LAYOUT, getPanelDefinition } from '../layout'
+import { useLayout, DEFAULT_LAYOUT, getPanelDefinition, needsProjectsPanelReconciliation } from '../layout'
 import { SCREEN_KEYS } from '../../lib/screenKeys'
 import { buildCommands } from '../../components/CommandPalette'
 
@@ -150,6 +150,30 @@ describe('screenComponents.renderScreenComponent covers every non-terminal SCREE
       if (key === 'terminal') continue
       expect(renderScreenComponent(key, {}), `renderScreenComponent(${key}) returned null`).not.toBeNull()
     }
+  })
+})
+
+describe('needsProjectsPanelReconciliation (File Explorer dead-end guard)', () => {
+  it('reconciles when focusedPanelId is projects and activeTabId is null', () => {
+    expect(needsProjectsPanelReconciliation('projects', null)).toBe(true)
+  })
+
+  it('does not reconcile when projects has an active tab', () => {
+    expect(needsProjectsPanelReconciliation('projects', 'tab-1')).toBe(false)
+  })
+
+  it('does not reconcile terminal with a null activeTabId (Epics workspace intentionally renders this)', () => {
+    expect(needsProjectsPanelReconciliation('terminal', null)).toBe(false)
+  })
+
+  it('does not reconcile other panels with a null activeTabId', () => {
+    expect(needsProjectsPanelReconciliation('overview', null)).toBe(false)
+    expect(needsProjectsPanelReconciliation('browser', null)).toBe(false)
+    expect(needsProjectsPanelReconciliation('editor', null)).toBe(false)
+  })
+
+  it('does not reconcile when focusedPanelId is null', () => {
+    expect(needsProjectsPanelReconciliation(null, null)).toBe(false)
   })
 })
 

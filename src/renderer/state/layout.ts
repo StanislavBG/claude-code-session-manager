@@ -92,6 +92,24 @@ export function getPanelDefinition(id: string): PanelDefinition | undefined {
   return useLayout.getState().panels.find((p) => p.id === id)
 }
 
+/**
+ * 'projects' (File Explorer, ProjectsWorkspace.tsx) renders `useSessions()`'s
+ * `activeTab` and dead-ends on a bare "No session selected." with no way
+ * back when there is none — reachable whenever the last session tab closes,
+ * or App.tsx's explicit `activeTabId: null` resets (navigate('terminal'),
+ * handleNewSession) fire while 'projects' is still the focused panel. Pure
+ * predicate (no store reads) so App.tsx's reconciliation effect is
+ * unit-testable without mounting App. Scoped to 'projects' only — 'terminal'
+ * (Epics workspace) intentionally renders with activeTabId === null, and
+ * 'browser'/'editor' own independent tab-id state, not session activeTabId.
+ */
+export function needsProjectsPanelReconciliation(
+  focusedPanelId: string | null,
+  activeTabId: string | null,
+): boolean {
+  return focusedPanelId === 'projects' && activeTabId === null
+}
+
 /** True when `panelId` is the workbench's currently active panel. */
 export function usePanelFocus(panelId: string): boolean {
   return useLayout((s) => s.focusedPanelId === panelId)

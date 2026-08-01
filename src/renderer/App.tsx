@@ -19,7 +19,7 @@ import { toast } from './state/toast'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
-import { useLayout } from './state/layout'
+import { useLayout, needsProjectsPanelReconciliation } from './state/layout'
 import { useEditor } from './state/editor'
 import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
@@ -114,6 +114,22 @@ export function App() {
       curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
     if (isPureSwitch) useLayout.getState().openPanel('terminal')
   }, [activeTabId, tabs])
+
+  // 'projects' (File Explorer) renders useSessions().activeTab and dead-ends
+  // on "No session selected." with no path back when activeTabId is null —
+  // reachable whenever the last tab closes, or the activeTabId:null resets
+  // above (navigate('terminal'), handleNewSession) fire while 'projects' is
+  // still focused. Reconcile to Home instead of leaving a dead panel up.
+  // Scoped ONLY to 'projects': 'terminal' (Epics workspace) intentionally
+  // renders with activeTabId === null (see navigate() above), and
+  // 'browser'/'editor' own independent tab-id state (useBrowserState()
+  // .activeTabId, no activeTab dependency in EditorView) so they don't need
+  // this guard — see needsProjectsPanelReconciliation's own comment.
+  useEffect(() => {
+    if (needsProjectsPanelReconciliation(focusedPanelId, activeTabId)) {
+      useLayout.getState().openPanel('overview')
+    }
+  }, [focusedPanelId, activeTabId])
 
   // Terminal-screen toast: transient notice on watcher activity, or a
   // "sent to N tabs" confirmation after a broadcast. Ported from MainPane.

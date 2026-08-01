@@ -13,6 +13,9 @@
  * INSTRUCTION. References are appended as trailing lines to both.
  */
 
+import { agentTagDef } from './agentTagDefs'
+import type { TicketTag } from './ticketDisplay'
+
 export interface EpicIntakeFields {
   /** Epic title — optional; becomes the session's goal line. */
   title: string
@@ -20,6 +23,13 @@ export interface EpicIntakeFields {
   goal: string
   /** Absolute paths of attached references. */
   referencePaths?: string[]
+  /**
+   * The Epic's single tag. When given, its `initialPromptTemplate`
+   * (agentTagDefs.ts) is prepended to `openingPrompt` only — `goalText`
+   * stays the pure user objective, since that's what's displayed as the
+   * Epic's identity in Scheduler chips / the composer header.
+   */
+  tag?: TicketTag
 }
 
 export interface EpicIntake {
@@ -43,7 +53,7 @@ function withReferences(body: string, referencePaths: string[]): string {
  *
  * Complexity: O(n) in the number of references.
  */
-export function composeEpicIntake({ title, goal, referencePaths = [] }: EpicIntakeFields): EpicIntake {
+export function composeEpicIntake({ title, goal, referencePaths = [], tag }: EpicIntakeFields): EpicIntake {
   const trimmedTitle = singleLine(title.trim())
   const trimmedGoal = goal.trim()
 
@@ -51,9 +61,12 @@ export function composeEpicIntake({ title, goal, referencePaths = [] }: EpicInta
   // The opening prompt names the title as the goal explicitly, so the agent
   // reads it as the objective rather than as the first line of the request.
   const promptBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
+  // The tag's grounding template comes first — it's the agent's framing
+  // instruction, read before the human's own goal.
+  const groundedPromptBody = tag ? `${agentTagDef(tag).initialPromptTemplate}\n\n${promptBody}` : promptBody
 
   return {
     goalText: withReferences(body, referencePaths),
-    openingPrompt: withReferences(promptBody, referencePaths),
+    openingPrompt: withReferences(groundedPromptBody, referencePaths),
   }
 }

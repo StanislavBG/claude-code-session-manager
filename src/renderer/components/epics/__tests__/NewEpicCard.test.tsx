@@ -181,7 +181,11 @@ describe('NewEpicCard', () => {
       tabId: created.id,
       sessionId: created.claudeSessionId,
       cwd: '/home/bilko/Projects/alpha',
-      prompt: 'Goal: Flaky test\n\nMake CI stop flaking',
+      prompt:
+        'You are building new functionality. Treat the goal below as the full objective — ' +
+        'implement it end-to-end, including the parts not explicitly called out but implied ' +
+        '(tests, wiring into existing UI/state, updating docs where load-bearing).\n\n' +
+        'Goal: Flaky test\n\nMake CI stop flaking',
     })
   })
 
@@ -198,6 +202,6 @@ describe('NewEpicCard', () => {
     const args = sendSpy.mock.calls[0][0]
     expect(args.sessionId).toBe(created.claudeSessionId)
     expect(args.sessionId).not.toBe(created.id)
-    expect(args.prompt).toBe('Just the objective')
+    expect(args.prompt.endsWith('Just the objective')).toBe(true)
   })
 })

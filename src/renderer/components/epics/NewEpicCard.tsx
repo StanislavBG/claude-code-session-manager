@@ -75,7 +75,7 @@ export function NewEpicCard({
     // goal text — otherwise the reference line names a file that never
     // existed (PRD 865).
     const referencePaths = await resolveAttachmentPaths(att.items, effectiveCwd)
-    const { goalText, openingPrompt } = composeEpicIntake({ title, goal, referencePaths })
+    const { goalText, openingPrompt } = composeEpicIntake({ title, goal, referencePaths, tag })
     // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
     // Submitting this form is not a second kind of creation — it is the one
     // 'proposed -> active' transition, the same one EpicApprovalBar's

@@ -45,4 +45,16 @@ describe('composeEpicIntake', () => {
   it('trims the objective', () => {
     expect(composeEpicIntake({ title: '', goal: '  spaced  ' }).goalText).toBe('spaced')
   })
+
+  it('prepends the tag grounding template to openingPrompt only, leaving goalText untouched', () => {
+    const { goalText, openingPrompt } = composeEpicIntake({ title: 'T', goal: 'G', tag: 'bug' })
+    expect(goalText).toBe('T\n\nG')
+    expect(openingPrompt.startsWith('You are diagnosing a reported bug.')).toBe(true)
+    expect(openingPrompt.endsWith('Goal: T\n\nG')).toBe(true)
+  })
+
+  it('omits grounding entirely when no tag is given', () => {
+    const { openingPrompt } = composeEpicIntake({ title: 'T', goal: 'G' })
+    expect(openingPrompt).toBe('Goal: T\n\nG')
+  })
 })

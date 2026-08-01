@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -7,6 +7,8 @@ import { EmptyState } from '../ui/EmptyState'
 import { ReferencedFilesPanel } from './ReferencedFilesPanel'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
+import { useLayout } from '../../state/layout'
+import { deriveNavFace } from '../../lib/navFace'
 import { CLAUDE_MD_SCOPES, type Scope } from '../../lib/scopes'
 import { PromptPresetsLibrary, ViewSwitcher } from './Library'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -23,8 +25,31 @@ export function SystemPrompt() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const cwd = activeTab?.cwd ?? null
 
-  const [scope, setScope] = useState<Scope>('user')
+  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
+  // -> 'user', Project face -> 'project' (falling back to 'user' when no
+  // active-tab cwd resolves). Mirrors HistoryDashboard/Scheduler's
+  // manuallyTouchedRef + prevNavFaceRef pattern so the default only
+  // re-applies on an actual face transition, never on a same-face re-render,
+  // and never once the user has manually changed the scope since the last
+  // transition.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+
+  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'installed' | 'library'>('installed')
+
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    setScope(navFace === 'project' && cwd ? 'project' : 'user')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFace, cwd])
 
   const scopePaths = useMemo(() => {
     const out: Partial<Record<Scope, string>> = {}
@@ -84,7 +109,7 @@ export function SystemPrompt() {
           <ScopeSwitcher
             scopes={CLAUDE_MD_SCOPES.scopes}
             active={scope}
-            onChange={setScope}
+            onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }}
             annotate={(s) => {
               if (scopeNeedsCwd(s)) return { exists: false }
               const p = scopePaths[s]

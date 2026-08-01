@@ -377,16 +377,43 @@ function parsePrdBodyDepFragments(body) {
  */
 function checkDeps(queueEntry, allJobs, prdBody) {
   const bySlug = new Map(allJobs.map((j) => [j.slug, j]));
+  // A PRD's filename carries the allocator's `NN-` prefix, but `dependsOn:` is
+  // authored with the bare name (the author cannot know the number that will
+  // be issued). Resolve exact slug first, then bare-name — identical rule to
+  // schedulerBatch.pickForProject's rowsForDep, which MUST agree with this
+  // function (see the missing-row note below).
+  const rowsByBareSlug = new Map();
+  for (const j of allJobs) {
+    const bare = String(j.slug ?? '').replace(/^\d+-/, '');
+    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
+    rowsByBareSlug.get(bare).push(j);
+  }
+  const rowsForDep = (slug) => {
+    const exact = bySlug.get(slug);
+    if (exact) return [exact];
+    return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
+  };
 
   // 1. Queue-level dependsOn (explicit).
   const queueDeps = Array.isArray(queueEntry.dependsOn) ? queueEntry.dependsOn : [];
   for (const depSlug of queueDeps) {
-    const dep = bySlug.get(depSlug);
-    if (!dep) {
-      return { ok: false, reason: `dependsOn: "${depSlug}" not found in queue` };
-    }
-    if (dep.status !== 'completed') {
-      return { ok: false, reason: `dependsOn: "${depSlug}" is ${dep.status} (need completed)` };
+    const deps = rowsForDep(depSlug);
+    // A dep with NO row is SATISFIED, not unmet. Completed rows are retired to
+    // history shards and their PRD is archived, so absence is the normal
+    // end-state of a finished dependency — exactly how pickForProject reads it.
+    //
+    // This used to return deps_unmet, which put the two halves of the
+    // scheduler in direct contradiction: the picker treated a missing dep as
+    // done and fired the job, then this check treated the same missing dep as
+    // unmet and downgraded the finished run back to pending — an infinite
+    // re-run, one full billed claude -p per cycle. It also silently dropped
+    // real work: PRDs 854 and 857 each ran to exit 0, were downgraded on a
+    // bare dep name that never matched any row, and ended up on disk with no
+    // queue row at all.
+    if (deps.length === 0) continue;
+    const unfinished = deps.find((d) => d.status !== 'completed');
+    if (unfinished) {
+      return { ok: false, reason: `dependsOn: "${depSlug}" is ${unfinished.status} (need completed)` };
     }
   }
 

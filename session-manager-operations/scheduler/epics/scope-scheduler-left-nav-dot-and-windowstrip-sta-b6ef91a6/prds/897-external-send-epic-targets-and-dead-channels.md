@@ -2,7 +2,6 @@
 title: Resolve external chat sends against Epics, and remove the dead chat context-probe channels
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 14
-dependsOn: [prompt-session-event-broadcast]
 ---
 # Goal
 

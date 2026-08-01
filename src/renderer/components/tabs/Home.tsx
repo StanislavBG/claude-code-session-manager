@@ -85,7 +85,7 @@ function Hero({ greeting }: { greeting: string }) {
     return () => { alive = false; clearInterval(id) }
   }, [])
 
-  const total = slots?.total ?? 3
+  const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0
 
   return (
@@ -97,6 +97,45 @@ function Hero({ greeting }: { greeting: string }) {
         {greeting}. <span className="text-accent">{inUse} of {total}</span> session slots are busy.
       </h1>
     </header>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Session slot cap control — 0 (pause all new launches) to 10 (max
+// allowed), default 5. Shared by ActiveSessionsCard below.
+// ────────────────────────────────────────────────────────────────────
+function SessionSlotCapControl({ slots }: { slots: SlotSnapshot | null }) {
+  const min = slots?.min ?? 0
+  const max = slots?.max ?? 10
+  const total = slots?.total ?? 5
+  const envOverride = slots?.envOverride ?? false
+  const [pending, setPending] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const value = pending ?? total
+
+  const commit = (n: number) => {
+    setPending(n)
+    setSaving(true)
+    window.api.schedule.setSessionSlots(n)
+      .catch(() => { /* Toast is reserved for user-triggered actions; snapshot poll will resync display */ })
+      .finally(() => { setSaving(false); setPending(null) })
+  }
+
+  return (
+    <span className="flex items-center gap-2.5 shrink-0" title={envOverride ? 'Pinned by SM_SESSION_SLOTS env var' : 'Max concurrent claude -p sessions on this machine (0 pauses new launches)'}>
+      <span className="font-mono text-[11px] text-fg-faint">Max slots</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        disabled={envOverride || saving}
+        onChange={(e) => commit(Number(e.target.value))}
+        className="w-24 accent-accent disabled:opacity-40 disabled:cursor-not-allowed"
+      />
+      <span className="font-mono text-[12px] font-semibold text-fg w-4 text-right">{value}</span>
+    </span>
   )
 }
 
@@ -337,7 +376,10 @@ function relativeTime(ms: number): string {
 // (lib/sessionSlots.cjs) joined against running scheduler jobs / chat runs.
 // ────────────────────────────────────────────────────────────────────
 
-type SlotSnapshot = { total: number; inUse: number; holders: { owner: string; at: string }[] }
+type SlotSnapshot = {
+  total: number; inUse: number; holders: { owner: string; at: string }[]
+  min: number; max: number; default: number; envOverride: boolean
+}
 
 function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
@@ -357,7 +399,7 @@ function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
     return () => { alive = false; clearInterval(id) }
   }, [])
 
-  const total = slots?.total ?? 3
+  const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0
   const runningJobs = useMemo(() => jobs.filter((j) => j.status === 'running'), [jobs])
   const rows = useMemo(
@@ -377,7 +419,10 @@ function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
     <section className="mb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="m-0 font-serif text-[22px] font-medium">Active sessions</h2>
-        <span className="font-mono text-[12px] text-fg-faint">{inUse} of {total} slots in use</span>
+        <span className="flex items-center gap-4">
+          <span className="font-mono text-[12px] text-fg-faint">{inUse} of {total} slots in use</span>
+          <SessionSlotCapControl slots={slots} />
+        </span>
       </div>
       {rows.length === 0 ? (
         <div className="text-[13px] text-fg-faint py-1">No headless Claude sessions running.</div>

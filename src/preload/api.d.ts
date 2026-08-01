@@ -1390,8 +1390,16 @@ export interface SessionManagerAPI {
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;
-    /** Machine-wide claude -p slot pool (sessionSlots.cjs): total/inUse/holders. */
-    sessionSlots: () => Promise<{ total: number; inUse: number; holders: { owner: string; at: string }[] }>;
+    /** Machine-wide claude -p slot pool (sessionSlots.cjs): total/inUse/holders + [min,max]/default/envOverride. */
+    sessionSlots: () => Promise<{
+      total: number; inUse: number; holders: { owner: string; at: string }[];
+      min: number; max: number; default: number; envOverride: boolean;
+    }>;
+    /** Set the slot pool's user cap (Home tab), [0, 10]; 0 pauses new launches. Ignored if SM_SESSION_SLOTS is set. */
+    setSessionSlots: (cap: number) => Promise<{
+      total: number; inUse: number; holders: { owner: string; at: string }[];
+      min: number; max: number; default: number; envOverride: boolean;
+    }>;
     setConfig: (partial: Partial<ScheduleConfig & { supervisor?: Partial<SupervisorConfig> }>) => Promise<{ ok: boolean; config: ScheduleConfig }>;
     resetJob: (slug: string) => Promise<{ ok: boolean; error?: string }>;
     runNow: () => Promise<{ ok: boolean }>;

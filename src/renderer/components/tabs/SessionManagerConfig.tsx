@@ -92,12 +92,13 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
         <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Session pool</h2>
         <p className="mt-0 mb-3 text-[13px] text-fg-dim leading-relaxed">
           One machine-wide pool of concurrent Claude sessions. Scheduler jobs and Epic chat
-          runs each request a slot before launching; work waits when the pool is full. Sized
-          to this machine's memory budget — override with{' '}
-          <code className="font-mono text-[12px]">SM_SESSION_SLOTS</code> (clamped 1–3).
+          runs each request a slot before launching; work waits when the pool is full.
+          Adjustable from 0 (pauses new launches) to 10 on the Home tab, default 5 — or
+          pin it with{' '}
+          <code className="font-mono text-[12px]">SM_SESSION_SLOTS</code> (clamped 0–10).
         </p>
         <div className="flex items-center gap-2">
-          {Array.from({ length: slots?.total ?? 3 }, (_, i) => (
+          {Array.from({ length: slots?.total ?? 5 }, (_, i) => (
             <span
               key={i}
               className={`w-3.5 h-3.5 rounded-full border ${

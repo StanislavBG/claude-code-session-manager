@@ -1,36 +1,80 @@
 // sessionSlots.cjs — the Session-Manager-owned machine-wide claude -p pool.
 // vitest globals (test/beforeEach/afterEach) — same convention as the other .cjs tests.
 const assert = require('node:assert');
+const fs = require('node:fs');
 const slots = require('../sessionSlots.cjs');
 
-beforeEach(() => slots.__resetForTests());
+// Same real-homedir convention as queueStore.cjs's own tests — no path override exists
+// for this module, so keep the persisted file removed except where a test deliberately
+// wants it, and restore it to unset afterward.
+const CONFIG_PATH = require('node:path').join(require('node:os').homedir(), '.claude', 'session-manager', 'session-slots-config.json');
+function removeConfig() {
+  try { fs.unlinkSync(CONFIG_PATH); } catch { /* already absent */ }
+}
+
+beforeEach(() => {
+  slots.__resetForTests();
+  removeConfig();
+});
 afterEach(() => {
   slots.__resetForTests();
   delete process.env.SM_SESSION_SLOTS;
+  removeConfig();
 });
 
-test('pool defaults to 3 slots and exhausts', () => {
-  assert.equal(slots.totalSlots(), 3);
-  const t1 = slots.acquire('a');
-  const t2 = slots.acquire('b');
-  const t3 = slots.acquire('c');
-  assert.ok(t1 && t2 && t3);
+test('pool defaults to 5 slots and exhausts', () => {
+  assert.equal(slots.totalSlots(), 5);
+  const tokens = ['a', 'b', 'c', 'd', 'e'].map((o) => slots.acquire(o));
+  assert.ok(tokens.every(Boolean));
   assert.equal(slots.available(), 0);
-  assert.equal(slots.acquire('d'), null, 'fourth acquire must be refused');
-  slots.release(t2);
+  assert.equal(slots.acquire('f'), null, 'sixth acquire must be refused');
+  slots.release(tokens[1]);
   assert.equal(slots.available(), 1);
-  assert.ok(slots.acquire('d'));
+  assert.ok(slots.acquire('f'));
 });
 
-test('SM_SESSION_SLOTS overrides, clamped to [1,3]', () => {
+test('SM_SESSION_SLOTS overrides, clamped to [0, 10]', () => {
   process.env.SM_SESSION_SLOTS = '1';
   assert.equal(slots.totalSlots(), 1);
-  process.env.SM_SESSION_SLOTS = '9';
-  assert.equal(slots.totalSlots(), 3, 'clamped high');
+  process.env.SM_SESSION_SLOTS = '20';
+  assert.equal(slots.totalSlots(), 10, 'clamped high');
   process.env.SM_SESSION_SLOTS = '0';
-  assert.equal(slots.totalSlots(), 1, 'clamped low');
+  assert.equal(slots.totalSlots(), 0, '0 is a legal explicit value (pauses new launches)');
+  process.env.SM_SESSION_SLOTS = '-5';
+  assert.equal(slots.totalSlots(), 0, 'clamped low');
   process.env.SM_SESSION_SLOTS = 'junk';
-  assert.equal(slots.totalSlots(), 3, 'non-numeric falls back to default');
+  assert.equal(slots.totalSlots(), 5, 'non-numeric falls back to default');
+});
+
+test('cap of 0 pauses all new acquisitions without touching existing holders', () => {
+  const t = slots.acquire('a');
+  assert.ok(t);
+  process.env.SM_SESSION_SLOTS = '0';
+  assert.equal(slots.acquire('b'), null);
+  assert.equal(slots.inUse(), 1, 'existing holder is untouched by the pause');
+  slots.release(t);
+  assert.equal(slots.inUse(), 0);
+});
+
+test('setCap persists a value that totalSlots() picks up without an env override', () => {
+  slots.setCap(8);
+  assert.equal(slots.totalSlots(), 8);
+  slots.setCap(0);
+  assert.equal(slots.totalSlots(), 0);
+});
+
+test('setCap rejects out-of-range or non-integer values', () => {
+  assert.throws(() => slots.setCap(11));
+  assert.throws(() => slots.setCap(-1));
+  assert.throws(() => slots.setCap(2.5));
+});
+
+test('setCap notifies subscribers so a raised cap can wake waiting consumers', () => {
+  let notified = 0;
+  const unsub = slots.subscribe(() => { notified += 1; });
+  slots.setCap(7);
+  assert.equal(notified, 1);
+  unsub();
 });
 
 test('release is idempotent and notifies subscribers exactly on real releases', () => {

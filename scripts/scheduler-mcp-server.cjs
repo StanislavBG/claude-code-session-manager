@@ -107,7 +107,7 @@ const TOOLS = [
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
         parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
         dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
-        sourcePromptId: { type: 'string', description: 'Optional: PromptTicket.id this PRD was authored from, for traceability' },
+        sourcePromptId: { type: 'string', description: "Optional: an EXISTING Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join that Epic instead of minting a new one — NOT a PromptTicket.id (PromptTicket.id and promptSessionId are distinct fields; passing the former will silently mint an unrelated Epic)" },
         sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
       },
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],

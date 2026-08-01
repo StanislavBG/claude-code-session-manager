@@ -51,6 +51,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-commit-guard-noop.test.cjs',
       'src/main/__tests__/scheduler-unreadable-queue-guard.test.cjs',
       'src/main/__tests__/health-prd-migration.test.cjs',
+      'src/main/__tests__/epicMint.test.cjs',
       'scripts/__tests__/feedback-sweep.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',

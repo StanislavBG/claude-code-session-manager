@@ -284,10 +284,12 @@ const schedulerCreatePrd = z.object({
   // Explicit ordering (PRD 832): slugs that must complete before this PRD
   // becomes eligible. Written to frontmatter as `dependsOn: [a, b]`.
   dependsOn: z.array(z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/)).max(20).optional(),
-  // Originating PromptTicket.id (PRD 748) when this PRD was authored from a
-  // ticket classified 'develop' (PRD 749) — traces the PRD back to the
-  // prompt that spawned it. Same newline-injection guard as title/cwd since
-  // it also becomes a frontmatter value.
+  // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
+  // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
+  // sessions key literally equals this value; the renderer only ever sends
+  // PromptTicket.promptSessionId here (see state/chat.ts), never
+  // PromptTicket.id — those are distinct fields. Same newline-injection
+  // guard as title/cwd since it also becomes a frontmatter value.
   sourcePromptId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // Originating tab id (PRD 761) — used at job completion to route a status
   // prompt back into the chat tab that queued this PRD, via

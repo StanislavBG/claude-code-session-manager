@@ -4145,6 +4145,12 @@ const remote = {
             goalText: fm.title || slug,
             tag: fm.tag,
             // An Epic-conversation dispatch already has its Epic — join it.
+            // fm.sourcePromptId must be an existing Epic's promptSessionId
+            // (== its active-index.json sessions key), NOT a
+            // PromptTicket.id — epicMint.cjs's ensureEpic looks it up via
+            // `index.sessions[explicitEpicId]` (see epicMint.cjs ~line 73),
+            // a literal-equality join. Any other id (e.g. a PromptTicket.id)
+            // simply won't match and mints a sibling Epic instead of joining.
             epicId: fm.sourcePromptId,
           });
           dir = epic.prdDir;

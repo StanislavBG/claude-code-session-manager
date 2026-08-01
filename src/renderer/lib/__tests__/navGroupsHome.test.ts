@@ -144,6 +144,23 @@ describe('memory is project-only', () => {
   })
 })
 
+describe('remote is home-only', () => {
+  it('NAV_ITEMS tags remote with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'remote')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes remote', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('remote')
+  })
+
+  it('home face includes remote', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('remote')
+  })
+})
+
 describe('NAV_ITEMS face-coverage invariant', () => {
   it('every NAV_ITEMS entry has a non-empty faces array', () => {
     for (const item of NAV_ITEMS) {

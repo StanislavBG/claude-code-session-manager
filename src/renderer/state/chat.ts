@@ -30,6 +30,8 @@ export interface ToolUseTrace {
   id: string
   kind: 'skill' | 'mcp' | 'tool'
   label: string
+  /** Populated only for Edit/Write tool_use events; undefined for every other kind. */
+  diff?: { filePath: string; oldText?: string; newText?: string }
 }
 
 export interface ChatTurn {
@@ -811,8 +813,8 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   window.api.chat.onOutput(({ tabId, delta }) => {
     patch(tabId, (c) => ({ ...c, stream: c.stream + delta }))
   })
-  window.api.chat.onToolUse(({ tabId, id, kind, label }) => {
-    patch(tabId, (c) => ({ ...c, liveToolUses: [...c.liveToolUses, { id, kind, label }] }))
+  window.api.chat.onToolUse(({ tabId, id, kind, label, diff }) => {
+    patch(tabId, (c) => ({ ...c, liveToolUses: [...c.liveToolUses, { id, kind, label, diff }] }))
   })
   window.api.chat.onComplete(({ tabId, finalMessage }) => {
     capturePromptSessionTurn(tabId, 'assistant', finalMessage)

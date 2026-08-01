@@ -1121,6 +1121,8 @@ export interface ChatRunToolUseEvent {
   id: string;
   kind: 'skill' | 'mcp' | 'tool';
   label: string;
+  /** Populated only for Edit/Write tool_use blocks; undefined for every other kind. */
+  diff?: { filePath: string; oldText?: string; newText?: string };
 }
 
 export interface ChatRunNeedsInputEvent {

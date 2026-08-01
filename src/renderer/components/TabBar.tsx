@@ -26,11 +26,17 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
   const watchersById = useWatchers((s) => s.watchers)
   const hasBrowserTabs = useBrowserState((s) => s.tabs.length > 0)
   const canSplitView = activeTabId != null && hasBrowserTabs
-  const focusedPanelId = useLayout((s) => s.focusedPanelId)
   const openPanel = useLayout((s) => s.openPanel)
   const openProjectPanel = useLayout((s) => s.openProjectPanel)
   const setEpicsWorkspaceOpen = useLayout((s) => s.setEpicsWorkspaceOpen)
-  const machineHomeActive = focusedPanelId === 'overview'
+  // Home pill tracks navFace, not focusedPanelId === 'overview' — most Home
+  // sidebar rows (Scheduler, Skills, Plugins, etc.) are BOTH-face screens, so
+  // browsing one of them via the Home sidebar leaves focusedPanelId on that
+  // screen's id, not 'overview'. navFace is the real "which face am I on"
+  // state (see state/layout.ts) and stays 'home' the whole time, so this pill
+  // stays lit for the whole Home browsing session instead of only on the
+  // literal Overview screen.
+  const machineHomeActive = useLayout((s) => s.navFace === 'home')
 
   // Re-render the badge layer once a second so the 30s activity window can
   // expire on its own — lastLineAt itself doesn't change when no new line

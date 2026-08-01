@@ -174,12 +174,15 @@ export function getPanelDefinition(id: string): PanelDefinition | undefined {
 }
 
 /**
- * 'projects' (File Explorer, ProjectsWorkspace.tsx) renders `useSessions()`'s
- * `activeTab` and dead-ends on a bare "No session selected." with no way
- * back when there is none — reachable whenever the last session tab closes,
- * or App.tsx's explicit `activeTabId: null` resets (navigate('terminal'),
- * handleNewSession) fire while 'projects' is still the focused panel. Pure
- * predicate (no store reads) so App.tsx's reconciliation effect is
+ * 'projects' (File Explorer, ProjectsWorkspace.tsx) used to dead-end on a
+ * bare "No session selected." with no way back whenever `activeTabId` was
+ * null — reachable when the last session tab closes, or App.tsx's explicit
+ * `activeTabId: null` resets (navigate('terminal'), handleNewSession) fire
+ * while 'projects' is still focused. File Explorer is now a BOTH-face
+ * screen (see lib/navGroups.ts): on the Home face it roots at the OS home
+ * directory and never depends on `activeTab`, so the dead-end can only
+ * happen on the Project face — `navFace` scopes the guard accordingly.
+ * Pure predicate (no store reads) so App.tsx's reconciliation effect is
  * unit-testable without mounting App. Scoped to 'projects' only — 'terminal'
  * (Epics workspace) intentionally renders with activeTabId === null, and
  * 'browser'/'editor' own independent tab-id state, not session activeTabId.
@@ -187,8 +190,9 @@ export function getPanelDefinition(id: string): PanelDefinition | undefined {
 export function needsProjectsPanelReconciliation(
   focusedPanelId: string | null,
   activeTabId: string | null,
+  navFace: NavFace = 'project',
 ): boolean {
-  return focusedPanelId === 'projects' && activeTabId === null
+  return focusedPanelId === 'projects' && activeTabId === null && navFace === 'project'
 }
 
 /** True when `panelId` is the workbench's currently active panel. */

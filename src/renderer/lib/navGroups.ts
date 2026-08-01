@@ -36,7 +36,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'project-home', group: 'Workspace', label: 'Home',     icon: 'home',         hint: 'What this project is, and what is in flight', faces: PROJECT },
   { key: 'terminal',   group: 'Workspace', label: 'Epics',      icon: 'terminal',     hint: 'Independent goal-scoped Epics, grouped by project', faces: BOTH },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences', faces: HOME },
-  { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit, per project', faces: PROJECT },
+  { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
   { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs', faces: BOTH },
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: BOTH },
 

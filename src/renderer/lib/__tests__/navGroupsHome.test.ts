@@ -18,10 +18,10 @@ describe('navGroups Home swap', () => {
 
 describe('getNavItemsForFace', () => {
   const HOME_ONLY = ['browser', 'plugins', 'keybindings', 'remote', 'sm-config', 'voice']
-  const PROJECT_ONLY = ['project-home', 'projects', 'repoviz', 'search', 'memory']
+  const PROJECT_ONLY = ['project-home', 'repoviz', 'search', 'memory']
   const BOTH = [
     'terminal', 'scheduler', 'history', 'system-prompt', 'skills', 'mcp', 'hooks',
-    'permissions', 'settings',
+    'permissions', 'settings', 'projects',
   ]
 
   it('home face returns home-only + both keys', () => {
@@ -110,15 +110,17 @@ describe('keybindings is home-only', () => {
   })
 })
 
-describe('projects is project-only', () => {
-  it('NAV_ITEMS tags projects with faces: [project]', () => {
+describe('projects (File Explorer) is a BOTH-face screen', () => {
+  // Reachable from both sidebars — its starting root folder differs by
+  // face at render time (ProjectsWorkspace.tsx), not by hiding the row.
+  it('NAV_ITEMS tags projects with faces: [home, project]', () => {
     const item = NAV_ITEMS.find((i) => i.key === 'projects')
-    expect(item?.faces).toEqual(['project'])
+    expect(item?.faces).toEqual(['home', 'project'])
   })
 
-  it('home face excludes projects', () => {
+  it('home face includes projects', () => {
     const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).not.toContain('projects')
+    expect(keys).toContain('projects')
   })
 
   it('project face includes projects', () => {

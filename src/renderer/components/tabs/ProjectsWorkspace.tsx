@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
 import { useSessions } from '../../state/sessions'
 import { useEditor } from '../../state/editor'
+import { useLayout } from '../../state/layout'
 import { useProjectsPrefs } from '../../state/projectsPrefs'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { FileTree } from '../layout/FileTree'
@@ -32,6 +33,23 @@ export function ProjectsWorkspace() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
+
+  // File Explorer is a BOTH-face screen (see lib/navGroups.ts): its starting
+  // root folder must differ by face rather than always following whichever
+  // tab happens to be active. On the Project face it roots at that tab's
+  // cwd (unchanged behavior). On the Home face it roots at the OS home
+  // directory instead — independent of any open project tab — so opening
+  // File Explorer from the Home sidebar never depends on (or implies) a
+  // selected project.
+  const navFace = useLayout((s) => s.navFace)
+  const [homeDir, setHomeDir] = useState<string | null>(null)
+  useEffect(() => {
+    if (navFace !== 'home' || homeDir) return
+    let cancelled = false
+    window.api.app.homeDir().then((dir) => { if (!cancelled) setHomeDir(dir) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [navFace, homeDir])
+  const rootCwd = navFace === 'home' ? homeDir : (activeTab?.cwd ?? null)
 
   const [pct, setPct] = useState<number>(() => loadSplitPct())
   const [collapsed, setCollapsed] = useState<boolean>(() => loadCollapsed())
@@ -139,7 +157,7 @@ export function ProjectsWorkspace() {
             className="flex-1 min-w-0 px-3 py-1.5 text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-bg-hi transition-colors"
           >
             <span className="flex-1 truncate text-left">
-              {activeTab ? compactPath(activeTab.cwd) : 'Projects'}
+              {rootCwd ? compactPath(rootCwd) : 'Projects'}
             </span>
             <span className="text-fg-faint shrink-0 text-[10px]">{launcherOpen ? '▲' : '▼'}</span>
           </button>
@@ -197,18 +215,18 @@ export function ProjectsWorkspace() {
           )}
         </div>
 
-        {activeTab ? (
+        {rootCwd ? (
           <>
-            <div className="px-3 py-2 border-b border-line text-[11.5px] text-fg-faint font-mono truncate shrink-0" title={activeTab.cwd}>
-              {compactPath(activeTab.cwd)}
+            <div className="px-3 py-2 border-b border-line text-[11.5px] text-fg-faint font-mono truncate shrink-0" title={rootCwd}>
+              {compactPath(rootCwd)}
             </div>
             <div className="flex-1 min-h-0 overflow-auto">
-              <FileTree cwd={activeTab.cwd} activeTabId={activeTab.id} onPreviewFile={openInline} />
+              <FileTree cwd={rootCwd} activeTabId={activeTab?.id ?? null} onPreviewFile={openInline} />
             </div>
           </>
         ) : (
           <div className="px-3 py-6 text-center text-[12px] text-fg-faint">
-            No session selected.
+            {navFace === 'home' ? 'Loading home folder…' : 'No session selected.'}
           </div>
         )}
       </div>

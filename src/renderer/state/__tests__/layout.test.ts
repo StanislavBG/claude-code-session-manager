@@ -246,6 +246,14 @@ describe('needsProjectsPanelReconciliation (File Explorer dead-end guard)', () =
   it('does not reconcile when focusedPanelId is null', () => {
     expect(needsProjectsPanelReconciliation(null, null)).toBe(false)
   })
+
+  it('does not reconcile on the Home face — File Explorer roots at the home dir there, no activeTab needed', () => {
+    expect(needsProjectsPanelReconciliation('projects', null, 'home')).toBe(false)
+  })
+
+  it('still reconciles on the Project face with no active tab (default navFace)', () => {
+    expect(needsProjectsPanelReconciliation('projects', null, 'project')).toBe(true)
+  })
 })
 
 describe('layout.ts hydrateOpenToHomePref (app-prefs.json boot hydration)', () => {

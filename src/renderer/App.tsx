@@ -48,6 +48,7 @@ export function App() {
   // (sidebar, CommandPalette, keyboard shortcuts, forced-terminal toggles)
   // goes through — see src/renderer/state/layout.ts.
   const focusedPanelId = (useLayout((s) => s.focusedPanelId) ?? 'overview') as NavKey
+  const navFace = useLayout((s) => s.navFace)
   // `--simple` launch flag: null until resolved, then true → SimpleShell.
   const [simpleMode, setSimpleMode] = useState<boolean | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -126,21 +127,25 @@ export function App() {
     if (isPureSwitch) useLayout.getState().openProjectPanel('terminal')
   }, [activeTabId, tabs])
 
-  // 'projects' (File Explorer) renders useSessions().activeTab and dead-ends
-  // on "No session selected." with no path back when activeTabId is null —
-  // reachable whenever the last tab closes, or the activeTabId:null resets
-  // above (navigate('terminal'), handleNewSession) fire while 'projects' is
-  // still focused. Reconcile to Home instead of leaving a dead panel up.
+  // 'projects' (File Explorer) on the Project face renders useSessions()
+  // .activeTab and dead-ends on "No session selected." with no path back
+  // when activeTabId is null — reachable whenever the last tab closes, or
+  // the activeTabId:null resets above (navigate('terminal'),
+  // handleNewSession) fire while 'projects' is still focused. Reconcile to
+  // Home instead of leaving a dead panel up. On the Home face, File Explorer
+  // roots at the OS home directory and never needs activeTab, so the guard
+  // is scoped to navFace === 'project' (needsProjectsPanelReconciliation's
+  // default) and must not fire while browsing it from Home.
   // Scoped ONLY to 'projects': 'terminal' (Epics workspace) intentionally
   // renders with activeTabId === null (see navigate() above), and
   // 'browser'/'editor' own independent tab-id state (useBrowserState()
   // .activeTabId, no activeTab dependency in EditorView) so they don't need
   // this guard — see needsProjectsPanelReconciliation's own comment.
   useEffect(() => {
-    if (needsProjectsPanelReconciliation(focusedPanelId, activeTabId)) {
+    if (needsProjectsPanelReconciliation(focusedPanelId, activeTabId, navFace)) {
       useLayout.getState().openPanel('overview')
     }
-  }, [focusedPanelId, activeTabId])
+  }, [focusedPanelId, activeTabId, navFace])
 
   // Terminal-screen toast: transient notice on watcher activity, or a
   // "sent to N tabs" confirmation after a broadcast. Ported from MainPane.

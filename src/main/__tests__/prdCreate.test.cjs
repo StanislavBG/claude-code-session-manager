@@ -23,6 +23,7 @@ const {
   PRD_CREATE_SLUG_RE,
   registerAdminRoute,
   createPrd,
+  resolveSourcePromptIdFromClaudeSession,
 } = require('../lib/prdCreate.cjs');
 const { createAdminHttp } = require('../lib/localAdminHttp.cjs');
 const config = require('../config.cjs');
@@ -503,5 +504,74 @@ test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the cr
     expect(written).toMatch(/sourcePromptId: ticket-xyz-789/);
   } finally {
     await admin.stop();
+  }
+});
+
+// ──────────────────────────────────────────── originClaudeSessionId fallback
+// (2026-08-01 fix: a PRD queued via the scheduler_create_prd MCP tool from
+// inside an Epic's own chat session, without an explicit sourcePromptId,
+// must still join that Epic rather than mint an unrelated sibling one.)
+
+async function writeActiveIndexFixture(cwd, sessions) {
+  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.writeFile(path.join(dir, 'active-index.json'), JSON.stringify({ sessions, events: {} }, null, 2));
+}
+
+test('resolveSourcePromptIdFromClaudeSession finds the Epic whose claudeSessionId matches', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-resolve-epic-'));
+  try {
+    await writeActiveIndexFixture(root, {
+      'psess-abc123': { id: 'psess-abc123', claudeSessionId: 'claude-sess-1', status: 'active' },
+    });
+    expect(resolveSourcePromptIdFromClaudeSession(root, 'claude-sess-1')).toBe('psess-abc123');
+    expect(resolveSourcePromptIdFromClaudeSession(root, 'claude-sess-unknown')).toBeNull();
+    expect(resolveSourcePromptIdFromClaudeSession(root, null)).toBeNull();
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createPrd resolves sourcePromptId from originClaudeSessionId when the caller omitted sourcePromptId', async () => {
+  const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-origin-session-epic-'));
+  config.addAllowedRoot(root);
+  try {
+    await writeActiveIndexFixture(root, {
+      'psess-always-select-tab': { id: 'psess-always-select-tab', claudeSessionId: 'claude-sess-epic-1', status: 'active' },
+    });
+    const prdsDir = path.join(root, 'session-manager-operations', 'scheduler', 'epics', 'psess-always-select-tab', 'prds');
+    const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+    const result = await createPrd(
+      validCreateBody({ cwd: root, slug: 'joins-the-epic', originClaudeSessionId: 'claude-sess-epic-1' }),
+      remote,
+    );
+
+    expect(result.ok).toBe(true);
+    const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+    expect(written).toMatch(/sourcePromptId: psess-always-select-tab/);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createPrd leaves sourcePromptId unset when originClaudeSessionId matches no known Epic (plain SessionTab chat)', async () => {
+  const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-origin-session-no-match-'));
+  config.addAllowedRoot(root);
+  try {
+    await writeActiveIndexFixture(root, {});
+    const prdsDir = path.join(root, 'session-manager-operations', 'scheduler', 'prds');
+    const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+    const result = await createPrd(
+      validCreateBody({ cwd: root, slug: 'no-epic-match', originClaudeSessionId: 'claude-sess-not-an-epic' }),
+      remote,
+    );
+
+    expect(result.ok).toBe(true);
+    const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+    expect(!/sourcePromptId:/.test(written)).toBeTruthy();
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });

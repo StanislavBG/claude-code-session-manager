@@ -154,7 +154,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_create_prd') {
-      const result = await adminRequest('POST', '/admin/scheduler/create-prd', args);
+      // If the caller (the model) didn't pass sourcePromptId, forward this
+      // process's own SM_CHAT_SESSION_ID (set by chatRunner.cjs on the
+      // parent claude -p process this MCP server inherited its env from) so
+      // the admin route can auto-resolve it to the calling Epic and join
+      // that Epic instead of silently minting an unrelated sibling one — see
+      // prdCreate.cjs's resolveSourcePromptIdFromClaudeSession.
+      const payload = { ...args };
+      if (!payload.sourcePromptId && process.env.SM_CHAT_SESSION_ID) {
+        payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
+      }
+      const result = await adminRequest('POST', '/admin/scheduler/create-prd', payload);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'chat_send_prompt') {

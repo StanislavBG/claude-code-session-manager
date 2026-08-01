@@ -23,6 +23,7 @@ const { kebabCase } = require('./kebabCase.cjs');
 const config = require('../config.cjs');
 const { expandHome } = require('./expandHome.cjs');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
+const { readActiveIndex } = require('./epicMint.cjs');
 
 const STANDARDS_PATH = path.join(
   __dirname, '..', '..', '..',
@@ -91,6 +92,29 @@ function buildPrdBody(input) {
 }
 
 /**
+ * Best-effort fallback for a PRD queued via the scheduler_create_prd MCP tool
+ * from inside an Epic's own headless chat session, when the model's tool
+ * call omitted `sourcePromptId` — the exact gap that let PRDs 866/867 mint
+ * two unrelated sibling Epics instead of joining the Epic that was actually
+ * driving the conversation (2026-08-01). `claudeSessionId` is this process's
+ * `originClaudeSessionId` input (chatRunner.cjs's SM_CHAT_SESSION_ID env var,
+ * inherited down to the MCP server child); looked up against `cwd`'s
+ * active-index.json for the Epic whose own claudeSessionId matches (domain
+ * model: Epic:claude-session is 1:1). Returns null for a non-Epic tab (plain
+ * SessionTab chat) or when the id is stale/unknown — never throws, since this
+ * is strictly a convenience default and a miss must fall back to minting a
+ * normal Epic exactly like today.
+ */
+function resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId) {
+  if (!claudeSessionId) return null;
+  const { sessions } = readActiveIndex(cwd);
+  for (const session of Object.values(sessions)) {
+    if (session && session.claudeSessionId === claudeSessionId) return session.id;
+  }
+  return null;
+}
+
+/**
  * Core create-PRD orchestration: cwd validation, slug derivation, NN
  * allocation, existing-file collision check, body build, write. Shared by
  * both the admin HTTP route (registerAdminRoute, used by the MCP tool) and
@@ -129,6 +153,11 @@ async function createPrd(input, remote) {
   // though validatePath (the read boundary) just passed above.
   config.addAllowedRoot(realCwd);
   input = { ...input, cwd };
+
+  if (!input.sourcePromptId && input.originClaudeSessionId) {
+    const resolved = resolveSourcePromptIdFromClaudeSession(cwd, input.originClaudeSessionId);
+    if (resolved) input = { ...input, sourcePromptId: resolved };
+  }
 
   const slug = input.slug || deriveSlugFromTitle(input.title);
   if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {
@@ -209,6 +238,7 @@ module.exports = {
   readStandards,
   deriveSlugFromTitle,
   buildPrdBody,
+  resolveSourcePromptIdFromClaudeSession,
   createPrd,
   registerAdminRoute,
 };

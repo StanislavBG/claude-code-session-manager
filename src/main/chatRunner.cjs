@@ -495,7 +495,14 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     };
 
     const claudeBin = resolveClaudeBin();
-    const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
+    // Carried down to any MCP server this run spawns (e.g.
+    // scripts/scheduler-mcp-server.cjs, inherited via the claude CLI's own
+    // child env) so scheduler_create_prd can auto-resolve sourcePromptId
+    // when the model forgets to pass it — see prdCreate.cjs's
+    // resolveSourcePromptIdFromClaudeSession. sessionId IS the Epic's
+    // claudeSessionId for an Epic-backed tab (domain model: Epic:claude-session
+    // 1:1); for a non-Epic tab, resolution below simply finds no match.
+    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId });
 
     // Prepend the stop-signal protocol instruction and the chat-mode truth
     // instruction to every prompt

@@ -303,6 +303,14 @@ const schedulerCreatePrd = z.object({
   // prompt back into the chat tab that queued this PRD, via
   // enqueueExternalPrompt (PRD 753). Same newline-injection guard.
   sourceTabId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  // The calling MCP process's own claude session id (scheduler-mcp-server.cjs
+  // forwards its inherited SM_CHAT_SESSION_ID env var here when the model
+  // omitted sourcePromptId) — never written to frontmatter itself; prdCreate.cjs's
+  // createPrd() resolves it against active-index.json to fill sourcePromptId
+  // when it matches an existing Epic's claudeSessionId, so a PRD queued from
+  // within an Epic's own chat session joins that Epic even if the tool call
+  // forgot to pass sourcePromptId explicitly.
+  originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // User-selected Feature/Bug tag (PRD 774) carried from the originating
   // PromptTicket — deterministic, never LLM-classified.
   tag: z.enum(['feature', 'bug', 'discussion']).optional(),

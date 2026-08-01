@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { NAV_ITEMS, getNavItemsForFace } from '../navGroups'
+import type { NavFace } from '../navFace'
+
+const VALID_FACES: NavFace[] = ['home', 'project']
 
 describe('navGroups Home swap', () => {
   it('first Workspace item is project-home labeled Home', () => {
@@ -53,5 +56,29 @@ describe('project-home is project-only', () => {
   it('project face includes project-home', () => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
     expect(keys).toContain('project-home')
+  })
+})
+
+describe('NAV_ITEMS face-coverage invariant', () => {
+  it('every NAV_ITEMS entry has a non-empty faces array', () => {
+    for (const item of NAV_ITEMS) {
+      expect(item.faces.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('every face value is a valid NavFace', () => {
+    for (const item of NAV_ITEMS) {
+      for (const face of item.faces) {
+        expect(VALID_FACES).toContain(face)
+      }
+    }
+  })
+
+  it('home + project faces together cover every NAV_ITEMS key', () => {
+    const homeKeys = getNavItemsForFace('home').map((item) => item.key)
+    const projectKeys = getNavItemsForFace('project').map((item) => item.key)
+    const covered = new Set([...homeKeys, ...projectKeys])
+    const allKeys = NAV_ITEMS.map((item) => item.key)
+    expect(covered).toEqual(new Set(allKeys))
   })
 })

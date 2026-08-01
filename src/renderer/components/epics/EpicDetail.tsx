@@ -131,7 +131,7 @@ function ResponseEvent({
   }
 
   return (
-    <div data-testid="epic-response-event" className="text-center text-[11px] text-fg-faint">
+    <div data-testid="epic-response-event" className="break-words text-center text-[11px] text-fg-faint">
       <span>— {expanded && fullText ? fullText : event.text} —</span>
       {truncated && (
         <button
@@ -289,7 +289,7 @@ function RunCard({ job }: { job: ScheduleJob }) {
  *  title field on PromptSession) — split back apart for the header's h1 +
  *  goal paragraph. Older/Epics with no blank-line separator render the
  *  whole text as the title with no goal paragraph. */
-function splitTitleAndGoal(goalText: string): { title: string; goal: string } {
+export function splitTitleAndGoal(goalText: string): { title: string; goal: string } {
   const idx = goalText.indexOf('\n\n')
   if (idx === -1) return { title: goalText, goal: '' }
   return { title: goalText.slice(0, idx), goal: goalText.slice(idx + 2) }
@@ -308,9 +308,15 @@ function lastActivityAt(session: PromptSession, events: PromptSessionEvent[], tu
 
 interface Props {
   promptSession: PromptSession
+  /** Wired from EpicsWorkspace (the shared parent of this component and the
+   *  sibling EpicComposer) — forwarded to every Turn rendered in the
+   *  Discussion timeline so its hover "Quote" button can seed the composer's
+   *  reply-context strip. Omitted entirely for callers with no composer to
+   *  seed. */
+  onQuote?: (text: string) => void
 }
 
-export function EpicDetail({ promptSession }: Props) {
+export function EpicDetail({ promptSession, onQuote }: Props) {
   const epicId = promptSession.id
   const { cwd, claudeSessionId: sessionId } = promptSession
   const isCompleted = promptSession.status === 'completed'
@@ -532,7 +538,7 @@ export function EpicDetail({ promptSession }: Props) {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-4 pb-2.5" data-testid="epic-meta">
+        <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-line pb-2.5 pt-2.5" data-testid="epic-meta">
           <MetaItem label="opened" value={formatWhen(promptSession.createdAt)} />
           <MetaItem label="last activity" value={formatWhen(lastActivityAt(promptSession, sessionEvents, turns))} />
           {stats && <MetaItem label="turns" value={String(stats.turns)} />}
@@ -559,7 +565,7 @@ export function EpicDetail({ promptSession }: Props) {
         </div>
 
         {mode === 'chat' && (
-          <div className="flex gap-0.5">
+          <div className="flex gap-0.5 border-t border-line pt-2">
             <ViewTabs options={views} active={view} onChange={setView} />
           </div>
         )}
@@ -574,11 +580,11 @@ export function EpicDetail({ promptSession }: Props) {
           <EpicTerminalPane key={sessionId} epicId={epicId} cwd={cwd} sessionId={sessionId} onReturnToChat={returnToChat} />
         </div>
       ) : (
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-5" data-testid="epic-detail-body">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5" data-testid="epic-detail-body">
         {view === 'discussion' && (
-          <div className="grid max-w-[900px] gap-4">
+          <div className="grid max-w-[900px] min-w-0 gap-4">
             {attachedPrds.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 pb-1" data-testid="epic-attached-prds">
+              <div className="flex flex-wrap items-center gap-2 border-b border-line pb-3" data-testid="epic-attached-prds">
                 <span className="font-mono text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint">attached</span>
                 {attachedPrds.map((p) => (
                   <button
@@ -609,7 +615,7 @@ export function EpicDetail({ promptSession }: Props) {
                 const prevTurn = i > 0 ? turns[i - 1] : undefined
                 const precedingUserPrompt = prevTurn?.role === 'user' ? prevTurn.text : undefined
                 return (
-                  <div key={t.id} id={`epic-detail-turn-${t.id}`}>
+                  <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
                     <Turn
                       turn={t}
                       cwd={cwd}
@@ -623,6 +629,7 @@ export function EpicDetail({ promptSession }: Props) {
                       toolStripVariant="collapsible"
                       needsDecisionStyle
                       precedingUserPrompt={precedingUserPrompt}
+                      onQuote={onQuote}
                     />
                   </div>
                 )

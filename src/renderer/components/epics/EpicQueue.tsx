@@ -10,8 +10,11 @@
  * 827's original contract keeps working for any caller that only needs the
  * plain grouped list.
  */
-import { useMemo, useState, type ReactNode } from 'react'
-import type { PromptSession, PromptSessionEvent } from '../../state/promptSessions'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
+import { useEpicTerminal } from '../../state/epicTerminal'
+import { toast } from '../../state/toast'
+import { splitTitleAndGoal } from './EpicDetail'
 import {
   epicDisplayStatus,
   epicPrds,
@@ -48,6 +51,204 @@ function PinIcon({ filled }: { filled: boolean }) {
   )
 }
 
+function DotsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width={13} height={13} aria-hidden="true" fill="currentColor">
+      <circle cx="3.5" cy="8" r="1.4" />
+      <circle cx="8" cy="8" r="1.4" />
+      <circle cx="12.5" cy="8" r="1.4" />
+    </svg>
+  )
+}
+
+interface MenuItem {
+  label: string
+  onSelect: () => void
+  danger?: boolean
+  /** Requires a second click within 3s to actually fire — the item's label
+   *  flips to `confirmLabel` in between. Used for Delete Epic instead of a
+   *  native window.confirm popup. */
+  confirm?: boolean
+  confirmLabel?: string
+}
+
+const CONFIRM_WINDOW_MS = 3000
+
+/** Fixed-position dropdown anchored to a trigger button — mirrors the
+ *  design's RowMenu (epics.jsx), reflowing above the anchor when there's
+ *  more room up than down and closing on outside click / Escape. */
+function RowMenu({ anchor, items, onClose }: { anchor: HTMLElement; items: MenuItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const [confirmingLabel, setConfirmingLabel] = useState<string | null>(null)
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useLayoutEffect(() => {
+    const menu = ref.current
+    if (!menu) return
+    const r = anchor.getBoundingClientRect()
+    const h = menu.offsetHeight
+    const w = menu.offsetWidth
+    const pad = 8
+    const below = window.innerHeight - r.bottom - pad
+    const above = r.top - pad
+    const up = below < h && above > below
+    setPos({
+      left: Math.max(pad, Math.min(r.right - w, window.innerWidth - w - pad)),
+      top: up ? Math.max(pad, r.top - 2 - h) : r.bottom + 2,
+    })
+  }, [anchor])
+
+  useEffect(() => {
+    const away = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node) && !anchor.contains(ev.target as Node)) onClose()
+    }
+    const esc = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('mousedown', away)
+      document.removeEventListener('keydown', esc)
+      if (confirmTimer.current) clearTimeout(confirmTimer.current)
+    }
+  }, [anchor, onClose])
+
+  return (
+    <div
+      ref={ref}
+      data-testid="epic-queue-row-menu"
+      className="fixed z-[60] min-w-[180px] grid gap-0.5 rounded-lg border border-rule bg-bg-elev p-1 shadow-lg"
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
+    >
+      {items.map((it) => {
+        const confirming = Boolean(it.confirm) && confirmingLabel === it.label
+        return (
+          <button
+            key={it.label}
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation()
+              if (it.confirm && !confirming) {
+                setConfirmingLabel(it.label)
+                if (confirmTimer.current) clearTimeout(confirmTimer.current)
+                confirmTimer.current = setTimeout(() => setConfirmingLabel(null), CONFIRM_WINDOW_MS)
+                return
+              }
+              if (confirmTimer.current) clearTimeout(confirmTimer.current)
+              onClose()
+              it.onSelect()
+            }}
+            data-testid={confirming ? 'epic-queue-row-menu-confirm' : undefined}
+            className={`rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium hover:bg-bg-hi ${
+              it.danger ? 'text-delta-bad' : 'text-fg'
+            }`}
+          >
+            {confirming ? (it.confirmLabel ?? 'Click again to confirm…') : it.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Replaces a QueueRow in place while renaming/editing its goal — title
+ *  input + goal textarea prefilled via EpicDetail's splitTitleAndGoal, Save
+ *  disabled until dirty + title non-empty, ⌘/Ctrl+Enter saves, Escape
+ *  cancels. Save calls promptSessions' renameEpic(id, title, goal). */
+function RowEditor({ epic, mode, onCancel }: { epic: PromptSession; mode: 'title' | 'goal'; onCancel: () => void }) {
+  const initial = useMemo(() => splitTitleAndGoal(epic.goalText), [epic.goalText])
+  const [title, setTitle] = useState(initial.title)
+  const [goal, setGoal] = useState(initial.goal)
+  const [saving, setSaving] = useState(false)
+  const titleRef = useRef<HTMLInputElement | null>(null)
+  const goalRef = useRef<HTMLTextAreaElement | null>(null)
+  // Cancel unmounts this RowEditor before an in-flight save() settles — guard
+  // the post-await state updates so a stale save from a since-abandoned edit
+  // can't clobber a freshly reopened editor for the same epic.
+  const liveRef = useRef(true)
+  useEffect(() => () => {
+    liveRef.current = false
+  }, [])
+
+  useEffect(() => {
+    if (mode === 'title') titleRef.current?.focus()
+    else goalRef.current?.focus()
+  }, [mode])
+
+  const dirty = title.trim() !== initial.title.trim() || goal.trim() !== initial.goal.trim()
+  const canSave = title.trim().length > 0 && dirty && !saving
+
+  const save = async () => {
+    if (!canSave) return
+    setSaving(true)
+    try {
+      await usePromptSessions.getState().renameEpic(epic.id, title, goal)
+      if (liveRef.current) onCancel()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      if (liveRef.current) setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      data-testid="epic-queue-row-editor"
+      onClick={(ev) => ev.stopPropagation()}
+      onKeyDown={(ev) => {
+        if (ev.key === 'Escape') {
+          ev.stopPropagation()
+          onCancel()
+        } else if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+          ev.stopPropagation()
+          void save()
+        }
+      }}
+      className="rounded-lg border border-line bg-bg p-2.5 grid gap-1.5"
+    >
+      <input
+        ref={titleRef}
+        type="text"
+        value={title}
+        onChange={(ev) => setTitle(ev.target.value)}
+        placeholder="Title"
+        data-testid="epic-queue-row-editor-title"
+        className="w-full rounded-md border border-rule bg-bg-elev px-2 py-1 text-[12.5px] font-semibold text-fg outline-none focus:border-accent"
+      />
+      <textarea
+        ref={goalRef}
+        value={goal}
+        onChange={(ev) => setGoal(ev.target.value)}
+        placeholder="Goal / first prompt"
+        rows={3}
+        data-testid="epic-queue-row-editor-goal"
+        className="w-full resize-none rounded-md border border-rule bg-bg-elev px-2 py-1 text-[12px] text-fg-dim outline-none focus:border-accent"
+      />
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          data-testid="epic-queue-row-editor-cancel"
+          className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-fg-faint hover:text-fg disabled:opacity-40"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={!canSave}
+          data-testid="epic-queue-row-editor-save"
+          className="rounded-md bg-accent px-2.5 py-1 text-[11.5px] font-semibold text-white disabled:opacity-40"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function activityAgeLabel(epicId: string, epic: PromptSession, events: Record<string, PromptSessionEvent[]>, now: number): string {
   const tail = events[epicId]?.slice(-1)[0] ?? null
   const at = tail?.at ?? epic.createdAt
@@ -69,9 +270,128 @@ interface QueueRowProps {
   onPin?: (id: string) => void
 }
 
+/** Row actions available from every Epic's overflow menu — built from store
+ *  actions that already exist: copy the claude session id, mark completed
+ *  (mirrors EpicDetail's own button), jump straight into the Epic's Terminal
+ *  view, rename/edit-goal (opens the in-place RowEditor), duplicate as a new
+ *  Epic, reopen a completed Epic, and delete (with an in-menu confirm step). */
+function useRowMenuItems(
+  epic: PromptSession,
+  status: EpicDisplayStatus,
+  onSelect: (id: string) => void,
+  onEdit: (mode: 'title' | 'goal') => void,
+): MenuItem[] {
+  const items: MenuItem[] = [
+    {
+      label: 'Copy Epic ID',
+      onSelect: () => {
+        void navigator.clipboard?.writeText(epic.id).then(
+          () => toast.info('Epic id copied'),
+          () => toast.error('Copy failed'),
+        )
+      },
+    },
+    { label: 'Rename title', onSelect: () => onEdit('title') },
+    { label: 'Edit goal / first prompt', onSelect: () => onEdit('goal') },
+  ]
+  if (epic.status === 'active') {
+    items.push({
+      label: 'Resume in terminal',
+      onSelect: () => {
+        onSelect(epic.id)
+        useEpicTerminal.getState().setMode(epic.id, 'terminal')
+      },
+    })
+    if (status !== 'completed') {
+      items.push({
+        label: 'Mark completed',
+        onSelect: () => void usePromptSessions.getState().markCompleted(epic.id),
+      })
+    }
+  }
+  if (epic.status === 'completed') {
+    items.push({
+      label: 'Reopen',
+      onSelect: () => {
+        try {
+          usePromptSessions.getState().resumeArchived(epic.id)
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : String(err))
+        }
+      },
+    })
+  }
+  items.push({
+    label: 'Duplicate as new Epic',
+    onSelect: () => {
+      try {
+        const dup = usePromptSessions.getState().duplicateEpic(epic.id)
+        onSelect(dup.id)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+  })
+  items.push({
+    label: 'Delete Epic',
+    danger: true,
+    confirm: true,
+    confirmLabel: 'Click again to delete…',
+    onSelect: () => {
+      usePromptSessions
+        .getState()
+        .deleteEpic(epic.id)
+        .catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
+    },
+  })
+  return items
+}
+
+function RowMenuButton({
+  epic,
+  status,
+  onSelect,
+  onEdit,
+  className,
+}: {
+  epic: PromptSession
+  status: EpicDisplayStatus
+  onSelect: (id: string) => void
+  onEdit: (mode: 'title' | 'goal') => void
+  className: string
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const items = useRowMenuItems(epic, status, onSelect, onEdit)
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        title="Epic actions"
+        aria-label={`Actions for ${epic.goalText}`}
+        data-testid="epic-queue-row-menu-trigger"
+        className={className}
+      >
+        <DotsIcon />
+      </button>
+      {open && btnRef.current && <RowMenu anchor={btnRef.current} items={items} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
+  const [editing, setEditing] = useState<'title' | 'goal' | null>(null)
   const age = activityAgeLabel(epic.id, epic, events, now)
   const queuedDetail = status === 'queued' ? epicQueuedDetail(epic.id, snapshots) : undefined
+
+  if (editing) {
+    return <RowEditor epic={epic} mode={editing} onCancel={() => setEditing(null)} />
+  }
 
   if (compact) {
     return (
@@ -84,7 +404,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           title={queuedDetail}
           className={`w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2 rounded-md py-1.5 px-2 text-left border-l-2 ${
             selected ? 'bg-bg-hi border-l-accent' : 'border-l-transparent hover:bg-bg-hi/60'
-          } ${onPin ? 'pr-6' : ''}`}
+          } ${onPin ? 'pr-12' : 'pr-6'}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${epicStatusDotClass(status)} ${status === 'completed' ? 'opacity-45' : ''}`} aria-hidden="true" />
           <span className="min-w-0 flex items-center gap-1.5">
@@ -103,11 +423,18 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
             title={pinned ? 'Unpin' : 'Pin to top'}
             aria-label={pinned ? `Unpin ${epic.goalText}` : `Pin ${epic.goalText} to top`}
             data-testid="epic-queue-row-pin"
-            className={`absolute top-1/2 -translate-y-1/2 right-1.5 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
+            className={`absolute top-1/2 -translate-y-1/2 right-6 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
           >
             <PinIcon filled={pinned} />
           </button>
         )}
+        <RowMenuButton
+          epic={epic}
+          status={status}
+          onSelect={onSelect}
+          onEdit={setEditing}
+          className="absolute top-1/2 -translate-y-1/2 right-1 p-0.5 text-fg-faint opacity-60 hover:opacity-100 hover:text-fg"
+        />
       </div>
     )
   }
@@ -132,7 +459,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
         <span className="flex items-center gap-1.5">
           <EpicStatusChip status={status} small detail={queuedDetail} />
           <EpicKindTag kind={epic.tag} small />
-          <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-4">{age}</span>
+          <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-9">{age}</span>
         </span>
         <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1">{epic.goalText}</span>
         <span className="flex items-center gap-3 font-mono text-[10.5px] text-fg-faint">
@@ -155,11 +482,18 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           title={pinned ? 'Unpin' : 'Pin to top'}
           aria-label={pinned ? `Unpin ${epic.goalText}` : `Pin ${epic.goalText} to top`}
           data-testid="epic-queue-row-pin"
-          className={`absolute top-2 right-2 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
+          className={`absolute top-2 right-7 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
         >
           <PinIcon filled={pinned} />
         </button>
       )}
+      <RowMenuButton
+        epic={epic}
+        status={status}
+        onSelect={onSelect}
+        onEdit={setEditing}
+        className="absolute top-2 right-2 p-0.5 text-fg-faint opacity-60 hover:opacity-100 hover:text-fg"
+      />
     </div>
   )
 }

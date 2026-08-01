@@ -141,4 +141,22 @@ function appendPrdCreatedEvent(cwd, epicId, prdSlug, text) {
   return true;
 }
 
-module.exports = { ensureEpic, appendPrdCreatedEvent, activeIndexPath, readActiveIndex };
+/**
+ * removeEpic(cwd, epicId) — roll back a freshly-minted Epic when the caller
+ * that minted it (ensureEpic's `created: true`) failed to complete its work
+ * (e.g. the PRD write that motivated the mint never landed). Deletes the
+ * Epic's entry from both active-index.json maps. Never call this for an
+ * Epic ensureEpic reported as joined (`created: false`) — that Epic predates
+ * this call and may carry unrelated history.
+ */
+function removeEpic(cwd, epicId) {
+  if (!cwd || !epicId) return false;
+  const index = readActiveIndex(cwd);
+  if (!index.sessions[epicId]) return false;
+  delete index.sessions[epicId];
+  delete index.events[epicId];
+  writeActiveIndex(cwd, index);
+  return true;
+}
+
+module.exports = { ensureEpic, appendPrdCreatedEvent, removeEpic, activeIndexPath, readActiveIndex };

@@ -86,7 +86,7 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { sweep: sweepFeedback } = require('../../scripts/lib/watchdogHelpers.cjs');
 const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
-const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
+const { ensureEpic, appendPrdCreatedEvent, removeEpic, readActiveIndex } = require('./lib/epicMint.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -4173,6 +4173,10 @@ const remote = {
     // PRD 825: if this call minted a brand-new Epic (ensureEpic's `created`)
     // and the write below never lands, don't strand an empty Epic dir —
     // best-effort remove `<epic>/prds` then `<epic>` itself, only when empty.
+    // PRD 851: also drop the Epic's active-index.json entry (sessions/events)
+    // so an orphaned seed-prompt-only Epic doesn't linger in the Epics nav.
+    // Gated on epicCreated (never fires when ensureEpic joined an existing
+    // Epic) so a pre-existing Epic's history is never touched.
     const cleanupEmptyMintedEpic = async () => {
       if (!epicCreated || !epicId) return;
       try {
@@ -4183,6 +4187,7 @@ const remote = {
         const epicRootEntries = await fsp.readdir(epicRootDir);
         if (epicRootEntries.length === 0) await fsp.rmdir(epicRootDir);
       } catch { /* best-effort only */ }
+      try { removeEpic(cwd, epicId); } catch { /* best-effort only */ }
     };
 
     const resolved = safeSlugPathIn(dir, slug);

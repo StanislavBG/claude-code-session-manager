@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { ensureEpic, readActiveIndex } = require('../lib/epicMint.cjs');
+const { ensureEpic, removeEpic, readActiveIndex } = require('../lib/epicMint.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -59,4 +59,27 @@ test('ensureEpic joins the existing Epic when explicit epicId equals its promptS
 
   const index = readActiveIndex(cwd);
   expect(Object.keys(index.sessions)).toHaveLength(1);
+});
+
+test('removeEpic deletes a minted Epic from both sessions and events maps', async () => {
+  const cwd = await mkCwd();
+  const minted = ensureEpic(cwd, { goalText: 'to be rolled back' });
+  expect(readActiveIndex(cwd).sessions[minted.epicId]).toBeDefined();
+
+  const removed = removeEpic(cwd, minted.epicId);
+
+  expect(removed).toBe(true);
+  const index = readActiveIndex(cwd);
+  expect(index.sessions[minted.epicId]).toBeUndefined();
+  expect(index.events[minted.epicId]).toBeUndefined();
+});
+
+test('removeEpic is a no-op (returns false) for an unknown epicId', async () => {
+  const cwd = await mkCwd();
+  ensureEpic(cwd, { goalText: 'unrelated epic' });
+
+  const removed = removeEpic(cwd, 'nonexistent-epic-id');
+
+  expect(removed).toBe(false);
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(1);
 });

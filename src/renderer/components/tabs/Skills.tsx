@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
@@ -10,6 +10,8 @@ import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useLayout } from '../../state/layout'
+import { deriveNavFace } from '../../lib/navFace'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { SkillsLibrary, ViewSwitcher } from './Library'
@@ -43,7 +45,20 @@ export function Skills() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
-  const [scope, setScope] = useState<Scope>('user')
+
+  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
+  // -> 'user', Project face -> 'project' (falling back to 'user' when no
+  // active-tab cwd resolves). Mirrors SystemPrompt/HistoryDashboard/
+  // Scheduler's manuallyTouchedRef + prevNavFaceRef pattern so the default
+  // only re-applies on an actual face transition, never on a same-face
+  // re-render, and never once the user has manually changed the scope since
+  // the last transition.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+
+  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [items, setItems] = useState<Item[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [view, setView] = useState<'installed' | 'library'>('installed')
@@ -53,6 +68,17 @@ export function Skills() {
     if (!home) return null
     return roots(home, cwd)
   }, [home, cwd])
+
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    setScope(navFace === 'project' && cwd ? 'project' : 'user')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFace, cwd])
 
   // Enumerate skills and commands for the active scope.
   useEffect(() => {
@@ -207,7 +233,7 @@ export function Skills() {
           <>
             <ViewSwitcher active={view} onChange={setView} />
             <span className="mx-2 text-fg-faint">·</span>
-            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
+            <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           </>
         }
       >
@@ -228,7 +254,7 @@ export function Skills() {
         <>
           <ViewSwitcher active={view} onChange={setView} />
           <span className="mx-2 text-fg-faint">·</span>
-          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={setScope} />
+          <ScopeSwitcher scopes={['user', 'project']} active={scope} onChange={(s) => { manuallyTouchedRef.current = true; setScope(s) }} />
           <span className="ml-3 text-fg-faint">
             {items.length} {items.length === 1 ? 'item' : 'items'}
           </span>

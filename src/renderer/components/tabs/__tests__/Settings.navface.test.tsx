@@ -89,7 +89,7 @@ function clickScope(el: HTMLElement, label: string) {
 
 beforeEach(() => {
   installWindowApiMock()
-  useLayout.setState({ focusedPanelId: 'overview' })
+  useLayout.setState({ navFace: 'home' })
   useSessions.setState({ tabs: [], activeTabId: null })
   useConfig.setState({ files: {}, watchRefs: {} })
 })
@@ -113,7 +113,7 @@ describe('Settings NavFace-driven default scope', () => {
     expect(activeScope(el)).toBe('User')
     await act(async () => {
       useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
     expect(activeScope(el)).toBe('Project')
@@ -122,7 +122,7 @@ describe('Settings NavFace-driven default scope', () => {
   it('flipping navFace to project with no active-tab cwd stays on user', async () => {
     const el = await mount()
     await act(async () => {
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
     expect(activeScope(el)).toBe('User')
@@ -132,7 +132,7 @@ describe('Settings NavFace-driven default scope', () => {
     const el = await mount()
     await act(async () => {
       useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
     expect(activeScope(el)).toBe('Project')

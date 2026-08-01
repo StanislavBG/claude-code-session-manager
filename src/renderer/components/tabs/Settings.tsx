@@ -10,7 +10,6 @@ import { ViewTabs } from '../ui/ViewTabs'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
 import { useLayout } from '../../state/layout'
-import { deriveNavFace } from '../../lib/navFace'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
@@ -33,8 +32,7 @@ export function Settings() {
   // + prevNavFaceRef pattern so the default only re-applies on an actual face
   // transition, never on a same-face re-render, and never once the user has
   // manually changed the scope since the last transition.
-  const focusedPanelId = useLayout((s) => s.focusedPanelId)
-  const navFace = deriveNavFace(focusedPanelId)
+  const navFace = useLayout((s) => s.navFace)
   const manuallyTouchedRef = useRef(false)
   const prevNavFaceRef = useRef(navFace)
 

@@ -12,7 +12,6 @@ import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
-import { deriveNavFace } from '../../lib/navFace'
 import type { Scope } from '../../lib/scopes'
 import { McpLibrary, ViewSwitcher } from './Library'
 import { toast } from '../../state/toast'
@@ -114,8 +113,7 @@ export function McpServers() {
   // manuallyTouchedRef + prevNavFaceRef pattern so the default only re-applies
   // on an actual face transition, never on a same-face re-render, and never
   // once the user has manually changed the scope since the last transition.
-  const focusedPanelId = useLayout((s) => s.focusedPanelId)
-  const navFace = deriveNavFace(focusedPanelId)
+  const navFace = useLayout((s) => s.navFace)
   const manuallyTouchedRef = useRef(false)
   const prevNavFaceRef = useRef(navFace)
 

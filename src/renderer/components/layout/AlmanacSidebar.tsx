@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NavKey } from '../LeftNav'
 import { useSessions } from '../../state/sessions'
+import { useLayout } from '../../state/layout'
 import { useVoice } from '../../state/voice'
 import { useScheduleState } from '../../state/scheduleState'
 import { useBilling } from '../../state/billing'
@@ -21,7 +22,7 @@ import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
 import { NAV_GROUP_DESCRIPTIONS, getNavItemsForFace, type NavGroupItem } from '../../lib/navGroups'
-import { deriveNavFace, type NavFace } from '../../lib/navFace'
+import type { NavFace } from '../../lib/navFace'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -143,7 +144,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const indicators = useLiveIndicators()
 
-  const navFace: NavFace = deriveNavFace(active)
+  const navFace: NavFace = useLayout((s) => s.navFace)
   const items = getNavItemsForFace(navFace)
   const workspace = items.filter((item) => item.group === 'Workspace')
   const configure = items.filter((item) => item.group === 'Configure')

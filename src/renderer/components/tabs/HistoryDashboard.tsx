@@ -7,7 +7,6 @@ import { buildUsageCsv } from '../../lib/usageCsv'
 import { toast } from '../../state/toast'
 import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
-import { deriveNavFace } from '../../lib/navFace'
 import { ControlBar, type RangeDays } from './history/analytics/ControlBar'
 import { Headline } from './history/analytics/Headline'
 import { BudgetStrip } from './history/analytics/BudgetStrip'
@@ -60,8 +59,7 @@ export function HistoryDashboard() {
   // manually changed the filter since the last transition. `keep`'s initial
   // value is seeded from the NavFace too, so mounting directly on the
   // project face (not just transitioning into it) isolates immediately.
-  const focusedPanelId = useLayout((s) => s.focusedPanelId)
-  const navFace = deriveNavFace(focusedPanelId)
+  const navFace = useLayout((s) => s.navFace)
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null

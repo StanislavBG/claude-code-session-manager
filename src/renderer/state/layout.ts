@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 import { readAppPrefs } from '../lib/appPrefs'
+import type { NavFace } from '../lib/navFace'
 
 /**
  * Panel registry entry. `component` is a lookup key (not a component
@@ -65,15 +66,46 @@ interface LayoutState {
   /** Show/hide the Epics workspace over the terminal. Never touches tab selection. */
   setEpicsWorkspaceOpen: (open: boolean) => void
   /**
+   * Which sidebar item set + scope default is showing: 'home' (machine-level)
+   * or 'project' (scoped to the active tab's project). See lib/navFace.ts.
+   *
+   * Deliberately NOT derived from `focusedPanelId` per-render (that was the
+   * bug: most screens — Scheduler, Hooks, Skills, System Prompt, etc. — are
+   * shared by both faces, so "any panel other than overview" is not a valid
+   * definition of 'project'; it flipped the face the instant you clicked a
+   * Home-face row for one of those shared screens). Instead this is real
+   * state, changed only by the two genuine entry points: `openPanel` flips it
+   * to 'home' when (and only when) navigating TO 'overview' — the one screen
+   * that is unambiguously home; `openProjectPanel` flips it to 'project' and
+   * is used exclusively by the top-tab-selection call sites (TabBar tab
+   * click, tab-switch effect, new-session flows). Plain `openPanel` calls for
+   * every other id (sidebar rows, CommandPalette nav:*, dockview mirroring)
+   * leave it untouched, so browsing the Home nav list stays on the Home face
+   * end to end. See navFace.spec.ts's regression coverage.
+   */
+  navFace: NavFace
+  setNavFace: (face: NavFace) => void
+  /**
    * Register (or focus, if already registered) a panel from an app-driven
    * action (sidebar click, command palette, etc.) — always bumps
    * `focusToken` so Workbench re-mounts/re-activates even for a same-id call.
+   * Sets `navFace: 'home'` when `id === 'overview'`; leaves navFace untouched
+   * for every other id (see `navFace` above / `openProjectPanel` below).
    */
   openPanel: (id: string) => void
   /**
+   * Like `openPanel`, but also asserts `navFace: 'project'`. Use this at the
+   * genuine "the user selected/activated a project tab" sites (TabBar tab
+   * click, the pure-tab-switch effect, new-session flows) — never from
+   * sidebar/command-palette navigation, which must preserve whichever face
+   * the user is currently browsing.
+   */
+  openProjectPanel: (id: string) => void
+  /**
    * Mirror a dockview-initiated activation (tab click, close, drag) into the
    * store. No-op if the id isn't registered. Does not bump `focusToken` —
-   * dockview has already made the panel active, no re-mount is needed.
+   * dockview has already made the panel active, no re-mount is needed. Same
+   * navFace rule as `openPanel`: only 'overview' asserts 'home'.
    */
   focusPanel: (id: string) => void
   /** Reset the workbench to DEFAULT_LAYOUT (CommandPalette "Reset layout"). */
@@ -97,21 +129,33 @@ export const useLayout = create<LayoutState>((set, get) => ({
   resetToken: 0,
   epicsWorkspaceOpen: false,
   setEpicsWorkspaceOpen: (open: boolean) => set({ epicsWorkspaceOpen: open }),
+  navFace: 'home',
+  setNavFace: (face: NavFace) => set({ navFace: face }),
   openPanel: (id: string) => {
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
-    set((s) => ({ focusedPanelId: id, focusToken: s.focusToken + 1 }))
+    set((s) => ({
+      focusedPanelId: id,
+      focusToken: s.focusToken + 1,
+      ...(id === 'overview' ? { navFace: 'home' as const } : null),
+    }))
+  },
+  openProjectPanel: (id: string) => {
+    const exists = get().panels.some((p) => p.id === id)
+    if (!exists) return
+    set((s) => ({ focusedPanelId: id, focusToken: s.focusToken + 1, navFace: 'project' }))
   },
   focusPanel: (id: string) => {
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
-    set({ focusedPanelId: id })
+    set({ focusedPanelId: id, ...(id === 'overview' ? { navFace: 'home' as const } : null) })
   },
   resetLayout: () => {
     set((s) => ({
       resetToken: s.resetToken + 1,
       focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
       focusToken: s.focusToken + 1,
+      navFace: 'home',
     }))
   },
   hydrateOpenToHomePref: async () => {
@@ -120,7 +164,7 @@ export const useLayout = create<LayoutState>((set, get) => ({
     // if the user (or another boot effect) already navigated during this
     // async read, their choice wins; the pref never overrides a live nav.
     if (prefs.openToHomeOnLaunch === true && get().focusedPanelId === (DEFAULT_LAYOUT[0]?.id ?? null)) {
-      set({ focusedPanelId: 'overview' })
+      set({ focusedPanelId: 'overview', navFace: 'home' })
     }
   },
 }))

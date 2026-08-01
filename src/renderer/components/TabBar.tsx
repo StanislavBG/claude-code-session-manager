@@ -28,6 +28,7 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
   const canSplitView = activeTabId != null && hasBrowserTabs
   const focusedPanelId = useLayout((s) => s.focusedPanelId)
   const openPanel = useLayout((s) => s.openPanel)
+  const openProjectPanel = useLayout((s) => s.openProjectPanel)
   const setEpicsWorkspaceOpen = useLayout((s) => s.setEpicsWorkspaceOpen)
   const machineHomeActive = focusedPanelId === 'overview'
 
@@ -60,7 +61,9 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
       // workspace overlay. Selection itself is never cleared anywhere — the
       // workspace is a display mode now, not the absence of a selection.
       setEpicsWorkspaceOpen(false)
-      openPanel('terminal')
+      // openProjectPanel (not openPanel) — this IS the genuine "user selected
+      // a project" moment, so it also asserts navFace: 'project'.
+      openProjectPanel('terminal')
     },
   })
 

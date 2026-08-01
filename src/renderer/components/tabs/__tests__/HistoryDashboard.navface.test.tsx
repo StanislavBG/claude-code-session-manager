@@ -114,7 +114,7 @@ function isShowingAll(el: HTMLElement): boolean {
 beforeEach(() => {
   localStorage.clear()
   installWindowApiMock()
-  useLayout.setState({ focusedPanelId: 'overview' })
+  useLayout.setState({ navFace: 'home' })
   useSessions.setState({ tabs: [], activeTabId: null })
 })
 
@@ -134,7 +134,7 @@ describe('HistoryDashboard NavFace-driven default project facet', () => {
 
   it('mounting directly on navFace=project (already focused, not a transition) isolates the active tab cwd', async () => {
     useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-    useLayout.setState({ focusedPanelId: 'terminal' })
+    useLayout.setState({ navFace: 'project' })
     const el = await mount(<HistoryDashboard />)
     expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
   })
@@ -143,7 +143,7 @@ describe('HistoryDashboard NavFace-driven default project facet', () => {
     const el = await mount(<HistoryDashboard />)
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
     expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
@@ -153,7 +153,7 @@ describe('HistoryDashboard NavFace-driven default project facet', () => {
     const el = await mount(<HistoryDashboard />)
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
     expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
@@ -177,13 +177,13 @@ describe('HistoryDashboard NavFace-driven default project facet', () => {
     const el = await mount(<HistoryDashboard />)
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
     expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
 
     await act(async () => {
-      useLayout.setState({ focusedPanelId: 'overview' })
+      useLayout.setState({ navFace: 'home' })
       await Promise.resolve()
     })
     expect(isShowingAll(el)).toBe(true)

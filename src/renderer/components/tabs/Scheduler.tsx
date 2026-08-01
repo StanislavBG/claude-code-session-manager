@@ -11,7 +11,6 @@ import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { LegendItem } from './scheduler/sched-primitives'
 import { LearningPanel } from '../LearningPanel'
 import { useLayout } from '../../state/layout'
-import { deriveNavFace } from '../../lib/navFace'
 
 /**
  * Scheduler — the single home for the claude -p batch workflow. Three tabs,
@@ -192,8 +191,7 @@ export function Scheduler() {
   // machine-wide escape hatch. The default is NavFace-driven (see the
   // module docstring) — Home face defaults to 'all', Project face to
   // 'project' — and only re-applies on an actual face transition.
-  const focusedPanelId = useLayout((s) => s.focusedPanelId)
-  const navFace = deriveNavFace(focusedPanelId)
+  const navFace = useLayout((s) => s.navFace)
   const [scope, setScope] = useState<'project' | 'all'>(() => (navFace === 'project' ? 'project' : 'all'))
   const manuallyTouchedRef = useRef(false)
   const prevNavFaceRef = useRef(navFace)

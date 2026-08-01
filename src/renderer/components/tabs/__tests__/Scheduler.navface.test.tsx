@@ -59,7 +59,7 @@ function mount(el: React.ReactElement) {
 beforeEach(() => {
   localStorage.clear()
   installWindowApiMock()
-  useLayout.setState({ focusedPanelId: 'overview' })
+  useLayout.setState({ navFace: 'home' })
   useSessions.setState({ tabs: [], activeTabId: null })
   useScheduleState.setState({ snapshot: null })
   usePromptSessions.setState({ sessions: {}, events: {} })
@@ -86,7 +86,7 @@ describe('Scheduler NavFace-driven default scope', () => {
     const el = mount(<Scheduler />)
     act(() => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
     })
     const allBtn = el.querySelector('[data-testid="scheduler-scope-all"]') as HTMLButtonElement
     const projectBtn = el.querySelector('[data-testid="scheduler-scope-project"]') as HTMLButtonElement
@@ -98,7 +98,7 @@ describe('Scheduler NavFace-driven default scope', () => {
     const el = mount(<Scheduler />)
     act(() => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
     })
     const allBtn = el.querySelector('[data-testid="scheduler-scope-all"]') as HTMLButtonElement
     const projectBtn = el.querySelector('[data-testid="scheduler-scope-project"]') as HTMLButtonElement
@@ -135,14 +135,14 @@ describe('Scheduler NavFace-driven default scope', () => {
     // so scope stays 'project' (which happens to match the manual choice here).
     act(() => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ focusedPanelId: 'terminal' })
+      useLayout.setState({ navFace: 'project' })
     })
     expect(projectBtn.className).toContain('border-accent/60')
 
     // Transition #2 (project -> home): the manual-touch flag was already
     // consumed by transition #1, so the navFace default re-applies here.
     act(() => {
-      useLayout.setState({ focusedPanelId: 'overview' })
+      useLayout.setState({ navFace: 'home' })
     })
     expect(allBtn.className).toContain('border-accent/60')
     expect(projectBtn.className).not.toContain('border-accent/60')

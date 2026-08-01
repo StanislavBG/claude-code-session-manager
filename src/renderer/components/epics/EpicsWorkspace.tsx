@@ -11,7 +11,6 @@ import { lastActivityMs } from '../../lib/epicQueueControls'
 import { projectNameFromCwd } from '../../lib/homeProjectRows'
 import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
-import { deriveNavFace } from '../../lib/navFace'
 import type { EpicSnapshots } from '../../lib/epicDerive'
 import type { ScheduleJob } from '../../../preload/api'
 import { EpicQueueControls } from './EpicQueueControls'
@@ -70,11 +69,10 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   // NavFace-driven default project filter — only meaningful for the
   // TerminalStage singleton mount (no `cwd` prop). Terminal.tsx's dormant-tab
   // mount passes `cwd` explicitly, which always wins below.
-  const focusedPanelId = useLayout((s) => s.focusedPanelId)
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
-  const navFace = deriveNavFace(focusedPanelId)
+  const navFace = useLayout((s) => s.navFace)
 
   const [projectFilter, setProjectFilter] = useState<string | null>(null)
   const manuallyTouchedRef = useRef(false)

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useLayout, DEFAULT_LAYOUT, getPanelDefinition, needsProjectsPanelReconciliation } from '../layout'
 import { SCREEN_KEYS } from '../../lib/screenKeys'
 import { buildCommands } from '../../components/CommandPalette'
+import { getNavItemsForFace } from '../../lib/navGroups'
 
 // react-force-graph-2d (pulled in transitively via screenComponents ->
 // Plugins -> SkillReferenceGraph) touches `window` at module-import time,
@@ -53,7 +54,7 @@ describe('layout.ts registry lookup', () => {
 
 describe('layout.ts useLayout store', () => {
   beforeEach(() => {
-    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0 })
+    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0, navFace: 'home' })
   })
 
   it('initializes with the default layout and the first screen focused', () => {
@@ -87,7 +88,7 @@ describe('layout.ts useLayout store', () => {
 
 describe('layout.ts focusToken (Workbench regression: openPanel-same-id must still re-mount)', () => {
   beforeEach(() => {
-    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0 })
+    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0, navFace: 'home' })
   })
 
   it('openPanel bumps focusToken even when the id matches the current focusedPanelId', () => {
@@ -127,9 +128,73 @@ describe('layout.ts focusToken (Workbench regression: openPanel-same-id must sti
   })
 })
 
+describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from focusedPanelId)', () => {
+  beforeEach(() => {
+    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0, navFace: 'home' })
+  })
+
+  it('boots at navFace "home", matching the default overview panel', () => {
+    expect(useLayout.getState().navFace).toBe('home')
+  })
+
+  // THE regression this suite exists to catch. User report: from the Home
+  // tab, clicking any Home-face sidebar row (Scheduler, History, Hooks,
+  // Skills, System Prompt, MCP, Permissions, Settings, Epics, ...) "redirects
+  // towards an open Project" — i.e. the sidebar's own item set and every
+  // scope-aware tab's default scope silently jumped to 'project' the instant
+  // you navigated into one of those shared screens, because they aren't
+  // 'overview'. Browsing the Home nav list must never leave the Home face.
+  it('openPanel to every Home-face NavKey keeps navFace at "home"', () => {
+    const homeItems = getNavItemsForFace('home')
+    expect(homeItems.length).toBeGreaterThan(0)
+    for (const item of homeItems) {
+      useLayout.setState({ navFace: 'home' })
+      useLayout.getState().openPanel(item.key)
+      expect(useLayout.getState().navFace, `openPanel('${item.key}') flipped navFace away from home`).toBe('home')
+    }
+  })
+
+  it('openPanel("overview") always asserts navFace "home", even from project', () => {
+    useLayout.setState({ navFace: 'project' })
+    useLayout.getState().openPanel('overview')
+    expect(useLayout.getState().navFace).toBe('home')
+  })
+
+  it('openPanel to a non-overview id never changes navFace either way (project stays project too)', () => {
+    useLayout.setState({ navFace: 'project' })
+    useLayout.getState().openPanel('scheduler')
+    expect(useLayout.getState().navFace).toBe('project')
+  })
+
+  it('openProjectPanel asserts navFace "project" — the only path that should', () => {
+    useLayout.getState().openProjectPanel('terminal')
+    expect(useLayout.getState().navFace).toBe('project')
+    expect(useLayout.getState().focusedPanelId).toBe('terminal')
+  })
+
+  it('openProjectPanel is a no-op for an unregistered id (navFace untouched)', () => {
+    useLayout.getState().openProjectPanel('does-not-exist')
+    expect(useLayout.getState().navFace).toBe('home')
+  })
+
+  it('focusPanel mirrors the same rule: only "overview" asserts home, other ids are untouched', () => {
+    useLayout.setState({ navFace: 'project' })
+    useLayout.getState().focusPanel('skills')
+    expect(useLayout.getState().navFace).toBe('project')
+    useLayout.getState().focusPanel('overview')
+    expect(useLayout.getState().navFace).toBe('home')
+  })
+
+  it('resetLayout resets navFace to "home" alongside the default panel', () => {
+    useLayout.setState({ navFace: 'project' })
+    useLayout.getState().resetLayout()
+    expect(useLayout.getState().navFace).toBe('home')
+  })
+})
+
 describe('layout.ts panel-focus predicate (backs usePanelFocus)', () => {
   beforeEach(() => {
-    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: 'terminal', focusToken: 0 })
+    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: 'terminal', focusToken: 0, navFace: 'project' })
   })
 
   it('is true only for the currently focused panel id', () => {
@@ -185,7 +250,7 @@ describe('needsProjectsPanelReconciliation (File Explorer dead-end guard)', () =
 
 describe('layout.ts hydrateOpenToHomePref (app-prefs.json boot hydration)', () => {
   beforeEach(() => {
-    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0 })
+    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0, navFace: 'home' })
     readAppPrefsMock.mockReset()
   })
 
@@ -205,6 +270,7 @@ describe('layout.ts hydrateOpenToHomePref (app-prefs.json boot hydration)', () =
     readAppPrefsMock.mockResolvedValue({ openToHomeOnLaunch: true })
     await useLayout.getState().hydrateOpenToHomePref()
     expect(useLayout.getState().focusedPanelId).toBe('overview')
+    expect(useLayout.getState().navFace).toBe('home')
   })
 
   it('does not stomp a navigation that happens while the pref read is in flight', async () => {

@@ -123,7 +123,7 @@ export function App() {
     const isPureSwitch =
       prevActive !== null && activeTabId !== null && activeTabId !== prevActive &&
       curIds.size === prevIds.size && prevIds.has(activeTabId) && curIds.has(prevActive)
-    if (isPureSwitch) useLayout.getState().openPanel('terminal')
+    if (isPureSwitch) useLayout.getState().openProjectPanel('terminal')
   }, [activeTabId, tabs])
 
   // 'projects' (File Explorer) renders useSessions().activeTab and dead-ends
@@ -210,7 +210,7 @@ export function App() {
         // activeTabId, so the freshly opened project's tab stays SELECTED
         // while the workspace is what's displayed (PRD 833 I5).
         useLayout.getState().setEpicsWorkspaceOpen(true)
-        useLayout.getState().openPanel('terminal')
+        useLayout.getState().openProjectPanel('terminal')
       })
   }, [])
 
@@ -777,7 +777,7 @@ export function App() {
             case 'new-tab-here': {
               if (!activeTab) return
               useSessions.getState().addTab({ cwd: activeTab.cwd, startupCommand: null, dormant: true })
-              useLayout.getState().openPanel('terminal')
+              useLayout.getState().openProjectPanel('terminal')
               return
             }
             case 'close-tab':

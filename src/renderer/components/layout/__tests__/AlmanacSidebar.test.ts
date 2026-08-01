@@ -6,6 +6,7 @@ import { describe, expect, it, afterEach } from 'vitest'
 import { AlmanacSidebar } from '../AlmanacSidebar'
 import { useScheduleState } from '../../../state/scheduleState'
 import { useSessions } from '../../../state/sessions'
+import { useLayout } from '../../../state/layout'
 
 // AlmanacSidebar persists rail/collapse state to localStorage; jsdom provides
 // a real localStorage so no mocking needed, but clear it between tests so one
@@ -14,6 +15,7 @@ afterEach(() => {
   localStorage.clear()
   useScheduleState.setState({ snapshot: null, loaded: false })
   useSessions.setState({ tabs: [], activeTabId: null })
+  useLayout.setState({ navFace: 'home' })
 })
 
 /** Seed a scheduler snapshot with one running job per given cwd. */
@@ -68,9 +70,11 @@ function mount(active: 'overview' | 'scheduler' = 'overview') {
 
 describe('AlmanacSidebar', () => {
   it('renders each row label alongside its hint text in the non-rail (expanded) layout', () => {
-    // Project face (active tab present, non-overview panel) so both
-    // project-only (Search) and both-face (Scheduler) rows are present.
+    // Project face (navFace is real state now, not derived from `active` —
+    // see state/layout.ts) so both project-only (Search) and both-face
+    // (Scheduler) rows are present.
     seedActiveTab('/tmp/project')
+    useLayout.setState({ navFace: 'project' })
     const { container, root } = mount('scheduler')
     try {
       const nav = container.querySelector('[data-testid="tour-leftnav"]')

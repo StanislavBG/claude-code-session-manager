@@ -356,7 +356,7 @@ describe('EpicsWorkspace', () => {
     }
 
     beforeEach(() => {
-      useLayout.setState({ focusedPanelId: 'overview' })
+      useLayout.setState({ navFace: 'home' })
       useSessions.setState({ tabs: [], activeTabId: null })
     })
 
@@ -382,7 +382,7 @@ describe('EpicsWorkspace', () => {
       const el = mount(<EpicsWorkspace />)
       act(() => {
         useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-        useLayout.setState({ focusedPanelId: 'terminal' })
+        useLayout.setState({ navFace: 'project' })
       })
 
       expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe(
@@ -404,7 +404,7 @@ describe('EpicsWorkspace', () => {
       const el = mount(<EpicsWorkspace />)
       act(() => {
         useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-        useLayout.setState({ focusedPanelId: 'terminal' })
+        useLayout.setState({ navFace: 'project' })
       })
       // Auto-defaulted to alpha by the face transition.
       expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe(

@@ -21,6 +21,12 @@ vi.mock('electron', () => ({ ipcMain: { handle: vi.fn(), on: vi.fn() } }))
 const ORIGINAL_SM_CHAT_CONCURRENCY = process.env.SM_CHAT_CONCURRENCY
 beforeEach(() => {
   delete process.env.SM_CHAT_CONCURRENCY
+  // Clear lane + slot-pool state between tests. Several specs drive the REAL
+  // executeRun with a fake child that never emits 'exit', so their run stays
+  // in flight forever, holding a session slot and a lane seat; without this
+  // the pool (3) is exhausted partway through the file and later tests see no
+  // spawn at all.
+  chatRunner.__resetQueueForTests()
 })
 afterEach(() => {
   if (ORIGINAL_SM_CHAT_CONCURRENCY === undefined) delete process.env.SM_CHAT_CONCURRENCY
@@ -56,7 +62,7 @@ exchanges.recordExchange = (...args: unknown[]) => {
 }
 
 const chatRunner = require('../../src/main/chatRunner.cjs') as {
-  run: (opts: Record<string, unknown>) => void
+  run: (opts: Record<string, unknown>) => { accepted: boolean; queued?: boolean; reason?: string }
   attachWindow: (win: unknown) => void
   parseContextUsageMarkdown: (text: string) => {
     usedTokens: number
@@ -66,6 +72,7 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   } | null
   probeContextUsage: (opts: { tabId: string; sessionId: string; cwd: string }) => void
   __setExecutor: (fn: ((job: Record<string, unknown>) => Promise<void>) | null) => void
+  __resetQueueForTests: () => void
   parseStopSignal: (text: string) => { questions: string[] } | null
   splitStopSignal: (text: string) => { answerBody: string; questions: string[] } | null
   STOP_SENTINEL: string
@@ -715,5 +722,66 @@ describe('registerAdminRoute (PRD 753)', () => {
 
     expect(sent).toHaveLength(0)
     expect(res.statusCode).toBe(400)
+  })
+})
+
+// A colliding submission used to be discarded outright while `chat:run` still
+// resolved { ok: true } — the renderer stayed at running:true forever with no
+// toast and no terminal event, so a user's message could vanish because a
+// background /context probe happened to hold the tab.
+describe('per-tab collision handling', () => {
+  let captured: Array<Record<string, unknown>>
+  let release: Array<() => void>
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+
+  beforeEach(() => {
+    captured = []
+    release = []
+    chatRunner.__setExecutor((job) => {
+      captured.push(job)
+      return new Promise<void>((resolve) => release.push(resolve))
+    })
+  })
+
+  afterEach(() => {
+    release.forEach((r) => r())
+    chatRunner.__setExecutor(null)
+  })
+
+  it('queues a user send behind the tab\'s in-flight run and dispatches it on settle', async () => {
+    chatRunner.run({ tabId: 'tab-collide', sessionId: 'sess-c', prompt: 'first', cwd: '/tmp', resume: false })
+    await tick()
+    expect(captured).toHaveLength(1)
+
+    const outcome = chatRunner.run({ tabId: 'tab-collide', sessionId: 'sess-c', prompt: 'second', cwd: '/tmp', resume: false })
+    expect(outcome.accepted).toBe(true)
+    expect(outcome.queued).toBe(true)
+
+    // Still exactly one running: per-tab exclusivity holds, so the second is
+    // waiting rather than racing a second --resume on the same sessionId.
+    await tick()
+    expect(captured).toHaveLength(1)
+
+    release[0]()
+    await tick()
+    await tick()
+    expect(captured).toHaveLength(2)
+    expect(captured[1].prompt).toBe('second')
+  })
+
+  it('still drops a colliding silent probe rather than delaying real work', async () => {
+    chatRunner.run({ tabId: 'tab-probe-collide', sessionId: 'sess-p', prompt: 'real work', cwd: '/tmp', resume: false })
+    await tick()
+    expect(captured).toHaveLength(1)
+
+    const outcome = chatRunner.run({
+      tabId: 'tab-probe-collide', sessionId: 'sess-p', prompt: '/context', cwd: '/tmp', resume: true, silent: true,
+    })
+    expect(outcome).toEqual({ accepted: false, reason: 'tab-busy-silent' })
+
+    release[0]()
+    await tick()
+    await tick()
+    expect(captured).toHaveLength(1)
   })
 })

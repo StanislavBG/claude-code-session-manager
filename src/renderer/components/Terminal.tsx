@@ -39,6 +39,14 @@ export function writeInChunks(tabId: string, data: string) {
 
 export function Terminal({ tabId, cwd }: Props) {
   const isDormant = useSessions((s) => s.tabs.find((t) => t.id === tabId)?.status === 'dormant')
+  // TerminalStage keeps EVERY tab mounted and toggles visibility, which is
+  // right for a live xterm (remounting would re-spawn its PTY) but wrong for
+  // the Epics workspace a dormant tab renders instead: each hidden copy ran
+  // its own hydrate loop, active-index watcher, pty re-adoption probe and 30s
+  // usage-refresh interval, and they all wrote the same shared Epic stores
+  // while holding independent selection state. Primitive selector — re-renders
+  // only when this tab's active-ness actually flips.
+  const isActiveTab = useSessions((s) => s.activeTabId === tabId)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const spawnedRef = useRef(false)
@@ -265,7 +273,9 @@ export function Terminal({ tabId, cwd }: Props) {
   // the global list. Raw xterm only spawns once the user opens a raw
   // session (wakeTab) via EpicDetail's Terminal mode.
   if (isDormant) {
-    return <EpicsWorkspace cwd={cwd} />
+    // Only the visible tab mounts one. A dormant tab has no PTY to preserve,
+    // so an inactive one costs nothing to unmount and remount on switch.
+    return isActiveTab ? <EpicsWorkspace cwd={cwd} /> : null
   }
 
   return (

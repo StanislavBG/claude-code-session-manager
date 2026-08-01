@@ -127,6 +127,17 @@ function mintId(prefix: string): string {
 // (synchronous store actions) needing to await anything.
 const pendingWritesByPath = new Map<string, Promise<void>>()
 
+// How many persists are still in flight per path. hydrate() reconciles
+// disk-deleted Epics OUT of the store, and a just-created Epic exists in
+// memory a beat before its write lands — reconciling during that window would
+// delete it. A non-zero count here means "disk is knowably behind memory for
+// this path", so hydrate() adds but never removes until it drains.
+const pendingWriteCounts = new Map<string, number>()
+
+function hasPendingWrite(path: string): boolean {
+  return (pendingWriteCounts.get(path) ?? 0) > 0
+}
+
 /** Fire-and-forget persist of a cwd's active-session slice — called after
  *  every mutation so a reload never loses in-progress work. Best-effort: a
  *  write failure is logged, never thrown into the caller (createPromptSession
@@ -144,14 +155,20 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
     index.events[id] = events[id] ?? []
   }
   const path = promptSessionActiveIndexPath(cwd)
+  pendingWriteCounts.set(path, (pendingWriteCounts.get(path) ?? 0) + 1)
   const prior = pendingWritesByPath.get(path) ?? Promise.resolve()
-  const next = prior.then(() => window.api!.config.writeJson(path, index)).then(
-    () => undefined,
-    (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err)
-      window.api?.logs?.write('promptSessions', 'warn', `persistActiveIndex failed for ${cwd}: ${msg}`)
-    },
-  )
+  const next = prior
+    .then(() => window.api!.config.writeJson(path, index))
+    .then(
+      () => undefined,
+      (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        window.api?.logs?.write('promptSessions', 'warn', `persistActiveIndex failed for ${cwd}: ${msg}`)
+      },
+    )
+    .finally(() => {
+      pendingWriteCounts.set(path, Math.max(0, (pendingWriteCounts.get(path) ?? 1) - 1))
+    })
   pendingWritesByPath.set(path, next)
 }
 
@@ -282,9 +299,9 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   hydrate: async (cwd) => {
     if (typeof window === 'undefined' || !window.api?.config?.readJson) return
     try {
-      const result = await window.api.config.readJson(promptSessionActiveIndexPath(cwd))
-      if (!result.exists || !result.data) return
-      const disk = result.data as Partial<PromptSessionActiveIndex>
+      const path = promptSessionActiveIndexPath(cwd)
+      const result = await window.api.config.readJson(path)
+      const disk = (result.exists && result.data ? result.data : {}) as Partial<PromptSessionActiveIndex>
       const diskSessions = disk.sessions ?? {}
       const diskEvents = disk.events ?? {}
       // In-memory state always wins over disk on id collision — disk is only
@@ -295,12 +312,33 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       // which is exactly the shape of an effect-driven re-render loop.
       const existingSessions = get().sessions
       const newIds = Object.keys(diskSessions).filter((id) => !existingSessions[id])
-      if (newIds.length === 0) return
+      // Removals are the other half of hydration: this index is the source of
+      // truth for which Epics are still ACTIVE in this cwd, and it is edited
+      // out-of-band (another window, a tool, a manual cleanup). Without this
+      // the store only ever grew, so Epics deleted on disk stayed listed as
+      // Open forever — and the next persist wrote all of them back, undoing
+      // the deletion. Scoped to this cwd's active Epics: completed ones live
+      // in per-Epic archives (hydrateArchived) and are never in this file.
+      // Skipped entirely while our own writes are in flight, since disk is
+      // legitimately behind memory then.
+      const goneIds = hasPendingWrite(path)
+        ? []
+        : Object.keys(existingSessions).filter(
+            (id) =>
+              existingSessions[id].cwd === cwd &&
+              existingSessions[id].status === 'active' &&
+              !diskSessions[id],
+          )
+      if (newIds.length === 0 && goneIds.length === 0) return
       const sessions = { ...existingSessions }
       const events = { ...get().events }
       for (const id of newIds) {
         sessions[id] = diskSessions[id]
         events[id] = diskEvents[id] ?? []
+      }
+      for (const id of goneIds) {
+        delete sessions[id]
+        delete events[id]
       }
       set({ sessions, events })
     } catch (err) {

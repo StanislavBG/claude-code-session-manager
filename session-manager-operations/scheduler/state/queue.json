@@ -1,0 +1,78 @@
+{
+  "jobs": [
+    {
+      "slug": "854-external-send-epic-targets-and-dead-channels",
+      "title": "Resolve external chat sends against Epics, and remove the dead chat context-probe channels",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 854,
+      "estimateMinutes": 14,
+      "sourcePromptId": "scope-scheduler-left-nav-dot-and-windowstrip-sta-b6ef91a6",
+      "sourceTabId": null,
+      "dependsOn": [
+        "prompt-session-event-broadcast"
+      ],
+      "originSessionId": "c9607aa2-8a5c-4489-81c5-8eb3c15882ad",
+      "bodyPreview": "# Goal\n\nAny externally-originated prompt aimed at an Epic is silently ignored. src/renderer/state/chat.ts:812-818 resolves the target via `useSessions.getState().tabs.find(t => t.id === tabId)`, but Epics are PromptSessions in usePromptSessions, not SessionTabs — so every Web Remote, loopback admin-API, and MCP `chat_send_prompt` call targeting an Epic id hits the `if (!tab)` branch at :814 and logs \"external send ignored: tab <id> is not open\". src/main/scheduler.cjs:1666-1680 uses the same fallback lookup. Separately, `ipcMain.handle('chat:probe-context')` (chatRunner.cjs:835) and `broadcast('chat:context-usage')` (chatRunner.cjs:210) have no preload counterpart in src/preload/index.cjs and are dead in both directions. Fix the first; resolve the second one way or the other.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "853-prompt-session-event-broadcast",
+      "title": "Broadcast promptSession event appends so PRD responses reach an open Epic thread live",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 853,
+      "estimateMinutes": 20,
+      "sourcePromptId": "scope-scheduler-left-nav-dot-and-windowstrip-sta-b6ef91a6",
+      "sourceTabId": null,
+      "dependsOn": [],
+      "originSessionId": "c9607aa2-8a5c-4489-81c5-8eb3c15882ad",
+      "bodyPreview": "# Goal\n\nScheduler PRD completions never reach an open Epic thread. src/main/scheduler.cjs:1659 calls `appendResponseEvent(job.cwd, prd.sourcePromptId, message)`, which src/main/promptSessionEvents.cjs:56-86 writes into active-index.json on disk with NO IPC broadcast at all. The renderer only learns of events via `usePromptSessions.hydrate(cwd)`, and src/renderer/state/promptSessions.ts:297-298 early-returns whenever there are no NEW session ids — so for an Epic already in memory the response event is discarded forever and only a full app restart surfaces it. Add an IPC broadcast on event append, subscribe to it in the promptSessions store, and fix hydrate to merge events for existing sessions, so the `prompt -> prd_created -> response -> closed` chain renders live.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "852-epic-thread-live-stream-and-tools",
+      "title": "Render live streaming output and tool-use activity in the Epic chat thread",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 852,
+      "estimateMinutes": 18,
+      "sourcePromptId": "scope-scheduler-left-nav-dot-and-windowstrip-sta-b6ef91a6",
+      "sourceTabId": null,
+      "dependsOn": [],
+      "originSessionId": "c9607aa2-8a5c-4489-81c5-8eb3c15882ad",
+      "bodyPreview": "# Goal\n\nAfter sending a message in an Epic, the user sees nothing at all until the whole turn finishes. src/renderer/state/chat.ts:749 accumulates `chat.stream` from every `chat:run:output` delta and :752 records `chat:run:tool-use`, but NO component reads either — a grep for `.stream` across src/renderer/components returns only comments (EpicDetail.tsx:273, EpicsWorkspace.tsx:37), and src/renderer/lib/useChatSignals.ts:7-9 deliberately excludes it. EpicDetail.tsx renders only completed `turns`, so the entire turn is dead air. Render the in-flight stream as a live assistant bubble and surface tool-use as visible operation chips in the thread, so the session's operations are reported back to the user as they happen.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "851-chat-send-silent-drop-guard",
+      "title": "Never silently drop an Epic chat send in chatRunner's per-tab exclusivity guard",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 851,
+      "estimateMinutes": 12,
+      "sourcePromptId": "scope-scheduler-left-nav-dot-and-windowstrip-sta-b6ef91a6",
+      "sourceTabId": null,
+      "dependsOn": [],
+      "originSessionId": "c9607aa2-8a5c-4489-81c5-8eb3c15882ad",
+      "bodyPreview": "# Goal\n\nA user's Epic chat message can be swallowed with no error and no way to recover. `run()` in src/main/chatRunner.cjs:381 returns early when `opts.tabId` is already in `inFlight` or `waiting`, emitting no broadcast at all, while `ipcMain.handle('chat:run')` (chatRunner.cjs:817) still resolves `{ ok: true }`. The renderer already set `running: true` at src/renderer/state/chat.ts:438, so the Epic is wedged in the running state forever with no toast and no completion event. A `silent` /context probe (chatRunner.cjs:196) occupying the same tabId is enough to trigger this. Fix the guard so a colliding send is either queued behind the in-flight run or reported as an error — never dropped.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    }
+  ]
+}

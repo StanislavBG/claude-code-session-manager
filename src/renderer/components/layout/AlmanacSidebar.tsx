@@ -91,10 +91,21 @@ function loadCollapsed(): Set<GroupName> {
 }
 
 function useLiveIndicators() {
-  // Selector returns a primitive so this component only re-renders when the
-  // boolean flips, not on every scheduler snapshot broadcast.
+  // Scheduler is a browser over TAB → EPIC → PRD (CLAUDE.md domain model), so
+  // the nav dot reports the ACTIVE TAB's project only — a job running in some
+  // other project must not light up this project's row. Falls back to
+  // machine-wide when there's no active tab, matching the Scheduler tab's own
+  // scope toggle ("No active tab — showing all projects").
+  //
+  // Both selectors return primitives (a cwd string and a boolean) so this
+  // component re-renders only when the value actually flips, not on every
+  // scheduler snapshot broadcast — and never returns a freshly-built array,
+  // which would infinite-loop under zustand v5 (see CLAUDE.md "Avoid").
+  const activeCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const schedulerRunning = useScheduleState((s) =>
-    (s.snapshot?.jobs ?? []).some((j) => j.status === 'running'),
+    (s.snapshot?.jobs ?? []).some(
+      (j) => j.status === 'running' && (!activeCwd || j.cwd === activeCwd),
+    ),
   )
   return {
     scheduler: schedulerRunning,

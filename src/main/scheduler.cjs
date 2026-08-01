@@ -3822,116 +3822,137 @@ function registerScheduleHandlers() {
 
 async function init() {
   ensureDirs();
-  // A slot freed anywhere (e.g. a chat run settled) may unblock a deferred
-  // batch — advance the queue without waiting for the next 60s poll.
-  sessionSlots.subscribe(() => { tickQueue().catch(() => {}); });
-  // Retire the global queue.json: split its rows into per-project shards
-  // BEFORE the first read below, so boot reconciliation sees the shards.
+  // Boot phase — reconciliation, migrations, self-heal, first reset probe.
+  // Guarded as a unit: everything below installs the timers that ARE the
+  // running scheduler (poll loop, heartbeat, supervisor). A throw in here
+  // used to reject init() and silently skip all of them, leaving an app
+  // that looks up and holds the ownership lock but never ticks and never
+  // writes a heartbeat — indistinguishable from a hung queue. Most of this
+  // work is best-effort recovery; none of it is worth trading the scheduler
+  // itself for. rescheduleTimer() in particular reaches the billing API,
+  // which fails whenever the OAuth token is stale.
   try {
-    const m = await queueStore.migrateLegacyGlobalQueue(DEFAULT_PROJECT_CWD);
-    if (m.migrated) {
-      console.log(`[scheduler] legacy global queue retired: ${m.moved} row(s) split across ${m.projects} project shard(s)`);
+    // A slot freed anywhere (e.g. a chat run settled) may unblock a deferred
+    // batch — advance the queue without waiting for the next 60s poll.
+    sessionSlots.subscribe(() => { tickQueue().catch(() => {}); });
+    // Retire the global queue.json: split its rows into per-project shards
+    // BEFORE the first read below, so boot reconciliation sees the shards.
+    try {
+      const m = await queueStore.migrateLegacyGlobalQueue(DEFAULT_PROJECT_CWD);
+      if (m.migrated) {
+        console.log(`[scheduler] legacy global queue retired: ${m.moved} row(s) split across ${m.projects} project shard(s)`);
+      }
+    } catch (e) {
+      console.error('[scheduler] legacy queue split failed', e?.message);
     }
-  } catch (e) {
-    console.error('[scheduler] legacy queue split failed', e?.message);
-  }
-  await runPrdMigration();
-  sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
+    await runPrdMigration();
+    sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
 
-  // Hydrate cached state from the sidecar before any scheduling decisions.
-  loadSchedulerState();
-  bootedAt = Date.now();
+    // Hydrate cached state from the sidecar before any scheduling decisions.
+    loadSchedulerState();
+    bootedAt = Date.now();
 
-  // Boot reconciliation: finalize any job that was 'running' when the app died.
-  // Check the run log first — a job that emitted result/success before the crash
-  // should be marked 'completed', not 'failed', so it doesn't wedge the queue
-  // via the failure-gate. Also kill any still-live orphan claude child to prevent
-  // it from continuing to write to the project unsupervised (2026-05-21 incident).
-  //
-  // classifyRunOutcome calls readTail → fs.readFileSync (up to 64 KB per job).
-  // Pre-compute all outcomes BEFORE entering the mutate lock so the blocking I/O
-  // does not stall the event loop or hold the mutateTail chain during startup.
-  //
-  // Jobs whose recorded pid is still alive are deferred (not classified here) —
-  // see partitionBootOrphans. Everything else (dead pid or no pid) is safe to
-  // classify immediately below.
-  const bootSnap = readQueueSync();
-  const { immediate: immediateSlugs, deferred: deferredSlugs } = partitionBootOrphans(bootSnap.jobs);
-  const bootOutcomes = new Map();
-  for (const j of bootSnap.jobs) {
-    if (!immediateSlugs.includes(j.slug)) continue;
-    const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
-    bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
-  }
-  const bootReconciledCompletions = [];
-  await mutate((state) => {
-    for (const j of state.jobs) {
-      if (j.status !== 'running' || !immediateSlugs.includes(j.slug)) continue;
-      const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
-      const pid = j.runtime?.pid;
-      const killNote = pid ? ` (orphan pid=${pid}: dead)` : '';
-      applyOrphanOutcome(j, outcome, killNote);
-      if (j.status === 'completed') bootReconciledCompletions.push({ slug: j.slug, cwd: j.cwd });
-      console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → status=${j.status}`);
-    }
-  });
-  for (const { slug, cwd } of bootReconciledCompletions) {
-    await archiveCompletedPrd(slug, cwd);
-  }
-
-  // Still-alive orphans: SIGTERM (+ killOrphanClaudePid's own deferred SIGKILL
-  // follow-up) now, but classification waits until BOOT_ORPHAN_KILL_GRACE_MS
-  // later — reading the log while the orphan might still be writing to it
-  // could misclassify an about-to-succeed run as no_result and double-run the
-  // same PRD (2026-05-21 incident this guard exists for).
-  for (const slug of deferredSlugs) {
-    const j = bootSnap.jobs.find((x) => x.slug === slug);
-    const pid = j?.runtime?.pid;
-    const bootRunId = j?.runId ?? null; // captured now — guards against reconciling a DIFFERENT later run of the same slug
-    if (!pid) continue;
-    const result = killOrphanClaudePid(pid);
-    const killNote = ` (orphan pid=${pid}: ${result})`;
-    if (result === 'killed') {
-      console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${slug} — deferring finalize ${BOOT_ORPHAN_KILL_GRACE_MS}ms`);
-    }
-    setTimeout(() => {
+    // Boot reconciliation: finalize any job that was 'running' when the app died.
+    // Check the run log first — a job that emitted result/success before the crash
+    // should be marked 'completed', not 'failed', so it doesn't wedge the queue
+    // via the failure-gate. Also kill any still-live orphan claude child to prevent
+    // it from continuing to write to the project unsupervised (2026-05-21 incident).
+    //
+    // classifyRunOutcome calls readTail → fs.readFileSync (up to 64 KB per job).
+    // Pre-compute all outcomes BEFORE entering the mutate lock so the blocking I/O
+    // does not stall the event loop or hold the mutateTail chain during startup.
+    //
+    // Jobs whose recorded pid is still alive are deferred (not classified here) —
+    // see partitionBootOrphans. Everything else (dead pid or no pid) is safe to
+    // classify immediately below.
+    const bootSnap = readQueueSync();
+    const { immediate: immediateSlugs, deferred: deferredSlugs } = partitionBootOrphans(bootSnap.jobs);
+    const bootOutcomes = new Map();
+    for (const j of bootSnap.jobs) {
+      if (!immediateSlugs.includes(j.slug)) continue;
       const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
-      const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
-      let deferredCompletedCwd;
-      mutate((state) => {
-        const cur = state.jobs.find((x) => x.slug === slug);
-        // Race guard: bail if the job already resolved, OR if it's already been
-        // re-picked into a NEW run (different runId) within the grace window —
-        // that new run is not the boot orphan we SIGTERM'd and must not be
-        // touched by this stale classification.
-        if (!cur || cur.status !== 'running' || cur.runId !== bootRunId) return;
-        applyOrphanOutcome(cur, outcome, killNote);
-        console.log(`[scheduler] boot reconcile (deferred): slug=${slug} outcome=${outcome} → status=${cur.status}`);
-        deferredCompletedCwd = cur.status === 'completed' ? cur.cwd : undefined;
-      }).then(() => {
-        if (deferredCompletedCwd !== undefined) return archiveCompletedPrd(slug, deferredCompletedCwd);
-      }).catch((e) => console.error(`[scheduler] deferred boot reconcile failed for ${slug}:`, e?.message));
-    }, BOOT_ORPHAN_KILL_GRACE_MS).unref?.();
+      bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
+    }
+    const bootReconciledCompletions = [];
+    await mutate((state) => {
+      for (const j of state.jobs) {
+        if (j.status !== 'running' || !immediateSlugs.includes(j.slug)) continue;
+        const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
+        const pid = j.runtime?.pid;
+        const killNote = pid ? ` (orphan pid=${pid}: dead)` : '';
+        applyOrphanOutcome(j, outcome, killNote);
+        if (j.status === 'completed') bootReconciledCompletions.push({ slug: j.slug, cwd: j.cwd });
+        console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → status=${j.status}`);
+      }
+    });
+    for (const { slug, cwd } of bootReconciledCompletions) {
+      await archiveCompletedPrd(slug, cwd);
+    }
+
+    // Still-alive orphans: SIGTERM (+ killOrphanClaudePid's own deferred SIGKILL
+    // follow-up) now, but classification waits until BOOT_ORPHAN_KILL_GRACE_MS
+    // later — reading the log while the orphan might still be writing to it
+    // could misclassify an about-to-succeed run as no_result and double-run the
+    // same PRD (2026-05-21 incident this guard exists for).
+    for (const slug of deferredSlugs) {
+      const j = bootSnap.jobs.find((x) => x.slug === slug);
+      const pid = j?.runtime?.pid;
+      const bootRunId = j?.runId ?? null; // captured now — guards against reconciling a DIFFERENT later run of the same slug
+      if (!pid) continue;
+      const result = killOrphanClaudePid(pid);
+      const killNote = ` (orphan pid=${pid}: ${result})`;
+      if (result === 'killed') {
+        console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${slug} — deferring finalize ${BOOT_ORPHAN_KILL_GRACE_MS}ms`);
+      }
+      setTimeout(() => {
+        const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
+        const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
+        let deferredCompletedCwd;
+        mutate((state) => {
+          const cur = state.jobs.find((x) => x.slug === slug);
+          // Race guard: bail if the job already resolved, OR if it's already been
+          // re-picked into a NEW run (different runId) within the grace window —
+          // that new run is not the boot orphan we SIGTERM'd and must not be
+          // touched by this stale classification.
+          if (!cur || cur.status !== 'running' || cur.runId !== bootRunId) return;
+          applyOrphanOutcome(cur, outcome, killNote);
+          console.log(`[scheduler] boot reconcile (deferred): slug=${slug} outcome=${outcome} → status=${cur.status}`);
+          deferredCompletedCwd = cur.status === 'completed' ? cur.cwd : undefined;
+        }).then(() => {
+          if (deferredCompletedCwd !== undefined) return archiveCompletedPrd(slug, deferredCompletedCwd);
+        }).catch((e) => console.error(`[scheduler] deferred boot reconcile failed for ${slug}:`, e?.message));
+      }, BOOT_ORPHAN_KILL_GRACE_MS).unref?.();
+    }
+
+    // If we boot up while paused with a resumeAt in the past, clear it. This
+    // happens when the app was closed across the reset window.
+    const boot = await readQueue();
+    if (boot.paused && boot.paused.resumeAt && new Date(boot.paused.resumeAt).getTime() <= Date.now()) {
+      await clearPause('boot-elapsed');
+    } else if (boot.paused && boot.paused.resumeAt) {
+      // Re-arm the resume timer (lost across restart).
+      await setPaused(boot.paused.reason, boot.paused.resumeAt);
+    }
+
+    // Self-heal stale needs_review flags using the current verifier (see
+    // reverifyNeedsReview). Runs once on boot so a shipped verifier fix clears
+    // its own historical false positives without manual retagging.
+    await reverifyNeedsReview().catch((e) => {
+      console.error(`[scheduler] boot reverify failed: ${e?.message ?? e}`);
+    });
+
+    await rescheduleTimer();
+  } catch (e) {
+    console.error('[scheduler] boot phase failed — starting timers anyway:', e?.message);
+    try {
+      require('./logs.cjs').writeLine({
+        scope: 'scheduler',
+        level: 'error',
+        message: 'boot phase failed; timers started anyway',
+        meta: { error: e?.message },
+      });
+    } catch { /* logging must never be the thing that stops the scheduler */ }
   }
-
-  // If we boot up while paused with a resumeAt in the past, clear it. This
-  // happens when the app was closed across the reset window.
-  const boot = await readQueue();
-  if (boot.paused && boot.paused.resumeAt && new Date(boot.paused.resumeAt).getTime() <= Date.now()) {
-    await clearPause('boot-elapsed');
-  } else if (boot.paused && boot.paused.resumeAt) {
-    // Re-arm the resume timer (lost across restart).
-    await setPaused(boot.paused.reason, boot.paused.resumeAt);
-  }
-
-  // Self-heal stale needs_review flags using the current verifier (see
-  // reverifyNeedsReview). Runs once on boot so a shipped verifier fix clears
-  // its own historical false positives without manual retagging.
-  await reverifyNeedsReview().catch((e) => {
-    console.error(`[scheduler] boot reverify failed: ${e?.message ?? e}`);
-  });
-
-  await rescheduleTimer();
   // Refresh next-reset every 10 minutes — billing window can shift if usage
   // resets early or the auth token rotates. Tracked so re-init doesn't leak.
   if (rescheduleInterval) clearInterval(rescheduleInterval);

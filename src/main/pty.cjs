@@ -25,6 +25,11 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 // the remediation message so the user can cd there and rebuild.
 const PKG_DIR = path.join(__dirname, '..', '..');
 
+// Per-session replay buffer ceiling. Big enough that switching away from an
+// Epic and back shows a meaningful working history, small enough that a dozen
+// chatty sessions can't balloon main-process memory.
+const REPLAY_BUFFER_MAX = 256 * 1024;
+
 /**
  * ANSI-formatted terminal text explaining a native-module / immediate-exit
  * failure and exactly how to fix it. Written straight into the tab's output so
@@ -60,6 +65,13 @@ class PtyManager {
   constructor() {
     this.sessions = new Map(); // tabId -> { proc, cwd, created }
     this.killed = new Set();   // tabIds explicitly killed — suppress their exit events
+    // tabId -> recent output, replayed verbatim on reattach. An Epic's
+    // Terminal pane unmounts whenever the user views a DIFFERENT Epic while
+    // its claude keeps running (Epic ⇄ claude-session is 1:1 and must survive
+    // browsing), so "pre-reattach output is lost" — tolerable for a dev
+    // reload — would read as the session having been wiped. Bounded ring so a
+    // long-lived session can't grow this without limit.
+    this.buffers = new Map();
     this.window = null;
   }
 
@@ -103,6 +115,15 @@ class PtyManager {
         existing.proc.resize(cols, rows);
       } catch {
         /* pty may have exited between the check and the resize */
+      }
+      // Replay recent output so a reattached viewport isn't blank. The caller
+      // registers its pty:data listener BEFORE invoking spawn (see
+      // EpicTerminalPane / Terminal), and this fires on the next tick, so the
+      // listener is always in place by the time the replay lands. Sent as one
+      // chunk ahead of any live data, preserving ordering.
+      const replay = this.buffers.get(tabId);
+      if (replay) {
+        setImmediate(() => sendIfAlive(this.window, `pty:data:${tabId}`, replay));
       }
       // If the process has already exited but its session wasn't cleaned up,
       // fire a synthetic exit after the renderer re-registers its onExit handler.
@@ -154,6 +175,7 @@ class PtyManager {
 
     proc.onData((data) => {
       gotData = true;
+      this.#appendReplay(tabId, data);
       sendIfAlive(this.window, `pty:data:${tabId}`, data);
     });
 
@@ -164,6 +186,7 @@ class PtyManager {
       if (this.killed.delete(tabId)) {
         console.log('[pty] suppressed exit broadcast for killed tabId=', tabId);
         this.sessions.delete(tabId);
+        this.buffers.delete(tabId);
         return;
       }
       // Fast-exit detector: a shell that dies in <1.2s with a non-zero status
@@ -176,10 +199,20 @@ class PtyManager {
       }
       sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode, signal });
       this.sessions.delete(tabId);
+      this.buffers.delete(tabId);
     });
 
     this.sessions.set(tabId, { proc, cwd, created: spawnedAt });
     return { pid: proc.pid, cwd, reattached: false };
+  }
+
+  /** Append to a session's bounded replay buffer, trimming oldest output. */
+  #appendReplay(tabId, data) {
+    const next = (this.buffers.get(tabId) ?? '') + data;
+    this.buffers.set(
+      tabId,
+      next.length > REPLAY_BUFFER_MAX ? next.slice(next.length - REPLAY_BUFFER_MAX) : next,
+    );
   }
 
   write({ tabId, data }) {
@@ -225,6 +258,7 @@ class PtyManager {
         /* already dead */
       }
       this.sessions.delete(tabId);
+      this.buffers.delete(tabId);
     }
   }
 

@@ -371,6 +371,69 @@ describe('promptSessions.ts', () => {
     })
   })
 
+  // The active index is the source of truth for which Epics are still open in
+  // a cwd, and it gets edited out-of-band (main-process epicMint, another
+  // window, a manual cleanup). hydrate() used to only ever ADD, so a deleted
+  // Epic stayed listed as Open and the next persist wrote it straight back.
+  it('hydrate() removes active Epics for the cwd that are no longer on disk', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const kept = store.createPromptSession('/proj', 'Still open')
+    const deleted = usePromptSessions.getState().createPromptSession('/proj', 'Removed on disk')
+    const otherProject = usePromptSessions.getState().createPromptSession('/other', 'Different cwd')
+
+    // Let the in-flight persists drain — hydrate() intentionally declines to
+    // reconcile removals while disk is knowably behind memory.
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Disk now lists only `kept` for /proj.
+    api.config.readJson.mockResolvedValue({
+      exists: true,
+      raw: '',
+      data: {
+        sessions: { [kept.id]: usePromptSessions.getState().sessions[kept.id] },
+        events: { [kept.id]: usePromptSessions.getState().events[kept.id] },
+      },
+      parseError: null,
+      mtimeMs: 0,
+      error: null,
+    })
+
+    await usePromptSessions.getState().hydrate('/proj')
+
+    const after = usePromptSessions.getState()
+    expect(after.sessions[kept.id]).toBeDefined()
+    expect(after.sessions[deleted.id]).toBeUndefined()
+    expect(after.events[deleted.id]).toBeUndefined()
+    // Another project's Epics are outside this index's authority.
+    expect(after.sessions[otherProject.id]).toBeDefined()
+  })
+
+  it('hydrate() does not remove a just-created Epic whose write is still in flight', async () => {
+    const api = installWindowApiMock()
+    // Hold the write open so the pending-write guard is active.
+    let releaseWrite: () => void = () => {}
+    api.config.writeJson.mockImplementation(
+      () => new Promise<void>((resolve) => { releaseWrite = () => resolve() }),
+    )
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const fresh = usePromptSessions.getState().createPromptSession('/proj', 'Brand new')
+    // Disk has nothing yet — the write hasn't landed.
+    api.config.readJson.mockResolvedValue({
+      exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null,
+    })
+
+    await usePromptSessions.getState().hydrate('/proj')
+
+    expect(usePromptSessions.getState().sessions[fresh.id]).toBeDefined()
+    releaseWrite()
+  })
+
   it('round-trips an Epic-level tag through persistActiveIndex and hydrate()', async () => {
     const api = installWindowApiMock()
     const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')

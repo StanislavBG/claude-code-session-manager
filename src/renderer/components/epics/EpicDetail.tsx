@@ -231,6 +231,7 @@ export function EpicDetail({ promptSession }: Props) {
 
   const mode = useEpicTerminal((s) => s.modes[epicId] ?? 'chat')
   const setMode = useEpicTerminal((s) => s.setMode)
+  const setAttached = useEpicTerminal((s) => s.setAttached)
 
   const [view, setView] = useState<ViewKey>('discussion')
   const prds = useScheduledPrds()
@@ -292,6 +293,11 @@ export function EpicDetail({ promptSession }: Props) {
 
   const onMarkCompleted = () => {
     setMarkingCompleted(true)
+    // markCompleted kills the Epic's PTY and chat run; drop the terminal
+    // attachment with it so a completed Epic can't leave chat.ts's send()
+    // guard latched on a session that no longer exists.
+    setAttached(epicId, false)
+    setMode(epicId, 'chat')
     void markCompleted(epicId).finally(() => setMarkingCompleted(false))
   }
 
@@ -309,6 +315,14 @@ export function EpicDetail({ promptSession }: Props) {
   // thread's audit trail stays honest even though the interactive turns
   // themselves are never backfilled (out of scope).
   const returnToChat = () => {
+    // Explicit handoff back to Chat is the ONE place a Terminal-mode PTY is
+    // torn down by the user (browsing to another Epic no longer kills it, so
+    // the session survives). Chat and Terminal are mutually-exclusive views
+    // over one claudeSessionId: the interactive claude has to be gone before
+    // chatRunner may `--resume` the same session. Idempotent no-op when the
+    // PTY already exited on its own.
+    window.api.pty.kill(sessionId)
+    setAttached(epicId, false)
     // Read the tail fresh rather than off the render-snapshotted
     // `sessionEvents` — appendPromptSessionEvent's tail-chain check needs the
     // CURRENT tail, not whatever was current when EpicDetail last rendered.

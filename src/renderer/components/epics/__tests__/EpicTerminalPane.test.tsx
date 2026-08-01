@@ -192,11 +192,41 @@ describe('EpicTerminalPane (PRD 831)', () => {
     act(() => { backBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(onReturnToChat).toHaveBeenCalledTimes(1)
 
-    // Unmount still tears the pty down cleanly (idempotent even post-exit).
+    // Unmount must NOT kill: teardown is owned by the explicit exits (Chat
+    // toggle / Mark completed) and by the pty's own exit, never by the pane
+    // going away — this pane unmounts every time the user views another Epic.
     act(() => root?.unmount())
     root = null
-    expect(kill).toHaveBeenCalledWith('claude-session-abc')
+    expect(kill).not.toHaveBeenCalled()
     expect(useEpicTerminal.getState().isAttached('epic-1')).toBe(false)
+  })
+
+  // The regression this whole change exists to prevent: browsing to another
+  // Epic used to SIGKILL the live claude behind the one you left, so returning
+  // got a cold `--resume` with the session's in-flight context gone.
+  it('leaves the pty running and the Epic attached when the pane unmounts because another Epic was selected', async () => {
+    const { kill } = installWindowApiMock()
+    const { useEpicTerminal } = await import('../../../state/epicTerminal')
+    const { EpicTerminalPane } = await import('../EpicTerminalPane')
+
+    mount(
+      createElement(EpicTerminalPane, {
+        epicId: 'epic-1',
+        cwd: '/proj',
+        sessionId: 'claude-session-abc',
+        onReturnToChat: vi.fn(),
+      }),
+    )
+    await act(async () => { await Promise.resolve() })
+    expect(useEpicTerminal.getState().isAttached('epic-1')).toBe(true)
+
+    act(() => root?.unmount())
+    root = null
+
+    expect(kill).not.toHaveBeenCalled()
+    // Still attached: a live interactive claude owns this claudeSessionId, so
+    // chat.ts's send() guard must keep refusing a headless --resume for it.
+    expect(useEpicTerminal.getState().isAttached('epic-1')).toBe(true)
   })
 
   it('regression: switching the selected Epic while both are in Terminal mode spawns a fresh pty for the new Epic instead of reusing the stale instance', async () => {

@@ -84,6 +84,11 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
   if (queueState.paused) return { stalled: false, reason: 'paused' };
   if (config.enabled === false) return { stalled: false, reason: 'disabled' };
   if (running >= concurrencyCap) return { stalled: false, reason: 'at-capacity' };
+  // 'manual' means the operator fires batches by hand — the scheduler is not
+  // supposed to pick these up on its own, so pending work sitting with free
+  // capacity is the configured behaviour, not a stall. Without this, any queue
+  // under a manual policy reported RED forever and drowned out real stalls.
+  if (config.firePolicy === 'manual') return { stalled: false, reason: 'manual-fire-policy' };
 
   const lastRunAt = queueState.lastRunAt ? Date.parse(queueState.lastRunAt) : null;
   // No lastRunAt at all (fresh install, never ticked) — nothing to measure

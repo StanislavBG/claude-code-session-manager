@@ -38,9 +38,15 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
 
   // Attached the instant this pane mounts (before the pty round-trip
   // resolves) so chat.ts's send() guard blocks immediately on mode switch.
+  //
+  // Deliberately NOT cleared on unmount: this pane unmounts whenever the user
+  // browses to a different Epic, but the PTY keeps running and keeps holding
+  // this Epic's claudeSessionId. Clearing here would let chat.ts dispatch a
+  // headless `--resume` against a session a live interactive claude still
+  // owns. Attachment ends only when the PTY actually ends — on its exit event,
+  // or on the explicit Chat toggle, both of which clear it.
   useEffect(() => {
     setAttached(epicId, true)
-    return () => setAttached(epicId, false)
   }, [epicId, setAttached])
 
   useEffect(() => {
@@ -119,8 +125,13 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
       offExit()
       offSettings()
       term.dispose()
-      // Idempotent no-op if the process already exited on its own.
-      window.api.pty.kill(sessionId)
+      // The PTY is deliberately LEFT RUNNING. An Epic IS its claude session,
+      // and viewing another Epic must not destroy it — killing here is what
+      // made switching away lose the session's live context (only the
+      // transcript survived, so returning got a cold `--resume`). Teardown is
+      // now owned by the explicit exits: the Chat toggle, Mark completed, and
+      // the PTY's own exit. Main-process output keeps buffering meanwhile and
+      // is replayed on remount, so the viewport comes back with its history.
     }
   }, [sessionId, cwd, epicId, setAttached])
 

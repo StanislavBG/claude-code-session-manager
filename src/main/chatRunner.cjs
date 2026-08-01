@@ -341,11 +341,29 @@ function getConcurrencyCap() {
 // await full teardown instead of firing SIGTERM and returning immediately.
 const inFlight = new Map();
 const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult }]
+// tabIds picked by pump() but not yet registered in `inFlight` by executeRun.
+// Closes the microtask-wide window in which per-tab exclusivity would
+// otherwise not hold. See pump().
+const dispatching = new Set();
 let activeCount = 0;
 
 // Indirection so tests can stub the spawn without launching claude.
 let executor = executeRun;
 function __setExecutor(fn) { executor = fn || executeRun; }
+
+/**
+ * Test hook: drop all lane state. The module is a singleton shared across
+ * every test in a file, and a spec whose fake child never emits 'exit' leaves
+ * its run permanently in flight — holding a session slot and a lane seat that
+ * silently starve every later test. Also releases the shared slot pool.
+ */
+function __resetQueueForTests() {
+  inFlight.clear();
+  dispatching.clear();
+  waiting.length = 0;
+  activeCount = 0;
+  sessionSlots.__resetForTests();
+}
 
 // ─── Window reference (set by attachWindow) ────────────────────────────────
 
@@ -375,27 +393,56 @@ function broadcast(channel, payload) {
  * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, promptId?: string }} opts
  */
 function run(opts) {
-  // Per-tab exclusivity guard — unrelated to the cross-tab cap; must hold for
-  // BOTH manual and silent runs so a manual send can't race a /context probe
-  // for the same tab against the same --resume sessionId.
-  if (inFlight.has(opts.tabId) || waiting.some((w) => w.tabId === opts.tabId)) return;
+  // Per-tab exclusivity still holds — two `claude -p --resume` against ONE
+  // sessionId must never overlap — but it is now enforced in pump() (which
+  // refuses to start a run for a tab that already has one live) rather than by
+  // discarding the submission here.
+  //
+  // Dropping was silent and unrecoverable: `chat:run` still resolved
+  // { ok: true }, so the renderer sat at running: true forever with no toast
+  // and no terminal event. A `silent` /context probe holding the tabId was
+  // enough to swallow a user's message. User-initiated sends are now QUEUED
+  // behind whatever holds the tab and dispatched in FIFO order.
+  // `dispatching` counts as busy too: between pump() picking a run and
+  // executeRun registering it in `inFlight`, the tab is committed but not yet
+  // visible in `inFlight` — the same window pump() guards against.
+  const tabBusy = inFlight.has(opts.tabId)
+    || dispatching.has(opts.tabId)
+    || waiting.some((w) => w.tabId === opts.tabId);
+  if (tabBusy && opts.silent) {
+    // Silent probes stay best-effort and invisible: a probe that collides is
+    // still dropped, since queueing one would delay real work to no benefit.
+    return { accepted: false, reason: 'tab-busy-silent' };
+  }
 
   waiting.push(opts);
   pump();
+  return { accepted: true, queued: tabBusy };
 }
 
 // Fill open lanes FIFO up to CONCURRENCY_CAP, then announce queue positions for
 // the remainder. O(n) over the waiting list (bounded by open tabs).
 function pump() {
   while (activeCount < getConcurrencyCap() && waiting.length > 0) {
+    // Per-tab exclusivity: skip past any waiting run whose tab already has one
+    // live, rather than head-blocking the whole lane on it. `dispatching`
+    // covers the gap between picking a job here and executeRun() registering
+    // it in `inFlight` (which happens a microtask later) — without it, one
+    // synchronous sweep of this loop could start two runs for the same tab and
+    // race two --resume processes against a single sessionId.
+    const idx = waiting.findIndex((w) => !inFlight.has(w.tabId) && !dispatching.has(w.tabId));
+    // Everything queued is blocked behind its own tab's live run; the settle()
+    // of that run re-pumps.
+    if (idx === -1) break;
     // The chat lane cap is a POLICY bound; actual capacity comes from the
     // Session-Manager-wide slot pool shared with the scheduler
     // (lib/sessionSlots.cjs). No slot → everyone keeps waiting; the next
     // settle() in either subsystem re-pumps.
-    const slotToken = sessionSlots.acquire(`chat:${waiting[0].tabId}`);
+    const slotToken = sessionSlots.acquire(`chat:${waiting[idx].tabId}`);
     if (!slotToken) break;
-    const job = waiting.shift();
+    const [job] = waiting.splice(idx, 1);
     activeCount += 1;
+    dispatching.add(job.tabId);
     Promise.resolve()
       .then(() => {
         const donePromise = executor(job);
@@ -404,7 +451,12 @@ function pump() {
         return donePromise;
       })
       .catch(() => { /* executeRun never rejects; defensive */ })
-      .finally(() => { sessionSlots.release(slotToken); activeCount -= 1; pump(); });
+      .finally(() => {
+        dispatching.delete(job.tabId);
+        sessionSlots.release(slotToken);
+        activeCount -= 1;
+        pump();
+      });
   }
   // Anyone still waiting gets a 1-based position update. Silent (automated
   // probe) runs must stay invisible to the renderer, same as every other
@@ -815,8 +867,12 @@ function registerChatHandlers() {
   const { schemas, validated } = require('./ipcSchemas.cjs');
 
   ipcMain.handle('chat:run', validated(schemas.chatRun, async ({ tabId, sessionId, prompt, cwd, resume, promptId }) => {
-    run({ tabId, sessionId, prompt, cwd, resume: !!resume, promptId });
-    return { ok: true };
+    // Report what actually happened instead of an unconditional { ok: true }.
+    // A user send is always accepted now (queued behind the tab's live run if
+    // one holds it), but the renderer gets the truth either way rather than a
+    // success it can't verify.
+    const outcome = run({ tabId, sessionId, prompt, cwd, resume: !!resume, promptId });
+    return { ok: outcome.accepted !== false, queued: !!outcome.queued, reason: outcome.reason };
   }));
 
   // Classification for a queued PromptTicket reaching the front of its
@@ -841,6 +897,7 @@ function registerChatHandlers() {
 module.exports = {
   run,
   cancel,
+  __resetQueueForTests,
   attachWindow,
   registerChatHandlers,
   parseStopSignal,

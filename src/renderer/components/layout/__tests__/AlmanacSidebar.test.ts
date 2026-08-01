@@ -4,13 +4,51 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, afterEach } from 'vitest'
 import { AlmanacSidebar } from '../AlmanacSidebar'
+import { useScheduleState } from '../../../state/scheduleState'
+import { useSessions } from '../../../state/sessions'
 
 // AlmanacSidebar persists rail/collapse state to localStorage; jsdom provides
 // a real localStorage so no mocking needed, but clear it between tests so one
 // test's rail toggle doesn't leak into the next.
 afterEach(() => {
   localStorage.clear()
+  useScheduleState.setState({ snapshot: null, loaded: false })
+  useSessions.setState({ tabs: [], activeTabId: null })
 })
+
+/** Seed a scheduler snapshot with one running job per given cwd. */
+function seedRunningJobs(cwds: string[]) {
+  const jobs = cwds.map((cwd, i) => ({
+    slug: `job-${i}`,
+    title: `Job ${i}`,
+    cwd,
+    status: 'running',
+    parallelGroup: 0,
+    estimateMinutes: null,
+    bodyPreview: '',
+    runId: null,
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    error: null,
+  }))
+  useScheduleState.setState({ snapshot: { jobs } as never, loaded: true })
+}
+
+function seedActiveTab(cwd: string | null) {
+  if (cwd === null) {
+    useSessions.setState({ tabs: [], activeTabId: null })
+    return
+  }
+  useSessions.setState({
+    tabs: [{ id: 'tab-1', cwd } as never],
+    activeTabId: 'tab-1',
+  })
+}
+
+function schedulerDotCount(container: HTMLElement): number {
+  return container.querySelectorAll('[title="live activity"]').length
+}
 
 function mount() {
   const container = document.createElement('div')
@@ -77,5 +115,61 @@ describe('AlmanacSidebar', () => {
       act(() => root.unmount())
       container.remove()
     }
+  })
+
+  // The Scheduler nav dot is scoped to the active TAB's project (TAB → EPIC →
+  // PRD domain model) — a job running in a different project must not light up
+  // this project's row.
+  describe('scheduler live dot project scoping', () => {
+    it('lights up when a running job belongs to the active tab\'s project', () => {
+      seedActiveTab('/home/u/Projects/alpha')
+      seedRunningJobs(['/home/u/Projects/alpha'])
+      const { container, root } = mount()
+      try {
+        expect(schedulerDotCount(container)).toBe(1)
+      } finally {
+        act(() => root.unmount())
+        container.remove()
+      }
+    })
+
+    it('stays dark when the only running job belongs to another project', () => {
+      seedActiveTab('/home/u/Projects/alpha')
+      seedRunningJobs(['/home/u/Projects/beta'])
+      const { container, root } = mount()
+      try {
+        expect(schedulerDotCount(container)).toBe(0)
+      } finally {
+        act(() => root.unmount())
+        container.remove()
+      }
+    })
+
+    it('falls back to machine-wide when there is no active tab', () => {
+      seedActiveTab(null)
+      seedRunningJobs(['/home/u/Projects/beta'])
+      const { container, root } = mount()
+      try {
+        expect(schedulerDotCount(container)).toBe(1)
+      } finally {
+        act(() => root.unmount())
+        container.remove()
+      }
+    })
+
+    it('ignores running jobs with a null cwd when a project is scoped', () => {
+      seedActiveTab('/home/u/Projects/alpha')
+      useScheduleState.setState({
+        snapshot: { jobs: [{ slug: 'j', status: 'running', cwd: null }] } as never,
+        loaded: true,
+      })
+      const { container, root } = mount()
+      try {
+        expect(schedulerDotCount(container)).toBe(0)
+      } finally {
+        act(() => root.unmount())
+        container.remove()
+      }
+    })
   })
 })

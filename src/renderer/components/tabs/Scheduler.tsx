@@ -71,7 +71,7 @@ function pauseMessage(reason: string, resumeAt: string | null, now: number): str
   return `Scheduler paused (${reason})`
 }
 
-function WindowStrip() {
+function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
   const { snapshot } = useScheduleState()
   const [now, setNow] = useState(() => Date.now())
 
@@ -82,7 +82,11 @@ function WindowStrip() {
 
   if (!snapshot) return null
 
-  const jobs = snapshot.jobs ?? []
+  // Job counts follow the scope toggle so the strip agrees with the list
+  // rendered directly beneath it. The reset countdown, utilization and
+  // last-batch readings below stay machine-wide on purpose — they describe the
+  // 5h billing window and the scheduler tick, not this project's work.
+  const jobs = (snapshot.jobs ?? []).filter(j => !scopeCwd || j.cwd === scopeCwd)
   const pending   = jobs.filter(j => j.status === 'pending').length
   const running   = jobs.filter(j => j.status === 'running').length
   const completed = jobs.filter(j => j.status === 'completed' && (j.finishedAt ? isToday(j.finishedAt, now) : false)).length
@@ -216,7 +220,7 @@ export function Scheduler() {
         </p>
 
         <div className="mt-[18px] mb-[22px]">
-          <WindowStrip />
+          <WindowStrip scopeCwd={scopeCwd} />
         </div>
 
         <div className="flex items-center gap-3 pb-0">

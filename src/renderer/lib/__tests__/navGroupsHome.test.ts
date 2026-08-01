@@ -212,6 +212,23 @@ describe('repoviz is project-only', () => {
   })
 })
 
+describe('search is project-only', () => {
+  it('NAV_ITEMS tags search with faces: [project]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'search')
+    expect(item?.faces).toEqual(['project'])
+  })
+
+  it('home face excludes search', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).not.toContain('search')
+  })
+
+  it('project face includes search', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).toContain('search')
+  })
+})
+
 describe('NAV_ITEMS face-coverage invariant', () => {
   it('every NAV_ITEMS entry has a non-empty faces array', () => {
     for (const item of NAV_ITEMS) {

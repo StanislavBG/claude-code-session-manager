@@ -178,6 +178,23 @@ describe('sm-config is home-only', () => {
   })
 })
 
+describe('voice is home-only', () => {
+  it('NAV_ITEMS tags voice with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'voice')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes voice', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('voice')
+  })
+
+  it('home face includes voice', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('voice')
+  })
+})
+
 describe('NAV_ITEMS face-coverage invariant', () => {
   it('every NAV_ITEMS entry has a non-empty faces array', () => {
     for (const item of NAV_ITEMS) {

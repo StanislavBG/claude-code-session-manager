@@ -3,7 +3,7 @@ title: "Home face: Global Controls dashboard section in Session-Manager Config"
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 22
 sourcePromptId: two-face-leftnav-home-vs-project-scoped-navigati-7edd20cb
-dependsOn: [leftnav-two-face-framework, nav-face-session-manager-config]
+dependsOn: [890-nav-face-session-manager-config]
 ---
 # Goal
 

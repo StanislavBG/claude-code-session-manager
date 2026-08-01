@@ -3,7 +3,6 @@ title: "Nav face: tag Session-Manager Config as home-only (anchor for new global
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 12
 sourcePromptId: two-face-leftnav-home-vs-project-scoped-navigati-7edd20cb
-dependsOn: [leftnav-two-face-framework]
 ---
 # Goal
 

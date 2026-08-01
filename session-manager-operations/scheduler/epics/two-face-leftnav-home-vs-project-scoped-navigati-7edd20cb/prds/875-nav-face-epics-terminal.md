@@ -3,7 +3,6 @@ title: "Nav face: Epics/Terminal both-face with home=all-projects, project=cwd-s
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 20
 sourcePromptId: two-face-leftnav-home-vs-project-scoped-navigati-7edd20cb
-dependsOn: [leftnav-two-face-framework]
 ---
 # Goal
 

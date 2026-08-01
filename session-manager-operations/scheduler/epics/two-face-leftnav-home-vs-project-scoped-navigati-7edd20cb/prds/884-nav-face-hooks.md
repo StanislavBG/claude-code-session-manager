@@ -3,7 +3,6 @@ title: "Nav face: Hooks both-face, default scope flips user<->project"
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 18
 sourcePromptId: two-face-leftnav-home-vs-project-scoped-navigati-7edd20cb
-dependsOn: [leftnav-two-face-framework]
 ---
 # Goal
 

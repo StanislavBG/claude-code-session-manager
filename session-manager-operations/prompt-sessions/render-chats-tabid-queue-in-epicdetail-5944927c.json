@@ -1,0 +1,32 @@
+{
+  "session": {
+    "id": "render-chats-tabid-queue-in-epicdetail-5944927c",
+    "cwd": "/home/bilko/Projects/session-manager",
+    "goalText": "Render chats[tabId].queue in EpicDetail",
+    "claudeSessionId": "9e3a03fd-ef35-425f-9e77-67050d28838d",
+    "status": "completed",
+    "createdAt": "2026-08-01T07:33:17.806Z",
+    "completedAt": "2026-08-01T07:34:01.135Z",
+    "tag": "bug",
+    "openingPrompt": "PRD 871 follow-up gap. PRD 871 (archived at session-manager-operations/scheduler/epics/psess-msa1n71r-4/prds-archived/871-...) had three acceptance criteria:\n1. Persistent running/queued indicator on the Epics list, independent of EpicDetail being mounted.\n2. A chat run queued behind the session-slot pool visually distinguishable from one that completed with no response.\n3. EpicDetail (or its composer) renders chats[tabId].queue — every ticket typed while a run is busy visible as a distinct pending item, in FIFO order.\n\nCommit bb3cb69 fully implemented (1) and (2) via epicDisplayStatus + a new epicQueuedDetail() helper in src/renderer/components/epics/epic-primitives.tsx and src/renderer/lib/epicDerive.ts (with test coverage in epicDerive.test.ts). But (3) was never implemented.\n\nVerified by grep: src/renderer/components/epics/EpicDetail.tsx only renders chat.queuedPosition (chatRunner's own lane position in the machine-wide session-slot pool, rendered around line 662 as \"queued · position N\"). It never renders the chat.queue array itself — a different field in src/renderer/state/chat.ts:136 (`queue: PromptTicket[]`), pushed onto by send() around line 311 when a message is typed while a run is already busy for that Epic, and drained one-at-a-time FIFO by dequeueNext() around line 468-477. Grepped every renderer component for consumers of chats[tabId].queue — there are none.\n\nNet effect: a user who types a 2nd or 3rd follow-up message while an Epic's chat run is still busy gets zero on-screen acknowledgment that it was captured. It silently sits in chat.queue with no chip/counter/list until its own turn eventually starts. This is exactly the ambiguity PRD 871 was filed to resolve (\"did my message queue or is it about to dump everything at once\") and it is only half-fixed.\n\nFix: render chats[tabId].queue as a sibling list near the existing queuedPosition indicator in EpicDetail.tsx (~line 662), showing each pending PromptTicket in FIFO order so the user can see what's waiting and confirm nothing was dropped.\n\nAcceptance criteria:\n- [ ] EpicDetail renders chats[tabId].queue as a visible FIFO list of pending prompt tickets (not just the currently-running turn's queuedPosition).\n- [ ] Test coverage confirming the queue renders when non-empty and is absent/empty when there's nothing queued.\n- [ ] timeout 300 npm run typecheck passes"
+  },
+  "events": [
+    {
+      "id": "d1939087-0aa0-4111-9ece-c7e6646beec6",
+      "promptSessionId": "render-chats-tabid-queue-in-epicdetail-5944927c",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-01T07:33:17.806Z",
+      "text": "PRD 871 follow-up gap. PRD 871 (archived at session-manager-operations/scheduler/epics/psess-msa1n71r-4/prds-archived/871-...) had three acceptance criteria:\n1. Persistent running/queued indicator on the Epics list, independent of EpicDetail being mounted.\n2. A chat run queued behind the session-slot pool visually distinguishable from one that completed with no response.\n3. EpicDetail (or its composer) renders chats[tabId].queue — every ticket typed while a run is busy visible as a distinct pending item, in FIFO order.\n\nCommit bb3cb69 fully implemented (1) and (2) via epicDisplayStatus + a new epicQueuedDetail() helper in src/renderer/components/epics/epic-primitives.tsx and src/renderer/lib/epicDerive.ts (with test coverage in epicDerive.test.ts). But (3) was never implemented.\n\nVerified by grep: src/renderer/components/epics/EpicDetail.tsx only renders chat.queuedPosition (chatRunner's own lane position in the machine-wide session-slot pool, rendered around line 662 as \"queued · position N\"). It never renders the chat.queue array itself — a different field in src/renderer/state/chat.ts:136 (`queue: PromptTicket[]`), pushed onto by send() around line 311 when a message is typed while a run is already busy for that Epic, and drained one-at-a-time FIFO by dequeueNext() around line 468-477. Grepped every renderer component for consumers of chats[tabId].queue — there are none.\n\nNet effect: a user who types a 2nd or 3rd follow-up message while an Epic's chat run is still busy gets zero on-screen acknowledgment that it was captured. It silently sits in chat.queue with no chip/counter/list until its own turn eventually starts. This is exactly the ambiguity PRD 871 was filed to resolve (\"did my message queue or is it about to dump everything at once\") and it is only half-fixed.\n\nFix: render chats[tabId].queue as a sibling list near the existing queuedPosition indicator in EpicDetail.tsx (~line 662), showing each pending PromptTicket in FIFO order so the user can see what's waiting and confirm nothing was dropped.\n\nAcceptance criteria:\n- [ ] EpicDetail renders chats[tabId].queue as a visible FIFO list of pending prompt tickets (not just the currently-running turn's queuedPosition).\n- [ ] Test coverage confirming the queue renders when non-empty and is absent/empty when there's nothing queued.\n- [ ] timeout 300 npm run typecheck passes"
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "d1939087-0aa0-4111-9ece-c7e6646beec6",
+      "id": "pevt-msa228q7-14",
+      "promptSessionId": "render-chats-tabid-queue-in-epicdetail-5944927c",
+      "at": "2026-08-01T07:34:01.135Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-01T07:34:01.135Z"
+}

@@ -3,7 +3,6 @@ title: "Nav face: tag Voice as home-only"
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 8
 sourcePromptId: two-face-leftnav-home-vs-project-scoped-navigati-7edd20cb
-dependsOn: [leftnav-two-face-framework]
 ---
 # Goal
 

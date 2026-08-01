@@ -4181,11 +4181,12 @@ const remote = {
       if (!epicCreated || !epicId) return;
       try {
         const entries = await fsp.readdir(dir);
-        if (entries.length > 0) return;
-        await fsp.rmdir(dir);
-        const epicRootDir = path.dirname(dir);
-        const epicRootEntries = await fsp.readdir(epicRootDir);
-        if (epicRootEntries.length === 0) await fsp.rmdir(epicRootDir);
+        if (entries.length === 0) {
+          await fsp.rmdir(dir);
+          const epicRootDir = path.dirname(dir);
+          const epicRootEntries = await fsp.readdir(epicRootDir);
+          if (epicRootEntries.length === 0) await fsp.rmdir(epicRootDir);
+        }
       } catch { /* best-effort only */ }
       try { removeEpic(cwd, epicId); } catch { /* best-effort only */ }
     };

@@ -20,7 +20,8 @@ import { findPreset } from '../../lib/presets'
 import { AlmanacIcon, type AlmanacIconName } from './AlmanacIcon'
 import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
-import { NAV_ITEMS, NAV_GROUP_DESCRIPTIONS, type NavGroupItem } from '../../lib/navGroups'
+import { NAV_GROUP_DESCRIPTIONS, getNavItemsForFace, type NavGroupItem } from '../../lib/navGroups'
+import { deriveNavFace, type NavFace } from '../../lib/navFace'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -30,11 +31,6 @@ type ToolKey = Extract<NavKey,
 >
 void useBilling; void useMemo // (kept for future signal additions)
 
-// Grouping is defined once in lib/navGroups.ts (shared with MainPane's
-// per-page eyebrow) — these are just filtered views over it.
-const WORKSPACE: NavGroupItem[] = NAV_ITEMS.filter((item) => item.group === 'Workspace')
-const CONFIGURE: NavGroupItem[] = NAV_ITEMS.filter((item) => item.group === 'Configure')
-
 interface ToolItem {
   key: ToolKey
   label: string
@@ -42,9 +38,11 @@ interface ToolItem {
   hint?: string
 }
 
-const TOOLS: ToolItem[] = NAV_ITEMS
-  .filter((item): item is NavGroupItem & { key: ToolKey } => item.group === 'Tools')
-  .map(({ key, label, icon, hint }) => ({ key, label, icon, hint }))
+function toolItems(items: NavGroupItem[]): ToolItem[] {
+  return items
+    .filter((item): item is NavGroupItem & { key: ToolKey } => item.group === 'Tools')
+    .map(({ key, label, icon, hint }) => ({ key, label, icon, hint }))
+}
 
 // Resizable width — persisted per the user's drag, clamped to a sane range.
 const WIDTH_KEY = 'sm.almanac.sidebarWidth'
@@ -145,6 +143,12 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const indicators = useLiveIndicators()
 
+  const navFace: NavFace = deriveNavFace(active, !!activeTab)
+  const items = getNavItemsForFace(navFace)
+  const workspace = items.filter((item) => item.group === 'Workspace')
+  const configure = items.filter((item) => item.group === 'Configure')
+  const tools = toolItems(items)
+
   // Drag-to-resize. widthRef mirrors width so a new drag starts from the
   // current size; the move/up listeners live on window so the drag keeps
   // tracking even if the pointer leaves the thin handle.
@@ -184,7 +188,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
       data-testid="tour-leftnav"
       aria-label="Primary navigation"
     >
-      <ProjectCaption tab={activeTab} onNewSession={onNewSession} rail={rail} onToggleRail={toggleRail} />
+      <ProjectCaption tab={activeTab} navFace={navFace} onNewSession={onNewSession} rail={rail} onToggleRail={toggleRail} />
 
       <div className="flex-1 min-h-0 overflow-auto pb-3" style={{ paddingInline: rail ? '4px' : '8px' }}>
         <>
@@ -193,11 +197,11 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               label="Workspace"
               desc={NAV_GROUP_DESCRIPTIONS.Workspace}
               collapsed={collapsed.has('Workspace')}
-              count={WORKSPACE.length}
+              count={workspace.length}
               onToggle={() => toggleGroup('Workspace')}
             />
           )}
-          {(rail || !collapsed.has('Workspace')) && WORKSPACE.map((item) => (
+          {(rail || !collapsed.has('Workspace')) && workspace.map((item) => (
             <NavRow
               key={item.key}
               item={item}
@@ -213,11 +217,11 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               label="Configure"
               desc={NAV_GROUP_DESCRIPTIONS.Configure}
               collapsed={collapsed.has('Configure')}
-              count={CONFIGURE.length}
+              count={configure.length}
               onToggle={() => toggleGroup('Configure')}
             />
           )}
-          {(rail || !collapsed.has('Configure')) && CONFIGURE.map((item) => (
+          {(rail || !collapsed.has('Configure')) && configure.map((item) => (
             <NavRow
               key={item.key}
               item={item}
@@ -233,11 +237,11 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               label="Tools"
               desc={NAV_GROUP_DESCRIPTIONS.Tools}
               collapsed={collapsed.has('Tools')}
-              count={TOOLS.length}
+              count={tools.length}
               onToggle={() => toggleGroup('Tools')}
             />
           )}
-          {(rail || !collapsed.has('Tools')) && TOOLS.map((tool) => (
+          {(rail || !collapsed.has('Tools')) && tools.map((tool) => (
             <ToolRow
               key={tool.key}
               tool={tool}
@@ -249,7 +253,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
         </>
       </div>
 
-      <SidebarFooter rail={rail} />
+      <SidebarFooter rail={rail} navFace={navFace} />
 
       {/* Drag-to-resize handle — hidden in rail mode since width is fixed. */}
       {!rail && (
@@ -268,9 +272,10 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
 }
 
 function ProjectCaption({
-  tab, onNewSession, rail, onToggleRail,
+  tab, navFace, onNewSession, rail, onToggleRail,
 }: {
   tab: { cwd: string; label: string } | null
+  navFace: NavFace
   onNewSession: () => void
   rail: boolean
   onToggleRail: () => void
@@ -299,6 +304,38 @@ function ProjectCaption({
             <AlmanacIcon name="chevron" size={15} stroke={1.8} />
           </span>
         </button>
+      </div>
+    )
+  }
+
+  if (navFace === 'home') {
+    return (
+      <div className="px-[18px] pt-[14px] pb-[10px] border-b border-rule">
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] font-semibold tracking-[0.06em] text-fg-faint uppercase">
+            Session Manager
+          </div>
+          <button
+            onClick={onToggleRail}
+            title="Collapse sidebar"
+            data-testid="sidebar-rail-toggle"
+            className="w-6 h-6 rounded-md text-fg-faint hover:text-fg hover:bg-bg-hi/50 transition-colors flex items-center justify-center"
+          >
+            <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
+              <AlmanacIcon name="chevron" size={13} stroke={1.8} />
+            </span>
+          </button>
+        </div>
+        <div className="mt-3 flex items-stretch gap-1.5">
+          <button
+            onClick={onNewSession}
+            data-testid="tour-new-session"
+            className="flex-1 px-3 py-1.5 rounded-md bg-bg-hi border border-line text-fg text-[12.5px] font-medium hover:bg-bg-hi/80 hover:border-accent/40 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <AlmanacIcon name="plus" size={13} stroke={1.8} />
+            Open / Start Project
+          </button>
+        </div>
       </div>
     )
   }
@@ -458,7 +495,7 @@ function ToolRow({ tool, active, onClick, rail }: { tool: ToolItem; active: bool
   )
 }
 
-function SidebarFooter({ rail }: { rail: boolean }) {
+function SidebarFooter({ rail, navFace }: { rail: boolean; navFace: NavFace }) {
   const isRecording = useVoice((s) => s.isRecording)
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
@@ -490,9 +527,11 @@ function SidebarFooter({ rail }: { rail: boolean }) {
         className={`w-1.5 h-1.5 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-sage'}`}
         title={isRecording ? 'recording' : 'idle'}
       />
-      <span className="truncate" title={model ?? ''}>
-        {isRecording ? 'recording…' : (model ? `Claude · ${prettyModel(model)}` : 'Claude Code')}
-      </span>
+      {(isRecording || navFace === 'project') && (
+        <span className="truncate" title={model ?? ''}>
+          {isRecording ? 'recording…' : (model ? `Claude · ${prettyModel(model)}` : 'Claude Code')}
+        </span>
+      )}
     </div>
   )
 }

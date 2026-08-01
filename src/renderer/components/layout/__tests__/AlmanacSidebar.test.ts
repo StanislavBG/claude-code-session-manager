@@ -50,14 +50,14 @@ function schedulerDotCount(container: HTMLElement): number {
   return container.querySelectorAll('[title="live activity"]').length
 }
 
-function mount() {
+function mount(active: 'overview' | 'scheduler' = 'overview') {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   act(() => {
     root.render(
       createElement(AlmanacSidebar, {
-        active: 'overview',
+        active,
         onNavigate: () => {},
         onNewSession: () => {},
       }),
@@ -68,7 +68,10 @@ function mount() {
 
 describe('AlmanacSidebar', () => {
   it('renders each row label alongside its hint text in the non-rail (expanded) layout', () => {
-    const { container, root } = mount()
+    // Project face (active tab present, non-overview panel) so both
+    // project-only (Search) and both-face (Scheduler) rows are present.
+    seedActiveTab('/tmp/project')
+    const { container, root } = mount('scheduler')
     try {
       const nav = container.querySelector('[data-testid="tour-leftnav"]')
       expect(nav).not.toBeNull()

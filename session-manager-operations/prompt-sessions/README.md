@@ -117,47 +117,75 @@ lifecycle. Nothing else — no second flag, no derived "is it started" boolean, 
 approval record — may encode where an Epic sits in its life. Any surface that needs to know the
 Epic's stage reads this field.
 
-**Required states**, in order:
+**There are exactly three states.** No fourth.
 
 | Status | Meaning | Entered by | Spends tokens |
 | --- | --- | --- | --- |
-| `draft` | The human is typing it. Not started, not visible to automation. | User opens New Epic and begins entering title/objective | No |
-| `proposed` | An agent/automation is asking for this work. Awaits a human. | `ensureEpic(..., { status: 'proposed' })`, `/propose-epic`, `lib/rcaFeedbackHook.cjs` | No |
-| `active` | The Epic's claude session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start** (from `proposed`), or finishes the draft (from `draft`) | Yes |
+| `proposed` | Not started. Either an agent is asking for the work, or a human is still typing it. | `ensureEpic(..., { status: 'proposed' })`, `/propose-epic`, `lib/rcaFeedbackHook.cjs`, **and** the New Epic form | No |
+| `active` | The Epic's session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start**, or finishes the draft — the same transition | Yes |
 | `completed` | Archived. `claudeSessionId` is dead and never reused. | `markCompleted()`, or **Discard** on a proposal | No |
 
-An Epic starts at `proposed` **unless the human typed it**, in which case it starts at `draft`
-and stays there while they type.
+**There is no `draft` state.** A half-typed Epic is simply `proposed`: it has not started and has
+spent nothing, which is exactly what `proposed` already means. "The human is still typing" and
+"an agent is asking" need no distinction at the state level — both are *not started, awaiting a
+human to commit*. Adding a fourth state to encode who authored it would put authorship in the
+status field, where it does not belong.
 
 ### The one way an Epic starts
 
-`draft` and `proposed` are two doors into the same room. Both converge on a single start action —
-send the Epic's `openingPrompt` (falling back to `goalText`) as the first message of its own
-`claudeSessionId`:
-
-- from `proposed`: the human presses **Approve & start** (`EpicApprovalBar`)
-- from `draft`: the human finishes/submits the draft (`NewEpicCard`)
-
-There must be exactly one code path that performs this, so an Epic can never begin two different
-ways. Today both call `useChat.send({ tabId: epic.id, sessionId: epic.claudeSessionId, cwd, prompt: openingPrompt || goalText })`,
-which is the behavior to preserve.
+Both doors — approving an agent's proposal, and finishing your own draft — are the **same
+transition**, `proposed → active`, and must run one code path: send the Epic's `openingPrompt`
+(falling back to `goalText`) as the first message of its own `claudeSessionId`. Today that is
+`useChat.send({ tabId: epic.id, sessionId: epic.claudeSessionId, cwd, prompt: openingPrompt || goalText })`,
+which is the behavior to preserve. An Epic can never begin two different ways.
 
 Once `active`, the Epic's session is what authors PRDs (via `scheduler_create_prd` / `chat:create-prd`,
 carrying `sourcePromptId` = this Epic's id) and what the scheduler reports back into as
 `prd_created` / `response` events on the Epic's chain. The Epic is the context root: PRDs are
 never authored outside an `active` Epic.
 
+### Persisted state vs. derived display
+
+**Only the actual state may be shown as the Epic's state.** `status` is the only persisted
+lifecycle value; anything else the UI computes is a *view*, never a state, and must never be
+written back onto the Epic. Equally, nothing persisted may be silently recomputed — if a badge
+says `proposed`, that is because the field says `proposed`.
+
+Activity signals (is a run in flight, is it queued behind the session-slot pool, is it waiting on
+an answer) are real and worth showing — but they are **not Epic state**. They belong to the
+entity that owns them, and are displayed as that entity's status, beside the Epic's own.
+
+### The three entities
+
+The workflow has three objects, each owning its own properties. Keeping the boundary clean is
+what stops one badge from meaning three different things.
+
+| Entity | Owns | Purpose |
+| --- | --- | --- |
+| **EPIC** (`PromptSession`) | `id`, `cwd`, `goalText`, `openingPrompt`, `tag`, `status`, `createdAt`, `completedAt`, `resumedFromId` | The unit of work and the human gate. Its properties **control the session**: what it is about, where it runs, and what first prompt starts it. |
+| **SESSION** (the claude session, 1:1 with its Epic) | `claudeSessionId`, attachment/view (Chat vs Terminal — mutually exclusive), running / queued / needs-input, queue position, model + effort, token usage, transcript, event chain | The thing that actually executes. Its properties **write the PRDs**. |
+| **PRD** | `slug`, `title`, `cwd`, `estimateMinutes`, `dependsOn`, `sourcePromptId`, `sourceTabId`, `parallelGroup`, `tag`, and its queue-row `status` (`pending` / `running` / `completed` / `failed` / `needs_review`) | One dispatched piece of work, authored by a session and executed by the scheduler. |
+
+A property goes on the entity whose lifecycle it shares. If a new field is needed to track or
+display run activity, it goes on the **session**, not the Epic — an Epic outlives any one run,
+and an Epic that is `active` says nothing about whether a run is in flight right now.
+
 ### Known gaps (as of 2026-08-01)
 
-1. **`draft` does not exist as an Epic status.** `PromptSession.status` is
-   `'proposed' | 'active' | 'completed'`. `NewEpicCard` holds title/goal/tag in ephemeral React
-   `useState` and calls `createPromptSession(cwd, goalText, tag)` with the default status
-   `'active'` — so a human-typed Epic jumps straight to `active` and an in-progress draft is lost
-   on navigate or reload. Implementing `draft` means persisting the form as a real Epic row.
-2. **The name `draft` is already taken.** `EpicDisplayStatus` (`src/renderer/lib/epicDerive.ts`)
-   uses `'draft'` for a *PRD* with no scheduler job row yet, and `epic-primitives.tsx` renders a
-   badge for it. That is a different object at a different level. Adding an Epic-level `draft`
-   requires disambiguating the two, or the Epics list will show one word meaning two things.
+1. **A human-typed Epic never passes through `proposed`.** `NewEpicCard` holds title/goal/tag in
+   ephemeral React `useState` and calls `createPromptSession(cwd, goalText, tag)` with the default
+   status `'active'` — so it starts the session immediately and an in-progress draft is lost on
+   navigate or reload. It should create the Epic as `proposed` as soon as there is something to
+   keep, and take the same `proposed → active` transition on submit that Approve takes.
+2. **`epicDisplayStatus` invents state that isn't state.** `src/renderer/lib/epicDerive.ts`
+   returns a six-value `EpicDisplayStatus` (`running`/`needs`/`queued`/`completed`/`proposed`/`draft`)
+   from one function, mixing all three entities: `completed`/`proposed` are real Epic status,
+   `running`/`queued`/`needs` are **session** activity, and the final fallback returns
+   **`'draft'` for an `active` Epic that simply has nothing in flight** — a label for a state that
+   does not exist, shown in place of the Epic's real one. (`epicPrds` separately uses `'draft'`
+   for a PRD file with no job row yet, which is a **PRD** property and a legitimate derived view.)
+   An idle `active` Epic must read `active`; session activity must be surfaced as the session's
+   status, not substituted for the Epic's.
 3. **Proposals are erased from disk by the next renderer write.** `epicMint.cjs` (main process)
    writes `proposed` Epics into `active-index.json`, but `persistActiveIndex` (renderer) rewrites
    that same file filtered to `status === 'active'` only. Any renderer mutation therefore drops

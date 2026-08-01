@@ -70,6 +70,85 @@ function slugify(text) {
     .slice(0, 48) || 'epic';
 }
 
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'is', 'of', 'to', 'for', 'and', 'in', 'on', 'at', 'this', 'that',
+]);
+
+// Lowercase, strip punctuation, split on whitespace, drop stopwords — shared
+// by findJoinableEpic's similarity check. Kept standalone so its behavior is
+// independently testable rather than inlined into the Jaccard computation.
+function tokenize(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token && !STOPWORDS.has(token));
+}
+
+function jaccardSimilarity(tokensA, tokensB) {
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  if (setA.size === 0 && setB.size === 0) return 0;
+  let intersection = 0;
+  for (const token of setA) {
+    if (setB.has(token)) intersection += 1;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+const JOIN_SIMILARITY_THRESHOLD = 0.35;
+
+/**
+ * findJoinableEpicInIndex(index, { goalText, preferEpicId, status }) → { epicId, matchedBy, score? } | null
+ *
+ * Same contract as findJoinableEpic() but takes an already-loaded index —
+ * lets ensureEpic() consult this without a second readActiveIndex() call
+ * inside its own withPathLock critical section. Two strategies, in order:
+ *  1. `preferEpicId` — an explicitly-known origin Epic the caller already has
+ *     in hand. Joined immediately (no similarity check) as long as it exists
+ *     and is still open ('proposed' or 'active') — a 'completed' or unknown
+ *     preferEpicId falls through to strategy 2 rather than joining a dead Epic.
+ *  2. Keyword-similarity — Jaccard token-set overlap between `goalText` and
+ *     every other OPEN Epic's goalText in the same cwd (open = 'proposed' or
+ *     'active', regardless of the specific requested `status` — a proposed
+ *     RCA report and an active one about the same topic are still the same
+ *     underlying issue). Highest score wins if it clears
+ *     JOIN_SIMILARITY_THRESHOLD; otherwise no join. `status` is accepted for
+ *     signature symmetry with ensureEpic()/reuseByGoal but only participates
+ *     in strategy 1's preferEpicId open-check, not the similarity filter.
+ */
+function findJoinableEpicInIndex(index, { goalText, preferEpicId = null, status: _status = 'proposed' } = {}) {
+  if (preferEpicId && hasOwn(index.sessions, preferEpicId)) {
+    const preferred = index.sessions[preferEpicId];
+    if (preferred && (preferred.status === 'proposed' || preferred.status === 'active')) {
+      return { epicId: preferEpicId, matchedBy: 'preferEpicId' };
+    }
+  }
+
+  const candidateTokens = tokenize(goalText);
+  let best = null;
+  for (const s of Object.values(index.sessions)) {
+    if (!s || (s.status !== 'proposed' && s.status !== 'active')) continue;
+    const score = jaccardSimilarity(candidateTokens, tokenize(s.goalText));
+    if (score >= JOIN_SIMILARITY_THRESHOLD && (!best || score > best.score)) {
+      best = { epicId: s.id, matchedBy: 'similarity', score };
+    }
+  }
+  return best;
+}
+
+/**
+ * findJoinableEpic(cwd, { goalText, preferEpicId, status }) → { epicId, matchedBy, score? } | null
+ *
+ * Public entry point for callers outside ensureEpic()'s own critical section
+ * (tests, future PRD 899/900 wiring) — loads the index itself. See
+ * findJoinableEpicInIndex() for the matching logic.
+ */
+function findJoinableEpic(cwd, opts = {}) {
+  return findJoinableEpicInIndex(readActiveIndex(cwd), opts);
+}
+
 // Serializes read-modify-write cycles per active-index.json path, mirroring
 // promptSessionEvents.cjs's own pendingWritesByPath/withPathLock. The current
 // read/write pair below is synchronous (fs.readFileSync/writeFileSync), so
@@ -94,7 +173,12 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, openingPrompt?, mintIfMissing?, source? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, openingPrompt?, mintIfMissing?, source?, forceNewEpic? }) → Promise<{ epicId, prdDir, created }>
+ *
+ * Before minting brand-new, the mint branch consults findJoinableEpic() —
+ * minting is the LAST resort, not the default, for automated callers. Pass
+ * `forceNewEpic: true` to skip that check and always mint (the one
+ * legitimate case being explicit human-authored creation).
  *
  * `status` defaults to 'proposed' — a fail-safe default so any caller that
  * forgets to pass it files an Epic that waits for human approval rather than
@@ -118,7 +202,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null } = {}) {
+function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null, forceNewEpic = false } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   return withPathLock(activeIndexPath(cwd), () => {
     const index = readActiveIndex(cwd);
@@ -162,6 +246,15 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
         + 'a new Epic can only be created by explicit human intent (New Epic UI, or /propose-epic + Approve & start), '
         + 'never implicitly by a PRD-authoring path',
       );
+    }
+
+    if (!forceNewEpic) {
+      const joinable = findJoinableEpicInIndex(index, { goalText, preferEpicId: explicitEpicId, status });
+      if (joinable) {
+        const prdDir = resolveEpicPrdWriteDir(cwd, joinable.epicId);
+        fs.mkdirSync(prdDir, { recursive: true });
+        return { epicId: joinable.epicId, prdDir, created: false };
+      }
     }
 
     const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -255,4 +348,4 @@ function removeEpic(cwd, epicId) {
   return true;
 }
 
-module.exports = { ensureEpic, appendPrdCreatedEvent, removeEpic, activeIndexPath, readActiveIndex };
+module.exports = { ensureEpic, appendPrdCreatedEvent, removeEpic, activeIndexPath, readActiveIndex, findJoinableEpic, tokenize };

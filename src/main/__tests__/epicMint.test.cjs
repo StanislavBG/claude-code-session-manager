@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { ensureEpic, removeEpic, readActiveIndex } = require('../lib/epicMint.cjs');
+const { ensureEpic, removeEpic, readActiveIndex, findJoinableEpic } = require('../lib/epicMint.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -126,4 +126,91 @@ test('ensureEpic omits source from the written record when not passed', async ()
 
   const index = readActiveIndex(cwd);
   expect('source' in index.sessions[minted.epicId]).toBe(false);
+});
+
+test('ensureEpic joins an existing open Epic when goalText is a near-identical paraphrase (no preferEpicId)', async () => {
+  const cwd = await mkCwd();
+
+  const first = await ensureEpic(cwd, { goalText: 'Fix the login button color' });
+  expect(first.created).toBe(true);
+
+  const second = await ensureEpic(cwd, { goalText: 'Fix login button colour issue' });
+
+  expect(second.created).toBe(false);
+  expect(second.epicId).toBe(first.epicId);
+
+  const index = readActiveIndex(cwd);
+  expect(Object.keys(index.sessions)).toHaveLength(1);
+});
+
+test('ensureEpic mints a distinct Epic when goalText is genuinely unrelated', async () => {
+  const cwd = await mkCwd();
+
+  const first = await ensureEpic(cwd, { goalText: 'Fix the login button color' });
+  expect(first.created).toBe(true);
+
+  const second = await ensureEpic(cwd, { goalText: 'Add CSV export to History tab' });
+
+  expect(second.created).toBe(true);
+  expect(second.epicId).not.toBe(first.epicId);
+
+  const index = readActiveIndex(cwd);
+  expect(Object.keys(index.sessions)).toHaveLength(2);
+});
+
+test('findJoinableEpic joins the preferEpicId Epic even when goalText similarity is near-zero', async () => {
+  const cwd = await mkCwd();
+
+  const first = await ensureEpic(cwd, { goalText: 'Fix the login button color' });
+  expect(first.created).toBe(true);
+
+  const joined = findJoinableEpic(cwd, {
+    goalText: 'Completely unrelated topic about database migrations',
+    preferEpicId: first.epicId,
+  });
+
+  expect(joined).toEqual({ epicId: first.epicId, matchedBy: 'preferEpicId' });
+});
+
+test('findJoinableEpic falls through to the similarity check when preferEpicId points at a completed Epic', async () => {
+  const cwd = await mkCwd();
+
+  const first = await ensureEpic(cwd, { goalText: 'Fix the login button color' });
+  const index = readActiveIndex(cwd);
+  index.sessions[first.epicId].status = 'completed';
+  fs.writeFileSync(
+    path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'),
+    JSON.stringify(index, null, 2),
+  );
+
+  // No other open Epic shares tokens with the completed one, so the
+  // fall-through similarity check finds nothing rather than joining the
+  // dead (completed) preferEpicId Epic.
+  const joined = findJoinableEpic(cwd, { goalText: 'Fix login button colour issue', preferEpicId: first.epicId });
+
+  expect(joined).toBeNull();
+});
+
+test('findJoinableEpic falls through to the similarity check when preferEpicId points at a nonexistent Epic, and can still find a match there', async () => {
+  const cwd = await mkCwd();
+  const sibling = await ensureEpic(cwd, { goalText: 'Fix the login button color' });
+
+  const joined = findJoinableEpic(cwd, { goalText: 'Fix login button colour issue', preferEpicId: 'nonexistent-epic-id' });
+
+  expect(joined).toEqual({ epicId: sibling.epicId, matchedBy: 'similarity', score: expect.any(Number) });
+});
+
+test('ensureEpic with forceNewEpic:true mints even when a near-identical open Epic exists', async () => {
+  const cwd = await mkCwd();
+
+  const first = await ensureEpic(cwd, { goalText: 'Fix the login button color' });
+  expect(first.created).toBe(true);
+
+  const second = await ensureEpic(cwd, { goalText: 'Fix login button colour issue', forceNewEpic: true });
+
+  expect(second.created).toBe(true);
+  expect(second.epicId).not.toBe(first.epicId);
+
+  const index = readActiveIndex(cwd);
+  expect(Object.keys(index.sessions)).toHaveLength(2);
 });

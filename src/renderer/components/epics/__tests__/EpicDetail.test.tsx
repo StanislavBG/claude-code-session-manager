@@ -389,7 +389,7 @@ describe('EpicDetail (PRD 827)', () => {
     expect(occurrences).toBe(1)
   })
 
-  it('shows the queue position instead of an empty live bubble while chat:run:queued', async () => {
+  it('suppresses the empty live bubble while chat:run:queued (queued-position indicator was superseded by EpicQueuePanel)', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { useChat } = await import('../../../state/chat')
@@ -413,9 +413,7 @@ describe('EpicDetail (PRD 827)', () => {
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
     expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
-    const queued = el.querySelector('[data-testid="epic-queued-position"]')
-    expect(queued).not.toBeNull()
-    expect(queued!.textContent).toContain('2')
+    expect(el.querySelector('[data-testid="epic-queued-position"]')).toBeNull()
   })
 
   it('resets to no live bubble on chat:run:error (stream cleared, running false)', async () => {

@@ -6,6 +6,7 @@ import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag } from './epic-primitives'
+import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn } from '../ChatTranscriptTurn'
 import { openPrdSlug } from '../../lib/epicNav'
@@ -658,38 +659,31 @@ export function EpicDetail({ promptSession }: Props) {
                 pushTurn's single atomic set() flips running:false and
                 appends it — no separate teardown step, so no flicker of
                 both being on screen together. */}
-            {running &&
-              (chat && chat.queuedPosition > 0 ? (
-                <div
-                  key={`epic-live-queued-${epicId}`}
-                  data-testid="epic-queued-position"
-                  className="text-center text-[11px] text-fg-faint"
-                >
-                  queued · position {chat.queuedPosition}
-                </div>
-              ) : (
-                <div key={`epic-live-turn-${epicId}`} data-testid="epic-live-turn">
-                  <Turn
-                    turn={{
-                      id: `${epicId}-live`,
-                      role: 'assistant',
-                      text: chat?.stream ?? '',
-                      toolUses: chat?.liveToolUses,
-                      at: Date.now(),
-                    }}
-                    cwd={cwd}
-                    tabId={epicId}
-                    sessionId={sessionId}
-                    runActive
-                    consentActionDisabled={running}
-                    enableRawSessionActions={false}
-                    linkTarget="browser"
-                    inlineFilePreview
-                    toolStripVariant="collapsible"
-                    needsDecisionStyle
-                  />
-                </div>
-              ))}
+            {running && !(chat && chat.queuedPosition > 0) && (
+              <div key={`epic-live-turn-${epicId}`} data-testid="epic-live-turn">
+                <Turn
+                  turn={{
+                    id: `${epicId}-live`,
+                    role: 'assistant',
+                    text: chat?.stream ?? '',
+                    toolUses: chat?.liveToolUses,
+                    at: Date.now(),
+                  }}
+                  cwd={cwd}
+                  tabId={epicId}
+                  sessionId={sessionId}
+                  runActive
+                  consentActionDisabled={running}
+                  enableRawSessionActions={false}
+                  linkTarget="browser"
+                  inlineFilePreview
+                  toolStripVariant="collapsible"
+                  needsDecisionStyle
+                />
+              </div>
+            )}
+
+            <EpicQueuePanel chat={chat} />
           </div>
         )}
 

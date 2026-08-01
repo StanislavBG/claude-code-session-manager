@@ -1,4 +1,8 @@
 import { create } from 'zustand'
+import { useChat } from './chat'
+import { useScheduleState } from './scheduleState'
+import { useEpicTerminal } from './epicTerminal'
+import { epicIdCandidates } from '../lib/epicProvenance'
 
 /**
  * A top-level goal-oriented prompt, promoted to its own independent Claude
@@ -168,6 +172,23 @@ interface PromptSessionsState {
    *  the archived one is dead) that carries a traceability link back to the
    *  archived session it follows on from. */
   resumeArchived: (archivedId: string) => PromptSession
+  /** Cosmetic correction only (typo/clarity in the queue row menu) — not a
+   *  re-purposing of the Epic's goal. Re-encodes goalText as `${title}\n\n${goal}`,
+   *  the same encoding EpicDetail.tsx's splitTitleAndGoal reads, and persists
+   *  through the same active-index write path as every other mutation here.
+   *  Throws if title.trim() is empty. */
+  renameEpic: (promptSessionId: string, title: string, goal: string) => Promise<void>
+  /** Mints a brand-new Epic from the source Epic's cwd/goalText/tag via the
+   *  existing createPromptSession — fresh id + claudeSessionId, no PRDs/
+   *  thread history/scheduler jobs carried over. Mirrors a hand-created Epic
+   *  whose opening prompt happens to match an existing one. */
+  duplicateEpic: (promptSessionId: string) => PromptSession
+  /** Removes the Epic from in-memory sessions/events and persists the removal
+   *  through the active-index write path. Throws (never silently no-ops) if
+   *  the Epic has a running/queued scheduler job or a chat run in flight —
+   *  never deletes out from under live work. Does not touch on-disk PRD
+   *  files or scheduler run logs. */
+  deleteEpic: (promptSessionId: string) => Promise<void>
   /** Reads a cwd's active-session index back from disk and merges it into
    *  the store — best-effort, one-shot per cwd at call time (safe to call
    *  repeatedly as ProjectsLanding discovers known cwds). In-memory state
@@ -224,8 +245,8 @@ function hasPendingWrite(path: string): boolean {
  *  write failure is logged, never thrown into the caller (createPromptSession
  *  and appendPromptSessionEvent are synchronous APIs their callers don't
  *  await). No-ops outside a renderer (tests that never stub window.api). */
-function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>, events: Record<string, PromptSessionEvent[]>): void {
-  if (typeof window === 'undefined' || !window.api?.config?.writeJson) return
+function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>, events: Record<string, PromptSessionEvent[]>): Promise<void> {
+  if (typeof window === 'undefined' || !window.api?.config?.writeJson) return Promise.resolve()
   const index: PromptSessionActiveIndex = {
     sessions: Object.fromEntries(
       // Everything NOT YET ARCHIVED — 'proposed' as well as 'active'. A
@@ -262,6 +283,7 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
       pendingWriteCounts.set(path, Math.max(0, (pendingWriteCounts.get(path) ?? 1) - 1))
     })
   pendingWritesByPath.set(path, next)
+  return next
 }
 
 export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
@@ -416,6 +438,63 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     set({ sessions })
     persistActiveIndex(session.cwd, sessions, get().events)
     return linked
+  },
+  renameEpic: async (promptSessionId, title, goal) => {
+    const session = get().sessions[promptSessionId]
+    if (!session) {
+      throw new Error(`renameEpic: no PromptSession with id "${promptSessionId}"`)
+    }
+    // Title occupies everything before the FIRST "\n\n" once persisted
+    // (splitTitleAndGoal's decode side) — a newline-bearing title would
+    // silently truncate itself and bleed into the goal on read-back, so
+    // collapse it to one line before re-encoding.
+    const trimmedTitle = title.trim().replace(/\s*\n+\s*/g, ' ')
+    if (!trimmedTitle) {
+      throw new Error('renameEpic: title must not be empty')
+    }
+    const goalText = `${trimmedTitle}\n\n${goal}`
+    const renamed: PromptSession = { ...session, goalText }
+    const sessions = { ...get().sessions, [promptSessionId]: renamed }
+    set({ sessions })
+    await persistActiveIndex(session.cwd, sessions, get().events)
+  },
+  duplicateEpic: (promptSessionId) => {
+    const source = get().sessions[promptSessionId]
+    if (!source) {
+      throw new Error(`duplicateEpic: no PromptSession with id "${promptSessionId}"`)
+    }
+    return get().createPromptSession(source.cwd, source.goalText, source.tag, 'active')
+  },
+  deleteEpic: async (promptSessionId) => {
+    const session = get().sessions[promptSessionId]
+    if (!session) {
+      throw new Error(`deleteEpic: no PromptSession with id "${promptSessionId}"`)
+    }
+    // Same epicId → sourcePromptId → sourceTabId preference epicProvenance.ts
+    // uses everywhere else a job/PRD is linked back to its Epic — sourcePromptId
+    // alone can be stale frontmatter, so a live job whose PRD only carries the
+    // (authoritative) epicId must still block deletion.
+    const hasLiveJob = (useScheduleState.getState().snapshot?.jobs ?? []).some(
+      (job) =>
+        (job.status === 'running' || job.status === 'pending') &&
+        epicIdCandidates(job).includes(promptSessionId),
+    )
+    if (hasLiveJob) {
+      throw new Error('deleteEpic: this Epic has a running or queued scheduler job — cancel it first')
+    }
+    const chat = useChat.getState().chats[promptSessionId]
+    if (chat && (chat.running || chat.queuedPosition > 0)) {
+      throw new Error('deleteEpic: this Epic has a chat run in flight — wait for it to finish first')
+    }
+    if (useEpicTerminal.getState().isAttached(promptSessionId)) {
+      throw new Error('deleteEpic: this Epic has a live Terminal session attached — detach it first')
+    }
+    const sessions = { ...get().sessions }
+    const events = { ...get().events }
+    delete sessions[promptSessionId]
+    delete events[promptSessionId]
+    set({ sessions, events })
+    await persistActiveIndex(session.cwd, sessions, events)
   },
   hydrate: async (cwd) => {
     if (typeof window === 'undefined' || !window.api?.config?.readJson) return

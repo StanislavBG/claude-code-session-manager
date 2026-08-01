@@ -800,3 +800,173 @@ describe('proposed Epics are durable (never erased)', () => {
     })
   })
 })
+
+describe('renameEpic / duplicateEpic / deleteEpic', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('renameEpic re-encodes goalText as title + blank line + goal', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
+    await usePromptSessions.getState().renameEpic(session.id, 'New title', 'New goal body')
+
+    expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('New title\n\nNew goal body')
+  })
+
+  it('renameEpic rejects an empty (or whitespace-only) title', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
+
+    await expect(usePromptSessions.getState().renameEpic(session.id, '   ', 'goal')).rejects.toThrow()
+    expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('Old title\n\nOld goal body')
+  })
+
+  it('renameEpic collapses a multi-line title so it cannot bleed into the goal on read-back', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
+    await usePromptSessions.getState().renameEpic(session.id, 'Line one\n\nLine two', 'goal body')
+
+    const goalText = usePromptSessions.getState().sessions[session.id].goalText
+    // splitTitleAndGoal decodes on the FIRST "\n\n" — the encoded title must
+    // not itself contain that separator, or the decode would truncate it.
+    expect(goalText.indexOf('\n\n')).toBe(goalText.indexOf('\n\ngoal body'))
+  })
+
+  it('duplicateEpic mints a fresh Epic with the same cwd/goalText/tag but a new id + claudeSessionId', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const source = usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
+    const copy = usePromptSessions.getState().duplicateEpic(source.id)
+
+    expect(copy.id).not.toBe(source.id)
+    expect(copy.claudeSessionId).not.toBe(source.claudeSessionId)
+    expect(copy.cwd).toBe(source.cwd)
+    expect(copy.goalText).toBe(source.goalText)
+    expect(copy.tag).toBe(source.tag)
+    expect(copy.status).toBe('active')
+  })
+
+  it('deleteEpic removes the Epic from both sessions and events', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
+    await usePromptSessions.getState().deleteEpic(session.id)
+
+    expect(usePromptSessions.getState().sessions[session.id]).toBeUndefined()
+    expect(usePromptSessions.getState().events[session.id]).toBeUndefined()
+  })
+
+  it('deleteEpic throws and does not remove the Epic when a scheduler job is running against it', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useScheduleState } = await import('../scheduleState')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Has a running job')
+    useScheduleState.setState({
+      loaded: true,
+      snapshot: {
+        jobs: [
+          {
+            slug: '001-foo',
+            title: 'foo',
+            cwd: '/proj',
+            parallelGroup: 0,
+            estimateMinutes: null,
+            bodyPreview: '',
+            status: 'running',
+            runId: null,
+            startedAt: null,
+            finishedAt: null,
+            exitCode: null,
+            error: null,
+            sourcePromptId: session.id,
+          },
+        ],
+      } as never,
+    })
+
+    await expect(usePromptSessions.getState().deleteEpic(session.id)).rejects.toThrow()
+    expect(usePromptSessions.getState().sessions[session.id]).toBeDefined()
+  })
+
+  it('deleteEpic still blocks when only the authoritative epicId (not sourcePromptId) matches a pending job', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useScheduleState } = await import('../scheduleState')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Has a pending job, stale sourcePromptId')
+    useScheduleState.setState({
+      loaded: true,
+      snapshot: {
+        jobs: [
+          {
+            slug: '002-bar',
+            title: 'bar',
+            cwd: '/proj',
+            parallelGroup: 0,
+            estimateMinutes: null,
+            bodyPreview: '',
+            status: 'pending',
+            runId: null,
+            startedAt: null,
+            finishedAt: null,
+            exitCode: null,
+            error: null,
+            sourcePromptId: 'stale-other-id',
+            epicId: session.id,
+          },
+        ],
+      } as never,
+    })
+
+    await expect(usePromptSessions.getState().deleteEpic(session.id)).rejects.toThrow()
+    expect(usePromptSessions.getState().sessions[session.id]).toBeDefined()
+  })
+
+  it('deleteEpic throws and does not remove the Epic when its chat run is in flight', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useChat } = await import('../chat')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Has a live chat run')
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [],
+          running: true,
+          queuedPosition: 0,
+          queue: [],
+          activeTicket: null,
+          stream: '',
+          liveToolUses: [],
+          started: false,
+        } as never,
+      },
+    })
+
+    await expect(usePromptSessions.getState().deleteEpic(session.id)).rejects.toThrow()
+    expect(usePromptSessions.getState().sessions[session.id]).toBeDefined()
+  })
+
+  it('deleteEpic throws and does not remove the Epic when a Terminal session is attached', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useEpicTerminal } = await import('../epicTerminal')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Attached to Terminal')
+    useEpicTerminal.getState().setAttached(session.id, true)
+
+    await expect(usePromptSessions.getState().deleteEpic(session.id)).rejects.toThrow()
+    expect(usePromptSessions.getState().sessions[session.id]).toBeDefined()
+  })
+})

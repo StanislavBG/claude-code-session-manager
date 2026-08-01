@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
-import { useSessions } from '../state/sessions'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { extractUrls } from '../lib/extractUrls'
 import { toast } from '../state/toast'
@@ -9,6 +8,7 @@ import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } fro
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { formatAgo } from '../lib/formatTime'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
+import { InlineConsentTerminal } from './InlineConsentTerminal'
 
 /**
  * Turn rendering — extracted from TerminalChat.tsx (PRD 319+) so it can be
@@ -313,8 +313,9 @@ export function Turn({
   runActive?: boolean
   consentActionDisabled?: boolean
   /** False for views with no backing SessionTab/PTY (e.g. PromptSessionConversation,
-   *  PRD 804) — hides the "Grant consent" action, which drives a real tab's raw
-   *  xterm session via useSessions and has no equivalent there. */
+   *  PRD 804) — hides the "Grant consent" action, which spawns an inline
+   *  InlineConsentTerminal PTY widget against a real tab's sessionId and has
+   *  no equivalent there. */
   enableRawSessionActions?: boolean
   /** 'browser' routes http(s) link clicks through the embedded Browser
    *  (state/browser.ts) instead of shell.openExternal — set only by
@@ -343,6 +344,19 @@ export function Turn({
   // Only needed to disable/enable the question turn's inline answer buttons
   // while a later run is already in flight for this tab.
   const chatRunning = useChat((s) => s.chats[tabId]?.running ?? false)
+  // Only meaningful for the 'notice' branch below, but declared up here
+  // (rules of hooks) since earlier roles return before that branch runs.
+  // onConsentGranted/onConsentClose are stabilized with useCallback because
+  // InlineConsentTerminal's spawn effect depends on `onGranted`'s identity —
+  // a fresh closure on every re-render (e.g. from this tab's shared
+  // `chatRunning` selector flipping) would tear the widget's effect down and
+  // never respawn it (spawnedRef guards re-spawn to the first mount only).
+  const [consentExpanded, setConsentExpanded] = useState(false)
+  const onConsentGranted = useCallback(() => {
+    toast.info('Consent granted — you can retry the run now.')
+    setConsentExpanded(false)
+  }, [])
+  const onConsentClose = useCallback(() => setConsentExpanded(false), [])
   useEffect(() => {
     if (turn.role === 'assistant' && presentation === 'text' && bodyRef.current) {
       linkifyFilePaths(bodyRef.current)
@@ -421,14 +435,17 @@ export function Turn({
   }
   if (turn.role === 'notice') {
     const isConsentNotice = turn.text.includes(CONSENT_NOTICE_MARKER)
-    const onGrantConsent = () => {
-      // Queue the command for Terminal.tsx's spawn handler to auto-type once
-      // the PTY is ready, then wake the tab into that live raw session — same
-      // mechanism as the existing "Open raw session" button, just pre-filled
-      // so the user lands directly at the confirmation prompt instead of an
-      // empty terminal. The confirmation itself is never auto-answered.
-      useSessions.getState().queueRawCommand(tabId, '/design consent')
-      void useSessions.getState().wakeTab(tabId)
+    const onGrantConsent = async () => {
+      // Same pre-condition wakeTab enforces at sessions.ts:220-227 (PRD 718) —
+      // a headless chat run still writing to this sessionId's --resume
+      // transcript must be torn down before anything else attaches to the
+      // same PTY. Unlike the old path, nothing here mints a new tab/Terminal
+      // mount — the widget below attaches inline in chat.
+      if (useChat.getState().chats[tabId]?.running) {
+        await window.api.chat.cancel(tabId)
+        toast.info('Cancelled the in-progress chat run to open a live session.')
+      }
+      setConsentExpanded(true)
     }
     return (
       <div className={`rounded-[14px] border px-4 py-3 text-sm ${AMBER_TINT} ${AMBER_TEXT}`}>
@@ -439,14 +456,26 @@ export function Turn({
         {turn.text}
         {isConsentNotice && enableRawSessionActions && (
           <div className={`mt-2 border-t pt-2 ${AMBER_TINT}`}>
-            <button
-              onClick={onGrantConsent}
-              disabled={consentActionDisabled}
-              title={consentActionDisabled ? 'Cancel or wait for the current run before opening a raw session' : 'Open a live interactive claude session with /design consent pre-typed'}
-              className={`rounded border px-2 py-1 text-xs font-medium hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent ${AMBER_TEXT} border-current`}
-            >
-              Grant consent →
-            </button>
+            {consentExpanded ? (
+              <div className="mt-1">
+                <InlineConsentTerminal
+                  sessionId={sessionId}
+                  cwd={cwd}
+                  command="/design consent"
+                  onGranted={onConsentGranted}
+                  onClose={onConsentClose}
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => { void onGrantConsent() }}
+                disabled={consentActionDisabled}
+                title={consentActionDisabled ? 'Cancel or wait for the current run before granting consent' : 'Grant MCP consent inline, without leaving chat'}
+                className={`rounded border px-2 py-1 text-xs font-medium hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent ${AMBER_TEXT} border-current`}
+              >
+                Grant consent →
+              </button>
+            )}
           </div>
         )}
       </div>

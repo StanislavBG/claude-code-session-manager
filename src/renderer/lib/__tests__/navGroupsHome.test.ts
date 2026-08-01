@@ -38,3 +38,20 @@ describe('getNavItemsForFace', () => {
     expect(homeKeys).toEqual(expected)
   })
 })
+
+describe('project-home is project-only', () => {
+  it('NAV_ITEMS tags project-home with faces: [project]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'project-home')
+    expect(item?.faces).toEqual(['project'])
+  })
+
+  it('home face excludes project-home', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).not.toContain('project-home')
+  })
+
+  it('project face includes project-home', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).toContain('project-home')
+  })
+})

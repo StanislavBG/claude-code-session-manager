@@ -9,13 +9,18 @@
 
 'use strict';
 
-import { test, expect, beforeEach } from 'vitest';
+import { test, expect, beforeEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { appendResponseEventIfKnown, promptSessionActiveIndexPath } = require('../promptSessionEvents.cjs');
+const {
+  appendResponseEventIfKnown,
+  promptSessionActiveIndexPath,
+  attachWindow,
+  EVENT_APPENDED_CHANNEL,
+} = require('../promptSessionEvents.cjs');
 
 let cwd;
 
@@ -103,4 +108,53 @@ test('two different PromptSessions in the same cwd each get their own non-interl
 test('returns false (never throws) when cwd or sourcePromptId is missing', async () => {
   await expect(appendResponseEventIfKnown(null, 'psess-1', 'hi')).resolves.toBe(false);
   await expect(appendResponseEventIfKnown(cwd, null, 'hi')).resolves.toBe(false);
+});
+
+test('broadcasts EVENT_APPENDED_CHANNEL to the attached window on a successful append', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: {
+      'psess-1': [
+        { id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
+  });
+
+  const send = vi.fn();
+  const fakeWindow = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send } };
+  attachWindow(fakeWindow);
+  try {
+    const routed = await appendResponseEventIfKnown(cwd, 'psess-1', 'PRD finished');
+    expect(routed).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    const [channel, payload] = send.mock.calls[0];
+    expect(channel).toBe(EVENT_APPENDED_CHANNEL);
+    expect(payload.cwd).toBe(cwd);
+    expect(payload.promptSessionId).toBe('psess-1');
+    expect(payload.event.kind).toBe('response');
+    expect(payload.event.text).toBe('PRD finished');
+    expect(payload.event.causedByEventId).toBe('pevt-1');
+  } finally {
+    attachWindow(null);
+  }
+});
+
+test('does not throw broadcasting before a window is attached, or after it is destroyed', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: {
+      'psess-1': [
+        { id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
+  });
+
+  attachWindow(null);
+  await expect(appendResponseEventIfKnown(cwd, 'psess-1', 'no window yet')).resolves.toBe(true);
+
+  const destroyedWindow = { isDestroyed: () => true, webContents: { isDestroyed: () => false, send: vi.fn() } };
+  attachWindow(destroyedWindow);
+  await expect(appendResponseEventIfKnown(cwd, 'psess-1', 'window destroyed')).resolves.toBe(true);
+  expect(destroyedWindow.webContents.send).not.toHaveBeenCalled();
+  attachWindow(null);
 });

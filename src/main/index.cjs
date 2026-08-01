@@ -29,6 +29,7 @@ const scheduler = require('./scheduler.cjs');
 const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
 const chatRunner = require('./chatRunner.cjs');
+const promptSessionEvents = require('./promptSessionEvents.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
@@ -307,6 +308,7 @@ async function rebootApp() {
     watchers.attachWindow(mainWindow);
     pluginInstall.attachWindow(mainWindow);
     chatRunner.attachWindow(mainWindow);
+    promptSessionEvents.attachWindow(mainWindow);
     attachDocEditWindow(mainWindow);
     rebooting = false;
     return;
@@ -1092,6 +1094,7 @@ app.whenReady().then(async () => {
   pluginInstall.attachWindow(mainWindow);
   webRemote.attachWindow(mainWindow);
   chatRunner.attachWindow(mainWindow);
+  promptSessionEvents.attachWindow(mainWindow);
   attachDocEditWindow(mainWindow);
   // Scheduler ownership (PRD 834): exactly one instance machine-wide runs
   // scheduler mutation (boot reconciliation, ticking, sweep, supervisor) and

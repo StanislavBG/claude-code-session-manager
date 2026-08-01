@@ -1522,6 +1522,29 @@ export interface SessionManagerAPI {
       offset?: number;
     }) => Promise<Exchange[]>;
   };
+  promptSessions: {
+    /** Fires when the main process appends an event to a PromptSession's
+     *  chain on disk (currently only the scheduler's response-event append
+     *  from notifyOriginatingTab) — lets an already-hydrated Epic pick it up
+     *  live instead of waiting for a restart. */
+    onEventAppended: (handler: (e: PromptSessionEventAppendedPayload) => void) => () => void;
+  };
+}
+
+// ─────────────────────────────────── PromptSession event-appended broadcast
+
+export interface PromptSessionEventAppendedPayload {
+  cwd: string;
+  promptSessionId: string;
+  event: {
+    id: string;
+    promptSessionId: string;
+    kind: 'prompt' | 'prd_created' | 'response' | 'closed';
+    causedByEventId: string | null;
+    at: string;
+    prdSlug?: string;
+    text?: string;
+  };
 }
 
 // ────────────────────────────────────────────── Exchanges (PRD 324 read path)

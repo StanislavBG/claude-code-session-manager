@@ -109,6 +109,15 @@ interface PromptSessionsState {
    *  counterpart of hydrate(). Same in-memory-wins-on-collision, best-effort,
    *  no-op-if-window.api-unavailable semantics. */
   hydrateArchived: (cwd: string) => Promise<void>
+  /** Merges a single event appended to a PromptSession's chain from the main
+   *  process (scheduler's response-event append, via the
+   *  promptSession:event-appended broadcast) into the in-memory event list —
+   *  the live counterpart of hydrate()'s disk merge, for an Epic that's
+   *  already loaded and doesn't need a full re-read. No-ops (silently) if the
+   *  session isn't known yet, its cwd doesn't match, or the event id is
+   *  already present (e.g. a `prd_created` this tab already appended
+   *  optimistically via chat.ts's appendPrdCreatedEvent). */
+  mergeAppendedEvent: (cwd: string, promptSessionId: string, event: PromptSessionEvent) => void
 }
 
 let seq = 0
@@ -329,17 +338,38 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
               existingSessions[id].status === 'active' &&
               !diskSessions[id],
           )
-      if (newIds.length === 0 && goneIds.length === 0) return
       const sessions = { ...existingSessions }
       const events = { ...get().events }
+      let changed = false
       for (const id of newIds) {
         sessions[id] = diskSessions[id]
         events[id] = diskEvents[id] ?? []
+        changed = true
       }
       for (const id of goneIds) {
         delete sessions[id]
         delete events[id]
+        changed = true
       }
+      // Merge path for Epics ALREADY in memory (the case a bare newIds/goneIds
+      // check used to early-return on, silently discarding any event a
+      // scheduler job appended to disk while this Epic sat open — PRD 855).
+      // Adds any disk event this store hasn't seen yet by id; never removes
+      // or overwrites an existing in-memory event, so an optimistic append
+      // (e.g. chat.ts's appendPrdCreatedEvent) that hasn't hit disk yet is
+      // never clobbered.
+      for (const id of Object.keys(diskEvents)) {
+        if (!existingSessions[id] || newIds.includes(id)) continue
+        const diskEvts = diskEvents[id] ?? []
+        const existingEvts = events[id] ?? []
+        const existingIds = new Set(existingEvts.map((e) => e.id))
+        const missing = diskEvts.filter((e) => !existingIds.has(e.id))
+        if (missing.length > 0) {
+          events[id] = [...existingEvts, ...missing].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+          changed = true
+        }
+      }
+      if (!changed) return
       set({ sessions, events })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -376,4 +406,26 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       window.api?.logs?.write('promptSessions', 'warn', `hydrateArchived failed for ${cwd}: ${msg}`)
     }
   },
+  mergeAppendedEvent: (cwd, promptSessionId, event) => {
+    const session = get().sessions[promptSessionId]
+    if (!session || session.cwd !== cwd) return
+    const existing = get().events[promptSessionId] ?? []
+    if (existing.some((e) => e.id === event.id)) return
+    const events = {
+      ...get().events,
+      [promptSessionId]: [...existing, event].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
+    }
+    set({ events })
+  },
 }))
+
+// ─── one-time global IPC subscription ──────────────────────────────────────
+// Wired at module load (mirrors chat.ts's own onQueued/onOutput/... block).
+// Guarded so a non-renderer import (tests) doesn't throw on a missing
+// window.api. A broadcast for a cwd/session this app instance never
+// hydrated is a silent no-op inside mergeAppendedEvent itself.
+if (typeof window !== 'undefined' && window.api?.promptSessions) {
+  window.api.promptSessions.onEventAppended(({ cwd, promptSessionId, event }) => {
+    usePromptSessions.getState().mergeAppendedEvent(cwd, promptSessionId, event)
+  })
+}

@@ -440,4 +440,15 @@ contextBridge.exposeInMainWorld('api', {
      *  `sessionId` filters to one session; `limit`/`offset` for pagination. */
     list: (payload) => ipcRenderer.invoke('exchanges:list', payload),
   },
+  promptSessions: {
+    /** Fires when the main process (currently only the scheduler's
+     *  response-event append) appends an event to a PromptSession's chain on
+     *  disk — lets an already-hydrated Epic pick it up live instead of
+     *  waiting for a restart. */
+    onEventAppended: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('promptSession:event-appended', listener);
+      return () => ipcRenderer.removeListener('promptSession:event-appended', listener);
+    },
+  },
 });

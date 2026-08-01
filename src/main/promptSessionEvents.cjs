@@ -18,6 +18,22 @@ function promptSessionActiveIndexPath(cwd) {
   return `${String(cwd).replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/active-index.json`;
 }
 
+// IPC channel broadcast whenever an event is appended to a PromptSession's
+// chain from the main process (currently only the scheduler's response-event
+// append below). Mirrors chatRunner.cjs's attachWindow/broadcast pattern.
+const EVENT_APPENDED_CHANNEL = 'promptSession:event-appended';
+
+let mainWindow = null;
+function attachWindow(win) { mainWindow = win; }
+
+function broadcast(channel, payload) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  } catch { /* render frame may be gone */ }
+}
+
 let seq = 0;
 function mintEventId() {
   seq += 1;
@@ -76,6 +92,7 @@ async function appendResponseEventIfKnown(cwd, sourcePromptId, text) {
       };
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data);
+      broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });
       return true;
     });
   } catch (e) {
@@ -84,4 +101,9 @@ async function appendResponseEventIfKnown(cwd, sourcePromptId, text) {
   }
 }
 
-module.exports = { appendResponseEventIfKnown, promptSessionActiveIndexPath };
+module.exports = {
+  appendResponseEventIfKnown,
+  promptSessionActiveIndexPath,
+  attachWindow,
+  EVENT_APPENDED_CHANNEL,
+};

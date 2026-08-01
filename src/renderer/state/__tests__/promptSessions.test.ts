@@ -514,6 +514,146 @@ describe('promptSessions.ts', () => {
     expect(usePromptSessions.getState().sessions['active-index']).toBeUndefined()
   })
 
+  it('mergeAppendedEvent merges a broadcast event into an already in-memory session', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+
+    store.mergeAppendedEvent(session.cwd, session.id, {
+      id: 'pevt-response-1',
+      promptSessionId: session.id,
+      kind: 'response',
+      causedByEventId: promptEvent.id,
+      at: new Date(Date.parse(promptEvent.at) + 60_000).toISOString(),
+      text: 'PRD finished',
+    })
+
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events).toHaveLength(2)
+    expect(events[1].id).toBe('pevt-response-1')
+    expect(events[1].kind).toBe('response')
+    expect(events[1].text).toBe('PRD finished')
+  })
+
+  it('mergeAppendedEvent dedupes by event id against an event already present (e.g. an optimistic prd_created)', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+
+    const optimistic = store.appendPromptSessionEvent(session.id, {
+      kind: 'prd_created',
+      causedByEventId: promptEvent.id,
+      prdSlug: '900-ship-the-feature',
+    })
+
+    // Main process also wrote (or would write) the SAME event to disk and
+    // broadcasts it back — must not produce a duplicate chip.
+    store.mergeAppendedEvent(session.cwd, session.id, { ...optimistic })
+
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events).toHaveLength(2)
+    expect(events.filter((e) => e.id === optimistic.id)).toHaveLength(1)
+  })
+
+  it('mergeAppendedEvent silently ignores a broadcast for a session never hydrated into this store', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    expect(() =>
+      usePromptSessions.getState().mergeAppendedEvent('/proj', 'psess-unknown', {
+        id: 'pevt-x',
+        promptSessionId: 'psess-unknown',
+        kind: 'response',
+        causedByEventId: null,
+        at: '2026-07-31T00:00:00.000Z',
+        text: 'hi',
+      }),
+    ).not.toThrow()
+    expect(usePromptSessions.getState().events['psess-unknown']).toBeUndefined()
+  })
+
+  it('hydrate() merges newly-appended disk events into a session ALREADY in memory instead of early-returning when newIds is empty', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the widget')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+
+    // Disk now has one MORE event than memory (the scheduler's response
+    // append, main-process-side) but the SAME session id — so newIds is
+    // empty and the old early-return would have discarded it.
+    const responseEvent = {
+      id: 'pevt-response-1',
+      promptSessionId: session.id,
+      kind: 'response' as const,
+      causedByEventId: promptEvent.id,
+      at: new Date(Date.parse(promptEvent.at) + 60_000).toISOString(),
+      text: 'PRD finished',
+    }
+    api.config.readJson.mockResolvedValue({
+      exists: true,
+      raw: '',
+      data: {
+        sessions: { [session.id]: usePromptSessions.getState().sessions[session.id] },
+        events: { [session.id]: [promptEvent, responseEvent] },
+      },
+      parseError: null,
+      mtimeMs: 0,
+      error: null,
+    })
+
+    await usePromptSessions.getState().hydrate('/proj')
+
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events.map((e) => e.id)).toEqual([promptEvent.id, responseEvent.id])
+    expect(promptSessionActiveIndexPath('/proj')).toBeTruthy()
+  })
+
+  it('hydrate() does not clobber an in-memory event newer than disk while merging', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the widget')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+
+    // An optimistic append not yet reflected on disk.
+    const optimistic = store.appendPromptSessionEvent(session.id, {
+      kind: 'prd_created',
+      causedByEventId: promptEvent.id,
+      prdSlug: '900-optimistic',
+    })
+
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+
+    // Disk is stale — still only has the first event.
+    api.config.readJson.mockResolvedValue({
+      exists: true,
+      raw: '',
+      data: {
+        sessions: { [session.id]: usePromptSessions.getState().sessions[session.id] },
+        events: { [session.id]: [promptEvent] },
+      },
+      parseError: null,
+      mtimeMs: 0,
+      error: null,
+    })
+
+    await usePromptSessions.getState().hydrate('/proj')
+
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events.map((e) => e.id)).toEqual([promptEvent.id, optimistic.id])
+  })
+
   it('hydrateArchived() never overwrites an in-memory session on id collision', async () => {
     const api = installWindowApiMock()
     const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')

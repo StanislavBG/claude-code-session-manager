@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -9,6 +9,8 @@ import { EffectiveCards } from '../ui/EffectiveCards'
 import { ViewTabs } from '../ui/ViewTabs'
 import { useConfig } from '../../state/config'
 import { useSessions } from '../../state/sessions'
+import { useLayout } from '../../state/layout'
+import { deriveNavFace } from '../../lib/navFace'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
@@ -25,8 +27,35 @@ export function Settings() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const cwd = activeTab?.cwd ?? null
 
-  const [scope, setScope] = useState<Scope>('user')
+  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
+  // -> 'user', Project face -> 'project' (falling back to 'user' when no
+  // active-tab cwd resolves). Mirrors Permissions/Hooks/Skills' manuallyTouchedRef
+  // + prevNavFaceRef pattern so the default only re-applies on an actual face
+  // transition, never on a same-face re-render, and never once the user has
+  // manually changed the scope since the last transition.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+
+  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'app'>('effective')
+
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    setScope(navFace === 'project' && cwd ? 'project' : 'user')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFace, cwd])
+
+  const handleScopeChange = (next: Scope) => {
+    manuallyTouchedRef.current = true
+    setScope(next)
+  }
 
   // Resolve + load + watch every scope path so the switcher annotations stay live.
   const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
@@ -92,7 +121,7 @@ export function Settings() {
               <ScopeSwitcher
                 scopes={SETTINGS_SCOPES.scopes}
                 active={scope}
-                onChange={setScope}
+                onChange={handleScopeChange}
                 annotate={(s) => {
                   if (scopeNeedsCwd(s)) return { exists: false }
                   const p = scopePaths[s]

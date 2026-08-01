@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react'
+import { DockviewReact, type DockviewApi, type DockviewGroupPanel, type DockviewReadyEvent, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
 import './workbench.css'
 import { DEFAULT_LAYOUT, getPanelDefinition, useLayout } from '../../state/layout'
@@ -113,6 +113,9 @@ export function Workbench(ctx: WorkbenchProps) {
   // Holds the disposable returned by dockview's onDidRemovePanel subscription
   // so it can be torn down on unmount (see the cleanup effect below).
   const removePanelDisposableRef = useRef<{ dispose: () => void } | null>(null)
+  // Same for the onDidAddGroup subscription that keeps every group's tab
+  // header hidden (see onReady).
+  const addGroupDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -177,6 +180,20 @@ export function Workbench(ctx: WorkbenchProps) {
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     apiRef.current = event.api
+    // The left-nav sidebar is the sole navigation surface for screens now —
+    // dockview's own per-group tab strip would just repeat the same labels
+    // in a second horizontal row. Hide every group's header rather than
+    // removing tabs/split support outright: the forEach covers any group
+    // that could already exist on this api (none normally do yet at this
+    // point, before fromJSON/mountPanel below creates the first one), and
+    // the subscription (registered before fromJSON/mountPanel run) covers
+    // every group created afterward — restored groups, a future drag-to-split,
+    // or a floating/popout group.
+    const hideGroupHeader = (group: DockviewGroupPanel) => {
+      group.header.hidden = true
+    }
+    addGroupDisposableRef.current = event.api.onDidAddGroup(hideGroupHeader)
+    event.api.groups.forEach(hideGroupHeader)
     const persisted = persistedRef.current
     if (persisted) {
       try {
@@ -232,11 +249,13 @@ export function Workbench(ctx: WorkbenchProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Dispose the onDidRemovePanel subscription registered in onReady when
-  // Workbench unmounts — it otherwise outlives the component and leaks.
+  // Dispose the onDidRemovePanel/onDidAddGroup subscriptions registered in
+  // onReady when Workbench unmounts — they otherwise outlive the component
+  // and leak.
   useEffect(() => {
     return () => {
       removePanelDisposableRef.current?.dispose()
+      addGroupDisposableRef.current?.dispose()
     }
   }, [])
 

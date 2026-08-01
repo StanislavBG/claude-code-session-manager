@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { extractUrls } from '../lib/extractUrls'
+import { computeLineDiff, type DiffLine } from '../lib/lineDiff'
 import { toast } from '../state/toast'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } from '../lib/handleChatLinkClick'
@@ -291,6 +292,80 @@ export const AMBER_TINT = 'border-[#8e641a]/40 bg-[#8e641a]/10'
 // not the CLI's, so it stays correct even if the CLI's phrasing changes.
 const CONSENT_NOTICE_MARKER = 'needs interactive consent for an MCP server'
 
+// "good"-tone pairing already used by Badge.tsx's `good` variant — reused
+// here (rather than a new arbitrary green) for added diff lines, mirroring
+// this file's own ERROR_TEXT/AMBER_TEXT contrast-checked pattern.
+const DIFF_ADD_TEXT = 'text-sage-dark'
+const DIFF_ADD_TINT = 'bg-sage/15'
+const DIFF_REMOVE_TEXT = ERROR_TEXT
+const DIFF_REMOVE_TINT = 'bg-[#b8443c]/10'
+
+function DiffLineRow({ line }: { line: DiffLine }) {
+  const sign = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '
+  const tint = line.type === 'add' ? DIFF_ADD_TINT : line.type === 'remove' ? DIFF_REMOVE_TINT : ''
+  const text = line.type === 'add' ? DIFF_ADD_TEXT : line.type === 'remove' ? DIFF_REMOVE_TEXT : 'text-fg-dim'
+  return (
+    <div className={`whitespace-pre-wrap break-all px-2 py-0.5 font-mono text-[11px] ${tint} ${text}`}>
+      <span className="select-none opacity-70">{sign} </span>
+      {line.text}
+    </div>
+  )
+}
+
+// Collapsible file-diff card for an Edit/Write tool_use — the real-data
+// equivalent of the Epics design mock's TDiff (epic-thread-mock.jsx). Accept/
+// Retry/Reject buttons are intentionally out of scope: the mock's actions
+// imply an accept/reject workflow this codebase has no backing action for —
+// by the time this turn renders, the edit has already landed on disk.
+export function DiffCard({ diff }: { diff: NonNullable<ToolUseTrace['diff']> }) {
+  const [open, setOpen] = useState(false)
+  // Memoized on the diff's own text — a ToolUseTrace's diff payload never
+  // changes after it's recorded, but the parent Turn re-renders often while
+  // a run streams, and the O(n·m) LCS table shouldn't redo on every one.
+  const { lines, added, removed } = useMemo(
+    () => computeLineDiff(diff.oldText, diff.newText),
+    [diff.oldText, diff.newText],
+  )
+  return (
+    <div className="mb-1.5 overflow-hidden rounded-lg border border-line" data-testid="diff-card">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        data-testid="diff-card-toggle"
+        className="flex w-full items-center gap-1.5 bg-elev px-2 py-1 font-mono text-[11px] text-fg-dim hover:bg-hi"
+      >
+        <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true">
+          ▸
+        </span>
+        <span className="min-w-0 flex-1 truncate text-left">{diff.filePath}</span>
+        <span className={DIFF_ADD_TEXT}>+{added}</span>
+        <span className={DIFF_REMOVE_TEXT}>-{removed}</span>
+      </button>
+      {open && (
+        <div className="max-h-96 overflow-y-auto bg-bg" data-testid="diff-card-lines">
+          {lines.map((line, i) => (
+            <DiffLineRow key={i} line={line} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Renders one DiffCard per toolUse that carries an Edit/Write diff payload —
+// multiple edits within the same turn each get their own card, never merged.
+function DiffCards({ items }: { items: ToolUseTrace[] | undefined }) {
+  const withDiffs = items?.filter((u) => u.diff) ?? []
+  if (!withDiffs.length) return null
+  return (
+    <>
+      {withDiffs.map((u) => (
+        <DiffCard key={u.id} diff={u.diff!} />
+      ))}
+    </>
+  )
+}
+
 export function Turn({
   turn,
   cwd,
@@ -570,6 +645,7 @@ export function Turn({
         ) : (
           <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
         )}
+        <DiffCards items={turn.toolUses} />
         {presentation === 'working' ? (
           <div className={`border border-line bg-elev px-3 py-2 text-sm text-fg-dim ${bubbleCorners}`}>
             <span className="inline-flex items-center gap-2">

@@ -160,3 +160,115 @@ describe('Turn — consent-notice Retry button', () => {
     expect(el.textContent).toContain(CONSENT_NOTICE_TEXT)
   })
 })
+
+describe('Turn — assistant diff card (PRD chat-turn-diff-rendering)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    if (root && container) {
+      act(() => root!.unmount())
+      container.remove()
+    }
+    container = null
+    root = null
+    delete (window as unknown as { api?: unknown }).api
+  })
+
+  it('renders a diff card for a toolUse carrying a diff payload, with added/removed content', async () => {
+    installWindowApiMock()
+    const { Turn } = await import('../ChatTranscriptTurn')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: {
+          id: 't-assistant-diff',
+          role: 'assistant',
+          text: 'Updated the config.',
+          at: Date.now(),
+          toolUses: [
+            {
+              id: 'tu-1',
+              kind: 'tool',
+              label: 'Edit',
+              diff: { filePath: 'src/foo.ts', oldText: 'const a = 1', newText: 'const a = 2' },
+            },
+          ],
+        } as any,
+        cwd: '/tmp/proj',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+      }),
+    )
+
+    const card = el.querySelector('[data-testid="diff-card"]')
+    expect(card).not.toBeNull()
+    expect(card!.textContent).toContain('src/foo.ts')
+    expect(card!.textContent).toContain('+1')
+    expect(card!.textContent).toContain('-1')
+
+    // Collapsed by default — line content not yet in the DOM.
+    expect(el.querySelector('[data-testid="diff-card-lines"]')).toBeNull()
+
+    const toggle = el.querySelector('[data-testid="diff-card-toggle"]')!
+    await act(async () => {
+      toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const lines = el.querySelector('[data-testid="diff-card-lines"]')
+    expect(lines).not.toBeNull()
+    expect(lines!.textContent).toContain('const a = 1')
+    expect(lines!.textContent).toContain('const a = 2')
+  })
+
+  it('renders one diff card per Edit/Write toolUse, and no card for a plain-text turn', async () => {
+    installWindowApiMock()
+    const { Turn } = await import('../ChatTranscriptTurn')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: {
+          id: 't-assistant-multi-diff',
+          role: 'assistant',
+          text: 'Updated two files.',
+          at: Date.now(),
+          toolUses: [
+            { id: 'tu-1', kind: 'tool', label: 'Edit', diff: { filePath: 'src/a.ts', oldText: 'x', newText: 'y' } },
+            { id: 'tu-2', kind: 'tool', label: 'Write', diff: { filePath: 'src/b.ts', newText: 'brand new file' } },
+            { id: 'tu-3', kind: 'tool', label: 'Bash' },
+          ],
+        } as any,
+        cwd: '/tmp/proj',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+      }),
+    )
+
+    const cards = el.querySelectorAll('[data-testid="diff-card"]')
+    expect(cards.length).toBe(2)
+  })
+
+  it('renders no diff card at all for a turn with no diff-carrying toolUses', async () => {
+    installWindowApiMock()
+    const { Turn } = await import('../ChatTranscriptTurn')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: {
+          id: 't-assistant-plain',
+          role: 'assistant',
+          text: 'Just some prose, no edits.',
+          at: Date.now(),
+          toolUses: [{ id: 'tu-1', kind: 'tool', label: 'Bash' }],
+        } as any,
+        cwd: '/tmp/proj',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+      }),
+    )
+
+    expect(el.querySelector('[data-testid="diff-card"]')).toBeNull()
+    expect(el.textContent).toContain('Just some prose, no edits.')
+  })
+})

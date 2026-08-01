@@ -7,45 +7,11 @@ import { EmptyState } from '../../ui/EmptyState'
 import { Toggle } from '../../ui/Toggle'
 import { useActiveTab } from '../../../lib/useActiveTab'
 import { useLiveTab } from '../../../state/live'
+import { computeLineDiff, type DiffLineType } from '../../../lib/lineDiff'
 
-type DiffRow = { sign: ' ' | '+' | '-'; text: string }
-
-// Line-level LCS diff. O(m*n) time/space — fine for plans on the order of a
-// few hundred lines; not suitable for arbitrary documents.
-function lineDiff(a: string, b: string): DiffRow[] {
-  const aLines = a.split('\n')
-  const bLines = b.split('\n')
-  const m = aLines.length
-  const n = bLines.length
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-  for (let i = m - 1; i >= 0; i--) {
-    for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] =
-        aLines[i] === bLines[j]
-          ? dp[i + 1][j + 1] + 1
-          : Math.max(dp[i + 1][j], dp[i][j + 1])
-    }
-  }
-  const out: DiffRow[] = []
-  let i = 0
-  let j = 0
-  while (i < m && j < n) {
-    if (aLines[i] === bLines[j]) {
-      out.push({ sign: ' ', text: aLines[i] })
-      i++
-      j++
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      out.push({ sign: '-', text: aLines[i] })
-      i++
-    } else {
-      out.push({ sign: '+', text: bLines[j] })
-      j++
-    }
-  }
-  while (i < m) out.push({ sign: '-', text: aLines[i++] })
-  while (j < n) out.push({ sign: '+', text: bLines[j++] })
-  return out
-}
+// '+'/'-'/' ' sign for a diff line, derived from lib/lineDiff's add/remove/
+// context type — kept local since this view renders signs, not type names.
+const DIFF_SIGN: Record<DiffLineType, ' ' | '+' | '-'> = { add: '+', remove: '-', context: ' ' }
 
 export function SessionPlansView() {
   const activeTab = useActiveTab()
@@ -143,25 +109,28 @@ export function SessionPlansView() {
 }
 
 function PlanDiff({ prev, curr }: { prev: string; curr: string }) {
-  const rows = useMemo(() => lineDiff(prev, curr), [prev, curr])
+  const rows = useMemo(() => computeLineDiff(prev, curr).lines, [prev, curr])
   return (
     <div className="p-4">
       <pre className="text-xs font-mono whitespace-pre-wrap leading-5">
-        {rows.map((r, i) => (
-          <div
-            key={i}
-            className={
-              r.sign === '+'
-                ? 'bg-green-900/30 text-green-300'
-                : r.sign === '-'
-                  ? 'bg-red-900/30 text-red-300'
-                  : 'text-fg-dim'
-            }
-          >
-            <span className="select-none text-fg-faint pr-2">{r.sign}</span>
-            {r.text || ' '}
-          </div>
-        ))}
+        {rows.map((r, i) => {
+          const sign = DIFF_SIGN[r.type]
+          return (
+            <div
+              key={i}
+              className={
+                r.type === 'add'
+                  ? 'bg-green-900/30 text-green-300'
+                  : r.type === 'remove'
+                    ? 'bg-red-900/30 text-red-300'
+                    : 'text-fg-dim'
+              }
+            >
+              <span className="select-none text-fg-faint pr-2">{sign}</span>
+              {r.text || ' '}
+            </div>
+          )
+        })}
       </pre>
     </div>
   )

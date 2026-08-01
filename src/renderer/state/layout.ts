@@ -49,6 +49,21 @@ interface LayoutState {
    */
   resetToken: number
   /**
+   * True when the Epics workspace should be shown in place of the active
+   * SessionTab's terminal, on the 'terminal' destination.
+   *
+   * This exists because "show the Epics workspace" used to be encoded as
+   * `activeTabId === null`, so navigating to Epics had to DESELECT the top
+   * tab (App.tsx's `useSessions.setState({ activeTabId: null })`). That broke
+   * the invariant that a top-tab selection is mandatory: clicking a left-nav
+   * item dropped the selection, which in turn made downstream consumers that
+   * key off the active tab flip mid-interaction. Making the intent explicit
+   * lets nav change what is DISPLAYED without ever mutating what is SELECTED.
+   */
+  epicsWorkspaceOpen: boolean
+  /** Show/hide the Epics workspace over the terminal. Never touches tab selection. */
+  setEpicsWorkspaceOpen: (open: boolean) => void
+  /**
    * Register (or focus, if already registered) a panel from an app-driven
    * action (sidebar click, command palette, etc.) — always bumps
    * `focusToken` so Workbench re-mounts/re-activates even for a same-id call.
@@ -69,6 +84,8 @@ export const useLayout = create<LayoutState>((set, get) => ({
   focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
   focusToken: 0,
   resetToken: 0,
+  epicsWorkspaceOpen: false,
+  setEpicsWorkspaceOpen: (open: boolean) => set({ epicsWorkspaceOpen: open }),
   openPanel: (id: string) => {
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return

@@ -60,11 +60,13 @@ export function App() {
   // Every NavKey routes through the layout store. Used by CommandPalette
   // nav:* entries, AlmanacSidebar, and the Cmd-P / Cmd-Shift-F shortcuts.
   const navigate = useCallback((k: NavKey) => {
-    // The Epics destination ('terminal') is the EpicsWorkspace, which
-    // TerminalStage only shows when no SessionTab is active — deselect the
-    // active tab on explicit nav so persisted dormant tabs can't mask the
-    // workspace. Tab views stay reachable via the TabBar / Open raw session.
-    if (k === 'terminal') useSessions.setState({ activeTabId: null })
+    // The Epics destination ('terminal') shows the EpicsWorkspace over the
+    // terminal layer. Ask for it EXPLICITLY rather than deselecting the
+    // active tab: a top-tab selection is mandatory and nav must never drop
+    // it (this line used to be `useSessions.setState({ activeTabId: null })`,
+    // which is what made left-nav clicks lose top-tab focus). Navigating
+    // anywhere else closes the workspace so the tab shows through again.
+    useLayout.getState().setEpicsWorkspaceOpen(k === 'terminal')
     useLayout.getState().openPanel(k)
   }, [])
 
@@ -195,9 +197,10 @@ export function App() {
       .catch(() => null)
       .finally(() => {
         // Land on the Epics view (not the opened tab's chat), matching the
-        // comment above and navigate('terminal')'s deselect — otherwise the
-        // freshly activated tab masks the workspace (PRD 833 I5).
-        useSessions.setState({ activeTabId: null })
+        // comment above. Opens the workspace explicitly instead of clearing
+        // activeTabId, so the freshly opened project's tab stays SELECTED
+        // while the workspace is what's displayed (PRD 833 I5).
+        useLayout.getState().setEpicsWorkspaceOpen(true)
         useLayout.getState().openPanel('terminal')
       })
   }, [])
@@ -528,6 +531,9 @@ export function App() {
         e.preventDefault()
         e.stopPropagation()
         setActive(target.id)
+        // Cmd-N means "show me that tab" — lift the Epics workspace overlay
+        // so the selection is actually visible (see layout.ts).
+        useLayout.getState().setEpicsWorkspaceOpen(false)
       }
     }
     // Capture phase: xterm.js consumes shortcuts on the terminal textarea

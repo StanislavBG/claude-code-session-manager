@@ -28,6 +28,7 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
   const canSplitView = activeTabId != null && hasBrowserTabs
   const focusedPanelId = useLayout((s) => s.focusedPanelId)
   const openPanel = useLayout((s) => s.openPanel)
+  const setEpicsWorkspaceOpen = useLayout((s) => s.setEpicsWorkspaceOpen)
   const machineHomeActive = focusedPanelId === 'overview'
 
   // Re-render the badge layer once a second so the 30s activity window can
@@ -53,7 +54,13 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
     onReorder: reorderTab,
     onActivate: (index) => {
       const tab = tabs[index]
-      if (tab) setActive(tab.id)
+      if (!tab) return
+      setActive(tab.id)
+      // Clicking a top tab means "show me this session", so drop the Epics
+      // workspace overlay. Selection itself is never cleared anywhere — the
+      // workspace is a display mode now, not the absence of a selection.
+      setEpicsWorkspaceOpen(false)
+      openPanel('terminal')
     },
   })
 

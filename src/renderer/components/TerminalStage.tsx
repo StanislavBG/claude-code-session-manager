@@ -3,6 +3,7 @@ import { TerminalControls } from './TerminalControls'
 import { LiveTranscript } from './LiveTranscript'
 import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { useSessions } from '../state/sessions'
+import { useLayout } from '../state/layout'
 
 /**
  * TerminalStage — the "always mounted, visibility-toggled" terminal layer.
@@ -19,13 +20,18 @@ export function TerminalStage({ visible = true }: TerminalStageProps) {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
+  // Explicit request for the workspace (Epics nav), independent of selection.
+  // Previously this was inferred from `activeTab === null`, which forced nav
+  // to deselect the top tab to show the workspace — see layout.ts.
+  const epicsWorkspaceOpen = useLayout((s) => s.epicsWorkspaceOpen)
+  const showWorkspace = epicsWorkspaceOpen || !activeTab
 
   return (
     <div
       className="absolute inset-0"
       style={{ visibility: visible ? 'visible' : 'hidden' }}
     >
-      {activeTab ? (
+      {!showWorkspace ? (
         tabs.map((t) => (
           <div
             key={`${t.id}-${t.generation}`}

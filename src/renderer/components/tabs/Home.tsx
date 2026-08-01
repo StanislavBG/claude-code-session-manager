@@ -17,6 +17,7 @@ import type { NavKey } from '../LeftNav'
 import { useBilling, getBillingData, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
+import { useLayout } from '../../state/layout'
 import { usePromptSessions } from '../../state/promptSessions'
 import { useChatSignals } from '../../lib/useChatSignals'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -142,6 +143,9 @@ function ProjectsCard() {
     } else {
       addTab({ cwd, startupCommand: null, dormant: true })
     }
+    // Opening a project from Home means "show me it" — lift the Epics
+    // workspace overlay so the selected tab isn't masked (see layout.ts).
+    useLayout.getState().setEpicsWorkspaceOpen(false)
   }
 
   return (

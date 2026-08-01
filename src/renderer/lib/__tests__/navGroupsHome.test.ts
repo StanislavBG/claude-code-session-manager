@@ -127,6 +127,23 @@ describe('projects is project-only', () => {
   })
 })
 
+describe('memory is project-only', () => {
+  it('NAV_ITEMS tags memory with faces: [project]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'memory')
+    expect(item?.faces).toEqual(['project'])
+  })
+
+  it('home face excludes memory', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).not.toContain('memory')
+  })
+
+  it('project face includes memory', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).toContain('memory')
+  })
+})
+
 describe('NAV_ITEMS face-coverage invariant', () => {
   it('every NAV_ITEMS entry has a non-empty faces array', () => {
     for (const item of NAV_ITEMS) {

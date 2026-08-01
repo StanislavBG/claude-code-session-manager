@@ -11,11 +11,23 @@
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, afterAll } from 'vitest';
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { createAdminHttp, TOKEN_PATH, resolveTokenPath } = require('../localAdminHttp.cjs');
+
+// Redirect every start() in this file away from the PRODUCTION admin-api.json.
+// Without this, these tests overwrote the running app's port+token with a
+// throwaway server's, orphaning scheduler-mcp-server.cjs until an app restart
+// (confirmed live 2026-08-01). Tests that specifically exercise path
+// resolution unset this override themselves.
+// Must live under the home dir: config.writeJson enforces allowedRoots.
+const TEST_TOKEN_PATH = path.join(path.dirname(TOKEN_PATH), `admin-api.test-${process.pid}.json`);
+process.env.SM_ADMIN_TOKEN_PATH = TEST_TOKEN_PATH;
+
+afterAll(() => { fs.rmSync(TEST_TOKEN_PATH, { force: true }); });
 
 function request(port, { method = 'GET', path: reqPath, token, body }) {
   return new Promise((resolve, reject) => {
@@ -109,11 +121,11 @@ test('start() persists token file with port + token, mode 0600', async () => {
   const admin = createAdminHttp();
   const { port, token } = await admin.start();
   try {
-    const raw = fs.readFileSync(TOKEN_PATH, 'utf8');
+    const raw = fs.readFileSync(TEST_TOKEN_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     expect(parsed.port).toBe(port);
     expect(parsed.token).toBe(token);
-    const mode = fs.statSync(TOKEN_PATH).mode & 0o777;
+    const mode = fs.statSync(TEST_TOKEN_PATH).mode & 0o777;
     expect(mode).toBe(0o600);
   } finally {
     await admin.stop();
@@ -124,6 +136,8 @@ test('SM_DEV=1 writes to a dev-suffixed path, never the production admin-api.jso
   const devPath = path.join(path.dirname(TOKEN_PATH), 'admin-api.dev.json');
   const prevMtime = fs.existsSync(TOKEN_PATH) ? fs.statSync(TOKEN_PATH).mtimeMs : null;
   const prevEnv = process.env.SM_DEV;
+  const prevOverride = process.env.SM_ADMIN_TOKEN_PATH;
+  delete process.env.SM_ADMIN_TOKEN_PATH;
   process.env.SM_DEV = '1';
   const admin = createAdminHttp();
   try {
@@ -141,32 +155,36 @@ test('SM_DEV=1 writes to a dev-suffixed path, never the production admin-api.jso
   } finally {
     await admin.stop();
     if (prevEnv === undefined) delete process.env.SM_DEV; else process.env.SM_DEV = prevEnv;
+    if (prevOverride !== undefined) process.env.SM_ADMIN_TOKEN_PATH = prevOverride;
     fs.rmSync(devPath, { force: true });
   }
 });
 
-test('with neither SM_DEV nor SM_E2E set, writes to the original admin-api.json path', async () => {
+test('with neither SM_DEV nor SM_E2E set, resolves to the original admin-api.json path', () => {
+  // Path RESOLUTION only — deliberately does not start() a server here. This
+  // test used to boot one with no override set, which wrote a throwaway
+  // port+token straight into the live app's admin-api.json and cut
+  // scheduler-mcp-server.cjs off from the running app. Persistence itself is
+  // covered by the 0600 test above, against the redirected test path.
   const prevDev = process.env.SM_DEV;
   const prevE2e = process.env.SM_E2E;
+  const prevOverride = process.env.SM_ADMIN_TOKEN_PATH;
   delete process.env.SM_DEV;
   delete process.env.SM_E2E;
-  let admin;
+  delete process.env.SM_ADMIN_TOKEN_PATH;
   try {
     expect(resolveTokenPath()).toBe(TOKEN_PATH);
-    admin = createAdminHttp();
-    const { port, token } = await admin.start();
-    const parsed = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
-    expect(parsed.port).toBe(port);
-    expect(parsed.token).toBe(token);
   } finally {
-    if (admin) await admin.stop();
     if (prevDev === undefined) delete process.env.SM_DEV; else process.env.SM_DEV = prevDev;
     if (prevE2e === undefined) delete process.env.SM_E2E; else process.env.SM_E2E = prevE2e;
+    if (prevOverride !== undefined) process.env.SM_ADMIN_TOKEN_PATH = prevOverride;
   }
 });
 
 test('dev and production token paths never collide', () => {
   const prevEnv = process.env.SM_DEV;
+  const prevOverride = process.env.SM_ADMIN_TOKEN_PATH;
+  delete process.env.SM_ADMIN_TOKEN_PATH;
   try {
     process.env.SM_DEV = '1';
     const devPath = resolveTokenPath();
@@ -175,6 +193,7 @@ test('dev and production token paths never collide', () => {
     expect(devPath).not.toBe(prodPath);
   } finally {
     if (prevEnv === undefined) delete process.env.SM_DEV; else process.env.SM_DEV = prevEnv;
+    if (prevOverride !== undefined) process.env.SM_ADMIN_TOKEN_PATH = prevOverride;
   }
 });
 

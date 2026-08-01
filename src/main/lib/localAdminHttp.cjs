@@ -49,6 +49,15 @@ const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-
  * harmless tie-break, since real launches only ever set one or the other.
  */
 function resolveTokenPath() {
+  // Explicit override, highest priority. Exists because the unit tests call
+  // createAdminHttp().start() directly with neither SM_DEV nor SM_E2E set,
+  // which resolved to the PRODUCTION admin-api.json and overwrote the
+  // running app's port+token with a throwaway test server's — silently
+  // orphaning scheduler-mcp-server.cjs's access to the live app until the
+  // next app restart (confirmed live 2026-08-01: `npm run test:unit` made
+  // every scheduler_* MCP tool report "app is not running"). Tests point
+  // this at a tmp file; production never sets it.
+  if (process.env.SM_ADMIN_TOKEN_PATH) return process.env.SM_ADMIN_TOKEN_PATH;
   if (process.env.SM_DEV === '1') {
     return path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.dev.json');
   }

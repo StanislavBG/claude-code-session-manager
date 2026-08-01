@@ -1,132 +1,104 @@
 {
   "version": 1,
-  "synthesizedAt": "2026-08-01T06:28:15.287Z",
+  "synthesizedAt": "2026-08-01T16:27:06.614Z",
   "editedAt": null,
   "model": "sonnet",
-  "purpose": "A local Electron cockpit that lets a developer manage Claude Code CLI sessions per-project through a TAB → EPIC → PRD hierarchy, combining terminal, chat, scheduling, and observability into one app.",
+  "purpose": "Electron desktop cockpit for driving and observing Claude Code CLI sessions across projects, with a scheduler that turns approved Epics into autonomously-executed PRDs.",
   "what": [
-    "**TAB = project.** A Terminal tab is pinned to one cwd, and everything session-manager tracks for that project lives under `<cwd>/session-manager-operations/` — Epics, scheduler PRDs/queue, the per-project Brief, and `HUMAN_LEARN/` docs — governed by a fail-closed **single-writer law** (`opsOwnership.cjs`) so only the declared owner surface may write each namespace.",
-    "**EPIC = one unit of work = one Claude session.** Implemented as `PromptSession`, an Epic mints its own `claudeSessionId`, fixes its title/objective as the first prompt, and offers Chat and Terminal as two views over the same session (never two sessions). `status: 'proposed'` is now the human-approval gate that fully replaced the old `feedback/` intake folder and its skills — an Epic proposal already carries its own session + PRD directory, and pressing **Approve & start** kicks it off.",
-    "**Scheduler is a browser over TAB→EPIC→PRD**, not an owner of new state: PRDs live per-project under `scheduler/epics/<epic-id>/prds/` (flat `scheduler/prds/` retired), queue/history shards in `scheduler/state/`, and only a machine-wide session slot pool (`sessionSlots.cjs`, cap ≤3 concurrent `claude -p`) plus run logs remain global. Recent work (through 2026-07-31, v0.39.4/v0.40.3) hardened Epic/Scheduler integration — rollback on failed PRD writes, sourcePromptId provenance, a durable per-Epic prompt/response transcript store, and live-streaming Epic threads.",
-    "Beyond the Epics/Scheduler core, the app carries 25+ config/observability tabs (Settings, Skills, Hooks, MCP Servers, Memory Clusters, Web Remote, Permissions, etc.) built on isolated zustand stores fed by IPC broadcasts from the main process, plus a mobile web cockpit at bilko.run (Clerk-authed, same-origin relay, desktop-as-source-of-truth)."
+    "The app centers on a **TAB → EPIC → SESSION → PRD** hierarchy: a Terminal tab is anchored to one project cwd, and each Epic (`PromptSession`) is a tagged claude session with a single lifecycle field (`proposed` → `active` → `completed`). Recent work hardened this model — `1f4e6e6` locked Epic creation to explicit human intent, `993f9d0` closed three lifecycle gaps, and `b141ce6` added a structured `EpicSource` field.",
+    "The **Scheduler** (`src/main/scheduler.cjs`, `lib/queueStore.cjs`) runs PRDs per-project from `session-manager-operations/scheduler/epics/<epic-id>/prds/` as `claude -p` jobs, gated on Epic approval (`3577195`), with boot reconciliation, a dead-process reaper, and a definition-of-done drain hook. `1ade7e3`/`4517458` fixed `dependsOn` satisfaction semantics.",
+    "A **Two-Face LeftNav** framework (`ec9be06`) now splits navigation into Home-only (global session-manager config) vs Project-only (per-tab) destinations, derived from focused panel rather than tab selection (`d5cbcb1`) — heavily regression-tested across nav items (Skills, MCP, Hooks, Settings, Permissions, History, Scheduler, Memory, Voice, Remote, RepoViz, Search) in the latest ~30 commits.",
+    "Chat gained a **Prompt Queue** panel (`1cf0b2b`) and inline **MCP consent** handling — `InlineConsentTerminal`, a small embedded PTY widget wired into the consent-notice card (`ebb4f3b`) with a one-click Retry (`8ce6cb8`), addressing the completed 'Granting Consent via Chat' Epic."
   ],
   "areas": [
     {
-      "name": "Epics workspace (renderer + epic state/session lifecycle)",
-      "files": 25,
-      "note": "EpicQueue/EpicDetail/EpicComposer, promptSessions state, chat<->terminal handoff, live streaming bubbles, token accounting",
-      "epic": "TAB→EPIC→PRD model",
-      "heat": 0.95
-    },
-    {
-      "name": "Scheduler (main + renderer)",
-      "files": 15,
-      "note": "scheduler.cjs job runner, queueStore/prdLocations, dodDrainHook definition-of-done gate, Almanac Scheduler tab + SchedulePanel",
-      "epic": "Scheduler = browser over TAB→EPIC→PRD",
-      "heat": 0.85
-    },
-    {
-      "name": "Single-writer ops-root law",
-      "files": 3,
-      "note": "opsOwnership.cjs fail-closed writer table + config.cjs writer-tagged atomic writes; newest architectural addition (d96eea6)",
-      "epic": "single-writer law, Epic proposals replacing feedback intake",
+      "name": "Epics / PromptSessions (state/promptSessions.ts, lib/epicMint.cjs, EpicDetail/EpicComposer)",
+      "files": 14,
+      "note": "Epic lifecycle, Prompt Queue panel, EpicSource field, creation lockdown",
+      "epic": "Finish Scheduled Work",
       "heat": 0.9
     },
     {
-      "name": "Home / Project Brief",
-      "files": 8,
-      "note": "projectBrief.cjs backend, per-project Brief synthesis, Home redesign (Active sessions, Recent sessions, Now/Waiting-on-you)",
-      "epic": "The 'Home' Tab seems to be irresponsive",
-      "heat": 0.5
+      "name": "Scheduler (src/main/scheduler.cjs, scheduler/, lib/queueStore.cjs, lib/dodDrainHook.cjs)",
+      "files": 12,
+      "note": "PRD execution, dependsOn fixes, approval gating, DoD drain gate",
+      "epic": "Scheduler inside Tab",
+      "heat": 0.85
     },
     {
-      "name": "Chat paste-image handling",
-      "files": null,
-      "note": "clipboard image paste into chat composer; fixed once already, regression reopened",
-      "epic": "Paste image in chat does not work",
+      "name": "Two-Face LeftNav (nav framework + per-item NavFace registry, test/navGroups)",
+      "files": 18,
+      "note": "Home-only vs Project-only nav split; extensive regression test coverage added",
+      "epic": "HOME TAB - Has unique Left Navigation vs. Project Tab",
+      "heat": 0.95
+    },
+    {
+      "name": "Chat / MCP consent (InlineConsentTerminal, chatRunner.cjs)",
+      "files": 6,
+      "note": "Inline consent widget + retry replacing full-screen auth flow",
+      "epic": "Granting Consent via Chat is needed",
       "heat": 0.6
     },
     {
-      "name": "Web Remote v2 (mobile cockpit)",
-      "files": 6,
-      "note": "webRemote.cjs relay, ping/auth/session-state protocol, deployed on bilko.run",
-      "epic": null,
-      "heat": 0.1
+      "name": "Home / Session-Manager config (SessionManagerConfig.tsx, Global Controls)",
+      "files": 8,
+      "note": "Global Controls summary section, launch-to-Home toggle, concurrency config",
+      "epic": "Increased concurent session count",
+      "heat": 0.5
     },
     {
-      "name": "Memory Clusters",
-      "files": 2,
-      "note": "memoryAggregate.cjs replaced the retired Knowledge Graph tab; cost-gated claude -p clustering pass",
-      "epic": null,
-      "heat": 0.05
-    },
-    {
-      "name": "Scheduled PRD authoring / watchdog",
+      "name": "Web Remote (webRemote.cjs, WebRemote.tsx)",
       "files": 5,
-      "note": "PRD_AUTHORING.md rules, external scheduler-watchdog.cjs relaunch-only liveness check, boot orphan reconciliation",
+      "note": "Same-origin relay + mobile cockpit; currently touched in working tree tests",
       "epic": null,
-      "heat": 0.15
+      "heat": 0.3
     }
   ],
   "scope": [
     {
       "when": "2026-07-31",
       "kind": "decided",
-      "text": "Single-writer law over session-manager-operations/: every namespace has exactly one owning writer, fail-closed, with a narrow declared-delegation table for cross-writer exceptions.",
-      "src": "d96eea6"
+      "text": "No 'general' OWNERS namespace exists or is needed; architecture/, design-mocks/, HUMAN_LEARN/, reviews/ stay outside single-writer law as skill-authored artifacts, not app runtime state.",
+      "src": "CLAUDE.md"
     },
     {
       "when": "2026-07-31",
       "kind": "added",
-      "text": "Persist full prompt/response text to a durable per-Epic transcript store so chat context can be rebuilt from disk.",
-      "src": "8cd4b23"
+      "text": "Scheduler reframed as a browser over TAB → EPIC → PRD, scoped to the active tab's project by default (v0.39.4).",
+      "src": "CLAUDE.md"
+    },
+    {
+      "when": "recent",
+      "kind": "decided",
+      "text": "Epic lifecycle fixed at exactly three states (proposed/active/completed); every Epic is born proposed, only markCompleted archives it.",
+      "src": "epics/git_log (993f9d0, dab5f54, 1e48e65)"
     },
     {
       "when": "recent",
       "kind": "narrowed",
-      "text": "Epic proposals (status: 'proposed' + Approve & start) fully replaced the feedback/ intake folder, /process-feedback and /my-feedback skills, and the scheduler's 5-minute feedback sweep.",
-      "src": "d96eea6"
-    },
-    {
-      "when": "recent",
-      "kind": "decided",
-      "text": "A project's cwd is registered as an allowed write root at createPrd() time to fix epic-scoped PRD writes.",
-      "src": "9348b57"
+      "text": "Epic creation locked down to explicit human intent only — no implicit/automatic Epic minting.",
+      "src": "git_log 1f4e6e6"
     },
     {
       "when": "recent",
       "kind": "added",
-      "text": "Rollback active-index.json entries when a freshly-minted Epic's PRD write fails, including when the minted-epic dir is non-empty.",
-      "src": "68de06e, 4e44c31"
+      "text": "Two-Face LeftNav: NavFace type + per-item face registry, derived from focused panel not tab selection.",
+      "src": "git_log ec9be06, d5cbcb1"
     },
     {
       "when": "recent",
       "kind": "decided",
-      "text": "Chat/scheduler external-send targets resolve against Epics, not just SessionTabs; scheduler response events broadcast live into open Epic threads.",
-      "src": "00b57bd, 7f250df"
-    },
-    {
-      "when": "2026-06",
-      "kind": "decided",
-      "text": "Scheduler/Plans/Background-Agents consolidated into one Scheduler nav destination after LeftNav grew to ~31 overlapping destinations.",
-      "src": "CLAUDE.md Avoid section"
-    },
-    {
-      "when": "v0.39.4",
-      "kind": "decided",
-      "text": "TAB→EPIC→PRD domain model introduced: epic-scoped PRDs, per-project scheduler state, machine-wide session slot pool.",
-      "src": "6586edb"
+      "text": "Prompt Queue default behavior is chat-first — PRDs only created explicitly/exceptionally, agent decides based on responses.",
+      "src": "epics: Prompt Queue"
     }
   ],
   "conventions": [
-    "Tab ID = claudeSessionId; never mint a second session when switching Chat/Terminal views of the same Epic.",
-    "All fs writes go through config.cjs's writeJson/writeTextAtomic with an explicit `writer` tag enforced by opsOwnership.cjs — no raw fs writes into session-manager-operations/.",
-    "Zustand stores never cross-subscribe (config.ts, live.ts, voice.ts, scheduleState.ts, toast.ts are isolated islands); compose via selectors in components.",
-    "Never return a freshly-built value from a zustand selector (`?? []`, `.filter()`, `.map()` inline) — causes React #185 blank-app; select raw slice, derive after. Enforced by `npm run lint:selectors`.",
-    "Cap concurrent `claude -p` jobs at 3 machine-wide (scheduler + chatRunner + slot pool) — prior 5x concurrency OOM-killed Electron.",
-    "No `shell: true` in child_process.spawn except watchers.cjs and app:test-fire-hook.",
-    "New PRDs must mint/join an Epic via scripts/mint-epic.cjs or scheduler_create_prd MCP tool; flat scheduler/prds/ is retired.",
-    "Before adding a new LeftNav tab for live/observability data, check whether an existing surface (Terminal, Scheduler) should own it instead of duplicating."
+    "Tab ID = claudeSessionId; Chat and Terminal are two views over one session, never two sessionIds.",
+    "Single-writer law over `session-manager-operations/<namespace>/` — fail-closed via `opsOwnership.cjs`; new writers/namespaces require deliberate table edits.",
+    "zustand stores are isolated islands (config/live/voice/scheduleState/toast) — never cross-subscribe; avoid fresh-value selectors (React #185 blank-app risk), guarded by `npm run lint:selectors`.",
+    "Max 3 concurrent `claude -p` jobs machine-wide via session slot pool — do not exceed (OOM risk), though an Epic proposes raising the configurable range to 0–10 default 5.",
+    "No backwards-compat shims (single-author project) — rename/refactor directly.",
+    "Before adding a new LeftNav destination, check if an existing surface (Terminal/Scheduler) already owns that data instead of duplicating."
   ],
   "pins": {
     "what": false,

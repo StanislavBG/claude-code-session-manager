@@ -164,7 +164,7 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
     {
       key: 'system-prompt',
       title: 'System Prompt',
-      summary: claudeMdFile?.exists
+      summary: claudeMdFile?.exists && claudeMdFile.diskRaw.trim().length > 0
         ? `configured (${claudeMdFile.diskRaw.length.toLocaleString()} chars)`
         : 'not set',
     },

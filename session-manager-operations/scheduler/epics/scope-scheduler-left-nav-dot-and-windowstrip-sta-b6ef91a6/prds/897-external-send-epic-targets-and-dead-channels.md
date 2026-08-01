@@ -50,3 +50,7 @@ Before writing any code, read `/home/bilko/.npm/_npx/5346543b21849140/node_modul
 API-reuse, TDD, and Execution-discipline rules that apply to this PRD. Every rule in it is
 mandatory, especially Execution discipline (bounded commands, verify before done, the
 finish-protocol sentinel).
+
+> Superseded: implemented in commit 00b57bd (2026-07-31). Closed out by PRD
+> 897-fix-external-send-epic-targets-and-dead-channels, which added the dead-channel
+> regression guard. Do not re-dispatch.

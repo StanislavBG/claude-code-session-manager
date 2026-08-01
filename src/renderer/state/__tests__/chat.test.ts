@@ -263,7 +263,12 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ tabId: 'epic-1', sessionId: 'epic-sess-1', prompt: 'status update from scheduler' }),
+      expect.objectContaining({
+        tabId: 'epic-1',
+        sessionId: 'epic-sess-1',
+        cwd: '/proj/epic',
+        prompt: 'status update from scheduler',
+      }),
     )
 
     const chat = useChat.getState().get('epic-1')

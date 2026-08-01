@@ -9,16 +9,6 @@
       "createdAt": "2026-08-01T06:56:10.771Z",
       "completedAt": null,
       "resumedFromId": "psess-msa0nhhp-9"
-    },
-    "psess-msa0sh18-16": {
-      "id": "psess-msa0sh18-16",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Scheduler inside Tab\n\nIt seem the scheduler does not run PRDs or have recovery mechanis anymore enabled? Is that true, how do we make sure that what is added to the scheduler will be processed, this the most fundamental flow of this project",
-      "claudeSessionId": "d08d2435-1286-4e14-bf83-2ed8794d74db",
-      "status": "active",
-      "createdAt": "2026-08-01T06:58:25.724Z",
-      "completedAt": null,
-      "tag": "discussion"
     }
   },
   "events": {
@@ -38,16 +28,14 @@
         "id": "pevt-msa0pw3a-15",
         "promptSessionId": "psess-msa0pkwj-13",
         "at": "2026-08-01T06:56:25.270Z"
-      }
-    ],
-    "psess-msa0sh18-16": [
+      },
       {
-        "id": "pevt-msa0sh18-17",
-        "promptSessionId": "psess-msa0sh18-16",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-01T06:58:25.724Z",
-        "text": "Scheduler inside Tab\n\nIt seem the scheduler does not run PRDs or have recovery mechanis anymore enabled? Is that true, how do we make sure that what is added to the scheduler will be processed, this the most fundamental flow of this project"
+        "kind": "response",
+        "causedByEventId": "pevt-msa0pw3a-15",
+        "text": "Yes — PRD 869 (\"sync all, publish to npx the new build\") is done.\n\n- The PRD file moved from `prds/` to `prds-archived/`, i.e. the scheduler marked it completed and it was archived out of the queue.\n- The queue itself is now empty (`queue.json` has no pending jobs — its diff just dropped the old queued entry).\n- npm registry confirms: `npm view claude-code-session-manager version` → **0.41.0**, which matches local `package.json` version exactly. The publish landed.\n\nSo both parts of the PRD's intent — sync everything and publish the new build to npx — are confirmed done.",
+        "id": "pevt-msa0yqe6-21",
+        "promptSessionId": "psess-msa0pkwj-13",
+        "at": "2026-08-01T07:03:17.790Z"
       }
     ]
   }

@@ -1,31 +1,3 @@
 {
-  "jobs": [
-    {
-      "slug": "869-ok-sincr-all-is-done-publish-to-npx-the-new-build",
-      "title": "ok sincr all is done, publish to npx the new build",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 869,
-      "estimateMinutes": 15,
-      "sourcePromptId": "psess-msa0pkwj-13",
-      "sourceTabId": null,
-      "epicId": "psess-msa0pkwj-13",
-      "dependsOn": [],
-      "originSessionId": "27288c66-1754-467d-b1ca-47972501f748",
-      "bodyPreview": "# Goal\n\nok sincr all is done, publish to npx the new build\n\n# Acceptance criteria\n",
-      "status": "running",
-      "runId": "2026-08-01T06-57-14-600Z",
-      "startedAt": "2026-08-01T06:57:14.711Z",
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null,
-      "sessionId": "25cb728d-b329-4a33-8f2d-4c596154564c",
-      "runtime": {
-        "pid": 156534,
-        "runId": "2026-08-01T06-57-14-600Z",
-        "startedAt": "2026-08-01T06:57:14.711Z",
-        "sessionId": "25cb728d-b329-4a33-8f2d-4c596154564c",
-        "cwd": "/home/bilko/Projects/session-manager"
-      }
-    }
-  ]
+  "jobs": []
 }

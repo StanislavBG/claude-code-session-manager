@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * The Hooks tab sidebar should surface each event's HOOK_EVENT_DOCS `when`
@@ -40,14 +41,7 @@ function installWindowApiMock() {
   return { api }
 }
 
-function flush() {
-  return act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(4)
 
 describe('Hooks sidebar inline docs', () => {
   let container: HTMLDivElement

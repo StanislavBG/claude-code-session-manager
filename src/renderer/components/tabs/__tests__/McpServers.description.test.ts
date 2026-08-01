@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * The MCP servers sidebar should surface each server's user-set `description`
@@ -62,14 +63,7 @@ function installWindowApiMock() {
   return { api, getRaw: () => raw }
 }
 
-function flush() {
-  return act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(4)
 
 describe('McpServers sidebar + editor description', () => {
   let container: HTMLDivElement

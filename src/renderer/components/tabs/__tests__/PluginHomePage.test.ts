@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 // Monaco doesn't mount in jsdom; render the raw value so tests can assert on
 // the skill body text, mirroring Skills.description.test.ts's approach.
@@ -121,15 +122,7 @@ function installWindowApiMock() {
   return api
 }
 
-function flush() {
-  return act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(5)
 
 describe('Plugins drill-in page', () => {
   let container: HTMLDivElement

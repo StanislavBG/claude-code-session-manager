@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * Sidebar rows should surface each skill's SKILL.md frontmatter description
@@ -66,13 +67,7 @@ function installWindowApiMock() {
   return api
 }
 
-function flush() {
-  return act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(3)
 
 describe('Skills sidebar description', () => {
   let container: HTMLDivElement

@@ -11,14 +11,6 @@ import type { JobStatus } from '../../src/renderer/components/ui/StatusBadge'
 
 const ALL_STATUSES: JobStatus[] = ['pending', 'running', 'completed', 'failed', 'needs_review']
 
-describe('StatusBadge CLASSES — all five statuses are mapped', () => {
-  for (const status of ALL_STATUSES) {
-    it(`${status} has a non-empty class string`, () => {
-      expect(CLASSES[status]).toBeTruthy()
-    })
-  }
-})
-
 describe('StatusBadge CLASSES — color token semantics', () => {
   it('pending uses dim foreground (text-fg-dim)', () => {
     expect(CLASSES.pending).toContain('text-fg-dim')

@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * EpicDetail (PRD 827-epic-detail-view) — the right-pane Epic detail shell +
@@ -100,10 +101,7 @@ describe('EpicDetail (PRD 827)', () => {
     const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(2)
 
     const branchEl = el.querySelector('[data-testid="epic-detail-branch"]')
     expect(branchEl).not.toBeNull()
@@ -118,10 +116,7 @@ describe('EpicDetail (PRD 827)', () => {
     const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(2)
 
     expect(el.querySelector('[data-testid="epic-detail-branch"]')).toBeNull()
   })

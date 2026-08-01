@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * EpicDetail PRDs/Runs tabs (PRD 828-epic-detail-prds-runs) — the PRD file ×
@@ -56,12 +57,7 @@ function mount(el: React.ReactElement) {
   return container
 }
 
-async function flush() {
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(2)
 
 function clickTab(el: HTMLElement, label: string) {
   const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.startsWith(label)) as HTMLButtonElement

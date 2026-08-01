@@ -5,6 +5,7 @@ import { act } from 'react-dom/test-utils'
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { ReferencedFilesPanel } from '../ReferencedFilesPanel'
 import type { ImportRef } from '../../../../preload/api'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 // MarkdownEditor wraps @monaco-editor/react, which doesn't render in jsdom —
 // stub it with a plain element so the expanded-content assertions can look
@@ -49,12 +50,7 @@ function rerender(activePath: string | null) {
   act(() => root!.render(createElement(ReferencedFilesPanel, { activePath })))
 }
 
-async function flush() {
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(2)
 
 describe('ReferencedFilesPanel', () => {
   afterEach(() => {

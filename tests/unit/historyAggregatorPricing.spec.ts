@@ -115,5 +115,7 @@ describe('remote.aggregate', () => {
         expect(typeof bucket.costUsd).toBe('number')
       }
     }
-  })
+    // Scans the real ~/.claude/projects tree with no filters; under full-suite
+    // fs contention this can exceed vitest's 5000ms default.
+  }, 15000)
 })

@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * EpicTerminalPane (PRD 831) — the Epic Terminal-mode PTY pane. @xterm/xterm
@@ -154,10 +155,7 @@ describe('EpicTerminalPane (PRD 831)', () => {
       }),
     )
 
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(2)
     act(() => { vi.advanceTimersByTime(1600) })
 
     const resumeWrite = write.mock.calls.find(([payload]) => payload.data.includes('--resume'))
@@ -181,7 +179,7 @@ describe('EpicTerminalPane (PRD 831)', () => {
       }),
     )
 
-    await act(async () => { await Promise.resolve() })
+    await flushAsync(1)
     act(() => { fireExit({ exitCode: 0 }) })
 
     expect(useEpicTerminal.getState().isAttached('epic-1')).toBe(false)
@@ -217,7 +215,7 @@ describe('EpicTerminalPane (PRD 831)', () => {
         onReturnToChat: vi.fn(),
       }),
     )
-    await act(async () => { await Promise.resolve() })
+    await flushAsync(1)
     expect(useEpicTerminal.getState().isAttached('epic-1')).toBe(true)
 
     act(() => root?.unmount())
@@ -241,11 +239,11 @@ describe('EpicTerminalPane (PRD 831)', () => {
     useEpicTerminal.getState().setMode(sessionB.id, 'terminal')
 
     mount(createElement(EpicDetail, { promptSession: sessionA }))
-    await act(async () => { await Promise.resolve() })
+    await flushAsync(1)
     expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ tabId: sessionA.claudeSessionId }))
 
     act(() => { root!.render(createElement(EpicDetail, { promptSession: sessionB })) })
-    await act(async () => { await Promise.resolve() })
+    await flushAsync(1)
 
     // Without the sessionId `key` on EpicTerminalPane, React would reuse the
     // same instance (spawnedRef already true) and never spawn for Epic B.
@@ -266,10 +264,7 @@ describe('EpicTerminalPane (PRD 831)', () => {
       }),
     )
 
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(2)
     act(() => { vi.advanceTimersByTime(2000) })
 
     // The surviving claude REPL must not receive the literal launch command
@@ -297,11 +292,7 @@ describe('EpicTerminalPane (PRD 831)', () => {
       }),
     )
 
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(3)
     act(() => { vi.advanceTimersByTime(1600) })
 
     const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))

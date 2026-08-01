@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
  * Installed-plugins table rows should surface each plugin manifest's
@@ -73,14 +74,7 @@ function installWindowApiMock() {
   return api
 }
 
-function flush() {
-  return act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
+const flush = () => flushAsync(4)
 
 describe('Plugins installed table description', () => {
   let container: HTMLDivElement

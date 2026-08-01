@@ -8,6 +8,7 @@ import { useChat } from '../../../state/chat'
 import { useVoice } from '../../../state/voice'
 import type { PromptSession } from '../../../state/promptSessions'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
+import { flushAsync } from '../../../testUtils/domFlush'
 
 const cancelSpy = vi.fn()
 const saveBinarySpy = vi.fn(async () => ({ ok: true }))
@@ -145,11 +146,8 @@ describe('EpicComposer', () => {
     const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
     act(() => setNativeValue(textarea, 'hello there'))
     const sendBtn = el.querySelector('[data-testid="epic-composer-send"]') as HTMLButtonElement
-    await act(async () => {
-      sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushAsync(2)
     expect(send).toHaveBeenCalledWith({ tabId: 'epic-1', sessionId: 'sess-1', cwd: e.cwd, prompt: 'hello there' })
   })
 
@@ -159,11 +157,8 @@ describe('EpicComposer', () => {
     const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
     act(() => setNativeValue(textarea, 'fix the crash'))
     const sendBtn = el.querySelector('[data-testid="epic-composer-send"]') as HTMLButtonElement
-    await act(async () => {
-      sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushAsync(2)
     expect(dispatchSpy).toHaveBeenCalledWith('epic-1', e.cwd, 'fix the crash', 'bug')
   })
 

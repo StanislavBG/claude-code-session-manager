@@ -8,6 +8,7 @@ import { useEpicsPrefs } from '../../state/epicsPrefs'
 import { useChat } from '../../state/chat'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicUsage } from '../../state/epicUsage'
+import { flushAsync } from '../../testUtils/domFlush'
 
 /**
  * EpicsWorkspace (PRD 829) — the two-pane Epics workspace that replaced
@@ -263,10 +264,7 @@ describe('EpicsWorkspace', () => {
       .mockImplementation((ids: string[]) => Promise.resolve(ids.filter((id) => id === session!.claudeSessionId)))
 
     mount(<EpicsWorkspace />)
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    await flushAsync(2)
 
     const { useEpicTerminal } = await import('../../state/epicTerminal')
     expect(useEpicTerminal.getState().modes[session!.id]).toBe('terminal')

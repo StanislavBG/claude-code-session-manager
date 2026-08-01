@@ -42,8 +42,11 @@ export interface ChatTurn {
   /** Tools/skills/MCP calls that fired while producing this turn (assistant turns only). */
   toolUses?: ToolUseTrace[]
   /** Short sage-colored outcome label for a finished agent turn (e.g. "PRD ready for
-   *  review") — mirrors epics-mock.jsx's Turn `outcome` field. Unset today (no producer
-   *  populates it yet); rendered only when present. */
+   *  review") — mirrors epics-mock.jsx's Turn `outcome` field. Set only on the assistant
+   *  turn pushed by chatRunner's own 'complete' event (see onComplete below) — the one
+   *  signal chat.ts has that a run finished without error. Never set on an intermediate
+   *  turn (e.g. the answerBody half of a needs-input round) or an errored run, since
+   *  neither is a real "landed" signal. */
   outcome?: string
 }
 
@@ -225,6 +228,12 @@ function turnId(): string {
   seq += 1
   return `t${Date.now().toString(36)}-${seq}`
 }
+
+// The only outcome label chat.ts currently has real backing signal for: a run
+// that reached chatRunner's 'complete' event (as opposed to 'error' or
+// 'needs-input') finished without failing. Deliberately not "tests passed" or
+// similar — no such signal exists here, only "the run completed cleanly".
+const OUTCOME_LANDED = 'Landed'
 
 const PRD_TITLE_MAX_LEN = 60
 
@@ -808,7 +817,7 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   window.api.chat.onComplete(({ tabId, finalMessage }) => {
     capturePromptSessionTurn(tabId, 'assistant', finalMessage)
     appendResponseEvent(tabId, finalMessage)
-    pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now() })
+    pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now(), outcome: OUTCOME_LANDED })
   })
   window.api.chat.onNeedsInput(({ tabId, questions, answerBody }) => {
     const questionTurnId = turnId()

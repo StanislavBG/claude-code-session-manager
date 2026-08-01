@@ -18,6 +18,7 @@ function installWindowApiMock(opts: {
   const createPrd = vi.fn(opts.createPrd ?? (async () => ({ ok: true as const, nn: 42, filename: '42-fake-prd.md' })))
   let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
+  let errorHandler: ((e: { tabId: string; sessionId: string; message: string }) => void) | null = null
   let externalSendHandler: ((e: { tabId: string; prompt: string }) => void) | null = null
   const api = {
     chat: {
@@ -35,7 +36,10 @@ function installWindowApiMock(opts: {
         needsInputHandler = handler
         return () => { needsInputHandler = null }
       }),
-      onError: vi.fn(),
+      onError: vi.fn((handler) => {
+        errorHandler = handler
+        return () => { errorHandler = null }
+      }),
       onNotice: vi.fn(),
       onExternalSend: vi.fn((handler) => {
         externalSendHandler = handler
@@ -64,6 +68,7 @@ function installWindowApiMock(opts: {
     createPrd,
     getNeedsInputHandler: () => needsInputHandler,
     getCompleteHandler: () => completeHandler,
+    getErrorHandler: () => errorHandler,
     getExternalSendHandler: () => externalSendHandler,
   }
 }
@@ -473,6 +478,71 @@ describe('chat.ts onNeedsInput()', () => {
     const clearedHistory = cleared.ticketHistory ?? []
     expect(clearedHistory.some((t) => t.status === 'needs-input')).toBe(false)
     expect(clearedHistory.find((t) => t.text === 'do the risky thing')?.status).toBe('done')
+  })
+})
+
+describe('chat.ts assistant turn outcome label', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('sets outcome "Landed" on the assistant turn from a normal successful completion', async () => {
+    const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'do the thing' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'all done' })
+
+    const after = useChat.getState().get('t1')
+    const assistantTurn = after.turns.find((t) => t.role === 'assistant')
+    expect(assistantTurn?.outcome).toBe('Landed')
+  })
+
+  it('does not set outcome on an errored run', async () => {
+    const { run, getErrorHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'do the thing' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    getErrorHandler()!({ tabId: 't1', sessionId: 's1', message: 'boom' })
+
+    const after = useChat.getState().get('t1')
+    expect(after.turns.every((t) => t.outcome === undefined)).toBe(true)
+    expect(after.turns.some((t) => t.role === 'error')).toBe(true)
+  })
+
+  it('does not set outcome on the intermediate answerBody turn of a needs-input round', async () => {
+    const { getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useChat } = await import('../chat')
+
+    useChat.setState({
+      chats: {
+        't1': {
+          turns: [],
+          running: true,
+          queuedPosition: 0,
+          started: true,
+          stream: '',
+          liveToolUses: [],
+          queue: [],
+        },
+      },
+    })
+
+    getNeedsInputHandler()!({
+      tabId: 't1',
+      sessionId: 's1',
+      questions: ['Which env?'],
+      answerBody: '1. one\n2. two',
+      raw: 'raw text',
+    })
+
+    const after = useChat.getState().get('t1')
+    expect(after.turns.every((t) => t.outcome === undefined)).toBe(true)
   })
 })
 

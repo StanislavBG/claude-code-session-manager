@@ -51,6 +51,17 @@ function writeActiveIndex(cwd, index) {
   fs.renameSync(tmp, file);
 }
 
+// index.sessions/index.events are plain objects parsed from JSON — bracket
+// lookup with an attacker/agent-supplied key like "__proto__" or
+// "constructor" resolves through the prototype chain to a truthy
+// Object.prototype member even though no such Epic was ever written,
+// bypassing every "does this Epic exist" gate below (including the
+// mintIfMissing:false join-only check that PRD-authoring paths rely on).
+// Always use this instead of `obj[key]`/`!obj[key]` for existence checks.
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function slugify(text) {
   return String(text || 'epic')
     .toLowerCase()
@@ -83,26 +94,38 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, mintIfMissing? }) → Promise<{ epicId, prdDir, created }>
  *
- * `status` defaults to 'active'. Pass 'proposed' to file an Epic that waits
- * for human approval before anything runs.
+ * `status` defaults to 'proposed' — a fail-safe default so any caller that
+ * forgets to pass it files an Epic that waits for human approval rather than
+ * one that starts running immediately. Pass 'active' explicitly only for the
+ * one legitimate immediate-start path (the New Epic UI's own proposed→active
+ * transition, `promptSessions.ts`'s `approveProposed`).
  *
- * Mints a new Epic — or, with `reuseByGoal`, joins the existing ACTIVE Epic
- * whose goalText matches (used by the recurring feedback sweep so successive
- * sweeps chain into one Epic instead of minting one per tick).
+ * `mintIfMissing` defaults to true for the small set of callers that are
+ * themselves the human-intent gate (propose-epic, the RCA hook, the feedback
+ * sweep — all of which pass `status: 'proposed'`, so "minting" here still
+ * never starts anything without a human's Approve & start). Callers that are
+ * NOT themselves a human-intent gate (an automated PRD-write path acting on
+ * a session's behalf) must pass `mintIfMissing: false` — that path may only
+ * JOIN an Epic that already exists; it throws instead of silently creating a
+ * new one, so no PRD-authoring surface can conjure Epics on its own.
+ *
+ * Mints a new Epic — or, with `reuseByGoal`, joins the existing Epic (of the
+ * same `status`) whose goalText matches (used by the recurring feedback sweep
+ * so successive sweeps chain into one Epic instead of minting one per tick).
  *
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'active', openingPrompt = null } = {}) {
+function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   return withPathLock(activeIndexPath(cwd), () => {
     const index = readActiveIndex(cwd);
 
     // A dispatch that already knows its Epic (sourcePromptId frontmatter from
     // an Epic-conversation dispatch) joins it rather than minting a sibling.
-    if (explicitEpicId && index.sessions[explicitEpicId]) {
+    if (explicitEpicId && hasOwn(index.sessions, explicitEpicId)) {
       const prdDir = resolveEpicPrdWriteDir(cwd, explicitEpicId);
       fs.mkdirSync(prdDir, { recursive: true });
       return { epicId: explicitEpicId, prdDir, created: false };
@@ -131,6 +154,14 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
           return { epicId: s.id, prdDir, created: false };
         }
       }
+    }
+
+    if (!mintIfMissing) {
+      throw new Error(
+        `ensureEpic: no existing Epic found (epicId=${explicitEpicId ?? 'none'}) and mintIfMissing is false — `
+        + 'a new Epic can only be created by explicit human intent (New Epic UI, or /propose-epic + Approve & start), '
+        + 'never implicitly by a PRD-authoring path',
+      );
     }
 
     const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -185,7 +216,7 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
 function appendPrdCreatedEvent(cwd, epicId, prdSlug, text) {
   return withPathLock(activeIndexPath(cwd), () => {
     const index = readActiveIndex(cwd);
-    if (!index.sessions[epicId]) return false;
+    if (!hasOwn(index.sessions, epicId)) return false;
     const chain = Array.isArray(index.events[epicId]) ? index.events[epicId] : [];
     const tail = chain.length ? chain[chain.length - 1] : null;
     chain.push({
@@ -214,7 +245,7 @@ function appendPrdCreatedEvent(cwd, epicId, prdSlug, text) {
 function removeEpic(cwd, epicId) {
   if (!cwd || !epicId) return false;
   const index = readActiveIndex(cwd);
-  if (!index.sessions[epicId]) return false;
+  if (!hasOwn(index.sessions, epicId)) return false;
   delete index.sessions[epicId];
   delete index.events[epicId];
   writeActiveIndex(cwd, index);

@@ -19,9 +19,23 @@ description: >-
 
 **Role:** `/develop` owns the *pipeline*: it turns a development request into one or more
 self-contained PRDs, queues them, and tracks them to completion. It is the convergence point
-for both entry paths — an interactive human prompt comes straight here; an agent feedback file
-arrives as an approved Epic proposal (`/propose-epic`), which the user approves and then calls this skill. Everything from
-here on is identical regardless of who asked.
+for both entry paths — an interactive human prompt inside an Epic's own conversation comes
+straight here; an agent feedback file arrives as an approved Epic proposal (`/propose-epic`),
+which the user approves and then calls this skill. Everything from here on is identical
+regardless of who asked.
+
+**Epic-gated — non-negotiable.** `/develop` may only run inside an already-existing,
+already-human-approved Epic's own conversation (Chat or Terminal — the two views over one Epic
+session, per the domain model). It never creates an Epic itself and never writes a PRD against
+one it had to guess at. Before doing anything else:
+1. Resolve `<epic-id>`: this conversation's own claudeSessionId must already match an Epic's
+   `claudeSessionId` in `<cwd>/session-manager-operations/prompt-sessions/active-index.json` —
+   that Epic's `id` is `<epic-id>` for every PRD authored in this pass.
+2. If it doesn't match any Epic — this was invoked as a bare standalone command outside any
+   Epic context — **stop and say so**. Tell the human to create the Epic first (the New Epic
+   card in the app, or `/propose-epic` + **Approve & start**), then re-run `/develop` from
+   inside that Epic. Do not mint one yourself, do not fall back to writing an epicless PRD, and
+   do not proceed with authoring.
 
 **Never** hand-implement the work inline in chat, and never restate rules that live elsewhere:
 the engineering rules belong to `standards.md`. Reference it; don't fork it.
@@ -184,7 +198,11 @@ can't load skills.
    **Prefer creating each PRD via the `scheduler_create_prd` MCP tool**
    (`mcp__session-manager-scheduler__scheduler_create_prd`) over hand-writing the file. Its input
    (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
-   `outOfScope[]`) maps directly onto the sections below — pass them straight through. It
+   `outOfScope[]`) maps directly onto the sections below — pass them straight through. **Always
+   pass `sourcePromptId` explicitly, set to the `<epic-id>` resolved in the Epic-gated step
+   above** — never omit it and rely on the server-side session-id fallback; that fallback exists
+   only to cover a model that forgot, not as this skill's normal path, and the server refuses to
+   write the PRD at all if no existing Epic resolves. It
    allocates a strictly-unique `NN` atomically (no read-then-write race against another
    concurrent `/develop` invocation, never reused across the project — PRD
    832), derives and collision-checks the slug, and embeds the standards pointer for you.
@@ -220,17 +238,21 @@ can't load skills.
    token-window resets, with auto-pause on rate-limit and auto-resume.
 
    **Canonical location — non-negotiable.** Every PRD belongs to an **Epic** (the TAB → EPIC →
-   PRD domain model in the project CLAUDE.md). PRDs MUST be written to, inside the target repo:
+   PRD domain model in the project CLAUDE.md) — specifically the `<epic-id>` resolved in the
+   Epic-gated step above. PRDs MUST be written to, inside the target repo:
    ```
    <cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<kebab-slug>.md
    ```
-   Get `<epic-id>`'s prds/ directory by minting (or joining) an Epic first:
+   Always pass that `<epic-id>` as `sourcePromptId` when creating each PRD — via the MCP
+   `scheduler_create_prd` tool's `sourcePromptId` input, or, for the manual-write fallback, by
+   resolving the directory with:
    ```bash
-   node <session-manager-repo>/scripts/mint-epic.cjs <cwd> "<one-line goal for this work>" [feature|bug|discussion]
+   node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>
    ```
-   The last stdout line is the exact directory to write into. Reuse-by-goal makes it idempotent —
-   all PRDs of one /develop ask share one Epic. (The MCP `scheduler_create_prd` tool does all of
-   this automatically; the mint step is only for the manual-write fallback.)
+   This only JOINS an existing Epic and prints its prds/ directory on the last stdout line — it
+   never creates one. If `<epic-id>` doesn't exist yet, that means the Epic-gated step above
+   wasn't satisfied; go back and get a human to create/approve the Epic first, don't work around
+   this by minting one.
 
    **Anywhere else doesn't get scheduled or gets retired.** `data/prds/`, `docs/prds/`, and the
    old global `prds/` dir under `~/.claude/session-manager/scheduled-plans/` are invisible to

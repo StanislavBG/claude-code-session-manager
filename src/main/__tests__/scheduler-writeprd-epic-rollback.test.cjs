@@ -1,14 +1,13 @@
 /**
- * scheduler-writeprd-epic-rollback.test.cjs — PRD 851: when remote.writePrd
- * mints a brand-new Epic via ensureEpic (epicMint.cjs) but the PRD file write
- * itself then fails, cleanupEmptyMintedEpic must roll back BOTH the on-disk
- * empty epic dir AND the Epic's active-index.json entry (sessions/events) —
- * otherwise an orphaned seed-prompt-only Epic lingers forever in the Epics
- * nav with no PRDs and no cleanup path.
+ * scheduler-writeprd-epic-rollback.test.cjs — remote.writePrd may only JOIN
+ * an existing, already-human-approved Epic (via `sourcePromptId`); it must
+ * never mint a new one (mintIfMissing:false, see epicMint.cjs's ensureEpic).
+ * A write with no resolvable Epic fails outright with zero residual
+ * active-index.json entries — no orphaned Epic can ever be left behind by
+ * this path because none is ever created by it.
  *
- * The rollback must only fire for a call that minted a FRESH Epic
- * (ensureEpic's `created: true`); a PRD write that joins an existing Epic
- * and then fails must leave that Epic's history untouched.
+ * A PRD write that joins a pre-existing Epic and then fails (e.g. an invalid
+ * slug) must leave that Epic's history untouched.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-writeprd-epic-rollback.test.cjs
  */
@@ -38,18 +37,20 @@ afterEach(() => {
 });
 
 // A slug that escapes safeSlugPathIn's containment check, tripping the
-// "invalid slug" branch of writePrd (scheduler.cjs ~4188-4191) after
-// ensureEpic has already minted+persisted the Epic.
+// "invalid slug" branch of writePrd (scheduler.cjs's writePrd). Only the
+// second test below (joining a pre-existing Epic) actually reaches this
+// check — the first test fails earlier, at Epic resolution, before the slug
+// is ever considered.
 const ESCAPING_SLUG = '../escape-attempt';
 
-test('writePrd: invalid-slug failure after a fresh Epic mint leaves zero residual active-index.json entries', async () => {
+test('writePrd: no sourcePromptId refuses to write (no Epic to join) and mints nothing', async () => {
   const cwd = makeFixtureCwd();
-  const body = '---\ntitle: Freshly minted epic goal\n---\n\nbody text\n';
+  const body = '---\ntitle: No epic given\n---\n\nbody text\n';
 
   const result = await remote.writePrd(ESCAPING_SLUG, body, cwd);
 
   expect(result.ok).toBe(false);
-  expect(result.error).toBe('invalid slug');
+  expect(result.error).toMatch(/no existing Epic to join/);
 
   const index = readActiveIndex(cwd);
   expect(Object.keys(index.sessions)).toHaveLength(0);

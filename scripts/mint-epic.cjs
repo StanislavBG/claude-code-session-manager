@@ -1,28 +1,41 @@
 #!/usr/bin/env node
 /**
- * mint-epic.cjs — CLI wrapper over lib/epicMint.cjs for PRD authors working
- * without the app's admin API (the /develop skill's manual-write fallback).
+ * mint-epic.cjs — CLI wrapper over lib/epicMint.cjs's JOIN path, for PRD
+ * authors working without the app's admin API (the /develop skill's
+ * manual-write fallback).
+ *
+ * This script never creates an Epic. It only resolves an EXISTING Epic's
+ * prds/ write directory. An Epic may only come into existence through
+ * explicit human intent — the New Epic UI, or /propose-epic followed by a
+ * human pressing Approve & start — never implicitly from a PRD-authoring
+ * path. /develop must already be running inside that Epic's own
+ * conversation (or have the approved Epic's id in hand) before it calls this.
  *
  * Usage:
- *   node scripts/mint-epic.cjs <cwd> "<goal text>" [feature|bug|discussion]
+ *   node scripts/mint-epic.cjs <cwd> <epic-id>
  *
- * Prints the Epic's prds/ write directory on stdout (last line), minting the
- * Epic (and registering it in prompt-sessions/active-index.json) if no active
- * Epic with the same goal text exists — reuse-by-goal, so re-running for the
- * same goal is idempotent and returns the same directory.
+ * Prints the Epic's prds/ write directory on stdout (last line). Exits 1
+ * with no stdout output if <epic-id> does not exist in
+ * <cwd>/session-manager-operations/prompt-sessions/active-index.json.
  */
 'use strict';
 
 const { ensureEpic } = require('../src/main/lib/epicMint.cjs');
 
-const [cwd, goalText, tag] = process.argv.slice(2);
-if (!cwd || !goalText) {
-  process.stderr.write('usage: mint-epic.cjs <cwd> "<goal text>" [feature|bug|discussion]\n');
+const [cwd, epicId] = process.argv.slice(2);
+if (!cwd || !epicId) {
+  process.stderr.write('usage: mint-epic.cjs <cwd> <epic-id>\n');
+  process.stderr.write('(epic-id must already exist — this script only joins, never creates)\n');
   process.exit(1);
 }
 
 (async () => {
-  const { epicId, prdDir, created } = await ensureEpic(cwd, { goalText, tag, reuseByGoal: true });
-  process.stderr.write(`${created ? 'minted' : 'joined'} epic ${epicId}\n`);
-  process.stdout.write(`${prdDir}\n`);
+  try {
+    const { prdDir } = await ensureEpic(cwd, { epicId, mintIfMissing: false });
+    process.stderr.write(`joined epic ${epicId}\n`);
+    process.stdout.write(`${prdDir}\n`);
+  } catch (e) {
+    process.stderr.write(`${e?.message ?? 'no such Epic'}\n`);
+    process.exit(1);
+  }
 })();

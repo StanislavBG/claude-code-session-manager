@@ -83,3 +83,28 @@ test('removeEpic is a no-op (returns false) for an unknown epicId', async () => 
   expect(removed).toBe(false);
   expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(1);
 });
+
+// A plain object's bracket lookup with a prototype-chain key like
+// "__proto__"/"constructor" returns a truthy Object.prototype member even
+// when no such Epic was ever written — without an own-property check, this
+// would make mintIfMissing:false's "join an existing Epic" gate falsely
+// report a match, defeating the restriction that a PRD write may only join
+// a real, already-approved Epic.
+for (const pollutedKey of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+  test(`ensureEpic refuses to "join" the prototype-chain key "${pollutedKey}" (mintIfMissing:false)`, async () => {
+    const cwd = await mkCwd();
+
+    await expect(
+      ensureEpic(cwd, { epicId: pollutedKey, mintIfMissing: false }),
+    ).rejects.toThrow(/no existing Epic found/);
+
+    const index = readActiveIndex(cwd);
+    expect(Object.keys(index.sessions)).toHaveLength(0);
+  });
+}
+
+test('removeEpic refuses to report success for the prototype-chain key "__proto__"', async () => {
+  const cwd = await mkCwd();
+  const removed = removeEpic(cwd, '__proto__');
+  expect(removed).toBe(false);
+});

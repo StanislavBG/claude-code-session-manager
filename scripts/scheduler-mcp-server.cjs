@@ -89,7 +89,9 @@ const TOOLS = [
     description:
       "Queue a new scheduled PRD via the session-manager app's admin API. Server-side "
       + 'validates the frontmatter, atomically allocates the NN parallel-group number, '
-      + 'appends the engineering standards, and writes the PRD file. Falls back: if the '
+      + 'appends the engineering standards, and writes the PRD file. Every PRD must join an '
+      + 'EXISTING, already-human-approved Epic (pass sourcePromptId) — this tool never mints '
+      + 'a new one, and refuses the write if no Epic can be resolved. Falls back: if the '
       + 'app is not running, author the PRD file by hand instead (see /develop).',
     inputSchema: {
       type: 'object',
@@ -107,7 +109,7 @@ const TOOLS = [
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
         parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
         dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
-        sourcePromptId: { type: 'string', description: "Optional: an EXISTING Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join that Epic instead of minting a new one — NOT a PromptTicket.id (PromptTicket.id and promptSessionId are distinct fields; passing the former will silently mint an unrelated Epic)" },
+        sourcePromptId: { type: 'string', description: "Effectively required: an EXISTING, already-human-approved Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join — NOT a PromptTicket.id (those are distinct fields). The server never mints a new Epic; if this is omitted and no Epic can be resolved (via the SM_CHAT_SESSION_ID fallback below), the write is refused with an error telling the caller to create/approve an Epic first." },
         sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
       },
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],

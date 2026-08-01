@@ -392,7 +392,11 @@ the user may or may not have open.
 
 ### Fallback: writing the PRD file directly
 
-When the app is not running, first mint (or join) an Epic — `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> "<goal>" [feature|bug|discussion]`; its last stdout line is the prds dir — then write `<NN>-<slug>.md` by hand into that
+When the app is not running, first join the EXISTING, already-human-approved Epic you're already
+working inside — `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>`; its last
+stdout line is the prds dir. This only joins; it never creates an Epic, and errors out if
+`<epic-id>` doesn't already exist — get a human to create/approve the Epic first (New Epic UI, or
+`/propose-epic` + Approve & start) if it doesn't. Then write `<NN>-<slug>.md` by hand into that
 `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` dir (the flat `scheduler/prds/` is RETIRED and auto-archived unexecuted at boot), add `sourcePromptId: <epic-id>` to the frontmatter so the job keeps its Epic linkage, following the frontmatter rules in §6 and the
 body conventions the rest of this guide describes (`# Goal`, `# Acceptance criteria`,
 `# Implementation notes`, `## Engineering standards` inlined verbatim — see `/develop`'s output

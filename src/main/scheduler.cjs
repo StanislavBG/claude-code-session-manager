@@ -86,7 +86,7 @@ const queueOps = require('./queueOps.cjs');
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
 const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
-const { ensureEpic, appendPrdCreatedEvent, removeEpic, readActiveIndex } = require('./lib/epicMint.cjs');
+const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -3710,6 +3710,15 @@ function registerScheduleHandlers() {
   // configuration tab.
   ipcMain.handle('schedule:session-slots', () => sessionSlots.snapshot());
 
+  // Home-tab control for the same pool: user-set cap in [0, 10], default 5.
+  // 0 pauses new claude -p launches machine-wide without killing anything
+  // already running. SM_SESSION_SLOTS (if set) still overrides this at read
+  // time — sessionSlots.snapshot().envOverride tells the UI to disable itself.
+  ipcMain.handle('schedule:set-session-slots', validated(schemas.setSessionSlotsSchema, async (data) => {
+    sessionSlots.setCap(data.cap);
+    return sessionSlots.snapshot();
+  }));
+
   ipcMain.handle('schedule:health', async () => {
     const state = await readQueue();
     const runningJobs = [];
@@ -4178,13 +4187,6 @@ async function init() {
 
 // remote — callable from webRemote.cjs without going through IPC.
 const remote = {
-  async getState() {
-    const state = await readQueue();
-    await reconcile(state);
-    await writeQueue(state);
-    return buildScheduleStatePayload(state, { withPaths: true });
-  },
-
   // `cwd` is optional: prdCreate.cjs's create flow passes the target
   // project's cwd explicitly (the file may not exist yet, so there's
   // nothing for findPrdDir to search for); the renderer's slug-only IPC
@@ -4220,33 +4222,12 @@ const remote = {
     }
   },
 
-  async readLog(slug, runId) {
-    const logPath = path.resolve(path.join(RUNS_DIR, runId, `${slug}.log`));
-    if (!logPath.startsWith(RUNS_DIR + path.sep)) {
-      return { ok: false, error: 'invalid slug or runId' };
-    }
-    try {
-      // realpath resolves symlinks; re-check boundary to block a rogue agent job
-      // that places a symlink inside RUNS_DIR pointing outside the safe root.
-      const real = await fsp.realpath(logPath);
-      if (!real.startsWith(RUNS_DIR + path.sep)) {
-        return { ok: false, error: 'invalid slug or runId' };
-      }
-      const text = await fsp.readFile(real, 'utf8');
-      return { ok: true, text };
-    } catch (e) {
-      return { ok: false, error: e?.message };
-    }
-  },
-
   // `cwd` optional — see readPrd's comment above; prdCreate.cjs's create
   // flow supplies it (the destination project dir for a brand-new file that
   // doesn't exist yet, so findPrdDir would return nothing to write into).
   async writePrd(slug, body, cwd) {
     let dir;
     let epicTrace = null;
-    let epicCreated = false;
-    let epicId = null;
     if (cwd) {
       // Edit-in-place if this slug already lives anywhere under this project
       // (legacy flat dir or any Epic's prds/); otherwise this is a CREATE,
@@ -4258,29 +4239,32 @@ const remote = {
         if (candidate && fs.existsSync(candidate)) { dir = d; break; }
       }
       if (!dir) {
+        // Every PRD must join an EXISTING, already-human-approved Epic —
+        // mintIfMissing:false means this never conjures a new one. Only
+        // Epics born from explicit human intent (New Epic UI, or
+        // /propose-epic + Approve & start) may write PRDs; this write path
+        // is not itself a human-intent gate, so it must not become one by
+        // accident.
+        const { fm } = splitFrontmatter(body);
         try {
-          const { fm } = splitFrontmatter(body);
           const epic = await ensureEpic(cwd, {
-            goalText: fm.title || slug,
-            tag: fm.tag,
-            // An Epic-conversation dispatch already has its Epic — join it.
             // fm.sourcePromptId must be an existing Epic's promptSessionId
             // (== its active-index.json sessions key), NOT a
             // PromptTicket.id — epicMint.cjs's ensureEpic looks it up via
             // `index.sessions[explicitEpicId]` (see epicMint.cjs ~line 73),
             // a literal-equality join. Any other id (e.g. a PromptTicket.id)
-            // simply won't match and mints a sibling Epic instead of joining.
+            // simply won't match and this call throws below.
             epicId: fm.sourcePromptId,
+            mintIfMissing: false,
           });
           dir = epic.prdDir;
           epicTrace = epic.epicId;
-          epicCreated = epic.created === true;
-          epicId = epic.epicId;
         } catch (e) {
-          // Epic mint must never block a PRD write — fall back to the
-          // legacy flat dir and log loudly.
-          console.error(`[scheduler] ensureEpic failed for ${slug}: ${e?.message}`);
-          dir = prdDirForCwd(cwd);
+          return {
+            ok: false,
+            error: `no existing Epic to join (sourcePromptId=${fm.sourcePromptId ?? 'none'}): ${e?.message ?? 'unknown error'}. `
+              + 'Create the Epic first via the New Epic UI or /propose-epic + Approve & start, then pass its id as sourcePromptId.',
+          };
         }
       }
       await fsp.mkdir(dir, { recursive: true });
@@ -4289,30 +4273,11 @@ const remote = {
       if (dir === PRDS_DIR) ensureDirs();
     }
 
-    // PRD 825: if this call minted a brand-new Epic (ensureEpic's `created`)
-    // and the write below never lands, don't strand an empty Epic dir —
-    // best-effort remove `<epic>/prds` then `<epic>` itself, only when empty.
-    // PRD 851: also drop the Epic's active-index.json entry (sessions/events)
-    // so an orphaned seed-prompt-only Epic doesn't linger in the Epics nav.
-    // Gated on epicCreated (never fires when ensureEpic joined an existing
-    // Epic) so a pre-existing Epic's history is never touched.
-    const cleanupEmptyMintedEpic = async () => {
-      if (!epicCreated || !epicId) return;
-      try {
-        const entries = await fsp.readdir(dir);
-        if (entries.length === 0) {
-          await fsp.rmdir(dir);
-          const epicRootDir = path.dirname(dir);
-          const epicRootEntries = await fsp.readdir(epicRootDir);
-          if (epicRootEntries.length === 0) await fsp.rmdir(epicRootDir);
-        }
-      } catch { /* best-effort only */ }
-      try { removeEpic(cwd, epicId); } catch { /* best-effort only */ }
-    };
-
+    // writePrd only ever JOINS an existing Epic now (mintIfMissing:false
+    // above) — it can never mint one, so there is no orphaned-mint case left
+    // to roll back here (contrast the old PRD 825/851 cleanup, removed).
     const resolved = safeSlugPathIn(dir, slug);
     if (!resolved) {
-      await cleanupEmptyMintedEpic();
       return { ok: false, error: 'invalid slug' };
     }
     try {
@@ -4324,23 +4289,20 @@ const remote = {
       // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
       if (realParent !== dir && !realParent.startsWith(dir + path.sep)) {
-        await cleanupEmptyMintedEpic();
         return { ok: false, error: 'invalid slug' };
       }
       const existing = await fsp.lstat(resolved).catch(() => null);
       if (existing && existing.isSymbolicLink()) {
-        await cleanupEmptyMintedEpic();
         return { ok: false, error: 'invalid slug' };
       }
       await config.writeTextAtomic(resolved, body, { writer: 'scheduler' });
       const stat = await fsp.stat(resolved);
       if (epicTrace) {
-        // Best-effort: record the dispatch on the minted Epic's event chain.
+        // Best-effort: record the dispatch on the Epic's event chain.
         try { await appendPrdCreatedEvent(cwd, epicTrace, slug); } catch { /* trace only */ }
       }
       return { ok: true, bytesWritten: stat.size };
     } catch (e) {
-      await cleanupEmptyMintedEpic();
       return { ok: false, error: e?.message ?? 'write failed' };
     }
   },
@@ -4378,28 +4340,6 @@ const remote = {
   // reuses the same allocator the file-based /develop authoring path relies
   // on implicitly, rather than re-deriving NN here.
   allocateParallelGroup,
-
-  async runNow() {
-    await clearPause('run-now');
-    runDueJobs().catch((e) => logs.writeLine({
-      level: 'error', scope: 'scheduler',
-      message: 'runDueJobs error (remote:run-now)', meta: { error: e?.message },
-    }));
-    return { ok: true };
-  },
-
-  async setConfig(partial) {
-    const cfg = await mutate((state) => {
-      const { supervisor: supPartial, ...rest } = partial;
-      state.config = { ...state.config, ...rest };
-      if (supPartial !== undefined) {
-        state.config.supervisor = { ...(state.config.supervisor ?? {}), ...supPartial };
-      }
-      return state.config;
-    });
-    await rescheduleTimer();
-    return { ok: true, config: cfg };
-  },
 };
 
 // Registers the two job-management admin HTTP routes (PRD 689 — moved

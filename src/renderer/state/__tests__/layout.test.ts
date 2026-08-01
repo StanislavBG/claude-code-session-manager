@@ -10,6 +10,12 @@ import { buildCommands } from '../../components/CommandPalette'
 // non-null, not a real force-graph render.
 vi.mock('react-force-graph-2d', () => ({ default: () => null }))
 
+// hydrateOpenToHomePref's only IPC dependency — mocked at the module
+// boundary rather than via a real window.api, since this suite runs under
+// the 'node' vitest environment (no window/jsdom).
+const readAppPrefsMock = vi.fn()
+vi.mock('../../lib/appPrefs', () => ({ readAppPrefs: () => readAppPrefsMock() }))
+
 const { renderScreenComponent } = await import('../../components/screenComponents')
 
 /**
@@ -174,6 +180,44 @@ describe('needsProjectsPanelReconciliation (File Explorer dead-end guard)', () =
 
   it('does not reconcile when focusedPanelId is null', () => {
     expect(needsProjectsPanelReconciliation(null, null)).toBe(false)
+  })
+})
+
+describe('layout.ts hydrateOpenToHomePref (app-prefs.json boot hydration)', () => {
+  beforeEach(() => {
+    useLayout.setState({ panels: DEFAULT_LAYOUT, focusedPanelId: DEFAULT_LAYOUT[0].id, focusToken: 0 })
+    readAppPrefsMock.mockReset()
+  })
+
+  it('leaves focusedPanelId at its unmodified default when the pref file is absent', async () => {
+    readAppPrefsMock.mockResolvedValue({})
+    await useLayout.getState().hydrateOpenToHomePref()
+    expect(useLayout.getState().focusedPanelId).toBe(DEFAULT_LAYOUT[0].id)
+  })
+
+  it('leaves focusedPanelId at its unmodified default when openToHomeOnLaunch is false', async () => {
+    readAppPrefsMock.mockResolvedValue({ openToHomeOnLaunch: false })
+    await useLayout.getState().hydrateOpenToHomePref()
+    expect(useLayout.getState().focusedPanelId).toBe(DEFAULT_LAYOUT[0].id)
+  })
+
+  it('sets focusedPanelId to overview when openToHomeOnLaunch is true', async () => {
+    readAppPrefsMock.mockResolvedValue({ openToHomeOnLaunch: true })
+    await useLayout.getState().hydrateOpenToHomePref()
+    expect(useLayout.getState().focusedPanelId).toBe('overview')
+  })
+
+  it('does not stomp a navigation that happens while the pref read is in flight', async () => {
+    let resolvePrefs: (v: { openToHomeOnLaunch: boolean }) => void
+    readAppPrefsMock.mockReturnValue(new Promise((res) => { resolvePrefs = res }))
+    const hydration = useLayout.getState().hydrateOpenToHomePref()
+
+    // User navigates away from the default panel before the IPC read resolves.
+    useLayout.getState().openPanel('terminal')
+    resolvePrefs!({ openToHomeOnLaunch: true })
+    await hydration
+
+    expect(useLayout.getState().focusedPanelId).toBe('terminal')
   })
 })
 

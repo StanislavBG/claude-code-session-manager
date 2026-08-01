@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useScheduleState } from '../../state/scheduleState'
 import { GlobalControlsSection } from './GlobalControlsSection'
+import { Toggle } from '../ui/Toggle'
+import { readAppPrefs, writeAppPrefs } from '../../lib/appPrefs'
+import { toast } from '../../state/toast'
 import type { NavKey } from '../LeftNav'
 
 /**
@@ -24,6 +27,27 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
   const snap = useScheduleState((s) => s.snapshot)
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
   const [saving, setSaving] = useState(false)
+  const [openToHomeOnLaunch, setOpenToHomeOnLaunch] = useState(false)
+  const [prefsSaving, setPrefsSaving] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    readAppPrefs().then((p) => { if (alive) setOpenToHomeOnLaunch(p.openToHomeOnLaunch === true) })
+    return () => { alive = false }
+  }, [])
+
+  const toggleOpenToHomeOnLaunch = async (value: boolean) => {
+    setOpenToHomeOnLaunch(value)
+    setPrefsSaving(true)
+    try {
+      await writeAppPrefs({ openToHomeOnLaunch: value })
+    } catch {
+      setOpenToHomeOnLaunch(!value)
+      toast.error('Failed to save "Open to Home on launch" — try again.')
+    } finally {
+      setPrefsSaving(false)
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -48,6 +72,20 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
     <div className="max-w-[760px] space-y-6">
       {/* ── Global Controls ──────────────────────────────────────── */}
       <GlobalControlsSection navigate={navigate} />
+
+      {/* ── Behavior ──────────────────────────────────────────────── */}
+      <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
+        <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Behavior</h2>
+        <p className="mt-0 mb-3 text-[13px] text-fg-dim leading-relaxed">
+          Cross-project app behavior, independent of any single project's config.
+        </p>
+        <Toggle
+          checked={openToHomeOnLaunch}
+          onChange={toggleOpenToHomeOnLaunch}
+          disabled={prefsSaving}
+          label="Open to Home on launch"
+        />
+      </section>
 
       {/* ── Session pool ─────────────────────────────────────────── */}
       <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">

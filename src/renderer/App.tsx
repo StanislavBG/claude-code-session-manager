@@ -78,6 +78,15 @@ export function App() {
     navigate('editor')
   }, [navigate])
 
+  // Boot-time only: corrects the initial focusedPanelId to 'overview' when
+  // app-prefs.json has openToHomeOnLaunch:true. Runs once (empty deps) —
+  // reading the pref is IPC-async so it can't be folded into the store's
+  // synchronous initial state; this effect is the earliest point after
+  // mount to apply it, before the user has a chance to navigate away.
+  useEffect(() => {
+    void useLayout.getState().hydrateOpenToHomePref()
+  }, [])
+
   useEffect(() => {
     const h = () => navigate('editor')
     window.addEventListener('sm:open-editor', h)

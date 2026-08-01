@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
+import { readAppPrefs } from '../lib/appPrefs'
 
 /**
  * Panel registry entry. `component` is a lookup key (not a component
@@ -77,6 +78,16 @@ interface LayoutState {
   focusPanel: (id: string) => void
   /** Reset the workbench to DEFAULT_LAYOUT (CommandPalette "Reset layout"). */
   resetLayout: () => void
+  /**
+   * Boot-time hydration step (called once from App.tsx): reads
+   * app-prefs.json and, when `openToHomeOnLaunch` is true, focuses
+   * 'overview'. A no-op — leaving `focusedPanelId` at its unmodified
+   * default — when the pref is absent or false, when read fails, or when
+   * the user has already navigated away from the initial default panel
+   * before the (async, IPC-bound) read resolves — never stomps a live
+   * navigation.
+   */
+  hydrateOpenToHomePref: () => Promise<void>
 }
 
 export const useLayout = create<LayoutState>((set, get) => ({
@@ -102,6 +113,15 @@ export const useLayout = create<LayoutState>((set, get) => ({
       focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
       focusToken: s.focusToken + 1,
     }))
+  },
+  hydrateOpenToHomePref: async () => {
+    const prefs = await readAppPrefs()
+    // Only apply if focusedPanelId is still at its unmodified boot default —
+    // if the user (or another boot effect) already navigated during this
+    // async read, their choice wins; the pref never overrides a live nav.
+    if (prefs.openToHomeOnLaunch === true && get().focusedPanelId === (DEFAULT_LAYOUT[0]?.id ?? null)) {
+      set({ focusedPanelId: 'overview' })
+    }
   },
 }))
 

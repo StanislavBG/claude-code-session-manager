@@ -63,6 +63,26 @@ function listEpicPrdDirs(cwd) {
 }
 
 /**
+ * Every `prds-archived/` dir for one project cwd: the retired flat layout's
+ * sibling archive plus each Epic's own sibling archive. Consumed by the
+ * scheduler's archived-twin stale-queue-row guard, so a PRD archived under
+ * its Epic (the layout every new PRD uses) is still found.
+ */
+function listArchivedPrdDirs(cwd) {
+  const dirs = [path.join(cwd, ...PRD_SUBPATH, '..', 'prds-archived')];
+  let root;
+  try { root = resolveEpicsRoot(cwd); } catch { return dirs; }
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return dirs; }
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    const archiveDir = path.join(root, ent.name, 'prds-archived');
+    if (fs.existsSync(archiveDir)) dirs.push(archiveDir);
+  }
+  return dirs;
+}
+
+/**
  * resolvePrdWriteDir(cwd) → `<cwd>/session-manager-operations/scheduler/prds`
  * Pure path join, no I/O. Throws on a missing/non-string cwd so a caller
  * never silently resolves a project-scoped path against `undefined`.
@@ -158,6 +178,7 @@ module.exports = {
   resolveEpicsRoot,
   resolveEpicPrdWriteDir,
   listEpicPrdDirs,
+  listArchivedPrdDirs,
   deriveEpicIdFromPrdPath,
   PRD_SUBPATH,
   EPICS_SUBPATH,

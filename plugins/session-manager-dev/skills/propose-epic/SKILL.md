@@ -35,10 +35,16 @@ that is the `proposed` status. So the intake pipeline collapses into one command
 ## How to file one
 
 ```bash
-node scripts/propose-epic.cjs <project-cwd> "<one-line title>" [feature|bug|discussion] <<'BODY'
+node "$SM_ROOT/scripts/propose-epic.cjs" <project-cwd> "<one-line title>" [feature|bug|discussion] <<'BODY'
 <the full objective — this is sent verbatim as the first prompt on approval>
 BODY
 ```
+
+`$SM_ROOT` is session-manager's own package root. Resolve it once, in this order:
+1. You are working inside the session-manager repo → `.` (use `scripts/propose-epic.cjs`).
+2. Otherwise the installed package — this skill file lives at
+   `<SM_ROOT>/plugins/session-manager-dev/skills/propose-epic/SKILL.md`, so
+   `SM_ROOT` is four directories up from this file's own path.
 
 - **`<project-cwd>`** — the project the work belongs to. Cross-project requests are just a
   proposal filed into *that* project's cwd; there is no separate outbound skill.

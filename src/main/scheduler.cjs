@@ -85,7 +85,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, removeEpic, readActiveIndex } = require('./lib/epicMint.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
@@ -496,23 +496,43 @@ function prdPathForJob(job) {
   return path.join(prdDirForCwd(job && job.cwd), `${job && job.slug}.md`);
 }
 
-/** Absolute path to the sibling `prds-archived/<slug>.md` twin of a job's PRD. */
+/**
+ * Absolute path to a job's archived-twin `<slug>.md`. Resolves to the first
+ * archive dir (across the flat legacy layout and every Epic's own sibling
+ * archive — see listArchivedPrdDirs) that actually contains the slug, falling
+ * back to the flat `prds-archived/<slug>.md` path when none do (this fallback
+ * is only ever used for its string value — logging/note text in
+ * prdArchivedSkipResult — never as an existence check).
+ */
 function archivedPrdPathForJob(job) {
-  return path.join(prdDirForCwd(job && job.cwd), '..', 'prds-archived', `${job && job.slug}.md`);
+  const slug = job && job.slug;
+  const flatPath = path.join(prdDirForCwd(job && job.cwd), '..', 'prds-archived', `${slug}.md`);
+  for (const dir of listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)) {
+    const candidate = safeSlugPathIn(dir, slug);
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return flatPath;
 }
 
 /**
- * True if a job's PRD has already been archived (sibling `prds-archived/<slug>.md`
- * exists). A queue entry whose PRD moved there is stale — the work already shipped
- * — not a genuine missing-PRD failure.
+ * True if a job's PRD has already been archived — in the flat legacy
+ * `prds-archived/` dir OR in the Epic-scoped sibling archive dir every new
+ * PRD actually lands in (archiveCompletedPrd archives into the source PRD's
+ * OWN parent's prds-archived/, which for an Epic PRD is inside that Epic).
+ * A queue entry whose PRD moved to either is stale — the work already
+ * shipped — not a genuine missing-PRD failure.
  */
 async function archivedTwinExists(job) {
-  try {
-    await fsp.access(archivedPrdPathForJob(job));
-    return true;
-  } catch {
-    return false;
+  const slug = job && job.slug;
+  for (const dir of listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)) {
+    const candidate = safeSlugPathIn(dir, slug);
+    if (!candidate) continue;
+    try {
+      await fsp.access(candidate);
+      return true;
+    } catch { /* not here — try the next archive dir */ }
   }
+  return false;
 }
 
 /**
@@ -1906,8 +1926,13 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   }
 
   // Read full PRD body fresh from disk (queue stored only the preview).
+  // Resolve through findPrdDir's full candidate search (legacy flat dir +
+  // every project's Epic-scoped dirs) first, so the common case — a live
+  // Epic-scoped PRD — is a first-try hit instead of probing the retired flat
+  // dir and only then falling back.
   let prompt;
-  let prdPath = prdPathForJob(job);
+  const resolvedDir = await findPrdDir(job.slug);
+  let prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
     // Centrally enforce the review → security-review → verify → commit finish

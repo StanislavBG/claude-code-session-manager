@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { archivedTwinExists, archivedPrdPathForJob, prdDirForCwd } = require('../scheduler.cjs');
+const { listArchivedPrdDirs } = require('../lib/prdLocations.cjs');
 
 const tmpDirs = [];
 
@@ -89,4 +90,66 @@ test('archivedPrdPathForJob does not escape prds-archived/ for a well-formed slu
   const resolved = path.resolve(archivedPrdPathForJob(job));
   const archiveDir = path.resolve(path.join(prdDirForCwd(cwd), '..', 'prds-archived'));
   expect(resolved.startsWith(archiveDir + path.sep)).toBe(true);
+});
+
+test('archivedTwinExists returns true when the twin lives in an EPIC\'s prds-archived dir', async () => {
+  // Regression cover for job 865: every new PRD is Epic-scoped, and
+  // archiveCompletedPrd archives into the Epic's own sibling prds-archived/,
+  // not the retired flat one. A queue row whose PRD moved there must still
+  // be recognized as stale.
+  const cwd = makeFixtureCwd();
+  const slug = '865-paste-image-in-chat-does-not-work';
+  const epicArchiveDir = path.join(
+    cwd, 'session-manager-operations', 'scheduler', 'epics', 'psess-fixture-1', 'prds-archived',
+  );
+  fs.mkdirSync(epicArchiveDir, { recursive: true });
+  fs.writeFileSync(path.join(epicArchiveDir, `${slug}.md`), '# Goal\n\nshipped\n', 'utf8');
+
+  await expect(archivedTwinExists({ slug, cwd })).resolves.toBe(true);
+});
+
+test('archivedTwinExists still returns true for a flat-layout twin', async () => {
+  const cwd = makeFixtureCwd();
+  const slug = 'test-flat-layout-twin';
+  const archivedDir = path.join(prdDirForCwd(cwd), '..', 'prds-archived');
+  fs.mkdirSync(archivedDir, { recursive: true });
+  fs.writeFileSync(path.join(archivedDir, `${slug}.md`), '# Goal\n\nshipped\n', 'utf8');
+
+  await expect(archivedTwinExists({ slug, cwd })).resolves.toBe(true);
+});
+
+test('archivedTwinExists returns false when no twin exists in any layout', async () => {
+  const cwd = makeFixtureCwd();
+  const slug = 'test-no-twin-anywhere';
+  fs.mkdirSync(prdDirForCwd(cwd), { recursive: true });
+
+  await expect(archivedTwinExists({ slug, cwd })).resolves.toBe(false);
+});
+
+test('listArchivedPrdDirs returns the flat dir plus every existing epic archive dir', () => {
+  const cwd = makeFixtureCwd();
+  const epicArchiveDir1 = path.join(
+    cwd, 'session-manager-operations', 'scheduler', 'epics', 'psess-a', 'prds-archived',
+  );
+  const epicArchiveDir2 = path.join(
+    cwd, 'session-manager-operations', 'scheduler', 'epics', 'psess-b', 'prds-archived',
+  );
+  // psess-c has no prds-archived dir yet — should be excluded.
+  fs.mkdirSync(path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'psess-c', 'prds'), { recursive: true });
+  fs.mkdirSync(epicArchiveDir1, { recursive: true });
+  fs.mkdirSync(epicArchiveDir2, { recursive: true });
+
+  const dirs = listArchivedPrdDirs(cwd);
+  const flatDir = path.join(prdDirForCwd(cwd), '..', 'prds-archived');
+  expect(dirs).toContain(flatDir);
+  expect(dirs).toContain(epicArchiveDir1);
+  expect(dirs).toContain(epicArchiveDir2);
+  expect(dirs).not.toContain(path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'psess-c', 'prds-archived'));
+});
+
+test('listArchivedPrdDirs never throws for a cwd with no session-manager-operations/ at all', () => {
+  const cwd = makeFixtureCwd();
+  expect(() => listArchivedPrdDirs(cwd)).not.toThrow();
+  const dirs = listArchivedPrdDirs(cwd);
+  expect(dirs.length).toBe(1);
 });

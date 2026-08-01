@@ -6,7 +6,7 @@
  *   2. Schema-invalid payloads throw ZodError before any handler runs.
  *   3. Path-bearing commands (cmd:pty:spawn) pass cwd through validatePath.
  *   4. Kill-switch: commands are refused when remoteEnabled = false.
- *   5. All 18 allowlisted command types are present in the set.
+ *   5. All 11 allowlisted command types are present in the set.
  *   6. Destructive pty commands live in the MUTATE tier, not READ.
  *   7. Sensitive READ commands (SAS_GATED_READS) are not in the plain READ tier.
  */
@@ -28,8 +28,8 @@ const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, SAS_GATED_READS, MUTATE_COMMAN
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 
 describe('ALLOWED_COMMANDS set', () => {
-  it('contains exactly 18 entries', () => {
-    expect(ALLOWED_COMMANDS.size).toBe(18)
+  it('contains exactly 11 entries', () => {
+    expect(ALLOWED_COMMANDS.size).toBe(11)
   })
 
   it('is the exact union of READ, SAS_GATED_READS, and MUTATE tiers (no overlap, no orphans)', () => {
@@ -44,7 +44,7 @@ describe('ALLOWED_COMMANDS set', () => {
   // Destructive/stateful commands must require the remoteControlEnabled + SAS
   // gate, which only applies to MUTATE_COMMANDS. A read-only mirror that could
   // kill or resize the desktop PTY would be a control-bypass (sec review S2/S7).
-  for (const c of ['cmd:pty:kill', 'cmd:pty:resize', 'cmd:pty:spawn', 'cmd:pty:write', 'cmd:schedule:write-prd', 'cmd:schedule:run-now']) {
+  for (const c of ['cmd:pty:kill', 'cmd:pty:resize', 'cmd:pty:spawn', 'cmd:pty:write']) {
     it(`gates "${c}" behind the MUTATE tier`, () => {
       expect(MUTATE_COMMANDS.has(c)).toBe(true)
       expect(READ_COMMANDS.has(c)).toBe(false)
@@ -66,6 +66,16 @@ describe('ALLOWED_COMMANDS set', () => {
     '',
     'cmd:unknown',
     'cmd:exec:shell',
+    // Scheduler/Epics commands were deliberately removed from Remote (core
+    // scheduler/Epics redesign) — Remote no longer reaches into scheduler
+    // internals; a future rebuild will use a higher-level surface instead.
+    'cmd:schedule:state',
+    'cmd:schedule:read-prd',
+    'cmd:schedule:read-log',
+    'cmd:schedule:write-prd',
+    'cmd:schedule:reset-job',
+    'cmd:schedule:run-now',
+    'cmd:schedule:set-config',
   ]
 
   for (const t of forbidden) {

@@ -1054,7 +1054,6 @@ function getDispatchMap() {
 
   const { manager: ptyManager } = require('./pty.cjs');
   const sessionsStore = require('./sessionsStore.cjs');
-  const scheduler = require('./scheduler.cjs');
   const { remote: histRemote } = require('./historyAggregator.cjs');
   const chatRunner = require('./chatRunner.cjs');
 
@@ -1093,37 +1092,6 @@ function getDispatchMap() {
       const parsed = schemas.ptyTabId.parse(payload);
       ptyManager.kill(parsed.tabId);
       return { ok: true };
-    },
-
-    'cmd:schedule:state': async () =>
-      scheduler.remote.getState(),
-
-    'cmd:schedule:read-prd': async (payload) => {
-      const parsed = schemas.scheduleSlug.parse(payload);
-      return scheduler.remote.readPrd(parsed.slug);
-    },
-
-    'cmd:schedule:read-log': async (payload) => {
-      const parsed = schemas.scheduleReadLog.parse(payload);
-      return scheduler.remote.readLog(parsed.slug, parsed.runId);
-    },
-
-    'cmd:schedule:write-prd': async (payload) => {
-      const parsed = schemas.scheduleWritePrd.parse(payload);
-      return scheduler.remote.writePrd(parsed.slug, parsed.body);
-    },
-
-    'cmd:schedule:reset-job': async (payload) => {
-      const parsed = schemas.scheduleSlug.parse(payload);
-      return scheduler.remote.resetJob(parsed.slug);
-    },
-
-    'cmd:schedule:run-now': async () =>
-      scheduler.remote.runNow(),
-
-    'cmd:schedule:set-config': async (payload) => {
-      const parsed = schemas.setConfigSchema.default({}).parse(payload ?? {});
-      return scheduler.remote.setConfig(parsed);
     },
 
     'cmd:history:aggregate': async (payload) => {

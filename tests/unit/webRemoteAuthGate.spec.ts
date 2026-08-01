@@ -28,9 +28,6 @@ function isBlocked(type: string, e2eAuthenticated: boolean): boolean {
 describe('SAS_GATED_READS — sensitive READ commands require SAS confirmation', () => {
   const sensitiveReads = [
     'cmd:sessions:load',
-    'cmd:schedule:read-prd',
-    'cmd:schedule:read-log',
-    'cmd:schedule:state',
     'cmd:history:aggregate',
     'cmd:session:subscribe',
   ]
@@ -65,7 +62,7 @@ describe('Ungated READ commands are not in SAS_GATED_READS', () => {
 })
 
 describe('MUTATE commands remain gated', () => {
-  const mutates = ['cmd:pty:spawn', 'cmd:pty:write', 'cmd:schedule:write-prd']
+  const mutates = ['cmd:pty:spawn', 'cmd:pty:write']
   for (const cmd of mutates) {
     it(`${cmd} is blocked when e2eAuthenticated=false`, () => {
       expect(isBlocked(cmd, false)).toBe(true)

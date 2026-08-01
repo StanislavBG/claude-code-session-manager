@@ -377,6 +377,14 @@ const setConfigSchema = z.object({
   }).optional(),
 }).strict();
 
+// Machine-wide claude -p slot pool cap (sessionSlots.cjs) — deliberately its own
+// schema/channel rather than folded into setConfigSchema: it governs the shared
+// process pool, not any one project's scheduler config, and its range (0-10, 0
+// pauses new launches) differs from concurrencyCap's (1-20).
+const setSessionSlotsSchema = z.object({
+  cap: z.number().int().min(0).max(10),
+}).strict();
+
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
 // Slug regex is shared with memoryTool.cjs/memoryAggregate.cjs via lib/memorySlug.cjs;
@@ -754,9 +762,6 @@ const READ_COMMANDS = new Set([
 // Sensitive reads — return user data; require SAS confirmation same as MUTATE.
 const SAS_GATED_READS = new Set([
   'cmd:sessions:load',
-  'cmd:schedule:state',
-  'cmd:schedule:read-prd',
-  'cmd:schedule:read-log',
   'cmd:history:aggregate',
   // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',
@@ -764,6 +769,12 @@ const SAS_GATED_READS = new Set([
   // no dispatch handler for it, so an allowlist entry would only fail closed with
   // an opaque reject. Re-add here together with the handler when remote exchanges
   // are wired, so the allowlist always mirrors an actual capability.
+  //
+  // Scheduler/Epics commands (cmd:schedule:*) were removed here deliberately
+  // (core scheduler/Epics redesign) — Remote no longer reaches into scheduler
+  // internals at all; a future Remote rebuild will talk to Scheduler/Epics
+  // through whatever higher-level surface that redesign lands on, not this
+  // per-command allowlist.
 ]);
 
 const MUTATE_COMMANDS = new Set([
@@ -776,10 +787,6 @@ const MUTATE_COMMANDS = new Set([
   // mobile mirror has no business killing or resizing the desktop's session.
   'cmd:pty:kill',
   'cmd:pty:resize',
-  'cmd:schedule:write-prd',
-  'cmd:schedule:reset-job',
-  'cmd:schedule:run-now',
-  'cmd:schedule:set-config',
   // Pushes a prompt into an open tab's chat queue — a real mutation of that
   // tab's session, same tier as pty:write.
   'cmd:chat:send',
@@ -839,6 +846,7 @@ module.exports = {
     scheduleArchivePrd,
     scheduleRetagPrd,
     setConfigSchema,
+    setSessionSlotsSchema,
     shellOpen,
     archiveProject,
     historyAggregate,

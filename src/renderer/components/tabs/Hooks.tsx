@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
@@ -9,6 +9,8 @@ import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useLayout } from '../../state/layout'
+import { deriveNavFace } from '../../lib/navFace'
 import { useScopedConfigFiles } from '../../lib/useScopedConfigFiles'
 import { SETTINGS_SCOPES, type Scope } from '../../lib/scopes'
 import { HooksLibrary } from './Library'
@@ -154,9 +156,37 @@ export function Hooks() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
-  const [scope, setScope] = useState<Scope>('user')
+
+  // Scope defaults from the NavFace (leftnav-two-face-framework): Home face
+  // -> 'user', Project face -> 'project' (falling back to 'user' when no
+  // active-tab cwd resolves). Mirrors Skills/SystemPrompt/McpServers'
+  // manuallyTouchedRef + prevNavFaceRef pattern so the default only re-applies
+  // on an actual face transition, never on a same-face re-render, and never
+  // once the user has manually changed the scope since the last transition.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+
+  const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [selectedEvent, setSelectedEvent] = useState<HookEvent>('PreToolUse')
   const [view, setView] = useState<'effective' | 'events' | 'library'>('effective')
+
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    setScope(navFace === 'project' && cwd ? 'project' : 'user')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFace, cwd])
+
+  const handleScopeChange = (next: Scope) => {
+    manuallyTouchedRef.current = true
+    setScope(next)
+  }
 
   const scopePaths = useScopedConfigFiles(SETTINGS_SCOPES, home, cwd)
   const path = scopePaths[scope] ?? null
@@ -223,7 +253,7 @@ export function Hooks() {
           <>
             {viewTabs}
             <span className="mx-2 text-fg-faint">·</span>
-            <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={setScope} />
+            <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={handleScopeChange} />
           </>
         }
       >
@@ -273,7 +303,7 @@ export function Hooks() {
         <>
           {viewTabs}
           <span className="mx-2 text-fg-faint">·</span>
-          <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={setScope} />
+          <ScopeSwitcher scopes={['user', 'project', 'local']} active={scope} onChange={handleScopeChange} />
           <span className="ml-3 text-fg-faint truncate">
             {view === 'effective' ? `overrides → ${path}` : path}
           </span>

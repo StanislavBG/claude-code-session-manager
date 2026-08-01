@@ -147,6 +147,14 @@ class PtyManager {
       FORCE_COLOR: '1',
       // Tag the session so hook server / transcript tail can correlate.
       SESSION_MANAGER_TAB_ID: tabId,
+      // Tab ID = claudeSessionId by design (see CLAUDE.md domain model), and
+      // for an Epic, Terminal/Chat are two views over the SAME session — so
+      // this is exactly the id chatRunner.cjs sets for headless chat runs.
+      // Without it, a PRD queued via scheduler_create_prd from an
+      // interactive Epic terminal (not headless chat) had no way to resolve
+      // back to its originating Epic and minted an unrelated sibling one
+      // instead (prdCreate.cjs's resolveSourcePromptIdFromClaudeSession).
+      SM_CHAT_SESSION_ID: tabId,
     });
 
     const shell = process.env.SHELL || '/bin/bash';

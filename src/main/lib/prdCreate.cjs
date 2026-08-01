@@ -24,6 +24,7 @@ const config = require('../config.cjs');
 const { expandHome } = require('./expandHome.cjs');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
+const { appendAuditEvent } = require('./auditLog.cjs');
 
 const STANDARDS_PATH = path.join(
   __dirname, '..', '..', '..',
@@ -191,6 +192,17 @@ async function createPrd(input, remote) {
   if (!writeResult?.ok) {
     return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };
   }
+
+  // Trace-back point for "who/what created this PRD" (auditLog.cjs) — every
+  // PRD write, whether from the admin/MCP route or the renderer's chat:create-prd
+  // IPC handler, lands one record here regardless of outcome path above.
+  appendAuditEvent('prd_create', {
+    cwd: input.cwd,
+    slug: filenameSlug,
+    title: input.title,
+    sourcePromptId: input.sourcePromptId ?? null,
+    sourceTabId: input.sourceTabId ?? null,
+  });
 
   return { ok: true, nn, filename: `${filenameSlug}.md` };
 }

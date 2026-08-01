@@ -49,10 +49,32 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   // unchanged (lowest-number-first waves), so an in-flight mixed queue keeps
   // its order without migration.
   const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
-  const blockingDep = (j) => (j.dependsOn ?? []).find((slug) => {
-    const dep = rowBySlug.get(slug);
-    return dep && dep.status !== 'completed';
-  });
+  // A PRD's filename slug carries the auto-allocated `NN-` prefix
+  // (prdCreate.cjs builds `${nn}-${slug}`), but a human/agent authoring
+  // `dependsOn:` writes the BARE name it chose — it cannot know the number
+  // the allocator will hand out. Without this, every such dep resolved to
+  // undefined and was silently treated as "already done", turning the whole
+  // dependency gate into a no-op (observed live 2026-08-01: 22 PRDs listing
+  // `leftnav-two-face-framework` while the real row was
+  // `873-leftnav-two-face-framework`, all of them eligible immediately even
+  // though the framework PRD they build on had not landed). Resolve a dep by
+  // exact slug first, then fall back to matching rows whose slug is that dep
+  // with a leading `NN-` stripped.
+  const rowsByBareSlug = new Map();
+  for (const j of projectJobs) {
+    const bare = String(j.slug ?? '').replace(/^\d+-/, '');
+    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
+    rowsByBareSlug.get(bare).push(j);
+  }
+  /** Every queue row a dep string refers to (exact match, else bare-name match). */
+  const rowsForDep = (slug) => {
+    const exact = rowBySlug.get(slug);
+    if (exact) return [exact];
+    return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
+  };
+  const blockingDep = (j) => (j.dependsOn ?? []).find((slug) => (
+    rowsForDep(slug).some((dep) => dep.status !== 'completed')
+  ));
 
   const allPending = projectJobs.filter(
     (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug),
@@ -64,7 +86,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   for (const j of allPending) {
     const dep = blockingDep(j);
     if (!dep) { pending.push(j); continue; }
-    if (rowBySlug.get(dep)?.status === 'failed') heldByFailedDep.push({ job: j, dep });
+    if (rowsForDep(dep).some((d) => d.status === 'failed')) heldByFailedDep.push({ job: j, dep });
     // running/pending/needs_review dep — simply not eligible this tick.
   }
   if (pending.length === 0) {

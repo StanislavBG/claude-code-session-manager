@@ -313,9 +313,16 @@ async function emitFeedbackPRD(cwd, {
     // Every PRD belongs to an Epic (CLAUDE.md domain model). The sweep joins
     // one standing "Inbound feedback" Epic per project (reuseByGoal) so
     // recurring ticks chain into a single Epic rather than minting one each.
+    // This is an unattended automated sweep, not a human action — status
+    // MUST be 'proposed' (same as lib/rcaFeedbackHook.cjs) so the Epic lands
+    // behind the Approve & start human gate instead of running immediately;
+    // an 'active' default here would let an unattended process mint and
+    // execute PRDs with zero human approval, exactly the hole the 'proposed'
+    // gate exists to close.
     const epic = await ensureEpic(cwd, {
       goalText: 'Inbound feedback processing',
       tag: 'discussion',
+      status: 'proposed',
       reuseByGoal: true,
     });
     epicId = epic.epicId;

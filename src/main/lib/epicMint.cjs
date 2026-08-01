@@ -22,6 +22,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
+const { appendAuditEvent } = require('./auditLog.cjs');
 
 function activeIndexPath(cwd) {
   return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
@@ -163,6 +164,11 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
     index.sessions[epicId] = session;
     index.events[epicId] = [firstEvent];
     writeActiveIndex(cwd, index);
+
+    // Every mint is logged, whether the Epic starts 'proposed' (human gate
+    // ahead) or 'active' (started immediately) — this is the trace-back point
+    // for "who/what created this Epic" (see auditLog.cjs).
+    appendAuditEvent('epic_mint', { cwd, epicId, status, tag: tag ?? null, goalText: session.goalText });
 
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
     fs.mkdirSync(prdDir, { recursive: true });

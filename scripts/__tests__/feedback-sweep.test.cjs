@@ -451,7 +451,9 @@ test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic p
       path.join(projectDir, 'session-manager-operations', 'prompt-sessions', 'active-index.json'), 'utf8'));
     const epicId = path.basename(path.dirname(dir));
     assert.ok(index.sessions[epicId], 'auto-minted Epic must be in active-index.json');
-    assert.equal(index.sessions[epicId].status, 'active');
+    // Unattended automated sweep, not a human action: must file 'proposed'
+    // (Approve & start gate), never 'active' (see watchdogHelpers.cjs).
+    assert.equal(index.sessions[epicId].status, 'proposed');
     const events = index.events[epicId];
     assert.equal(events[0].kind, 'prompt');
     assert.equal(events[events.length - 1].kind, 'prd_created', 'dispatch must be traced as prd_created');

@@ -1163,8 +1163,39 @@ async function reconcile(state) {
   // for them (that row already exists, durably, in history.jsonl).
   const historyArchiveCandidates = [];
 
+  // Cache active-index.json reads per cwd across this reconcile pass — many
+  // unmatched PRDs typically share a project, and readActiveIndex is a
+  // synchronous fs.readFileSync.
+  const epicStatusCache = new Map(); // cwd -> { sessions }
+  function epicStatus(cwd, epicId) {
+    if (!cwd || !epicId) return null;
+    let idx = epicStatusCache.get(cwd);
+    if (!idx) {
+      idx = readActiveIndex(cwd);
+      epicStatusCache.set(cwd, idx);
+    }
+    return idx.sessions[epicId]?.status ?? null;
+  }
+
   for (const [slug, p] of onDisk) {
     if (seen.has(slug)) continue;
+    // Security gate: a PRD's file location IS its Epic membership
+    // (prdLocations.deriveEpicIdFromPrdPath / p.epicId). Before this check,
+    // the scheduler queued ANY .md file it found under an Epic's prds/ dir
+    // regardless of that Epic's status or even whether it was ever properly
+    // minted — so a PRD filed under a 'proposed' Epic (agent-proposed,
+    // awaiting human Approve & start via EpicApprovalBar), or one dropped
+    // straight onto disk under a directory that was never registered via
+    // ensureEpic()/active-index.json at all (bypassing the app entirely),
+    // would still execute as a claude -p job with --dangerously-skip-permissions.
+    // Require an explicit 'active' registration rather than merely rejecting
+    // 'proposed', so an unregistered directory (status resolves to null) is
+    // rejected too, not silently allowed through. The human's Approve action
+    // flips status to 'active' (state/promptSessions.ts), and the very next
+    // reconcile pass picks the PRD up normally with no other change needed.
+    if (p.epicId && epicStatus(p.cwd, p.epicId) !== 'active') {
+      continue;
+    }
     const hist = historyBySlug.get(slug);
     if (hist) {
       if (hist.status === 'completed') {

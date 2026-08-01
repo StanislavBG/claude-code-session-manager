@@ -1071,6 +1071,11 @@ function reconcileSourcePromptId(job, parsedSourcePromptId) {
  * Status is preserved: pending stays pending, completed stays completed.
  * Newly-discovered PRDs land as `pending`.
  */
+// Epic ids already warned about (PRD-bearing but absent from
+// active-index.json). Module-scoped so the warning is one line per Epic per
+// process rather than one per 60s reconcile tick.
+const warnedUnregisteredEpics = new Set();
+
 async function reconcile(state) {
   // Defence in depth — tickQueue already gates on this, but reconcile is the
   // function that would do the damage (every unmatched PRD .md becomes a
@@ -1188,13 +1193,28 @@ async function reconcile(state) {
     // straight onto disk under a directory that was never registered via
     // ensureEpic()/active-index.json at all (bypassing the app entirely),
     // would still execute as a claude -p job with --dangerously-skip-permissions.
-    // Require an explicit 'active' registration rather than merely rejecting
-    // 'proposed', so an unregistered directory (status resolves to null) is
-    // rejected too, not silently allowed through. The human's Approve action
-    // flips status to 'active' (state/promptSessions.ts), and the very next
-    // reconcile pass picks the PRD up normally with no other change needed.
-    if (p.epicId && epicStatus(p.cwd, p.epicId) !== 'active') {
+    // Block ONLY an explicit 'proposed' — the actual human gate. The human's
+    // Approve action flips status to 'active' (state/promptSessions.ts) and
+    // the very next reconcile pass picks the PRD up with no other change.
+    //
+    // This deliberately does NOT require a positive 'active' registration.
+    // That stricter form shipped briefly and caused a 6-hour silent outage
+    // (2026-08-01): 23 real PRDs whose Epic dir existed on disk but had no
+    // active-index.json entry were skipped forever with no log line, so the
+    // scheduler looked simply dead. Absence of an entry is not evidence of a
+    // rogue writer — an Epic archived on completion also leaves active-index,
+    // and other paths can create the dir without registering it. Fail-closed
+    // is right for the approval gate; it is wrong as a blanket requirement,
+    // because the failure mode is invisible and unrecoverable by the user.
+    const ownerStatus = epicStatus(p.cwd, p.epicId);
+    if (p.epicId && ownerStatus === 'proposed') {
       continue;
+    }
+    // Unregistered Epic dir: allowed, but never silently — this is the only
+    // signal that a PRD's Epic is missing from the index it should be in.
+    if (p.epicId && ownerStatus === null && !warnedUnregisteredEpics.has(p.epicId)) {
+      warnedUnregisteredEpics.add(p.epicId);
+      console.warn(`[scheduler] epic ${p.epicId} (${p.cwd}) has PRDs on disk but no active-index.json entry — queuing anyway; register or archive it to silence this`);
     }
     const hist = historyBySlug.get(slug);
     if (hist) {

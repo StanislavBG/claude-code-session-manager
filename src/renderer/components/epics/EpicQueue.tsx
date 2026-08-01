@@ -24,7 +24,7 @@ import { EpicStatusChip, EpicKindTag, epicStatusDotClass, epicStatusLabel } from
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
 
-const STATUS_ORDER: EpicDisplayStatus[] = ['running', 'needs', 'queued', 'draft', 'completed']
+const STATUS_ORDER: EpicDisplayStatus[] = ['running', 'needs', 'queued', 'active', 'completed']
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (

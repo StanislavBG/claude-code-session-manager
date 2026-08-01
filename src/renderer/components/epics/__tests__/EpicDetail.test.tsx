@@ -85,7 +85,7 @@ describe('EpicDetail (PRD 827)', () => {
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
-    expect(el.querySelector('[role="status"]')?.textContent).toContain('draft')
+    expect(el.querySelector('[role="status"]')?.textContent).toContain('active')
     expect(el.textContent).toContain('FEATURE')
     expect(el.querySelector('h1')?.textContent).toBe('Ship it')
     expect(el.textContent).toContain('Get it out the door.')

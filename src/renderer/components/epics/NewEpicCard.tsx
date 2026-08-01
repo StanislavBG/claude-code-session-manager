@@ -26,6 +26,7 @@ export function NewEpicCard({
   onCancel: () => void
 }) {
   const createPromptSession = usePromptSessions((s) => s.createPromptSession)
+  const approveProposed = usePromptSessions((s) => s.approveProposed)
   const { rows, enriched } = useKnownProjects()
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
 
@@ -75,7 +76,15 @@ export function NewEpicCard({
     // existed (PRD 865).
     const referencePaths = await resolveAttachmentPaths(att.items, effectiveCwd)
     const { goalText, openingPrompt } = composeEpicIntake({ title, goal, referencePaths })
-    const session = createPromptSession(effectiveCwd, goalText, tag)
+    // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
+    // Submitting this form is not a second kind of creation — it is the one
+    // 'proposed -> active' transition, the same one EpicApprovalBar's
+    // Approve & start takes. Creating it 'active' (the createPromptSession
+    // default) set the state as a side effect of creation and meant the New
+    // Epic path never went through that shared transition at all.
+    // See prompt-sessions/README.md#lifecycle.
+    const session = createPromptSession(effectiveCwd, goalText, tag, 'proposed')
+    approveProposed(session.id)
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is
     // nothing further for them to enter. Chat (not PRD dispatch) on purpose:

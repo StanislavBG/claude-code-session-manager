@@ -96,10 +96,10 @@ describe('projectHomeDerive.inFlightCards', () => {
     expect(byId['epic-queued'].note).toBe('ready to run when a slot frees')
   })
 
-  it('sets note text for a draft (no runs/PRDs/needs-input) epic', () => {
+  it('sets note text for an idle active (no runs/PRDs/needs-input) epic', () => {
     const snapshots = makeSnapshots({ sessions: { 'epic-draft': makeSession({ id: 'epic-draft' }) } })
     const cards = inFlightCards('/proj', snapshots)
-    expect(cards).toEqual([{ epicId: 'epic-draft', title: 'Ship it', status: 'draft', note: 'not started' }])
+    expect(cards).toEqual([{ epicId: 'epic-draft', title: 'Ship it', status: 'active', note: 'idle' }])
   })
 
   it('returns an empty list when there are no active epics for the cwd', () => {

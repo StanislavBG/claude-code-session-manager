@@ -732,3 +732,71 @@ describe('promptSessions.ts', () => {
     expect(usePromptSessions.getState().sessions[session.id].status).toBe('active')
   })
 })
+
+describe('proposed Epics are durable (never erased)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  const lastIndexWrite = (api: ReturnType<typeof installWindowApiMock>, path: string) => {
+    const calls = api.config.writeJson.mock.calls.filter((c: unknown[]) => c[0] === path)
+    return calls[calls.length - 1]?.[1] as
+      | { sessions: Record<string, unknown>; events: Record<string, unknown[]> }
+      | undefined
+  }
+
+  it('persists a proposed Epic to active-index.json', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+
+    const proposed = usePromptSessions
+      .getState()
+      .createPromptSession('/proj', 'agent-filed work', 'bug', 'proposed')
+
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    expect(lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))?.sessions[proposed.id]).toEqual(proposed)
+  })
+
+  // The regression: persistActiveIndex rewrites the WHOLE file, so filtering it
+  // to status === 'active' meant any later mutation dropped every proposal that
+  // epicMint.cjs (main) had written in — silently destroying the agent-proposal
+  // intake. A proposed Epic is a valid minimal row, not junk to filter out.
+  it('keeps proposed Epics when an unrelated active Epic is mutated', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+
+    const proposed = usePromptSessions
+      .getState()
+      .createPromptSession('/proj', 'agent-filed work', 'bug', 'proposed')
+    const active = usePromptSessions.getState().createPromptSession('/proj', 'human work', 'feature')
+
+    usePromptSessions.getState().appendPromptSessionEvent(active.id, {
+      kind: 'response',
+      causedByEventId: usePromptSessions.getState().events[active.id][0].id,
+      text: 'a later mutation',
+    })
+
+    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
+    expect(persisted?.sessions[active.id]).toBeDefined()
+    expect(persisted?.sessions[proposed.id]).toEqual(proposed)
+  })
+
+  it('drops a row only when it is completed (archived)', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+
+    const proposed = usePromptSessions
+      .getState()
+      .createPromptSession('/proj', 'agent-filed work', 'bug', 'proposed')
+    await usePromptSessions.getState().markCompleted(proposed.id)
+
+    // Wait on the CONDITION, not on writeJson having been called at all —
+    // create() already called it, so the latter resolves before the
+    // completion write lands.
+    await vi.waitFor(() => {
+      expect(lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))?.sessions[proposed.id]).toBeUndefined()
+    })
+  })
+})

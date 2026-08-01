@@ -12,13 +12,16 @@ const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: st
   running:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'running' },
   needs:     { bg: 'bg-delta-bad/15',   text: 'text-delta-bad',   dot: 'bg-delta-bad',   label: 'needs you' },
   // Mock (epics-mock.jsx E_STATUS): queued is a FILLED tan pill (#ece0c6) —
-  // only draft is the outline variant. Dot is solid muteband (tan), distinct
-  // from draft's fg-faint grey — in compact rows (dot only, no label text)
+  // only active (resting) is the outline variant. Dot is solid muteband (tan),
+  // distinct from active's fg-faint grey — in compact rows (dot only, no label text)
   // those two states would otherwise render as the identical dot color,
   // making a run genuinely queued behind the session-slot pool look
   // indistinguishable from an Epic that never started anything.
   queued:    { bg: 'bg-muteband/60',    text: 'text-fg-dim',      dot: 'bg-muteband',    label: 'queued' },
-  draft:     { bg: 'transparent',       text: 'text-fg-faint',    dot: 'bg-fg-faint',    label: 'draft', ring: true },
+  // Started and alive, with nothing in flight this instant. The Epic's real
+  // persisted status — not a placeholder for "never started" (that is
+  // 'proposed'). Outline variant, muted, since it is the resting state.
+  active:    { bg: 'transparent',       text: 'text-fg-faint',    dot: 'bg-fg-faint',    label: 'active', ring: true },
   // Filed by automation, waiting on a human to approve before it spends
   // anything — the state that replaced the feedback-folder inbox.
   proposed:  { bg: 'bg-butter/25',      text: 'text-fg-dim',      dot: 'bg-butter',      label: 'proposed', ring: true },

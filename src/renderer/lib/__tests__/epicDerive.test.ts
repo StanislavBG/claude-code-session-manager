@@ -140,9 +140,11 @@ describe('epicDerive.epicQueuedDetail', () => {
     expect(epicQueuedDetail('epic-1', snapshots)).toBeUndefined()
   })
 
-  it('returns draft when active with no runs/PRDs/needs-input', () => {
+  // An idle active Epic reports its REAL state. It used to report 'draft',
+  // a label for an Epic state that does not exist.
+  it('returns active when active with no runs/PRDs/needs-input', () => {
     const snapshots = makeSnapshots({ sessions: { 'epic-1': makeSession() } })
-    expect(epicDisplayStatus('epic-1', snapshots)).toBe('draft')
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('active')
   })
 
   it('ignores jobs/chats belonging to a different epic', () => {
@@ -151,7 +153,7 @@ describe('epicDerive.epicQueuedDetail', () => {
       chats: { 'epic-2': makeChat({ running: true }) },
       jobs: [makeJob({ sourcePromptId: 'epic-2', status: 'running' })],
     })
-    expect(epicDisplayStatus('epic-1', snapshots)).toBe('draft')
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('active')
   })
 })
 

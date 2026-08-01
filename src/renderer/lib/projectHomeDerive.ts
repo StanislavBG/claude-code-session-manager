@@ -21,9 +21,13 @@ function noteFor(status: EpicDisplayStatus, epic: PromptSession): string {
       return 'waiting on your answer'
     case 'queued':
       return 'ready to run when a slot frees'
-    case 'draft':
-    default:
+    case 'proposed':
       return 'not started'
+    case 'active':
+    default:
+      // Started, session alive, nothing in flight right now — NOT "not
+      // started", which is what 'proposed' means.
+      return 'idle'
   }
 }
 

@@ -22,7 +22,7 @@ export interface EpicSnapshots {
   usage?: Record<string, EpicUsage>
 }
 
-export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'proposed' | 'draft'
+export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'proposed' | 'active'
 
 /**
  * Derived Epic-level status per the design spec's status vocabulary. Order
@@ -52,7 +52,14 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
   const jobQueued = epicJobs.some((j) => j.status === 'pending')
   if (chatQueued || jobQueued) return 'queued'
 
-  return 'draft'
+  // Nothing in flight. The Epic's REAL state is what shows — it is 'active'
+  // (started, session alive, just idle right now), never a state that does not
+  // exist. This used to return 'draft', a label for a nonexistent Epic state,
+  // displayed in place of the true one. `running`/`queued`/`needs` above are
+  // SESSION activity shown on the Epic's row, not Epic state; only these last
+  // two lines and the completed/proposed checks report actual status.
+  // See prompt-sessions/README.md#lifecycle.
+  return 'active'
 }
 
 /**

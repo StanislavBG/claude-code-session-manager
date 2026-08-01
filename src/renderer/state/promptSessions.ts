@@ -212,7 +212,18 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
   if (typeof window === 'undefined' || !window.api?.config?.writeJson) return
   const index: PromptSessionActiveIndex = {
     sessions: Object.fromEntries(
-      Object.entries(sessions).filter(([, s]) => s.cwd === cwd && s.status === 'active'),
+      // Everything NOT YET ARCHIVED — 'proposed' as well as 'active'. A
+      // proposed Epic is a valid minimal row (id + claudeSessionId are enough:
+      // reserved and ready to spawn, with goalText/openingPrompt filling in
+      // later), not junk to filter out. Filtering to 'active' alone meant every
+      // renderer mutation rewrote this file without the proposals that
+      // epicMint.cjs (main) had written into it, silently destroying the
+      // agent-proposal intake that replaced the feedback folder. Only
+      // markCompleted removes a row from here, by moving it to its archive.
+      // See prompt-sessions/README.md#lifecycle.
+      Object.entries(sessions).filter(
+        ([, s]) => s.cwd === cwd && (s.status === 'active' || s.status === 'proposed'),
+      ),
     ),
     events: {},
   }
@@ -338,7 +349,8 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const sessions = { ...get().sessions, [promptSessionId]: completed }
     set({ sessions })
     // Status flipped to 'completed' — persisting now drops it out of the
-    // active index (persistActiveIndex only keeps status === 'active').
+    // active index (which keeps everything not yet archived, i.e. 'active' and
+    // 'proposed'). This is the ONLY way a row leaves that file.
     persistActiveIndex(session.cwd, sessions, get().events)
 
     let transcript = ''
@@ -419,7 +431,11 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
         : Object.keys(existingSessions).filter(
             (id) =>
               existingSessions[id].cwd === cwd &&
-              existingSessions[id].status === 'active' &&
+              // Must match persistActiveIndex's filter exactly: this file now
+              // holds proposed rows too, so a proposed Epic missing from disk
+              // is a real deletion to reconcile, not a row that was never
+              // persisted in the first place.
+              (existingSessions[id].status === 'active' || existingSessions[id].status === 'proposed') &&
               !diskSessions[id],
           )
       const sessions = { ...existingSessions }

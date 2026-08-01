@@ -146,8 +146,11 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('mcp:status'),
   },
   logs: {
-    write: (scope, level, message, meta) =>
-      ipcRenderer.send('log:write', { scope, level, message, meta }),
+    // ctx is optional: { cwd, tabId, epicId, tags } — when present and
+    // level is 'error', main also appends a tagged line to that project's
+    // own session-manager-operations/logs/ (see opsErrorLog.cjs).
+    write: (scope, level, message, meta, ctx) =>
+      ipcRenderer.send('log:write', { scope, level, message, meta, ...ctx }),
     dir: () => ipcRenderer.invoke('log:dir'),
   },
   config: {

@@ -56,6 +56,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-writeprd-epic-rollback.test.cjs',
       'src/main/__tests__/promptSessionTranscript.test.cjs',
       'src/main/__tests__/scheduler-notify-originating-tab-transcript.test.cjs',
+      'src/main/__tests__/opsErrorLog.test.cjs',
       'scripts/__tests__/feedback-sweep.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',

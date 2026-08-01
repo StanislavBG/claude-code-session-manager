@@ -1,6 +1,7 @@
 const { app, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const opsErrorLog = require('./lib/opsErrorLog.cjs');
 
 // Rolling daily files under <userData>/logs/. Anything mtime'd older than
 // RETENTION_MS is pruned at boot; we never compact mid-session, since the
@@ -75,7 +76,24 @@ function writeLine(payload) {
 }
 
 function registerLogHandlers() {
-  ipcMain.on('log:write', (_e, payload) => writeLine(payload));
+  ipcMain.on('log:write', (_e, payload) => {
+    writeLine(payload);
+    // Renderer errors that name which project/tab they belong to also land
+    // in that project's own session-manager-operations/logs/ — the
+    // machine-global file above mixes every project together and isn't
+    // taggable, so it's not a substitute for the per-project trace.
+    if (payload && payload.level === 'error' && payload.cwd) {
+      opsErrorLog.appendError({
+        cwd: payload.cwd,
+        scope: payload.scope,
+        tabId: payload.tabId,
+        epicId: payload.epicId,
+        tags: Array.isArray(payload.tags) ? payload.tags : [],
+        message: payload.message,
+        meta: payload.meta,
+      });
+    }
+  });
   ipcMain.handle('log:dir', () => logDir());
 }
 

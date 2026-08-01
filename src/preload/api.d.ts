@@ -1283,7 +1283,13 @@ export interface SessionManagerAPI {
     status: () => Promise<McpStatusResult>;
   };
   logs: {
-    write: (scope: string, level: 'debug' | 'info' | 'warn' | 'error', message: string, meta?: unknown) => void;
+    write: (
+      scope: string,
+      level: 'debug' | 'info' | 'warn' | 'error',
+      message: string,
+      meta?: unknown,
+      ctx?: { cwd?: string; tabId?: string; epicId?: string; tags?: string[] },
+    ) => void;
     dir: () => Promise<string>;
   };
   config: {

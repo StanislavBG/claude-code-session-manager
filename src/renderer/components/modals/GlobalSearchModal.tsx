@@ -110,7 +110,7 @@ export function GlobalSearchModal({ open, onClose, variant = 'overlay' }: Global
         .catch((e: unknown) => {
           if (token !== tokenRef.current) return
           const msg = e instanceof Error ? e.message : String(e)
-          log.error('global-search', 'search.text threw', { error: msg })
+          log.error('global-search', 'search.text threw', { error: msg }, { cwd, tabId: activeTab?.id })
           setError(msg)
           setMatches([])
         })
@@ -157,7 +157,7 @@ export function GlobalSearchModal({ open, onClose, variant = 'overlay' }: Global
       window.api.pty.write({ tabId, data })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      log.error('global-search', 'pty.write failed', { error: msg })
+      log.error('global-search', 'pty.write failed', { error: msg }, { cwd, tabId })
       toast.error(`Failed to write to terminal: ${msg}`)
       return
     }

@@ -1,67 +1,53 @@
 {
   "sessions": {
-    "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210": {
-      "id": "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210",
+    "psess-msa0pkwj-13": {
+      "id": "psess-msa0pkwj-13",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "The 'Home' Tab seems to be irresponsive. Make sure that",
-      "claudeSessionId": "c8d2ca66-6317-4c69-9461-dbbdad3aee58",
+      "goalText": "Showing 0 Open EPICS in the Orange Tab but none listed\n\nShowing 0 Open EPICS in the Orange Tab but none listed\n\nReference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ag1muy43m8a-image.png",
+      "claudeSessionId": "27288c66-1754-467d-b1ca-47972501f748",
       "status": "active",
-      "createdAt": "2026-08-01T05:11:36.597Z",
+      "createdAt": "2026-08-01T06:56:10.771Z",
       "completedAt": null,
-      "tag": "bug"
+      "resumedFromId": "psess-msa0nhhp-9"
     },
-    "paste-image-in-chat-does-not-work-1807b432": {
-      "id": "paste-image-in-chat-does-not-work-1807b432",
+    "psess-msa0sh18-16": {
+      "id": "psess-msa0sh18-16",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Paste image in chat does not work",
-      "claudeSessionId": "9304401b-a9a6-4fef-99f3-9d516197915b",
-      "status": "proposed",
-      "createdAt": "2026-08-01T06:22:14.956Z",
+      "goalText": "Scheduler inside Tab\n\nIt seem the scheduler does not run PRDs or have recovery mechanis anymore enabled? Is that true, how do we make sure that what is added to the scheduler will be processed, this the most fundamental flow of this project",
+      "claudeSessionId": "d08d2435-1286-4e14-bf83-2ed8794d74db",
+      "status": "active",
+      "createdAt": "2026-08-01T06:58:25.724Z",
       "completedAt": null,
-      "tag": "bug",
-      "openingPrompt": "A prior PRD (865) targeting this exact title failed before any fix landed — its run errored\non a scheduler PRD-path resolution bug (see separate proposed Epic \"Failed epic-scoped PRD\nsilently archived without running the fix\") and its source PRD got archived as if the work\nhad shipped. It had not: the paste-image bug itself was never actually investigated or fixed.\n\nThere is no repro detail beyond the title — the original feedback item that produced PRD 865\ncarried no more information than \"Paste Image in Chat does not work\". Start by reproducing:\ntry pasting an image (Cmd+V from clipboard, e.g. a screenshot) into the Epic chat composer\n(`EpicDetail.tsx`/`EpicComposer.tsx`) and into the Terminal tab's input, and determine where\nthe paste is silently dropped — clipboard read permission, a missing paste handler on the\ncomposer's textarea/input, an unsupported image MIME type, or something else. Fix the actual\nbreak, and add a regression test (component test for the composer's paste handler, or an e2e\ntest if the fix is Electron-clipboard-specific) so this doesn't regress silently again.\n\nDone = pasting a clipboard image into the chat composer actually attaches/sends it (or shows\na clear, actionable error if images truly aren't supported yet — but confirm with the user's\nintent first if that's the conclusion, since the title implies they expect it to work)."
-    },
-    "failed-epic-scoped-prd-silently-archived-without-56d953a8": {
-      "id": "failed-epic-scoped-prd-silently-archived-without-56d953a8",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Failed epic-scoped PRD silently archived without running the fix",
-      "claudeSessionId": "bdb38cda-5a24-4134-a8dd-9ebfe9b6c496",
-      "status": "proposed",
-      "createdAt": "2026-08-01T06:22:30.403Z",
-      "completedAt": null,
-      "tag": "bug",
-      "openingPrompt": "Reproduced today via job 865-paste-image-in-chat-does-not-work (sourced from Epic\npsess-ms9yi6hy-14). Its PRD source lived at the epic-scoped path\nsession-manager-operations/scheduler/epics/psess-ms9yi6hy-14/prds/865-paste-image-in-chat-does-not-work.md.\nThe run log\n(~/.claude/session-manager/scheduled-plans/runs/2026-08-01T06-19-53-002Z/865-paste-image-in-chat-does-not-work.log)\nshows:\n\n  [scheduler] failed to read PRD: ENOENT: no such file or directory, open\n  '/home/bilko/Projects/session-manager/session-manager-operations/scheduler/prds/865-paste-image-in-chat-does-not-work.md'\n\n`prdPathForJob()` in src/main/scheduler.cjs (~line 495) resolves only the legacy flat\nper-project dir via `prdDirForCwd`/`resolvePrdWriteDir` (src/main/lib/prdLocations.cjs), not\nthe epic-scoped dir the PRD actually lived in. `executeJob` (~line 1908-1945) does have a\nfallback that calls `findPrdDir(job.slug)`, which searches `resolvePrdsDirs()` — and that\nfunction's doc comment explicitly says it includes every project's epic-scoped PRD dirs via\n`listEpicPrdDirs(cwd)`, unfiltered by recency (this was a deliberate fix for an earlier\n142-PRD-across-6-quiet-projects incident). But in this run the fallback evidently still\nmissed the file: there's no \"PRD not in project dir; found ...\" log line, meaning\n`findPrdDir` returned null even though the file existed on disk in an epic dir.\n\nNet effect after the read failure: the job was recorded as failed, but the PRD source file\nwas later moved into session-manager-operations/scheduler/epics/psess-ms9yi6hy-14/prds-archived/\n(the same place completed work gets archived), and the queue.json entry for this slug is now\ngone entirely — no trace in queue.json's jobs array. So a job that errored on a path-resolution\nbug ends up looking exactly like a shipped one: archived PRD, no queue row, no visible failure\nhistory. The user only found out via the scheduler completion notification for this specific\nrun, not via anything in the app's current state.\n\nInvestigate and fix:\n1. Why `findPrdDir`/`resolvePrdsDirs` missed an epic-scoped PRD that existed on disk at fire\n   time — check for a race between epic-dir creation/PRD write and job dispatch, and whether\n   `allProjectCwds()` (which resolvePrdsDirs iterates) has any caching/staleness that could\n   exclude a cwd or an epic dir just created moments earlier.\n2. `prdPathForJob()` itself should probably resolve epic-scoped PRDs directly (the job/queue\n   row likely already knows or can look up its epic id) rather than relying on a legacy-dir\n   guess + best-effort fallback search — the fallback-then-fail design is exactly how this PRD\n   silently ate the paste-image fix.\n3. Whatever archives a failed job's PRD into prds-archived/ (instead of leaving it in prds/\n   for a retry, or flagging it distinctly) needs to stop treating \"PRD unreadable\" the same as\n   \"PRD completed\" — a job that never ran the actual work must not look identical to one that\n   shipped it.\n4. Add a regression test: an epic-scoped PRD (not the legacy flat dir) should be readable and\n   fireable by the scheduler, including through the findPrdDir fallback path, and a failed\n   read must leave a durable, visible failure record (queue history entry, not just a run log\n   file on disk) rather than disappearing."
+      "tag": "discussion"
     }
   },
   "events": {
-    "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210": [
+    "psess-msa0pkwj-13": [
       {
-        "id": "dacaa688-d363-4e8b-ab54-9c91bd4dd749",
-        "promptSessionId": "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210",
+        "id": "pevt-msa0pkwj-14",
+        "promptSessionId": "psess-msa0pkwj-13",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-01T05:11:36.597Z",
-        "text": "The 'Home' Tab seems to be irresponsive. Make sure that"
+        "at": "2026-08-01T06:56:10.771Z",
+        "text": "Showing 0 Open EPICS in the Orange Tab but none listed\n\nShowing 0 Open EPICS in the Orange Tab but none listed\n\nReference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ag1muy43m8a-image.png"
+      },
+      {
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msa0pkwj-14",
+        "prdSlug": "869-ok-sincr-all-is-done-publish-to-npx-the-new-build",
+        "id": "pevt-msa0pw3a-15",
+        "promptSessionId": "psess-msa0pkwj-13",
+        "at": "2026-08-01T06:56:25.270Z"
       }
     ],
-    "paste-image-in-chat-does-not-work-1807b432": [
+    "psess-msa0sh18-16": [
       {
-        "id": "551712d7-6a30-4384-8e4e-140e37915653",
-        "promptSessionId": "paste-image-in-chat-does-not-work-1807b432",
+        "id": "pevt-msa0sh18-17",
+        "promptSessionId": "psess-msa0sh18-16",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-01T06:22:14.956Z",
-        "text": "A prior PRD (865) targeting this exact title failed before any fix landed — its run errored\non a scheduler PRD-path resolution bug (see separate proposed Epic \"Failed epic-scoped PRD\nsilently archived without running the fix\") and its source PRD got archived as if the work\nhad shipped. It had not: the paste-image bug itself was never actually investigated or fixed.\n\nThere is no repro detail beyond the title — the original feedback item that produced PRD 865\ncarried no more information than \"Paste Image in Chat does not work\". Start by reproducing:\ntry pasting an image (Cmd+V from clipboard, e.g. a screenshot) into the Epic chat composer\n(`EpicDetail.tsx`/`EpicComposer.tsx`) and into the Terminal tab's input, and determine where\nthe paste is silently dropped — clipboard read permission, a missing paste handler on the\ncomposer's textarea/input, an unsupported image MIME type, or something else. Fix the actual\nbreak, and add a regression test (component test for the composer's paste handler, or an e2e\ntest if the fix is Electron-clipboard-specific) so this doesn't regress silently again.\n\nDone = pasting a clipboard image into the chat composer actually attaches/sends it (or shows\na clear, actionable error if images truly aren't supported yet — but confirm with the user's\nintent first if that's the conclusion, since the title implies they expect it to work)."
-      }
-    ],
-    "failed-epic-scoped-prd-silently-archived-without-56d953a8": [
-      {
-        "id": "0cb6c109-242d-49ab-a9f5-cfb838938766",
-        "promptSessionId": "failed-epic-scoped-prd-silently-archived-without-56d953a8",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-01T06:22:30.403Z",
-        "text": "Reproduced today via job 865-paste-image-in-chat-does-not-work (sourced from Epic\npsess-ms9yi6hy-14). Its PRD source lived at the epic-scoped path\nsession-manager-operations/scheduler/epics/psess-ms9yi6hy-14/prds/865-paste-image-in-chat-does-not-work.md.\nThe run log\n(~/.claude/session-manager/scheduled-plans/runs/2026-08-01T06-19-53-002Z/865-paste-image-in-chat-does-not-work.log)\nshows:\n\n  [scheduler] failed to read PRD: ENOENT: no such file or directory, open\n  '/home/bilko/Projects/session-manager/session-manager-operations/scheduler/prds/865-paste-image-in-chat-does-not-work.md'\n\n`prdPathForJob()` in src/main/scheduler.cjs (~line 495) resolves only the legacy flat\nper-project dir via `prdDirForCwd`/`resolvePrdWriteDir` (src/main/lib/prdLocations.cjs), not\nthe epic-scoped dir the PRD actually lived in. `executeJob` (~line 1908-1945) does have a\nfallback that calls `findPrdDir(job.slug)`, which searches `resolvePrdsDirs()` — and that\nfunction's doc comment explicitly says it includes every project's epic-scoped PRD dirs via\n`listEpicPrdDirs(cwd)`, unfiltered by recency (this was a deliberate fix for an earlier\n142-PRD-across-6-quiet-projects incident). But in this run the fallback evidently still\nmissed the file: there's no \"PRD not in project dir; found ...\" log line, meaning\n`findPrdDir` returned null even though the file existed on disk in an epic dir.\n\nNet effect after the read failure: the job was recorded as failed, but the PRD source file\nwas later moved into session-manager-operations/scheduler/epics/psess-ms9yi6hy-14/prds-archived/\n(the same place completed work gets archived), and the queue.json entry for this slug is now\ngone entirely — no trace in queue.json's jobs array. So a job that errored on a path-resolution\nbug ends up looking exactly like a shipped one: archived PRD, no queue row, no visible failure\nhistory. The user only found out via the scheduler completion notification for this specific\nrun, not via anything in the app's current state.\n\nInvestigate and fix:\n1. Why `findPrdDir`/`resolvePrdsDirs` missed an epic-scoped PRD that existed on disk at fire\n   time — check for a race between epic-dir creation/PRD write and job dispatch, and whether\n   `allProjectCwds()` (which resolvePrdsDirs iterates) has any caching/staleness that could\n   exclude a cwd or an epic dir just created moments earlier.\n2. `prdPathForJob()` itself should probably resolve epic-scoped PRDs directly (the job/queue\n   row likely already knows or can look up its epic id) rather than relying on a legacy-dir\n   guess + best-effort fallback search — the fallback-then-fail design is exactly how this PRD\n   silently ate the paste-image fix.\n3. Whatever archives a failed job's PRD into prds-archived/ (instead of leaving it in prds/\n   for a retry, or flagging it distinctly) needs to stop treating \"PRD unreadable\" the same as\n   \"PRD completed\" — a job that never ran the actual work must not look identical to one that\n   shipped it.\n4. Add a regression test: an epic-scoped PRD (not the legacy flat dir) should be readable and\n   fireable by the scheduler, including through the findPrdDir fallback path, and a failed\n   read must leave a durable, visible failure record (queue history entry, not just a run log\n   file on disk) rather than disappearing."
+        "at": "2026-08-01T06:58:25.724Z",
+        "text": "Scheduler inside Tab\n\nIt seem the scheduler does not run PRDs or have recovery mechanis anymore enabled? Is that true, how do we make sure that what is added to the scheduler will be processed, this the most fundamental flow of this project"
       }
     ]
   }

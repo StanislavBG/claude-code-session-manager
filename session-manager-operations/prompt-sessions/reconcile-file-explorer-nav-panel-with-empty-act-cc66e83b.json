@@ -1,0 +1,38 @@
+{
+  "session": {
+    "id": "reconcile-file-explorer-nav-panel-with-empty-act-cc66e83b",
+    "cwd": "/home/bilko/Projects/session-manager",
+    "goalText": "Reconcile File Explorer nav panel with empty active-tab state",
+    "claudeSessionId": "56cabeb9-8b3e-4a90-94ca-321863af3370",
+    "status": "completed",
+    "createdAt": "2026-08-01T06:33:41.202Z",
+    "completedAt": "2026-08-01T06:53:24.949Z"
+  },
+  "events": [
+    {
+      "id": "aa3cff66-3018-4291-b73b-517bd899e9f4",
+      "promptSessionId": "reconcile-file-explorer-nav-panel-with-empty-act-cc66e83b",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-01T06:33:41.202Z",
+      "text": "Reconcile File Explorer nav panel with empty active-tab state"
+    },
+    {
+      "id": "3d0603b0-83b0-4da5-b03a-6729982c442c",
+      "promptSessionId": "reconcile-file-explorer-nav-panel-with-empty-act-cc66e83b",
+      "kind": "prd_created",
+      "causedByEventId": "aa3cff66-3018-4291-b73b-517bd899e9f4",
+      "at": "2026-08-01T06:33:41.204Z",
+      "prdSlug": "866-reconcile-tab-scoped-nav-empty-state"
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "3d0603b0-83b0-4da5-b03a-6729982c442c",
+      "id": "pevt-msa0m0yd-7",
+      "promptSessionId": "reconcile-file-explorer-nav-panel-with-empty-act-cc66e83b",
+      "at": "2026-08-01T06:53:24.949Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-01T06:53:24.949Z"
+}

@@ -20,6 +20,7 @@ const { addAllowedRoot } = require('./config.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const opsErrorLog = require('./lib/opsErrorLog.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
 // the remediation message so the user can cd there and rebuild.
@@ -162,6 +163,13 @@ class PtyManager {
       });
     } catch (err) {
       console.error('[pty] pty.spawn threw:', err);
+      opsErrorLog.appendError({
+        cwd,
+        scope: 'pty',
+        tabId,
+        tags: ['spawn-failed'],
+        message: `pty.spawn threw: ${err?.message ?? String(err)}`,
+      });
       // Surface the cause in the tab + report a clean exit rather than throwing
       // an opaque IPC error (covers a missing/invalid cwd or a native fault).
       sendIfAlive(this.window, `pty:data:${tabId}`, nativeModuleHelp(`pty.spawn failed: ${err?.message ?? String(err)}`));
@@ -196,6 +204,13 @@ class PtyManager {
       // real interactive shell (which prints a prompt immediately) is exempt.
       if (!gotData && exitCode !== 0 && Date.now() - spawnedAt < 1200) {
         sendIfAlive(this.window, `pty:data:${tabId}`, nativeModuleHelp(`The shell exited immediately (code ${exitCode}).`));
+        opsErrorLog.appendError({
+          cwd,
+          scope: 'pty',
+          tabId,
+          tags: ['immediate-exit'],
+          message: `shell exited immediately (code ${exitCode}, signal ${signal ?? 'none'}) after ${Date.now() - spawnedAt}ms with no output`,
+        });
       }
       sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode, signal });
       this.sessions.delete(tabId);

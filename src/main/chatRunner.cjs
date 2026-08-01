@@ -51,6 +51,7 @@ const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/sessionSlots.cjs');
+const opsErrorLog = require('./lib/opsErrorLog.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -470,6 +471,19 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     const emitTerminal = (channel, payload) => {
       if (terminalSent) return;
       terminalSent = true;
+      // Every terminal error for this tab, logged once, regardless of the
+      // `silent` gate below — a probe run's failure is still real signal for
+      // tracing even though it never reaches the visible chat UI.
+      if (channel === 'chat:run:error') {
+        opsErrorLog.appendError({
+          cwd,
+          scope: 'chatRunner',
+          tabId,
+          tags: silent ? ['silent-probe'] : [],
+          message: payload?.message ?? 'chat run failed',
+          meta: { sessionId, silent },
+        });
+      }
       // Silent (probe) runs still need this bookkeeping so the lane frees
       // correctly, but must never surface on the six turn-affecting channels.
       if (silent) return;

@@ -7,9 +7,23 @@
 
 type Level = 'debug' | 'info' | 'warn' | 'error'
 
-function emit(scope: string, level: Level, message: string, meta?: unknown): void {
+/**
+ * Optional attribution for an error line — when supplied (and level is
+ * 'error'), main also appends a tagged line to that project's own
+ * `session-manager-operations/logs/` (opsErrorLog.cjs), on top of the
+ * always-on machine-global mirror. Omit when the error has no clear
+ * project/tab owner (e.g. a boot-time or cross-project failure).
+ */
+export interface LogCtx {
+  cwd?: string
+  tabId?: string
+  epicId?: string
+  tags?: string[]
+}
+
+function emit(scope: string, level: Level, message: string, meta?: unknown, ctx?: LogCtx): void {
   try {
-    window.api?.logs?.write(scope, level, message, meta)
+    window.api?.logs?.write(scope, level, message, meta, ctx)
   } catch {
     /* preload unavailable in tests / early boot */
   }
@@ -26,5 +40,5 @@ export const log = {
   debug: (scope: string, msg: string, meta?: unknown) => emit(scope, 'debug', msg, meta),
   info: (scope: string, msg: string, meta?: unknown) => emit(scope, 'info', msg, meta),
   warn: (scope: string, msg: string, meta?: unknown) => emit(scope, 'warn', msg, meta),
-  error: (scope: string, msg: string, meta?: unknown) => emit(scope, 'error', msg, meta),
+  error: (scope: string, msg: string, meta?: unknown, ctx?: LogCtx) => emit(scope, 'error', msg, meta, ctx),
 }

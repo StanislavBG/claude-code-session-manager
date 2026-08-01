@@ -1,0 +1,1 @@
+{"v":1,"epicId":"psess-msa0sh18-16","eventId":null,"role":"user","at":"2026-08-01T06:58:25.739Z","text":"Goal: Scheduler inside Tab\n\nIt seem the scheduler does not run PRDs or have recovery mechanis anymore enabled? Is that true, how do we make sure that what is added to the scheduler will be processed, this the most fundamental flow of this project"}

@@ -26,6 +26,7 @@
  *   - config.cjs writeTextAtomic / writeBinaryAtomic / writeJson / writeJsonSync
  *   - lib/epicMint.cjs      (raw fs tmp+rename)
  *   - lib/queueStore.cjs    (raw fs tmp+rename)
+ *   - lib/opsErrorLog.cjs   (raw fs append, JSONL error log)
  * Renderer callers declare their writer id through the IPC payload.
  */
 
@@ -51,6 +52,8 @@ const OWNERS = Object.freeze({
   'feedback': 'feedback',
   // Browser tab scratch saves (DOM captures, screenshots, recorded flows).
   'browser': 'browser',
+  // Structured per-tab error log lines (JSONL), tagged for tracing/analysis.
+  'logs': 'logs',
 });
 
 /**

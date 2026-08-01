@@ -191,7 +191,7 @@ export function QuickOpenModal({ open, onClose, variant = 'overlay' }: QuickOpen
       })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e)
-        log.error('quick-open', 'search.files threw', { error: msg })
+        log.error('quick-open', 'search.files threw', { error: msg }, { cwd, tabId: activeTab?.id })
         toast.error(`File search failed: ${msg}`)
         setFiles([])
       })
@@ -257,7 +257,7 @@ export function QuickOpenModal({ open, onClose, variant = 'overlay' }: QuickOpen
       window.api.pty.write({ tabId, data: payload })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      log.error('quick-open', 'pty.write failed', { error: msg })
+      log.error('quick-open', 'pty.write failed', { error: msg }, { cwd, tabId })
       toast.error(`Failed to write to terminal: ${msg}`)
       return
     }

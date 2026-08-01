@@ -8,6 +8,8 @@ import { useEpicsPrefs } from '../../state/epicsPrefs'
 import { useChat } from '../../state/chat'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicUsage } from '../../state/epicUsage'
+import { useLayout } from '../../state/layout'
+import { useSessions, type SessionTab } from '../../state/sessions'
 import { flushAsync } from '../../testUtils/domFlush'
 
 /**
@@ -334,6 +336,98 @@ describe('EpicsWorkspace', () => {
       const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)
       expect(el.querySelector('[data-testid="epic-detail"]')).toBeNull()
       expect(el.textContent).toContain('No Epic selected')
+    })
+  })
+
+  // NavFace-driven default project filter (leftnav-two-face-framework) —
+  // only applies to the singleton TerminalStage mount (no `cwd` prop).
+  describe('NavFace-driven default project filter (no cwd prop)', () => {
+    const ALPHA_TAB: SessionTab = {
+      id: 'tab-alpha',
+      sessionId: 'tab-alpha',
+      label: 'alpha',
+      cwd: '/home/bilko/Projects/alpha',
+      pid: null,
+      status: 'dormant',
+      exitCode: null,
+      startupCommand: null,
+      presetId: null,
+      generation: 0,
+    }
+
+    beforeEach(() => {
+      useLayout.setState({ focusedPanelId: 'overview' })
+      useSessions.setState({ tabs: [], activeTabId: null })
+    })
+
+    it('mounts at navFace=home (overview panel) with the filter defaulted to all projects', () => {
+      installWindowApiMock()
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      })
+
+      const el = mount(<EpicsWorkspace />)
+      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe('all')
+      expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(2)
+    })
+
+    it('flipping navFace to project defaults the filter to the active tab\'s cwd', () => {
+      installWindowApiMock()
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      })
+
+      const el = mount(<EpicsWorkspace />)
+      act(() => {
+        useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
+        useLayout.setState({ focusedPanelId: 'terminal' })
+      })
+
+      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe(
+        '/home/bilko/Projects/alpha',
+      )
+      const rows = el.querySelectorAll('[data-testid="epic-queue-row"]')
+      expect(rows).toHaveLength(1)
+      expect(el.textContent).toContain('alpha epic')
+      expect(el.textContent).not.toContain('beta epic')
+    })
+
+    it('a manual filter change survives a re-render at the same navFace', () => {
+      installWindowApiMock()
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      })
+
+      const el = mount(<EpicsWorkspace />)
+      act(() => {
+        useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
+        useLayout.setState({ focusedPanelId: 'terminal' })
+      })
+      // Auto-defaulted to alpha by the face transition.
+      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe(
+        '/home/bilko/Projects/alpha',
+      )
+
+      const select = el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement
+      const setNativeValue = (elm: HTMLSelectElement, value: string) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+        setter.call(elm, value)
+      }
+      act(() => {
+        setNativeValue(select, 'all')
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(select.value).toBe('all')
+
+      // A re-render at the SAME navFace ('project') must not reset the
+      // manual choice back to the active tab's cwd.
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'a third epic')
+      })
+      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe('all')
     })
   })
 })

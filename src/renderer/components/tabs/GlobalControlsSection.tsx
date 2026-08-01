@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useConfig } from '../../state/config'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { SETTINGS_SCOPES, CLAUDE_MD_SCOPES } from '../../lib/scopes'
+import { listSkillEntries } from '../../lib/listSkills'
 import type { NavKey } from '../LeftNav'
 
 /**
@@ -81,22 +82,8 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
     if (!home) return
     let cancelled = false
     ;(async () => {
-      const base = `${home}/.claude/skills`
-      const dir = await window.api.config.listDir(base, { dirsOnly: true })
-      let count = 0
-      for (const e of dir.entries) {
-        const direct = await window.api.config.readText(`${e.path}/SKILL.md`)
-        if (direct.exists) {
-          count += 1
-          continue
-        }
-        const nested = await window.api.config.listDir(e.path, { dirsOnly: true })
-        for (const ne of nested.entries) {
-          const nestedSkill = await window.api.config.readText(`${ne.path}/SKILL.md`)
-          if (nestedSkill.exists) count += 1
-        }
-      }
-      if (!cancelled) setSkillsCount(count)
+      const entries = await listSkillEntries(`${home}/.claude/skills`)
+      if (!cancelled) setSkillsCount(entries.length)
     })()
     return () => {
       cancelled = true
@@ -109,12 +96,16 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
 
   const settingsData = useMemo(() => {
     if (!settingsFile?.exists || settingsFile.parseError) return null
-    return (settingsFile.diskData as Record<string, unknown>) ?? {}
+    const data = settingsFile.diskData
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return {}
+    return data as Record<string, unknown>
   }, [settingsFile])
 
   const mcpData = useMemo(() => {
     if (!mcpFile?.exists || mcpFile.parseError) return null
-    return (mcpFile.diskData as Record<string, unknown>) ?? {}
+    const data = mcpFile.diskData
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return {}
+    return data as Record<string, unknown>
   }, [mcpFile])
 
   const settingsStatus = !settingsFile

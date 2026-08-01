@@ -12,6 +12,7 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
 import { deriveNavFace } from '../../lib/navFace'
+import { listSkillEntries } from '../../lib/listSkills'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { SkillsLibrary, ViewSwitcher } from './Library'
@@ -94,38 +95,17 @@ export function Skills() {
       const next: Item[] = []
       // Skills: subdirs containing SKILL.md, possibly nested under a
       // namespace dir (e.g. ~/.claude/skills/user/<name>/SKILL.md).
-      const skillsDir = await window.api.config.listDir(bases.skills, { dirsOnly: true })
-      for (const e of skillsDir.entries) {
-        // Check if this dir itself is a skill (has SKILL.md).
-        const directSkill = await window.api.config.readText(`${e.path}/SKILL.md`)
-        if (directSkill.exists) {
-          next.push({
-            kind: 'skills',
-            scope,
-            name: e.name,
-            path: `${e.path}/SKILL.md`,
-            dir: e.path,
-            disabled: readSkillDisabled(directSkill.text),
-            description: parseSkillMeta(directSkill.text).description ?? undefined,
-          })
-        } else {
-          // Namespace dir — scan one level deeper.
-          const nested = await window.api.config.listDir(e.path, { dirsOnly: true })
-          for (const ne of nested.entries) {
-            const nestedSkill = await window.api.config.readText(`${ne.path}/SKILL.md`)
-            if (nestedSkill.exists) {
-              next.push({
-                kind: 'skills',
-                scope,
-                name: ne.name,
-                path: `${ne.path}/SKILL.md`,
-                dir: ne.path,
-                disabled: readSkillDisabled(nestedSkill.text),
-                description: parseSkillMeta(nestedSkill.text).description ?? undefined,
-              })
-            }
-          }
-        }
+      const skillEntries = await listSkillEntries(bases.skills)
+      for (const s of skillEntries) {
+        next.push({
+          kind: 'skills',
+          scope,
+          name: s.name,
+          path: s.path,
+          dir: s.dir,
+          disabled: readSkillDisabled(s.text),
+          description: parseSkillMeta(s.text).description ?? undefined,
+        })
       }
       // Commands: each .md file is a command.
       const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })

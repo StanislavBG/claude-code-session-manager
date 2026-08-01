@@ -263,7 +263,7 @@ export function EpicQueue({
     : epics.length === 0 && pinnedEpics.length === 0
 
   return (
-    <aside className="w-[352px] shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
+    <aside className="w-[352px] h-full shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
       <div className={`flex items-center gap-2 px-3.5 py-3 ${filters ? '' : 'border-b border-line'}`}>
         <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Epic queue</span>
         <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>

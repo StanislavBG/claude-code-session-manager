@@ -52,6 +52,11 @@ export function NewEpicCard({
   const effectiveCwd = cwd || (activeTabCwd && knownCwds.includes(activeTabCwd) ? activeTabCwd : '') || knownCwds[0] || ''
   const trimmedGoal = goal.trim()
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
+  // Epics are always created from within a tab's project context — the
+  // selector only earns its place on screen when that context is missing
+  // (no active tab, or its cwd isn't a known project). Otherwise it's a
+  // second way to change something already decided by which tab is open.
+  const showProjectSelector = !(activeTabCwd && knownCwds.includes(activeTabCwd))
 
   const resetForm = () => {
     setCwd('')
@@ -121,22 +126,32 @@ export function NewEpicCard({
           as the first message the moment you start it, so the agent is already working when it opens.
         </p>
 
-        <label className="mb-2.5 flex flex-col gap-1">
-          <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
-            Project
-          </span>
-          <select
-            data-testid="new-prompt-cwd"
-            value={effectiveCwd}
-            onChange={(e) => setCwd(e.target.value)}
-            className="rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] text-fg"
+        {showProjectSelector ? (
+          <label className="mb-2.5 flex flex-col gap-1">
+            <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+              Project
+            </span>
+            <select
+              data-testid="new-prompt-cwd"
+              value={effectiveCwd}
+              onChange={(e) => setCwd(e.target.value)}
+              className="rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] text-fg"
+            >
+              {knownCwds.length === 0 && <option value="">No known projects</option>}
+              {knownCwds.map((c) => (
+                <option key={c} value={c}>{compactPath(c)}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div
+            data-testid="new-prompt-cwd-static"
+            className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint"
           >
-            {knownCwds.length === 0 && <option value="">No known projects</option>}
-            {knownCwds.map((c) => (
-              <option key={c} value={c}>{compactPath(c)}</option>
-            ))}
-          </select>
-        </label>
+            <span className="uppercase tracking-[0.09em]">Project</span>
+            <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
+          </div>
+        )}
 
         <input
           data-testid="new-epic-title"

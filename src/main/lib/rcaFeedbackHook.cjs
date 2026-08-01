@@ -28,6 +28,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
+const { ensureEpic } = require('./epicMint.cjs');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readTail } = require('./fileTail.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
@@ -35,7 +36,6 @@ const { resolvePrdWriteDir } = require('./prdLocations.cjs');
 // The one project this hook always knows how to reach, used as the fallback
 // destination when a job's own cwd has no feedback inbox.
 const SM_REPO_ROOT = path.join(os.homedir(), 'Projects', 'session-manager');
-const SM_REPO_FEEDBACK_DIR = path.join(SM_REPO_ROOT, 'session-manager-operations', 'feedback');
 
 // NEVER write here: ~/.claude/session-manager/feedback/ is the scheduler's
 // auto-PRD intake (src/main/scheduler.cjs's periodic feedback sweep) — it
@@ -200,36 +200,36 @@ function extractAcceptanceCriteria(prdBody) {
 // ─── Destination resolution ──────────────────────────────────────────────────
 
 /**
- * Resolve where an RCA for `job` should be filed.
- *   1. <job.cwd>/session-manager-operations/feedback/ if it exists.
- *   2. Else session-manager's own repo inbox, naming the target project.
+ * Resolve which PROJECT the proposal is filed into.
+ *   1. the job's own cwd — Epics live in every project, so this is almost
+ *      always the answer.
+ *   2. else session-manager's own repo, naming the target project in the body.
+ *
+ * The old version probed for a `session-manager-operations/feedback/`
+ * directory and fell back when it was missing; with proposals there is
+ * nothing to probe for — the Epic store is created on demand.
  */
 function resolveDestination(job) {
   const jobCwd = job?.cwd;
   if (jobCwd) {
-    const candidate = path.join(jobCwd, 'session-manager-operations', 'feedback');
-    try {
-      if (fs.statSync(candidate).isDirectory()) {
-        return { dir: candidate, allowlistRoot: jobCwd, targetProjectNote: null };
-      }
-    } catch {
-      // missing/inaccessible — fall through to the session-manager fallback
-    }
+    return { cwd: jobCwd, allowlistRoot: jobCwd, targetProjectNote: null };
   }
-  const targetProjectNote = jobCwd
-    ? `Filed into session-manager's own feedback inbox because \`${jobCwd}\` has no ` +
-      `\`session-manager-operations/feedback/\` directory. Target project: \`${jobCwd}\`.`
-    : 'Filed into session-manager\'s own feedback inbox (job had no cwd on record).';
-  return { dir: SM_REPO_FEEDBACK_DIR, allowlistRoot: SM_REPO_ROOT, targetProjectNote };
+  return {
+    cwd: SM_REPO_ROOT,
+    allowlistRoot: SM_REPO_ROOT,
+    targetProjectNote: "Filed into session-manager's own project (job had no cwd on record).",
+  };
+}
+
+/** One-line title for the proposal — goalText is what the Epics list shows,
+ *  so it must stay short; the full RCA markdown rides in openingPrompt. */
+function rcaProposalTitle(job, verdict) {
+  return `PRD ${job?.slug ?? 'unknown'} needs review: ${humanVerdict(verdict)}`;
 }
 
 function shortRunId(runId) {
   const cleaned = String(runId ?? '').replace(/[^a-zA-Z0-9]/g, '');
   return cleaned.slice(0, 12) || 'norun';
-}
-
-function rcaFileName(dateStr, slug, runId) {
-  return `${dateStr}-rca-${slug}-${shortRunId(runId)}.md`;
 }
 
 function lastNLines(text, n) {
@@ -328,35 +328,6 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
     }
 
     const dest = resolveDestination(job);
-    const dateStr = (now instanceof Date ? now : new Date()).toISOString().slice(0, 10);
-    const fileName = rcaFileName(dateStr, job.slug, job.runId);
-    const destPath = path.resolve(path.join(dest.dir, fileName));
-    if (!destPath.startsWith(path.resolve(dest.dir) + path.sep)) {
-      console.log(`[rca] skip: destPath escaped dest dir (${destPath})`);
-      return { filed: false, reason: 'unsafe-path' };
-    }
-    // /process-feedback archives dispositioned items to <dest.dir>/processed/
-    // immediately at disposition time (its own README convention) — long
-    // before this hook's own run-verify/self-heal passes might touch the same
-    // (slug, runId) again. Once archived, the live-dir check alone goes false
-    // and a re-trigger would refile a duplicate straight into the live inbox.
-    const processedPath = path.resolve(path.join(dest.dir, 'processed', fileName));
-    if (!processedPath.startsWith(path.resolve(path.join(dest.dir, 'processed')) + path.sep)) {
-      console.log(`[rca] skip: processedPath escaped processed dir (${processedPath})`);
-      return { filed: false, reason: 'unsafe-path' };
-    }
-
-    const liveExists = fs.existsSync(destPath);
-    const processedExists = !liveExists && fs.existsSync(processedPath);
-    const alreadyFiled = liveExists || processedExists;
-    if (alreadyFiled && !investigationText) {
-      const existingPath = liveExists ? destPath : processedPath;
-      console.log(`[rca] skip: already filed for ${job.slug}@${job.runId}`);
-      return { filed: false, reason: 'duplicate', path: existingPath };
-    }
-    // An investigationText update must target wherever the file actually
-    // lives (live dir or processed/), not assume the live dir.
-    const targetPath = liveExists || !processedExists ? destPath : processedPath;
 
     const meta = readRunMeta(runDir, job.slug);
     const logPath = runDir ? path.join(runDir, `${job.slug}.log`) : null;
@@ -369,11 +340,27 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
       targetProjectNote: dest.targetProjectNote, annotations,
     });
 
+    // File it as a PROPOSED Epic rather than a markdown file in a feedback
+    // inbox. The proposal lands directly in the Epics workspace behind an
+    // Approve & start gate: nothing runs and nothing is spent until a human
+    // approves it. This replaced the feedback-folder intake (and the
+    // process-feedback triage pass that existed only to read it back out) —
+    // the proposal IS the work item, already carrying its own session and
+    // PRD directory. reuseByGoal makes a re-trigger for the same failure
+    // join the existing proposal instead of duplicating it, which is what
+    // the old live/processed existence checks were for.
     config.addAllowedRoot(dest.allowlistRoot);
-    await config.writeTextAtomic(targetPath, markdown);
+    const title = rcaProposalTitle(job, verdict);
+    const { epicId, created } = await ensureEpic(dest.cwd, {
+      goalText: title,
+      tag: 'bug',
+      status: 'proposed',
+      reuseByGoal: true,
+      openingPrompt: markdown,
+    });
 
-    console.log(`[rca] ${alreadyFiled ? 'updated (investigation)' : 'filed'} ${targetPath}`);
-    return { filed: true, path: targetPath, updated: alreadyFiled };
+    console.log(`[rca] ${created ? 'proposed' : 'joined'} epic ${epicId} for ${job.slug}`);
+    return { filed: true, epicId, created, updated: !created };
   } catch (e) {
     console.error('[rca] error filing RCA feedback', e?.message ?? String(e));
     return { filed: false, reason: 'error', error: e?.message ?? String(e) };
@@ -382,15 +369,14 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
 
 module.exports = {
   fileRcaFeedback,
+  rcaProposalTitle,
   // Pure helpers, exported for unit tests.
   humanVerdict,
   classifyFailure,
   extractAcceptanceCriteria,
   extractRcaBlock,
   resolveDestination,
-  rcaFileName,
   buildRcaMarkdown,
   FAILURE_CLASSES,
   VERDICT_LABELS,
-  SM_REPO_FEEDBACK_DIR,
 };

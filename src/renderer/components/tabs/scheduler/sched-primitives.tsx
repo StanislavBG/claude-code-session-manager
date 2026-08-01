@@ -5,6 +5,7 @@
 import type { ReactNode } from 'react'
 import type { ScheduleJobStatus } from '../../../../preload/api'
 import { projectColorFor } from '../../../lib/projectColor'
+import { shortEpicId } from '../../../lib/epicProvenance'
 
 // ─── projectNameFromCwd — canonical "last path segment" extraction ──────────
 // Single source for turning an absolute project cwd into a short display
@@ -68,6 +69,70 @@ export function ProjectTag({ cwd, name }: { cwd?: string | null; name?: string }
         aria-hidden="true"
       />
       {label}
+    </span>
+  )
+}
+
+// ─── EpicTag ─────────────────────────────────────────────────────────────────
+// "Which Epic did this come from" — the one chip every Scheduler surface uses
+// (Queue rows, PRD cards, History rows) so they can't drift apart. Purely
+// presentational, like ProjectTag: the caller resolves the ref via
+// lib/epicProvenance.resolveEpicRef and passes the result in. `onOpen` makes
+// it a deep-link into the Epic; omit it for a static label.
+export function EpicTag({
+  epicId,
+  label,
+  onOpen,
+  testId = 'epic-tag',
+  className = '',
+}: {
+  epicId: string | null
+  label: string | null
+  onOpen?: (epicId: string) => void
+  /** Overridable so a host row can keep its own established test hook. */
+  testId?: string
+  className?: string
+}) {
+  if (!epicId) return null
+  const known = label != null
+  const text = known ? label : shortEpicId(epicId)
+  const title = known ? `Epic · ${label}` : `Epic ${epicId} is not currently loaded`
+  const body = (
+    <>
+      <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70 shrink-0">epic</span>
+      <span className="truncate">{text}</span>
+    </>
+  )
+  const base = `inline-flex items-center gap-1.5 font-mono text-[11.5px] max-w-full min-w-0 ${className}`
+  if (!onOpen || !known) {
+    return (
+      <span data-testid={testId} data-epic-id={epicId} title={title} className={`${base} text-fg-faint`}>
+        {body}
+      </span>
+    )
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      data-testid={testId}
+      data-epic-id={epicId}
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        onOpen(epicId)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.stopPropagation()
+          e.preventDefault()
+          onOpen(epicId)
+        }
+      }}
+      className={`${base} text-accent hover:text-accent/80 cursor-pointer`}
+    >
+      {body}
     </span>
   )
 }

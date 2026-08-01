@@ -420,6 +420,7 @@ function dispatchSend(args: {
   const { tabId, sessionId, cwd, text, promptId, tag, chainRootId } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
+  capturePromptSessionTurn(tabId, 'user', text)
   const activeTicket: PromptTicket = cur.activeTicket ?? {
     id: promptId ?? crypto.randomUUID(),
     tabId,
@@ -565,6 +566,54 @@ function appendPrdCreatedEvent(promptSessionId: string, slug: string): void {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     window.api?.logs?.write('chat', 'warn', `appendPrdCreatedEvent failed for ${promptSessionId}: ${msg}`)
+  }
+}
+
+// Bound the in-memory PromptSessionEvent.text preview so the active-index.json
+// read-modify-write stays small; the full text always lives in the durable
+// transcript store (promptSessionTranscript.cjs), never only here.
+const RESPONSE_EVENT_PREVIEW_MAX = 2000
+
+/**
+ * Persists one chat turn's FULL text to the durable per-Epic JSONL transcript
+ * (PRD 863) — chat.ts's `tabId` equals the driving Epic's `promptSessionId`
+ * whenever chat is rendered from EpicDetail/EpicComposer, so a known
+ * PromptSession at that id is how this tells "this tab IS an Epic" from "this
+ * is a plain dormant terminal tab with no Epic". No-op (never throws) for the
+ * latter case, and best-effort on any IPC failure.
+ */
+function capturePromptSessionTurn(tabId: string, role: 'user' | 'assistant', text: string): void {
+  const session = usePromptSessions.getState().sessions[tabId]
+  if (!session) return
+  try {
+    void window.api?.promptSessionTranscript?.append(session.cwd, tabId, { role, text })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    window.api?.logs?.write('chat', 'warn', `capturePromptSessionTurn failed for ${tabId}: ${msg}`)
+  }
+}
+
+/**
+ * Companion to capturePromptSessionTurn for an assistant reply: also chains a
+ * 'response' PromptSessionEvent onto the PromptSession's event history, with
+ * `text` truncated to a bounded preview (the full reply is already durably
+ * captured by capturePromptSessionTurn). Best-effort — a missing tail event
+ * (session not yet minted, or a race) just skips the append.
+ */
+function appendResponseEvent(promptSessionId: string, text: string): void {
+  try {
+    const tail = usePromptSessions.getState().events[promptSessionId]?.slice(-1)[0]
+    if (!tail) return
+    const preview =
+      text.length > RESPONSE_EVENT_PREVIEW_MAX ? `${text.slice(0, RESPONSE_EVENT_PREVIEW_MAX)}…` : text
+    usePromptSessions.getState().appendPromptSessionEvent(promptSessionId, {
+      kind: 'response',
+      causedByEventId: tail.id,
+      text: preview,
+    })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    window.api?.logs?.write('chat', 'warn', `appendResponseEvent failed for ${promptSessionId}: ${msg}`)
   }
 }
 
@@ -757,11 +806,15 @@ if (typeof window !== 'undefined' && window.api?.chat) {
     patch(tabId, (c) => ({ ...c, liveToolUses: [...c.liveToolUses, { id, kind, label }] }))
   })
   window.api.chat.onComplete(({ tabId, finalMessage }) => {
+    capturePromptSessionTurn(tabId, 'assistant', finalMessage)
+    appendResponseEvent(tabId, finalMessage)
     pushTurn(tabId, { id: turnId(), role: 'assistant', text: finalMessage, at: Date.now() })
   })
   window.api.chat.onNeedsInput(({ tabId, questions, answerBody }) => {
     const questionTurnId = turnId()
     if (answerBody && answerBody.trim()) {
+      capturePromptSessionTurn(tabId, 'assistant', answerBody)
+      appendResponseEvent(tabId, answerBody)
       // Two turns: the answer body renders as a normal assistant bubble
       // (with the run's accumulated tool-use trace), the question card
       // beneath it carries no tool-use trace of its own.

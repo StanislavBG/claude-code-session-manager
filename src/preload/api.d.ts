@@ -122,6 +122,11 @@ export interface ImportRef {
   ok: boolean;
 }
 
+/** Declared owner ids for the single-writer law over a project's
+ *  session-manager-operations/ root. Mirrors OWNERS in
+ *  src/main/lib/opsOwnership.cjs — one writer per namespace; everyone reads. */
+export type OpsWriter = 'epics' | 'scheduler' | 'project-home' | 'feedback' | 'browser';
+
 export interface WriteResult {
   ok: boolean;
   mtimeMs: number;
@@ -415,6 +420,11 @@ export interface ScheduleJob {
    *  `sourceTabId` for referential tracing even when the tab/session no
    *  longer resolves. */
   sourcePromptId?: string | null;
+  /** The Epic this job's PRD belongs to, derived from the PRD's directory
+   *  (`scheduler/epics/<epicId>/prds/`) — fact on disk, unlike the
+   *  intent-carrying `sourcePromptId`/`sourceTabId`, which can disagree.
+   *  Authoritative source for "which Epic is this from" in every UI. */
+  epicId?: string | null;
 }
 
 export interface SchedulePaths {
@@ -459,6 +469,8 @@ export interface PrdListItem {
   /** PRD frontmatter `sourcePromptId` — the PromptSession (Epic) id this PRD
    *  was dispatched from, if any. */
   sourcePromptId?: string | null;
+  /** Owning Epic id, derived from the PRD's directory. See ScheduleJob.epicId. */
+  epicId?: string | null;
 }
 
 export interface SupervisorConfig {
@@ -874,6 +886,8 @@ export interface ProjectBriefScopeEntry {
 export interface ProjectBrief {
   version: number;
   synthesizedAt: string;
+  /** ISO timestamp of the last hand-edit through `projectBrief.update`, or null. */
+  editedAt: string | null;
   model: string;
   purpose: string;
   what: string[];
@@ -882,6 +896,15 @@ export interface ProjectBrief {
   conventions: string[];
   pins: { what: boolean; conventions: boolean };
   pinned: { what: string[] | null; conventions: string[] | null };
+}
+
+export interface PromptSessionTranscriptTurn {
+  v: 1;
+  epicId: string;
+  eventId: string | null;
+  role: 'user' | 'assistant';
+  at: string;
+  text: string;
 }
 
 export interface ProjectBriefSource {
@@ -901,6 +924,19 @@ export type ProjectBriefRefreshResult =
   | { ok: false; error: string };
 
 export type ProjectBriefSetPinResult =
+  | { ok: true; brief: ProjectBrief }
+  | { ok: false; error: string };
+
+/** Hand-edit patch over brief.json. Editing `what`/`conventions` auto-pins them. */
+export interface ProjectBriefPatch {
+  purpose?: string;
+  what?: string[];
+  conventions?: string[];
+  areas?: ProjectBriefArea[];
+  scope?: ProjectBriefScopeEntry[];
+}
+
+export type ProjectBriefUpdateResult =
   | { ok: true; brief: ProjectBrief }
   | { ok: false; error: string };
 
@@ -1184,7 +1220,7 @@ export interface SessionManagerAPI {
       | { ok: true; url: string; title: string; dataUrl: string }
       | { ok: false; error: string }
     >;
-    saveBinary: (path: string, base64: string) => Promise<{ ok: boolean; error?: string }>;
+    saveBinary: (path: string, base64: string, writer?: OpsWriter) => Promise<{ ok: boolean; error?: string }>;
     /** Opens a native "Save As" dialog and writes `text` to the chosen path directly
      *  (bypasses config.cjs's write-boundary check — the path is user-chosen via OS dialog). */
     saveRecording: (payload: { defaultName: string; text: string }) => Promise<
@@ -1253,8 +1289,10 @@ export interface SessionManagerAPI {
   config: {
     readJson: (path: string) => Promise<ReadJsonResult>;
     readText: (path: string) => Promise<ReadTextResult>;
-    writeJson: (path: string, data: unknown) => Promise<WriteResult>;
-    writeText: (path: string, text: string) => Promise<WriteResult>;
+    /** `writer` declares the owning surface for the single-writer law — required
+     *  when `path` is inside a project's session-manager-operations/ root. */
+    writeJson: (path: string, data: unknown, writer?: OpsWriter) => Promise<WriteResult>;
+    writeText: (path: string, text: string, writer?: OpsWriter) => Promise<WriteResult>;
     listDir: (path: string, opts?: { filesOnly?: boolean; dirsOnly?: boolean; includeHidden?: boolean }) => Promise<ListDirResult>;
     exists: (path: string) => Promise<boolean>;
     watch: (paths: string[]) => void;
@@ -1439,6 +1477,18 @@ export interface SessionManagerAPI {
     refresh: (cwd: string) => Promise<ProjectBriefRefreshResult>;
     /** Pin/unpin a synthesized block ('what' | 'conventions'), freezing or clearing its frozen copy. */
     setPin: (cwd: string, block: ProjectBriefPinnableBlock, pinned: boolean) => Promise<ProjectBriefSetPinResult>;
+    /** Hand-edit brief.json in place — no LLM cost. Edited pinnable blocks are auto-pinned so the next refresh preserves them. */
+    update: (cwd: string, patch: ProjectBriefPatch) => Promise<ProjectBriefUpdateResult>;
+  };
+  promptSessionTranscript: {
+    /** Append one full-text turn to an Epic's durable JSONL transcript. Best-effort — resolves `{ok:false}` rather than throwing on failure. */
+    append: (
+      cwd: string,
+      epicId: string,
+      turn: { role: 'user' | 'assistant'; text: string; at?: string; eventId?: string },
+    ) => Promise<{ ok: boolean }>;
+    /** Read back an Epic's full-text turns (optionally capped to the last `limit`). Skips corrupt lines rather than throwing. */
+    read: (cwd: string, epicId: string, limit?: number) => Promise<{ turns: PromptSessionTranscriptTurn[] }>;
   };
   agentMemory: {
     /** List all memory entries for one subagent. Sorted newest first. */

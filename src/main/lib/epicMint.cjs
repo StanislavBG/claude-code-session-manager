@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
+const { assertOpsWrite } = require('./opsOwnership.cjs');
 
 function activeIndexPath(cwd) {
   return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
@@ -39,6 +40,9 @@ function readActiveIndex(cwd) {
 }
 
 function writeActiveIndex(cwd, index) {
+  // Single-writer law: prompt-sessions/ is owned by 'epics'; the scheduler
+  // holds a narrow delegation for active-index.json only (opsOwnership.cjs).
+  assertOpsWrite(activeIndexPath(cwd), 'scheduler');
   const file = activeIndexPath(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
@@ -78,7 +82,10 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status? }) → Promise<{ epicId, prdDir, created }>
+ *
+ * `status` defaults to 'active'. Pass 'proposed' to file an Epic that waits
+ * for human approval before anything runs.
  *
  * Mints a new Epic — or, with `reuseByGoal`, joins the existing ACTIVE Epic
  * whose goalText matches (used by the recurring feedback sweep so successive
@@ -87,7 +94,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId } = {}) {
+function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'active', openingPrompt = null } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   return withPathLock(activeIndexPath(cwd), () => {
     const index = readActiveIndex(cwd);
@@ -102,7 +109,22 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
 
     if (reuseByGoal) {
       for (const s of Object.values(index.sessions)) {
-        if (s && s.status === 'active' && s.goalText === goalText) {
+        // Match the status being requested so repeat proposals chain into
+        // one proposal instead of spawning a duplicate per trigger.
+        if (s && s.status === status && s.goalText === goalText) {
+          // A PROPOSED Epic has not started, so its opening prompt is still
+          // mutable: a re-trigger carrying richer detail (e.g. the RCA hook's
+          // later investigation pass) enriches the pending proposal in place
+          // rather than filing a duplicate. Never done for an active Epic —
+          // its first turn is already history.
+          if (s.status === 'proposed' && openingPrompt && openingPrompt !== s.openingPrompt) {
+            s.openingPrompt = String(openingPrompt);
+            const chain = index.events[s.id];
+            if (Array.isArray(chain) && chain[0] && chain[0].kind === 'prompt') {
+              chain[0].text = String(openingPrompt);
+            }
+            writeActiveIndex(cwd, index);
+          }
           const prdDir = resolveEpicPrdWriteDir(cwd, s.id);
           fs.mkdirSync(prdDir, { recursive: true });
           return { epicId: s.id, prdDir, created: false };
@@ -119,10 +141,16 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       // Independently minted, never shared with a SessionTab — same invariant
       // as renderer-created PromptSessions (state/promptSessions.ts).
       claudeSessionId: crypto.randomUUID(),
-      status: 'active',
+      // 'proposed' files the Epic WITHOUT starting it — nothing runs until a
+      // human approves it in the Epics workspace. This is the sink that
+      // replaced the feedback-folder intake (see lib/rcaFeedbackHook.cjs).
+      status,
       createdAt: now,
       completedAt: null,
       ...(tag ? { tag } : {}),
+      // Full body for a proposal whose goalText is only a one-line title;
+      // sent verbatim as the first prompt when a human approves it.
+      ...(openingPrompt ? { openingPrompt: String(openingPrompt) } : {}),
     };
     const firstEvent = {
       id: crypto.randomUUID(),
@@ -130,7 +158,7 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       kind: 'prompt',
       causedByEventId: null,
       at: now,
-      text: String(goalText || ''),
+      text: String(openingPrompt || goalText || ''),
     };
     index.sessions[epicId] = session;
     index.events[epicId] = [firstEvent];

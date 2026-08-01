@@ -74,7 +74,7 @@ blocking PR number — never a silent omission.
 
 - This skill only *reads* the tracker (issues/PRs) and git state — it makes no commits,
   opens nothing, and files nothing. If the loop surfaces a genuine follow-up that can't be
-  picked now, note it in the report; do not auto-file a new issue or `/my-feedback` item
+  picked now, note it in the report; do not auto-file a new issue or `/propose-epic` item
   for it. Filing anything public/outward is a human decision, not this skill's default.
 - Don't rank an item you couldn't verify is actually unclaimed and non-conflicting — when
   in doubt, put it in the skip list with the uncertainty stated, rather than ranking a

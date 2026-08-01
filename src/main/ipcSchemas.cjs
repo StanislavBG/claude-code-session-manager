@@ -118,6 +118,8 @@ const browserSaveRecording = z.object({
 const browserSaveBinary = z.object({
   path: z.string().min(1).max(4096),
   base64: z.string().min(1).max(50_000_000),
+  // Single-writer law (lib/opsOwnership.cjs) — required for ops-root paths.
+  writer: z.string().min(1).max(64).optional(),
 });
 
 // PRD 410: replay a recorded step list against a live view. The renderer
@@ -183,14 +185,20 @@ const transcriptUsageFor = z.object({
 // ──────────────────────────────────────────── Config
 const configPath = z.object({ path: z.string().min(1).max(4096) });
 
+// `writer` carries the renderer's declared owner id for the single-writer law
+// (lib/opsOwnership.cjs). Optional on the wire because most writes target
+// ~/.claude, not a project ops root; writes INSIDE the ops root are refused
+// when it is absent or wrong.
 const configWriteJson = z.object({
   path: z.string().min(1).max(4096),
   data: z.unknown(),
+  writer: z.string().min(1).max(64).optional(),
 });
 
 const configWriteText = z.object({
   path: z.string().min(1).max(4096),
   text: z.string(),
+  writer: z.string().min(1).max(64).optional(),
 });
 
 const configListDir = z.object({
@@ -426,6 +434,40 @@ const projectBriefSetPin = z.object({
   cwd: z.string().min(1).max(4096),
   block: PROJECT_BRIEF_BLOCK,
   pinned: z.boolean(),
+}).strict();
+// Hand-edit patch. Only bounds the wire shape (sizes + which keys exist);
+// per-field shape is enforced by projectBriefCore.validateUpdateField so the
+// rule lives in one unit-tested place. At least one key is required.
+const PROJECT_BRIEF_TEXT = z.string().max(20_000);
+const projectBriefUpdate = z.object({
+  cwd: z.string().min(1).max(4096),
+  patch: z.object({
+    purpose: PROJECT_BRIEF_TEXT.optional(),
+    what: z.array(PROJECT_BRIEF_TEXT).max(50).optional(),
+    conventions: z.array(PROJECT_BRIEF_TEXT).max(100).optional(),
+    areas: z.array(z.record(z.unknown())).max(100).optional(),
+    scope: z.array(z.record(z.unknown())).max(200).optional(),
+  }).strict().refine((p) => Object.keys(p).length > 0, { message: 'patch is empty' }),
+}).strict();
+
+// ──────────────────────────────────────────── Prompt session transcript
+// (durable full-text turn store, PRD 863). cwd/epicId are only bounded for
+// wire shape here — real path safety is config.cjs's validatePath/
+// validateWrite inside promptSessionTranscript.cjs.
+const PROMPT_SESSION_EPIC_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const PROMPT_SESSION_TRANSCRIPT_ROLE = z.enum(['user', 'assistant']);
+const promptSessionTranscriptAppend = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_EPIC_ID_RE),
+  role: PROMPT_SESSION_TRANSCRIPT_ROLE,
+  text: z.string().max(2_000_000),
+  at: z.string().max(64).optional(),
+  eventId: z.string().max(128).optional(),
+}).strict();
+const promptSessionTranscriptRead = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_EPIC_ID_RE),
+  limit: z.number().int().positive().max(10_000).optional(),
 }).strict();
 
 // ──────────────────────────────────────────── Per-subagent memory
@@ -813,6 +855,9 @@ module.exports = {
     memoryStale,
     projectBriefCwd,
     projectBriefSetPin,
+    projectBriefUpdate,
+    promptSessionTranscriptAppend,
+    promptSessionTranscriptRead,
     agentMemoryList,
     agentMemoryGet,
     agentMemorySet,

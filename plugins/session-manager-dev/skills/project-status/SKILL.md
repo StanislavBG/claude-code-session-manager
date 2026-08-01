@@ -134,51 +134,37 @@ A status check shouldn't dead-end at a report. Once the four dimensions are in,
 self-contained *bootstrap → evaluate → improve* loop, usable even on a brand-new
 project.
 
-**First, work the inbox — triage before generating new work.** Right after the
-audit, clear the inbound queue via **`/process-feedback`**: it evaluates any
-pending feedback (cross-project asks others filed to us, plus the prior cycle's
-`/optimize-kpi` item) and routes each — ours-do-it → `/develop`, theirs →
-`/my-feedback`, decline-with-reason. Don't generate new levers on top of an
-unprocessed backlog. (If the inbox is empty, say so and move on.)
+**First, work the pending proposals — decide before generating new work.** Right
+after the audit, look at the project's **proposed Epics** (status `proposed` in
+`session-manager-operations/prompt-sessions/active-index.json`): these are the
+items agents filed for a human decision. Report them so the user can approve
+or discard; do not
+approve them yourself, and do not stack new levers on top of an undecided
+backlog. (If there are none, say so and move on.)
 
-**Reconcile queued feedback — this audit owns it, because `/process-feedback`
-hands off at queue time.** Under the resilience contract, `/process-feedback` is
-done the moment an item is queued as a PRD and archived to `processed/` — it does
-NOT wait for the PRD to land. So the ongoing tracking is **this skill's job**: as
-part of the chores/scheduler audit, cross-reference the feedback status-log
-against `queue.json` and (a) flip any **🛠** row whose PRD now shows `completed`
-to **✅** with the landing evidence, and (b) surface any `failed` / `needs_review`
-/ stuck Burrow PRD behind a still-🛠 row as a finding to route. The file is
-already in `processed/`; only the row's status is reconciled here. A `-local` may
-supply the exact cross-reference command (grep 🛠 rows → look up their PRD id in
-the queue); if it doesn't, do it inline. Never expect `/process-feedback` to have
-delivery-gated the archive — that's the anti-pattern this split removes.
+There is no inbox to reconcile and no archive convention to keep in step: an
+approved proposal becomes an active Epic whose PRDs and runs are already visible
+in the Scheduler, so its status is read from the queue directly rather than
+tracked in a parallel status log.
 
 Then route **this audit's own findings**, by ownership:
 
 1. **A finding that belongs to another project** (an upstream/downstream service
    in the stack — e.g. the data source is stale, a contract drifted): do NOT
-   reach across the boundary. File it with **`/my-feedback <project>`** into that
-   project's intake, and note it in the report. (Same rule as everywhere: service
-   boundaries outrank convenience.)
+   reach across the boundary. File it with **`/propose-epic <that project's cwd>`**,
+   and note it in the report. (Same rule as everywhere: service boundaries
+   outrank convenience.)
 2. **A finding that belongs to THIS project** (a real bug, a missing guard, an
    enhancement the audit revealed — a cold sold-surface, a recurring error in the
    logs, a usage gap): queue it as a scheduled PRD via **`/develop`** — never
    implement it inline here. Record the queued PRD id in the report.
 3. **Nothing actionable** — just report.
 
-Then, the improvement gate: **if and only if the full health verdict is GREEN**
-(every check passing — not degraded, not down) **and** the KPI/crons are clean,
-invoke **`/optimize-kpi`** to drive the next North-Star improvement. The green gate
-is load-bearing: optimizing the KPI on a broken or degraded base is wasted
-motion — *fix health first* (via routes 1/2 above), and let a later run, once
-green, trigger the optimizer. State explicitly in the report whether the gate
-opened (green → optimize queued) or stayed shut (degraded/down → health findings
-routed first).
+Then stop. There is no automatic improvement gate: findings are routed as
+proposals and PRDs above, and the user decides what gets worked on next.
 
-This sequence — audit → route findings (my-feedback / develop) → optimize-when-green
-— is enough to bootstrap, evaluate, and continuously improve a project from a
-single `/project-status` invocation. The `-local` owns the *specifics* of each
+This sequence — audit → route findings (propose-epic / develop) — is enough to
+bootstrap and evaluate a project from a single `/project-status` invocation. The `-local` owns the *specifics* of each
 step; this framework owns the *loop*.
 
 ## Model expectation (every local must mirror this)

@@ -15,6 +15,9 @@ const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: st
   // only draft is the outline variant.
   queued:    { bg: 'bg-muteband/60',    text: 'text-fg-dim',      dot: 'bg-fg-faint',    label: 'queued' },
   draft:     { bg: 'transparent',       text: 'text-fg-faint',    dot: 'bg-fg-faint',    label: 'draft', ring: true },
+  // Filed by automation, waiting on a human to approve before it spends
+  // anything — the state that replaced the feedback-folder inbox.
+  proposed:  { bg: 'bg-butter/25',      text: 'text-fg-dim',      dot: 'bg-butter',      label: 'proposed', ring: true },
   completed: { bg: 'bg-sage/20',        text: 'text-sage',        dot: 'bg-sage',        label: 'completed' },
 }
 

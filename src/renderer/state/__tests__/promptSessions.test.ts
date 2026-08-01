@@ -31,6 +31,10 @@ function installWindowApiMock() {
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }),
       listDir: vi.fn().mockResolvedValue({ ok: true, entries: [], error: null }),
     },
+    promptSessionTranscript: {
+      append: vi.fn().mockResolvedValue({ ok: true }),
+      read: vi.fn().mockResolvedValue({ turns: [] }),
+    },
   }
   vi.stubGlobal('window', { api })
   return api
@@ -287,6 +291,50 @@ describe('promptSessions.ts', () => {
 
     expect(api.chat.cancel).not.toHaveBeenCalled()
     expect(api.config.writeJson).not.toHaveBeenCalled()
+  })
+
+  it('markCompleted falls back to the durable transcript store when the raw ~/.claude/projects copy is empty', async () => {
+    const api = installWindowApiMock()
+    api.config.readText.mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null })
+    api.promptSessionTranscript.read.mockResolvedValue({
+      turns: [
+        { v: 1, epicId: 'irrelevant', eventId: null, role: 'user', at: '2026-01-01T00:00:00.000Z', text: 'hello' },
+        { v: 1, epicId: 'irrelevant', eventId: null, role: 'assistant', at: '2026-01-01T00:00:01.000Z', text: 'hi there' },
+      ],
+    })
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    const archiveCall = api.config.writeJson.mock.calls.find(
+      (c) => c[0] === promptSessionArchivePath('/proj', session.id),
+    )
+    expect(archiveCall).toBeDefined()
+    const [, archive] = archiveCall!
+    expect(archive.transcript).toBe('')
+    expect(archive.durableTurns).toEqual([
+      { role: 'user', text: 'hello', at: '2026-01-01T00:00:00.000Z' },
+      { role: 'assistant', text: 'hi there', at: '2026-01-01T00:00:01.000Z' },
+    ])
+  })
+
+  it('markCompleted omits durableTurns when the raw transcript copy is present', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    expect(api.promptSessionTranscript.read).not.toHaveBeenCalled()
+    const archiveCall = api.config.writeJson.mock.calls.find(
+      (c) => c[0] === promptSessionArchivePath('/proj', session.id),
+    )
+    const [, archive] = archiveCall!
+    expect(archive.transcript).toBe('transcript body')
+    expect(archive.durableTurns).toBeUndefined()
   })
 
   it('resumeArchived mints a fresh independent session id and records the link back to the archived session', async () => {

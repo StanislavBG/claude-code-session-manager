@@ -171,7 +171,7 @@ function makeFakeRemoteWithPrdsDir(prdsDir) {
     async writePrd(slug, body) {
       try {
         const filePath = path.join(prdsDir, `${slug}.md`);
-        await config.writeTextAtomic(filePath, body);
+        await config.writeTextAtomic(filePath, body, { writer: 'scheduler' });
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e?.message };
@@ -413,7 +413,8 @@ test('validateWrite allows writes under <root>/session-manager-operations/schedu
   await fsp.mkdir(prdsDir, { recursive: true });
   const filePath = path.join(prdsDir, '1-do-thing.md');
 
-  await config.writeTextAtomic(filePath, 'PRD body\n');
+  // Writes into scheduler/ must declare the owning surface (single-writer law).
+  await config.writeTextAtomic(filePath, 'PRD body\n', { writer: 'scheduler' });
 
   expect(fs.existsSync(filePath)).toBeTruthy();
   expect(await fsp.readFile(filePath, 'utf8')).toBe('PRD body\n');
@@ -473,7 +474,7 @@ test('createPrd registers cwd as an allowed write root itself, so a chat-only Ep
         const filePath = path.join(prdsEpicDir, `${slug}.md`);
         // Real config.cjs write path — this is what threw
         // "Write outside allowed write boundaries" before the fix.
-        await config.writeTextAtomic(filePath, body);
+        await config.writeTextAtomic(filePath, body, { writer: 'scheduler' });
         return { ok: true };
       },
     };

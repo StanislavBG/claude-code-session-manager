@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSessions } from '../../state/sessions'
+import { usePromptSessions } from '../../state/promptSessions'
 import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
 import { SchedulePanel } from '../SchedulePanel'
 import { SchedulerPrdsView } from './plans/SchedulerPrdsView'
@@ -190,6 +191,27 @@ export function Scheduler() {
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
   const scopeCwd = scope === 'project' ? activeCwd : null
+
+  // Epic names shown on Queue/PRD/History rows come from the promptSessions
+  // store, which is hydrated lazily per project. Without this, booting
+  // straight into Scheduler renders bare epic ids until the user happens to
+  // visit Home or Epics. Archived Epics are hydrated too — History rows point
+  // at Epics that are, by definition, usually finished.
+  const openCwds = useMemo(() => {
+    const seen: string[] = []
+    for (const t of tabs) {
+      if (t.cwd && !seen.includes(t.cwd)) seen.push(t.cwd)
+    }
+    return seen
+  }, [tabs])
+
+  useEffect(() => {
+    const targets = scope === 'project' ? (activeCwd ? [activeCwd] : []) : openCwds
+    for (const cwd of targets) {
+      void usePromptSessions.getState().hydrate(cwd)
+      void usePromptSessions.getState().hydrateArchived(cwd)
+    }
+  }, [scope, activeCwd, openCwds])
 
   useEffect(() => {
     localStorage.setItem(LS_KEY, subView)

@@ -17,6 +17,39 @@ import { toast } from '../../state/toast'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { useBranch } from '../../lib/useBranch'
 import type { ScheduleJob } from '../../../preload/api'
+import { parseTranscriptTurns, selectNewTurns } from '../../lib/terminalHandoffTranscript'
+
+/**
+ * Parses the Terminal session's own JSONL transcript, filters to turns not
+ * already captured by the durable per-Epic store, and appends each through
+ * promptSessionTranscript. Best-effort end to end — a missing/unreadable
+ * transcript or an IPC failure resolves to 0 captured rather than throwing,
+ * so returnToChat's placeholder fallback always has a safe count to render.
+ * Returns the number of newly captured turns.
+ */
+async function captureTerminalHandoffTurns(cwd: string, epicId: string, sessionId: string): Promise<number> {
+  try {
+    const [transcriptPath, { turns: existingTurns }] = await Promise.all([
+      window.api.transcripts.pathFor(cwd, sessionId),
+      window.api.promptSessionTranscript.read(cwd, epicId),
+    ])
+    const lastCapturedAt = existingTurns.length > 0 ? existingTurns[existingTurns.length - 1].at : null
+    const result = await window.api.config.readText(transcriptPath)
+    if (!result.exists || !result.text) return 0
+    const parsed = parseTranscriptTurns(result.text)
+    const fresh = selectNewTurns(parsed, lastCapturedAt)
+    for (const turn of fresh) {
+      await window.api.promptSessionTranscript.append(cwd, epicId, {
+        role: turn.role,
+        text: turn.text,
+        at: turn.at,
+      })
+    }
+    return fresh.length
+  } catch {
+    return 0
+  }
+}
 
 /**
  * Right pane of the redesigned Epics workspace — header (status/kind/project
@@ -49,6 +82,67 @@ function MetaItem({ label, value }: { label: string; value: string }) {
       <span className="text-fg-faint">{label}</span>
       <span className="font-mono font-semibold text-fg-dim">{value}</span>
     </span>
+  )
+}
+
+/**
+ * Renders a 'response' PromptSessionEvent — a bounded preview by default
+ * (the in-memory event carries at most RESPONSE_EVENT_PREVIEW_MAX chars,
+ * chat.ts). When the preview looks truncated (ends in the '…' chat.ts
+ * appends), offers an expand toggle that lazily reads the durable per-Epic
+ * transcript store for the full text of the assistant turn closest in time
+ * to this event, rather than clipping it with no way to see the rest.
+ */
+function ResponseEvent({
+  event,
+  cwd,
+  epicId,
+}: {
+  event: PromptSessionEvent
+  cwd: string
+  epicId: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [fullText, setFullText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const truncated = (event.text ?? '').endsWith('…')
+
+  const onToggle = () => {
+    if (!expanded && truncated && fullText === null && !loading) {
+      setLoading(true)
+      window.api.promptSessionTranscript
+        .read(cwd, epicId)
+        .then(({ turns }) => {
+          const eventAt = Date.parse(event.at)
+          const assistantTurns = turns.filter((t) => t.role === 'assistant')
+          if (assistantTurns.length === 0) return
+          const closest = assistantTurns.reduce((best, t) => {
+            const bestDelta = Math.abs(Date.parse(best.at) - eventAt)
+            const delta = Math.abs(Date.parse(t.at) - eventAt)
+            return delta < bestDelta ? t : best
+          })
+          setFullText(closest.text)
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false))
+    }
+    setExpanded((v) => !v)
+  }
+
+  return (
+    <div data-testid="epic-response-event" className="text-center text-[11px] text-fg-faint">
+      <span>— {expanded && fullText ? fullText : event.text} —</span>
+      {truncated && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="ml-1.5 text-accent hover:underline"
+          data-testid="epic-response-event-toggle"
+        >
+          {loading ? 'loading…' : expanded ? 'show less' : 'show more'}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -314,8 +408,10 @@ export function EpicDetail({ promptSession }: Props) {
 
   // Returning to Chat (manual toggle or the pane reporting a PTY exit) records
   // a 'response'-kind marker on the Epic's event chain so the Discussion
-  // thread's audit trail stays honest even though the interactive turns
-  // themselves are never backfilled (out of scope).
+  // thread's audit trail stays honest. The marker text is the real turns
+  // captured from the Terminal session's transcript where available — the
+  // 'Iterated in Terminal view' string below is only ever used as a fallback,
+  // for when nothing parseable came back.
   const returnToChat = () => {
     // Explicit handoff back to Chat is the ONE place a Terminal-mode PTY is
     // torn down by the user (browsing to another Epic no longer kills it, so
@@ -325,18 +421,24 @@ export function EpicDetail({ promptSession }: Props) {
     // PTY already exited on its own.
     window.api.pty.kill(sessionId)
     setAttached(epicId, false)
-    // Read the tail fresh rather than off the render-snapshotted
-    // `sessionEvents` — appendPromptSessionEvent's tail-chain check needs the
-    // CURRENT tail, not whatever was current when EpicDetail last rendered.
-    const liveEvents = usePromptSessions.getState().events[epicId] ?? []
-    const tail = liveEvents[liveEvents.length - 1] ?? null
-    if (tail) {
+
+    void captureTerminalHandoffTurns(cwd, epicId, sessionId).then((capturedCount) => {
+      // Read the tail fresh rather than off the render-snapshotted
+      // `sessionEvents` — appendPromptSessionEvent's tail-chain check needs
+      // the CURRENT tail, not whatever was current when EpicDetail last
+      // rendered.
+      const liveEvents = usePromptSessions.getState().events[epicId] ?? []
+      const tail = liveEvents[liveEvents.length - 1] ?? null
+      if (!tail) return
       appendPromptSessionEvent(epicId, {
         kind: 'response',
         causedByEventId: tail.id,
-        text: 'Iterated in Terminal view',
+        text:
+          capturedCount > 0
+            ? `Iterated in Terminal view (${capturedCount} turn${capturedCount === 1 ? '' : 's'} captured)` // real turns, not a fallback
+            : 'Iterated in Terminal view', // fallback: nothing parseable was captured
       })
-    }
+    })
     setMode(epicId, 'chat')
   }
 
@@ -537,11 +639,7 @@ export function EpicDetail({ promptSession }: Props) {
                 )
               }
               if (e.kind === 'response') {
-                return (
-                  <div key={e.id} data-testid="epic-response-event" className="text-center text-[11px] text-fg-faint">
-                    — {e.text} —
-                  </div>
-                )
+                return <ResponseEvent key={e.id} event={e} cwd={cwd} epicId={epicId} />
               }
               return (
                 <div key={e.id} data-testid="epic-closed-event" className="text-center text-[11px] text-fg-faint">

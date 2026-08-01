@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ScheduleStateSnapshot, RetagPrdItem } from '../../../../preload/api'
-import { ProjectTag, prdNumber, PrdNumberBadge, prdStatusFor, PrdStatusPill, verdictLabel } from '../scheduler/sched-primitives'
+import { ProjectTag, EpicTag, prdNumber, PrdNumberBadge, prdStatusFor, PrdStatusPill, verdictLabel } from '../scheduler/sched-primitives'
 import { EmptyState } from '../../ui/EmptyState'
 import { Modal } from '../../ui/Modal'
 import { Tooltip } from '../../ui/Tooltip'
@@ -8,6 +8,9 @@ import { serializePrdFile } from '../../../lib/prdFrontmatter'
 import { formatAgo } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
+import { usePromptSessions } from '../../../state/promptSessions'
+import { resolveEpicRef } from '../../../lib/epicProvenance'
+import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
 import { takePendingPrdSlug } from '../../../lib/prdDeepLink'
 import { useEditor } from '../../../state/editor'
 import { EditorView } from '../EditorView'
@@ -19,6 +22,17 @@ interface PrdMeta {
   cwd: string
   estimateMinutes: number | null
   mtimeMs: number
+  /** Epic linkage — see lib/epicProvenance. Already returned by list-prds;
+   *  this view used to drop both fields, which is why a PRD showed no Epic
+   *  here while the same PRD's queue row showed one. */
+  epicId?: string | null
+  sourcePromptId?: string | null
+}
+
+/** Deep-link into the Epic workspace, same handler the Queue rows use. */
+function openEpic(epicId: string): void {
+  setPendingPromptSessionId(epicId)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
 }
 
 function TBtn({
@@ -95,6 +109,8 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
   }, [])
 
   const liveSnap = useScheduleState((s) => s.snapshot)
+  // Raw slice — never derive inside a zustand selector (React #185 class).
+  const epicSessions = usePromptSessions((s) => s.sessions)
   useEffect(() => {
     if (liveSnap) setQueueState(liveSnap)
   }, [liveSnap])
@@ -424,6 +440,16 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
               {sortedPrds.map((p) => {
                 const j = queueState?.jobs.find((jj) => jj.slug === p.slug)
                 const prdStatus = prdStatusFor(j)
+                // The PRD file and its queue row can each carry linkage; the
+                // file's own epicId (its directory) wins, per epicProvenance.
+                const epicRef = resolveEpicRef(
+                  {
+                    epicId: p.epicId ?? j?.epicId ?? null,
+                    sourcePromptId: p.sourcePromptId ?? j?.sourcePromptId ?? null,
+                    sourceTabId: j?.sourceTabId ?? null,
+                  },
+                  epicSessions,
+                )
                 const isRunning = j?.status === 'running'
                 const isNeedsReview = j?.status === 'needs_review'
                 return (
@@ -457,6 +483,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
                       </div>
                       <div className="flex items-center gap-4 font-mono text-xs text-fg-faint flex-wrap">
                         <ProjectTag cwd={p.cwd} />
+                        <EpicTag epicId={epicRef.epicId} label={epicRef.label} onOpen={openEpic} />
                         {p.estimateMinutes != null && <span>{p.estimateMinutes}m</span>}
                         <span>g{p.parallelGroup}</span>
                         <span>edited {formatAgo(p.mtimeMs, Date.now())}</span>

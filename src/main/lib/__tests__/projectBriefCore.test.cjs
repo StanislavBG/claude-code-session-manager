@@ -9,6 +9,7 @@ const {
   applyPinEnforcement,
   buildPersistedBrief,
   computeSetPin,
+  computeUpdate,
 } = require('../projectBriefCore.cjs');
 
 test('computeDrift: true only when mtime strictly newer than synthesizedAt', () => {
@@ -139,4 +140,77 @@ test('computeSetPin: pinning freezes current block content, unpinning clears it'
   assert.equal(unpinned.ok, true);
   assert.equal(unpinned.brief.pins.what, false);
   assert.equal(unpinned.brief.pinned.what, null);
+});
+
+// ── computeUpdate: the hand-edit ("maintain") path ────────────────────────
+function baseBrief() {
+  return {
+    version: 1,
+    synthesizedAt: '2026-07-31T00:00:00.000Z',
+    editedAt: null,
+    model: 'sonnet',
+    purpose: 'p',
+    what: ['a'],
+    areas: [{ name: 'x', files: 1, note: '', epic: null, heat: 0.1 }],
+    scope: [],
+    conventions: ['c1'],
+    pins: { what: false, conventions: false },
+    pinned: { what: null, conventions: null },
+  };
+}
+
+test('computeUpdate: errors when there is no brief yet', () => {
+  const res = computeUpdate(null, { what: ['x'] }, '2026-08-01T00:00:00.000Z');
+  assert.equal(res.ok, false);
+  assert.match(res.error, /generate one first/);
+});
+
+test('computeUpdate: rejects an empty patch and non-editable fields', () => {
+  assert.equal(computeUpdate(baseBrief(), {}, 'NOW').ok, false);
+  const res = computeUpdate(baseBrief(), { model: 'opus' }, 'NOW');
+  assert.equal(res.ok, false);
+  assert.match(res.error, /not editable: model/);
+});
+
+test('computeUpdate: rejects field shapes the renderer could not render', () => {
+  assert.equal(computeUpdate(baseBrief(), { purpose: '   ' }, 'NOW').ok, false);
+  assert.equal(computeUpdate(baseBrief(), { what: 'not an array' }, 'NOW').ok, false);
+  assert.equal(computeUpdate(baseBrief(), { conventions: [1, 2] }, 'NOW').ok, false);
+  assert.equal(computeUpdate(baseBrief(), { areas: ['nope'] }, 'NOW').ok, false);
+});
+
+test('computeUpdate: applies the patch, stamps editedAt, leaves other fields alone', () => {
+  const before = baseBrief();
+  const res = computeUpdate(before, { purpose: 'sharper' }, '2026-08-01T00:00:00.000Z');
+  assert.equal(res.ok, true);
+  assert.equal(res.brief.purpose, 'sharper');
+  assert.equal(res.brief.editedAt, '2026-08-01T00:00:00.000Z');
+  assert.deepEqual(res.brief.what, ['a']);
+  assert.equal(res.brief.synthesizedAt, before.synthesizedAt);
+  // purpose is not pinnable — a refresh legitimately re-derives it.
+  assert.equal(res.brief.pins.what, false);
+});
+
+test('computeUpdate: editing a pinnable block auto-pins it with the edited content', () => {
+  const res = computeUpdate(baseBrief(), { what: ['edited one', 'edited two'] }, 'NOW');
+  assert.equal(res.ok, true);
+  assert.equal(res.brief.pins.what, true);
+  assert.deepEqual(res.brief.pinned.what, ['edited one', 'edited two']);
+  assert.equal(res.brief.pins.conventions, false);
+  assert.equal(res.brief.pinned.conventions, null);
+});
+
+test('computeUpdate: an edited block survives the next synthesis via pin enforcement', () => {
+  const edited = computeUpdate(baseBrief(), { conventions: ['hand-written rule'] }, 'NOW').brief;
+  const persisted = buildPersistedBrief({
+    rawBrief: { purpose: 'new', what: ['fresh'], areas: [], scope: [], conventions: ['model rewrote it'] },
+    priorPins: edited.pins,
+    priorPinned: edited.pinned,
+    model: 'sonnet',
+    nowIso: '2026-08-02T00:00:00.000Z',
+    priorEditedAt: edited.editedAt,
+  });
+  assert.deepEqual(persisted.conventions, ['hand-written rule']);
+  assert.deepEqual(persisted.what, ['fresh']);
+  assert.equal(persisted.editedAt, 'NOW');
 });

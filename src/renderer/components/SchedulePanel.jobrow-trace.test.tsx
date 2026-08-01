@@ -82,7 +82,10 @@ describe('JobRow prompt-session trace chip', () => {
     const chip = el.querySelector('[data-testid="job-row-prompt-session-chip"]') as HTMLElement
     expect(chip).toBeTruthy()
     expect(chip.getAttribute('role')).not.toBe('button')
-    expect(chip.textContent).toBe('tab-miss')
+    // Unresolved Epics now show a longer, more identifiable id slice than the
+    // old 8-char cut, under an "epic" kicker.
+    expect(chip.textContent).toContain('tab-missing-')
+    expect(chip.getAttribute('data-epic-id')).toBe('tab-missing-1234')
   })
 
   it('renders no chip when neither sourcePromptId nor sourceTabId is set', () => {

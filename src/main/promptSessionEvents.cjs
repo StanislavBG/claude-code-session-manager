@@ -91,7 +91,7 @@ async function appendResponseEventIfKnown(cwd, sourcePromptId, text) {
         text,
       };
       data.events[sourcePromptId] = [...events, event];
-      await config.writeJson(path, data);
+      await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });
       return true;
     });

@@ -3,7 +3,9 @@ import { usePromptSessions, type PromptSession } from '../../state/promptSession
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { compactPath } from '../../lib/compactPath'
-import { AttachTray, useAttachments } from './attachments'
+import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
+import { composeEpicIntake } from '../../lib/epicIntake'
+import { useChat } from '../../state/chat'
 
 const KIND_OPTIONS: Array<{ tag: NonNullable<PromptSession['tag']>; label: string }> = [
   { tag: 'feature', label: 'Feature' },
@@ -44,6 +46,7 @@ export function NewEpicCard({
   const [goal, setGoal] = useState('')
   const [tag, setTag] = useState<NonNullable<PromptSession['tag']>>('feature')
   const att = useAttachments()
+  const [creating, setCreating] = useState(false)
 
   const effectiveCwd = cwd || (activeTabCwd && knownCwds.includes(activeTabCwd) ? activeTabCwd : '') || knownCwds[0] || ''
   const trimmedGoal = goal.trim()
@@ -57,19 +60,37 @@ export function NewEpicCard({
     att.clear()
   }
 
-  const handleCreate = () => {
-    if (!canCreate) return
-    // File names are user/filesystem controlled and can contain newlines —
-    // strip them so a crafted name can't inject a fake extra "Reference:"
-    // line (or otherwise forge structure) into goalText.
-    const singleLine = (s: string) => s.replace(/\r?\n/g, ' ')
-    const trimmedTitle = singleLine(title.trim())
-    const bodyText = trimmedTitle ? `${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
-    const referenceLines = att.items.map((i) => `Reference: ${singleLine(i.path)}`)
-    const goalText = referenceLines.length ? `${bodyText}\n\n${referenceLines.join('\n')}` : bodyText
+  const handleCreate = async () => {
+    if (!canCreate || creating) return
+    setCreating(true)
+    try {
+    // goalText and the opening prompt come from one composer (lib/epicIntake)
+    // so the Epic's stored identity and the message the agent actually reads
+    // can't drift. Both are written exactly once: an Epic's title/objective
+    // are fixed for the life of its session by design — iteration happens in
+    // follow-up messages, not by rewriting the goal.
+    // Pasted-clipboard images have no filesystem path until they are saved,
+    // so resolve every attachment to a real path BEFORE folding it into the
+    // goal text — otherwise the reference line names a file that never
+    // existed (PRD 865).
+    const referencePaths = await resolveAttachmentPaths(att.items, effectiveCwd)
+    const { goalText, openingPrompt } = composeEpicIntake({ title, goal, referencePaths })
     const session = createPromptSession(effectiveCwd, goalText, tag)
+    // Send the objective straight into the Epic's session, so it opens already
+    // waiting on the agent — the user has just typed the goal, there is
+    // nothing further for them to enter. Chat (not PRD dispatch) on purpose:
+    // the first turn is the agent's response, which the user then acts on.
+    useChat.getState().send({
+      tabId: session.id,
+      sessionId: session.claudeSessionId,
+      cwd: effectiveCwd,
+      prompt: openingPrompt,
+    })
     resetForm()
     onCreated(session.id)
+    } finally {
+      setCreating(false)
+    }
   }
 
   const handleCancel = () => {
@@ -87,7 +108,8 @@ export function NewEpicCard({
           What are we trying to achieve?
         </h2>
         <p className="my-2 mb-[18px] text-[13.5px] leading-[1.55] text-fg-dim">
-          One goal per Epic. Its discussion, PRDs and agent runs all stay inside it.
+          One goal per Epic — fixed for the life of its session. The title and objective are sent
+          as the first message the moment you start it, so the agent is already working when it opens.
         </p>
 
         <label className="mb-2.5 flex flex-col gap-1">
@@ -112,6 +134,7 @@ export function NewEpicCard({
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          onPaste={(e) => attachPastedFiles(e, att)}
           placeholder="Epic title"
           className="mb-2 w-full appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-sm font-semibold text-fg outline-none"
         />
@@ -120,7 +143,8 @@ export function NewEpicCard({
           rows={3}
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
-          placeholder="The goal, in a sentence or two — what done looks like."
+          onPaste={(e) => attachPastedFiles(e, att)}
+          placeholder="The objective, in a sentence or two — this is sent as the first instruction."
           className="mb-3 w-full resize-y appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-[13px] leading-[1.55] text-fg outline-none"
         />
 
@@ -163,11 +187,11 @@ export function NewEpicCard({
             <button
               type="button"
               data-testid="new-epic-create"
-              onClick={handleCreate}
-              disabled={!canCreate}
+              onClick={() => void handleCreate()}
+              disabled={!canCreate || creating}
               className="rounded-md bg-accent px-4 py-2 text-[12.5px] font-semibold text-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Create Epic
+              {creating ? 'Starting…' : 'Start Epic'}
             </button>
           </span>
         </div>

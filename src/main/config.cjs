@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { assertOpsWrite } = require('./lib/opsOwnership.cjs');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -219,6 +220,7 @@ async function readText(abs) {
 async function writeTextAtomic(abs, text, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
+  assertOpsWrite(real, opts.writer);
   const dir = path.dirname(real);
   await fsp.mkdir(dir, { recursive: true });
   const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -242,9 +244,10 @@ async function writeTextAtomic(abs, text, opts = {}) {
  * Binary-safe sibling of writeTextAtomic — same validate + tmp+rename flow,
  * for callers (screenshot capture) whose payload is a Buffer, not utf8 text.
  */
-async function writeBinaryAtomic(abs, buffer) {
+async function writeBinaryAtomic(abs, buffer, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
+  assertOpsWrite(real, opts.writer);
   const dir = path.dirname(real);
   await fsp.mkdir(dir, { recursive: true });
   const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -259,9 +262,9 @@ async function writeBinaryAtomic(abs, buffer) {
   return { ok: true, mtimeMs: stat.mtimeMs };
 }
 
-async function writeJson(abs, data) {
+async function writeJson(abs, data, opts = {}) {
   const pretty = JSON.stringify(data, null, 2) + '\n';
-  return writeTextAtomic(abs, pretty);
+  return writeTextAtomic(abs, pretty, opts);
 }
 
 /**
@@ -269,9 +272,10 @@ async function writeJson(abs, data) {
  * an event-loop yield would deadlock the caller. Use writeJson/writeTextAtomic
  * for everything else.
  */
-function writeJsonSync(abs, data) {
+function writeJsonSync(abs, data, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
+  assertOpsWrite(real, opts.writer);
   const dir = path.dirname(real);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -432,8 +436,10 @@ function registerConfigHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('config:read-json', v(s.configPath, ({ path: p }) => readJson(p)));
   ipcMain.handle('config:read-text', v(s.configPath, ({ path: p }) => readText(p)));
-  ipcMain.handle('config:write-json', v(s.configWriteJson, ({ path: p, data }) => writeJson(p, data)));
-  ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text }) => writeTextAtomic(p, text)));
+  // `writer` is the renderer's declared owner id for the single-writer law
+  // (lib/opsOwnership.cjs). Ignored outside the ops root; required inside it.
+  ipcMain.handle('config:write-json', v(s.configWriteJson, ({ path: p, data, writer }) => writeJson(p, data, { writer })));
+  ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text, writer }) => writeTextAtomic(p, text, { writer })));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
   ipcMain.handle('config:parse-imports', v(s.configParseImports, async ({ path: p }) => {

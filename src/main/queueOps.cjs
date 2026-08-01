@@ -519,7 +519,7 @@ async function retagOne({ slug, parallelGroup, estimateMinutes }) {
   // Atomic write via shared helper. If slug changed, write at the new path
   // and unlink the old slug.
   try {
-    await config.writeTextAtomic(dst, newRaw);
+    await config.writeTextAtomic(dst, newRaw, { writer: 'scheduler' });
     if (dst !== src) {
       try { await fsp.unlink(src); } catch { /* if src is already same as dst (race), fine */ }
     }

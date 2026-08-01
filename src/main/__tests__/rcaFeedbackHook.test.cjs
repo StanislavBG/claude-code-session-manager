@@ -78,238 +78,73 @@ function baseJob(overrides = {}) {
 
 // ─── dedupe / new-runId ───────────────────────────────────────────────────────
 
-test('fileRcaFeedback: second call with same (slug, runId) is a no-op', async () => {
+// ─── proposal filing (replaced the feedback-file inbox) ──────────────────────
+
+function readSessions(cwd) {
+  const p = path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  if (!fs.existsSync(p)) return {};
+  return JSON.parse(fs.readFileSync(p, 'utf8')).sessions ?? {};
+}
+
+test('fileRcaFeedback: files a PROPOSED Epic carrying the RCA as its opening prompt', async () => {
   const cwd = makeProjectWithInbox();
-  const runDir = path.join(tmpHome, 'run1');
-  writeRun(runDir, 'testslug');
-  writePrd(cwd, 'testslug');
-  const job = baseJob({ cwd });
-
-  const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
-  expect(first.filed).toBe(true);
-
-  const second = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
-  expect(second.filed).toBe(false);
-  expect(second.reason).toBe('duplicate');
-
-  const files = fs.readdirSync(path.join(cwd, 'session-manager-operations', 'feedback'));
-  expect(files.length).toBe(1);
-});
-
-test('fileRcaFeedback: new runId for the same slug files a new RCA', async () => {
-  const cwd = makeProjectWithInbox();
-  const runDir1 = path.join(tmpHome, 'run1');
-  const runDir2 = path.join(tmpHome, 'run2');
-  writeRun(runDir1, 'testslug');
-  writeRun(runDir2, 'testslug');
-  writePrd(cwd, 'testslug');
-
-  const r1 = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd, runId: 'run-aaa' }), runDir: runDir1, verdict: 'transcript_errors' });
-  const r2 = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd, runId: 'run-bbb' }), runDir: runDir2, verdict: 'transcript_errors' });
-
-  expect(r1.filed).toBe(true);
-  expect(r2.filed).toBe(true);
-  expect(r1.path).not.toBe(r2.path);
-
-  const files = fs.readdirSync(path.join(cwd, 'session-manager-operations', 'feedback'));
-  expect(files.length).toBe(2);
-});
-
-test('fileRcaFeedback: a duplicate is still detected after /process-feedback archives the file into processed/', async () => {
-  const cwd = makeProjectWithInbox();
-  const runDir = path.join(tmpHome, 'run1');
-  writeRun(runDir, 'testslug');
-  writePrd(cwd, 'testslug');
-  const job = baseJob({ cwd });
-
-  const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
-  expect(first.filed).toBe(true);
-
-  const feedbackDir = path.join(cwd, 'session-manager-operations', 'feedback');
-  const processedDir = path.join(feedbackDir, 'processed');
-  fs.mkdirSync(processedDir, { recursive: true });
-  const fileName = path.basename(first.path);
-  fs.renameSync(first.path, path.join(processedDir, fileName));
-
-  const second = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
-  expect(second.filed).toBe(false);
-  expect(second.reason).toBe('duplicate');
-  expect(second.path).toBe(path.join(processedDir, fileName));
-
-  expect(fs.existsSync(path.join(feedbackDir, fileName))).toBe(false);
-  const liveFiles = fs.readdirSync(feedbackDir).filter((f) => f !== 'processed');
-  expect(liveFiles.length).toBe(0);
-  expect(fs.readdirSync(processedDir).length).toBe(1);
-});
-
-test('fileRcaFeedback: investigationText updates the file in processed/ in place instead of duplicating it in the live dir', async () => {
-  const cwd = makeProjectWithInbox();
-  const runDir = path.join(tmpHome, 'run1');
-  writeRun(runDir, 'testslug');
-  writePrd(cwd, 'testslug');
-  const job = baseJob({ cwd });
-
-  const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
-  expect(first.filed).toBe(true);
-
-  const feedbackDir = path.join(cwd, 'session-manager-operations', 'feedback');
-  const processedDir = path.join(feedbackDir, 'processed');
-  fs.mkdirSync(processedDir, { recursive: true });
-  const fileName = path.basename(first.path);
-  const processedPath = path.join(processedDir, fileName);
-  fs.renameSync(first.path, processedPath);
-
-  const second = await rcaFeedbackHook.fileRcaFeedback({
-    job, runDir, verdict: 'transcript_errors', investigationText: 'Root cause: forgot to bound the poll loop.',
-  });
-  expect(second.filed).toBe(true);
-  expect(second.updated).toBe(true);
-  expect(second.path).toBe(processedPath);
-
-  const after = fs.readFileSync(processedPath, 'utf8');
-  expect(after).toContain('## Investigation analysis');
-  expect(fs.existsSync(path.join(feedbackDir, fileName))).toBe(false);
-});
-
-// ─── failure-class matching ───────────────────────────────────────────────────
-
-test('classifyFailure: detects stuck-loop from an until/while-true/sleep tail', () => {
-  const logTail = ['doing work', 'until curl -s http://x | jq .uptime; do sleep 5; done', 'still waiting'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('stuck-loop');
-});
-
-test('classifyFailure: detects post-ac-overrun when work continues well past the last AC checkbox with no PASS', () => {
-  const lines = ['- [x] first AC item done', '- [x] last AC item done'];
-  for (let i = 0; i < 30; i++) lines.push(`extra post-AC work line ${i}`);
-  const logTail = lines.join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('post-ac-overrun');
-});
-
-test('classifyFailure: falls back to uncommitted-changes for that verdict', () => {
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'uncommitted_changes', logTail: 'no special markers here' })).toBe('uncommitted-changes');
-});
-
-test('classifyFailure: falls back to no-sentinel for no_verdict_sentinel/pass_no_commit', () => {
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail: 'clean tail, no loops' })).toBe('no-sentinel');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail: 'clean tail, no loops' })).toBe('no-sentinel');
-});
-
-test('classifyFailure: falls back to transcript-errors for transcript_errors/verify_unavailable', () => {
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'transcript_errors', logTail: 'Traceback (most recent call last)' })).toBe('transcript-errors');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'verify_unavailable', logTail: 'verifier threw' })).toBe('transcript-errors');
-});
-
-test('classifyFailure: unknown verdict with no matching markers falls back to unknown', () => {
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'halt', logTail: 'nothing special' })).toBe('unknown');
-});
-
-test('classifyFailure: detects self-queue from a "Launching skill: session-manager-dev:develop" tail', () => {
-  const logTail = ['doing setup', 'Launching skill: session-manager-dev:develop', 'skill running'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
-});
-
-test('classifyFailure: detects self-queue from a "Launching skill: session-manager-dev:process-feedback" tail', () => {
-  const logTail = ['doing setup', 'Launching skill: session-manager-dev:process-feedback', 'skill running'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
-});
-
-test('classifyFailure: detects self-queue from a ScheduleWakeup tool_use even when the tail also contains "sleep" (PRD 771 regression)', () => {
-  const logTail = [
-    'launching background build: eas-cli build --wait',
-    'the app will sleep between polls',
-    '{"type":"tool_use","name":"ScheduleWakeup","input":{"delaySeconds":600}}',
-  ].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('self-queue');
-});
-
-test('classifyFailure: detects already-shipped from a pass_no_commit tail citing a prior commit', () => {
-  const logTail = ['re-verified acceptance criteria', 'this work was already committed in 9cf0384', 'nothing left to change'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail })).toBe('already-shipped');
-});
-
-test('classifyFailure: detects already-shipped from a pass_no_commit tail with "nothing new to commit"', () => {
-  const logTail = ['checked the diff', 'nothing new to commit for this PRD', 'exiting clean'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail })).toBe('already-shipped');
-});
-
-test('classifyFailure: ALREADY_SHIPPED is checked before SELF_QUEUE, so a no_verdict_sentinel tail with both markers classifies as already-shipped', () => {
-  const logTail = [
-    'Launching skill: session-manager-dev:develop',
-    'the acceptance criteria were already implemented',
-  ].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail })).toBe('already-shipped');
-});
-
-test('classifyFailure: pass_no_commit tail with no already-shipped phrasing still falls back to no-sentinel (regression)', () => {
-  const logTail = ['ran the tests', 'everything looked fine', 'printed PASS'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'pass_no_commit', logTail })).toBe('no-sentinel');
-});
-
-test('classifyFailure: STUCK_LOOP/POST_AC_OVERRUN reordering does not change classification when no self-queue marker is present', () => {
-  const stuckLoopTail = ['doing work', 'until curl -s http://x | jq .uptime; do sleep 5; done', 'still waiting'].join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail: stuckLoopTail })).toBe('stuck-loop');
-
-  const postAcLines = ['- [x] first AC item done', '- [x] last AC item done'];
-  for (let i = 0; i < 30; i++) postAcLines.push(`extra post-AC work line ${i}`);
-  const postAcTail = postAcLines.join('\n');
-  expect(rcaFeedbackHook.classifyFailure({ verdict: 'no_verdict_sentinel', logTail: postAcTail })).toBe('post-ac-overrun');
-});
-
-// ─── AC extraction ─────────────────────────────────────────────────────────────
-
-test('extractAcceptanceCriteria: pulls the section body between the heading and the next heading', () => {
-  const body = ['# Goal', '', 'Do the thing.', '', '# Acceptance criteria', '', '- [ ] one', '- [ ] two', '', '# Out of scope', '', '- N/A'].join('\n');
-  expect(rcaFeedbackHook.extractAcceptanceCriteria(body)).toBe('- [ ] one\n- [ ] two');
-});
-
-test('extractAcceptanceCriteria: returns null when no such heading exists', () => {
-  const body = ['# Goal', '', 'Do the thing.'].join('\n');
-  expect(rcaFeedbackHook.extractAcceptanceCriteria(body)).toBeNull();
-});
-
-// ─── investigation <RCA> block extraction ──────────────────────────────────────
-
-test('extractRcaBlock: pulls plain-text block content', () => {
-  const log = 'preamble\n<RCA>\nForgot to bound the poll loop.\n</RCA>\npostamble';
-  expect(rcaFeedbackHook.extractRcaBlock(log)).toBe('Forgot to bound the poll loop.');
-});
-
-test('extractRcaBlock: unescapes JSON-escaped newlines from a stream-json transcript', () => {
-  const log = '{"text":"<RCA>\\nForgot to bound the poll loop.\\nSee scheduler.cjs:1509.\\n</RCA>"}';
-  expect(rcaFeedbackHook.extractRcaBlock(log)).toBe('Forgot to bound the poll loop.\nSee scheduler.cjs:1509.');
-});
-
-test('extractRcaBlock: returns null when no block is present', () => {
-  expect(rcaFeedbackHook.extractRcaBlock('no block here')).toBeNull();
-});
-
-// ─── destination resolution ────────────────────────────────────────────────────
-
-test('resolveDestination: uses the job cwd inbox when it exists', () => {
-  const cwd = makeProjectWithInbox();
-  const dest = rcaFeedbackHook.resolveDestination({ cwd });
-  expect(dest.dir).toBe(path.join(cwd, 'session-manager-operations', 'feedback'));
-  expect(dest.targetProjectNote).toBeNull();
-});
-
-test('resolveDestination: falls back to the session-manager repo inbox when the target has none', () => {
-  const cwd = makeProjectWithoutInbox();
-  const dest = rcaFeedbackHook.resolveDestination({ cwd });
-  expect(dest.dir).toBe(rcaFeedbackHook.SM_REPO_FEEDBACK_DIR);
-  expect(dest.targetProjectNote).toContain(cwd);
-});
-
-test('fileRcaFeedback: actually writes into the fallback dir when the target inbox is missing', async () => {
-  const cwd = makeProjectWithoutInbox();
   const runDir = path.join(tmpHome, 'run1');
   writeRun(runDir, 'testslug');
   writePrd(cwd, 'testslug');
 
   const res = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
   expect(res.filed).toBe(true);
-  expect(res.path.startsWith(rcaFeedbackHook.SM_REPO_FEEDBACK_DIR)).toBe(true);
-  const content = fs.readFileSync(res.path, 'utf8');
-  expect(content).toContain(cwd);
+  expect(res.created).toBe(true);
+
+  const sessions = readSessions(cwd);
+  const epic = sessions[res.epicId];
+  // Nothing may auto-run: the whole point is a human gate.
+  expect(epic.status).toBe('proposed');
+  expect(epic.tag).toBe('bug');
+  expect(epic.goalText).toContain('testslug');
+  // Short title for the list, full RCA body for the first prompt.
+  expect(epic.goalText.split('\n').length).toBe(1);
+  expect(epic.openingPrompt).toContain('Root cause');
+  expect(epic.openingPrompt).toContain('prdSlug: testslug');
+});
+
+test('fileRcaFeedback: a re-trigger for the same failure joins the proposal instead of duplicating it', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+  const job = baseJob({ cwd });
+
+  const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
+  const second = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
+
+  expect(first.created).toBe(true);
+  expect(second.created).toBe(false);
+  expect(second.epicId).toBe(first.epicId);
+  expect(Object.keys(readSessions(cwd)).length).toBe(1);
+});
+
+test('fileRcaFeedback: a different verdict for the same slug is its own proposal', async () => {
+  const cwd = makeProjectWithInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+
+  const a = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
+  const b = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'pass_no_commit' });
+
+  expect(a.epicId).not.toBe(b.epicId);
+  expect(Object.keys(readSessions(cwd)).length).toBe(2);
+});
+
+test('fileRcaFeedback: files into the job\'s own project, no feedback dir required', async () => {
+  const cwd = makeProjectWithoutInbox();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+
+  const res = await rcaFeedbackHook.fileRcaFeedback({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
+  expect(res.filed).toBe(true);
+  expect(readSessions(cwd)[res.epicId].status).toBe('proposed');
 });
 
 test('fileRcaFeedback: rejects a slug containing path-traversal segments', async () => {
@@ -339,7 +174,7 @@ test('fileRcaFeedback: SM_RCA_DISABLE=1 skips without writing', async () => {
 
 // ─── investigation-text enrichment ──────────────────────────────────────────────
 
-test('fileRcaFeedback: investigationText updates the existing RCA instead of duplicating it', async () => {
+test('fileRcaFeedback: investigationText enriches the pending proposal in place', async () => {
   const cwd = makeProjectWithInbox();
   const runDir = path.join(tmpHome, 'run1');
   writeRun(runDir, 'testslug');
@@ -348,20 +183,17 @@ test('fileRcaFeedback: investigationText updates the existing RCA instead of dup
 
   const first = await rcaFeedbackHook.fileRcaFeedback({ job, runDir, verdict: 'transcript_errors' });
   expect(first.filed).toBe(true);
-  const before = fs.readFileSync(first.path, 'utf8');
-  expect(before).not.toContain('## Investigation analysis');
+  expect(readSessions(cwd)[first.epicId].openingPrompt).not.toContain('## Investigation analysis');
 
   const second = await rcaFeedbackHook.fileRcaFeedback({
     job, runDir, verdict: 'transcript_errors', investigationText: 'Root cause: forgot to bound the poll loop.',
   });
-  expect(second.filed).toBe(true);
+  expect(second.epicId).toBe(first.epicId);
   expect(second.updated).toBe(true);
-  expect(second.path).toBe(first.path);
 
-  const after = fs.readFileSync(second.path, 'utf8');
-  expect(after).toContain('## Investigation analysis');
-  expect(after).toContain('forgot to bound the poll loop');
-
-  const files = fs.readdirSync(path.join(cwd, 'session-manager-operations', 'feedback'));
-  expect(files.length).toBe(1);
+  const enriched = readSessions(cwd)[second.epicId];
+  expect(enriched.openingPrompt).toContain('## Investigation analysis');
+  expect(enriched.openingPrompt).toContain('forgot to bound the poll loop');
+  expect(enriched.status).toBe('proposed');
+  expect(Object.keys(readSessions(cwd)).length).toBe(1);
 });

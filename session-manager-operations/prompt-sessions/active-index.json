@@ -1,4 +1,74 @@
 {
-  "sessions": {},
-  "events": {}
+  "sessions": {
+    "epic-scheduler-integration-audit-follow-ups-sour-bf812a26": {
+      "id": "epic-scheduler-integration-audit-follow-ups-sour-bf812a26",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Epic-Scheduler integration audit follow-ups: sourcePromptId contract, orphaned-Epic rollback, active-index.json race/ordering hardening",
+      "claudeSessionId": "88447129-762b-4b8b-bda2-6845c979b133",
+      "status": "active",
+      "createdAt": "2026-08-01T04:57:02.447Z",
+      "completedAt": null,
+      "tag": "discussion"
+    },
+    "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210": {
+      "id": "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "The 'Home' Tab seems to be irresponsive. Make sure that",
+      "claudeSessionId": "c8d2ca66-6317-4c69-9461-dbbdad3aee58",
+      "status": "active",
+      "createdAt": "2026-08-01T05:11:36.597Z",
+      "completedAt": null,
+      "tag": "bug"
+    },
+    "psess-ms9yi6hy-14": {
+      "id": "psess-ms9yi6hy-14",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Paste Image in Chat does not work\n\nPaste Image in Chat does not work",
+      "claudeSessionId": "c00c514b-317b-4ca7-9c6e-c02816c66f0d",
+      "status": "active",
+      "createdAt": "2026-08-01T05:54:26.278Z",
+      "completedAt": null,
+      "tag": "feature"
+    }
+  },
+  "events": {
+    "epic-scheduler-integration-audit-follow-ups-sour-bf812a26": [
+      {
+        "id": "ec651596-ab48-40a8-8e5b-a14992bdf31a",
+        "promptSessionId": "epic-scheduler-integration-audit-follow-ups-sour-bf812a26",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-01T04:57:02.447Z",
+        "text": "Epic-Scheduler integration audit follow-ups: sourcePromptId contract, orphaned-Epic rollback, active-index.json race/ordering hardening"
+      }
+    ],
+    "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210": [
+      {
+        "id": "dacaa688-d363-4e8b-ab54-9c91bd4dd749",
+        "promptSessionId": "the-home-tab-seems-to-be-irresponsive-make-sure--025c6210",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-01T05:11:36.597Z",
+        "text": "The 'Home' Tab seems to be irresponsive. Make sure that"
+      }
+    ],
+    "psess-ms9yi6hy-14": [
+      {
+        "id": "pevt-ms9yi6hy-15",
+        "promptSessionId": "psess-ms9yi6hy-14",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-01T05:54:26.278Z",
+        "text": "Paste Image in Chat does not work\n\nPaste Image in Chat does not work"
+      },
+      {
+        "kind": "prd_created",
+        "causedByEventId": "pevt-ms9yi6hy-15",
+        "prdSlug": "865-paste-image-in-chat-does-not-work",
+        "id": "pevt-ms9yi8po-16",
+        "promptSessionId": "psess-ms9yi6hy-14",
+        "at": "2026-08-01T05:54:29.148Z"
+      }
+    ]
+  }
 }

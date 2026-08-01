@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { toast } from '../../state/toast'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 
 export interface AttachmentItem {
@@ -57,6 +58,64 @@ export function useAttachments(): AttachmentsState {
   return { items, add, remove, clear }
 }
 
+/**
+ * Shared ⌘V handler. Attach this to every element a user could plausibly be
+ * focused in when they paste — in practice that means the COMPOSER TEXTAREA,
+ * not just the tray: the tray owned the only onPaste for a while, so pasting
+ * a screenshot while typing (the normal case, and the one the composer
+ * placeholder advertises) silently did nothing. Returns true when files were
+ * consumed, so a caller can skip its own paste handling.
+ */
+export function attachPastedFiles(e: React.ClipboardEvent, att: AttachmentsState): boolean {
+  const files = e.clipboardData?.files
+  if (!files || files.length === 0) return false
+  e.preventDefault()
+  att.add(files)
+  return true
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
+/**
+ * Resolves each attachment to an absolute path — real drag-drop/file-picker
+ * paths pass through, pasted-clipboard images (no real path) are saved first
+ * into the project's prompt-sessions/attachments dir via browser.saveBinary
+ * (declared writer 'epics' under the single-writer law).
+ *
+ * Shared by BOTH the Epic composer and the New Epic card: the card used to
+ * inline `item.path`, which for a pasted image is just "pasted-image.png" —
+ * a reference line pointing at a file that does not exist anywhere.
+ */
+export async function resolveAttachmentPaths(items: AttachmentItem[], cwd: string): Promise<string[]> {
+  const paths: string[] = []
+  for (const item of items) {
+    if (item.hasRealPath) {
+      paths.push(item.path)
+      continue
+    }
+    try {
+      const destPath = `${cwd}/session-manager-operations/prompt-sessions/attachments/${item.id}-${item.name}`
+      const base64 = await fileToBase64(item.file)
+      const res = await window.api.browser.saveBinary(destPath, base64, 'epics')
+      if (res.ok) {
+        paths.push(destPath)
+      } else {
+        toast.error(`Failed to save attachment "${item.name}": ${res.error ?? 'unknown error'}`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(`Failed to save attachment "${item.name}": ${msg}`)
+    }
+  }
+  return paths
+}
+
 /** Paste (⌘V) / drag-drop / file-picker tray for reference attachments.
  *  Chips show a thumbnail (images) or file icon, name, size, and a remove
  *  button. Matches the design mock's AttachTray. */
@@ -64,13 +123,7 @@ export function AttachTray({ att, tall, testId }: { att: AttachmentsState; tall?
   const inputRef = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
 
-  const onPaste = (e: React.ClipboardEvent) => {
-    const files = e.clipboardData?.files
-    if (files && files.length) {
-      e.preventDefault()
-      att.add(files)
-    }
-  }
+  const onPaste = (e: React.ClipboardEvent) => { attachPastedFiles(e, att) }
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setOver(false)

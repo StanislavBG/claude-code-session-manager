@@ -82,7 +82,7 @@ contextBridge.exposeInMainWorld('api', {
     },
     captureDom: (payload) => ipcRenderer.invoke('browser:capture-dom', payload),
     captureShot: (viewId) => ipcRenderer.invoke('browser:capture-shot', { viewId }),
-    saveBinary: (path, base64) => ipcRenderer.invoke('browser:save-binary', { path, base64 }),
+    saveBinary: (path, base64, writer) => ipcRenderer.invoke('browser:save-binary', { path, base64, writer }),
     saveRecording: (payload) => ipcRenderer.invoke('browser:save-recording', payload),
     replay: (payload) => ipcRenderer.invoke('browser:replay', payload),
     onReplayStep: (viewId, handler) => {
@@ -153,8 +153,8 @@ contextBridge.exposeInMainWorld('api', {
   config: {
     readJson: (path) => ipcRenderer.invoke('config:read-json', { path }),
     readText: (path) => ipcRenderer.invoke('config:read-text', { path }),
-    writeJson: (path, data) => ipcRenderer.invoke('config:write-json', { path, data }),
-    writeText: (path, text) => ipcRenderer.invoke('config:write-text', { path, text }),
+    writeJson: (path, data, writer) => ipcRenderer.invoke('config:write-json', { path, data, writer }),
+    writeText: (path, text, writer) => ipcRenderer.invoke('config:write-text', { path, text, writer }),
     listDir: (path, opts) => ipcRenderer.invoke('config:list-dir', { path, opts }),
     exists: (path) => ipcRenderer.invoke('config:exists', { path }),
     watch: (paths) => ipcRenderer.send('config:watch', { paths }),
@@ -320,6 +320,13 @@ contextBridge.exposeInMainWorld('api', {
     get: (cwd) => ipcRenderer.invoke('project-brief:get', { cwd }),
     refresh: (cwd) => ipcRenderer.invoke('project-brief:refresh', { cwd }),
     setPin: (cwd, block, pinned) => ipcRenderer.invoke('project-brief:set-pin', { cwd, block, pinned }),
+    update: (cwd, patch) => ipcRenderer.invoke('project-brief:update', { cwd, patch }),
+  },
+  promptSessionTranscript: {
+    append: (cwd, epicId, turn) =>
+      ipcRenderer.invoke('promptSessionTranscript:append', { cwd, epicId, ...turn }),
+    read: (cwd, epicId, limit) =>
+      ipcRenderer.invoke('promptSessionTranscript:read', { cwd, epicId, ...(limit ? { limit } : {}) }),
   },
   agentMemory: {
     list: (agentId) => ipcRenderer.invoke('agent-memory:list', { agentId }),

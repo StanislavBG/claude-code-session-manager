@@ -10,7 +10,8 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
+import { SchBadge, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
+import { resolveEpicRef } from '../lib/epicProvenance'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -773,15 +774,14 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
 
-  // Traceability link back to the PromptSession this job's PRD was authored
-  // from (see promptSessionDeepLink.ts) — job.sourceTabId equals a
-  // PromptSession's own id when the PRD came out of PromptSessionConversation
-  // (its chat key IS the PromptSession id), so a match here is the PRD → the
-  // goal-scoped conversation that spawned it, for tracing + reopening it to
-  // see the completion prompt the scheduler published back into that session.
-  const linkedPromptSession = usePromptSessions((s) =>
-    job.sourceTabId ? (s.sessions[job.sourceTabId] ?? null) : null,
-  )
+  // Traceability link back to the Epic this job's PRD belongs to. Resolution
+  // order (epicId → sourcePromptId → sourceTabId) lives in
+  // lib/epicProvenance so the PRDs and History views resolve identically —
+  // this row used to key on sourceTabId alone, which silently mis-resolved
+  // rows where the two fields disagree.
+  const sessions = usePromptSessions((s) => s.sessions)
+  const epicRef = useMemo(() => resolveEpicRef(job, sessions), [job, sessions])
+  const linkedPromptSession = epicRef.known && epicRef.epicId ? sessions[epicRef.epicId] : null
 
   const navigateToPromptSession = useCallback((id: string) => {
     setPendingPromptSessionId(id)
@@ -840,37 +840,13 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
               {note}
             </div>
           )}
-          {linkedPromptSession ? (
-            <span
-              role="button"
-              tabIndex={0}
-              data-testid="job-row-prompt-session-chip"
-              title={linkedPromptSession.goalText}
-              onClick={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
-                navigateToPromptSession(linkedPromptSession.id)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  navigateToPromptSession(linkedPromptSession.id)
-                }
-              }}
-              className="inline-block mt-0.5 text-[12.5px] text-accent hover:text-accent/80 cursor-pointer truncate max-w-full"
-            >
-              {truncateLabel(linkedPromptSession.goalText) || linkedPromptSession.id.slice(0, 8)}
-            </span>
-          ) : (job.sourcePromptId || job.sourceTabId) ? (
-            <span
-              data-testid="job-row-prompt-session-chip"
-              title="Source prompt session is not currently loaded"
-              className="inline-block mt-0.5 text-[12.5px] text-fg-faint truncate max-w-full"
-            >
-              {(job.sourcePromptId ?? job.sourceTabId ?? '').slice(0, 8)}
-            </span>
-          ) : null}
+          <EpicTag
+            epicId={epicRef.epicId}
+            label={epicRef.label ? truncateLabel(epicRef.label) : null}
+            onOpen={navigateToPromptSession}
+            testId="job-row-prompt-session-chip"
+            className="mt-0.5"
+          />
         </div>
         <ProjectTag cwd={job.cwd} />
         <span className="inline-flex items-center gap-2.5 font-mono text-xs text-fg-faint shrink-0">
@@ -932,6 +908,8 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
           <DetailBlock label="Location">
             <DetailLine k="group" v={`${job.parallelGroup} · ${job.slug}`} />
             <DetailLine k="cwd" v={job.cwd ?? '—'} wrap />
+            <DetailLine k="epic" v={epicRef.label ?? epicRef.epicId ?? '—'} wrap />
+            <DetailLine k="epic id" v={epicRef.epicId ?? '—'} wrap />
             <DetailLine k="prompt id" v={job.sourcePromptId ?? '—'} wrap />
             <DetailLine k="source tab" v={job.sourceTabId ?? '—'} wrap />
           </DetailBlock>
@@ -946,7 +924,7 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
                   onClick={() => navigateToPromptSession(linkedPromptSession.id)}
                   className="text-[13px] font-semibold text-accent hover:text-accent/80 bg-transparent border-0 cursor-pointer p-0"
                 >
-                  view prompt session →
+                  view epic →
                 </button>
               )}
               {job.runId && (

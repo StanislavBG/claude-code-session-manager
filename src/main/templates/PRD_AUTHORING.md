@@ -437,7 +437,7 @@ not be re-proposed:
 
 ### Reference implementation of this exact loop
 
-`/process-feedback`'s step 0b (source → triage → `/develop` → queue) is a working example of this
+The proposal → approve → `/develop` → queue path is a working example of this
 shape, landed 2026-07-14 (`feat(process-feedback): sync open GitHub issues into the feedback
 intake`, commit `352b89c`). It syncs open GitHub issues into `session-manager-operations/feedback/`
 (deduped on a `gh-issue-<N>` token), then processes each item through the same triage → `/develop`

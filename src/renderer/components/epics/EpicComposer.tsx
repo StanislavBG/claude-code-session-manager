@@ -4,9 +4,8 @@ import { useChat, dispatchPromptSessionToPrd } from '../../state/chat'
 import type { PromptSession } from '../../state/promptSessions'
 import { epicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
 import { EpicKindTag, epicStatusDotClass } from './epic-primitives'
-import { AttachTray, useAttachments, type AttachmentItem } from './attachments'
+import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import type { TicketTag } from '../../lib/ticketDisplay'
-import { toast } from '../../state/toast'
 import { useVoice, selectCanRecord } from '../../state/voice'
 import { copyFor } from '../../lib/voiceCopy'
 
@@ -23,50 +22,13 @@ function dispatchTag(tag: PromptSession['tag']): TicketTag {
   return tag === 'bug' ? 'bug' : 'feature'
 }
 
-async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return btoa(binary)
-}
-
-/**
- * Resolves each attachment to an absolute path — real drag-drop/file-picker
- * paths pass through, pasted-clipboard images (no real path) are saved first
- * into the Epic's own prompt-sessions/attachments dir via the existing
- * browser.saveBinary IPC (already allowlisted under the cwd's
- * session-manager-operations write boundary).
- */
-async function resolveAttachmentPaths(items: AttachmentItem[], cwd: string): Promise<string[]> {
-  const paths: string[] = []
-  for (const item of items) {
-    if (item.hasRealPath) {
-      paths.push(item.path)
-      continue
-    }
-    try {
-      const destPath = `${cwd}/session-manager-operations/prompt-sessions/attachments/${item.id}-${item.name}`
-      const base64 = await fileToBase64(item.file)
-      const res = await window.api.browser.saveBinary(destPath, base64)
-      if (res.ok) {
-        paths.push(destPath)
-      } else {
-        toast.error(`Failed to save attachment "${item.name}": ${res.error ?? 'unknown error'}`)
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      toast.error(`Failed to save attachment "${item.name}": ${msg}`)
-    }
-  }
-  return paths
-}
-
 /** An Epic that's already completed/archived shows no composer — its
  *  claudeSessionId is dead. Parent surfaces should gate on this instead of
  *  mounting EpicComposer at all. */
 export function canCompose(epic: PromptSession): boolean {
-  return epic.status !== 'completed'
+  // 'proposed' Epics show EpicApprovalBar instead — they have not been
+  // approved to spend anything yet, so there is nothing to compose into.
+  return epic.status === 'active'
 }
 
 interface Props {
@@ -252,6 +214,7 @@ export function EpicComposer({ epic, snapshots, onSent }: Props) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={(e) => attachPastedFiles(e, att)}
           rows={2}
           placeholder={
             running

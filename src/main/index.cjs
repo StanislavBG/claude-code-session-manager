@@ -56,6 +56,7 @@ const schedulerConfig = require('./lib/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const { registerProjectBriefIpc } = require('./projectBrief.cjs');
+const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const filesIpc = require('./files.cjs');
@@ -774,6 +775,14 @@ pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();
+ipcMain.handle('promptSessionTranscript:append', validated(schemas.promptSessionTranscriptAppend, async ({ cwd, epicId, role, text, at, eventId }) => {
+  const ok = await promptSessionTranscript.appendTurn(cwd, epicId, { role, text, at, eventId });
+  return { ok };
+}));
+ipcMain.handle('promptSessionTranscript:read', validated(schemas.promptSessionTranscriptRead, async ({ cwd, epicId, limit }) => {
+  const turns = await promptSessionTranscript.readTurns(cwd, epicId, { limit });
+  return { turns };
+}));
 agentMemory.registerAgentMemoryHandlers();
 git.register(ipcMain);
 filesIpc.registerFilesHandlers();

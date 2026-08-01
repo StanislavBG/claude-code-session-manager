@@ -4,7 +4,16 @@ import { EmptyState } from '../../ui/EmptyState'
 import { formatTimingLabel } from '../../../lib/formatTime'
 import { FilterPills } from '../../ui/FilterPills'
 import { RunLogViewer } from './RunLogViewer'
-import { SchBadge, ProjectTag, DetailBlock, DetailLine, projectNameFromCwd, verdictLabel } from '../scheduler/sched-primitives'
+import { SchBadge, ProjectTag, EpicTag, DetailBlock, DetailLine, projectNameFromCwd, verdictLabel } from '../scheduler/sched-primitives'
+import { usePromptSessions } from '../../../state/promptSessions'
+import { resolveEpicRef } from '../../../lib/epicProvenance'
+import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
+
+/** Deep-link into the Epic workspace, same handler the Queue/PRDs views use. */
+function openEpic(epicId: string): void {
+  setPendingPromptSessionId(epicId)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
+}
 
 interface HistoryResult {
   ok: boolean
@@ -162,6 +171,10 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
   const [expanded, setExpanded] = useState(false)
   const [showLog, setShowLog] = useState(false)
 
+  // Raw slice + derive outside the selector (React #185 class).
+  const epicSessions = usePromptSessions((s) => s.sessions)
+  const epicRef = useMemo(() => resolveEpicRef(job, epicSessions), [job, epicSessions])
+
   const duration = job.startedAt && job.finishedAt
     ? Date.parse(job.finishedAt) - Date.parse(job.startedAt)
     : null
@@ -184,6 +197,11 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
           <div className="text-[14.5px] font-medium text-fg leading-snug text-pretty">{job.title}</div>
           {job.error && !expanded && (job.status === 'failed' || job.status === 'needs_review') && (
             <div className="text-[12.5px] mt-0.5 text-accent/80 truncate">{job.error}</div>
+          )}
+          {epicRef.epicId && (
+            <span className="flex mt-0.5">
+              <EpicTag epicId={epicRef.epicId} label={epicRef.label} onOpen={openEpic} />
+            </span>
           )}
         </div>
         <ProjectTag cwd={job.cwd} />
@@ -217,6 +235,7 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
           <DetailBlock label="Location">
             <DetailLine k="group" v={job.parallelGroup != null ? String(job.parallelGroup) : '—'} />
             <DetailLine k="slug" v={job.slug} />
+            <DetailLine k="epic" v={epicRef.label ?? epicRef.epicId ?? '—'} wrap />
             {job.cwd && <DetailLine k="cwd" v={job.cwd} wrap />}
           </DetailBlock>
           <DetailBlock label="Actions">

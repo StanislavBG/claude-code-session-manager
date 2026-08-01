@@ -63,6 +63,7 @@ const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
+const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
 const logs = require('./logs.cjs');
@@ -84,7 +85,6 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { sweep: sweepFeedback } = require('../../scripts/lib/watchdogHelpers.cjs');
 const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, removeEpic, readActiveIndex } = require('./lib/epicMint.cjs');
 
@@ -144,6 +144,10 @@ const POST_RESULT_GRACE_MS = 90_000;
 const POST_RESULT_KILL_MS = 30_000;
 const RESULT_TAIL_POLL_MS = 5_000;
 const RESULT_TAIL_BYTES = 8 * 1024;
+// Wider than RESULT_TAIL_BYTES (which only needs the subtype near the
+// boundary) — a real `result` string can be a full paragraph, so
+// extractResultTextFromLog scans more of the tail to find it whole.
+const RESULT_TEXT_TAIL_BYTES = 64 * 1024;
 
 // Idle-output watchdog: if the log file mtime stops advancing for this long
 // while the process is still alive, the agent is hung mid-work (network
@@ -1106,9 +1110,13 @@ async function reconcile(state) {
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: reconcileSourcePromptId(job, p.sourcePromptId),
       sourceTabId: p.sourceTabId,
+      // Unlike sourcePromptId (frozen once a row leaves 'pending'), epicId is
+      // refreshed from disk every pass: the PRD's directory IS its Epic
+      // membership, so moving the file between Epic dirs must re-point the row.
+      epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
       originSessionId: job.originSessionId
-        ?? resolveOriginSessionId(p.cwd, reconcileSourcePromptId(job, p.sourcePromptId)),
+        ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     });
   }
@@ -1167,8 +1175,9 @@ async function reconcile(state) {
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
       sourceTabId: p.sourceTabId,
+      epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
-      originSessionId: resolveOriginSessionId(p.cwd, p.sourcePromptId),
+      originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       status: 'pending',
       runId: null,
@@ -1267,17 +1276,11 @@ let resumeTimer = null;
 let pollLoopTimer = null;
 let rescheduleInterval = null;
 let heartbeatInterval = null;
-// Feedback sweep piggybacks on the 60s heartbeat tick but runs far less often —
-// every Nth tick — since it's a readdir-per-active-project scan, not free.
-// 5 ticks = 5 minutes; well inside sweep()/activeProjectCwds()'s 90-minute
-// active-session window, so no active project can be missed between sweeps.
-const FEEDBACK_SWEEP_TICK_INTERVAL = 5;
-let feedbackSweepTickCount = 0;
-/** Pure gate for the tick counter above — exported so the wiring is testable
- *  without waiting on real setInterval timers. */
-function feedbackSweepDue(tickCount, interval = FEEDBACK_SWEEP_TICK_INTERVAL) {
-  return tickCount >= interval;
-}
+// (The 5-minute feedback sweep that used to piggyback on this heartbeat is
+// gone: it scanned each active project's session-manager-operations/feedback/
+// and auto-queued a /process-feedback PRD. Both the folder and that skill are
+// retired — agents now file a `proposed` Epic that waits for human approval,
+// so there is nothing to sweep for. See lib/rcaFeedbackHook.cjs.)
 // In-memory set of slugs currently spawned in this process. Prevents
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
@@ -1624,6 +1627,34 @@ function isNotifiableTerminalStatus(effectiveStatus) {
 }
 
 /**
+ * Scans a run log's tail for the last `{"type":"result",...}` JSONL event
+ * (the claude harness's final message) and returns its `result` string, or
+ * null if the log is missing, unreadable, or has no parseable result line.
+ * Never throws — a missing/torn log must not break notifyOriginatingTab.
+ */
+function extractResultTextFromLog(logPath) {
+  if (!logPath) return null;
+  try {
+    const tail = readTail(logPath, RESULT_TEXT_TAIL_BYTES);
+    if (!tail) return null;
+    const lines = tail.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line || !line.includes('"type":"result"')) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && typeof parsed.result === 'string') return parsed.result;
+      } catch {
+        // torn/partial line — keep scanning backward
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * notifyOriginatingTab(job) → void
  *
  * On a true terminal transition (completed/failed — never the benign
@@ -1659,11 +1690,32 @@ async function notifyOriginatingTab(job, {
   loadSessions = sessionsStore.load,
   sendPrompt = enqueueExternalPrompt,
   appendResponseEvent = appendResponseEventIfKnown,
+  appendTranscriptTurn = promptSessionTranscript.appendTurn,
+  readResultFromLog = extractResultTextFromLog,
 } = {}) {
   try {
     const prdPath = prdPathForJob(job);
     const prd = await parsePrdRaw(prdPath).catch(() => null);
     const message = `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`;
+
+    // Persist the job's real result text (not just the short status chip
+    // above) to the durable per-Epic transcript, keyed off whichever id
+    // notifyOriginatingTab would otherwise notify. Best-effort: a missing
+    // cwd/epic id, an unreadable run log, or an IPC error here must never
+    // block the notification below.
+    const epicIdForTranscript = prd?.sourcePromptId || prd?.sourceTabId || null;
+    if (epicIdForTranscript && job.cwd) {
+      try {
+        const logPath = job.runId ? path.join(RUNS_DIR, job.runId, `${job.slug}.log`) : null;
+        const resultText = readResultFromLog(logPath);
+        await appendTranscriptTurn(job.cwd, epicIdForTranscript, {
+          role: 'assistant',
+          text: resultText || message,
+        });
+      } catch (e) {
+        console.error('[scheduler] notifyOriginatingTab transcript append error', job?.slug, e);
+      }
+    }
 
     if (prd?.sourcePromptId) {
       const routed = await appendResponseEvent(job.cwd || null, prd.sourcePromptId, message).catch((e) => {
@@ -3773,7 +3825,7 @@ function registerScheduleHandlers() {
     const resolved = safeSlugPathIn(dir, data.slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
-      await config.writeTextAtomic(resolved, data.body);
+      await config.writeTextAtomic(resolved, data.body, { writer: 'scheduler' });
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };
     }
@@ -3811,6 +3863,7 @@ function registerScheduleHandlers() {
             cwd: parsed.cwd || '',
             estimateMinutes: parsed.estimateMinutes,
             sourcePromptId: parsed.sourcePromptId,
+            epicId: parsed.epicId ?? null,
             mtimeMs: stat.mtimeMs,
           });
         } catch (e) {
@@ -4022,17 +4075,6 @@ async function init() {
       utilization: cachedUtilization,
       consecutiveFailures,
     });
-
-    feedbackSweepTickCount++;
-    if (feedbackSweepDue(feedbackSweepTickCount, FEEDBACK_SWEEP_TICK_INTERVAL)) {
-      feedbackSweepTickCount = 0;
-      // sweepFeedback() is async (epicMint.cjs's ensureEpic/appendPrdCreatedEvent
-      // now serialize through withPathLock); the setInterval callback itself
-      // stays sync, so this is fire-and-forget with its own rejection handler.
-      sweepFeedback().catch((e) => {
-        console.warn('[scheduler] feedback sweep failed', e?.message);
-      });
-    }
   }, 60_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
 
@@ -4214,7 +4256,7 @@ const remote = {
         await cleanupEmptyMintedEpic();
         return { ok: false, error: 'invalid slug' };
       }
-      await config.writeTextAtomic(resolved, body);
+      await config.writeTextAtomic(resolved, body, { writer: 'scheduler' });
       const stat = await fsp.stat(resolved);
       if (epicTrace) {
         // Best-effort: record the dispatch on the minted Epic's event chain.
@@ -4317,4 +4359,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, feedbackSweepDue, FEEDBACK_SWEEP_TICK_INTERVAL, sweepFeedback, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, candidatePrdsDirs, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

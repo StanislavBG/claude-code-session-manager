@@ -13,6 +13,7 @@ import type { ScheduleJob } from '../../../preload/api'
 import { EpicQueueControls } from './EpicQueueControls'
 import { EpicDetail } from './EpicDetail'
 import { EpicComposer, canCompose } from './EpicComposer'
+import { EpicApprovalBar } from './EpicApprovalBar'
 import { NewEpicCard } from './NewEpicCard'
 import { EmptyState } from '../ui/EmptyState'
 
@@ -223,8 +224,12 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
       ) : selectedEpic ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <EpicDetail promptSession={selectedEpic} />
-          {selectedMode === 'chat' && canCompose(selectedEpic) && (
-            <EpicComposer epic={selectedEpic} snapshots={snapshots} />
+          {selectedEpic.status === 'proposed' ? (
+            <EpicApprovalBar epic={selectedEpic} />
+          ) : (
+            selectedMode === 'chat' && canCompose(selectedEpic) && (
+              <EpicComposer epic={selectedEpic} snapshots={snapshots} />
+            )
           )}
         </div>
       ) : (

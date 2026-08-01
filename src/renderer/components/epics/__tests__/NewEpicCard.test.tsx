@@ -5,8 +5,10 @@ import { act } from 'react-dom/test-utils'
 import { NewEpicCard } from '../NewEpicCard'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
+import { useChat } from '../../../state/chat'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
+const sendSpy = vi.fn()
 
 vi.mock('../../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
@@ -45,6 +47,8 @@ beforeEach(() => {
   usePromptSessions.setState({ sessions: {}, events: {} })
   usePromptSessions.setState({ createPromptSession: createPromptSessionSpy })
   createPromptSessionSpy.mockClear()
+  useChat.setState({ send: sendSpy })
+  sendSpy.mockClear()
   useSessions.setState({ tabs: [], activeTabId: null })
 })
 
@@ -66,7 +70,7 @@ describe('NewEpicCard', () => {
     expect(create.disabled).toBe(false)
   })
 
-  it('calls createPromptSession(cwd, goal, tag) and fires onCreated with the new id on goal-only submission', () => {
+  it('calls createPromptSession(cwd, goal, tag) and fires onCreated with the new id on goal-only submission', async () => {
     const onCreated = vi.fn()
     const el = mount(<NewEpicCard onCreated={onCreated} onCancel={vi.fn()} />)
 
@@ -80,13 +84,15 @@ describe('NewEpicCard', () => {
 
     const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'Fix the flaky test', 'feature')
     const created = Object.values(usePromptSessions.getState().sessions)[0]
     expect(onCreated).toHaveBeenCalledWith(created.id)
   })
 
-  it('folds a typed title in as a leading line and respects the selected kind pill', () => {
+  it('folds a typed title in as a leading line and respects the selected kind pill', async () => {
     const onCreated = vi.fn()
     const el = mount(<NewEpicCard onCreated={onCreated} onCancel={vi.fn()} />)
 
@@ -99,6 +105,8 @@ describe('NewEpicCard', () => {
 
     const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledWith(
       '/home/bilko/Projects/alpha',
@@ -107,7 +115,7 @@ describe('NewEpicCard', () => {
     )
   })
 
-  it('folds attached reference paths into goalText as trailing "Reference:" lines', () => {
+  it('folds attached reference paths into goalText as trailing "Reference:" lines', async () => {
     const onCreated = vi.fn()
     const el = mount(<NewEpicCard onCreated={onCreated} onCancel={vi.fn()} />)
 
@@ -122,6 +130,8 @@ describe('NewEpicCard', () => {
 
     const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledWith(
       '/home/bilko/Projects/alpha',
@@ -130,7 +140,7 @@ describe('NewEpicCard', () => {
     )
   })
 
-  it('resets form state after a successful create and on Cancel', () => {
+  it('resets form state after a successful create and on Cancel', async () => {
     const onCreated = vi.fn()
     const onCancel = vi.fn()
     const el = mount(<NewEpicCard onCreated={onCreated} onCancel={onCancel} />)
@@ -139,6 +149,8 @@ describe('NewEpicCard', () => {
     act(() => setNativeValue(goal, 'Ship it'))
     const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
     expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('')
 
     act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'another goal'))
@@ -146,5 +158,44 @@ describe('NewEpicCard', () => {
     act(() => cancel.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(onCancel).toHaveBeenCalled()
     expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('auto-sends the title + objective as the Epic\'s first prompt, so it opens waiting on the agent', async () => {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+
+    const title = el.querySelector('[data-testid="new-epic-title"]') as HTMLInputElement
+    act(() => setNativeValue(title, 'Flaky test'))
+    const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+    act(() => setNativeValue(goal, 'Make CI stop flaking'))
+
+    const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+    act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
+
+    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+    expect(sendSpy).toHaveBeenCalledWith({
+      tabId: created.id,
+      sessionId: created.claudeSessionId,
+      cwd: '/home/bilko/Projects/alpha',
+      prompt: 'Goal: Flaky test\n\nMake CI stop flaking',
+    })
+  })
+
+  it('sends into the Epic\'s own claude session, never a SessionTab id', async () => {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+    act(() => setNativeValue(goal, 'Just the objective'))
+    const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+    act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
+
+    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    const args = sendSpy.mock.calls[0][0]
+    expect(args.sessionId).toBe(created.claudeSessionId)
+    expect(args.sessionId).not.toBe(created.id)
+    expect(args.prompt).toBe('Just the objective')
   })
 })

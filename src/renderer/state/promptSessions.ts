@@ -14,7 +14,14 @@ export interface PromptSession {
   goalText: string
   /** Independently minted — NOT shared with any SessionTab.sessionId. */
   claudeSessionId: string
-  status: 'active' | 'completed'
+  /**
+   * 'proposed' — filed by an agent/automation, NOT started. Its opening
+   * prompt is held until a human approves it (approveProposed), which is what
+   * replaced the old feedback-folder intake: a proposal is just an Epic that
+   * hasn't been allowed to spend tokens yet.
+   * 'active' — running/iterable. 'completed' — archived, claudeSessionId dead.
+   */
+  status: 'proposed' | 'active' | 'completed'
   createdAt: string
   completedAt: string | null
   /** Set only on a session minted via resumeArchived — traces back to the
@@ -25,6 +32,11 @@ export interface PromptSession {
    *  Epics auto-minted from a headless PRD dispatch — stay shape-compatible
    *  so hydrate() reading a main-written active-index.json round-trips it. */
   tag?: 'feature' | 'bug' | 'discussion'
+  /** Full first-prompt body, when it differs from the display `goalText`
+   *  (a proposal filed by automation: goalText is a one-line title, this is
+   *  the RCA/analysis body). Sent verbatim on approval; falls back to
+   *  goalText when absent. Written by src/main/lib/epicMint.cjs too. */
+  openingPrompt?: string | null
 }
 
 /** On-disk archive shape written by markCompleted and read back by any
@@ -34,6 +46,13 @@ export interface PromptSessionArchive {
   events: PromptSessionEvent[]
   transcript: string
   archivedAt: string
+  /** Full-text turns from the durable per-Epic transcript store
+   *  (promptSessionTranscript.cjs), populated whenever `transcript` above
+   *  came back empty — the raw `~/.claude/projects/...` JSONL copy is a
+   *  one-shot best-effort snapshot that's empty if that file didn't exist
+   *  yet or the session id didn't line up (PRD 863). Absent on older
+   *  archives written before this field existed. */
+  durableTurns?: Array<{ role: 'user' | 'assistant'; text: string; at: string }>
 }
 
 /** Where a PromptSession's archive lives once completed — shared by the
@@ -108,7 +127,18 @@ function compareEventsChainAware(a: PromptSessionEvent, b: PromptSessionEvent): 
 interface PromptSessionsState {
   sessions: Record<string, PromptSession>
   events: Record<string, PromptSessionEvent[]>
-  createPromptSession: (cwd: string, goalText: string, tag?: PromptSession['tag']) => PromptSession
+  /** `status` defaults to 'active'. Pass 'proposed' to file an Epic that is
+   *  NOT started — nothing runs until approveProposed() is called. */
+  createPromptSession: (
+    cwd: string,
+    goalText: string,
+    tag?: PromptSession['tag'],
+    status?: PromptSession['status'],
+  ) => PromptSession
+  /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
+   *  approved session, or null when the id is unknown or not a proposal.
+   *  Starting its session is the caller's job (it owns the opening prompt). */
+  approveProposed: (promptSessionId: string) => PromptSession | null
   appendPromptSessionEvent: (
     promptSessionId: string,
     event: Omit<PromptSessionEvent, 'id' | 'promptSessionId' | 'at'>,
@@ -193,7 +223,7 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
   pendingWriteCounts.set(path, (pendingWriteCounts.get(path) ?? 0) + 1)
   const prior = pendingWritesByPath.get(path) ?? Promise.resolve()
   const next = prior
-    .then(() => window.api!.config.writeJson(path, index))
+    .then(() => window.api!.config.writeJson(path, index, 'epics'))
     .then(
       () => undefined,
       (err: unknown) => {
@@ -210,14 +240,14 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
 export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   sessions: {},
   events: {},
-  createPromptSession: (cwd, goalText, tag) => {
+  createPromptSession: (cwd, goalText, tag, status = 'active') => {
     const now = new Date().toISOString()
     const session: PromptSession = {
       id: mintId('psess'),
       cwd,
       goalText,
       claudeSessionId: crypto.randomUUID(),
-      status: 'active',
+      status,
       createdAt: now,
       completedAt: null,
       ...(tag ? { tag } : {}),
@@ -235,6 +265,15 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     set({ sessions, events })
     persistActiveIndex(cwd, sessions, events)
     return session
+  },
+  approveProposed: (promptSessionId) => {
+    const session = get().sessions[promptSessionId]
+    if (!session || session.status !== 'proposed') return null
+    const approved: PromptSession = { ...session, status: 'active' }
+    const sessions = { ...get().sessions, [promptSessionId]: approved }
+    set({ sessions })
+    persistActiveIndex(session.cwd, sessions, get().events)
+    return approved
   },
   appendPromptSessionEvent: (promptSessionId, event) => {
     if (!get().sessions[promptSessionId]) {
@@ -311,13 +350,32 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       transcript = ''
     }
 
+    // The raw ~/.claude/projects/... copy above is a one-shot best-effort
+    // snapshot — empty whenever that file doesn't exist yet or the session
+    // id doesn't line up. Fall back to the durable per-Epic transcript store
+    // (promptSessionTranscript.cjs) so a completed Epic's archive always
+    // carries its conversation. Both fields are kept when present rather
+    // than one replacing the other.
+    let durableTurns: PromptSessionArchive['durableTurns'] = undefined
+    if (!transcript) {
+      try {
+        const { turns } = await window.api.promptSessionTranscript.read(session.cwd, promptSessionId)
+        if (turns.length > 0) {
+          durableTurns = turns.map((t) => ({ role: t.role, text: t.text, at: t.at }))
+        }
+      } catch {
+        durableTurns = undefined
+      }
+    }
+
     const archive: PromptSessionArchive = {
       session: completed,
       events: get().events[promptSessionId] ?? [],
       transcript,
       archivedAt: now,
+      ...(durableTurns ? { durableTurns } : {}),
     }
-    await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive)
+    await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive, 'epics')
   },
   resumeArchived: (archivedId) => {
     const archived = get().sessions[archivedId]

@@ -48,6 +48,10 @@ function installWindowApiMock() {
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },
     schedule: { listPrds: vi.fn().mockResolvedValue([]) },
+    promptSessionTranscript: {
+      append: vi.fn().mockResolvedValue({ ok: true }),
+      read: vi.fn().mockResolvedValue({ turns: [] }),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api }
@@ -206,8 +210,12 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
       returnBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
+    // The marker append now follows an async handoff-transcript capture
+    // attempt (PRD 863) — readText's mocked `exists: false` means nothing is
+    // parseable, so it resolves to the same 0-captured-turns placeholder the
+    // old synchronous append used, just one microtask queue later.
+    await vi.waitFor(() => expect(usePromptSessions.getState().events[session.id]).toHaveLength(2))
     const events = usePromptSessions.getState().events[session.id]
-    expect(events).toHaveLength(2)
     const marker = events[1]
     expect(marker.kind).toBe('response')
     expect(marker.causedByEventId).toBe(firstEvent.id)
@@ -215,6 +223,10 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
 
     // Back on Chat: the pane is gone and the marker renders in the timeline.
     expect(el.querySelector('[data-testid="fake-epic-terminal-pane"]')).toBeNull()
-    expect(el.querySelector('[data-testid="epic-response-event"]')?.textContent).toContain('Iterated in Terminal view')
+    await vi.waitFor(() =>
+      expect(el.querySelector('[data-testid="epic-response-event"]')?.textContent).toContain(
+        'Iterated in Terminal view',
+      ),
+    )
   })
 })

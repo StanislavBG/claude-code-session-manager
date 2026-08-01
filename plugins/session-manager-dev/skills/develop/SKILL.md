@@ -20,7 +20,7 @@ description: >-
 **Role:** `/develop` owns the *pipeline*: it turns a development request into one or more
 self-contained PRDs, queues them, and tracks them to completion. It is the convergence point
 for both entry paths — an interactive human prompt comes straight here; an agent feedback file
-arrives via `/process-feedback`, which evaluates it and then calls this skill. Everything from
+arrives as an approved Epic proposal (`/propose-epic`), which the user approves and then calls this skill. Everything from
 here on is identical regardless of who asked.
 
 **Never** hand-implement the work inline in chat, and never restate rules that live elsewhere:
@@ -66,7 +66,7 @@ can't load skills.
 1. **Clarify scope first.** If the prompt has genuine ambiguity (acceptance criteria, target
    repo, framework, edge cases), ask 2–4 focused questions as plain text and wait. Don't use
    the AskUserQuestion tool. Don't guess on decisions that would cost real rework. (When the
-   caller is `/process-feedback`, scope is already established by its evaluation — don't
+   caller is an approved Epic proposal, scope is already established by its objective — don't
    re-ask; build from the brief it hands you.)
 
 2. **Explore the target repo — broadly, not just the obvious file.** Identify the absolute
@@ -186,7 +186,7 @@ can't load skills.
    (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
    `outOfScope[]`) maps directly onto the sections below — pass them straight through. It
    allocates a strictly-unique `NN` atomically (no read-then-write race against another
-   concurrent `/develop`/`/process-feedback` invocation, never reused across the project — PRD
+   concurrent `/develop` invocation, never reused across the project — PRD
    832), derives and collision-checks the slug, and embeds the standards pointer for you.
    `parallelGroup` is DEPRECATED and ignored — express ordering with the `dependsOn` input
    (slugs that must complete first); independent PRDs simply omit it and may run in parallel.
@@ -334,7 +334,7 @@ can't load skills.
 ## Phase 2 — Track to completion (reusable tail)
 
 The queued PRDs run headlessly and can take a while. Don't fire-and-forget, and don't block —
-hand off to a recurring check. `/process-feedback` delegates to this exact phase, so it is the
+hand off to a recurring check. An approved proposal delegates to this exact phase, so it is the
 single definition of "tracked to done" for both entry paths.
 
 7. **Watch the scheduler every ~30 min.** Start a 30-minute monitoring loop (`/loop 30m` over
@@ -348,7 +348,7 @@ single definition of "tracked to done" for both entry paths.
      per `PRD_AUTHORING.md`). Don't silently retry forever. For `needs_review`, the scheduler
      auto-files a Root Cause Analysis into the target project's feedback inbox
      (`rcaFeedbackHook`, filename `<date>-rca-<slug>-<runId>.md`) — reference that file in
-     your report rather than re-deriving the analysis, and let `/process-feedback` fold its
+     your report rather than re-deriving the analysis, and let the approving user fold its
      prevention hint back into future PRD authoring. A `rateLimited` exit-1 is the
      scheduler's benign auto-pause (auto-resumes next window) — keep waiting, don't escalate.
    - **All PRDs completed successfully** — go to step 8.

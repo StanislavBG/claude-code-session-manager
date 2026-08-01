@@ -116,7 +116,7 @@ describe('EpicsWorkspace', () => {
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })
 
-  it('"New Epic" swaps in the creation card; picking a project + goal creates and selects the new Epic', () => {
+  it('"New Epic" swaps in the creation card; picking a project + goal creates and selects the new Epic', async () => {
     installWindowApiMock()
     const el = mount(<EpicsWorkspace />)
 
@@ -145,6 +145,8 @@ describe('EpicsWorkspace', () => {
     act(() => {
       create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
+    // handleCreate awaits attachment resolution (PRD 865) — flush it.
+    await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'a brand new goal', 'feature')
     expect(el.querySelector('[data-testid="new-epic-card"]')).toBeNull()

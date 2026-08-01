@@ -33,6 +33,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { allProjectCwds, activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
+const { assertOpsWrite } = require('./opsOwnership.cjs');
 
 const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-machine.json');
 const LEGACY_QUEUE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json');
@@ -52,6 +53,7 @@ function projectHistoryPath(cwd) {
 }
 
 function writeJsonAtomicSync(file, value) {
+  assertOpsWrite(file, 'scheduler');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
@@ -59,6 +61,7 @@ function writeJsonAtomicSync(file, value) {
 }
 
 async function writeJsonAtomic(file, value) {
+  assertOpsWrite(file, 'scheduler');
   await fsp.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
   await fsp.writeFile(tmp, JSON.stringify(value, null, 2));

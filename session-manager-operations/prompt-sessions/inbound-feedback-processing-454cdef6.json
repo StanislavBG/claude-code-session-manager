@@ -1,0 +1,40 @@
+{
+  "session": {
+    "id": "inbound-feedback-processing-454cdef6",
+    "cwd": "/home/bilko/Projects/session-manager",
+    "goalText": "Inbound feedback processing",
+    "claudeSessionId": "a428e5c5-aff5-4b91-afa1-bafbee3b7bdc",
+    "status": "completed",
+    "createdAt": "2026-08-01T05:54:13.078Z",
+    "completedAt": "2026-08-01T06:00:25.623Z",
+    "tag": "discussion"
+  },
+  "events": [
+    {
+      "id": "973d464e-0164-4cf3-8510-00c13069d1ee",
+      "promptSessionId": "inbound-feedback-processing-454cdef6",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-01T05:54:13.078Z",
+      "text": "Inbound feedback processing"
+    },
+    {
+      "id": "ab386826-e422-421c-b8b9-31c79fbeb371",
+      "promptSessionId": "inbound-feedback-processing-454cdef6",
+      "kind": "prd_created",
+      "causedByEventId": "973d464e-0164-4cf3-8510-00c13069d1ee",
+      "at": "2026-08-01T05:54:13.079Z",
+      "prdSlug": "864-feedback-session-manager",
+      "text": "Feedback sweep emitted 864-feedback-session-manager"
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "ab386826-e422-421c-b8b9-31c79fbeb371",
+      "id": "pevt-ms9ypvrr-17",
+      "promptSessionId": "inbound-feedback-processing-454cdef6",
+      "at": "2026-08-01T06:00:25.623Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-01T06:00:25.623Z"
+}

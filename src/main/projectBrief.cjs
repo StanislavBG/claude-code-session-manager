@@ -226,8 +226,22 @@ async function gatherSrcTree(cwd) {
 
 const inFlight = new Set();
 
+/**
+ * Register the project root as an allowed WRITE root before persisting
+ * brief.json. config.cjs only grants project-root writes to roots added via
+ * addAllowedRoot, and until now the sole caller was pty.cjs's spawn — so a
+ * project whose tab had no live PTY (dormant/hydrated tab, chat-only Epic)
+ * failed the write with "Write outside allowed write boundaries" *after*
+ * paying for a full synthesis. The read-side validatePath above has already
+ * proven the cwd is inside allowedRoots, so this widens nothing.
+ */
+function allowBriefWrites(realCwd) {
+  config.addAllowedRoot(realCwd);
+}
+
 async function refresh({ cwd }) {
   const realCwd = config.validatePath(cwd);
+  allowBriefWrites(realCwd);
 
   if (inFlight.has(realCwd)) {
     return { ok: false, error: 'refresh already running' };
@@ -279,9 +293,10 @@ async function refresh({ cwd }) {
       priorPinned,
       model: BRIEF_MODEL,
       nowIso: new Date().toISOString(),
+      priorEditedAt: priorBrief ? priorBrief.editedAt : null,
     });
 
-    await config.writeJson(briefPath(realCwd), persisted);
+    await config.writeJson(briefPath(realCwd), persisted, { writer: 'project-home' });
     return { ok: true, brief: persisted };
   } finally {
     if (token) sessionSlots.release(token);
@@ -289,12 +304,29 @@ async function refresh({ cwd }) {
   }
 }
 
+/**
+ * Hand-edit brief.json in place — the "maintain" half of the generate-and-
+ * maintain loop, and the reason the brief is a real file rather than a cache.
+ * Zero LLM cost. Edited pinnable blocks are auto-pinned by computeUpdate so
+ * the next refresh feeds them back in instead of rewriting them.
+ */
+async function update({ cwd, patch }) {
+  const realCwd = config.validatePath(cwd);
+  allowBriefWrites(realCwd);
+  const currentBrief = await readBrief(realCwd);
+  const result = core.computeUpdate(currentBrief, patch, new Date().toISOString());
+  if (!result.ok) return result;
+  await config.writeJson(briefPath(realCwd), result.brief, { writer: 'project-home' });
+  return { ok: true, brief: result.brief };
+}
+
 async function setPin({ cwd, block, pinned }) {
   const realCwd = config.validatePath(cwd);
+  allowBriefWrites(realCwd);
   const currentBrief = await readBrief(realCwd);
   const result = core.computeSetPin(currentBrief, block, pinned);
   if (!result.ok) return result;
-  await config.writeJson(briefPath(realCwd), result.brief);
+  await config.writeJson(briefPath(realCwd), result.brief, { writer: 'project-home' });
   return { ok: true, brief: result.brief };
 }
 
@@ -303,6 +335,7 @@ function registerProjectBriefIpc() {
   ipcMain.handle('project-brief:get', v(s.projectBriefCwd, get));
   ipcMain.handle('project-brief:refresh', v(s.projectBriefCwd, refresh));
   ipcMain.handle('project-brief:set-pin', v(s.projectBriefSetPin, setPin));
+  ipcMain.handle('project-brief:update', v(s.projectBriefUpdate, update));
 }
 
 module.exports = {
@@ -310,4 +343,5 @@ module.exports = {
   get,
   refresh,
   setPin,
+  update,
 };

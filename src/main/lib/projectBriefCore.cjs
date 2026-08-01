@@ -8,12 +8,21 @@
  * with plain-object inputs.
  *
  * brief.json shape (see design-mocks/home/DESIGN_SPEC.md "Persistence"):
- *   { version, synthesizedAt, model, purpose, what[], areas[], scope[],
- *     conventions[], pins{what,conventions}, pinned{what,conventions} }
+ *   { version, synthesizedAt, editedAt, model, purpose, what[], areas[],
+ *     scope[], conventions[], pins{what,conventions}, pinned{what,conventions} }
+ *
+ * The file is not write-once: `computeUpdate` is the hand-edit path (the
+ * "maintain" half of generate-and-maintain), so the brief can be corrected
+ * without paying for a full re-synthesis.
  */
 
 const BRIEF_VERSION = 1;
 const PINNABLE_BLOCKS = ['what', 'conventions'];
+/** Fields a caller may hand-edit through `computeUpdate`. Editing a PINNABLE
+ *  block also auto-pins it, so the next refresh cannot silently undo the edit;
+ *  the derived blocks (areas/scope) are re-synthesized on every refresh by
+ *  design, so edits to them are a stopgap, not a source of truth. */
+const EDITABLE_FIELDS = ['purpose', 'what', 'areas', 'scope', 'conventions'];
 
 /** true when a source's mtime is strictly newer than the brief's synthesizedAt. */
 function computeDrift(mtimeMs, synthesizedAtMs) {
@@ -131,12 +140,15 @@ function applyPinEnforcement(rawBrief, priorPins, priorPinned) {
 }
 
 /** Full persisted-shape builder: stamps version/synthesizedAt/model on top of
- *  the pin-enforced content. `nowIso` is passed in — never computed here. */
-function buildPersistedBrief({ rawBrief, priorPins, priorPinned, model, nowIso }) {
+ *  the pin-enforced content. `nowIso` is passed in — never computed here.
+ *  `priorEditedAt` carries forward so a refresh doesn't erase the record that
+ *  the (pinned, therefore preserved) blocks were hand-edited. */
+function buildPersistedBrief({ rawBrief, priorPins, priorPinned, model, nowIso, priorEditedAt = null }) {
   const enforced = applyPinEnforcement(rawBrief, priorPins, priorPinned);
   return {
     version: BRIEF_VERSION,
     synthesizedAt: nowIso,
+    editedAt: priorEditedAt || null,
     model,
     purpose: enforced.purpose,
     what: enforced.what,
@@ -163,9 +175,61 @@ function computeSetPin(currentBrief, block, pinned) {
   return { ok: true, brief: { ...currentBrief, pins: nextPins, pinned: nextPinned } };
 }
 
+/** Per-field shape guard for a hand-edit patch. Mirrors validateBriefShape's
+ *  strictness so an edit can never write a brief the renderer can't render. */
+function validateUpdateField(field, value) {
+  if (field === 'purpose') {
+    if (typeof value !== 'string' || !value.trim()) return 'purpose must be a non-empty string';
+    return null;
+  }
+  if (!Array.isArray(value)) return `${field} must be an array`;
+  if (field === 'what' || field === 'conventions') {
+    if (value.some((v) => typeof v !== 'string')) return `${field} must be an array of strings`;
+    return null;
+  }
+  if (value.some((v) => !v || typeof v !== 'object' || Array.isArray(v))) return `${field} must be an array of objects`;
+  return null;
+}
+
+/**
+ * Pure hand-edit transform. Given the current brief (or null), a patch of
+ * editable fields, and `nowIso`, returns the next brief with the patch applied
+ * and `editedAt` stamped. Any edited PINNABLE block is auto-pinned and its
+ * frozen copy set to the new content, so the next refresh preserves the edit
+ * instead of overwriting it. Returns {ok:false, error} on a missing brief,
+ * an unknown/empty patch, or a field whose shape would break the renderer.
+ *
+ * Complexity: O(n) in the patched arrays' lengths.
+ */
+function computeUpdate(currentBrief, patch, nowIso) {
+  if (!currentBrief) return { ok: false, error: 'no brief to edit yet — generate one first' };
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return { ok: false, error: 'patch must be an object' };
+
+  const fields = Object.keys(patch);
+  if (fields.length === 0) return { ok: false, error: 'patch is empty' };
+  const unknown = fields.filter((f) => !EDITABLE_FIELDS.includes(f));
+  if (unknown.length) return { ok: false, error: `not editable: ${unknown.join(', ')}` };
+  for (const f of fields) {
+    const err = validateUpdateField(f, patch[f]);
+    if (err) return { ok: false, error: err };
+  }
+
+  const next = { ...currentBrief, ...patch, editedAt: nowIso };
+  next.pins = { what: false, conventions: false, ...(currentBrief.pins || {}) };
+  next.pinned = { what: null, conventions: null, ...(currentBrief.pinned || {}) };
+  for (const block of PINNABLE_BLOCKS) {
+    if (fields.includes(block)) {
+      next.pins[block] = true;
+      next.pinned[block] = patch[block];
+    }
+  }
+  return { ok: true, brief: next };
+}
+
 module.exports = {
   BRIEF_VERSION,
   PINNABLE_BLOCKS,
+  EDITABLE_FIELDS,
   computeDrift,
   buildSources,
   buildSynthesisPrompt,
@@ -173,4 +237,6 @@ module.exports = {
   applyPinEnforcement,
   buildPersistedBrief,
   computeSetPin,
+  validateUpdateField,
+  computeUpdate,
 };

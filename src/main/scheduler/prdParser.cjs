@@ -73,6 +73,14 @@ async function parsePrdRaw(filePath) {
     // dropped straight into an Epic's prds/ dir still get real linkage
     // instead of null.
     sourcePromptId: fm.sourcePromptId || deriveEpicIdFromPrdPath(filePath) || null,
+    // The Epic this PRD actually belongs to, derived purely from its location
+    // (epic dir name == epic id, 1:1 by design — prdLocations.deriveEpicIdFromPrdPath).
+    // Deliberately separate from sourcePromptId: that field is *intent* and
+    // can be stale or hand-written wrong in frontmatter (real rows in
+    // queue.json exist where sourcePromptId and sourceTabId disagree), while
+    // this one is *fact* on disk. Every surface that shows "which Epic is this
+    // from" reads this, so Scheduler and Epics can't drift apart.
+    epicId: deriveEpicIdFromPrdPath(filePath),
     // Optional traceability back to the chat tab that queued this PRD (PRD
     // 761) — read back at job completion to route a status prompt via
     // enqueueExternalPrompt (PRD 753). Additive — absent on every PRD

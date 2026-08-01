@@ -51,6 +51,10 @@ function installWindowApiMock(opts: {
       exists: vi.fn().mockResolvedValue(opts.transcriptExists),
     },
     logs: { write: vi.fn() },
+    promptSessionTranscript: {
+      append: vi.fn().mockResolvedValue({ ok: true }),
+      read: vi.fn().mockResolvedValue({ turns: [] }),
+    },
   }
   vi.stubGlobal('window', { api })
   return {
@@ -264,6 +268,74 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
     const chat = useChat.getState().get('epic-1')
     expect(chat.turns.some((t) => t.role === 'user' && t.text === 'status update from scheduler')).toBe(true)
+  })
+
+  it('durably captures the user prompt and the assistant reply for a chat tab that is a known Epic', async () => {
+    const { api, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
+    const { useSessions } = await import('../sessions')
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useChat } = await import('../chat')
+
+    useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({
+      sessions: {
+        'epic-1': {
+          id: 'epic-1',
+          cwd: '/proj/epic',
+          goalText: 'ship the thing',
+          claudeSessionId: 'epic-sess-1',
+          status: 'active',
+          createdAt: '2026-07-31T00:00:00.000Z',
+          completedAt: null,
+        },
+      },
+      events: {
+        'epic-1': [
+          {
+            id: 'pevt-1',
+            promptSessionId: 'epic-1',
+            kind: 'prompt',
+            causedByEventId: null,
+            at: '2026-07-31T00:00:00.000Z',
+            text: 'ship the thing',
+          },
+        ],
+      },
+    })
+
+    useChat.getState().send({ tabId: 'epic-1', sessionId: 'epic-sess-1', cwd: '/proj/epic', prompt: 'do the thing' })
+
+    await vi.waitFor(() =>
+      expect(api.promptSessionTranscript.append).toHaveBeenCalledWith(
+        '/proj/epic',
+        'epic-1',
+        expect.objectContaining({ role: 'user', text: 'do the thing' }),
+      ),
+    )
+
+    getCompleteHandler()!({ tabId: 'epic-1', sessionId: 'epic-sess-1', finalMessage: 'done — here is the result' })
+
+    expect(api.promptSessionTranscript.append).toHaveBeenCalledWith(
+      '/proj/epic',
+      'epic-1',
+      expect.objectContaining({ role: 'assistant', text: 'done — here is the result' }),
+    )
+    const events = usePromptSessions.getState().events['epic-1']
+    expect(events[events.length - 1]).toMatchObject({ kind: 'response', text: 'done — here is the result' })
+  })
+
+  it('does not attempt a durable capture for a chat tab that is not a known Epic', async () => {
+    const { api, run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useChat } = await import('../chat')
+
+    usePromptSessions.setState({ sessions: {}, events: {} })
+
+    useChat.getState().send({ tabId: 'plain-tab', sessionId: 'sess-1', cwd: '/proj', prompt: 'hello' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    getCompleteHandler()!({ tabId: 'plain-tab', sessionId: 'sess-1', finalMessage: 'hi' })
+
+    expect(api.promptSessionTranscript.append).not.toHaveBeenCalled()
   })
 
   it('refuses a completed/archived Epic instead of resuming its dead claudeSessionId', async () => {

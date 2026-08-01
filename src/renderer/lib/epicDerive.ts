@@ -22,7 +22,7 @@ export interface EpicSnapshots {
   usage?: Record<string, EpicUsage>
 }
 
-export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'draft'
+export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'proposed' | 'draft'
 
 /**
  * Derived Epic-level status per the design spec's status vocabulary. Order
@@ -33,6 +33,10 @@ export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | '
 export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): EpicDisplayStatus {
   const session = snapshots.sessions[epicId]
   if (session?.status === 'completed') return 'completed'
+  // A proposal has spent nothing and started nothing — it outranks every
+  // in-flight signal below because the only meaningful action on it is
+  // approve-or-discard.
+  if (session?.status === 'proposed') return 'proposed'
 
   const chat = snapshots.chats[epicId]
   const hasPendingNeedsInput = (chat?.ticketHistory ?? []).some((t) => t.status === 'needs-input')

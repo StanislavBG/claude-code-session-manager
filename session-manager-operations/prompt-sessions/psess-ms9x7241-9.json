@@ -1,0 +1,46 @@
+{
+  "session": {
+    "id": "psess-ms9x7241-9",
+    "cwd": "/home/bilko/Projects/session-manager",
+    "goalText": "In sesion-manager-operations, I can see the actual PRDs, but I;m not able to see the actual SESSION \"prompts\" from me and \"responses\" from the agent fully; This is used to then rebuild the context of the chat evertything is persistet so that it can used as grounding",
+    "claudeSessionId": "af1a1c7f-d937-4780-b9ae-1a19fde40292",
+    "status": "completed",
+    "createdAt": "2026-08-01T05:17:47.761Z",
+    "completedAt": "2026-08-01T05:44:47.064Z"
+  },
+  "events": [
+    {
+      "id": "pevt-ms9x7241-10",
+      "promptSessionId": "psess-ms9x7241-9",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-01T05:17:47.761Z",
+      "text": "In sesion-manager-operations, I can see the actual PRDs, but I;m not able to see the actual SESSION \"prompts\" from me and \"responses\" from the agent fully; This is used to then rebuild the context of the chat evertything is persistet so that it can used as grounding"
+    },
+    {
+      "kind": "prd_created",
+      "causedByEventId": "pevt-ms9x7241-10",
+      "prdSlug": "863-in-sesion-manager-operations-i-can-see-the-actual-prds",
+      "id": "pevt-ms9x724f-11",
+      "promptSessionId": "psess-ms9x7241-9",
+      "at": "2026-08-01T05:17:47.775Z"
+    },
+    {
+      "kind": "response",
+      "causedByEventId": "pevt-ms9x724f-11",
+      "text": "Iterated in Terminal view",
+      "id": "pevt-ms9y44a4-12",
+      "promptSessionId": "psess-ms9x7241-9",
+      "at": "2026-08-01T05:43:30.220Z"
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "pevt-ms9y44a4-12",
+      "id": "pevt-ms9y5rko-13",
+      "promptSessionId": "psess-ms9x7241-9",
+      "at": "2026-08-01T05:44:47.064Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-01T05:44:47.064Z"
+}

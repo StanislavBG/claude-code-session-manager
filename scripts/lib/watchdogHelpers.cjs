@@ -324,6 +324,7 @@ async function emitFeedbackPRD(cwd, {
       tag: 'discussion',
       status: 'proposed',
       reuseByGoal: true,
+      source: { producer: 'feedback-sweep' },
     });
     epicId = epic.epicId;
     prdsDir = epic.prdDir;

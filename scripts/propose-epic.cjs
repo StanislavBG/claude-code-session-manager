@@ -49,6 +49,7 @@ function readStdin() {
     status: 'proposed',
     reuseByGoal: true,
     openingPrompt: body || title,
+    source: { producer: 'propose-epic' },
   });
   process.stderr.write(`${created ? 'proposed' : 'joined existing proposal'} epic ${epicId}\n`);
   process.stdout.write(`${epicId}\n`);

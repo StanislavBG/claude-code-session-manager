@@ -454,6 +454,9 @@ test('emitFeedbackPRD with no prdsDir override writes into an auto-minted Epic p
     // Unattended automated sweep, not a human action: must file 'proposed'
     // (Approve & start gate), never 'active' (see watchdogHelpers.cjs).
     assert.equal(index.sessions[epicId].status, 'proposed');
+    // Provenance (PRD 905): the sweep is the producer of record for its
+    // standing "Inbound feedback processing" Epic.
+    assert.deepEqual(index.sessions[epicId].source, { producer: 'feedback-sweep' });
     const events = index.events[epicId];
     assert.equal(events[0].kind, 'prompt');
     assert.equal(events[events.length - 1].kind, 'prd_created', 'dispatch must be traced as prd_created');

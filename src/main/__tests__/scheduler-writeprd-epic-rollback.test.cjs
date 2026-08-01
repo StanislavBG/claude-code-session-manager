@@ -20,6 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { remote } = require('../scheduler.cjs');
 const { ensureEpic, readActiveIndex } = require('../lib/epicMint.cjs');
+const config = require('../config.cjs');
 
 const tmpDirs = [];
 
@@ -76,4 +77,29 @@ test('writePrd: invalid-slug failure when joining a pre-existing Epic leaves tha
   expect(Object.keys(afterIndex.sessions)).toEqual([preexisting.epicId]);
   expect(afterIndex.sessions[preexisting.epicId]).toEqual(beforeIndex.sessions[preexisting.epicId]);
   expect(afterIndex.events[preexisting.epicId]).toEqual(beforeIndex.events[preexisting.epicId]);
+});
+
+// Provenance (PRD 905): writePrd's ensureEpic call passes
+// source: { producer: 'scheduler-dispatch', prdSlug }, but this call is
+// join-only (mintIfMissing:false, explicit epicId) — ensureEpic's
+// explicitEpicId branch returns before ever reading `source`, so a
+// successful join must NOT write/alter the joined Epic's `source` field.
+test('writePrd: successful join does not write a source field onto the pre-existing Epic (join-only no-op)', async () => {
+  // Must live under the home dir — config.cjs's writeTextAtomic validates
+  // paths against allowedRoots=home dir, unlike the failure-path tests above
+  // (which never reach the write) os.tmpdir() is not sufficient here.
+  const cwd = fs.mkdtempSync(path.join(os.homedir(), '.sm-writeprd-epic-source-'));
+  tmpDirs.push(cwd);
+  config.addAllowedRoot(cwd);
+
+  const preexisting = await ensureEpic(cwd, { goalText: 'pre-existing epic goal for join' });
+  expect(preexisting.created).toBe(true);
+
+  const body = `---\ntitle: Joins the existing epic\nsourcePromptId: ${preexisting.epicId}\n---\n\nbody text\n`;
+  const result = await remote.writePrd('valid-slug', body, cwd);
+
+  expect(result.ok).toBe(true);
+
+  const index = readActiveIndex(cwd);
+  expect('source' in index.sessions[preexisting.epicId]).toBe(false);
 });

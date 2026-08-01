@@ -4256,6 +4256,11 @@ const remote = {
             // simply won't match and this call throws below.
             epicId: fm.sourcePromptId,
             mintIfMissing: false,
+            // Join-only call (mintIfMissing:false, explicit epicId): the
+            // explicitEpicId branch in ensureEpic returns before `source` is
+            // ever read, so this is a no-op today — kept for symmetry/audit
+            // trail if that join path ever grows a source-touch (PRD 902/905).
+            source: { producer: 'scheduler-dispatch', prdSlug: slug },
           });
           dir = epic.prdDir;
           epicTrace = epic.epicId;

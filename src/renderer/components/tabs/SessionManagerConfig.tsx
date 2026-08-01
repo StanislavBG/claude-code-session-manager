@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useScheduleState } from '../../state/scheduleState'
+import { GlobalControlsSection } from './GlobalControlsSection'
+import type { NavKey } from '../LeftNav'
 
 /**
  * SessionManagerConfig — the home for GLOBAL (machine-level) configuration,
@@ -14,7 +16,11 @@ import { useScheduleState } from '../../state/scheduleState'
 
 type SlotSnapshot = { total: number; inUse: number; holders: { owner: string; at: string }[] }
 
-export function SessionManagerConfig() {
+interface SessionManagerConfigProps {
+  navigate?: (k: NavKey) => void
+}
+
+export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
   const snap = useScheduleState((s) => s.snapshot)
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
   const [saving, setSaving] = useState(false)
@@ -40,6 +46,9 @@ export function SessionManagerConfig() {
 
   return (
     <div className="max-w-[760px] space-y-6">
+      {/* ── Global Controls ──────────────────────────────────────── */}
+      <GlobalControlsSection navigate={navigate} />
+
       {/* ── Session pool ─────────────────────────────────────────── */}
       <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
         <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Session pool</h2>

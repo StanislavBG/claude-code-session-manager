@@ -110,7 +110,7 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       case 'permissions':   return <Permissions />
       case 'settings':      return <Settings />
       case 'remote':        return <WebRemote />
-      case 'sm-config':     return <SessionManagerConfig />
+      case 'sm-config':     return <SessionManagerConfig navigate={ctx.onNavigate} />
       // Former-modal tools rendered with variant="page" so they paint inline
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.

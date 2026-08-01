@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { usePromptSessions } from '../../state/promptSessions'
 import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
@@ -10,6 +10,8 @@ import { formatAgo, formatRelative } from '../../lib/formatTime'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { LegendItem } from './scheduler/sched-primitives'
 import { LearningPanel } from '../LearningPanel'
+import { useLayout } from '../../state/layout'
+import { deriveNavFace } from '../../lib/navFace'
 
 /**
  * Scheduler — the single home for the claude -p batch workflow. Three tabs,
@@ -28,6 +30,12 @@ import { LearningPanel } from '../LearningPanel'
  * Plans, and the duplicate "Background Agents" tool) — all three read the same
  * queue.json + each active project's <cwd>/session-manager-operations/scheduler/prds/
  * files. One surface, no duplication.
+ *
+ * The project/all scope toggle defaults from the NavFace
+ * (leftnav-two-face-framework): Home face -> all projects, Project face ->
+ * the active tab's cwd. The default only re-applies on an actual face
+ * transition, never on a same-face re-render, and never once the user has
+ * manually toggled scope since the last transition.
  */
 
 type SubView = 'queue' | 'prds' | 'history'
@@ -174,8 +182,6 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
 
 // ─── Scheduler shell ─────────────────────────────────────────────────────────
 
-const LS_SCOPE_KEY = 'sm.schedulerTab.scope'
-
 export function Scheduler() {
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
@@ -183,10 +189,27 @@ export function Scheduler() {
   })
   // Scheduler is a BROWSER over TAB → EPIC → PRD (CLAUDE.md domain model):
   // default to the active tab's project. "All projects" stays as an explicit
-  // machine-wide escape hatch.
-  const [scope, setScope] = useState<'project' | 'all'>(() =>
-    localStorage.getItem(LS_SCOPE_KEY) === 'all' ? 'all' : 'project',
-  )
+  // machine-wide escape hatch. The default is NavFace-driven (see the
+  // module docstring) — Home face defaults to 'all', Project face to
+  // 'project' — and only re-applies on an actual face transition.
+  const focusedPanelId = useLayout((s) => s.focusedPanelId)
+  const navFace = deriveNavFace(focusedPanelId)
+  const [scope, setScope] = useState<'project' | 'all'>(() => (navFace === 'project' ? 'project' : 'all'))
+  const manuallyTouchedRef = useRef(false)
+  const prevNavFaceRef = useRef(navFace)
+  const handleScopeChange = (next: 'project' | 'all') => {
+    manuallyTouchedRef.current = true
+    setScope(next)
+  }
+  useEffect(() => {
+    if (prevNavFaceRef.current === navFace) return
+    prevNavFaceRef.current = navFace
+    if (manuallyTouchedRef.current) {
+      manuallyTouchedRef.current = false
+      return
+    }
+    setScope(navFace === 'project' ? 'project' : 'all')
+  }, [navFace])
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
@@ -216,10 +239,6 @@ export function Scheduler() {
   useEffect(() => {
     localStorage.setItem(LS_KEY, subView)
   }, [subView])
-
-  useEffect(() => {
-    localStorage.setItem(LS_SCOPE_KEY, scope)
-  }, [scope])
 
   return (
     <div className="h-full flex flex-col">
@@ -251,7 +270,8 @@ export function Scheduler() {
           <div className="ml-auto flex items-center gap-1 text-[12px]" role="group" aria-label="Scheduler scope">
             <button
               type="button"
-              onClick={() => setScope('project')}
+              data-testid="scheduler-scope-project"
+              onClick={() => handleScopeChange('project')}
               className={`px-2.5 py-1 rounded-full border transition-colors ${
                 scope === 'project'
                   ? 'border-accent/60 bg-accent/10 text-fg font-medium'
@@ -263,7 +283,8 @@ export function Scheduler() {
             </button>
             <button
               type="button"
-              onClick={() => setScope('all')}
+              data-testid="scheduler-scope-all"
+              onClick={() => handleScopeChange('all')}
               className={`px-2.5 py-1 rounded-full border transition-colors ${
                 scope === 'all'
                   ? 'border-accent/60 bg-accent/10 text-fg font-medium'

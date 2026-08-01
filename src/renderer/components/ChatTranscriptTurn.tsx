@@ -571,21 +571,21 @@ export function Turn({
           <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
         )}
         {presentation === 'working' ? (
-          <div className={`bg-elev px-3 py-2 text-sm text-fg-dim ${bubbleCorners}`}>
+          <div className={`border border-line bg-elev px-3 py-2 text-sm text-fg-dim ${bubbleCorners}`}>
             <span className="inline-flex items-center gap-2">
               <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
               working…
             </span>
           </div>
         ) : presentation === 'placeholder' ? (
-          <div className={`bg-elev px-3 py-2 text-sm italic text-fg-dim ${bubbleCorners}`}>
+          <div className={`border border-line bg-elev px-3 py-2 text-sm italic text-fg-dim ${bubbleCorners}`}>
             (no textual reply — see tool activity above)
           </div>
         ) : (
           <>
             <div
               ref={bodyRef}
-              className={`prose-chat bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
+              className={`prose-chat border border-line bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd, linkTarget) }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}

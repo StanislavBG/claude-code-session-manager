@@ -55,6 +55,8 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window', faces: BOTH },
   { key: 'remote',         group: 'Configure', label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default', faces: HOME },
   { key: 'sm-config',      group: 'Configure', label: 'Session-Manager', icon: 'settings',      hint: 'Global session pool, guardrails, scheduler policy', faces: HOME },
+  { key: 'agent-library',  group: 'Configure', label: 'Agent Library',  icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
+  { key: 'tag-library',    group: 'Configure', label: 'Tag Library',    icon: 'target',         hint: 'Epic intent tags and their /develop behavior', faces: HOME },
 
   // Tools
   { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk', faces: HOME },

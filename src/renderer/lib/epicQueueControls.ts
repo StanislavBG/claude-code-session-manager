@@ -8,6 +8,7 @@
  */
 import type { PromptSession, PromptSessionEvent } from '../state/promptSessions'
 import { epicDisplayStatus, epicPrds, epicStats, type EpicDisplayStatus, type EpicSnapshots } from './epicDerive'
+import { TAG_GROUP_ORDER } from './tagLibrary'
 
 export type EpicFilterKey = 'open' | 'needs' | 'running' | 'pinned' | 'all'
 export type EpicGroupKey = 'status' | 'tag' | 'recency'
@@ -18,7 +19,7 @@ export const PAGE = 18
 export const PAGE_INCREMENT = 40
 
 export const STATUS_GROUP_ORDER: EpicDisplayStatus[] = ['proposed', 'needs', 'running', 'queued', 'active', 'completed']
-export const TAG_GROUP_ORDER: ReadonlyArray<string> = ['feature', 'bug', 'discussion', 'build']
+export { TAG_GROUP_ORDER }
 export const RECENCY_GROUP_ORDER: ReadonlyArray<string> = ['Today', 'This week', 'This month', 'Older']
 
 export interface EpicCounts {

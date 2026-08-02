@@ -18,7 +18,7 @@ describe('navGroups Home swap', () => {
 })
 
 describe('getNavItemsForFace', () => {
-  const HOME_ONLY = ['overview', 'browser', 'plugins', 'keybindings', 'remote', 'sm-config', 'voice']
+  const HOME_ONLY = ['overview', 'browser', 'plugins', 'keybindings', 'remote', 'sm-config', 'voice', 'agent-library', 'tag-library']
   const PROJECT_ONLY = ['project-home', 'repoviz', 'search', 'memory', 'terminal']
   const BOTH = [
     'scheduler', 'history', 'system-prompt', 'skills', 'mcp', 'hooks',

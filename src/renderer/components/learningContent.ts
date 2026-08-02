@@ -634,4 +634,37 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'SM_SESSION_SLOTS (1–3) overrides the pool size for one launch; the default is sized to keep three 1 GB+ jobs from starving the app.',
       ],
     },
+  'agent-library': {
+      headline: 'Agent Library — every persona available to this machine',
+      intro: 'Global agent definitions live at ~/.claude/agents/*.md. A project can overlay a same-named agent at <project>/.claude/agents/<name>.md, which Claude Code prefers over the global definition whenever both exist. This page is read-only — edit the .md files directly to change an agent.',
+      sections: [
+        {
+          title: 'What it shows',
+          items: [
+            { term: 'Global personas', body: 'Every agent .md file under ~/.claude/agents, with its frontmatter (name, description, tools) and body.' },
+            { term: 'Overriding projects', body: 'For each agent, which of your currently-open project tabs has a local overlay of the same name — that overlay is what actually runs in that project.' },
+          ],
+        },
+      ],
+      tips: [
+        'Home face only — this is machine-wide data, not scoped to one project.',
+      ],
+    },
+  'tag-library': {
+      headline: 'Tag Library — the Epic intent-tag taxonomy',
+      intro: 'Every Epic carries an initial intent tag — feature, bug, discussion, or build — chosen at creation. The tag sets how eagerly /develop should fire inside that Epic\'s session: feature/bug/build treat PRD decomposition as the expected next step, discussion keeps /develop available but never assumed until whether-to-build is settled.',
+      sections: [
+        {
+          title: 'What it shows',
+          items: [
+            { term: 'Tag', body: 'The four intent tags an Epic can be created with.' },
+            { term: '/develop eagerness', body: 'Whether PRD decomposition is the expected default for that tag, or available-but-not-assumed.' },
+          ],
+        },
+      ],
+      tips: [
+        'Home face only — the taxonomy is machine-wide, not scoped to one project.',
+        'Read-only viewer — change an existing Epic\'s tag from its queue row menu, not from this page.',
+      ],
+    },
 }

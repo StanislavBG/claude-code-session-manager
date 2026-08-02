@@ -21,6 +21,8 @@ import { Browser } from './tabs/Browser'
 import { Scheduler } from './tabs/Scheduler'
 import { WebRemote } from './tabs/WebRemote'
 import { SessionManagerConfig } from './tabs/SessionManagerConfig'
+import { AgentLibrary } from './tabs/AgentLibrary'
+import { TagLibrary } from './tabs/TagLibrary'
 import { SectionFrame } from './layout/SectionFrame'
 import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 
@@ -59,6 +61,8 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'permissions':   { title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
   'settings':      { title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
   'sm-config':     { title: 'Session-Manager configuration', intro: 'Machine-level configuration — the global session pool, guardrails, and scheduler runtime policy. Everything project-scoped lives with its project; only what is global by nature lives here.' },
+  'agent-library': { title: 'Agent Library',                 intro: 'Every agent persona available on this machine — global definitions in ~/.claude/agents, and which currently-open projects override them locally. Read-only.' },
+  'tag-library':   { title: 'Tag Library',                   intro: 'Every Epic intent tag, its meaning, and its /develop-eagerness default. Read-only.' },
   'remote':        { title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
@@ -111,6 +115,8 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       case 'settings':      return <Settings />
       case 'remote':        return <WebRemote />
       case 'sm-config':     return <SessionManagerConfig navigate={ctx.onNavigate} />
+      case 'agent-library': return <AgentLibrary />
+      case 'tag-library':   return <TagLibrary />
       // Former-modal tools rendered with variant="page" so they paint inline
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.

@@ -1,5 +1,6 @@
 import type { PromptTicket } from '../state/chat'
 import type { PrdDisplayStatus } from '../components/tabs/scheduler/sched-primitives'
+import type { EpicTag } from './tagLibrary'
 
 /**
  * Maps a PromptTicket's lifecycle status onto the Almanac PRD status-pill
@@ -31,7 +32,7 @@ export function ticketDisplayStatus(status: PromptTicket['status']): PrdDisplayS
  * declares up front that the goal is back-and-forth research with the agent,
  * so it must never be routed to PRD authoring — see isDiscussionTag below.
  */
-export type TicketTag = 'feature' | 'bug' | 'discussion' | 'build'
+export type TicketTag = EpicTag
 
 /**
  * Tone for a ticket's user-selected tag — the same {bg,text,border,label}

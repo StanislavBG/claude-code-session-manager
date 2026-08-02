@@ -32,6 +32,8 @@ export const SCREEN_KEYS: NavKey[] = [
   'settings',
   'remote',
   'sm-config',
+  'agent-library',
+  'tag-library',
   // Tools (promoted from modal in v0.13.1)
   'voice',
   'repoviz',

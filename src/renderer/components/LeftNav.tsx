@@ -39,3 +39,7 @@ export type NavKey =
   | 'remote'
   // Global (machine-level) Session-Manager configuration — session pool, scheduler policy.
   | 'sm-config'
+  // Read-only directory of global + per-project agent personas (Home face only).
+  | 'agent-library'
+  // Read-only directory of the Epic intent-tag taxonomy (Home face only).
+  | 'tag-library'

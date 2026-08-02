@@ -1,0 +1,103 @@
+{
+  "identity": {
+    "name": "Session Manager",
+    "tag": "session-manager",
+    "version": "v0.54.0",
+    "oneLine": "Electron desktop cockpit for driving Claude Code CLI sessions across projects via a TAB→Epic→PRD hierarchy, with scheduling, chat/terminal views, and mobile relay.",
+    "claim": "A local cockpit for Claude Code.",
+    "sub": "Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, History, Scheduler, Memory, Permissions, etc.), plus a mobile web cockpit at bilko.run. Runs on your machine — the fs layer never writes outside the home directory, and Project Pages ship with zero network egress.",
+    "audience": "For developers running Claude Code CLI sessions across multiple projects",
+    "install": "npx claude-code-session-manager@latest"
+  },
+  "stats": [
+    { "v": "730", "k": "commits", "n": "full git history, this checkout" },
+    { "v": "42", "k": "archived Epics", "n": "each independently resumable" },
+    { "v": "3", "k": "concurrent claude -p sessions", "n": "machine-wide session slot pool" },
+    { "v": "189", "k": "test files", "n": "unit (vitest) + e2e (Playwright) combined" }
+  ],
+  "pillars": [
+    { "t": "One tab, one project", "d": "A Terminal tab is anchored to one cwd; that cwd IS the project identity, and every skill, hook and permission scopes itself to it automatically.", "k": "Workspace" },
+    { "t": "Epics replaced the feedback folder", "d": "status: 'proposed' is the human approval gate — an agent files a proposed Epic instead of writing into a feedback inbox; nothing runs until a human presses Approve & start.", "k": "Planning" },
+    { "t": "A scheduler that respects the billing window", "d": "Approved PRDs run as claude -p jobs from a ≤3-deep machine-wide session slot pool, auto-pausing on rate-limit and resuming at the next 5h reset.", "k": "Automation" },
+    { "t": "Single-writer law over the ops root", "d": "Every session-manager-operations/<namespace> folder has exactly one owning surface that may write it — fail-closed, enforced in opsOwnership.cjs.", "k": "Integrity" }
+  ],
+  "quotes": [],
+  "feature": {
+    "name": "Scheduler Redesign (Almanac / Canvas-2)",
+    "kicker": "Feature",
+    "status": "Shipped · v0.52–v0.54",
+    "owner": "Solo maintainer",
+    "oneLine": "The Scheduler tab's Canvas-2 restyle, paired with structural fixes that make an Epic's proposed→active transition and its on-disk index un-corruptible.",
+    "problem": "Scheduler/Plans/Background-Agents had grown into three overlapping nav destinations, and nothing stopped an Epic from being minted directly into 'active' or a concurrent write from clobbering active-index.json.",
+    "solution": "Scheduler/Plans/Background-Agents were merged into one Scheduler destination (2026-06-03), then restyled around the Almanac/Canvas-2 design system. ensureEpic and createPromptSession were made structurally unable to mint an Epic as anything but 'proposed', and persistActiveIndex became a read-merge-write instead of a blind overwrite.",
+    "steps": [
+      { "t": "Nav consolidation", "d": "Scheduler/Plans/Background-Agents merged into one Scheduler destination; Home-tab vs Project-tab left-nav split out." },
+      { "t": "Canvas-2 restyle", "d": "f559d59 — Scheduler rebuilt around the Canvas-2 design: Machine destination, first-run guide, merged diagnostics." },
+      { "t": "Epic-creation lockdown", "d": "b2b1b82 / 92280db / 3d12e19 — ensureEpic and persistActiveIndex made structurally unable to mint or overwrite an Epic into 'active'." },
+      { "t": "Epic Queue UX", "d": "Actions dropdown menu, Build toolbar button and a discuss-first path replaced the prior scattered row controls." },
+      { "t": "Two-axis Agent/Mission picker", "d": "1c8f5ed — New Epic card now separates agentType (who runs the session) from tag/mission (what it's for), with a flip-layout grounding board inspector." }
+    ],
+    "rules": [
+      { "t": "Exactly 3 Epic states", "d": "proposed / active / completed — no draft state; a half-typed Epic is proposed." },
+      { "t": "Never mint directly into active", "d": "Enforced structurally in ensureEpic and createPromptSession, not just by convention." },
+      { "t": "Read-merge-write only", "d": "active-index.json writes never blind-overwrite; a race can no longer drop another writer's session." },
+      { "t": "Selectors return stable references", "d": "A zustand selector must never build a fresh array/object per call — three prior blank-app incidents, guarded by npm run lint:selectors." }
+    ],
+    "specs": [
+      ["Epic states", "proposed / active / completed", "no draft state"],
+      ["Session pool", "≤3 concurrent claude -p", "machine-wide, not per project"],
+      ["Active-index writes", "read-merge-write", "never a blind overwrite (3d12e19)"],
+      ["Nav surface", "1 Scheduler destination", "merged from Scheduler/Plans/Background-Agents, 2026-06-03"]
+    ],
+    "faq": [
+      { "q": "Can an Epic be created directly as active?", "a": "No — ensureEpic and createPromptSession are structurally unable to do that; every Epic is born proposed (b2b1b82, 92280db)." },
+      { "q": "What happens if active-index.json is written by two processes at once?", "a": "persistActiveIndex has been a read-merge-write since 3d12e19, so a race no longer drops the other writer's session." },
+      { "q": "Where did the feedback folder go?", "a": "It's retired — status: 'proposed' Epics are the human-approval gate now; nothing runs until Approve & start is pressed." }
+    ],
+    "timeline": [
+      { "w": "v0.52.0", "t": "Canvas-2 Scheduler redesign", "s": "done" },
+      { "w": "v0.53.0", "t": "Epic-creation lockdown + v51 perf work", "s": "done" },
+      { "w": "v0.54.0", "t": "Two-axis Agent/Mission picker + grounding board inspector", "s": "done" },
+      { "w": "next", "t": "New Epic card modal integration polish (open Epic psess-msby9bx8-4)", "s": "next" }
+    ]
+  },
+  "architecture": {
+    "summary": "An Electron main process owns the claude CLI session pool, the scheduler queue and the fs layer; a React renderer talks to it only over typed, zod-validated IPC channels — neither side touches the other's concern directly.",
+    "principles": [
+      { "t": "Single-writer law", "d": "Every session-manager-operations/<namespace> has exactly one owning surface; a write by an undeclared writer throws (opsOwnership.cjs, fail-closed)." },
+      { "t": "Atomic writes only", "d": "All fs writes go through config.cjs's writeJson/writeTextAtomic (tmp + rename) — no ad hoc fs.writeFile in app-owned state." },
+      { "t": "Stores are islands", "d": "Renderer zustand stores never cross-subscribe; components compose multiple stores via hooks/selectors instead." },
+      { "t": "Project-scoped by default", "d": "A tab IS a cwd; every nav destination, skill and permission derives from the focused project, not global config." }
+    ],
+    "layers": [
+      { "n": "Renderer", "d": "React tabs/state/components — Terminal, Scheduler, Epics, Project Home, Config", "f": "309 files", "tone": "accent" },
+      { "n": "IPC contract", "d": "ipcSchemas.cjs — zod-validated channels between renderer and main", "f": "1 schema file", "tone": "butter" },
+      { "n": "Main process", "d": "Session pool, scheduler, queue store, hooks runner, transcripts, config fs layer", "f": "185 files", "tone": "sage" },
+      { "n": "Disk + CLI", "d": "claude binary, project cwds, session-manager-operations/, ~/.claude config tree", "f": "external", "tone": "mute" }
+    ],
+    "modules": [
+      { "n": "promptSessions.ts", "d": "Epic lifecycle state — status transitions, rename/delete guards", "f": 1, "dep": ["epicMint"], "heat": 0.9 },
+      { "n": "epicMint.cjs / activeIndexMerge.cjs", "d": "Epic minting + read-merge-write index invariants", "f": 2, "dep": [], "heat": 0.85 },
+      { "n": "scheduler.cjs", "d": "runs PRDs as claude -p jobs; boot reconciliation, dead-process reaper, feedback sweep", "f": 1, "dep": ["queueStore", "sessionSlots"], "heat": 0.8 },
+      { "n": "index.cjs / ipcSchemas.cjs / promptSessionEvents.cjs", "d": "Main-process IPC surface for Epic lifecycle", "f": 3, "dep": ["epicMint"], "heat": 0.7 },
+      { "n": "scheduler/tabs primitives", "d": "Almanac design primitives, Canvas-2 restyle", "f": 1, "dep": ["scheduler.cjs"], "heat": 0.6 },
+      { "n": "projectPages.cjs / projectBrief.cjs", "d": "Static Project Page generation pipeline (Stage 2-4)", "f": 2, "dep": ["config"], "heat": 0.5 },
+      { "n": "browserAgentServer.cjs / browserView.cjs", "d": "Embedded browser for Claude.ai login", "f": 2, "dep": [], "heat": 0.3 }
+    ],
+    "flow": [
+      { "a": "Main process", "b": "IPC broadcast", "t": "config:changed / transcript:event:<tabId> / schedule:snapshot-changed", "n": "events published after every state change" },
+      { "a": "IPC broadcast", "b": "Zustand store", "t": "store subscribes and updates", "n": "each store independent, no cross-subscribe" },
+      { "a": "Zustand store", "b": "Component", "t": "useConfig() / useLiveTab() / useScheduleState()", "n": "selectors read raw slices only, then derive in the component" }
+    ],
+    "decisions": [
+      { "id": "DEC-1", "t": "No 'general' OWNERS namespace", "w": "architecture/, design-mocks/, HUMAN_LEARN/, reviews/ stay outside the single-writer law as skill-authored documentation, not app-owned runtime state (decided 2026-07-31).", "s": "accepted" },
+      { "id": "DEC-2", "t": "project-pages/ is not an OWNERS namespace either", "w": "Written directly by a project-home-builder Epic's own Write tool calls, never through config.cjs — no app-enforceable concurrent-write hazard to guard.", "s": "accepted" },
+      { "id": "DEC-3", "t": "Epic status has exactly 3 states", "w": "No draft state; a half-typed Epic is proposed. Enforced structurally in ensureEpic/createPromptSession rather than left to convention.", "s": "accepted" }
+    ],
+    "risks": [
+      { "t": "Browser Broken", "d": "Embedded browser for Claude.ai login is flagged broken for the Google OAuth flow (brief.json area heat 0.3).", "s": "open" },
+      { "t": "New Epic card / Agent Library integration", "d": "Open Epic psess-msby9bx8-4 reports the New Epic modal's Type picker doesn't yet read clearly as Agent vs Mission.", "s": "watching" },
+      { "t": "CLI version drift", "d": "The shell assumes claude CLI flags/behavior that may change between releases.", "s": "watching" }
+    ]
+  }
+}

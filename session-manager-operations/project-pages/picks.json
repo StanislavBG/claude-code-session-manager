@@ -1,0 +1,26 @@
+{
+  "marketing": {
+    "hero": "editorial",
+    "proof": "stats",
+    "pillars": "cards",
+    "tour": "tabs",
+    "workflow": "rail",
+    "depth": "compare",
+    "faq": "accordion",
+    "close": "install"
+  },
+  "feature": {
+    "header": "spec",
+    "mech": "steps",
+    "walk": "hotspots",
+    "states": "grid",
+    "rules": "table",
+    "status": "timeline"
+  },
+  "architecture": {
+    "summary": "layers",
+    "map": "boxes",
+    "flow": "rail",
+    "dec": "adr"
+  }
+}

@@ -222,8 +222,8 @@ describe('NewEpicCard', () => {
 
   it('loads the Agent Library as a button list under "1 · agent", defaulting to "Default"', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
-      { name: 'debugger', description: 'Diagnoses failures.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], path: '', body: '', overridingProjects: [] },
+      { name: 'debugger', description: 'Diagnoses failures.', tools: [], path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
@@ -237,7 +237,7 @@ describe('NewEpicCard', () => {
 
   it('threads the selected agent into createPromptSession and grounds the opening prompt with its description', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'builder', description: 'Ships releases end to end.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases end to end.', tools: [], path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})

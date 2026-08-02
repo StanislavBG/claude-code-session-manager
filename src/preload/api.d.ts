@@ -263,27 +263,10 @@ export interface AgentPersona {
   name: string;
   description: string | null;
   tools: string[];
-  model: string | null;
-  color: string | null;
-  /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
-  tags: string[];
   path: string;
   body: string;
   /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
   overridingProjects: string[];
-}
-
-/** Payload for `agents.savePersona` — creates or overwrites a global persona file. */
-export interface AgentPersonaSaveInput {
-  name: string;
-  /** Previous filename, when renaming an existing persona. Omit when creating. */
-  originalName?: string;
-  description: string;
-  tools: string[];
-  model: string;
-  color: string;
-  tags: string[];
-  body: string;
 }
 
 export interface VoiceHotkeyConfig {
@@ -1346,9 +1329,6 @@ export interface SessionManagerAPI {
   };
   agents: {
     listPersonas: () => Promise<AgentPersona[]>;
-    savePersona: (payload: AgentPersonaSaveInput) => Promise<{ ok: boolean; path: string }>;
-    deletePersona: (payload: { name: string }) => Promise<{ ok: boolean }>;
-    removeOverride: (payload: { name: string; projectName: string }) => Promise<{ ok: boolean }>;
   };
   logs: {
     write: (

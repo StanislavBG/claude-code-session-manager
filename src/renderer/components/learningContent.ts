@@ -621,19 +621,18 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
     },
   'agent-library': {
       headline: 'Agent Library — every persona available to this machine',
-      intro: 'Global agent definitions live at ~/.claude/agents/*.md. A project can overlay a same-named agent at <project>/.claude/agents/<name>.md, which Claude Code prefers over the global definition whenever both exist. New / Duplicate / Save / Delete here write the matching global .md file directly.',
+      intro: 'Global agent definitions live at ~/.claude/agents/*.md. A project can overlay a same-named agent at <project>/.claude/agents/<name>.md, which Claude Code prefers over the global definition whenever both exist. This page is read-only — edit the .md files directly to change an agent.',
       sections: [
         {
           title: 'What it shows',
           items: [
-            { term: 'Global personas', body: 'Every agent .md file under ~/.claude/agents, with its frontmatter (name, description, model, color, tools) and body.' },
-            { term: 'Overriding projects', body: 'For each agent, which of your currently-open project tabs has a local overlay of the same name — that overlay is what actually runs in that project. Dropping one here deletes that project\'s local .md file.' },
+            { term: 'Global personas', body: 'Every agent .md file under ~/.claude/agents, with its frontmatter (name, description, tools) and body.' },
+            { term: 'Overriding projects', body: 'For each agent, which of your currently-open project tabs has a local overlay of the same name — that overlay is what actually runs in that project.' },
           ],
         },
       ],
       tips: [
         'Home face only — this is machine-wide data, not scoped to one project.',
-        'Only the global definition is editable here — a project overlay is created by Claude Code convention (a same-named file under <project>/.claude/agents/), not from this page.',
       ],
     },
   'tag-library': {
@@ -645,13 +644,12 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
           items: [
             { term: 'Tag', body: 'The four intent tags an Epic can be created with.' },
             { term: '/develop eagerness', body: 'Whether PRD decomposition is the expected default for that tag, or available-but-not-assumed.' },
-            { term: 'Agents carrying this tag', body: 'Which Agent Library personas have this tag in their `tags:` frontmatter — the same relationship Agent Library edits from the agent side. Assign or remove an agent here to update that persona\'s file directly.' },
           ],
         },
       ],
       tips: [
         'Home face only — the taxonomy is machine-wide, not scoped to one project.',
-        'The tag taxonomy itself is read-only here — change an existing Epic\'s tag from its queue row menu, not from this page. The agent↔tag assignment, though, is editable from either Tag Library or Agent Library.',
+        'Read-only viewer — change an existing Epic\'s tag from its queue row menu, not from this page.',
       ],
     },
 }

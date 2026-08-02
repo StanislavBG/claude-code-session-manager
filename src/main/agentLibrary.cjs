@@ -31,101 +31,6 @@ function parseTools(raw) {
   return raw.split(',').map((t) => t.trim()).filter(Boolean);
 }
 
-/** Filename-safe persona name: lowercase, hyphenated, matches the `.md` files on disk. */
-const PERSONA_NAME_RE = /^[a-z][a-z0-9-]*$/;
-
-/**
- * Serializes a persona's frontmatter + body back to `.md` file text.
- * `tags` is a Claude-Code-agnostic extension of the frontmatter (Claude Code
- * itself never reads it) — the Epic intent tags (tagLibrary.ts's TAG_LIBRARY)
- * this persona is associated with, so Agent Library and Tag Library can each
- * assign/remove the relationship from either side. Stored the same
- * comma-list way as `tools` for one parser to cover both.
- */
-function serializePersona({ name, description, tools, model, color, tags, body }) {
-  const lines = ['---', `name: ${name}`];
-  if (description) lines.push(`description: ${description}`);
-  if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
-  if (model && model !== 'inherit') lines.push(`model: ${model}`);
-  if (color) lines.push(`color: ${color}`);
-  if (tags && tags.length) lines.push(`tags: ${tags.join(', ')}`);
-  lines.push('---', '');
-  return lines.join('\n') + (body || '').trim() + '\n';
-}
-
-/**
- * Writes a global persona `.md` file — `~/.claude/agents/<name>.md`. Pass
- * `originalName` when renaming an existing persona so the old file is
- * removed once the new one is written (no-op if names match).
- */
-async function savePersona({
-  name,
-  originalName,
-  description,
-  tools,
-  model,
-  color,
-  tags,
-  body,
-  globalDir = path.join(os.homedir(), '.claude', 'agents'),
-  validatePath = configMgr.validatePath,
-  writeTextAtomic = configMgr.writeTextAtomic,
-} = {}) {
-  if (!PERSONA_NAME_RE.test(name || '')) {
-    throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
-  }
-  const target = validatePath(path.join(globalDir, `${name}.md`));
-  const text = serializePersona({ name, description, tools, model, color, tags, body });
-  await writeTextAtomic(target, text);
-  if (originalName && originalName !== name) {
-    const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
-    try {
-      await fsp.unlink(oldReal);
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-  }
-  return { ok: true, path: target };
-}
-
-/** Deletes a global persona `.md` file. Idempotent — missing file is not an error. */
-async function deletePersona({
-  name,
-  globalDir = path.join(os.homedir(), '.claude', 'agents'),
-  validatePath = configMgr.validatePath,
-} = {}) {
-  const target = validatePath(path.join(globalDir, `${name}.md`));
-  try {
-    await fsp.unlink(target);
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  return { ok: true };
-}
-
-/**
- * Drops a project's local override (`<cwd>/.claude/agents/<name>.md`) so the
- * global definition applies there again. `projectName` is resolved against
- * currently-open tabs (same source `listPersonas` uses for overridingProjects).
- */
-async function removeOverride({
-  name,
-  projectName,
-  loadSessions = sessionsStore.load,
-  validatePath = configMgr.validatePath,
-} = {}) {
-  const projects = await openProjects({ loadSessions });
-  const project = projects.find((p) => p.name === projectName);
-  if (!project) throw new Error(`project not open: ${projectName}`);
-  const target = validatePath(path.join(project.cwd, '.claude', 'agents', `${name}.md`));
-  try {
-    await fsp.unlink(target);
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  return { ok: true };
-}
-
 /**
  * Currently-open project tabs, deduped by cwd, as `{ cwd, name }` — `name`
  * is the last path segment (matches the `projectNameFromCwd` convention used
@@ -198,9 +103,6 @@ async function listPersonas({
       name: fm.name || fallbackName,
       description: fm.description || null,
       tools: parseTools(fm.tools),
-      model: fm.model || null,
-      color: fm.color || null,
-      tags: parseTools(fm.tags),
       path: real,
       body: body.trim(),
       overridingProjects,
@@ -210,12 +112,4 @@ async function listPersonas({
   return personas;
 }
 
-module.exports = {
-  listPersonas,
-  openProjects,
-  parseTools,
-  savePersona,
-  deletePersona,
-  removeOverride,
-  PERSONA_NAME_RE,
-};
+module.exports = { listPersonas, openProjects, parseTools };

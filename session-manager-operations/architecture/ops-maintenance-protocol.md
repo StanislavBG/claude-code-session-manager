@@ -63,6 +63,13 @@ fix, low risk — update CLAUDE.md's enumeration whenever a new artifact folder'
 same PR that adds the folder.
 
 ### Pattern C — legacy flat structure not fully migrated
+
+**Update 2026-08-02: resolved, see
+[`ops-maintenance-protocol-patterns-c-d-findings.md`](ops-maintenance-protocol-patterns-c-d-findings.md).**
+The 73 files were legitimately in-flight PRDs mid-drain, not stuck debt; re-checked a few hours
+later, the flat dir holds 0 `.md` files. No migration was needed.
+
+
 CLAUDE.md states the flat `scheduler/prds/` layout is "RETIRED and auto-consolidated into
 `prds-archived/` at boot." On disk today, `scheduler/prds/` (top-level) still holds 73 files and
 `scheduler/prds-archived/` holds 179 — the claimed boot-time consolidation is either not running,
@@ -74,6 +81,14 @@ queue/history before treating any of it as cleanup work. **Action**: investigate
 filed as part of the same hygiene Epic as Pattern D below, not auto-migrated by this protocol.
 
 ### Pattern D — orphaned top-level session/epic JSON
+
+**Update 2026-08-02: resolved, see
+[`ops-maintenance-protocol-patterns-c-d-findings.md`](ops-maintenance-protocol-patterns-c-d-findings.md).**
+Scripted the PRD-dispatch-event check (`scripts/audit-ops-hygiene.cjs`): 0 real data-loss
+candidates found. Every orphan is either a never-started Epic or a dispatched PRD that landed
+under a differently-named auto-minted epic dir.
+
+
 `prompt-sessions/`'s 46 top-level archived `*.json` files were cross-referenced against
 `scheduler/epics/`'s 35 directories: 29 have no matching `scheduler/epics/<id>/` directory. This
 is expected for Epics that never authored a PRD (discussion-tag Epics, abandoned proposals) — NOT

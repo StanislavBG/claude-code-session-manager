@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePromptSessions, promptSessionActiveIndexPath } from '../../state/promptSessions'
 import { useChatSignals } from '../../lib/useChatSignals'
 import { useScheduleState } from '../../state/scheduleState'
@@ -8,8 +8,6 @@ import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { lastActivityMs } from '../../lib/epicQueueControls'
-import { projectNameFromCwd } from '../../lib/homeProjectRows'
-import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
 import type { EpicSnapshots } from '../../lib/epicDerive'
 import type { ScheduleJob } from '../../../preload/api'
@@ -34,12 +32,13 @@ const EMPTY_JOBS: ScheduleJob[] = []
  * dormant SessionTab — `cwd`, when passed, scopes the visible Epics to that
  * tab's project and preselects its most recently active Epic.
  *
- * TerminalStage's always-on singleton mount passes no `cwd` — for that case
- * this component tracks its own project filter, defaulted from the NavFace
- * (leftnav-two-face-framework): Home face -> all projects, Project face ->
- * the active tab's cwd. The default only re-applies on an actual face
- * transition, never on a same-face re-render, and never once the user has
- * manually picked a filter since the last transition.
+ * TerminalStage's always-on singleton mount passes no `cwd` — it renders
+ * whenever the user explicitly opens the Epics workspace (Project-face-only
+ * nav item, so an active SessionTab always exists then) or when no tab is
+ * open at all. In the former case this component scopes itself to the
+ * active tab's cwd directly (no picker: the Epics nav can't be reached
+ * without a project tab already selected). In the latter (genuinely no tabs
+ * open) it renders an empty-state message instead.
  */
 export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const sessions = usePromptSessions((s) => s.sessions)
@@ -80,32 +79,13 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     return out
   }, [rows, enriched])
 
-  // NavFace-driven default project filter — only meaningful for the
-  // TerminalStage singleton mount (no `cwd` prop). Terminal.tsx's dormant-tab
-  // mount passes `cwd` explicitly, which always wins below.
+  // TerminalStage's singleton mount (no `cwd` prop) always scopes to the
+  // active tab — Terminal.tsx's dormant-tab mount passes `cwd` explicitly,
+  // which always wins below.
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
-  const navFace = useLayout((s) => s.navFace)
-
-  const [projectFilter, setProjectFilter] = useState<string | null>(null)
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-  const handleProjectFilterChange = (next: string | null) => {
-    manuallyTouchedRef.current = true
-    setProjectFilter(next)
-  }
-  useEffect(() => {
-    if (cwd !== undefined) return
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setProjectFilter(navFace === 'project' ? (activeTab?.cwd ?? null) : null)
-  }, [navFace, cwd, activeTab])
-  const effectiveCwd = cwd ?? projectFilter ?? undefined
+  const effectiveCwd = cwd ?? activeTab?.cwd ?? undefined
 
   // Backfill any active/archived PromptSessions persisted from a prior app
   // run, one call per known cwd as they're discovered — mirrors the retired
@@ -264,27 +244,17 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     setSelectedId(id)
   }
 
+  if (cwd === undefined && !activeTab) {
+    return (
+      <div className="flex h-full min-h-0 w-full" data-testid="epics-workspace">
+        <EmptyState title="No project open" hint="Open a project tab to see its Epics." />
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full" data-testid="epics-workspace">
       <div className="flex min-h-0 shrink-0 flex-col">
-        {cwd === undefined && (
-          <label className="flex items-center gap-1.5 border-b border-line px-3.5 py-1.5">
-            <span className="font-mono text-[10px] uppercase tracking-wide text-fg-faint">project</span>
-            <select
-              data-testid="epics-project-filter"
-              value={projectFilter ?? 'all'}
-              onChange={(e) => handleProjectFilterChange(e.target.value === 'all' ? null : e.target.value)}
-              className="bg-transparent outline-none cursor-pointer text-[11.5px] font-semibold text-fg"
-            >
-              <option value="all">All projects</option>
-              {knownCwds.map((c) => (
-                <option key={c} value={c}>
-                  {projectNameFromCwd(c)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <EpicQueueControls
           epics={epics}
           snapshots={snapshots}

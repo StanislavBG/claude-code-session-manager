@@ -8,7 +8,6 @@ import { useEpicsPrefs } from '../../state/epicsPrefs'
 import { useChat } from '../../state/chat'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicUsage } from '../../state/epicUsage'
-import { useLayout } from '../../state/layout'
 import { useSessions, type SessionTab } from '../../state/sessions'
 import { flushAsync } from '../../testUtils/domFlush'
 
@@ -22,6 +21,19 @@ import { flushAsync } from '../../testUtils/domFlush'
  */
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
+
+const ALPHA_TAB: SessionTab = {
+  id: 'tab-alpha',
+  sessionId: 'tab-alpha',
+  label: 'alpha',
+  cwd: '/home/bilko/Projects/alpha',
+  pid: null,
+  status: 'dormant',
+  exitCode: null,
+  startupCommand: null,
+  presetId: null,
+  generation: 0,
+}
 
 vi.mock('../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
@@ -88,6 +100,10 @@ beforeEach(() => {
   useChat.setState({ chats: {}, hydratedTabs: {} })
   useScheduleState.setState({ snapshot: null })
   useEpicUsage.setState({ usage: {} })
+  // The no-`cwd` mount (TerminalStage's singleton) is only ever reached via
+  // the Epics nav, which requires a project tab to already be active — mirror
+  // that here so the no-cwd tests below exercise the real reachable state.
+  useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
 })
 
 afterEach(() => {
@@ -103,7 +119,7 @@ describe('EpicsWorkspace', () => {
     installWindowApiMock()
     act(() => {
       usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
-      usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'fix the flaky test')
+      usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'fix the flaky test')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -121,6 +137,16 @@ describe('EpicsWorkspace', () => {
 
   it('"New Epic" swaps in the creation card; picking a project + goal creates and selects the new Epic', async () => {
     installWindowApiMock()
+    // Active tab's cwd deliberately NOT a known project, so NewEpicCard
+    // still shows its own project selector (it collapses to a static label
+    // once the active tab's cwd is already a known project) — this test is
+    // exercising that selector, not EpicsWorkspace's own scoping. A tab must
+    // stay active, though: EpicsWorkspace itself now shows an empty state
+    // with no "New Epic" entry point at all when no tab is active.
+    useSessions.setState({
+      tabs: [{ ...ALPHA_TAB, id: 'tab-gamma', sessionId: 'tab-gamma', cwd: '/home/bilko/Projects/gamma' }],
+      activeTabId: 'tab-gamma',
+    })
     const el = mount(<EpicsWorkspace />)
 
     const newEpicBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('New Epic')) as HTMLButtonElement
@@ -291,7 +317,7 @@ describe('EpicsWorkspace', () => {
       expect(el.textContent).not.toContain('beta epic')
     })
 
-    it('with no `cwd`, shows Epics from every project (unscoped default)', () => {
+    it('with no `cwd` prop, scopes to the active tab\'s cwd (the only reachable state via the Epics nav)', () => {
       installWindowApiMock()
       act(() => {
         usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
@@ -299,7 +325,23 @@ describe('EpicsWorkspace', () => {
       })
 
       const el = mount(<EpicsWorkspace />)
-      expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(2)
+      const rows = el.querySelectorAll('[data-testid="epic-queue-row"]')
+      expect(rows).toHaveLength(1)
+      expect(el.textContent).toContain('alpha epic')
+      expect(el.textContent).not.toContain('beta epic')
+    })
+
+    it('with no `cwd` prop and no active tab, shows an empty state instead of a project picker', () => {
+      installWindowApiMock()
+      useSessions.setState({ tabs: [], activeTabId: null })
+      act(() => {
+        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+      })
+
+      const el = mount(<EpicsWorkspace />)
+      expect(el.querySelector('[data-testid="epics-project-filter"]')).toBeNull()
+      expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(0)
+      expect(el.textContent).toContain('No project open')
     })
 
     it('preselects the scoped project\'s most recently active Epic on mount', () => {
@@ -339,95 +381,4 @@ describe('EpicsWorkspace', () => {
     })
   })
 
-  // NavFace-driven default project filter (leftnav-two-face-framework) —
-  // only applies to the singleton TerminalStage mount (no `cwd` prop).
-  describe('NavFace-driven default project filter (no cwd prop)', () => {
-    const ALPHA_TAB: SessionTab = {
-      id: 'tab-alpha',
-      sessionId: 'tab-alpha',
-      label: 'alpha',
-      cwd: '/home/bilko/Projects/alpha',
-      pid: null,
-      status: 'dormant',
-      exitCode: null,
-      startupCommand: null,
-      presetId: null,
-      generation: 0,
-    }
-
-    beforeEach(() => {
-      useLayout.setState({ navFace: 'home' })
-      useSessions.setState({ tabs: [], activeTabId: null })
-    })
-
-    it('mounts at navFace=home (overview panel) with the filter defaulted to all projects', () => {
-      installWindowApiMock()
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
-      })
-
-      const el = mount(<EpicsWorkspace />)
-      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe('all')
-      expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(2)
-    })
-
-    it('flipping navFace to project defaults the filter to the active tab\'s cwd', () => {
-      installWindowApiMock()
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
-      })
-
-      const el = mount(<EpicsWorkspace />)
-      act(() => {
-        useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-        useLayout.setState({ navFace: 'project' })
-      })
-
-      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe(
-        '/home/bilko/Projects/alpha',
-      )
-      const rows = el.querySelectorAll('[data-testid="epic-queue-row"]')
-      expect(rows).toHaveLength(1)
-      expect(el.textContent).toContain('alpha epic')
-      expect(el.textContent).not.toContain('beta epic')
-    })
-
-    it('a manual filter change survives a re-render at the same navFace', () => {
-      installWindowApiMock()
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
-      })
-
-      const el = mount(<EpicsWorkspace />)
-      act(() => {
-        useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-        useLayout.setState({ navFace: 'project' })
-      })
-      // Auto-defaulted to alpha by the face transition.
-      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe(
-        '/home/bilko/Projects/alpha',
-      )
-
-      const select = el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement
-      const setNativeValue = (elm: HTMLSelectElement, value: string) => {
-        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
-        setter.call(elm, value)
-      }
-      act(() => {
-        setNativeValue(select, 'all')
-        select.dispatchEvent(new Event('change', { bubbles: true }))
-      })
-      expect(select.value).toBe('all')
-
-      // A re-render at the SAME navFace ('project') must not reset the
-      // manual choice back to the active tab's cwd.
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'a third epic')
-      })
-      expect((el.querySelector('[data-testid="epics-project-filter"]') as HTMLSelectElement).value).toBe('all')
-    })
-  })
 })

@@ -50,6 +50,18 @@ export function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
+  // 'telemetry' (~/.config/session-manager/otel.json) and 'app' (Session
+  // Manager native prefs, localStorage) are both machine-wide only — no
+  // cwd/scope input anywhere in SettingsTelemetry/SettingsAppPrefs, so they
+  // render byte-identical regardless of navFace. Project face never offers
+  // them (see the ViewTabs options below); this effect just bounces the view
+  // back to 'effective' if you land on the Project face while one of them
+  // was already selected, so the toolbar never shows an active tab that's no
+  // longer in its own options list.
+  useEffect(() => {
+    if (navFace === 'project' && (view === 'telemetry' || view === 'app')) setView('effective')
+  }, [navFace, view])
+
   const handleScopeChange = (next: Scope) => {
     manuallyTouchedRef.current = true
     setScope(next)
@@ -107,8 +119,12 @@ export function Settings() {
               { key: 'effective', label: 'Guided' },
               { key: 'tree', label: 'Tree' },
               { key: 'raw', label: 'Raw' },
-              { key: 'telemetry', label: 'Telemetry' },
-              { key: 'app', label: 'Session Manager' },
+              // Machine-wide only — see the reset effect above for why these
+              // are hidden on the Project face rather than just left visible
+              // with identical content.
+              ...(navFace === 'home'
+                ? [{ key: 'telemetry', label: 'Telemetry' }, { key: 'app', label: 'Session Manager' }] as const
+                : []),
             ]}
             active={view}
             onChange={setView}

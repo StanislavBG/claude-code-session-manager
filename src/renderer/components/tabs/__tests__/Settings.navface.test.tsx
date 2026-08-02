@@ -53,6 +53,11 @@ function installWindowApiMock() {
       unwatch: vi.fn(),
       onChanged: vi.fn(() => () => {}),
     },
+    otel: {
+      getConfig: vi.fn().mockResolvedValue({ enabled: false }),
+      status: vi.fn().mockResolvedValue({ running: false }),
+      configPath: vi.fn().mockResolvedValue('/home/bilko/.config/session-manager/otel.json'),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return api
@@ -149,5 +154,59 @@ describe('Settings NavFace-driven default scope', () => {
       await Promise.resolve()
     })
     expect(activeScope(el)).toBe('User')
+  })
+})
+
+function viewTabLabels(el: HTMLElement): string[] {
+  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
+  return Array.from(toolbar?.querySelectorAll('button') ?? []).map((b) => b.textContent?.trim() ?? '')
+}
+
+function clickViewTab(el: HTMLElement, label: string) {
+  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
+  const btn = Array.from(toolbar?.querySelectorAll('button') ?? []).find((b) => b.textContent?.trim() === label)
+  ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+
+describe('Settings Telemetry/Session Manager tabs are Home-only', () => {
+  // SettingsTelemetry (~/.config/session-manager/otel.json) and
+  // SettingsAppPrefs (localStorage) have no cwd/scope input anywhere — they
+  // render identically regardless of navFace, so they must not appear as an
+  // option on the Project face.
+  it('shows Telemetry and Session Manager tabs on the Home face', async () => {
+    const el = await mount()
+    const labels = viewTabLabels(el)
+    expect(labels).toContain('Telemetry')
+    expect(labels).toContain('Session Manager')
+  })
+
+  it('hides Telemetry and Session Manager tabs on the Project face', async () => {
+    const el = await mount()
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      useLayout.setState({ navFace: 'project' })
+      await Promise.resolve()
+    })
+    const labels = viewTabLabels(el)
+    expect(labels).not.toContain('Telemetry')
+    expect(labels).not.toContain('Session Manager')
+  })
+
+  it('bounces back to Guided if navFace flips to project while Telemetry was selected', async () => {
+    const el = await mount()
+    await act(async () => {
+      clickViewTab(el, 'Telemetry')
+      await Promise.resolve()
+    })
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      useLayout.setState({ navFace: 'project' })
+      await Promise.resolve()
+    })
+    // Guided is the only tab whose active-state class survives; assert no
+    // dead 'active' styling is stuck on a tab that's no longer rendered.
+    const labels = viewTabLabels(el)
+    expect(labels).not.toContain('Telemetry')
+    expect(el.textContent).not.toContain('Session Manager preferences')
   })
 })

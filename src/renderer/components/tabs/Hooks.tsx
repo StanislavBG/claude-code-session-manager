@@ -181,6 +181,14 @@ export function Hooks() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
+  // 'library' (HooksLibrary, in ./Library.tsx) is a static reference catalog
+  // with no cwd/scope input anywhere — identical on both faces. Project face
+  // never offers it (see the ViewTabs options below); bounce back to
+  // 'effective' if you land on Project while it was selected.
+  useEffect(() => {
+    if (navFace === 'project' && view === 'library') setView('effective')
+  }, [navFace, view])
+
   const handleScopeChange = (next: Scope) => {
     manuallyTouchedRef.current = true
     setScope(next)
@@ -206,7 +214,7 @@ export function Hooks() {
       options={[
         { key: 'effective', label: 'Effective' },
         { key: 'events', label: 'Events' },
-        { key: 'library', label: 'Library' },
+        ...(navFace === 'home' ? [{ key: 'library', label: 'Library' }] as const : []),
       ]}
       active={view}
       onChange={setView}

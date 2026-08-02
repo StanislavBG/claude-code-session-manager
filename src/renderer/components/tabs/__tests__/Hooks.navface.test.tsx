@@ -151,3 +151,48 @@ describe('Hooks NavFace-driven default scope', () => {
     expect(activeScope(el)).toBe('User')
   })
 })
+
+function viewTabLabels(el: HTMLElement): string[] {
+  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
+  return Array.from(toolbar?.querySelectorAll('button') ?? []).map((b) => b.textContent?.trim() ?? '')
+}
+
+function clickViewTab(el: HTMLElement, label: string) {
+  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
+  const btn = Array.from(toolbar?.querySelectorAll('button') ?? []).find((b) => b.textContent?.trim() === label)
+  ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+
+describe('Hooks Library tab is Home-only', () => {
+  // HooksLibrary is a static reference catalog with no cwd/scope input —
+  // identical regardless of navFace, so it must not appear as an option on
+  // the Project face.
+  it('shows the Library tab on the Home face', async () => {
+    const el = await mount()
+    expect(viewTabLabels(el)).toContain('Library')
+  })
+
+  it('hides the Library tab on the Project face', async () => {
+    const el = await mount()
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      useLayout.setState({ navFace: 'project' })
+      await Promise.resolve()
+    })
+    expect(viewTabLabels(el)).not.toContain('Library')
+  })
+
+  it('bounces back to Effective if navFace flips to project while Library was selected', async () => {
+    const el = await mount()
+    await act(async () => {
+      clickViewTab(el, 'Library')
+      await Promise.resolve()
+    })
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      useLayout.setState({ navFace: 'project' })
+      await Promise.resolve()
+    })
+    expect(viewTabLabels(el)).not.toContain('Library')
+  })
+})

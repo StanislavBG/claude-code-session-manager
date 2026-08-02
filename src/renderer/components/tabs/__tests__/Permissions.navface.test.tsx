@@ -151,3 +151,48 @@ describe('Permissions NavFace-driven default scope', () => {
     expect(activeScope(el)).toBe('User')
   })
 })
+
+function viewTabLabels(el: HTMLElement): string[] {
+  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
+  return Array.from(toolbar?.querySelectorAll('button') ?? []).map((b) => b.textContent?.trim() ?? '')
+}
+
+function clickViewTab(el: HTMLElement, label: string) {
+  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
+  const btn = Array.from(toolbar?.querySelectorAll('button') ?? []).find((b) => b.textContent?.trim() === label)
+  ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+
+describe('Permissions Presets tab is Home-only', () => {
+  // PermissionsPresetsLibrary is a static reference catalog with no
+  // cwd/scope input — identical regardless of navFace, so it must not
+  // appear as an option on the Project face.
+  it('shows the Presets tab on the Home face', async () => {
+    const el = await mount()
+    expect(viewTabLabels(el)).toContain('Presets')
+  })
+
+  it('hides the Presets tab on the Project face', async () => {
+    const el = await mount()
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      useLayout.setState({ navFace: 'project' })
+      await Promise.resolve()
+    })
+    expect(viewTabLabels(el)).not.toContain('Presets')
+  })
+
+  it('bounces back to Effective if navFace flips to project while Presets was selected', async () => {
+    const el = await mount()
+    await act(async () => {
+      clickViewTab(el, 'Presets')
+      await Promise.resolve()
+    })
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      useLayout.setState({ navFace: 'project' })
+      await Promise.resolve()
+    })
+    expect(viewTabLabels(el)).not.toContain('Presets')
+  })
+})

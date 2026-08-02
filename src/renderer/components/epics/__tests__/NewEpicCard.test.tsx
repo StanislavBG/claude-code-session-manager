@@ -323,6 +323,9 @@ describe('NewEpicCard', () => {
         description:
           "Generates a project's static Project Home/Project Pages from that project's own saved component library and a computed project summary, if that pipeline exists in this repo yet.",
         tools: [],
+        model: null,
+        color: null,
+        tags: [],
         path: '',
         body: '',
         overridingProjects: [],

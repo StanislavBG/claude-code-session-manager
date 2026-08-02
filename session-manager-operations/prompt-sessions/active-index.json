@@ -1,77 +1,273 @@
 {
   "sessions": {
-    "psess-msappow2-2": {
-      "id": "psess-msappow2-2",
+    "psess-msase2q4-1": {
+      "id": "psess-msase2q4-1",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Brainstorem EPIC Types\n\nExpand the list of types of session we want to have and provide unique grounding for aech",
-      "claudeSessionId": "7cfac99f-4b0e-4369-8952-68cf844744ad",
+      "goalText": "Builder to NPX\n\nThis session is our Builder agent to NPX, looks for git commits and publishes to NPX",
+      "claudeSessionId": "54d89b1a-5188-4c9c-9d6d-d71e0ffdd9ea",
       "status": "active",
-      "createdAt": "2026-08-01T18:36:06.338Z",
+      "createdAt": "2026-08-01T19:51:03.244Z",
+      "completedAt": null,
+      "tag": "discussion"
+    },
+    "psess-msaup10i-1": {
+      "id": "psess-msaup10i-1",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Working on Epics\n\nFocus on achieving this build be as close as possible to it Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Epics.html\n\nFocus on these files (the whole project is readable):\n- `Epics.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/epic-thread.jsx`\n- `variants/epics-data.jsx`\n- `variants/epics.jsx`\n- `variants/shared.jsx`\n\nImplement: `Epics.html`",
+      "claudeSessionId": "fea161d7-bd7e-4413-ae1b-d40882845646",
+      "status": "active",
+      "createdAt": "2026-08-01T20:55:33.474Z",
       "completedAt": null,
       "tag": "feature"
     },
-    "psess-msaqy287-8": {
-      "id": "psess-msaqy287-8",
+    "psess-msaviffk-7": {
+      "id": "psess-msaviffk-7",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "UI imprveoments\n\nWork wth Claude-Code-Design-MCP to inpect areas of the application starting with EPICs, Scheduler for improvements",
-      "claudeSessionId": "401d8772-056d-4063-882d-c2ceea3dc30c",
+      "goalText": "Left Navigation\n\nThe Home-Tab still does not stay in focus when I'm clicking on the Left Navigation. The left Navigation Items when the Home-tab is selected must be distinct menu from the Tabs when Projects are selectioned. We have n't been able to get to the botton of this issue so far",
+      "claudeSessionId": "da33a6cd-e641-4105-bdad-0b906a4fe368",
       "status": "active",
-      "createdAt": "2026-08-01T19:10:36.487Z",
+      "createdAt": "2026-08-01T21:18:25.184Z",
       "completedAt": null,
-      "tag": "discussion"
+      "tag": "feature"
     }
   },
   "events": {
-    "psess-msappow2-2": [
+    "psess-msase2q4-1": [
       {
-        "id": "pevt-msappow2-3",
-        "promptSessionId": "psess-msappow2-2",
+        "id": "pevt-msase2q4-2",
+        "promptSessionId": "psess-msase2q4-1",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-01T18:36:06.338Z",
-        "text": "Brainstorem EPIC Types\n\nExpand the list of types of session we want to have and provide unique grounding for aech"
+        "at": "2026-08-01T19:51:03.244Z",
+        "text": "Builder to NPX\n\nThis session is our Builder agent to NPX, looks for git commits and publishes to NPX"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msappow2-3",
-        "text": "Current `tag` is a 3-way union at `promptSessions.ts:46` (`'feature' | 'bug' | 'discussion'`), used purely as a display/filter label — it doesn't currently change intake behavior. Here's an expanded set, each with a distinct **grounding** (a concrete artifact that anchors the session's opening prompt, not just a label):\n\n1. **feature** *(existing)* — grounded in a written objective (the goal text itself is the spec).\n2. **bug** *(existing)* — grounded in a reproduction: should require a repro path/stack trace/log excerpt attached via `referencePaths`, not just prose.\n3. **discussion** *(existing)* — grounded in a question with no required code change; exit state is a decision, not a diff.\n4. **incident** — grounded in `rcaFeedbackHook.cjs` output: a failed PRD's run log + root-cause note. Distinct from `bug` because it's machine-filed (auto-created on PRD failure), pre-populated with the failing job's `runs/<ts>/...` log rather than a human description.\n5. **refactor** — grounded in the current passing test suite as the acceptance boundary: AC = \"behavior unchanged, tests still green,\" no new test additions expected. Ties naturally to the `/simplify` skill.\n6. **research/spike** — grounded in a question + time-box, not a spec. Produces no PRDs by default; output is a memory entry or `HUMAN_LEARN/` page, not code. Needs its own completion criterion since \"done\" ≠ \"merged.\"\n7. **chore/maintenance** — grounded in an external signal (dependency advisory, lockfile drift, expiring credential) rather than a human-written goal. Naturally low-priority in scheduler ordering.\n8. **review** — grounded in a PR number + its unresolved comment thread (as `pr-review-sweep` already fetches), not a goalText the human typed. Output is comment resolutions, not new PRDs.\n9. **cross-project proposal** — grounded in the *requesting* project's identity (which repo/agent filed it), so the receiving Epic's opening prompt carries \"why another project asked for this,\" matching what `/propose-e…",
-        "id": "pevt-msapqf7m-4",
-        "promptSessionId": "psess-msappow2-2",
-        "at": "2026-08-01T18:36:40.450Z"
+        "causedByEventId": "pevt-msase2q4-2",
+        "text": "**Current state check:**\n- npm registry `claude-code-session-manager` is at `0.45.0`, matching local `package.json`.\n- 2 commits landed since the `v0.45.0` tag/publish, neither released yet:\n  - `779e622 fix(browser): allow real popup windows for identity-provider OAuth`\n  - `244019b docs(browser): wire-verify open-tab-request listener + add browser/ ops README`\n- No existing automation for this — no cron, no GH Action, no script watches commits and triggers `npm publish`. The only relevant memory is [Git publish autonomy](feedback_git_publish_autonomy.md): once *you* decide to publish, I run commit→bump→tag→publish→push without pausing for confirmation. That's about execution once triggered — it says nothing about who/what decides *when* to trigger.\n\nSo \"Builder agent to NPX\" is a new capability: something that watches for unreleased commits and initiates a release. Two real design questions before I'd build this, since getting them wrong means either noisy over-publishing or a repo that silently drifts from npm:\n\n1. **Trigger**: a recurring cron (e.g. `schedule` skill, checks every N hours/on a cadence) that diffs `HEAD` against the last version tag and publishes if there's anything new — or should it stay commit/push-triggered (e.g. a git hook or CI step), only firing right after you push?\n2. **Bump + gate policy**: auto-detect semver bump from conventional-commit prefixes (`fix→patch`, `feat→minor`, `BREAKING CHANGE→major`, `docs/chore→skip`)? And should it require `npm run typecheck` + `npm run test:unit` green before publishing, or trust that commits on `main` are already vetted?\n\nThe `fix(browser)` commit above is a good live test case — a `fix:` commit sitting unreleased since 0.45.0 is exactly what this agent should catch and turn into a `0.45.1` patch release.",
+        "id": "pevt-msaseugl-3",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T19:51:39.189Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msapqf7m-4",
-        "text": "Good pushback — right now there's no such framework, and that's the actual gap. Concretely:\n\n**What exists today (the whole \"context injection\" surface):**\n- `epicIntake.ts:46` — one function, type-agnostic, string-concatenates `title + goal + referencePaths` into `goalText`/`openingPrompt`. `tag` (`feature`/`bug`/`discussion`) is stored alongside but never read by intake — it's a display label only (used in `ticketDisplay.ts`, `prdFrontmatter.ts` for filtering/badges, nothing generative).\n- `chatRunner.cjs:523` — the only other injection point: `STOP_SIGNAL_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + prompt`, again flat string prepending, again type-agnostic.\n- No use of `--system-prompt` / `--append-system-prompt` anywhere in the codebase (checked `chatRunner.cjs`, `pty.cjs`). Every session runs with whatever the `claude` CLI's own default system context is (repo `CLAUDE.md` chain) plus this literal prompt text. \"Grounding\" today = a human typed some words into a textarea.\n\nSo there's currently exactly one undifferentiated context channel, and no registry, no per-type behavior, no separation between \"system frame\" and \"user ask.\" That's why the type list felt arbitrary — there was no framework for a type to plug into, so each one was just a label with a paragraph of justification attached.\n\n**The framework I'd build, mapped onto real seams in this codebase:**\n\n1. **Separate the channel.** Stop treating grounding as more text glued onto the user prompt. Use `--append-system-prompt <text>` on the `claude` CLI call (supported flag, unused here today) so grounding lives in system context, and `goalText`/`openingPrompt` stay pure user intent. This is the literal mechanism for \"move toward empty system context + special initiation per session\" — the base run stays minimal, and each type layers its own system-prompt fragment on top instead of inflating the human-visible prompt.\n\n2. **A `GroundingSource` per tag, not a paragraph per tag.** Interface: `gather(epicFields, c…",
-        "id": "pevt-msaq1k17-5",
-        "promptSessionId": "psess-msappow2-2",
-        "at": "2026-08-01T18:45:19.915Z"
+        "causedByEventId": "pevt-msaseugl-3",
+        "text": "Typecheck is clean on the current tree (even with the in-flight uncommitted edits). I'm stopping here rather than running the full unit suite, since the release decision below doesn't hinge on it — I don't publish through a dirty tree regardless of test result.\n\n## What I did\n\n**1. Builder agent, two layers, matching the precedence you described:**\n\n- `~/.claude/agents/builder.md` — the generic, project-agnostic definition. Registers a new `builder` subagent type usable from any project via the `Agent` tool. Protocol: diff HEAD against last release → check working-tree cleanliness (hard blocker if dirty, and explicitly: never stash/discard another session's uncommitted work) → classify commits via conventional-commit prefixes → run whatever gates the project already declares → decide-and-execute (bump/tag/publish/push) in one pass rather than re-asking each time → report what shipped. This is the file the Home-Tab would show as the base definition, and it's where future Builder-type sessions in *any* project should start.\n- `/home/bilko/Projects/session-manager/.claude/agents/builder.md` — the project overlay, which per Claude Code's own precedence rules overrides the global file when both exist. Holds session-manager-specific facts: npm package name, where version/tag truth lives, this repo's actual commit-prefix convention, the specific gates (`typecheck`, `test:unit`), and the load-bearing reason working-tree cleanliness matters *especially* here — this repo runs many concurrent Epic sessions against one working directory, so a dirty tree during a Builder run is the **expected**, not exceptional, case.\n\n**2. Ran the diff and decision reasoning against the live repo — this is the part that changed my earlier draft answer:**\n\n- Registry (`npm view`) and `package.json` both say `0.45.0` — in sync, no half-completed publish.\n- Unreleased commits since `v0.45.0`: `fix(browser): allow real popup windows for identity-provider OAuth`, `docs(browser): wire-verify open-tab…",
+        "id": "pevt-msasq4m4-7",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:00:25.564Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msaq1k17-5",
-        "text": "All green. Summary of what shipped:\n\n**Confirmed:** an Epic already carries exactly one tag (`tag?: 'feature' | 'bug' | 'discussion'` — scalar, not array) — no change needed there.\n\n**New:**\n- `src/renderer/lib/agentTagDefs.ts` — the per-tag \"agent\" registry: `AGENT_TAG_DEFS[tag] = { label, description, initialPromptTemplate }`. This is the concrete, minimal instance of the grounding framework discussed earlier — one fixed instruction string per tag, not yet the artifact-reading `gather()` system for `incident`/`review`/etc., since those need real per-Epic artifacts (repro files, run logs) that don't exist as inputs yet.\n- `epicIntake.ts` — `composeEpicIntake` now takes an optional `tag` and prepends that tag's `initialPromptTemplate` to `openingPrompt` only. `goalText` (the stored display identity) stays the pure user objective, per the file's existing goalText/openingPrompt split. Wired at the one call site, `NewEpicCard.tsx`.\n- `Home.tsx` — new **Agents** card at the bottom of the dashboard, listing all three tags with their tone chip (reusing `ticketTagTone` from `ticketDisplay.ts`, no new color system), description, and the literal `initialPromptTemplate` text that actually gets sent — read-only, since it's documentation of what each tag does, not a picker.\n- Test coverage in `epicIntake.test.ts` for grounded vs. ungrounded composition.\n\nTypecheck, the touched unit tests, and `lint:selectors` all pass. Nothing committed — say the word if you want it committed, or if you want the bigger `gather()`/`--append-system-prompt` machinery from the earlier discussion built out next (that's still open: `bug`'s template references \"attached reference\" but nothing currently forces one to exist).",
-        "id": "pevt-msaqhlv7-6",
-        "promptSessionId": "psess-msappow2-2",
-        "at": "2026-08-01T18:57:48.787Z"
+        "causedByEventId": "pevt-msasq4m4-7",
+        "text": "It's `app:reboot-app`, IPC-only (invoked from a UI button or menu item) — no CLI/admin-API path to trigger it from outside the running app, and it's a fire-and-forget `ipcMain.on` (no return value to await anyway).\n\n## Findings — restart is not safe right now\n\nI checked concretely rather than assuming:\n\n- **No scheduler PRD jobs running** (`queue.json` running count: 0) — that part is clear.\n- **But this very session is itself active**: I'm running as `claude -p --resume 54d89b1a... ` (pid 958028), spawned by this app's `chatRunner`. `rebootApp()` (`src/main/index.cjs:283`) does `ptyManager.killAll()` then `app.exit(0)` — a full teardown of the Electron process. Triggering it would kill the process I'm running inside of, mid-turn, before I could report anything back.\n- **There's also a separate long-lived interactive terminal session** (`claude --dangerously-skip-permissions`, pid 2117635, running since Jul 30, ~31 min CPU time) — that's real, ongoing work in another tab that a restart would also kill.\n\nSo by your own bar (\"no active sessions\"), it's currently 2-for-2 unsafe: this Builder run and that other terminal session both count.\n\n**Why I can't just wait and restart later in this same turn**: this environment is explicitly one-shot — nothing survives after I stop producing output, so I can't poll in the background and restart once things clear, and I can't defer \"restart after this session ends\" to a later moment inside this turn without literally being the thing that has to end first.\n\n**The mechanism, for when it is safe**: `app:reboot-app` is an Electron IPC event, fired from the UI only (menu/button in `index.cjs:1054`) — there's no external CLI or admin-API path to trigger it from outside the running app. So the actual restart has to happen either by you clicking that control once both sessions above are done, or by re-invoking the `builder` agent in a fresh turn at that point (a fresh turn is fine to trigger it as its final action even though it can't ob…",
+        "id": "pevt-msat5t5z-15",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:12:37.223Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msaqhlv7-6",
-        "text": "All green: typecheck clean, both test files pass (14/14, including the two previously-broken `NewEpicCard.test.tsx` cases), selector lint clean.\n\n**Straight answer to your question:** I skipped the PRD pipeline on the judgment that this was small and I already had full design context in-conversation, so a fresh-context PRD executor wasn't buying anything — but that reasoning ignored that this project's convention treats PRDs as the default audit/review path regardless of session context, and I never surfaced it as a decision for you to weigh in on. That was the actual gap, and it's why the missing review step caught a real regression (two `NewEpicCard.test.tsx` assertions were stale against the new grounded-prompt behavior — they'd have gone red on the next `npm run test:unit`).\n\n**What the review pass found and I fixed:**\n- **Critical (fixed):** `NewEpicCard`'s tag always defaults to `'feature'`, so grounding is unconditional in practice, not opt-in — the two existing tests still asserted the old ungrounded prompt. Updated both to expect the grounded text.\n- **Important (fixed):** the `bug` template implied a reference is usually attached; nothing enforces that. Reworded to branch explicitly (\"if attached... if nothing is attached, reproduce it yourself\").\n- **Minor (fixed):** dropped the unused `label` field from `AgentTagDef` (redundant with `ticketTagTone`'s label) and replaced the hand-duplicated `AGENT_TAG_ORDER` array with `Object.keys(AGENT_TAG_DEFS)` so a future 4th tag can't get added to the `Record` and silently missed in display order.\n\nNothing committed yet, and still no PRD/Epic record for this — if you want this retroactively tied into the PRD/Epic audit trail rather than living only as a working-tree diff, say so and I'll mint one; otherwise it's ready to commit as-is.",
-        "id": "pevt-msaqnv77-7",
-        "promptSessionId": "psess-msappow2-2",
-        "at": "2026-08-01T19:02:40.819Z"
+        "causedByEventId": "pevt-msat5t5z-15",
+        "text": "Decision made — here's the reasoning and outcome, no further questions needed:\n\n**Q1 (the pts/0 terminal, pid 2117635):** Checked it directly — 1.3% CPU over ~38 hours elapsed, no actively-executing foreground command (its only children are the standing MCP helper processes — playwright-mcp, workspace-mcp, scheduler-mcp-server — spawned once at session start, not evidence of live work). It's an idle terminal sitting at a prompt. A reboot is designed to survive exactly this: `rebootApp()` already treats all open PTY tabs as disposable on restart (`markFreshRestart` gives them fresh session IDs and they reopen). So it does not block a restart.\n\n**Q2 (who triggers it):** I checked for a way to trigger `app:reboot-app` myself — it's `ipcMain.on('app:reboot-app', ...)`, reachable only from inside the running renderer (menu/UI click). The admin HTTP API (`adminServer.cjs`) deliberately only exposes `scheduler_list_jobs`/`scheduler_reset_job` — no reboot endpoint. So there is no external/CLI path for me to invoke it, even in a follow-up run.\n\n**The remaining blocker is structural, not a judgment call:** I am, right now, the app's one genuinely active session — this Builder run is a `chatRunner` job inside the very process a reboot would kill. Triggering it mid-turn would terminate me before this response finishes sending, which fails the \"always end with a real result\" rule this run operates under. There's no way to sequence \"finish reporting\" and \"have already restarted\" inside one turn when the action kills the reporter.\n\n**So the decision is: don't restart in this turn — not because it's unsafe, but because it's mechanically impossible to do from inside my own execution.** The moment this response completes, this chat job exits and the app returns to genuinely zero active sessions (confirmed: 0 running scheduler jobs, 1 idle terminal that's restart-safe). At that point restarting is a plain UI click (or the app's own auto-relaunch-on-update path) with nothing left to pr…",
+        "id": "pevt-msat9doq-16",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:15:23.786Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msat9doq-16",
+        "text": "Correct, I did not publish — and confirming that decision is still right: the working tree is still dirty, more so than before (now 6 modified renderer files: `ChatTranscriptTurn.tsx`, `EpicComposer.tsx`, `EpicDetail.tsx`, `EpicQueue.tsx`, `NewEpicCard.tsx`, `styles.css`, plus ops-state churn). That's the exact match to the top of your original `git status` at the start of this whole conversation — this is very likely one continuous, still-in-progress uncommitted change to the Epics UI, not new unrelated noise.\n\nPer the Builder protocol we just wrote: `npm publish`'s `prepublishOnly` runs `vite build` off the working directory, so publishing now would ship those 6 uncommitted, unreviewed files baked into `dist/`. That's still the hard blocker — nothing about it has resolved since I last checked; if anything it's grown. `npm view` confirms the registry is still sitting at `0.45.0`, matching `package.json`, so nothing has drifted or half-published either.\n\nThe two commits I identified (`fix(browser)`, `docs(browser)`) are still sitting ready and safe to release as `0.45.1` the moment that tree clears — I haven't touched them, and holding costs nothing since they're not user-visible regressions.",
+        "id": "pevt-msatei8z-1",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:19:22.979Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msatei8z-1",
+        "text": "**Published.** `claude-code-session-manager@0.45.1` is live on npm, `latest` dist-tag confirmed.\n\nWhat actually happened, worked entirely through git rather than the dirty working directory:\n\n1. Diffed `HEAD` against the last release tag (`v0.45.0`) → 2 unreleased commits: `fix(browser): allow real popup windows for identity-provider OAuth`, `docs(browser): wire-verify open-tab-request listener + add browser/ ops README`. `fix` → patch bump.\n2. `npm version patch --no-git-tag-version` → `0.45.1`, touching only `package.json`/`package-lock.json`.\n3. Committed **only those two files** (`1e7babc`) and tagged `v0.45.1` — the 6 other in-progress files (Epic UI components, `styles.css`, ops-state) were never staged or touched.\n4. Built and published from a **clean `git worktree` checked out at the tag** (`/tmp/sm-publish-v0.45.1`), not the live working directory — so `prepublishOnly`'s `vite build` never saw the uncommitted renderer edits. `git status` in that worktree was clean before build; typecheck passed.\n5. `npm publish` succeeded (341 files, 31.9 MB tarball). Pushed `main` + tag `v0.45.1` to origin. Removed the temp worktree.\n6. Verified on the real registry: `0.45.1` / `latest`. Your actual working directory is untouched — same 6 modified files as before, nothing lost or overwritten.\n\nThis is now the pattern the `builder` agent files should encode as the default resolution to \"dirty tree blocks publish\": don't wait on it, don't stash it — build from an isolated worktree at the release commit instead. I'll fold that into `~/.claude/agents/builder.md` and the project overlay next time I touch them.",
+        "id": "pevt-msatiqa0-5",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:22:40.008Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msatiqa0-5",
+        "text": "Two different senses of \"published\" — both checked, and they diverge:\n\n**Everything committed to git is published.** `origin/main` and `HEAD` match, and the last tag (`v0.45.1`) is `HEAD` itself — no commits sitting ahead of the npm release. `npm view` and `package.json` both read `0.45.1`. Nothing is stuck between git and npm right now.\n\n**But there's a large amount of uncommitted work in the working tree that was never in git to begin with**, so by definition it isn't published anywhere. This has grown substantially since I last checked it (was 1 line, then 6 files, now ~31 files):\n\n- A broad nav-face refactor in progress: `App.tsx`, `TabBar.tsx`, `lib/navFace.ts`, `state/layout.ts`, and nearly every tab component (`Hooks`, `McpServers`, `Permissions`, `Scheduler`, `Settings`, `Skills`, `SystemPrompt`, `HistoryDashboard`, `AlmanacSidebar`) plus their `.navface.test.tsx` counterparts\n- The Epics UI edits from earlier (`EpicComposer`, `EpicDetail`, `EpicQueue`, `EpicsWorkspace`, `NewEpicCard`, `ChatTranscriptTurn`)\n- `src/renderer/lib/__tests__/navFace.spec.ts` **deleted**\n- `styles.css`\n\nThis is not something I touched or will touch autonomously — it reads as one continuous, active piece of work (likely another live session mid-refactor), and per the same reasoning as before, uncommitted code in a shared working directory isn't mine to commit, stash, or judge as done. It simply means: whenever that work is committed, it becomes the next candidate diff for a `builder` run — right now it's invisible to git entirely, so there's nothing for a \"diff vs npm\" to pick up yet.",
+        "id": "pevt-msaty664-1",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:34:40.444Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaty664-1",
+        "text": "**Published `claude-code-session-manager@0.45.2`.** Registry `latest` confirmed at `0.45.2`, `main` pushed with the release commit, tag `v0.45.2` pushed.\n\nCovered in this release: `fix(nav): make navFace real state instead of deriving it from focusedPanelId` and `fix(epics): fill Epic Queue sidebar height, drop redundant Project selector`.\n\nGit and npm are now fully in sync — `git log <last-tag>..HEAD` is empty, no unreleased commits remain. As noted, 4 files (`ChatTranscriptTurn.tsx`, `EpicComposer.tsx`, `EpicDetail.tsx`, `styles.css`) and a stray `src/renderer/session-manager-operations/scheduler/state/queue.json` are still uncommitted in the working tree, but they don't block future releases — the clean-worktree publish pattern means they'll simply be picked up whenever they land as commits.",
+        "id": "pevt-msaubk60-9",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T20:45:05.112Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaubk60-9",
+        "text": "**Published `claude-code-session-manager@0.46.0`.** Registry `latest` confirmed, `main` and tag `v0.46.0` pushed to origin.\n\nCovered: the 3 Epic queue row-menu feature commits (rename/duplicate/delete/reopen, RowEditor, quote-reply), their test coverage, and the nav Home-focus/File-Explorer fix. Minor bump since new `feat:` commits were in the set.\n\nGit and npm are fully in sync again — no commits remain ahead of the published tag.",
+        "id": "pevt-msax00ps-13",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-01T22:00:05.536Z"
       }
     ],
-    "psess-msaqy287-8": [
+    "psess-msaup10i-1": [
       {
-        "id": "pevt-msaqy287-9",
-        "promptSessionId": "psess-msaqy287-8",
+        "id": "pevt-msaup10i-2",
+        "promptSessionId": "psess-msaup10i-1",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-01T19:10:36.487Z",
-        "text": "UI imprveoments\n\nWork wth Claude-Code-Design-MCP to inpect areas of the application starting with EPICs, Scheduler for improvements"
+        "at": "2026-08-01T20:55:33.474Z",
+        "text": "Working on Epics\n\nFocus on achieving this build be as close as possible to it Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Epics.html\n\nFocus on these files (the whole project is readable):\n- `Epics.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/epic-thread.jsx`\n- `variants/epics-data.jsx`\n- `variants/epics.jsx`\n- `variants/shared.jsx`\n\nImplement: `Epics.html`"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaup10i-2",
+        "text": "Everything checks out: typecheck clean, selector lint clean, existing 72 epics unit tests pass.\n\n## Summary\n\nI imported and diffed the `Epics.html` design (claude.ai/design project `0ca33cd3-c2fa-4644-b728-bde42292abbd`) against the current app. The two-pane Epics workspace it describes (queue + detail, search/filter/group/sort/pin/paging/keyboard nav, Chat⇄Terminal toggle, Discussion/PRDs/Runs tabs, the rich Turn renderer) was **already fully implemented** in a prior session (PRDs 827/828/829/831/833/837) — my earlier reading of `EpicComposer.tsx`/`EpicDetail.tsx`/`EpicQueue.tsx` confirmed this before I touched anything.\n\nThe remote design had moved on since that sync, adding a per-row overflow menu (rename/edit-goal/pin/mark-completed/duplicate/resume-in-terminal/copy-id/delete) plus a Composer quote-reply affordance and an 8-situation Turn split (`epic-thread.jsx`). I:\n\n1. **Implemented the safe subset now**, in `src/renderer/components/epics/EpicQueue.tsx`: a `RowMenuButton`/`RowMenu` overflow menu offering **Copy Epic ID**, **Mark completed**, and **Resume in terminal** — all backed by existing store actions, no new persistence. Typecheck, `lint:selectors`, and all 72 existing Epics unit tests pass.\n2. **Filed proposed Epic** `epic-queue-row-actions-rename-duplicate-delete-63b84dd6` for the remainder (rename/edit-goal/duplicate/delete) — these need new store+IPC mutations that must respect the single-writer law and the already-fragile active-index.json write serialization, so I scoped that as real design work rather than rushing it into this pass.\n3. **Refreshed the local design-mock docs** (`design-mocks/epics/epics-mock.jsx`, new `epic-thread-mock.jsx`, `DESIGN_SPEC.md`) so the next sync has an accurate baseline, and explicitly noted that `ChatTranscriptTurn.tsx` already covers the mock's 8 Turn situations against real data (not a gap) — the one genuine small gap is Composer quote-reply, not yet filed as its own Epic.",
+        "id": "pevt-msauw9v5-3",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T21:01:11.537Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msauw9v5-3",
+        "text": "No — I scoped this deliberately, and not everything is done. Here's the honest breakdown:\n\n**What I implemented (UI + wired to real store/API paths, but no new tests written for it):**\n- Row overflow menu (`RowMenuButton`/`RowMenu` in `EpicQueue.tsx`) with 3 actions:\n  - **Copy Epic ID** — pure clipboard, no backend.\n  - **Mark completed** — calls the *existing* `usePromptSessions().markCompleted` action (same one `EpicDetail`'s button already used).\n  - **Resume in terminal** — calls the *existing* `useEpicTerminal().setMode` action.\n- These reuse pre-existing, already-tested store/IPC paths. I did **not** write new unit tests for the menu component itself (no test asserts the menu opens, positions, or that each item fires its handler) — I only confirmed the pre-existing 72 Epics tests still pass, which they would regardless of whether the new menu code is correct, since none of them exercise it.\n\n**What I explicitly did NOT implement (real gaps, not oversights):**\n1. **Rename title / Edit goal (inline RowEditor)** — no button, no modal, no store mutation. `PromptSession` has no title/goal-patch action today.\n2. **Duplicate as new Epic** — not implemented. No mutation exists.\n3. **Delete Epic** — not implemented. Destructive, no confirm modal, no precedent in this codebase.\n4. **Reopen** (for a completed Epic from the queue row) — not implemented; only `markCompleted` (one direction) is wired.\n5. **Composer quote-reply** (TUser's hover \"Quote\" → reply-context strip in the composer) — not implemented at all, not even filed as its own Epic yet.\n\nItems 1–4 are filed as proposed Epic `epic-queue-row-actions-rename-duplicate-delete-63b84dd6` (requires new store+IPC mutations respecting the single-writer law — I judged that unsafe to rush). Item 5 (quote-reply) is a real gap I flagged in the docs but have not yet filed.\n\n**On \"tested\":** typecheck, `lint:selectors`, and the existing 72 Epics unit tests pass — but that only proves I didn't break anything pre-existing. No …",
+        "id": "pevt-msav733k-4",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T21:09:35.984Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msav733k-4",
+        "text": "Filed all four PRDs into the approved Epic `psess-msaup10i-1` (this conversation's own Epic — confirmed its `claudeSessionId` matches, satisfying `/develop`'s Epic-gate), via `scheduler_create_prd` so numbering/slugs were allocated atomically:\n\n| NN | Slug | Depends on | ETA | What it builds |\n|---|---|---|---|---|\n| **909** | `epic-mutation-layer-rename-dup-delete` | — | ~25 min | Backend: `renameEpic`, `duplicateEpic`, `deleteEpic` store actions in `promptSessions.ts`, respecting the single-writer law + existing atomic-write serialization; also amends the CLAUDE.md invariant about title/goal being fixed-for-life to carve out cosmetic rename. |\n| **910** | `epic-row-menu-wiring` | 909 | ~22 min | UI: extends `EpicQueue.tsx`'s existing `RowMenuButton`/`RowMenu` with Rename/Edit-goal (inline `RowEditor`), Duplicate, Delete (two-step confirm, toast on error), Reopen. |\n| **911** | `epic-composer-quote-reply` | — (independent, can run in parallel with 909/910) | ~18 min | Hover \"Quote\" on a turn → dismissible reply-context strip in `EpicComposer`. The one real gap flagged earlier that had no PRD yet. |\n| **912** | `epic-row-menu-test-coverage` | 909, 910, 911 | ~20 min | Unit tests for all 8 menu actions (including the 3 I landed inline last turn with zero coverage) + quote-reply, **plus a mandatory manual click-through with screenshots** — I called out in the AC that green typecheck/tests alone don't prove a button renders. |\n\nAll four carry the mandatory test/security AC inline (per `standards.md`, not spun into separate PRDs) and point the headless executor at `standards.md`'s absolute path. You can watch them in the Scheduler tab, or run them now via \"Run now\" — **I cannot poll or report back on their progress myself**, since this is a one-shot session that ends when I stop writing.\n\n**On your second ask** — \"make sure that this is the starting grounding for EPICs of type Feature and Bug\" — I did not queue anything for this because I genuinely can't tell which of t…",
+        "id": "pevt-msavdc1l-5",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T21:14:27.513Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msavdc1l-5",
+        "text": "## Summary\n\n**Instruction-file grounding (done now, inline — per `developer_sg.md`'s exception for assistant-instruction files, not application code):**\n- `plugins/session-manager-dev/skills/develop/SKILL.md` — added a \"Tag-aware default\" note right after the Epic-gate section: **feature/bug** Epics treat PRD decomposition as the expected next step (`/develop` fires proactively); **discussion** Epics keep `/develop` fully available but never assumed until it's actually decided that building is the right move.\n- `CLAUDE.md`'s Epic-tag line — one-sentence pointer to that rule, so the domain model and the skill stay in sync without duplicating the policy text in two places.\n\n**PRD work queued last turn — status check this turn:** confirmed via `queue.json` and the working tree that PRD **909** (backend rename/duplicate/delete mutation layer) is already executing autonomously — `renameEpic`/`duplicateEpic`/`deleteEpic` are live in `promptSessions.ts` and the CLAUDE.md invariant carve-out already landed. **910/911/912** remain queued behind their `dependsOn` chain. I did not touch any of that in-flight code this turn — only the two instruction files above.\n\nNothing further is blocked; no question needed this turn.",
+        "id": "pevt-msavgy04-6",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T21:17:15.940Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msavgy04-6",
+        "text": "Confirmed — `git push origin main` succeeded (git reported \"Everything up-to-date\" because the push had already landed by the time the command ran). `HEAD` and `origin/main` now both point to `8eee330`, and the branch-tracking line shows no more ahead/behind gap.\n\n## Summary\n- Pushed the 4 completed PRD commits (`244f06f` rename/duplicate/delete mutations, `a3f72af` row-menu wiring, `9bf629a` composer quote-reply, `5908155` test coverage) to `origin/main`.\n- Left the unrelated pre-existing uncommitted files (`App.tsx`, `TabBar.tsx`, `ProjectsWorkspace.tsx`, `navGroups.ts`, `layout.ts`, `styles.css`, new navface tests) untouched — they predate this session's work and weren't part of what was asked to push.\n- `origin/main` and local `main` are now in sync at `8eee330`.",
+        "id": "pevt-msawxh49-12",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T21:58:06.825Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msawxh49-12",
+        "text": "## Summary\n\nMatched `EpicComposer.tsx`'s prompt panel to your screenshot:\n\n- **Merged the two header rows into one**, matching the screenshot exactly: `[Chat | Dispatch as PRD]` toggle → `in` → status dot + Epic title, all on a single line (was previously a separate \"iterating in...\" row above the toggle row).\n- **Added a folder/attach icon button** next to the mic button inside the joined input-tools box (with a divider), wired to the same `att.add(...)` attachment flow — this was a real gap: `DESIGN_SPEC.md` already documented \"mic + attach in a joined button group\" but the attach half was never built.\n- **Suppressed the full-width dashed drop-zone when empty** (new `hideZoneWhenEmpty` prop on the shared `AttachTray`, opt-in so `NewEpicCard`'s own usage is untouched) — it only appears once there are actual attachment chips to show, matching the clean single-row look in the screenshot instead of always showing \"Paste a screenshot... / Attach\".\n- **Shortened the running placeholder** to `\"Queue a follow-up…\"` to match the screenshot text exactly.\n- **Added a send/paper-plane icon** to the Send/Queue button, matching the screenshot's icon+label button.\n\nFixed one test that broke as a side effect (it queried the AttachTray's now-conditionally-hidden file input; retargeted it to the new dedicated `epic-composer-attach-input`). `npm run typecheck`, `check-unstable-selectors`, and the full epics test suite (94 tests) all pass. This was small, contained, directly-requested visual work, done inline per `developer_sg.md`'s \"user explicitly says to do it inline right now\" exception — nothing queued to the scheduler for this pass.",
+        "id": "pevt-msaxkl1l-3",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T22:16:05.001Z"
+      },
+      {
+        "id": "f399659c-f62d-4864-8649-3eee5d3b4f7a",
+        "promptSessionId": "psess-msaup10i-1",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msaxkl1l-3",
+        "at": "2026-08-01T22:22:21.971Z",
+        "prdSlug": "913-chat-turn-card-contrast"
+      },
+      {
+        "id": "ebeaa6b6-e921-4207-9290-8685db7e602c",
+        "promptSessionId": "psess-msaup10i-1",
+        "kind": "prd_created",
+        "causedByEventId": "f399659c-f62d-4864-8649-3eee5d3b4f7a",
+        "at": "2026-08-01T22:22:40.080Z",
+        "prdSlug": "914-chat-turn-outcome-wiring"
+      },
+      {
+        "id": "6d5ce2a3-4aba-4f18-9c27-59565ff56b6d",
+        "promptSessionId": "psess-msaup10i-1",
+        "kind": "prd_created",
+        "causedByEventId": "ebeaa6b6-e921-4207-9290-8685db7e602c",
+        "at": "2026-08-01T22:23:00.868Z",
+        "prdSlug": "915-chat-turn-diff-data-capture"
+      },
+      {
+        "id": "a1e4862b-9620-4a17-8613-37024eb4fdcd",
+        "promptSessionId": "psess-msaup10i-1",
+        "kind": "prd_created",
+        "causedByEventId": "6d5ce2a3-4aba-4f18-9c27-59565ff56b6d",
+        "at": "2026-08-01T22:23:21.038Z",
+        "prdSlug": "916-chat-turn-diff-rendering"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "a1e4862b-9620-4a17-8613-37024eb4fdcd",
+        "text": "## Summary\n\nFiled 4 PRDs into the same approved Epic (`psess-msaup10i-1`), grounded in what I actually read in the code (not assumptions):\n\n| NN | Slug | Depends on | ETA | What it builds |\n|---|---|---|---|---|\n| **913** | `chat-turn-card-contrast` | — | ~15 min | Fixes the near-invisible `bg-elev`/`bg` contrast so turns read as bounded cards instead of a wall of text. |\n| **914** | `chat-turn-outcome-wiring` | — | ~20 min | Wires `ChatTurn.outcome` (typed, rendered, but never populated — confirmed via its own \"no producer yet\" comment) to a real, honestly-derived completion signal. |\n| **915** | `chat-turn-diff-data-capture` | — | ~25 min | Backend-only: threads the Edit/Write tool-use `input` payload — already classified by `classifyTranscriptLine.cjs` but dropped before reaching `ChatTurn` — into a new `diff` field on `ToolUseTrace`. |\n| **916** | `chat-turn-diff-rendering` | 915 | ~22 min | UI: renders a real collapsible diff card from that data — the actual mock-vs-reality gap closest to what your screenshots show missing. Explicitly scoped OUT the mock's Accept/Reject buttons, since there's no real backing action for them (an Edit is already on disk by render time) — flagged rather than building inert buttons. |\n\nI did not implement any of this inline — per `developer_sg.md`, this is real investigative/feature work (confirmed by reading `chat.ts`, `ChatTranscriptTurn.tsx`, and the main-process transcript classifier), not a one-line fix, so it routes through the scheduler rather than being hand-edited in this session. I can't monitor these PRDs running to completion from this one-shot turn — check the Scheduler tab, or ask again in a future turn to check status.",
+        "id": "pevt-msaxu5ux-4",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-01T22:23:31.881Z"
+      }
+    ],
+    "psess-msaviffk-7": [
+      {
+        "id": "pevt-msaviffk-8",
+        "promptSessionId": "psess-msaviffk-7",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-01T21:18:25.184Z",
+        "text": "Left Navigation\n\nThe Home-Tab still does not stay in focus when I'm clicking on the Left Navigation. The left Navigation Items when the Home-tab is selected must be distinct menu from the Tabs when Projects are selectioned. We have n't been able to get to the botton of this issue so far"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaviffk-8",
+        "text": "Confirmed: the `promptSessions.ts` typecheck error is pre-existing (already-modified file from before this session, unrelated to my change), and no other typecheck errors exist. All relevant tests pass (42/42).\n\n## Summary\n\n**Root cause:** `TabBar.tsx:33` computed the top-bar \"Home\" pill's highlighted state as `focusedPanelId === 'overview'` — a stale derivation left over from before `navFace` became real state (commit `0593323`, same day). Since most Home-sidebar rows (Scheduler, Skills, Plugins, etc.) are shared `BOTH`-face screens, clicking one moves `focusedPanelId` off `'overview'` while `navFace` correctly stays `'home'` — so the Home pill visually deactivated even though you were still browsing the Home menu. This is the exact \"Home-Tab doesn't stay in focus\" symptom.\n\nThe \"distinct menu\" requirement was already correctly implemented (`AlmanacSidebar` filters `NAV_ITEMS` by `navFace` via `getNavItemsForFace`) — not the bug.\n\n**Fix:** `src/renderer/components/TabBar.tsx` — `machineHomeActive` now reads `useLayout((s) => s.navFace === 'home')` instead of the stale `focusedPanelId` check.\n\n**Test added:** `src/renderer/components/__tests__/TabBar.navface.test.tsx` — regression coverage asserting the Home pill stays highlighted while browsing Home-face shared screens, and drops only when `navFace` flips to `'project'`. 42/42 relevant tests pass; typecheck clean (one pre-existing, unrelated error in `promptSessions.ts` from your prior uncommitted work).",
+        "id": "pevt-msavla11-9",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-01T21:20:38.149Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msavla11-9",
+        "text": "Full suite is green: 1856/1856 tests pass, typecheck clean (aside from the pre-existing unrelated error).\n\n## Summary\n\nFixed both parts of the left-nav bug:\n\n**1. Home tab losing focus (previous turn's fix, verified still correct):** `TabBar.tsx`'s Home pill now tracks `navFace === 'home'` instead of the stale `focusedPanelId === 'overview'` check.\n\n**2. File Explorer — now reachable from both faces, with a distinct starting root, and no focus loss:**\n- `src/renderer/lib/navGroups.ts` — `'projects'` (File Explorer) changed from `faces: PROJECT` to `faces: BOTH`, so it now appears in both the Home and Project sidebars.\n- `src/renderer/components/tabs/ProjectsWorkspace.tsx` — root folder now depends on `navFace`: Project face still roots at the active tab's cwd; Home face roots at the OS home directory (`window.api.app.homeDir()`) regardless of any open project tab.\n- `src/renderer/state/layout.ts` — `needsProjectsPanelReconciliation` gained a `navFace` param (default `'project'`, preserving old behavior) so the \"bounce back to Home if no active tab\" dead-end guard only fires on the Project face — Home face never needs an active tab, so it must not trigger this bounce.\n- `src/renderer/App.tsx` — wired the `navFace` selector through to that guard.\n- Because sidebar clicks already route through `openPanel` (not `openProjectPanel`), which leaves `navFace` untouched for any id other than `'overview'`, opening File Explorer from the Home sidebar never flips the face — the Home tab stays focused, satisfying \"Tab must not change focus.\"\n\n**Tests:** added `ProjectsWorkspace.navface.test.tsx` (4 cases covering root-by-face + no dead-end on Home), extended `layout.test.ts` and `navGroupsHome.test.ts` for the new guard/face tagging. Full suite: 1856/1856 passing, typecheck clean.",
+        "id": "pevt-msavr4e6-10",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-01T21:25:10.782Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msavr4e6-10",
+        "text": "Pushed successfully — `main` on origin now points to `8eee330`.\n\n## Summary\n\nCommitted and pushed the left-nav fix (`8eee330`), along with the 4 prior local commits that were already ahead of origin (Epic queue row menu work). The commit includes only the 9 files from this task's fix — `App.tsx`, `TabBar.tsx`, `ProjectsWorkspace.tsx`, `navGroups.ts`, `layout.ts`, plus their tests. I deliberately left out unrelated dirty state already present in the working tree (`session-manager-operations/*`, `styles.css`, `plugins/.../SKILL.md`) since that's from other background activity, not this task — it remains uncommitted locally for you to review separately.",
+        "id": "pevt-msawx67w-11",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-01T21:57:52.700Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msawx67w-11",
+        "text": "Here's my pass through every item currently visible in the Home-face sidebar (`src/renderer/lib/navGroups.ts`), in nav order, with a keep/remove/change call and why:\n\n**Workspace**\n\n1. **Epics (`terminal`)** — **Remove from Home.** Agreed. An Epic is, by definition, \"one small unit of work within the Main Project\" (CLAUDE.md domain model) — there's no such thing as a machine-level Epic. It should be Project-only.\n2. **Browser** — **Keep Home-only.** Confirmed by reading `Browser.tsx`: it owns its own tab/viewId state (`useBrowserState`) keyed by URL, with zero dependency on `activeTab.cwd`. It's a genuinely machine-wide mini-browser, not project data — belongs in Home, not duplicated into Project.\n3. **File Explorer (`projects`)** — **Keep BOTH** (just wired this). Home roots at the OS home dir, Project roots at the active tab's cwd — the split you asked for is now real.\n4. **Scheduler** — **Keep BOTH.** It's explicitly \"a browser over TAB → EPIC → PRD,\" project-scoped by default with \"All projects\" as the Home-face escape hatch. That's the intended shape.\n5. **History** — **Keep BOTH.** \"Every session, ever\" is inherently machine-wide (Home = primary), but the Project face's filter-to-this-project view is genuinely useful. No change.\n\n**Configure** (these all follow the same real \"scoped editor\" pattern — user/project/local `settings.json`-style files with a `ScopeSwitcher`, confirmed by reading `Settings.tsx`)\n\n6. **System Prompt** — **Keep BOTH.** Real user vs. project scope in Claude Code config.\n7. **Skills** — **Keep BOTH.** Same — global `~/.claude/skills` vs. project skills.\n8. **Plugins** — **Keep Home-only.** Plugins install machine-wide via `claude plugin install`; there's no per-project plugin scope to switch to.\n9. **MCP Servers** — **Keep BOTH.** Global `~/.claude.json` vs. project `.mcp.json`.\n10. **Hooks** — **Keep BOTH.** Global vs. project `settings.json` hooks.\n11. **Keybindings** — **Keep Home-only.** No per-project keybindings concept exists in …",
+        "id": "pevt-msaxfumi-1",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-01T22:12:24.138Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaxfumi-1",
+        "text": "**Audit complete — no additional routing bugs found.** I checked all 9 BOTH-face screens (`Scheduler`, `HistoryDashboard`, `SystemPrompt`, `Skills`, `McpServers`, `Hooks`, `Permissions`, `Settings`, `ProjectsWorkspace`) for the exact class of bug we fixed twice already (logic that silently ignores or misreads which face you're on):\n\n1. **Scope defaults are all driven by the real `navFace` store field**, not `focusedPanelId` or any other derived/stale signal. Every one of the 8 scope-switcher screens uses the identical validated pattern: `useState(() => navFace === 'project' && cwd ? 'project' : 'user')` + a `prevNavFaceRef`-gated effect that only re-applies the default on an actual face *transition* + a `manuallyTouchedRef` that stops it from clobbering a manual scope change. `ProjectsWorkspace` (no scope switcher, just an automatic root) reads `navFace` directly the same way. Scheduler's `'project' | 'all'` scope follows the same shape.\n\n2. **`openProjectPanel`** — the only function that flips `navFace` to `'project'` — is called from exactly three places, all genuine \"user selected a project\" moments: `TabBar.tsx`'s tab-activate handler, `App.tsx`'s pure-tab-switch effect, and the new-project flow. **None of the 9 BOTH-face tab components call it.** So none of them can silently kick you out of Home face just by rendering.\n\n3. **No duplicate/conflicting routing table exists.** `screenComponents.tsx`'s render switch and `screenKeys.ts`'s `SCREEN_KEYS` list are both face-agnostic — `navGroups.ts`'s `faces: [...]` tag is the single source of truth for which sidebar shows which item. There's no second place that could drift out of sync with it.\n\n4. **`deriveNavFace`** (the old broken derivation) is fully gone — zero remaining references anywhere in the codebase.\n\n5. The only other `focusedPanelId ===` checks left in the codebase are legitimate per-panel-focus lookups (e.g. \"is the terminal panel currently the active dockview tab\") — not face-routing logic.\n\nNo changes …",
+        "id": "pevt-msaxkif2-2",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-01T22:16:01.598Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaxkif2-2",
+        "text": "No new changes to commit — the audit I just ran was read-only (grep/inspection only, no edits), and it found nothing that needed fixing. The left-nav work from earlier is already committed and pushed (`8eee330`).\n\nThe only diffs in the working tree right now are pre-existing and unrelated to this thread's work (same ones flagged last time): `EpicComposer.tsx`/`attachments.tsx`/`styles.css`/`session-manager-operations/*`/`plugins/.../SKILL.md` — all from other background activity, not something I touched in this conversation. I won't commit those under this task's name since they're not mine to attribute.\n\nNothing to push right now. Let me know if you want me to go ahead and implement the **Epics → Project-only** change (and/or a call on **Voice**) — that's the next actual code change queued up, and I'll commit that once it lands.",
+        "id": "pevt-msb25wse-5",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-02T00:24:38.462Z"
       }
     ]
   }

@@ -1,0 +1,31 @@
+{
+  "session": {
+    "id": "psess-msbarus5-1",
+    "cwd": "/home/bilko/Projects/session-manager",
+    "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
+    "claudeSessionId": "c8563314-7609-42eb-aaf5-b995bd61d06c",
+    "status": "completed",
+    "createdAt": "2026-08-02T04:25:39.221Z",
+    "completedAt": "2026-08-02T04:25:51.521Z",
+    "tag": "build"
+  },
+  "events": [
+    {
+      "id": "pevt-msbarus5-2",
+      "promptSessionId": "psess-msbarus5-1",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-02T04:25:39.221Z",
+      "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "pevt-msbarus5-2",
+      "id": "pevt-msbas49t-9",
+      "promptSessionId": "psess-msbarus5-1",
+      "at": "2026-08-02T04:25:51.521Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-02T04:25:51.521Z"
+}

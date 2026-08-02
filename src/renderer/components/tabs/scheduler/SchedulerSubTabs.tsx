@@ -25,7 +25,7 @@ export function SchedulerSubTabs<K extends string>({ options, active, onChange }
             key={key}
             type="button"
             onClick={() => onChange(key)}
-            className={`px-[18px] py-[7px] rounded-[9px] text-[13.5px] transition-colors ${
+            className={`px-[18px] py-[7px] rounded-lg text-[13.5px] transition-colors ${
               isActive
                 ? 'bg-bg-elev shadow-[inset_0_0_0_1px] shadow-line font-semibold text-fg'
                 : 'font-medium text-fg-dim hover:text-fg'

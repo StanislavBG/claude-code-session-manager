@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DOM Spec Template — {{TAB_NAME}}</title>
+<style>
+  :root {
+    --bg: #14140f; --bg-hi: #1b1b15; --bg-elev: #201f18; --line: #33322a;
+    --fg: #f1ede2; --fg-dim: #b8b3a4; --fg-faint: #837e6f;
+    --accent: #c8552f; --sage: #7a9b6e; --butter: #d8b25c; --code-bg: #0e0e0b;
+    --ok: #7a9b6e; --warn: #d8b25c; --bad: #c8552f;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 15px/1.55 -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+  header.doc-head { padding: 28px 36px 20px; border-bottom: 1px solid var(--line); background:var(--bg-hi); }
+  header.doc-head .kicker { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-faint); }
+  header.doc-head h1 { margin:.2em 0 .3em; font-size:30px; }
+  header.doc-head p { margin:0; max-width:760px; color:var(--fg-dim); font-size:14px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 36px 80px; }
+  section.block { margin: 0 0 34px; }
+  section.block > h2 { font-size:20px; border-bottom:1px solid var(--line); padding-bottom:8px; margin:0 0 14px; }
+  section.block > .desc { color: var(--fg-dim); font-size: 13.5px; margin: 0 0 16px; max-width: 760px; }
+  .component-card { border:1px solid var(--line); background:var(--bg-hi); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+  .component-card h3 { margin:0 0 4px; font-size:15px; }
+  .component-card .loc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; color:var(--fg-faint); margin-bottom:10px; }
+  dl.spec { display:grid; grid-template-columns: 110px 1fr; gap:6px 12px; margin:0; font-size:13px; }
+  dl.spec dt { color:var(--fg-faint); font-weight:600; }
+  dl.spec dd { margin:0; color:var(--fg-dim); }
+  code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; background:var(--code-bg); color:var(--fg-dim); padding:1px 5px; border-radius:4px; }
+  pre.code-block { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; background:var(--code-bg); color:var(--fg-dim); padding:10px 12px; border-radius:8px; overflow-x:auto; white-space:pre-wrap; }
+  table.inventory { width:100%; border-collapse: collapse; font-size:12.5px; }
+  table.inventory th, table.inventory td { border:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top; }
+  table.inventory th { background:var(--bg-elev); color:var(--fg-dim); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; }
+  .pill.ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color:var(--ok); }
+  .pill.warn { background: color-mix(in srgb, var(--warn) 20%, transparent); color:var(--warn); }
+  .pill.bad { background: color-mix(in srgb, var(--bad) 20%, transparent); color:var(--bad); }
+  figure.screenshot { margin:0 0 20px; }
+  figure.screenshot img { max-width:100%; border:1px solid var(--line); border-radius:10px; }
+  figure.screenshot figcaption { font-size:12px; color:var(--fg-faint); margin-top:6px; }
+  .visual-tree { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; color:var(--fg-dim); line-height:1.7; white-space:pre; }
+  .flags li { margin-bottom:8px; }
+  nav.toc { position: sticky; top: 0; background: var(--bg); padding: 10px 0 16px; border-bottom:1px solid var(--line); margin-bottom: 22px; font-size:12.5px; }
+  nav.toc a { color: var(--fg-dim); text-decoration:none; margin-right:16px; }
+  nav.toc a:hover { color: var(--fg); text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<!--
+  ============================================================================
+  DOM-SPEC TEMPLATE — reusable process for feeding a screen's structure to a
+  design tool (e.g. claude-code-designer via its MCP).
+
+  HOW TO USE THIS TEMPLATE FOR A NEW SCREEN:
+    1. Identify the screen's root component file and read every child
+       component it renders, in visual top-to-bottom / left-to-right order.
+       (For a large screen, delegate this read to an Explore subagent with a
+       prompt asking for: element name, file:line, DOM tag + key classes,
+       interaction/state behavior, verbatim text content, and any
+       data-testid/aria attributes — grouped in the order elements appear on
+       screen. That is exactly the report shape this template consumes.)
+    2. Fill in <header> with the tab/screen name and its one-paragraph purpose
+       (usually copy-pasteable from the component's own header text).
+    3. Attach a real screenshot in the "Visual reference" section — a
+       designer works far faster from a picture + spec together than from
+       spec text alone.
+    4. Walk the screen top-to-bottom. Each visually distinct region becomes
+       one <section class="block">. Inside it, each interactive or
+       informational element becomes one <div class="component-card">
+       following the <dl class="spec"> fields below. Order matters — keep it
+       the same order the eye encounters it on screen, not source-file order,
+       when the two differ (e.g. a component defined once but rendered N
+       places — describe it once, note every render site).
+    5. End with:
+         - a flat "All interactive elements" table (for quick scanning /
+           coverage-checking — every control should have exactly one row)
+         - a "Known issues / design flags" list — concrete complaints about
+           the CURRENT layout (visual noise, inconsistent spacing, unclear
+           hierarchy, terminology drift) for the designer to react to. This
+           is the single most valuable section for "make this less weird" —
+           without it a designer just reproduces the mess with a fresh coat
+           of paint.
+    6. Do NOT invent behavior. Every claim here must trace to a real file:line
+       or a real screenshot pixel. If you don't know why an element exists,
+       say "purpose unclear" — don't guess.
+    7. Hand the finished HTML file's path to the claude-code-designer MCP tool
+       as the input document, with the explicit framing: "produce a
+       human-friendly redesign focused on new users; DOM-spec below is source
+       of truth for what must still be possible after redesign."
+  ============================================================================
+-->
+
+<header class="doc-head">
+  <div class="kicker">DOM Spec · Design Input Document</div>
+  <h1>{{TAB_NAME}}</h1>
+  <p>{{ONE_PARAGRAPH_PURPOSE — usually the tab's own subtitle copy, verbatim.}}</p>
+</header>
+
+<main>
+  <nav class="toc">
+    <a href="#visual-reference">Visual reference</a>
+    <a href="#visual-tree">Visual tree</a>
+    <a href="#sections">Sections</a>
+    <a href="#interactive-inventory">Interactive elements</a>
+    <a href="#design-flags">Design flags</a>
+  </nav>
+
+  <section class="block" id="visual-reference">
+    <h2>Visual reference</h2>
+    <p class="desc">A real screenshot of the screen as it exists today. Crop to just this tab/screen; don't include unrelated chrome unless it's part of the interaction.</p>
+    <figure class="screenshot">
+      <img src="{{SCREENSHOT_PATH_OR_DATA_URI}}" alt="{{TAB_NAME}} screenshot">
+      <figcaption>{{screenshot caption / capture date / build version}}</figcaption>
+    </figure>
+  </section>
+
+  <section class="block" id="visual-tree">
+    <h2>Visual tree (top → bottom)</h2>
+    <p class="desc">A quick ASCII outline of the region hierarchy, before the detailed per-element breakdown below. Helps a reader (human or agent) hold the whole page shape in mind.</p>
+    <div class="visual-tree">{{ASCII_TREE — e.g.
+Header
+├─ Title + subtitle
+├─ Status strip
+└─ Sub-tab switcher
+Content (per sub-tab)
+├─ Section A
+│  ├─ Element 1
+│  └─ Element 2
+└─ Section B
+   └─ ...
+}}</div>
+  </section>
+
+  <section class="block" id="sections">
+    <h2>Sections</h2>
+    <p class="desc">One &lt;section&gt; per visually distinct region. Repeat the component-card block for every element inside it.</p>
+
+    <!-- Repeat this whole <section> block for every region of the screen -->
+    <section>
+      <h3>{{SECTION_NAME}}</h3>
+      <div class="component-card">
+        <h3>{{Element name — human label, e.g. "Fire policy select"}}</h3>
+        <div class="loc">{{file path}}:{{line}}</div>
+        <dl class="spec">
+          <dt>Tag / classes</dt><dd><code>{{tag}}</code> — {{key tailwind classes, verbatim}}</dd>
+          <dt>Content</dt><dd>{{verbatim label/text/options}}</dd>
+          <dt>Interaction</dt><dd>{{click/hover/input behavior}}</dd>
+          <dt>Reads/writes</dt><dd>{{state or IPC call touched}}</dd>
+          <dt>States</dt><dd>{{default / hover / disabled / loading / conditional-render rule}}</dd>
+          <dt>A11y</dt><dd>{{aria-*, data-testid, or "none"}}</dd>
+        </dl>
+      </div>
+      <!-- ... more component-cards ... -->
+    </section>
+  </section>
+
+  <section class="block" id="interactive-inventory">
+    <h2>All interactive elements (flat index)</h2>
+    <p class="desc">Every clickable/editable control on the screen, one row each — for quick coverage-checking against the sections above.</p>
+    <table class="inventory">
+      <thead><tr><th>Label</th><th>Type</th><th>Location</th><th>Action</th><th>Enabled when</th></tr></thead>
+      <tbody>
+        <tr><td>{{label}}</td><td>{{button/input/select/checkbox/link}}</td><td>{{file:line}}</td><td>{{what happens}}</td><td>{{condition, or "always"}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="block" id="design-flags">
+    <h2>Known issues / design flags</h2>
+    <p class="desc">Concrete, specific complaints about the current design — this is what turns a spec into useful designer input rather than a faithful trace of a messy layout.</p>
+    <ul class="flags">
+      <li><span class="pill bad">visual noise</span> {{finding}}</li>
+      <li><span class="pill warn">inconsistency</span> {{finding}}</li>
+      <li><span class="pill ok">works well, keep</span> {{finding — call out what NOT to break}}</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

@@ -151,7 +151,7 @@ export function SchedulerHistoryView({ scopeCwd = null }: { scopeCwd?: string | 
         {filtered.length === 0 ? (
           <EmptyState title="No matches" hint="Try adjusting the filters." />
         ) : (
-          <div className="mx-4 my-3 bg-bg-hi border border-line rounded-[14px] overflow-hidden">
+          <div className="mx-4 my-3 bg-bg-hi border border-line rounded-2xl overflow-hidden">
             <div className="flex items-center px-[18px] py-3 bg-bg-elev">
               <span className="font-serif text-base font-semibold text-fg">
                 {filtered.length} job{filtered.length !== 1 ? 's' : ''}

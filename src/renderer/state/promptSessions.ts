@@ -5,6 +5,7 @@ import { useEpicTerminal } from './epicTerminal'
 import { epicIdCandidates } from '../lib/epicProvenance'
 import { splitTitleAndGoal } from '../lib/epicDerive'
 import { toast } from './toast'
+import type { TicketTag } from '../lib/ticketDisplay'
 
 /**
  * A top-level goal-oriented prompt, promoted to its own independent Claude
@@ -49,7 +50,7 @@ export interface PromptSession {
   /** Epic-level intent tag. Also written by src/main/lib/epicMint.cjs for
    *  Epics auto-minted from a headless PRD dispatch — stay shape-compatible
    *  so hydrate() reading a main-written active-index.json round-trips it. */
-  tag?: 'feature' | 'bug' | 'discussion' | 'build'
+  tag?: TicketTag
   /** Full first-prompt body, when it differs from the display `goalText`
    *  (a proposal filed by automation: goalText is a one-line title, this is
    *  the RCA/analysis body). Sent verbatim on approval; falls back to

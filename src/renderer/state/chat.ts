@@ -497,6 +497,20 @@ function dequeueNext(tabId: string): void {
     return
   }
 
+  // Epic tabs never reach the classifier. When this tab IS an Epic (same
+  // "known PromptSession at tabId" test capturePromptSessionTurn uses), a
+  // queued follow-up must stay inside that Epic's session — the agent drafts
+  // any PRDs itself, linked to THIS Epic. Routing it through dispatchToPrd()
+  // would mint a brand-new active Epic out of the follow-up's raw text
+  // (resolveDispatchPromptSessionId's no-chainRootId branch), silently
+  // forking the conversation out of session context. Sessions must never
+  // create Epics without explicit user approval — only the New Epic card and
+  // the propose→approve flow do that.
+  if (usePromptSessions.getState().sessions[tabId]) {
+    dispatchQueuedInline(tabId, next)
+    return
+  }
+
   // A 'discussion' ticket is the user declaring intent up front: the goal is
   // an interactive research conversation with the agent, not work to be
   // decomposed. Classifying it anyway would let a well-argued research

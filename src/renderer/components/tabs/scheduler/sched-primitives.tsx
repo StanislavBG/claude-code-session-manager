@@ -210,9 +210,14 @@ export function PrdNumberBadge({ n }: { n: string }) {
 // ─── STATUS_TONE — PRD status pill styling ───────────────────────────────────
 // Consumed by SchedulerPrdsView restyle (PRD 20-scheduler-prds).
 export const STATUS_TONE: Record<string, { bg: string; text: string; border: boolean; label: string }> = {
-  running:      { bg: 'bg-butter/30', text: 'text-fg-dim',   border: false, label: 'running' },
-  investigating: { bg: 'bg-butter/30', text: 'text-fg-dim',  border: false, label: 'investigating' },
-  queued:       { bg: 'bg-sage/25',   text: 'text-sage',     border: false, label: 'queued' },
+  // running/queued deliberately mirror SchBadge's colors for the same two
+  // states (accent-filled running, neutral bordered queued/pending) — these
+  // two pill systems represent the same underlying job status, and used to
+  // diverge here: "queued" rendered in the same sage/green as "completed",
+  // making a not-yet-run PRD look done at a glance.
+  running:       { bg: 'bg-accent',    text: 'text-white',    border: false, label: 'running' },
+  investigating: { bg: 'bg-accent',    text: 'text-white',    border: false, label: 'investigating' },
+  queued:       { bg: 'bg-bg',        text: 'text-fg-dim',   border: true,  label: 'queued' },
   ready:        { bg: 'bg-bg',        text: 'text-fg-dim',   border: true,  label: 'ready to run' },
   draft:        { bg: 'bg-bg',        text: 'text-fg-faint', border: true,  label: 'draft' },
   completed:    { bg: 'bg-sage/20',   text: 'text-sage',     border: false, label: 'completed' },

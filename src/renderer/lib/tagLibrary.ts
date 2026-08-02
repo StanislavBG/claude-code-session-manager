@@ -7,7 +7,7 @@
  * (tone/color) and `epicQueueControls.ts` (group order) both import the tag
  * list from here rather than keeping their own copies.
  */
-export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build'
+export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'
 
 export type DevelopEagerness = 'expected-default' | 'available-not-assumed'
 
@@ -45,6 +45,13 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     label: 'Build',
     description:
       "A build Epic's whole point is to run the Builder skill — decomposition into PRDs (or a direct build run) is the expected next step, the same as feature/bug.",
+    developEagerness: 'expected-default',
+  },
+  {
+    tag: 'project-home-builder',
+    label: 'Project Home Builder',
+    description:
+      'Generates a project\'s 3 static Project Page HTML files via the project-home-builder local agent — see session-manager-operations/architecture/project-pages-pipeline.md. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
   },
 ]

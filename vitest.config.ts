@@ -57,6 +57,7 @@ export default defineConfig({
       'src/main/__tests__/browserView-oauth-popup.test.cjs',
       'src/main/__tests__/scheduler-reset-job-fields-guard.test.cjs',
       'src/main/__tests__/scheduler-commit-guard-noop.test.cjs',
+      'src/main/__tests__/scheduler-reap-dead-running-jobs.test.cjs',
       'src/main/__tests__/scheduler-unreadable-queue-guard.test.cjs',
       'src/main/__tests__/health-prd-migration.test.cjs',
       'src/main/__tests__/epicMint.test.cjs',

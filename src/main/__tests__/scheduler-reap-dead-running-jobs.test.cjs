@@ -23,12 +23,11 @@
  * DEFAULT_PROJECT_CWD) is baked into a top-level const from os.homedir() at
  * require time — this test must never be able to read or write real state.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-reap-dead-running-jobs.test.cjs
+ * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reap-dead-running-jobs.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

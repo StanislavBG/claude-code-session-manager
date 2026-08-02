@@ -240,7 +240,7 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
           title={status.tooltip}
         >
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className={`w-[38px] h-[38px] rounded-[10px] bg-bg border border-line flex items-center justify-center shrink-0 ${statusToneClass(status.kind)}`}>
+            <div className={`w-[38px] h-[38px] rounded-xl bg-bg border border-line flex items-center justify-center shrink-0 ${statusToneClass(status.kind)}`}>
               <AlmanacIcon name="clock" size={19} />
             </div>
             <div className="min-w-0">
@@ -417,10 +417,10 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
                 type="button"
                 onClick={onClearQueue}
                 disabled={jobs.every((j) => j.status === 'running')}
-                className="text-[12.5px] text-fg-dim hover:text-accent bg-transparent border-0 cursor-pointer font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[12px] text-accent border border-accent/40 hover:bg-accent/10 rounded-md px-2.5 py-1 cursor-pointer font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                 title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
               >
-                Clear queue
+                Archive &amp; clear queue…
               </button>
             </div>
           </div>

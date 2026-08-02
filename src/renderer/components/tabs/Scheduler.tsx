@@ -46,6 +46,7 @@ import type { NavKey } from '../LeftNav'
 type SubView = 'queue' | 'prds' | 'history'
 
 const LS_KEY = 'sm.schedulerTab.subView'
+const ADVANCED_LS_KEY = 'sm.schedulerTab.advancedOpen'
 
 const VIEW_OPTIONS = [
   { key: 'queue' as const, label: 'Queue' },
@@ -185,7 +186,51 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
   )
 }
 
-// ─── Architecture summary (Home face only) ──────────────────────────────────
+// ─── Advanced & global settings disclosure ──────────────────────────────────
+
+/**
+ * Collapses SessionManagerConfig (Global Controls / Behavior / Session pool /
+ * On disk) plus the architecture-summary stub behind one disclosure, closed
+ * by default. These are machine-wide, rarely-touched settings — stacking them
+ * open above the live job queue meant a first-time user had to scroll past 4+
+ * config cards before finding "is my work running." The queue is now the
+ * first thing in view; this content is one click away, not gone.
+ */
+function AdvancedSettingsSection({ navigate }: { navigate?: (k: NavKey) => void }) {
+  const [open, setOpen] = useState(() => localStorage.getItem(ADVANCED_LS_KEY) === '1')
+
+  useEffect(() => {
+    localStorage.setItem(ADVANCED_LS_KEY, open ? '1' : '0')
+  }, [open])
+
+  return (
+    <section className="border border-line rounded-xl bg-bg-hi overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-5 py-3.5 text-left hover:bg-bg-elev/60 transition-colors"
+      >
+        <span
+          className={`text-fg-faint inline-flex transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+          aria-hidden="true"
+        >
+          <AlmanacIcon name="chevron" size={13} />
+        </span>
+        <span className="text-[13.5px] font-semibold text-fg">Advanced &amp; global settings</span>
+        <span className="text-[12.5px] text-fg-faint">
+          — session pool, on-disk paths, diagnostics. Machine-wide, rarely touched.
+        </span>
+      </button>
+      {open && (
+        <div className="px-5 pb-5 pt-1 border-t border-line space-y-6">
+          <SessionManagerConfig navigate={navigate} />
+          <ArchitectureSummarySection />
+        </div>
+      )}
+    </section>
+  )
+}
 
 /**
  * Reserved slot for an agentic-generated architecture summary — a
@@ -294,18 +339,22 @@ export function Scheduler({ navigate }: SchedulerProps = {}) {
             Authored PRD source files on disk — edit, lint, archive, or queue them.
           </p>
         )}
+        {subView === 'history' && (
+          <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
+            The last 50 completed and failed jobs, for this project.
+          </p>
+        )}
       </div>
 
       {/* ── Content ──────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0">
         {subView === 'queue' && (
           <div className="h-full flex flex-col">
-            <div className="shrink-0 max-h-[45%] overflow-y-auto px-9 pb-6 pt-2 space-y-6">
-              <SessionManagerConfig navigate={navigate} />
-              <ArchitectureSummarySection />
-            </div>
-            <div className="flex-1 min-h-0 border-t border-line">
+            <div className="flex-1 min-h-0">
               <SchedulePanel scopeCwd={scopeCwd} />
+            </div>
+            <div className="shrink-0 px-9 py-4 border-t border-line">
+              <AdvancedSettingsSection navigate={navigate} />
             </div>
           </div>
         )}

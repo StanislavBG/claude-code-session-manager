@@ -45,6 +45,7 @@ const TAG_TONE: Record<TicketTag, { bg: string; text: string; border: boolean; l
   bug: { bg: 'bg-accent/15', text: 'text-accent', border: true, label: 'Bug' },
   discussion: { bg: 'bg-butter/25', text: 'text-fg-dim', border: true, label: 'Discussion' },
   build: { bg: 'bg-hive-teal/20', text: 'text-hive-teal', border: true, label: 'Build' },
+  'project-home-builder': { bg: 'bg-honey/20', text: 'text-honey-dark', border: true, label: 'Project Home Builder' },
 }
 
 export function ticketTagTone(tag: TicketTag) {

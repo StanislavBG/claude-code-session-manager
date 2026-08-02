@@ -1,0 +1,30 @@
+{
+  "session": {
+    "id": "psess-msb62qiw-2",
+    "cwd": "/home/bilko/Projects/session-manager",
+    "goalText": "the full Orange should follow the active tab\n\nAttached: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/djgnwmk5dps-image.png",
+    "claudeSessionId": "cefb6d48-540f-4ee7-9ea0-81a2e31fce9c",
+    "status": "completed",
+    "createdAt": "2026-08-02T02:14:08.840Z",
+    "completedAt": "2026-08-02T02:29:07.361Z"
+  },
+  "events": [
+    {
+      "id": "pevt-msb62qiw-3",
+      "promptSessionId": "psess-msb62qiw-2",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-02T02:14:08.840Z",
+      "text": "the full Orange should follow the active tab\n\nAttached: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/djgnwmk5dps-image.png"
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "pevt-msb62qiw-3",
+      "id": "pevt-msb6lztt-4",
+      "promptSessionId": "psess-msb62qiw-2",
+      "at": "2026-08-02T02:29:07.361Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-02T02:29:07.361Z"
+}

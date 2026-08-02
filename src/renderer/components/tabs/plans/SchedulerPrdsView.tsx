@@ -413,7 +413,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
             <button
               type="button"
               onClick={handleNewPrd}
-              className="shrink-0 bg-accent text-white rounded-[9px] px-4 py-[9px] text-[13.5px] font-semibold leading-none"
+              className="shrink-0 bg-accent text-white rounded-lg px-4 py-[9px] text-[13.5px] font-semibold leading-none"
             >
               + New PRD
             </button>
@@ -469,7 +469,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
                 return (
                   <div
                     key={p.slug}
-                    className="flex items-stretch bg-bg-elev border border-line rounded-[13px] overflow-hidden"
+                    className="flex items-stretch bg-bg-elev border border-line rounded-2xl overflow-hidden"
                   >
                     {/* Checkbox for bulk select */}
                     <label className="flex items-center px-3 cursor-pointer hover:bg-bg-hi">
@@ -534,7 +534,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
                         type="button"
                         onClick={() => window.api.schedule.runNow()}
                         disabled={isRunning}
-                        className="bg-fg text-bg rounded-[9px] px-[18px] py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-50"
+                        className="bg-fg text-bg rounded-lg px-[18px] py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-50"
                       >
                         {isRunning ? 'Running…' : 'Queue job'}
                       </button>

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DOM Spec — Scheduler Tab</title>
+<style>
+  :root {
+    --bg: #14140f; --bg-hi: #1b1b15; --bg-elev: #201f18; --line: #33322a;
+    --fg: #f1ede2; --fg-dim: #b8b3a4; --fg-faint: #837e6f;
+    --accent: #c8552f; --sage: #7a9b6e; --butter: #d8b25c; --code-bg: #0e0e0b;
+    --ok: #7a9b6e; --warn: #d8b25c; --bad: #c8552f;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 15px/1.55 -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+  header.doc-head { padding: 28px 36px 20px; border-bottom: 1px solid var(--line); background:var(--bg-hi); }
+  header.doc-head .kicker { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-faint); }
+  header.doc-head h1 { margin:.2em 0 .3em; font-size:30px; }
+  header.doc-head p { margin:0; max-width:760px; color:var(--fg-dim); font-size:14px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 36px 80px; }
+  section.block { margin: 0 0 34px; }
+  section.block > h2 { font-size:20px; border-bottom:1px solid var(--line); padding-bottom:8px; margin:0 0 14px; }
+  section.block > .desc { color: var(--fg-dim); font-size: 13.5px; margin: 0 0 16px; max-width: 760px; }
+  section.subsection { margin-bottom: 26px; }
+  section.subsection > h3.region { font-size:17px; color:var(--fg); margin: 0 0 10px; padding-bottom:4px; border-bottom: 1px dashed var(--line); }
+  .component-card { border:1px solid var(--line); background:var(--bg-hi); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+  .component-card h4 { margin:0 0 4px; font-size:14.5px; }
+  .component-card .loc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; color:var(--fg-faint); margin-bottom:10px; }
+  dl.spec { display:grid; grid-template-columns: 118px 1fr; gap:6px 12px; margin:0; font-size:13px; }
+  dl.spec dt { color:var(--fg-faint); font-weight:600; }
+  dl.spec dd { margin:0; color:var(--fg-dim); }
+  code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; background:var(--code-bg); color:var(--fg-dim); padding:1px 5px; border-radius:4px; }
+  table.inventory { width:100%; border-collapse: collapse; font-size:12.5px; margin-bottom: 10px; }
+  table.inventory th, table.inventory td { border:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top; }
+  table.inventory th { background:var(--bg-elev); color:var(--fg-dim); font-size:11px; text-transform:uppercase; letter-spacing:.04em; position: sticky; top: 44px; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; }
+  .pill.ok { background: rgba(122,155,110,0.2); color:var(--ok); }
+  .pill.warn { background: rgba(216,178,92,0.2); color:var(--warn); }
+  .pill.bad { background: rgba(200,85,47,0.2); color:var(--bad); }
+  figure.screenshot { margin:0 0 20px; }
+  figure.screenshot img { max-width:100%; border:1px solid var(--line); border-radius:10px; }
+  figure.screenshot figcaption { font-size:12px; color:var(--fg-faint); margin-top:6px; }
+  .visual-tree { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; color:var(--fg-dim); line-height:1.7; white-space:pre; background: var(--code-bg); padding: 14px 16px; border-radius: 10px; overflow-x:auto; }
+  .flags li { margin-bottom:10px; }
+  nav.toc { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 10px 0 16px; border-bottom:1px solid var(--line); margin-bottom: 22px; font-size:12.5px; }
+  nav.toc a { color: var(--fg-dim); text-decoration:none; margin-right:16px; }
+  nav.toc a:hover { color: var(--fg); text-decoration:underline; }
+  .reused-badge { display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--butter); border:1px solid rgba(216,178,92,0.4); border-radius: 5px; padding: 1px 6px; margin-left: 8px; }
+</style>
+</head>
+<body>
+
+<header class="doc-head">
+  <div class="kicker">DOM Spec · Design Input Document</div>
+  <h1>Scheduler Tab</h1>
+  <p>Global scheduler policy and the machine-wide session pool, plus — when a project tab is active —
+  that project's PRDs, run as <code>claude -p</code> jobs against the 5-hour billing window. Jobs
+  auto-pause on rate-limit and resume on the next reset. Three sub-tabs split by operate vs. author:
+  <strong>Queue</strong> (monitor/control live jobs + global machine config), <strong>PRDs</strong>
+  (author the .md source files), <strong>History</strong> (last 50 completed/failed jobs).
+  Generated from a live read of the source (<code>src/renderer/components/tabs/Scheduler.tsx</code>,
+  <code>SchedulePanel.tsx</code>, <code>SessionManagerConfig.tsx</code>,
+  <code>tabs/plans/SchedulerPrdsView.tsx</code>, <code>tabs/plans/SchedulerHistoryView.tsx</code>,
+  <code>tabs/scheduler/sched-primitives.tsx</code>) — every claim below traces to a file:line.</p>
+</header>
+
+<main>
+  <nav class="toc">
+    <a href="#visual-reference">Visual reference</a>
+    <a href="#visual-tree">Visual tree</a>
+    <a href="#header">Header/Strip</a>
+    <a href="#queue">Queue tab</a>
+    <a href="#prds">PRDs tab</a>
+    <a href="#history">History tab</a>
+    <a href="#shared">Shared primitives</a>
+    <a href="#interactive-inventory">Interactive index</a>
+    <a href="#design-flags">Design flags</a>
+  </nav>
+
+  <section class="block" id="visual-reference">
+    <h2>Visual reference</h2>
+    <p class="desc">Screenshot of the Queue sub-tab (top of scroll), captured from the live app. Everything below the
+    fold in this screenshot (job list, filter bar, footer) is documented in the Queue section but not pictured here.</p>
+    <figure class="screenshot">
+      <img src="./scheduler-tab-screenshot.png" alt="Scheduler tab — Queue sub-tab, top portion">
+      <figcaption>scheduler-tab-screenshot.png — Queue sub-tab, header + window strip + sub-tabs + Global Controls card grid + start of PolicyBar/status area.</figcaption>
+    </figure>
+  </section>
+
+  <section class="block" id="visual-tree">
+    <h2>Visual tree (top → bottom)</h2>
+    <div class="visual-tree">Scheduler (shell)
+├─ Header block  (px-9 pt-7)
+│  ├─ "WORKSPACE" kicker + LearningPanel "LEARN" link
+│  ├─ H1 "Scheduler"
+│  ├─ Subtitle paragraph
+│  ├─ WindowStrip
+│  │  ├─ Pause banner (conditional)
+│  │  └─ Stats row: reset countdown · pending/running/completed legend · utilization · last batch
+│  ├─ SchedulerSubTabs pill switcher: Queue | PRDs | History
+│  └─ Sub-tab description paragraph (Queue or PRDs only)
+└─ Content (per sub-tab)
+   ├─ QUEUE
+   │  ├─ [scroll region, max-h 45%] SessionManagerConfig
+   │  │  ├─ Global Controls  → 6 cards: Settings / Permissions / Hooks / MCP Servers / System Prompt / Skills
+   │  │  ├─ Behavior          → "Open to Home on launch" toggle
+   │  │  ├─ Session pool      → slot dots + holders list
+   │  │  └─ On disk           → 3 static path lines
+   │  ├─ ArchitectureSummarySection (disabled "Generate summary" button, stub)
+   │  └─ [flex-1 scroll region] SchedulePanel
+   │     ├─ SR-only live-region announcer (invisible)
+   │     ├─ FireStatus banner (Running/Paused/Manual/On-reset/Auto)
+   │     ├─ Meter rate-limited banner (conditional, dismissible)
+   │     ├─ PolicyBar: Start-jobs select · Up-to-N-at-once · Pause-above-N% · Fire-next-batch-now · Refresh
+   │     ├─ Running-concurrency badge (conditional)
+   │     ├─ FilterBar: search input + status pills (All/Running/Pending/Completed/Needs review/Failed)
+   │     ├─ Job table card
+   │     │  ├─ header row: "{N} jobs" · counts · Clear completed · Clear queue
+   │     │  ├─ JobRow × N (accordion) → expanded: Status/Timing/Location/Actions detail columns
+   │     │  ├─ progress bar (running rows, collapsed)
+   │     │  └─ "+N more completed" collapse toggle
+   │     ├─ Footer: reset/last-run text · "supervisor" link · "folder" link
+   │     ├─ SchedulerHealthSection (collapsible diagnostic)
+   │     └─ QueueHealthSection (collapsible PRD lint results)
+   │     [alternate view when panelView==='supervisor']
+   │     └─ SupervisorPanel: back link · Config (enabled/interval/probes/stale) · Recent probes log
+   ├─ PRDS  (SchedulerPrdsView)
+   │  ├─ Card-list view (default)
+   │  │  ├─ Header: description + "+ New PRD" button
+   │  │  ├─ Bulk-select action bar (conditional): Archive… / Retag… / Clear
+   │  │  ├─ Empty state
+   │  │  └─ PRD card grid: checkbox · title+badges · meta row · slug link · action column (Queue job)
+   │  ├─ Full-body editor view (on select)
+   │  │  ├─ Toolbar: ← PRDs · slug · status pill · Reset · Run now · Hide/Show log
+   │  │  ├─ EditorView (markdown/frontmatter editor, not detailed here)
+   │  │  └─ Log drawer (conditional)
+   │  └─ Modals: ArchiveConfirmModal, RetagModal
+   └─ HISTORY  (SchedulerHistoryView)
+      ├─ Filter bar: status pills · project select · date-from · date-to · count · clear
+      └─ Job list card → HistoryRow × N (accordion, same detail shape as JobRow)</div>
+  </section>
+
+  <!-- ═══════════════════════════════ HEADER / WINDOW STRIP ═══════════════════════════════ -->
+  <section class="block" id="header">
+    <h2>Header + Window Strip + Sub-tabs</h2>
+    <p class="desc">Fixed chrome at the top of every sub-tab. Source: <code>Scheduler.tsx</code> lines 257–297; <code>WindowStrip</code> lines 88–186; <code>SchedulerSubTabs.tsx</code>.</p>
+
+    <div class="component-card">
+      <h4>Title block</h4>
+      <div class="loc">Scheduler.tsx:262-276</div>
+      <dl class="spec">
+        <dt>Tag/classes</dt><dd><code>div.text-xs.font-bold.text-fg-faint.tracking-[0.8px].uppercase</code> → "WORKSPACE"; <code>h1.font-serif.text-[40px].font-semibold</code> → "Scheduler"; <code>p.text-[14.5px].text-fg-dim</code> subtitle with inline <code>&lt;code&gt;claude -p&lt;/code&gt;</code></dd>
+        <dt>Content</dt><dd>"Global scheduler policy and the machine-wide session pool, plus — when a project tab is active — that project's PRDs, run as `claude -p` jobs against your 5-hour window. Jobs auto-pause on rate-limit and resume on the next reset."</dd>
+        <dt>Interaction</dt><dd>Static text. <code>LearningPanel active="scheduler"</code> renders a "LEARN" link top-right (component not detailed here — same pattern used on every tab).</dd>
+        <dt>States</dt><dd>none</dd>
+      </dl>
+    </div>
+
+    <div class="component-card">
+      <h4>Pause banner</h4>
+      <div class="loc">Scheduler.tsx:130-143 (WindowStrip)</div>
+      <dl class="spec">
+        <dt>Tag/classes</dt><dd><code>div</code> — <code>flex items-center gap-3 border rounded-xl px-4 py-2.5 text-[13px]</code>; tone class <code>bg-red-950/60 border-red-700/50 text-red-200</code> (auth/network reasons) or <code>bg-amber-950/60 border-amber-700/50 text-amber-200</code> (rate_limit/manual)</dd>
+        <dt>Content</dt><dd>Reason-specific text via <code>pauseMessage()</code>: "Scheduler paused: Claude sign-in expired or invalid. Restart the app or re-run `claude login`, then Resume." · "Paused for rate limit — resumes in {time}" · "Paused: billing endpoint unreachable for 30+ min." · "Scheduler paused manually. Click Resume to restart."</dd>
+        <dt>Interaction</dt><dd><strong>"Resume"</strong> button, <code>onClick → window.api.schedule.resume()</code></dd>
+        <dt>States</dt><dd>Only rendered when <code>snapshot.paused</code> is truthy; color/urgency differs by pause reason</dd>
+      </dl>
+    </div>
+
+    <div class="component-card">
+      <h4>Stats row</h4>
+      <div class="loc">Scheduler.tsx:146-183</div>
+      <dl class="spec">
+        <dt>Tag/classes</dt><dd><code>div.flex.items-center.gap-5.flex-wrap.bg-bg-hi.border.border-line.rounded-xl.px-4.py-3</code></dd>
+        <dt>Content</dt><dd>Clock icon + "Window resets in {relative}" · divider · <span class="reused-badge">LegendItem ×3</span> "{n} pending" / "{n} running" / "{n} completed today" (dot colors: fg-faint / accent / sage) · divider · "{pct}% of window used" (or stale variant with "· last good reading {ago}" in amber if polling is failing) · right-aligned "last batch {ago}"</dd>
+        <dt>Interaction</dt><dd>Fully read-only display; re-renders every 30s via internal timer</dd>
+        <dt>States</dt><dd>Job counts (pending/running/completed) are scoped to the active project tab's cwd when one is open, else machine-wide; reset countdown/utilization/last-batch always stay machine-wide</dd>
+      </dl>
+    </div>
+
+    <div class="component-card">
+      <h4>Sub-tab switcher (SchedulerSubTabs)</h4>
+      <div class="loc">SchedulerSubTabs.tsx:18-40</div>
+      <dl class="spec">
+        <dt>Tag/classes</dt><dd>Segmented pill: <code>div.inline-flex.gap-1.bg-bg-hi.p-1.rounded-xl</code> containing 3 <code>button.px-[18px].py-[7px].rounded-[9px].text-[13.5px]</code>; active tab gets <code>bg-bg-elev.shadow-[inset_0_0_0_1px].font-semibold.text-fg</code>, inactive gets <code>font-medium.text-fg-dim.hover:text-fg</code></dd>
+        <dt>Content</dt><dd>"Queue" · "PRDs" · "History"</dd>
+        <dt>Interaction</dt><dd>Click sets <code>subView</code> state, persisted to <code>localStorage['sm.schedulerTab.subView']</code></dd>
+        <dt>States</dt><dd>One active at a time; comment in source explicitly says this switch is Scheduler-local and must not be reused elsewhere</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════ QUEUE TAB ═══════════════════════════════ -->
+  <section class="block" id="queue">
+    <h2>Queue sub-tab</h2>
+    <p class="desc">Default view. Top ~45% is a scrollable "Options" region (global machine config); below a divider is the live project job queue (<code>SchedulePanel</code>), independently scrollable.</p>
+
+    <section class="subsection">
+      <h3 class="region">Global Controls card grid <span class="reused-badge">SessionManagerConfig.tsx</span></h3>
+      <div class="component-card">
+        <h4>Section heading + 6 summary cards</h4>
+        <div class="loc">SessionManagerConfig.tsx (GlobalControlsSection, delegated component) — invoked from SessionManagerConfig.tsx root</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>section.border.border-line.rounded-xl.bg-bg-hi.px-5.py-4</code>; grid <code>div.grid.grid-cols-2.sm:grid-cols-3.gap-3</code> of <code>button.text-left.border.border-line.rounded-lg.bg-bg.px-3.py-2.5.hover:border-accent</code></dd>
+          <dt>Content</dt><dd>Heading "Global Controls" + desc "Machine-wide (user-scope) config state for the tabs that default to global here on Home. Read-only summary — open a card to edit." Cards: <strong>Settings</strong> ("{N} top-level key(s) configured"), <strong>Permissions</strong> ("{N} rule(s) configured"), <strong>Hooks</strong> ("{N} hook(s) configured"), <strong>MCP Servers</strong> ("{N} MCP server(s)"), <strong>System Prompt</strong> ("configured ({N} chars)" / "not set"), <strong>Skills</strong> ("{N} skill(s) installed")</dd>
+          <dt>Interaction</dt><dd>Each card is a button; <code>onClick → navigate?.(key)</code> jumps to that Configure nav tab</dd>
+          <dt>States</dt><dd>Summary text falls back to "loading…" / "invalid JSON" / "not configured" per card while data hydrates</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">Behavior / Session pool / On disk sections</h3>
+      <div class="component-card">
+        <h4>Behavior — "Open to Home on launch" toggle</h4>
+        <div class="loc">SessionManagerConfig.tsx (Behavior section)</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>section.border.border-line.rounded-xl.bg-bg-hi.px-5.py-4</code> + <code>Toggle</code> component</dd>
+          <dt>Content</dt><dd>Heading "Behavior", desc "Cross-project app behavior, independent of any single project's config.", label "Open to Home on launch"</dd>
+          <dt>Interaction</dt><dd>Toggle writes <code>appPrefs.openToHomeOnLaunch</code>; reverts + toasts error on write failure</dd>
+          <dt>States</dt><dd><code>disabled={prefsSaving}</code> while a write is in flight</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>Session pool — slot dots + holders</h4>
+        <div class="loc">SessionManagerConfig.tsx:95-107</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>div.flex.items-center.gap-2</code> of <code>span.w-3.5.h-3.5.rounded-full.border</code>; in-use dots get <code>bg-accent.border-accent</code>, free dots get <code>bg-bg.border-line</code></dd>
+          <dt>Content</dt><dd>Heading "Session pool", desc explaining the shared <code>SM_SESSION_SLOTS</code> pool (default 5, range 0–10); "{inUse} / {total} in use" trailing text; optional holders list "{owner} since {time}" per active holder</dd>
+          <dt>Interaction</dt><dd>Read-only display; polls <code>window.api.schedule.sessionSlots()</code> every 5s</dd>
+          <dt>States</dt><dd>"loading…" before first poll resolves</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>On disk — static path reference</h4>
+        <div class="loc">SessionManagerConfig.tsx (On disk section)</div>
+        <dl class="spec">
+          <dt>Content</dt><dd>3 monospace lines: <code>~/.claude/session-manager/scheduler-machine.json</code> ("policy + pause state"), <code>&lt;project&gt;/session-manager-operations/scheduler/state/</code> ("per-project queue + history"), <code>&lt;project&gt;/session-manager-operations/scheduler/epics/&lt;epic&gt;/prds/</code> ("PRD sources, per Epic")</dd>
+          <dt>Interaction</dt><dd>None — static reference text, not clickable/copyable</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">Architecture summary (stub)</h3>
+      <div class="component-card">
+        <h4>ArchitectureSummarySection</h4>
+        <div class="loc">Scheduler.tsx:198-221</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>section.border.border-line.rounded-xl.bg-bg-hi.px-5.py-4</code>; button <code>shrink-0.px-2.5.py-1.rounded.border.border-line.text-fg-faint.text-[12px].cursor-not-allowed.opacity-60</code></dd>
+          <dt>Content</dt><dd>Heading "Architecture summary"; desc "An agent-generated overview of how the scheduler pieces fit together — reconcile loop, queue/history shards, boot reconciliation, the dead-process reaper. Not generated yet."; button "Generate summary"; footer "No summary generated yet." (italic)</dd>
+          <dt>Interaction</dt><dd>Button is permanently <code>disabled</code> — feature not wired to a backend yet (reserved slot per source comment)</dd>
+          <dt>States</dt><dd>Always disabled today; will eventually run a cost-gated <code>claude -p</code> pass, cached to disk</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">Status banner (FireStatus) <span class="reused-badge">SchedulePanel.tsx</span></h3>
+      <div class="component-card">
+        <h4>Live scheduler-state banner</h4>
+        <div class="loc">SchedulePanel.tsx:238-266</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>div.flex.flex-wrap.items-center.gap-3.px-4.py-3.rounded-xl.border</code>, tone via <code>statusBannerClassAlmanac(kind)</code>: running → <code>bg-amber-400/10 border-amber-400/25</code>, paused → <code>bg-amber-500/10 border-amber-500/25</code>, auto-throttled → <code>bg-amber-500/5 border-amber-500/15</code>, else <code>bg-bg-elev border-line</code>. Icon tile <code>w-[38px] h-[38px] rounded-[10px]</code></dd>
+          <dt>Content</dt><dd>Bold leading mode word (Running/Paused/Manual/On-reset/Auto) + subtitle examples: "Running 1/2 · 2/4 parallel · 1m30s", "Paused — tokens exhausted", "Manual · 3 pending", "fires 3:45 PM (in 12m)", "No work queued". Right-aligned "{cap} slots · last batch {ago}"</dd>
+          <dt>Interaction</dt><dd>Conditional action button (paused/manual kinds only): <strong>"Resume"</strong> (<code>schedule.resume()</code>) or <strong>"Fire next batch now"</strong> (<code>forceTick()</code>)</dd>
+          <dt>States</dt><dd>5 mutually exclusive "kind" states drive color + copy + whether the action button shows at all</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>Meter rate-limited banner (conditional)</h4>
+        <div class="loc">SchedulePanel.tsx:269-281</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>div.flex.items-center.justify-between.gap-3.px-4.py-3.bg-amber-400/15.border.border-amber-400/30.rounded-xl</code></dd>
+          <dt>Content</dt><dd>"Meter rate-limited — firing on heuristic"</dd>
+          <dt>Interaction</dt><dd><strong>"Dismiss"</strong> button — session-only, does not persist across reload</dd>
+          <dt>States</dt><dd>Shown only when <code>consecutiveFailures &gt; 5 &amp;&amp; lastFailureKind === 'meter_rate_limited' &amp;&amp; !paused &amp;&amp; !dismissed</code></dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">PolicyBar (fire-policy controls)</h3>
+      <div class="component-card">
+        <h4>Start jobs — fire policy select</h4>
+        <div class="loc">SchedulePanel.tsx:286-298</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>select.appearance-none.border.border-line.bg-bg-hi.rounded-lg.px-2.5.py-1.5.text-[13px].font-medium</code></dd>
+          <dt>Content</dt><dd>Label "Start jobs"; options "when available" / "only on reset" / "manually" (values <code>when-available</code>/<code>on-reset</code>/<code>manual</code>)</dd>
+          <dt>Interaction</dt><dd><code>onChange → window.api.schedule.setConfig({firePolicy})</code></dd>
+          <dt>A11y</dt><dd>Tooltip explains each mode's semantics</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>Concurrency cap — "Up to N at once"</h4>
+        <div class="loc">SchedulePanel.tsx:301-326</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>input[type=number][min=1][max=20].w-11.text-center.border.border-line.bg-bg-hi.rounded-lg.py-1.5.font-mono.text-[13px]</code>; conditional "env" pin badge <code>span.text-[10px].uppercase.text-amber-400/90.bg-amber-400/10.border.border-amber-400/30.rounded.px-1.5.py-0.5</code></dd>
+          <dt>Content</dt><dd>Label "Up to" … "at once"; badge text "env" when pinned</dd>
+          <dt>Interaction</dt><dd><code>onChange → setConfig({concurrencyCap})</code></dd>
+          <dt>States</dt><dd><code>disabled</code> when pinned via <code>SM_SCHEDULER_MAX_CONCURRENCY</code> env var (tooltip explains why)</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>Utilization threshold — "Pause above N%" (conditional)</h4>
+        <div class="loc">SchedulePanel.tsx:329-343</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>input[type=number][min=0][max=100]</code>, same visual family as concurrency input</dd>
+          <dt>Content</dt><dd>Label "Pause above" … "% of window"</dd>
+          <dt>Interaction</dt><dd><code>onChange → setConfig({utilizationThreshold})</code></dd>
+          <dt>States</dt><dd>Only rendered when <code>firePolicy === 'when-available'</code> (the default) — disappears entirely for the other two modes</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>"Fire next batch now" / "Refresh" buttons</h4>
+        <div class="loc">SchedulePanel.tsx:346-363</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd>Primary: <code>button.bg-accent.text-white.rounded-lg.px-4.py-2.text-[13px].font-semibold.disabled:opacity-40</code>. Secondary: <code>button.bg-bg-hi.border.border-line.text-fg-dim.rounded-lg.px-3.5.py-2.text-[13px]</code></dd>
+          <dt>Content</dt><dd>"Fire next batch now" · "Refresh"</dd>
+          <dt>Interaction</dt><dd>Fire → <code>forceTick()</code> + toast (bypasses billing-usage poll). Refresh → <code>schedule.rescan()</code> (re-scans prds/ folder on disk)</dd>
+          <dt>States</dt><dd>Fire button <code>disabled</code> when <code>pending===0 && running===0</code></dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">Filter bar</h3>
+      <div class="component-card">
+        <h4>Search input + status pills</h4>
+        <div class="loc">SchedulePanel.tsx:967-997 (FilterBar)</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>input[type=text].w-full.bg-bg-hi.border.border-line.rounded-xl.py-2.pl-9.pr-3.text-[13.5px]</code> with leading search icon; pills via shared <code>FilterPills</code> component</dd>
+          <dt>Content</dt><dd>Placeholder "filter jobs…"; pill labels <strong>All / Running / Pending / Completed / Needs review / Failed</strong></dd>
+          <dt>Interaction</dt><dd>Text input filters by title/slug/project in-memory (not persisted); pill selection persists to <code>localStorage['sm.scheduler.queueFilter']</code></dd>
+          <dt>A11y</dt><dd><code>aria-label="Filter jobs by title, slug, or project"</code></dd>
+          <dt>States</dt><dd>Bar only renders when <code>jobs.length &gt; 0</code></dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">Job table</h3>
+      <div class="component-card">
+        <h4>Table header row</h4>
+        <div class="loc">SchedulePanel.tsx:395-424</div>
+        <dl class="spec">
+          <dt>Content</dt><dd>"{N} job(s)" · counts summary "{p}p · {r}r · {d}d" (+ "· {f}f" in accent color if failures exist)</dd>
+          <dt>Interaction</dt><dd><strong>"Clear completed"</strong> (conditional) — hides completed/failed rows client-side only (localStorage), queue.json untouched. <strong>"Clear queue"</strong> — <code>window.confirm()</code> then archives every non-running PRD to <code>prds-archived/&lt;timestamp&gt;/</code> and removes from queue; <code>disabled</code> if everything is running</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>JobRow (repeated per job, accordion) <span class="reused-badge">shared shape w/ HistoryRow</span></h4>
+        <div class="loc">SchedulePanel.tsx:766-963</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd>Clickable row: <code>button[data-job-row][data-job-index].w-full.text-left.grid.grid-cols-[116px_1fr_auto_auto].gap-4.px-[18px].py-3.5.hover:bg-bg/40</code>, <code>aria-expanded</code>, opens as accordion</dd>
+          <dt>Content</dt><dd>Col 1: <code>SchBadge</code>. Col 2: title (+ optional <code>PrdNumberBadge</code>) + error/verdict note line + <code>EpicTag</code> chip. Col 3: <code>ProjectTag</code>. Col 4: trailing timing text ("{elapsed} elapsed" / "took {dur}" / "~{eta}") + rotating chevron</dd>
+          <dt>Interaction</dt><dd>Click toggles expand; keyboard ArrowUp/ArrowDown roving focus across rows (persisted focus index)</dd>
+          <dt>States</dt><dd>Thin animated progress bar shown only for running+collapsed rows; expanded panel shows 4 <code>DetailBlock</code> columns (Status/Timing/Location/Actions) with row actions "view epic →", "view log →", "reset to pending →" each conditionally rendered</dd>
+          <dt>A11y</dt><dd><code>data-testid="job-row-prompt-session-chip"</code> / <code>"job-row-prompt-session-link"</code> on the Epic chip/link; <code>aria-label</code> = "PRD {n}, {title}, {status}"</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>"+N more completed" collapse toggle</h4>
+        <div class="loc">SchedulePanel.tsx:470-490</div>
+        <dl class="spec">
+          <dt>Content</dt><dd>"▾/▸ {N} more completed · fresh &amp; capped at 5 shown inline"; optional inline "un-hide" link when rows are locally hidden</dd>
+          <dt>Interaction</dt><dd>Toggles <code>showAllCompleted</code>; un-hide clears the hidden-slugs set</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="subsection">
+      <h3 class="region">Footer + collapsible diagnostics</h3>
+      <div class="component-card">
+        <h4>Footer bar</h4>
+        <div class="loc">SchedulePanel.tsx:500-522</div>
+        <dl class="spec">
+          <dt>Content</dt><dd>"reset {relative}" · "last run {relative} ago" · links <strong>"supervisor"</strong> (switches to SupervisorPanel view) and <strong>"folder"</strong> (opens prds/ folder on disk)</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>SchedulerHealthSection (collapsible)</h4>
+        <div class="loc">SchedulePanel.tsx:1146-1198</div>
+        <dl class="spec">
+          <dt>Tag/classes</dt><dd><code>div.text-[9px].text-fg-faint</code> — smallest text size on the entire screen</dd>
+          <dt>Content</dt><dd>Toggle text "scheduler health" / "scheduler health · {N} failures" / "scheduler health · paused"; expanded: boot time, last poll status, failure count, retry countdown, cached reset time, currently-running slugs+pids</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>QueueHealthSection (collapsible PRD lint)</h4>
+        <div class="loc">SchedulePanel.tsx:1211-1310</div>
+        <dl class="spec">
+          <dt>Content</dt><dd>"queue health · all clear ({N} scanned)" or "· {E} error(s), {W} warn(s)"; per-finding lines "✗ L{line}: {snippet}" (red) / "⚠ ..." (amber); "rerun" link to re-lint on demand</dd>
+          <dt>Interaction</dt><dd>Static lint of queued PRDs for unbounded loops / missing frontmatter etc.</dd>
+        </dl>
+      </div>
+      <div class="component-card">
+        <h4>SupervisorPanel (alternate full view, replaces queue list)</h4>
+        <div class="loc">SchedulePanel.tsx:1001-1143</div>
+        <dl class="spec">
+          <dt>Content</dt><dd>"← queue" back link · "Supervisor" label · "refresh" link · Config row (enabled checkbox, interval/probes/stale number inputs) · "Recent probes (last {N})" log list, each row a colored pill (verdict) + slug + optional kill action + cost + reason text</dd>
+          <dt>Interaction</dt><dd>Config inputs write live to supervisor settings; this entire panel replaces the job queue view rather than appearing alongside it</dd>
+        </dl>
+      </div>
+    </section>
+  </section>
+
+  <!-- ═══════════════════════════════ PRDS TAB ═══════════════════════════════ -->
+  <section class="block" id="prds">
+    <h2>PRDs sub-tab</h2>
+    <p class="desc">Source: <code>tabs/plans/SchedulerPrdsView.tsx</code>. Two mutually exclusive views: card list (default) vs. full-body editor (on selecting a PRD).</p>
+
+    <div class="component-card">
+      <h4>Card-list header + "+ New PRD"</h4>
+      <div class="loc">SchedulerPrdsView.tsx:406-419</div>
+      <dl class="spec">
+        <dt>Tag/classes</dt><dd>Button <code>shrink-0.bg-accent.text-white.rounded-[9px].px-4.py-[9px].text-[13.5px].font-semibold</code></dd>
+        <dt>Content</dt><dd>Desc: "PRDs are the source the scheduler runs from. Each one becomes a `claude -p` job when you queue it. This is where you write and edit the source — to watch a run in progress, use the Queue tab." Button "+ New PRD"</dd>
+        <dt>Interaction</dt><dd>Creates <code>new-prd-{timestamp}.md</code> from a template and opens it directly in the editor</dd>
+      </dl>
+    </div>
+    <div class="component-card">
+      <h4>Bulk-select action bar (conditional)</h4>
+      <div class="loc">SchedulerPrdsView.tsx:422-448</div>
+      <dl class="spec">
+        <dt>Content</dt><dd>"{N} selected" · <strong>Archive…</strong> · <strong>Retag…</strong> · <strong>Clear</strong> buttons</dd>
+        <dt>States</dt><dd>Only shown once ≥1 card is checkbox-selected</dd>
+      </dl>
+    </div>
+    <div class="component-card">
+      <h4>PRD card</h4>
+      <div class="loc">SchedulerPrdsView.tsx:470-543</div>
+      <dl class="spec">
+        <dt>Tag/classes</dt><dd><code>div.flex.items-stretch.bg-bg-elev.border.border-line.rounded-[13px]</code> with checkbox column, main content, action column</dd>
+        <dt>Content</dt><dd>Optional <code>PrdNumberBadge</code>, title (as clickable button), <code>PrdStatusPill</code>, meta row (<code>ProjectTag</code>, <code>EpicTag</code>, estimate minutes, parallel group, "edited {relative}"), slug link, conditional needs-review block with verdict text + "Re-fire" button</dd>
+        <dt>Interaction</dt><dd>Title/slug both open the editor. Action column: <strong>"Queue job"</strong>/"Running…" button, <code>disabled</code> while running, calls <code>schedule.runNow()</code></dd>
+      </dl>
+    </div>
+    <div class="component-card">
+      <h4>Full-body editor toolbar</h4>
+      <div class="loc">SchedulerPrdsView.tsx:344-403</div>
+      <dl class="spec">
+        <dt>Content</dt><dd>"← PRDs" back link · slug (mono) · <code>PrdStatusPill</code> · toolbar buttons <strong>Reset</strong> (disabled unless failed), <strong>Run now</strong>, <strong>Hide log / Last run log</strong> (label toggles)</dd>
+        <dt>Interaction</dt><dd>Each toolbar button (<code>TBtn</code> helper) wraps a <code>Tooltip</code>; below the toolbar is a shared <code>EditorView</code> (frontmatter + markdown body editor, not detailed here) and an optional log drawer with a raw <code>&lt;pre&gt;</code> log dump</dd>
+      </dl>
+    </div>
+    <div class="component-card">
+      <h4>ArchiveConfirmModal / RetagModal</h4>
+      <div class="loc">SchedulerPrdsView.tsx:570-713</div>
+      <dl class="spec">
+        <dt>Content</dt><dd>Archive: "Move {N} PRD(s) to prds-archived/&lt;timestamp&gt;/? Files are renamed, never deleted." Retag: numeric fields "parallelGroup:" and "estimateMinutes:" (blank = unchanged), inline validation errors, footer "Cancel" / "Archive {N}" / "Retag {N}"</dd>
+        <dt>Interaction</dt><dd>Modal confirm buttons disabled while <code>busy</code> or count is 0; retag logs every change to <code>retag-log.jsonl</code> for reversibility</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════ HISTORY TAB ═══════════════════════════════ -->
+  <section class="block" id="history">
+    <h2>History sub-tab</h2>
+    <p class="desc">Source: <code>tabs/plans/SchedulerHistoryView.tsx</code>. Read-only browse of the last 50 completed/failed jobs.</p>
+
+    <div class="component-card">
+      <h4>Filter bar</h4>
+      <div class="loc">SchedulerHistoryView.tsx:97-133</div>
+      <dl class="spec">
+        <dt>Content</dt><dd>Status pills <strong>All / Completed / Failed</strong> · project <code>&lt;select&gt;</code> ("All projects" + one option per project) · "from"/"to" <code>&lt;input type=date&gt;</code> pair · result count "{filtered}/{total}" · "clear" link (conditional, resets all 4 filters)</dd>
+      </dl>
+    </div>
+    <div class="component-card">
+      <h4>HistoryRow (accordion) <span class="reused-badge">same shape as JobRow</span></h4>
+      <div class="loc">SchedulerHistoryView.tsx:170-281</div>
+      <dl class="spec">
+        <dt>Content</dt><dd>Identical visual language to JobRow: <code>SchBadge</code>, title + error line, <code>EpicTag</code>, <code>ProjectTag</code>, duration + chevron; expanded panel with Status/Timing/Location/Actions <code>DetailBlock</code> columns — but dates shown as absolute locale strings rather than relative ("started"/"finished" here vs. live-elapsed in Queue)</dd>
+        <dt>Interaction</dt><dd>"view log →" and "reset to pending →" actions, both <code>stopPropagation</code> so they don't also toggle the row</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════ SHARED PRIMITIVES ═══════════════════════════════ -->
+  <section class="block" id="shared">
+    <h2>Shared primitives (reused identically across all 3 sub-tabs)</h2>
+    <p class="desc">Source: <code>tabs/scheduler/sched-primitives.tsx</code>. These are the single source of truth for status/epic/project chips — a designer should treat any restyle of one as a restyle of all its call sites.</p>
+    <table class="inventory">
+      <thead><tr><th>Primitive</th><th>Used by</th><th>Visual</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>SchBadge</code></td><td>JobRow, HistoryRow</td><td>Pill, min-width 104px, per-status bg/text + optional glyph (○ pending, ✓ completed, ! needs_review, ✕ failed, pulsing dot for running)</td><td>5 statuses total: running/pending/completed/needs_review/failed</td></tr>
+        <tr><td><code>ProjectTag</code></td><td>JobRow, PRD card, HistoryRow</td><td>Colored dot (hashed from project name) + mono project name</td><td>Color is deterministic per project via <code>projectColorFor()</code></td></tr>
+        <tr><td><code>EpicTag</code></td><td>JobRow, PRD card, HistoryRow</td><td>"epic" micro-label + truncated Epic name/id, clickable when <code>onOpen</code> given</td><td>Only JobRow's usage carries a <code>data-testid</code></td></tr>
+        <tr><td><code>DetailBlock</code>/<code>DetailLine</code></td><td>JobRow, HistoryRow expanded panels</td><td>Uppercase mono label + key/value mono rows</td><td>4 blocks always: Status, Timing, Location, Actions</td></tr>
+        <tr><td><code>PrdNumberBadge</code></td><td>JobRow, PRD card</td><td>Mono "#NN" chip</td><td>Extracted from leading numeric slug prefix</td></tr>
+        <tr><td><code>PrdStatusPill</code></td><td>PRD card, PRD editor toolbar</td><td>Rounded-full pill, 8 possible tones incl. "dispatched to PRD" and "needs your answer"</td><td>Distinct palette from SchBadge despite overlapping meaning (queued/running/completed/failed/needs_review are common to both)</td></tr>
+        <tr><td><code>LegendItem</code></td><td>WindowStrip stats row only</td><td>Dot + bold count + label</td><td>Not reused elsewhere</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════════════════════ FLAT INTERACTIVE INDEX ═══════════════════════════════ -->
+  <section class="block" id="interactive-inventory">
+    <h2>All interactive elements (flat index)</h2>
+    <table class="inventory">
+      <thead><tr><th>Label</th><th>Type</th><th>Sub-tab</th><th>Action</th><th>Enabled when</th></tr></thead>
+      <tbody>
+        <tr><td>Resume</td><td>button</td><td>Queue (banner)</td><td>schedule.resume()</td><td>paused</td></tr>
+        <tr><td>Fire next batch now</td><td>button</td><td>Queue (status banner)</td><td>forceTick()</td><td>kind is paused/manual</td></tr>
+        <tr><td>Dismiss</td><td>button</td><td>Queue (meter banner)</td><td>local dismiss, session-only</td><td>meter rate-limited banner visible</td></tr>
+        <tr><td>Start jobs (select)</td><td>select</td><td>Queue (PolicyBar)</td><td>setConfig(firePolicy)</td><td>always</td></tr>
+        <tr><td>Up to N at once (input)</td><td>number input</td><td>Queue (PolicyBar)</td><td>setConfig(concurrencyCap)</td><td>not env-pinned</td></tr>
+        <tr><td>Pause above N% (input)</td><td>number input</td><td>Queue (PolicyBar)</td><td>setConfig(utilizationThreshold)</td><td>firePolicy === when-available</td></tr>
+        <tr><td>Fire next batch now</td><td>button</td><td>Queue (PolicyBar)</td><td>forceTick()</td><td>pending or running &gt; 0</td></tr>
+        <tr><td>Refresh</td><td>button</td><td>Queue (PolicyBar)</td><td>schedule.rescan()</td><td>always</td></tr>
+        <tr><td>Filter jobs (search)</td><td>text input</td><td>Queue</td><td>in-memory text filter</td><td>jobs.length &gt; 0</td></tr>
+        <tr><td>All/Running/Pending/Completed/Needs review/Failed</td><td>pill group</td><td>Queue</td><td>status filter, persisted</td><td>jobs.length &gt; 0</td></tr>
+        <tr><td>Clear completed</td><td>button</td><td>Queue (job table)</td><td>hide completed rows locally</td><td>≥1 inline completed row</td></tr>
+        <tr><td>Clear queue</td><td>button</td><td>Queue (job table)</td><td>archive non-running PRDs, confirm() dialog</td><td>≥1 non-running job</td></tr>
+        <tr><td>JobRow (each)</td><td>button/accordion</td><td>Queue</td><td>expand/collapse detail</td><td>always</td></tr>
+        <tr><td>view epic →</td><td>button</td><td>Queue (job detail)</td><td>navigate to Epic's terminal tab</td><td>job has linked promptSession</td></tr>
+        <tr><td>view log →</td><td>button</td><td>Queue/History (job detail)</td><td>open RunLogViewer</td><td>job.runId set</td></tr>
+        <tr><td>reset to pending →</td><td>button</td><td>Queue/History (job detail)</td><td>schedule.resetJob(slug)</td><td>status not pending/running</td></tr>
+        <tr><td>+N more completed</td><td>button</td><td>Queue (job table)</td><td>toggle showAllCompleted</td><td>collapsedCount &gt; 0</td></tr>
+        <tr><td>un-hide</td><td>link</td><td>Queue (job table)</td><td>clear hidden-slugs set</td><td>hiddenSlugs.size &gt; 0</td></tr>
+        <tr><td>supervisor</td><td>link</td><td>Queue (footer)</td><td>switch to SupervisorPanel view</td><td>always</td></tr>
+        <tr><td>folder</td><td>link</td><td>Queue (footer)</td><td>schedule.openFolder()</td><td>always</td></tr>
+        <tr><td>scheduler health (toggle)</td><td>button</td><td>Queue</td><td>expand/collapse diagnostic panel</td><td>health data loaded</td></tr>
+        <tr><td>queue health (toggle) / rerun</td><td>button</td><td>Queue</td><td>expand/collapse lint results / re-lint</td><td>always</td></tr>
+        <tr><td>← queue</td><td>button</td><td>Queue (Supervisor view)</td><td>back to job list</td><td>always</td></tr>
+        <tr><td>refresh</td><td>button</td><td>Queue (Supervisor view)</td><td>reload probe log</td><td>always</td></tr>
+        <tr><td>enabled / interval / probes / stale</td><td>checkbox + number inputs</td><td>Queue (Supervisor view)</td><td>write supervisorConfig</td><td>always</td></tr>
+        <tr><td>Global Controls cards ×6</td><td>button</td><td>Queue (SessionManagerConfig)</td><td>navigate to Configure tab</td><td>always</td></tr>
+        <tr><td>Open to Home on launch</td><td>toggle</td><td>Queue (SessionManagerConfig)</td><td>write appPrefs</td><td>not currently saving</td></tr>
+        <tr><td>Generate summary</td><td>button</td><td>Queue (Architecture summary)</td><td>none (stub)</td><td>never — permanently disabled</td></tr>
+        <tr><td>+ New PRD</td><td>button</td><td>PRDs</td><td>create + open new PRD file</td><td>always</td></tr>
+        <tr><td>Archive… / Retag… / Clear</td><td>button</td><td>PRDs (bulk bar)</td><td>open modal / clear selection</td><td>≥1 checked</td></tr>
+        <tr><td>PRD title / slug (each card)</td><td>button</td><td>PRDs</td><td>open full-body editor</td><td>always</td></tr>
+        <tr><td>Re-fire</td><td>button</td><td>PRDs (needs_review card)</td><td>schedule.resetJob(slug)</td><td>status === needs_review</td></tr>
+        <tr><td>Queue job / Running…</td><td>button</td><td>PRDs (card action col)</td><td>schedule.runNow()</td><td>disabled while running</td></tr>
+        <tr><td>← PRDs</td><td>button</td><td>PRDs (editor toolbar)</td><td>close editor</td><td>always</td></tr>
+        <tr><td>Reset</td><td>button</td><td>PRDs (editor toolbar)</td><td>reset failed job to pending</td><td>status === failed</td></tr>
+        <tr><td>Run now</td><td>button</td><td>PRDs (editor toolbar)</td><td>runNow()</td><td>always</td></tr>
+        <tr><td>Hide log / Last run log</td><td>button</td><td>PRDs (editor toolbar)</td><td>toggle log drawer</td><td>always</td></tr>
+        <tr><td>Cancel / Archive N / Retag N</td><td>button</td><td>PRDs (modals)</td><td>confirm bulk action</td><td>not busy, count &gt; 0</td></tr>
+        <tr><td>All / Completed / Failed</td><td>pill group</td><td>History</td><td>status filter</td><td>always</td></tr>
+        <tr><td>Project (select)</td><td>select</td><td>History</td><td>filter by project</td><td>≥1 project present</td></tr>
+        <tr><td>from / to (date)</td><td>date input ×2</td><td>History</td><td>date-range filter</td><td>always</td></tr>
+        <tr><td>clear</td><td>link</td><td>History</td><td>reset all filters</td><td>any filter active</td></tr>
+        <tr><td>HistoryRow (each)</td><td>button/accordion</td><td>History</td><td>expand/collapse detail</td><td>always</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════════════════════ DESIGN FLAGS ═══════════════════════════════ -->
+  <section class="block" id="design-flags">
+    <h2>Known issues / design flags — why this screen reads as "weird"</h2>
+    <p class="desc">Concrete complaints for the designer to react to, not a wishlist of new features. Anything not listed here should be assumed intentional and worth preserving.</p>
+    <ul class="flags">
+      <li><span class="pill bad">visual noise</span> The Queue sub-tab stacks <strong>7 distinct card-like sections</strong> in one vertical scroll before you ever see a job (Global Controls grid, Behavior, Session pool, On disk, Architecture summary stub, status banner, PolicyBar) — a brand-new user has to scroll past all of it to find "did my job run." Nothing here signals which block is "config you set once" vs. "live state you check often."</li>
+      <li><span class="pill bad">visual noise</span> Font sizes range from <code>text-[9px]</code> (SchedulerHealthSection, QueueHealthSection) up to <code>text-[40px]</code> (H1) with at least 14 distinct sizes in between (10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 17, 18) — no clear type scale, so density and hierarchy feel arbitrary rather than designed.</li>
+      <li><span class="pill warn">inconsistency</span> Two different "status pill" systems exist for overlapping meaning: <code>SchBadge</code> (Queue/History rows) and <code>PrdStatusPill</code> (PRDs cards/editor) use different color palettes and shapes for states that are often the *same underlying job* (e.g. a running job is an accent-filled rounded-lg pill in Queue but a butter-tinted rounded-full pill in PRDs). A user moving between sub-tabs has to re-learn the color language.</li>
+      <li><span class="pill warn">inconsistency</span> Border radius varies without an apparent system: <code>rounded</code>, <code>rounded-lg</code>, <code>rounded-xl</code>, <code>rounded-[9px]</code>, <code>rounded-[10px]</code>, <code>rounded-[13px]</code>, <code>rounded-[14px]</code>, <code>rounded-2xl</code>, <code>rounded-full</code> all appear across cards/buttons/pills in this one tab.</li>
+      <li><span class="pill warn">inconsistency</span> "Queue", "PRDs", "History" as tab names don't map cleanly to what a new user is looking for ("is my thing running?" / "what did I write?" / "what happened before?") — the mental model (operate vs. author vs. audit) is explained only in a source code comment, never surfaced in the UI itself.</li>
+      <li><span class="pill bad">terminology overload</span> A first-time user hits, within the first screenful: PRD, Epic, parallel group, fire policy, concurrency cap, utilization threshold, session pool, 5-hour window, supervisor probes, queue health lint — ~10 domain terms with zero inline definitions or a glossary affordance.</li>
+      <li><span class="pill warn">inconsistency</span> Two nested "collapsible diagnostic" patterns (SchedulerHealthSection, QueueHealthSection) sit directly below the footer using near-invisible 9px text and a bare ▾/▸ glyph as the only affordance — easy to miss entirely, and visually they read as debug output rather than product UI.</li>
+      <li><span class="pill warn">inconsistency</span> The "Clear completed" vs. "Clear queue" buttons sit 2px apart with near-identical label text and styling but very different blast radius (one is a client-side hide, the other archives files to disk) — a misclick risk with no visual weight difference to signal "this one is bigger."</li>
+      <li><span class="pill bad">dead weight</span> "Generate summary" (Architecture summary section) is a permanently-disabled button shown to every user on every load — an unfinished feature stub occupying prime real estate above the actual job queue.</li>
+      <li><span class="pill ok">works well, keep</span> The JobRow/HistoryRow accordion pattern (badge · title · project tag · timing, expand for 4-column detail) is consistent, information-dense, and reused correctly in 2 of 3 sub-tabs — a good foundation to keep, not replace.</li>
+      <li><span class="pill ok">works well, keep</span> The window-resets/pending/running/completed status strip at the very top is a clear, glanceable "is everything OK" summary — the redesign should preserve an equivalent always-visible strip.</li>
+      <li><span class="pill ok">works well, keep</span> Read-only "on disk" path reference and the session-pool slot visualization are genuinely useful power-user context — don't strip these for simplicity, just consider whether they need to be this prominent for a first-time user.</li>
+    </ul>
+  </section>
+
+</main>
+</body>
+</html>

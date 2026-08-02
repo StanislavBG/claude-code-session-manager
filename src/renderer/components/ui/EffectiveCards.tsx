@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Scope } from '../../lib/scopes'
 import { SCOPE_LABELS } from '../../lib/scopes'
 import type { EffectiveNode, LeafNode } from '../../lib/mergeScopes'
@@ -74,6 +74,7 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
   )
 
   const [pendingScrollId, setPendingScrollId] = useState<string | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 
   const jumpToGroup = (id: string) => {
     const target = groups.find((g) => g.id === id)
@@ -83,12 +84,20 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
 
   useEffect(() => {
     if (!pendingScrollId) return
+    setPendingScrollId(null)
+    const container = scrollContainerRef.current
     const el = document.getElementById(`settings-group-${pendingScrollId}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      setPendingScrollId(null)
-    }
-  })
+    if (!container || !el) return
+    // Scroll ONLY this pane's own scrollable container. `el.scrollIntoView()`
+    // walks every scrollable ancestor to bring the target fully into the
+    // viewport — since this list is nested inside the app's outer layout
+    // scroll regions, that dragged the whole window/nav along with it
+    // (reported: "it scrolls to the section... but it moves everything and
+    // never resets"). Computing the offset within this one container and
+    // scrolling just it keeps the effect local to the settings pane.
+    const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top
+    container.scrollBy({ top: delta, behavior: 'smooth' })
+  }, [pendingScrollId])
 
   const visibleGroups = useMemo(() => {
     return groups
@@ -142,7 +151,7 @@ export function EffectiveCards({ node, targetScope, onOverride, schema }: Props)
       </div>
       <div className="flex-1 flex overflow-hidden">
         <GroupRail groups={railGroups} onJump={jumpToGroup} />
-        <div className="flex-1 overflow-auto py-3">
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto py-3">
           {visibleGroups.map((g) => (
             <Section
               key={g.id}

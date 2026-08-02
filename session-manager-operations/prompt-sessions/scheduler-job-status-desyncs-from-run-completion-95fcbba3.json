@@ -1,0 +1,63 @@
+{
+  "session": {
+    "id": "scheduler-job-status-desyncs-from-run-completion-95fcbba3",
+    "cwd": ".",
+    "goalText": "Scheduler job status desyncs from run completion — stuck 'running' after clean exit",
+    "claudeSessionId": "8eb42178-bca5-4ab4-902c-f08b6256ed96",
+    "status": "completed",
+    "createdAt": "2026-08-02T05:55:57.554Z",
+    "completedAt": "2026-08-02T06:27:56.280Z",
+    "tag": "bug",
+    "openingPrompt": "Scheduler bug: a job's claude -p process can exit cleanly and write its run artifacts (meta.json with exitCode 0, verdicts.json, even a landed git commit) while queue.json's job record is never advanced from status:\"running\" to \"completed\".\n\nFound live in this repo's own queue: slug 926-epic-prds-tab-include-archived started 2026-08-02T04:44:13Z, its run log shows exitCode 0 / finishedAt 2026-08-02T04:56:51Z, verdict \"clean\", and its commit (291aad6) is already on main — yet queue.json still shows status:\"running\" with finishedAt:null nearly an hour later. The owning Electron process (pid 1444358, started 21:20:57, before the job) never restarted, so this isn't a crash-orphan the existing boot-reconciliation logic would catch — it's a live desync between the run's completion handler (writes meta.json/verdicts.json under scheduled-plans/runs/<runId>/) and the queue.json status-transition write in scheduler.cjs. Net effect: the job looks permanently stuck to any observer (Scheduler tab, admin API scheduler_list_jobs), and everything with a dependsOn or slot-cap relationship to it stalls behind a phantom in-flight job.\n\nAsk the Epic to:\n1. Find the code path in src/main/scheduler.cjs where a job's process-exit handler writes run artifacts vs. where it flips queue.json job status to \"completed\" — identify why/how those two writes can succeed and fail independently (e.g. an exception between them, or the artifact writer running in a spot that doesn't await/precede the queueStore update).\n2. Make the two updates atomic, or add a reconciliation pass (could reuse the existing boot-orphan reconciliation pattern, but keyed on \"run artifacts exist with a terminal exitCode but queue.json job is still running\" rather than \"PID is dead\") so this self-heals on next scheduler tick without requiring an app restart.\n3. Add a regression test.\n\nDo NOT touch the already-completed 926 job's data as part of this fix — this PRD is about the general mechanism, not that one instance. Once the mechanism fix lands, it should also self-heal the currently-stuck 926 record without any manual queue.json edit.",
+    "source": {
+      "producer": "propose-epic"
+    }
+  },
+  "events": [
+    {
+      "id": "39782d10-cec1-4162-a85f-bc5baa209402",
+      "promptSessionId": "scheduler-job-status-desyncs-from-run-completion-95fcbba3",
+      "kind": "prompt",
+      "causedByEventId": null,
+      "at": "2026-08-02T05:55:57.554Z",
+      "text": "Scheduler bug: a job's claude -p process can exit cleanly and write its run artifacts (meta.json with exitCode 0, verdicts.json, even a landed git commit) while queue.json's job record is never advanced from status:\"running\" to \"completed\".\n\nFound live in this repo's own queue: slug 926-epic-prds-tab-include-archived started 2026-08-02T04:44:13Z, its run log shows exitCode 0 / finishedAt 2026-08-02T04:56:51Z, verdict \"clean\", and its commit (291aad6) is already on main — yet queue.json still shows status:\"running\" with finishedAt:null nearly an hour later. The owning Electron process (pid 1444358, started 21:20:57, before the job) never restarted, so this isn't a crash-orphan the existing boot-reconciliation logic would catch — it's a live desync between the run's completion handler (writes meta.json/verdicts.json under scheduled-plans/runs/<runId>/) and the queue.json status-transition write in scheduler.cjs. Net effect: the job looks permanently stuck to any observer (Scheduler tab, admin API scheduler_list_jobs), and everything with a dependsOn or slot-cap relationship to it stalls behind a phantom in-flight job.\n\nAsk the Epic to:\n1. Find the code path in src/main/scheduler.cjs where a job's process-exit handler writes run artifacts vs. where it flips queue.json job status to \"completed\" — identify why/how those two writes can succeed and fail independently (e.g. an exception between them, or the artifact writer running in a spot that doesn't await/precede the queueStore update).\n2. Make the two updates atomic, or add a reconciliation pass (could reuse the existing boot-orphan reconciliation pattern, but keyed on \"run artifacts exist with a terminal exitCode but queue.json job is still running\" rather than \"PID is dead\") so this self-heals on next scheduler tick without requiring an app restart.\n3. Add a regression test.\n\nDo NOT touch the already-completed 926 job's data as part of this fix — this PRD is about the general mechanism, not that one instance. Once the mechanism fix lands, it should also self-heal the currently-stuck 926 record without any manual queue.json edit."
+    },
+    {
+      "id": "202526fa-76d6-42ed-8383-093b6d5aaa8d",
+      "promptSessionId": "scheduler-job-status-desyncs-from-run-completion-95fcbba3",
+      "kind": "prd_created",
+      "causedByEventId": "39782d10-cec1-4162-a85f-bc5baa209402",
+      "at": "2026-08-02T06:05:47.931Z",
+      "prdSlug": "935-fix-scheduler-queue-json-stuck-at-status-running-after-clean"
+    },
+    {
+      "kind": "response",
+      "causedByEventId": "202526fa-76d6-42ed-8383-093b6d5aaa8d",
+      "text": "PRD 935 is queued in this repo's scheduler: `935-fix-scheduler-queue-json-stuck-at-status-running-after-clean.md`, joined to Epic `scheduler-job-status-desyncs-from-run-completion-95fcbba3`.\n\n**Root cause identified** (in `src/main/scheduler.cjs`):\n- `spawnJob()`'s completion sequence (meta.json write → verdicts.json write → `mutate()` flipping `queue.json` to `status:\"completed\"`) is wrapped in one `try/catch/finally`. If anything throws between the artifacts being written and the completion `mutate()` finishing, the exception is swallowed at `scheduler.cjs:3016` — but the `finally` block still runs and unconditionally does `runningSet.delete(job.slug)` (`scheduler.cjs:3019`).\n- The *only* periodic self-heal, `reapDeadRunningJobs()` (`scheduler.cjs:3197-3235`, called every 60s from `pollLoop`), gates its entire check on `if (runningSet.size === 0) return;` — but `runningSet` is now stale/wrong for exactly the job that needs reconciling, so it can bail before ever reading `queue.json`.\n- Live-verified against this repo's own stuck job: `926-epic-prds-tab-include-archived`, pid 1469438 (confirmed dead via `ps`), artifacts present with a clean exitCode, `queue.json` still `status:\"running\"`.\n\n**PRD 935** fixes `reapDeadRunningJobs()` to iterate `queue.json`'s actual running jobs (the source of truth) instead of gating on the `runningSet` in-memory cache, adds a regression test reproducing the runningSet-scrubbed-but-queue.json-still-running state, and requires the 926 job to self-heal automatically (not hand-edited) as live verification. Est. 20 min.\n\nSince this is a one-shot session with no later turn to check back in, I'm not polling for the PRD to finish — you'll see it complete in the Scheduler tab / Epic timeline. The Epic itself (`scheduler-job-status-desyncs-from-run-completion-95fcbba3`) is already `active` and will pick this PRD up on its next scheduler tick.",
+      "id": "pevt-msbed15h-40",
+      "promptSessionId": "scheduler-job-status-desyncs-from-run-completion-95fcbba3",
+      "at": "2026-08-02T06:06:06.101Z"
+    },
+    {
+      "kind": "closed",
+      "causedByEventId": "pevt-msbed15h-40",
+      "id": "pevt-msbf543c-6",
+      "promptSessionId": "scheduler-job-status-desyncs-from-run-completion-95fcbba3",
+      "at": "2026-08-02T06:27:56.280Z"
+    }
+  ],
+  "transcript": "",
+  "archivedAt": "2026-08-02T06:27:56.280Z",
+  "durableTurns": [
+    {
+      "role": "user",
+      "text": "Scheduler bug: a job's claude -p process can exit cleanly and write its run artifacts (meta.json with exitCode 0, verdicts.json, even a landed git commit) while queue.json's job record is never advanced from status:\"running\" to \"completed\".\n\nFound live in this repo's own queue: slug 926-epic-prds-tab-include-archived started 2026-08-02T04:44:13Z, its run log shows exitCode 0 / finishedAt 2026-08-02T04:56:51Z, verdict \"clean\", and its commit (291aad6) is already on main — yet queue.json still shows status:\"running\" with finishedAt:null nearly an hour later. The owning Electron process (pid 1444358, started 21:20:57, before the job) never restarted, so this isn't a crash-orphan the existing boot-reconciliation logic would catch — it's a live desync between the run's completion handler (writes meta.json/verdicts.json under scheduled-plans/runs/<runId>/) and the queue.json status-transition write in scheduler.cjs. Net effect: the job looks permanently stuck to any observer (Scheduler tab, admin API scheduler_list_jobs), and everything with a dependsOn or slot-cap relationship to it stalls behind a phantom in-flight job.\n\nAsk the Epic to:\n1. Find the code path in src/main/scheduler.cjs where a job's process-exit handler writes run artifacts vs. where it flips queue.json job status to \"completed\" — identify why/how those two writes can succeed and fail independently (e.g. an exception between them, or the artifact writer running in a spot that doesn't await/precede the queueStore update).\n2. Make the two updates atomic, or add a reconciliation pass (could reuse the existing boot-orphan reconciliation pattern, but keyed on \"run artifacts exist with a terminal exitCode but queue.json job is still running\" rather than \"PID is dead\") so this self-heals on next scheduler tick without requiring an app restart.\n3. Add a regression test.\n\nDo NOT touch the already-completed 926 job's data as part of this fix — this PRD is about the general mechanism, not that one instance. Once the mechanism fix lands, it should also self-heal the currently-stuck 926 record without any manual queue.json edit.",
+      "at": "2026-08-02T06:00:55.670Z"
+    },
+    {
+      "role": "assistant",
+      "text": "PRD 935 is queued in this repo's scheduler: `935-fix-scheduler-queue-json-stuck-at-status-running-after-clean.md`, joined to Epic `scheduler-job-status-desyncs-from-run-completion-95fcbba3`.\n\n**Root cause identified** (in `src/main/scheduler.cjs`):\n- `spawnJob()`'s completion sequence (meta.json write → verdicts.json write → `mutate()` flipping `queue.json` to `status:\"completed\"`) is wrapped in one `try/catch/finally`. If anything throws between the artifacts being written and the completion `mutate()` finishing, the exception is swallowed at `scheduler.cjs:3016` — but the `finally` block still runs and unconditionally does `runningSet.delete(job.slug)` (`scheduler.cjs:3019`).\n- The *only* periodic self-heal, `reapDeadRunningJobs()` (`scheduler.cjs:3197-3235`, called every 60s from `pollLoop`), gates its entire check on `if (runningSet.size === 0) return;` — but `runningSet` is now stale/wrong for exactly the job that needs reconciling, so it can bail before ever reading `queue.json`.\n- Live-verified against this repo's own stuck job: `926-epic-prds-tab-include-archived`, pid 1469438 (confirmed dead via `ps`), artifacts present with a clean exitCode, `queue.json` still `status:\"running\"`.\n\n**PRD 935** fixes `reapDeadRunningJobs()` to iterate `queue.json`'s actual running jobs (the source of truth) instead of gating on the `runningSet` in-memory cache, adds a regression test reproducing the runningSet-scrubbed-but-queue.json-still-running state, and requires the 926 job to self-heal automatically (not hand-edited) as live verification. Est. 20 min.\n\nSince this is a one-shot session with no later turn to check back in, I'm not polling for the PRD to finish — you'll see it complete in the Scheduler tab / Epic timeline. The Epic itself (`scheduler-job-status-desyncs-from-run-completion-95fcbba3`) is already `active` and will pick this PRD up on its next scheduler tick.",
+      "at": "2026-08-02T06:06:06.102Z"
+    }
+  ]
+}

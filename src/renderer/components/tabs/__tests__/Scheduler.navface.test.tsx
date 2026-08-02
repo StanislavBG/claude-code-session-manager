@@ -101,6 +101,21 @@ async function mount() {
   return container
 }
 
+// Global Options (SessionManagerConfig) now sits behind a closed-by-default
+// "Advanced & global settings" disclosure below the job queue — see
+// Scheduler.tsx's AdvancedSettingsSection. Tests that assert on its content
+// need to open it first.
+async function openAdvancedSettings(el: HTMLElement) {
+  const toggle = Array.from(el.querySelectorAll('button')).find((b) =>
+    b.textContent?.includes('Advanced & global settings'),
+  )
+  if (!toggle) throw new Error('Advanced & global settings toggle not found')
+  await act(async () => {
+    toggle.click()
+    await Promise.resolve()
+  })
+}
+
 beforeEach(() => {
   localStorage.clear()
   installWindowApiMock()
@@ -124,6 +139,7 @@ describe('Scheduler — one combined screen on both faces', () => {
     expect(el.textContent).toContain('Scheduler')
     expect(el.textContent).not.toContain('Scheduler Configs')
     expect(el.textContent).not.toContain("Epic's Execution Queue")
+    await openAdvancedSettings(el)
     expect(el.textContent).toContain('Session pool')
     expect(el.textContent).toContain('Architecture summary')
   })
@@ -137,6 +153,7 @@ describe('Scheduler — one combined screen on both faces', () => {
     })
     expect(el.textContent).toContain('Scheduler')
     expect(el.textContent).not.toContain("Epic's Execution Queue")
+    await openAdvancedSettings(el)
     expect(el.textContent).toContain('Session pool')
     // No escape hatch — the toggle buttons don't exist at all.
     expect(el.querySelector('[data-testid="scheduler-scope-all"]')).toBeNull()
@@ -145,6 +162,7 @@ describe('Scheduler — one combined screen on both faces', () => {
 
   it('flipping between faces does not change which screen renders', async () => {
     const el = await mount()
+    await openAdvancedSettings(el)
     expect(el.textContent).toContain('Session pool')
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })

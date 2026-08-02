@@ -29,6 +29,7 @@
     "dev:electron": "wait-on http://localhost:5173 && SM_DEV=1 electron .",
     "build": "vite build",
     "build:project-pages": "node scripts/build-project-pages-renderer.mjs",
+    "build:project-pages-logic": "node scripts/build-project-pages-logic.mjs",
     "typecheck": "tsc --noEmit",
     "start": "electron .",
     "postinstall": "node scripts/postinstall.cjs",

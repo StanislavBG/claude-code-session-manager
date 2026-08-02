@@ -655,6 +655,53 @@ describe('chat.ts prompt queue', () => {
     expect(useChat.getState().get('t1').activeTicket?.status).toBe('running')
   })
 
+  it('never classifies or dispatches to PRD a ticket queued on an Epic tab — Epic follow-ups stay in-session', async () => {
+    // Regression: a follow-up sent into a BUSY Epic ("the full Orange should
+    // follow the active tab", 2026-08-01) was queued, then classified
+    // 'develop' on dequeue — dispatchToPrd minted a brand-new active Epic
+    // from the raw ticket text, forking the message out of its session.
+    // An Epic tab (a PromptSession exists at tabId) must bypass the
+    // classifier entirely: the agent drafts PRDs itself, linked to THIS
+    // Epic, and sessions never create Epics without explicit user approval.
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+    })
+    const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    usePromptSessions.setState({
+      sessions: {
+        t1: {
+          id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+          claudeSessionId: 's1', status: 'active',
+          createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+        },
+      },
+      events: {},
+    })
+    const sessionsBefore = Object.keys(usePromptSessions.getState().sessions)
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({
+      tabId: 't1', sessionId: 's1', cwd: '/proj',
+      prompt: 'the full Orange should follow the active tab',
+    })
+    const queuedId = useChat.getState().get('t1').queue[0].id
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      prompt: 'the full Orange should follow the active tab', promptId: queuedId,
+    }))
+    expect(classifyTicket).not.toHaveBeenCalled()
+    expect(createPrd).not.toHaveBeenCalled()
+    // No rogue Epic minted out of the follow-up.
+    expect(Object.keys(usePromptSessions.getState().sessions)).toEqual(sessionsBefore)
+  })
+
   it('transitions a dequeued ticket to dispatched-to-prd, calls createPrd with the mapped payload, and populates prdSlugs when classified "develop"', async () => {
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,

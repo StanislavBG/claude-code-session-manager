@@ -7,6 +7,7 @@ import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
 import { agentTagDef } from '../../../lib/agentTagDefs'
+import { CONTEXT_INJECTIONS } from '../../../lib/contextInjections'
 import type { AgentPersona } from '../../../../preload/api'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
@@ -197,6 +198,7 @@ describe('NewEpicCard', () => {
       sessionId: created.claudeSessionId,
       cwd: '/home/bilko/Projects/alpha',
       prompt:
+        `${CONTEXT_INJECTIONS['general-behavior'].text}\n\n` +
         'You are building new functionality. Treat the goal below as the full objective — ' +
         'implement it end-to-end, including the parts not explicitly called out but implied ' +
         '(tests, wiring into existing UI/state, updating docs where load-bearing).\n\n' +

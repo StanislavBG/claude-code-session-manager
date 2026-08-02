@@ -14,6 +14,7 @@
  */
 
 import { agentTagDef } from './agentTagDefs'
+import { CONTEXT_INJECTIONS } from './contextInjections'
 import type { TicketTag } from './ticketDisplay'
 
 export interface EpicIntakeFields {
@@ -49,6 +50,16 @@ export interface EpicIntakeFields {
    * scripted 'build' Epic).
    */
   inputSummary?: string
+  /**
+   * Context Injections (contextInjections.ts) — Session-Manager-authored
+   * text, independent of Actor/Input/Mission, each an explicit on/off toggle
+   * in the New Epic card's advanced grounding board. `true` includes that
+   * key's `text` right after the Actor line (extends "who's acting" with
+   * "how they generally behave" before Input/Mission). Defaults to omitted
+   * (no injection) for callers that don't pass it — e.g. EpicQueue's
+   * scripted 'build' Epic.
+   */
+  contextInjections?: Partial<Record<keyof typeof CONTEXT_INJECTIONS, boolean>>
 }
 
 export interface EpicIntake {
@@ -80,6 +91,7 @@ export function composeEpicIntake({
   agentName,
   agentDescription,
   inputSummary,
+  contextInjections,
 }: EpicIntakeFields): EpicIntake {
   const trimmedTitle = singleLine(title.trim())
   const trimmedGoal = goal.trim()
@@ -94,10 +106,19 @@ export function composeEpicIntake({
   // AIM order: Actor, then Input, then Mission, then the human's own goal —
   // who is running this Epic, what it's standing on, what it's here to do.
   const inputPromptBody = inputSummary ? `${singleLine(inputSummary)}\n\n${taggedPromptBody}` : taggedPromptBody
+  // Context Injections come right after Actor (extending "who's acting" with
+  // "how they generally behave") and before Input — each one is independent,
+  // so order among enabled injections follows CONTEXT_INJECTIONS' own key
+  // order, not the order the caller happened to list them.
+  const injectedText = Object.keys(CONTEXT_INJECTIONS)
+    .filter((key) => contextInjections?.[key as keyof typeof CONTEXT_INJECTIONS])
+    .map((key) => CONTEXT_INJECTIONS[key as keyof typeof CONTEXT_INJECTIONS].text)
+    .join('\n\n')
+  const injectedPromptBody = injectedText ? `${injectedText}\n\n${inputPromptBody}` : inputPromptBody
   const groundedPromptBody =
     agentName && agentDescription
-      ? `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}\n\n${inputPromptBody}`
-      : inputPromptBody
+      ? `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}\n\n${injectedPromptBody}`
+      : injectedPromptBody
 
   return {
     goalText: withReferences(body, referencePaths),

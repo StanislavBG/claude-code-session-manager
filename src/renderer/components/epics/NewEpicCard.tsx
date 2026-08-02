@@ -9,6 +9,7 @@ import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
+import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import type { AgentPersona } from '../../../preload/api'
 
 // Tag list + labels only — deliberately hardcoded and scoped to 3 (see
@@ -85,6 +86,13 @@ export function NewEpicCard({
   const [advanced, setAdvanced] = useState(false)
   const [home, setHome] = useState<string | null>(null)
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
+  // Context Injections (contextInjections.ts) — Session-Manager-authored
+  // text, independent of Actor/Input/Mission, each its own on/off toggle.
+  // Default on: they're meant to help every Epic, so opting out is the
+  // deliberate action, not the default.
+  const [contextInjectionsOn, setContextInjectionsOn] = useState<Record<ContextInjectionKey, boolean>>(
+    () => Object.fromEntries(CONTEXT_INJECTION_ORDER.map((k) => [k, true])) as Record<ContextInjectionKey, boolean>,
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -152,6 +160,7 @@ export function NewEpicCard({
     setAgentName('')
     setAdvanced(false)
     setBoard(null)
+    setContextInjectionsOn(Object.fromEntries(CONTEXT_INJECTION_ORDER.map((k) => [k, true])) as Record<ContextInjectionKey, boolean>)
     att.clear()
   }
 
@@ -194,6 +203,7 @@ export function NewEpicCard({
       agentName: selectedAgent?.name,
       agentDescription: selectedAgent?.description ?? undefined,
       inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt) : undefined,
+      contextInjections: contextInjectionsOn,
     })
     // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
     // Submitting this form is not a second kind of creation — it is the one
@@ -453,6 +463,32 @@ export function NewEpicCard({
               </div>
               <div className="mt-1 text-sm font-semibold text-fg">{title || 'Untitled Epic'}</div>
               <div className="mt-0.5 text-[12.5px] leading-[1.5] text-fg-dim">{goal || selectedTagMission}</div>
+            </div>
+
+            {/* Context Injections — Session-Manager-authored text, independent
+                of Actor/Input/Mission and independently toggleable (unlike the
+                real-file inventory below, which is read-only by design). */}
+            <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5">
+              <div className="mb-1.5 text-[12.5px] font-semibold text-fg">Context injections</div>
+              {CONTEXT_INJECTION_ORDER.map((key) => {
+                const def = CONTEXT_INJECTIONS[key]
+                const on = contextInjectionsOn[key]
+                return (
+                  <label key={key} className="flex cursor-pointer items-start gap-2 py-1">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) => setContextInjectionsOn((prev) => ({ ...prev, [key]: e.target.checked }))}
+                      data-testid={`context-injection-toggle-${key}`}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="text-[12.5px] font-medium text-fg">{def.label}</span>
+                      <span className="block text-[11.5px] leading-[1.4] text-fg-faint">{def.description}</span>
+                    </span>
+                  </label>
+                )
+              })}
             </div>
 
             {board ? (

@@ -50,6 +50,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-find-prd-dir.test.cjs',
       'src/main/__tests__/scheduler-prd-missing-skip.test.cjs',
       'src/main/__tests__/scheduler-archive-completed-prd.test.cjs',
+      'src/main/__tests__/scheduler-reconcile-history-backfill.test.cjs',
       'src/main/__tests__/scheduler-archived-twin-guard.test.cjs',
       'src/main/__tests__/scheduler-investigation-clean-skip.test.cjs',
       'src/main/__tests__/runVerify.test.cjs',

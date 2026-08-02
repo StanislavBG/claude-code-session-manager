@@ -1138,11 +1138,26 @@ async function reconcile(state) {
 
   const next = [];
   const seen = new Set();
+  // Terminal (completed/failed) jobs whose .md vanished from disk BEFORE
+  // their row ever crossed HISTORY_RETENTION_MS in partitionJobs — i.e. the
+  // common case, since archiveCompletedPrd() (called right when a job
+  // finishes, scheduler.cjs's `newlyCompletedPrds` handling) moves the PRD
+  // file immediately, while partitionJobs' appendHistory only fires after 7
+  // days. Bug found 2026-08-02: the old code below dropped these rows on the
+  // very next reconcile() pass with NO history write at all — the file-gone
+  // check couldn't tell "already recorded to history.jsonl on a prior pass"
+  // apart from "never recorded anywhere", so a job that completed and had
+  // its file auto-archived within minutes lost its history entirely. Both
+  // Queue and History tabs then read as empty even for projects with real,
+  // successfully-completed work. Collected here; reconciled against
+  // historyTerminalBySlug() below and backfilled before being dropped.
+  const terminalDroppedNeedingHistoryCheck = [];
   for (const job of state.jobs) {
     const p = onDisk.get(job.slug);
     if (!p) {
       // A terminal job whose .md is gone was archived on purpose — dropping
-      // its row is the intended end of the auto-archive flow.
+      // its row is the intended end of the auto-archive flow, PROVIDED it's
+      // already durably recorded in history.jsonl (checked below).
       //
       // A PENDING or RUNNING job whose .md is merely not VISIBLE is a
       // different thing entirely, and dropping it destroys queued work: the
@@ -1163,6 +1178,8 @@ async function reconcile(state) {
         seen.add(job.slug);
         next.push({ ...job });
         console.warn(`[scheduler] reconcile: keeping ${job.status} job ${job.slug} — PRD source not visible in any candidate dir`);
+      } else if (job.status === 'completed' || job.status === 'failed') {
+        terminalDroppedNeedingHistoryCheck.push(job);
       }
       continue;
     }
@@ -1198,9 +1215,23 @@ async function reconcile(state) {
   for (const [slug] of onDisk) {
     if (!seen.has(slug)) unmatchedSlugs.push(slug);
   }
-  const historyBySlug = unmatchedSlugs.length > 0
+  const historyBySlug = (unmatchedSlugs.length > 0 || terminalDroppedNeedingHistoryCheck.length > 0)
     ? await queueHistory.historyTerminalBySlug()
     : new Map();
+
+  // Backfill: any terminal job dropped above whose slug isn't already in
+  // history.jsonl gets written now, before its row is gone for good. This is
+  // the fix for the bug described where the loop collects
+  // terminalDroppedNeedingHistoryCheck — without it, a job whose PRD file was
+  // auto-archived immediately on completion (the normal case) is lost from
+  // both jobs[] and history.jsonl in the same reconcile pass.
+  if (terminalDroppedNeedingHistoryCheck.length > 0) {
+    const missing = terminalDroppedNeedingHistoryCheck.filter((j) => !historyBySlug.has(j.slug));
+    if (missing.length > 0) {
+      await queueHistory.appendHistory(missing);
+      console.log(`[scheduler] reconcile: backfilled ${missing.length} completed/failed job(s) into history.jsonl (PRD file already archived, row about to drop)`);
+    }
+  }
 
   // Terminal-in-history slugs whose .md file is still on disk: fed into the
   // auto-archive selection pass below (as synthetic completed entries) so

@@ -7,6 +7,7 @@ import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments }
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { useVoice, selectCanRecord } from '../../state/voice'
 import { copyFor } from '../../lib/voiceCopy'
+import { takePendingEpicDraft } from '../../lib/epicDraftText'
 
 /** An Epic that's already completed/archived shows no composer — its
  *  claudeSessionId is dead. Parent surfaces should gate on this instead of
@@ -59,7 +60,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
   // Composer state (text, attachments) is scoped to the Epic being iterated
   // on — switching Epics must not leak a draft across.
   useEffect(() => {
-    setText('')
+    setText(takePendingEpicDraft(epic.id) ?? '')
     att.clear()
     setDictating(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps

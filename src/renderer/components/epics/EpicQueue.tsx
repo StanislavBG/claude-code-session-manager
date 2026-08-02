@@ -30,6 +30,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useBuildTarget } from '../../lib/useBuildTarget'
+import { setPendingEpicDraft } from '../../lib/epicDraftText'
 
 const BUILD_GOAL_TEXT =
   '/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there\'s anything new.'
@@ -45,13 +46,25 @@ function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
   const [creating, setCreating] = useState(false)
   const disabled = !activeTabCwd || !target || creating
 
+  /** Shared creation sequence for both entry points: mints the fresh
+   *  'build'-tagged Epic and approves it out of `proposed`. Callers decide
+   *  what happens to `openingPrompt` next (auto-send vs. leave in the
+   *  composer as a draft). */
+  const createBuildEpic = () => {
+    if (!activeTabCwd || !target) return null
+    const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: BUILD_GOAL_TEXT, tag: 'build' })
+    const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'proposed')
+    usePromptSessions.getState().approveProposed(session.id)
+    return { session, openingPrompt }
+  }
+
   const handleClick = async () => {
     if (!activeTabCwd || !target || creating) return
     setCreating(true)
     try {
-      const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: BUILD_GOAL_TEXT, tag: 'build' })
-      const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'proposed')
-      usePromptSessions.getState().approveProposed(session.id)
+      const created = createBuildEpic()
+      if (!created) return
+      const { session, openingPrompt } = created
       useChat.getState().send({
         tabId: session.id,
         sessionId: session.claudeSessionId,
@@ -66,23 +79,64 @@ function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
     }
   }
 
+  /** Advanced path (right-click on Build, or the adjacent caret): mints the
+   *  same fresh Epic but skips the auto-send — the opening prompt lands in
+   *  the Epic's composer as editable draft text so the user can discuss or
+   *  adjust before running anything. */
+  const handleAdvanced = async () => {
+    if (!activeTabCwd || !target || creating) return
+    setCreating(true)
+    try {
+      const created = createBuildEpic()
+      if (!created) return
+      const { session, openingPrompt } = created
+      setPendingEpicDraft(session.id, openingPrompt)
+      onSelect(session.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const tooltip = !activeTabCwd
     ? 'No active project tab — open a project to use Build'
     : !target
       ? 'No publish target found for this project — add session-manager-operations/architecture/build-target.json or a publishable package.json'
       : 'Start a fresh Epic that checks git vs the published package and publishes if there\'s anything new'
 
+  const advancedTooltip = !activeTabCwd || !target
+    ? tooltip
+    : 'Discuss before running — opens a fresh Epic with the Build prompt in the composer, unsent'
+
   return (
-    <button
-      type="button"
-      onClick={() => void handleClick()}
-      disabled={disabled}
-      data-testid="epic-queue-build"
-      title={tooltip}
-      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      Build
-    </button>
+    <span className="inline-flex items-stretch">
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          void handleAdvanced()
+        }}
+        disabled={disabled}
+        data-testid="epic-queue-build"
+        title={tooltip}
+        className="inline-flex items-center gap-1.5 rounded-l-md rounded-r-none border border-line bg-bg px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Build
+      </button>
+      <button
+        type="button"
+        onClick={() => void handleAdvanced()}
+        disabled={disabled}
+        data-testid="epic-queue-build-advanced"
+        aria-label="Discuss before running"
+        title={advancedTooltip}
+        className="inline-flex items-center rounded-r-md rounded-l-none border border-l-0 border-line bg-bg px-1.5 py-1.5 text-fg-dim hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <ChevronIcon open />
+      </button>
+    </span>
   )
 }
 

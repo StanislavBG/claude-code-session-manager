@@ -6,6 +6,7 @@ import { EpicQueue } from '../EpicQueue'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
+import { takePendingEpicDraft } from '../../../lib/epicDraftText'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
@@ -107,5 +108,45 @@ describe('EpicQueue — Build toolbar action', () => {
       prompt: expect.stringContaining('/builder'),
     })
     expect(onSelect).toHaveBeenCalledWith(created.id)
+  })
+
+  it('right-clicking Build creates+selects the Epic without auto-sending, leaving the opening prompt as a pending draft', async () => {
+    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
+    const onSelect = vi.fn()
+    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
+    await act(async () => {})
+    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+    expect(btn.disabled).toBe(false)
+
+    act(() => btn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    expect(approveProposedSpy).toHaveBeenCalledWith(created.id)
+    expect(sendSpy).not.toHaveBeenCalled()
+    expect(onSelect).toHaveBeenCalledWith(created.id)
+
+    const draft = takePendingEpicDraft(created.id)
+    expect(draft).toContain('/builder')
+  })
+
+  it('the caret trigger next to Build also reaches the advanced (discuss-first) path', async () => {
+    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
+    const onSelect = vi.fn()
+    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
+    await act(async () => {})
+    const caret = el.querySelector('[data-testid="epic-queue-build-advanced"]') as HTMLButtonElement
+    expect(caret).not.toBeNull()
+    expect(caret.disabled).toBe(false)
+
+    act(() => caret.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    expect(sendSpy).not.toHaveBeenCalled()
+    expect(onSelect).toHaveBeenCalledWith(created.id)
+    expect(takePendingEpicDraft(created.id)).toContain('/builder')
   })
 })

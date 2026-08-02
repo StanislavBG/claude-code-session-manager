@@ -6,6 +6,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { EpicComposer, canCompose } from '../EpicComposer'
 import { useChat } from '../../../state/chat'
 import { useVoice } from '../../../state/voice'
+import { setPendingEpicDraft } from '../../../lib/epicDraftText'
 import type { PromptSession } from '../../../state/promptSessions'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
 import { flushAsync } from '../../../testUtils/domFlush'
@@ -171,6 +172,17 @@ describe('EpicComposer', () => {
     rerender(createElement(EpicComposer, { epic: e2, snapshots: snapshots() }))
     const textareaAfter = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
     expect(textareaAfter.value).toBe('')
+  })
+
+  it('pre-fills the composer with a pending draft (BuildButton advanced path) as editable, unsent text', () => {
+    const send = vi.fn()
+    useChat.setState({ send } as any)
+    setPendingEpicDraft('epic-1', '/builder\n\nCheck git vs the published package…')
+    const e = epic({ id: 'epic-1' })
+    const el = mount(createElement(EpicComposer, { epic: e, snapshots: snapshots() }))
+    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
+    expect(textarea.value).toContain('/builder')
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('mic button dictates into the composer text, flips the store isRecording flag (RecordingStatus path), and never auto-submits', async () => {

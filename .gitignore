@@ -9,7 +9,10 @@ test-results
 playwright-report
 .env
 .env.local
-.claude/
+.claude/*
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/builder.md
 .research/
 <path>
 

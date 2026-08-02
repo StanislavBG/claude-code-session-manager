@@ -1653,7 +1653,26 @@ export interface SessionManagerAPI {
      *  from notifyOriginatingTab) — lets an already-hydrated Epic pick it up
      *  live instead of waiting for a restart. */
     onEventAppended: (handler: (e: PromptSessionEventAppendedPayload) => void) => () => void;
+    /** Main-side read-merge-write of a cwd's active-index.json
+     *  (lib/activeIndexMerge.cjs) — persistActiveIndex sends only its own
+     *  in-memory contribution for the cwd; disk stays main's truth, merged
+     *  inside the same lock epicMint.cjs's ensureEpic serializes through. */
+    mergeActiveIndex: (payload: PromptSessionsMergeActiveIndexPayload) => Promise<PromptSessionsMergeActiveIndexResult>;
   };
+}
+
+// ─────────────────────────────────── PromptSessions active-index merge
+export interface PromptSessionsMergeActiveIndexPayload {
+  cwd: string;
+  sessions: Record<string, unknown>;
+  events: Record<string, unknown[]>;
+  removedIds?: string[];
+  source: 'epics';
+}
+
+export interface PromptSessionsMergeActiveIndexResult {
+  sessions: Record<string, unknown>;
+  events: Record<string, unknown[]>;
 }
 
 // ─────────────────────────────────── PromptSession event-appended broadcast

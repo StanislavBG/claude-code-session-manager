@@ -471,5 +471,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('promptSession:event-appended', listener);
       return () => ipcRenderer.removeListener('promptSession:event-appended', listener);
     },
+    /** Main-side read-merge-write of a cwd's active-index.json
+     *  (lib/activeIndexMerge.cjs) — replaces persistActiveIndex's old
+     *  renderer-side read-merge-write. Payload carries only this renderer's
+     *  own in-memory contribution for the cwd; disk stays main's truth. */
+    mergeActiveIndex: (payload) => ipcRenderer.invoke('promptSessions:merge-active-index', payload),
   },
 });

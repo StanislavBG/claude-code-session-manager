@@ -214,6 +214,39 @@ const configWatch = z.array(z.string().min(1).max(4096));
 
 const configParseImports = z.object({ path: z.string().min(1).max(4096) });
 
+// ──────────────────────────────────────────── PromptSessions (Epics) active-index merge
+// lib/activeIndexMerge.cjs's read-merge-write, invoked over IPC by the
+// renderer's persistActiveIndex (state/promptSessions.ts) instead of that
+// module doing its own config:read-json/config:write-json round trip. Payload
+// carries only the CALLING renderer's in-memory contribution for this cwd —
+// disk is main's truth, merged inside the same withPathLock epicMint.cjs uses.
+//
+// Epic ids are keys here (Electron's structured-clone IPC transport, unlike
+// JSON.parse, can produce an own-enumerable "__proto__" key on a cloned
+// object) — the regex excludes the prototype-pollution trio so a malformed/
+// hostile payload fails validation before it ever reaches activeIndexMerge.cjs
+// (which additionally uses null-prototype merge targets as defense in depth).
+// Real epic ids are `${slugify(goalText)}-${uuid8}` (epicMint.cjs) — max 64
+// mirrors slugify's 48-char cap plus the "-" + 8 hex chars suffix, rounded up.
+const PROMPT_SESSION_ID_RE = /^(?!__proto__$|constructor$|prototype$)[A-Za-z0-9_-]{1,64}$/;
+const promptSessionsMergeActiveIndex = z.object({
+  cwd: z.string().min(1).max(4096),
+  sessions: z.record(z.string().regex(PROMPT_SESSION_ID_RE), z.unknown()).refine(
+    (v) => Object.keys(v).length <= 2000,
+    { message: 'too many sessions in one merge payload' },
+  ),
+  events: z.record(z.string().regex(PROMPT_SESSION_ID_RE), z.array(z.unknown()).max(5000)).refine(
+    (v) => Object.keys(v).length <= 2000,
+    { message: 'too many event chains in one merge payload' },
+  ),
+  removedIds: z.array(z.string().regex(PROMPT_SESSION_ID_RE)).max(500).optional(),
+  // Always the literal 'epics' on the wire — the handler ignores this value
+  // and hardcodes the writer id itself (single-writer law,
+  // lib/opsOwnership.cjs); requiring the literal here just means a
+  // forged/malformed payload fails validation before it reaches the merge.
+  source: z.literal('epics'),
+});
+
 // ──────────────────────────────────────────── Sessions
 const sessionsPayload = z.object({
   tabs: z.array(z.object({
@@ -908,6 +941,7 @@ module.exports = {
     projectBriefUpdate,
     promptSessionTranscriptAppend,
     promptSessionTranscriptRead,
+    promptSessionsMergeActiveIndex,
     auditLogAppend,
     agentMemoryList,
     agentMemoryGet,

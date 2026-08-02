@@ -66,7 +66,7 @@ test('removeEpic deletes a minted Epic from both sessions and events maps', asyn
   const minted = await ensureEpic(cwd, { goalText: 'to be rolled back' });
   expect(readActiveIndex(cwd).sessions[minted.epicId]).toBeDefined();
 
-  const removed = removeEpic(cwd, minted.epicId);
+  const removed = await removeEpic(cwd, minted.epicId);
 
   expect(removed).toBe(true);
   const index = readActiveIndex(cwd);
@@ -78,7 +78,7 @@ test('removeEpic is a no-op (returns false) for an unknown epicId', async () => 
   const cwd = await mkCwd();
   await ensureEpic(cwd, { goalText: 'unrelated epic' });
 
-  const removed = removeEpic(cwd, 'nonexistent-epic-id');
+  const removed = await removeEpic(cwd, 'nonexistent-epic-id');
 
   expect(removed).toBe(false);
   expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(1);
@@ -105,7 +105,7 @@ for (const pollutedKey of ['__proto__', 'constructor', 'toString', 'hasOwnProper
 
 test('removeEpic refuses to report success for the prototype-chain key "__proto__"', async () => {
   const cwd = await mkCwd();
-  const removed = removeEpic(cwd, '__proto__');
+  const removed = await removeEpic(cwd, '__proto__');
   expect(removed).toBe(false);
 });
 

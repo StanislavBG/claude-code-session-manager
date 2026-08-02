@@ -36,6 +36,10 @@ function installWindowApiMock() {
       append: vi.fn().mockResolvedValue({ ok: true }),
       read: vi.fn().mockResolvedValue({ turns: [] }),
     },
+    promptSessions: {
+      onEventAppended: vi.fn(),
+      mergeActiveIndex: vi.fn().mockResolvedValue({ sessions: {}, events: {} }),
+    },
     auditLog: {
       append: vi.fn().mockResolvedValue({ ok: true }),
     },
@@ -383,7 +387,7 @@ describe('promptSessions.ts', () => {
 
   it('persists an active session + its events to disk on create/append, and round-trips id/claudeSessionId/events through hydrate() after a simulated reload', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
     const session = store.createPromptSession('/proj', 'Ship the widget')
@@ -393,23 +397,31 @@ describe('promptSessions.ts', () => {
       text: 'progress update',
     })
 
-    // persistActiveIndex serializes writes to the same path behind a
-    // microtask chain (to preserve issue order across concurrent mutations),
-    // so the write lands a tick after the synchronous store call returns.
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-    const lastCall = api.config.writeJson.mock.calls[api.config.writeJson.mock.calls.length - 1]
-    expect(lastCall[0]).toBe(promptSessionActiveIndexPath('/proj'))
-    const persisted = lastCall[1] as { sessions: Record<string, unknown>; events: Record<string, unknown[]> }
-    expect(persisted.sessions[session.id]).toEqual(session)
-    expect(persisted.events[session.id]).toHaveLength(2)
+    // persistActiveIndex now forwards its contribution to the main-process
+    // merge IPC (window.api.promptSessions.mergeActiveIndex) instead of
+    // read-merge-writing itself — the call lands a tick after the synchronous
+    // store call returns.
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+    const calls = api.promptSessions.mergeActiveIndex.mock.calls
+    const lastCall = calls[calls.length - 1]
+    const payload = lastCall[0] as {
+      cwd: string
+      sessions: Record<string, unknown>
+      events: Record<string, unknown[]>
+    }
+    expect(payload.cwd).toBe('/proj')
+    expect(payload.sessions[session.id]).toEqual(session)
+    expect(payload.events[session.id]).toHaveLength(2)
 
     // Simulate an app reload: a brand-new module (fresh, empty store), disk
-    // still has what the prior instance wrote.
+    // now holds whatever the main-process merge (not under test here) wrote
+    // — modeled here as exactly the prior instance's contribution, since it
+    // was the only writer.
     vi.resetModules()
     api.config.readJson.mockResolvedValue({
       exists: true,
       raw: '',
-      data: persisted,
+      data: { sessions: payload.sessions, events: payload.events },
       parseError: null,
       mtimeMs: 0,
       error: null,
@@ -422,24 +434,30 @@ describe('promptSessions.ts', () => {
     const rehydrated = fresh.usePromptSessions.getState().sessions[session.id]
     expect(rehydrated).toEqual(session)
     expect(rehydrated.claudeSessionId).toBe(session.claudeSessionId)
-    expect(fresh.usePromptSessions.getState().events[session.id]).toEqual(persisted.events[session.id])
+    expect(fresh.usePromptSessions.getState().events[session.id]).toEqual(payload.events[session.id])
   })
 
   it('drops a session out of the active index once it is marked completed', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
     const session = store.createPromptSession('/proj', 'Ship the widget')
     await usePromptSessions.getState().markCompleted(session.id)
 
-    // persistActiveIndex's writes are chained microtasks — give the last one
-    // (fired from markCompleted, after status flips to 'completed') a tick.
+    // persistActiveIndex's merge calls fire as microtasks — give the last one
+    // (from markCompleted, after status flips to 'completed') a tick.
     await vi.waitFor(() => {
-      const calls = api.config.writeJson.mock.calls.filter((c) => c[0] === promptSessionActiveIndexPath('/proj'))
+      const calls = api.promptSessions.mergeActiveIndex.mock.calls.filter(
+        (c) => (c[0] as { cwd: string }).cwd === '/proj',
+      )
       expect(calls.length).toBeGreaterThan(0)
-      const persisted = calls[calls.length - 1][1] as { sessions: Record<string, unknown> }
-      expect(persisted.sessions[session.id]).toBeUndefined()
+      const payload = calls[calls.length - 1][0] as {
+        sessions: Record<string, unknown>
+        removedIds: string[]
+      }
+      expect(payload.sessions[session.id]).toBeUndefined()
+      expect(payload.removedIds).toContain(session.id)
     })
   })
 
@@ -458,7 +476,7 @@ describe('promptSessions.ts', () => {
 
     // Let the in-flight persists drain — hydrate() intentionally declines to
     // reconcile removals while disk is knowably behind memory.
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
     await Promise.resolve()
     await Promise.resolve()
 
@@ -487,10 +505,10 @@ describe('promptSessions.ts', () => {
 
   it('hydrate() does not remove a just-created Epic whose write is still in flight', async () => {
     const api = installWindowApiMock()
-    // Hold the write open so the pending-write guard is active.
+    // Hold the merge call open so the pending-write guard is active.
     let releaseWrite: () => void = () => {}
-    api.config.writeJson.mockImplementation(
-      () => new Promise<void>((resolve) => { releaseWrite = () => resolve() }),
+    api.promptSessions.mergeActiveIndex.mockImplementation(
+      () => new Promise((resolve) => { releaseWrite = () => resolve({ sessions: {}, events: {} }) }),
     )
     const { usePromptSessions } = await import('../promptSessions')
 
@@ -508,16 +526,19 @@ describe('promptSessions.ts', () => {
 
   it('round-trips an Epic-level tag through persistActiveIndex and hydrate()', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
     const session = store.createPromptSession('/proj', 'Ship the widget', 'bug')
     expect(session.tag).toBe('bug')
 
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-    const lastCall = api.config.writeJson.mock.calls[api.config.writeJson.mock.calls.length - 1]
-    const persisted = lastCall[1] as { sessions: Record<string, { tag?: string }> }
-    expect(persisted.sessions[session.id].tag).toBe('bug')
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+    const calls = api.promptSessions.mergeActiveIndex.mock.calls
+    const payload = calls[calls.length - 1][0] as {
+      sessions: Record<string, { tag?: string }>
+      events: Record<string, unknown[]>
+    }
+    expect(payload.sessions[session.id].tag).toBe('bug')
 
     // Simulate a reload from a main-minted active-index.json (epicMint.cjs
     // writes `tag` the same shape) — hydrate() must read it back untouched.
@@ -525,7 +546,7 @@ describe('promptSessions.ts', () => {
     api.config.readJson.mockResolvedValue({
       exists: true,
       raw: '',
-      data: persisted,
+      data: payload,
       parseError: null,
       mtimeMs: 0,
       error: null,
@@ -732,7 +753,7 @@ describe('promptSessions.ts', () => {
     const session = store.createPromptSession('/proj', 'Ship the widget')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
 
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
 
     // Disk now has one MORE event than memory (the scheduler's response
     // append, main-process-side) but the SAME session id — so newIds is
@@ -779,7 +800,7 @@ describe('promptSessions.ts', () => {
       prdSlug: '900-optimistic',
     })
 
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
 
     // Disk is stale — still only has the first event.
     api.config.readJson.mockResolvedValue({
@@ -837,21 +858,23 @@ describe('proposed Epics are durable (never erased)', () => {
     vi.unstubAllGlobals()
   })
 
-  const lastIndexWrite = (api: ReturnType<typeof installWindowApiMock>, path: string) => {
-    const calls = api.config.writeJson.mock.calls.filter((c: unknown[]) => c[0] === path)
-    return calls[calls.length - 1]?.[1] as
+  const lastIndexWrite = (api: ReturnType<typeof installWindowApiMock>, cwd: string) => {
+    const calls = api.promptSessions.mergeActiveIndex.mock.calls.filter(
+      (c: unknown[]) => (c[0] as { cwd: string }).cwd === cwd,
+    )
+    return calls[calls.length - 1]?.[0] as
       | { sessions: Record<string, unknown>; events: Record<string, unknown[]> }
       | undefined
   }
 
   it('persists a proposed Epic to active-index.json', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
     const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
 
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-    expect(lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))?.sessions[proposed.id]).toEqual(proposed)
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+    expect(lastIndexWrite(api, '/proj')?.sessions[proposed.id]).toEqual(proposed)
   })
 
   // The regression: persistActiveIndex rewrites the WHOLE file, so filtering it
@@ -860,7 +883,7 @@ describe('proposed Epics are durable (never erased)', () => {
   // intake. A proposed Epic is a valid minimal row, not junk to filter out.
   it('keeps proposed Epics when an unrelated active Epic is mutated', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
     const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
     const activeProposal = usePromptSessions.getState().createPromptSession('/proj', 'human work', 'feature')
@@ -872,24 +895,24 @@ describe('proposed Epics are durable (never erased)', () => {
       text: 'a later mutation',
     })
 
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-    const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+    const persisted = lastIndexWrite(api, '/proj')
     expect(persisted?.sessions[active.id]).toBeDefined()
     expect(persisted?.sessions[proposed.id]).toEqual(proposed)
   })
 
   it('drops a row only when it is completed (archived)', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
     const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
     await usePromptSessions.getState().markCompleted(proposed.id)
 
-    // Wait on the CONDITION, not on writeJson having been called at all —
+    // Wait on the CONDITION, not on the merge call having happened at all —
     // create() already called it, so the latter resolves before the
-    // completion write lands.
+    // completion call lands.
     await vi.waitFor(() => {
-      expect(lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))?.sessions[proposed.id]).toBeUndefined()
+      expect(lastIndexWrite(api, '/proj')?.sessions[proposed.id]).toBeUndefined()
     })
   })
 })
@@ -1068,182 +1091,98 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
   })
 })
 
-describe('persistActiveIndex is a read-merge-write, never a blind overwrite', () => {
+// The read-merge-write itself (disk preservation, memory-wins-on-collision,
+// removal tombstones/resurrection guard, event union, corrupt-disk fallback,
+// mint-during-persist) moved main-side to lib/activeIndexMerge.cjs — see
+// src/main/__tests__/activeIndexMerge.test.cjs for that coverage. These tests
+// only verify persistActiveIndex computes and forwards the correct
+// CONTRIBUTION to the main-process merge IPC.
+describe('persistActiveIndex forwards its contribution to the main-process merge IPC', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.unstubAllGlobals()
   })
 
-  const lastIndexWrite = (api: ReturnType<typeof installWindowApiMock>, path: string) => {
-    const calls = api.config.writeJson.mock.calls.filter((c: unknown[]) => c[0] === path)
-    return calls[calls.length - 1]?.[1] as
-      | { sessions: Record<string, PromptSession>; events: Record<string, unknown[]> }
+  const lastIndexWrite = (api: ReturnType<typeof installWindowApiMock>, cwd: string) => {
+    const calls = api.promptSessions.mergeActiveIndex.mock.calls.filter(
+      (c: unknown[]) => (c[0] as { cwd: string }).cwd === cwd,
+    )
+    return calls[calls.length - 1]?.[0] as
+      | {
+          cwd: string
+          sessions: Record<string, PromptSession>
+          events: Record<string, unknown[]>
+          removedIds: string[]
+          source: string
+        }
       | undefined
   }
 
-  // Incident 2026-08-02: two Epics created by another (already-running)
-  // renderer window sat on disk in active-index.json. A second renderer
-  // booted with an empty store and, on its very first mutation, persisted
-  // its (empty-of-those-two) in-memory map straight over the file — erasing
-  // both rows with no archive written. This is that exact shape: a fresh
-  // store must preserve every pre-existing on-disk Epic when it persists.
-  it('regression: a fresh renderer that creates one Epic preserves pre-existing on-disk Epics untouched', async () => {
+  it('sends only this cwd\'s open (active/proposed) Epics, tagged source: "epics"', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
-
-    const otherWindowSessionA: PromptSession = {
-      id: 'psess-other-a',
-      cwd: '/proj',
-      goalText: 'Created by another window A',
-      claudeSessionId: 'claude-other-a',
-      status: 'active',
-      createdAt: '2026-08-02T13:48:00.000Z',
-      completedAt: null,
-    }
-    const otherWindowSessionB: PromptSession = {
-      id: 'psess-other-b',
-      cwd: '/proj',
-      goalText: 'Created by another window B',
-      claudeSessionId: 'claude-other-b',
-      status: 'proposed',
-      createdAt: '2026-08-02T13:49:00.000Z',
-      completedAt: null,
-    }
-    const diskEventsA = [
-      { id: 'evt-a1', promptSessionId: 'psess-other-a', kind: 'prompt' as const, causedByEventId: null, at: '2026-08-02T13:48:00.000Z', text: 'Created by another window A' },
-    ]
-    const diskEventsB = [
-      { id: 'evt-b1', promptSessionId: 'psess-other-b', kind: 'prompt' as const, causedByEventId: null, at: '2026-08-02T13:49:00.000Z', text: 'Created by another window B' },
-    ]
-    api.config.readJson.mockResolvedValue({
-      exists: true,
-      raw: '',
-      data: {
-        sessions: { [otherWindowSessionA.id]: otherWindowSessionA, [otherWindowSessionB.id]: otherWindowSessionB },
-        events: { [otherWindowSessionA.id]: diskEventsA, [otherWindowSessionB.id]: diskEventsB },
-      },
-      parseError: null,
-      mtimeMs: 0,
-      error: null,
-    })
-
-    // This renderer's store never hydrated those two Epics — it boots empty
-    // and immediately creates its own, unrelated Epic.
-    const fresh = usePromptSessions.getState().createPromptSession('/proj', 'Brand new in this window')
-
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-    const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
-    expect(persisted?.sessions[otherWindowSessionA.id]).toEqual(otherWindowSessionA)
-    expect(persisted?.sessions[otherWindowSessionB.id]).toEqual(otherWindowSessionB)
-    expect(persisted?.sessions[fresh.id]).toEqual(fresh)
-    // Events for the preserved sessions must survive the merge too — the
-    // incident dropped events along with the sessions.
-    expect(persisted?.events[otherWindowSessionA.id]).toEqual(diskEventsA)
-    expect(persisted?.events[otherWindowSessionB.id]).toEqual(diskEventsB)
-  })
-
-  it('memory wins over disk on id collision', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
     const session = usePromptSessions.getState().createPromptSession('/proj', 'Fresh title')
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
+    usePromptSessions.getState().createPromptSession('/other', 'A different project')
 
-    // Disk has a stale copy of the SAME id (e.g. another window's earlier
-    // write) — this renderer's in-memory copy must win.
-    const staleDiskCopy: PromptSession = { ...session, goalText: 'Stale disk title' }
-    api.config.readJson.mockResolvedValue({
-      exists: true,
-      raw: '',
-      data: { sessions: { [session.id]: staleDiskCopy }, events: { [session.id]: [] } },
-      parseError: null,
-      mtimeMs: 0,
-      error: null,
-    })
-
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'response',
-      causedByEventId: usePromptSessions.getState().events[session.id][0].id,
-      text: 'a later mutation',
-    })
-
-    await vi.waitFor(() => {
-      const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
-      expect(persisted?.sessions[session.id].goalText).toBe('Fresh title')
-    })
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+    const persisted = lastIndexWrite(api, '/proj')
+    expect(persisted?.sessions[session.id]).toEqual(session)
+    expect(persisted?.source).toBe('epics')
+    // Never leaks another cwd's Epics into this cwd's merge call.
+    expect(Object.keys(persisted?.sessions ?? {})).toEqual([session.id])
   })
 
   // markCompleted/deleteEpic are the ONLY two mechanisms allowed to erase a
-  // row — verify the explicit-removal path still actually removes it from a
-  // merge, even when disk independently carries that id.
-  it('markCompleted still removes its own row from a merged write, even if disk independently has it', async () => {
+  // row — verify the renderer forwards the explicit removal, not just drops
+  // the row from its own contribution (the main-side merge needs removedIds
+  // to record the tombstone; see activeIndexMerge.test.cjs).
+  it('markCompleted forwards its own id in removedIds and drops it from the sessions contribution', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
     const session = usePromptSessions.getState().createPromptSession('/proj', 'Will complete')
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-
-    api.config.readJson.mockResolvedValue({
-      exists: true,
-      raw: '',
-      data: { sessions: { [session.id]: session }, events: { [session.id]: usePromptSessions.getState().events[session.id] } },
-      parseError: null,
-      mtimeMs: 0,
-      error: null,
-    })
-
     await usePromptSessions.getState().markCompleted(session.id)
 
     await vi.waitFor(() => {
-      const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
+      const persisted = lastIndexWrite(api, '/proj')
       expect(persisted?.sessions[session.id]).toBeUndefined()
-      expect(persisted?.events[session.id]).toBeUndefined()
+      expect(persisted?.removedIds).toContain(session.id)
     })
   })
 
-  it('deleteEpic still removes its own row from a merged write, even if disk independently has it', async () => {
+  it('deleteEpic forwards its own id in removedIds and drops it from the sessions contribution', async () => {
     const api = installWindowApiMock()
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
     const session = usePromptSessions.getState().createPromptSession('/proj', 'Will delete')
-    await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
-
-    api.config.readJson.mockResolvedValue({
-      exists: true,
-      raw: '',
-      data: { sessions: { [session.id]: session }, events: { [session.id]: usePromptSessions.getState().events[session.id] } },
-      parseError: null,
-      mtimeMs: 0,
-      error: null,
-    })
-
     await usePromptSessions.getState().deleteEpic(session.id)
 
     await vi.waitFor(() => {
-      const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
+      const persisted = lastIndexWrite(api, '/proj')
       expect(persisted?.sessions[session.id]).toBeUndefined()
-      expect(persisted?.events[session.id]).toBeUndefined()
+      expect(persisted?.removedIds).toContain(session.id)
     })
   })
 
-  it('falls back to writing memory state alone (with a logged warning) when the disk index is corrupt/unreadable', async () => {
+  it('logs a warning (and never throws into the caller) when the merge IPC call rejects', async () => {
     const api = installWindowApiMock()
-    api.config.readJson.mockRejectedValue(new Error('ENOENT-ish parse failure'))
+    api.promptSessions.mergeActiveIndex.mockRejectedValue(new Error('main-process merge failed'))
     const logsWrite = vi.fn()
     ;(api as unknown as { logs: { write: typeof logsWrite } }).logs = { write: logsWrite }
-    const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+    const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Survives a corrupt disk read')
+    expect(() =>
+      usePromptSessions.getState().createPromptSession('/proj', 'Survives a merge failure'),
+    ).not.toThrow()
 
     await vi.waitFor(() => {
-      const persisted = lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))
-      expect(persisted?.sessions[session.id]).toEqual(session)
+      expect(logsWrite).toHaveBeenCalledWith(
+        'promptSessions',
+        'warn',
+        expect.stringContaining('persistActiveIndex failed'),
+      )
     })
-    expect(logsWrite).toHaveBeenCalledWith(
-      'promptSessions',
-      'warn',
-      expect.stringContaining('disk read-merge failed'),
-    )
   })
 })
 

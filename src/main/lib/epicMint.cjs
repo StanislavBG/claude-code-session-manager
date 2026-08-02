@@ -34,9 +34,16 @@ function readActiveIndex(cwd) {
     return {
       sessions: parsed && typeof parsed.sessions === 'object' && parsed.sessions ? parsed.sessions : {},
       events: parsed && typeof parsed.events === 'object' && parsed.events ? parsed.events : {},
+      // Passed through untouched — this module never consults tombstones (it
+      // doesn't resurrect completed/deleted Epics on its own), but every
+      // caller here does read-modify-write on the object this returns, so
+      // dropping the field would silently erase the removal tombstones
+      // lib/activeIndexMerge.cjs's mergeActiveIndex records the next time any
+      // of ensureEpic/appendPrdCreatedEvent/removeEpic writes this file.
+      tombstones: parsed && typeof parsed.tombstones === 'object' && parsed.tombstones ? parsed.tombstones : {},
     };
   } catch {
-    return { sessions: {}, events: {} };
+    return { sessions: {}, events: {}, tombstones: {} };
   }
 }
 
@@ -374,12 +381,28 @@ function appendPrdCreatedEvent(cwd, epicId, prdSlug, text) {
  */
 function removeEpic(cwd, epicId) {
   if (!cwd || !epicId) return false;
-  const index = readActiveIndex(cwd);
-  if (!hasOwn(index.sessions, epicId)) return false;
-  delete index.sessions[epicId];
-  delete index.events[epicId];
-  writeActiveIndex(cwd, index);
-  return true;
+  return withPathLock(activeIndexPath(cwd), () => {
+    const index = readActiveIndex(cwd);
+    if (!hasOwn(index.sessions, epicId)) return false;
+    delete index.sessions[epicId];
+    delete index.events[epicId];
+    writeActiveIndex(cwd, index);
+    return true;
+  });
 }
 
-module.exports = { ensureEpic, appendPrdCreatedEvent, removeEpic, activeIndexPath, readActiveIndex, findJoinableEpic, tokenize };
+module.exports = {
+  ensureEpic,
+  appendPrdCreatedEvent,
+  removeEpic,
+  activeIndexPath,
+  readActiveIndex,
+  findJoinableEpic,
+  tokenize,
+  // Exported so lib/activeIndexMerge.cjs's renderer-facing merge IPC handler
+  // serializes through the SAME lock instance as ensureEpic/
+  // appendPrdCreatedEvent (module-level Map, shared via Node's require
+  // cache) — one lock per active-index.json path across both callers, not
+  // two independent lock maps that could still interleave.
+  withPathLock,
+};

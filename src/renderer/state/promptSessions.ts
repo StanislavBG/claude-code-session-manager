@@ -60,6 +60,12 @@ export interface PromptSession {
    *  Epic back to its origin. Written by src/main/lib/epicMint.cjs; absent for
    *  human-created Epics. */
   source?: EpicSource
+  /** Name of the Agent Library persona (`~/.claude/agents/<name>.md`) chosen to
+   *  run this Epic's session, distinct from `tag` (the Epic's mission —
+   *  feature/bug/discussion). Absent when the default agent was left selected.
+   *  Display-only on the Epic; the persona's framing is folded into
+   *  `openingPrompt` once, at creation, by composeEpicIntake (epicIntake.ts). */
+  agent?: string
 }
 
 /** On-disk archive shape written by markCompleted and read back by any
@@ -165,7 +171,13 @@ interface PromptSessionsState {
   /** Every Epic is born 'proposed' — this is the ONLY place a PromptSession
    *  is minted, and it can never write any other status. Nothing runs until
    *  approveProposed() flips it to 'active'. */
-  createPromptSession: (cwd: string, goalText: string, tag?: PromptSession['tag'], source?: string) => PromptSession
+  createPromptSession: (
+    cwd: string,
+    goalText: string,
+    tag?: PromptSession['tag'],
+    source?: string,
+    agent?: string,
+  ) => PromptSession
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
    *  Starting its session is the caller's job (it owns the opening prompt). */
@@ -249,16 +261,6 @@ function emitAuditEvent(kind: AuditEventKind, fields: { cwd: string; epicId: str
   })
 }
 
-// Two independent fire-and-forget writes to the SAME path (e.g.
-// resumeArchived's createPromptSession call immediately followed by its own
-// persistActiveIndex call) are each an unawaited tmp+rename IPC round-trip —
-// without serialization, whichever rename lands on disk *last* wins, not
-// whichever was *issued* last, which could silently drop the later write's
-// data. Chaining every write for a given path behind the previous one's
-// settlement (success or failure) preserves issue order without the callers
-// (synchronous store actions) needing to await anything.
-const pendingWritesByPath = new Map<string, Promise<void>>()
-
 // How many persists are still in flight per path. hydrate() reconciles
 // disk-deleted Epics OUT of the store, and a just-created Epic exists in
 // memory a beat before its write lands — reconciling during that window would
@@ -271,34 +273,39 @@ function hasPendingWrite(path: string): boolean {
 }
 
 /** Fire-and-forget persist of a cwd's active-session slice — called after
- *  every mutation so a reload never loses in-progress work. Read-merge-write:
- *  re-reads the on-disk index immediately before writing and merges it with
- *  this renderer's in-memory view, rather than overwriting the file with
- *  whatever this renderer instance happens to hold. A renderer whose store
- *  hasn't hydrated every Epic for this cwd (e.g. a just-booted window that
- *  immediately creates one Epic) used to silently erase every other session's
- *  row and event chain on its first write — incident 2026-08-02, where two
- *  Epics created by another window were wiped with no archive written, only
- *  minutes after creation. Disk rows not present in memory are preserved
- *  verbatim; memory wins on id collision; `removedIds` is the ONLY way an id
- *  disappears from the written file (markCompleted/deleteEpic pass their own
- *  id there — the two entry points the domain model allows to erase a row).
- *  Best-effort: a write failure is logged, never thrown into the caller
- *  (createPromptSession and appendPromptSessionEvent are synchronous APIs
- *  their callers don't await). No-ops outside a renderer (tests that never
- *  stub window.api). */
+ *  every mutation so a reload never loses in-progress work. Sends only THIS
+ *  renderer's own in-memory contribution to the main-process merge IPC
+ *  (lib/activeIndexMerge.cjs's mergeActiveIndex, over
+ *  window.api.promptSessions.mergeActiveIndex) rather than doing a
+ *  read-merge-write itself. Moved main-side (was a renderer-side
+ *  read-merge-write, commit 3d12e19) to close two holes that survived the
+ *  first fix: (1) a resurrection hole — a second window still holding an
+ *  archived/deleted Epic as open in memory could write that row right back
+ *  on its next persist; the main-side merge now records a removal tombstone
+ *  so a tombstoned id is dropped from every future merge's memory
+ *  contribution, not just from the write that removed it; (2) a TOCTOU gap —
+ *  the renderer's own read and write, round-tripped over separate IPC calls
+ *  with no lock between them, could still lose an interleaved main-process
+ *  mint (epicMint.cjs's ensureEpic). The main-side merge runs inside the same
+ *  withPathLock instance ensureEpic already serializes through, closing that
+ *  gap for real. `removedIds` is the ONLY way an id disappears from the
+ *  written file (markCompleted/deleteEpic pass their own id there — the two
+ *  entry points the domain model allows to erase a row). Best-effort: an IPC
+ *  failure is logged, never thrown into the caller (createPromptSession and
+ *  appendPromptSessionEvent are synchronous APIs their callers don't await).
+ *  No-ops outside a renderer (tests that never stub window.api). */
 function persistActiveIndex(
   cwd: string,
   sessions: Record<string, PromptSession>,
   events: Record<string, PromptSessionEvent[]>,
   removedIds: string[] = [],
 ): Promise<void> {
-  if (typeof window === 'undefined' || !window.api?.config?.writeJson) return Promise.resolve()
+  if (typeof window === 'undefined' || !window.api?.promptSessions?.mergeActiveIndex) return Promise.resolve()
   // Captured now, not re-read from the global inside the .then/.catch below —
   // those run on a later microtask, and in tests vi.unstubAllGlobals() in the
   // NEXT test's beforeEach can delete `window` out from under this closure
-  // before this write settles, turning a benign write-failure log into an
-  // unhandled ReferenceError.
+  // before this call settles, turning a benign failure log into an unhandled
+  // ReferenceError.
   const api = window.api
   // Everything NOT YET ARCHIVED — 'proposed' as well as 'active'. A proposed
   // Epic is a valid minimal row (id + claudeSessionId are enough: reserved
@@ -315,55 +322,8 @@ function persistActiveIndex(
   }
   const path = promptSessionActiveIndexPath(cwd)
   pendingWriteCounts.set(path, (pendingWriteCounts.get(path) ?? 0) + 1)
-  const prior = pendingWritesByPath.get(path) ?? Promise.resolve()
-  const next = prior
-    .then(async () => {
-      let diskSessions: Record<string, PromptSession> = {}
-      let diskEvents: Record<string, PromptSessionEvent[]> = {}
-      try {
-        const result = await api!.config.readJson(path)
-        if (result.exists && result.data) {
-          const disk = result.data as Partial<PromptSessionActiveIndex>
-          diskSessions = disk.sessions ?? {}
-          diskEvents = disk.events ?? {}
-        }
-      } catch (err) {
-        // Corrupt/unreadable disk index: fall back to writing memory state
-        // alone (this renderer's best-known truth) rather than crashing or
-        // propagating a data-dependent throw — same best-effort contract as
-        // every other failure path in this function.
-        const msg = err instanceof Error ? err.message : String(err)
-        api?.logs?.write(
-          'promptSessions',
-          'warn',
-          `persistActiveIndex: disk read-merge failed for ${cwd}, writing memory state only: ${msg}`,
-        )
-        diskSessions = {}
-        diskEvents = {}
-      }
-      const mergedSessions: Record<string, PromptSession> = { ...diskSessions, ...memorySessions }
-      for (const id of removedIds) delete mergedSessions[id]
-      // Events are a per-id UNION (same contract as hydrate's merge path,
-      // PRD 855): a scheduler job appends events to disk under the declared
-      // delegation, so memory-wins-wholesale here would silently drop any
-      // event that landed since this renderer's last hydrate. Memory order
-      // wins for events both sides know; disk-only events are appended and
-      // re-sorted chain-aware.
-      const mergedEvents: Record<string, PromptSessionEvent[]> = {}
-      for (const id of Object.keys(mergedSessions)) {
-        const memEvts = memoryEvents[id] ?? []
-        const diskEvts = diskEvents[id] ?? []
-        if (memEvts.length === 0) {
-          mergedEvents[id] = diskEvts
-          continue
-        }
-        const memIds = new Set(memEvts.map((e) => e.id))
-        const missing = diskEvts.filter((e) => !memIds.has(e.id))
-        mergedEvents[id] = missing.length > 0 ? [...memEvts, ...missing].sort(compareEventsChainAware) : memEvts
-      }
-      const index: PromptSessionActiveIndex = { sessions: mergedSessions, events: mergedEvents }
-      await api!.config.writeJson(path, index, 'epics')
-    })
+  const next = api.promptSessions
+    .mergeActiveIndex({ cwd, sessions: memorySessions, events: memoryEvents, removedIds, source: 'epics' })
     .then(
       () => undefined,
       (err: unknown) => {
@@ -374,7 +334,6 @@ function persistActiveIndex(
     .finally(() => {
       pendingWriteCounts.set(path, Math.max(0, (pendingWriteCounts.get(path) ?? 1) - 1))
     })
-  pendingWritesByPath.set(path, next)
   return next
 }
 
@@ -383,7 +342,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: (cwd, goalText, tag, source) => {
+  createPromptSession: (cwd, goalText, tag, source, agent) => {
     const now = new Date().toISOString()
     const session: PromptSession = {
       id: mintId('psess'),
@@ -394,6 +353,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       createdAt: now,
       completedAt: null,
       ...(tag ? { tag } : {}),
+      ...(agent ? { agent } : {}),
     }
     const firstEvent: PromptSessionEvent = {
       id: mintId('pevt'),

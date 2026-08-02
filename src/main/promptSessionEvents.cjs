@@ -13,10 +13,13 @@
  */
 
 const config = require('./config.cjs');
-
-function promptSessionActiveIndexPath(cwd) {
-  return `${String(cwd).replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/active-index.json`;
-}
+// activeIndexPath/withPathLock come from epicMint.cjs so this module's
+// read-modify-write of active-index.json (appendResponseEventIfKnown, below)
+// serializes through the EXACT SAME lock instance as ensureEpic/
+// appendPrdCreatedEvent and lib/activeIndexMerge.cjs's mergeActiveIndex — one
+// lock across all three writers of this file, not three independent maps
+// that could still interleave a stale read-modify-write past each other.
+const { activeIndexPath: promptSessionActiveIndexPath, withPathLock } = require('./lib/epicMint.cjs');
 
 // IPC channel broadcast whenever an event is appended to a PromptSession's
 // chain from the main process (currently only the scheduler's response-event
@@ -38,26 +41,6 @@ let seq = 0;
 function mintEventId() {
   seq += 1;
   return `pevt-${Date.now().toString(36)}-${seq}`;
-}
-
-// Serializes read-modify-write cycles per active-index.json path so two
-// PRDs finishing back-to-back for sessions in the same cwd chain onto the
-// tail in issue order instead of racing two independent read-then-write
-// round trips (mirrors promptSessions.ts's own pendingWritesByPath).
-const pendingWritesByPath = new Map();
-
-function withPathLock(path, task) {
-  const prior = pendingWritesByPath.get(path) || Promise.resolve();
-  const settle = () => task();
-  const run = prior.then(settle, settle);
-  pendingWritesByPath.set(
-    path,
-    run.then(
-      () => undefined,
-      () => undefined,
-    ),
-  );
-  return run;
 }
 
 /**

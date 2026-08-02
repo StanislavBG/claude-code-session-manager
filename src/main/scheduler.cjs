@@ -3221,7 +3221,11 @@ async function maybeLaunchWhenAvailable(state) {
  */
 async function reapDeadRunningJobs() {
   try {
-    if (runningSet.size === 0) return; // fast path: no in-flight jobs
+    // Do NOT gate on runningSet: spawnJob()'s finally block unconditionally
+    // deletes a job's slug from runningSet even when the preceding completion
+    // mutate() threw and was swallowed, leaving queue.json stuck at
+    // status:"running" with no slug left in runningSet to trigger reconciliation.
+    // queue.json is the source of truth for which jobs are actually running.
     const state = await readQueue();
     const dead = [];
     for (const j of state.jobs) {

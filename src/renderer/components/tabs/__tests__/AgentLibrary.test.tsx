@@ -18,6 +18,9 @@ const PERSONAS: AgentPersona[] = [
     name: 'builder',
     description: 'Watch git history and drive the next publish.',
     tools: ['Read', 'Grep', 'Glob', 'Bash'],
+    model: null,
+    color: null,
+    tags: [],
     path: '/home/bilko/.claude/agents/builder.md',
     body: 'You are the Builder agent.',
     overridingProjects: ['session-manager'],
@@ -26,6 +29,9 @@ const PERSONAS: AgentPersona[] = [
     name: 'debugger',
     description: 'Diagnose a failing test.',
     tools: [],
+    model: null,
+    color: null,
+    tags: [],
     path: '/home/bilko/.claude/agents/debugger.md',
     body: 'You are the Debugger agent.',
     overridingProjects: [],
@@ -36,6 +42,9 @@ function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
   const api = {
     agents: {
       listPersonas: vi.fn().mockResolvedValue(personas),
+      savePersona: vi.fn().mockResolvedValue({ ok: true, path: '' }),
+      deletePersona: vi.fn().mockResolvedValue({ ok: true }),
+      removeOverride: vi.fn().mockResolvedValue({ ok: true }),
     },
   }
   ;(window as unknown as { api: typeof api }).api = api

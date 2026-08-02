@@ -1,30 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { useChat, dispatchPromptSessionToPrd } from '../../state/chat'
+import { useChat } from '../../state/chat'
 import type { PromptSession } from '../../state/promptSessions'
 import { epicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
-import { EpicKindTag, epicStatusDotClass } from './epic-primitives'
 import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
-import type { TicketTag } from '../../lib/ticketDisplay'
 import { useVoice, selectCanRecord } from '../../state/voice'
 import { copyFor } from '../../lib/voiceCopy'
-
-type ComposerAction = 'chat' | 'dispatch'
-
-/** "Dispatch as PRD" must always be an explicit user choice — never the
- *  composer's default selection, regardless of the Epic's tag. Auto-selecting
- *  it has tricked the user into dispatching a message they meant as chat. */
-function defaultAction(_tag: PromptSession['tag']): ComposerAction {
-  return 'chat'
-}
-
-/** Tag passed to dispatchPromptSessionToPrd when the "Dispatch as PRD" action
- *  is used — the Epic's own feature/bug tag, or 'feature' as a fallback when
- *  a discussion-tagged Epic's message is overridden to dispatch. */
-function dispatchTag(tag: PromptSession['tag']): TicketTag {
-  return tag === 'bug' ? 'bug' : 'feature'
-}
 
 /** An Epic that's already completed/archived shows no composer — its
  *  claudeSessionId is dead. Parent surfaces should gate on this instead of
@@ -50,16 +32,16 @@ interface Props {
 
 /**
  * Epic-scoped composer — replaces the composer embedded in the retired
- * PromptSessionConversation.tsx (PRDs 827/829). Preserves its dispatch mechanism exactly:
- * Chat -> useChat().send, Dispatch -> dispatchPromptSessionToPrd. Design:
- * session-manager-operations/design-mocks/epics/DESIGN_SPEC.md §"Composer".
+ * PromptSessionConversation.tsx (PRDs 827/829). Always routes through Chat
+ * (useChat().send) — the agent creates PRDs itself as needed, so there is
+ * no separate "Dispatch as PRD" action here.
+ * Design: session-manager-operations/design-mocks/epics/DESIGN_SPEC.md §"Composer".
  */
 export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: Props) {
   const status = epicDisplayStatus(epic.id, snapshots)
   const running = status === 'running' || status === 'queued'
 
   const [text, setText] = useState('')
-  const [action, setAction] = useState<ComposerAction>(defaultAction(epic.tag))
   const [sending, setSending] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const att = useAttachments()
@@ -74,12 +56,11 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
   const isRecording = useVoice((s) => s.isRecording)
   const voiceGate = useVoice(useShallow(selectCanRecord))
 
-  // Composer state (text, attachments, action override) is scoped to the
-  // Epic being iterated on — switching Epics must not leak a draft across.
+  // Composer state (text, attachments) is scoped to the Epic being iterated
+  // on — switching Epics must not leak a draft across.
   useEffect(() => {
     setText('')
     att.clear()
-    setAction(defaultAction(epic.tag))
     setDictating(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epic.id])
@@ -125,11 +106,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
       const referencePaths = await resolveAttachmentPaths(attachmentsSnapshot, epic.cwd)
       const referenceLines = referencePaths.map((p) => `Attached: ${p}`)
       const prompt = referenceLines.length ? `${trimmed}\n\n${referenceLines.join('\n')}` : trimmed
-      if (action === 'chat') {
-        send({ tabId: epic.id, sessionId: epic.claudeSessionId, cwd: epic.cwd, prompt })
-      } else {
-        await dispatchPromptSessionToPrd(epic.id, epic.cwd, prompt, dispatchTag(epic.tag))
-      }
+      send({ tabId: epic.id, sessionId: epic.claudeSessionId, cwd: epic.cwd, prompt })
       onClearQuote?.()
       onSent?.()
     } finally {
@@ -160,40 +137,6 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
       onDrop={onDrop}
       className={`border-t px-[22px] pb-3 pt-2 ${dragOver ? 'border-accent bg-accent/5' : 'border-rule bg-bg'}`}
     >
-      <div className="mb-2 flex items-center gap-2" data-testid="epic-composer-context">
-        <span className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-bg-hi p-0.5" data-testid="epic-composer-action-toggle">
-          <button
-            type="button"
-            onClick={() => setAction('chat')}
-            data-testid="epic-composer-action-chat"
-            aria-pressed={action === 'chat'}
-            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${action === 'chat' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => setAction('dispatch')}
-            data-testid="epic-composer-action-dispatch"
-            aria-pressed={action === 'dispatch'}
-            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${action === 'dispatch' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
-          >
-            Dispatch as PRD
-          </button>
-        </span>
-        <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">in</span>
-        <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] font-semibold text-fg">
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${epicStatusDotClass(status)}`} aria-hidden="true" />
-          <span className="truncate">{epic.goalText}</span>
-        </span>
-        <EpicKindTag kind={epic.tag} small />
-        {dragOver && (
-          <span className="ml-auto font-mono text-[10.5px] font-semibold text-accent" data-testid="epic-composer-drop-hint">
-            drop to attach
-          </span>
-        )}
-      </div>
-
       <AttachTray att={att} testId="epic-composer-attach-tray" hideZoneWhenEmpty />
 
       {quote && (

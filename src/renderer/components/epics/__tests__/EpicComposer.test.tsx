@@ -45,12 +45,6 @@ vi.mock('../../../lib/speechSynthesis', () => ({
   getSpeakStartedAt: vi.fn(() => null),
 }))
 
-const dispatchSpy = vi.fn(async (..._args: unknown[]) => 'some-prd-slug')
-vi.mock('../../../state/chat', async () => {
-  const actual = await vi.importActual<typeof import('../../../state/chat')>('../../../state/chat')
-  return { ...actual, dispatchPromptSessionToPrd: (a: string, b: string, c: string, d: string) => dispatchSpy(a, b, c, d) }
-})
-
 let container: HTMLDivElement | null = null
 let root: Root | null = null
 
@@ -94,7 +88,6 @@ beforeEach(() => {
   useChat.setState({ chats: {} })
   cancelSpy.mockClear()
   saveBinarySpy.mockClear()
-  dispatchSpy.mockClear()
   capturedVoiceOpts = null
   useVoice.setState({
     isRecording: false,
@@ -120,49 +113,19 @@ describe('EpicComposer', () => {
     expect(canCompose(epic({ status: 'completed' }))).toBe(false)
   })
 
-  it('always defaults the action toggle to Chat regardless of Epic tag — Dispatch as PRD must be an explicit choice', () => {
-    const featureEl = mount(createElement(EpicComposer, { epic: epic({ tag: 'feature' }), snapshots: snapshots() }))
-    expect((featureEl.querySelector('[data-testid="epic-composer-action-chat"]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true')
-    expect((featureEl.querySelector('[data-testid="epic-composer-action-dispatch"]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false')
-    act(() => root?.unmount())
-    container?.remove()
-
-    const discussionEl = mount(createElement(EpicComposer, { epic: epic({ tag: 'discussion' }), snapshots: snapshots() }))
-    expect((discussionEl.querySelector('[data-testid="epic-composer-action-chat"]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true')
-  })
-
-  it('lets the user manually select Dispatch as PRD to override the Chat default', () => {
-    const el = mount(createElement(EpicComposer, { epic: epic({ tag: 'feature' }), snapshots: snapshots() }))
-    const dispatchBtn = el.querySelector('[data-testid="epic-composer-action-dispatch"]') as HTMLButtonElement
-    act(() => dispatchBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(dispatchBtn.getAttribute('aria-pressed')).toBe('true')
-    expect((el.querySelector('[data-testid="epic-composer-action-chat"]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false')
-  })
-
-  it('routes Chat to useChat.send with tabId=epicId, sessionId=claudeSessionId, cwd, prompt', async () => {
+  it('routes every send to useChat.send with tabId=epicId, sessionId=claudeSessionId, cwd, prompt — no separate dispatch action', async () => {
     const send = vi.fn()
     useChat.setState({ send } as any)
     const e = epic({ tag: 'discussion' })
     const el = mount(createElement(EpicComposer, { epic: e, snapshots: snapshots() }))
+    expect(el.querySelector('[data-testid="epic-composer-action-toggle"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-composer-context"]')).toBeNull()
     const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
     act(() => setNativeValue(textarea, 'hello there'))
     const sendBtn = el.querySelector('[data-testid="epic-composer-send"]') as HTMLButtonElement
     sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushAsync(2)
     expect(send).toHaveBeenCalledWith({ tabId: 'epic-1', sessionId: 'sess-1', cwd: e.cwd, prompt: 'hello there' })
-  })
-
-  it('routes Dispatch as PRD to dispatchPromptSessionToPrd(epicId, cwd, text, tag) once explicitly selected', async () => {
-    const e = epic({ tag: 'bug' })
-    const el = mount(createElement(EpicComposer, { epic: e, snapshots: snapshots() }))
-    const dispatchBtn = el.querySelector('[data-testid="epic-composer-action-dispatch"]') as HTMLButtonElement
-    act(() => dispatchBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
-    act(() => setNativeValue(textarea, 'fix the crash'))
-    const sendBtn = el.querySelector('[data-testid="epic-composer-send"]') as HTMLButtonElement
-    sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushAsync(2)
-    expect(dispatchSpy).toHaveBeenCalledWith('epic-1', e.cwd, 'fix the crash', 'bug')
   })
 
   it('shows Queue + Cancel when the Epic is running, and Cancel calls window.api.chat.cancel(epicId)', () => {
@@ -231,9 +194,8 @@ describe('EpicComposer', () => {
     const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
     expect(textarea.value).toBe('add a mic button')
 
-    // No auto-submit: dictating never sends/dispatches on its own.
+    // No auto-submit: dictating never sends on its own.
     expect(send).not.toHaveBeenCalled()
-    expect(dispatchSpy).not.toHaveBeenCalled()
 
     act(() => capturedVoiceOpts.onFinal('for the epic composer'))
     expect(textarea.value).toBe('add a mic button for the epic composer')

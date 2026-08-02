@@ -24,12 +24,21 @@ export interface EpicIntakeFields {
   /** Absolute paths of attached references. */
   referencePaths?: string[]
   /**
-   * The Epic's single tag. When given, its `initialPromptTemplate`
+   * The Epic's single mission tag. When given, its `initialPromptTemplate`
    * (agentTagDefs.ts) is prepended to `openingPrompt` only — `goalText`
    * stays the pure user objective, since that's what's displayed as the
    * Epic's identity in Scheduler chips / the composer header.
    */
   tag?: TicketTag
+  /** Name of the Agent Library persona (`~/.claude/agents/<name>.md`) chosen
+   *  to run this Epic, distinct from `tag` above. When given along with
+   *  `agentDescription`, a framing line names the persona before the tag's
+   *  mission template — the persona is the "who", the tag is the "what". */
+  agentName?: string
+  /** The persona's one-line description (AgentPersona.description), shown
+   *  alongside `agentName` in the framing line. Omitted from the framing
+   *  line entirely when either is absent. */
+  agentDescription?: string
 }
 
 export interface EpicIntake {
@@ -53,7 +62,14 @@ function withReferences(body: string, referencePaths: string[]): string {
  *
  * Complexity: O(n) in the number of references.
  */
-export function composeEpicIntake({ title, goal, referencePaths = [], tag }: EpicIntakeFields): EpicIntake {
+export function composeEpicIntake({
+  title,
+  goal,
+  referencePaths = [],
+  tag,
+  agentName,
+  agentDescription,
+}: EpicIntakeFields): EpicIntake {
   const trimmedTitle = singleLine(title.trim())
   const trimmedGoal = goal.trim()
 
@@ -63,7 +79,13 @@ export function composeEpicIntake({ title, goal, referencePaths = [], tag }: Epi
   const promptBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
   // The tag's grounding template comes first — it's the agent's framing
   // instruction, read before the human's own goal.
-  const groundedPromptBody = tag ? `${agentTagDef(tag).initialPromptTemplate}\n\n${promptBody}` : promptBody
+  const taggedPromptBody = tag ? `${agentTagDef(tag).initialPromptTemplate}\n\n${promptBody}` : promptBody
+  // The persona framing comes before even the tag's mission template — who is
+  // running this Epic is read before what its mission is.
+  const groundedPromptBody =
+    agentName && agentDescription
+      ? `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}\n\n${taggedPromptBody}`
+      : taggedPromptBody
 
   return {
     goalText: withReferences(body, referencePaths),

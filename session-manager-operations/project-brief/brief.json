@@ -1,86 +1,79 @@
 {
   "version": 1,
-  "synthesizedAt": "2026-08-02T13:55:07.871Z",
+  "synthesizedAt": "2026-08-02T15:19:45.382Z",
   "editedAt": null,
   "model": "sonnet",
-  "purpose": "Electron desktop cockpit for driving Claude Code CLI sessions across projects — Terminal + 25+ config/observability/scheduling tabs, plus a mobile web companion.",
+  "purpose": "Electron desktop cockpit for driving Claude Code CLI sessions across projects via a TAB→Epic→PRD hierarchy, with scheduling, chat/terminal views, and mobile relay.",
   "what": [
-    "The app is organized around a **TAB → EPIC → PRD** hierarchy: a Terminal tab is anchored to one project cwd (`session-manager-operations/`), Epics are tagged Claude sessions (`feature`/`bug`/`discussion`/`build`) with a strict 3-state lifecycle (`proposed`→`active`→`completed`), and the scheduler runs PRDs authored inside an Epic's session as `claude -p` jobs with a machine-wide concurrency cap.",
-    "Recent work (git log + Epics) has been heavily focused on **navigation/UI consolidation**: merging Home-face vs Project-face Scheduler screens back together (`119c20d`), splitting Scheduler into 'Configs' vs 'Execution Queue' by face (`481cef1`), giving the Home tab its own distinct left-nav vs Project tabs, and collapsing the Epic Queue toolbar into one Actions menu (`c246810`) — the currently active Epic 'Actions Dropwn in EPIC Queue' continues this thread.",
-    "A second active thread is **Project Home / Project Pages**: `projectPages.cjs` + the `project-home-builder` agent generate static marketing/feature/architecture HTML pages from a component library and computed project summary (Stage 2 deterministic variants, Stage 4 display — `2f02cf9`, `be9cf33`, `97a8fe9`), landed alongside a `Component Library mocks` commit today (`1e4295e`).",
-    "An active perf bug ('v51 has big Perf Issues' — tab-switching slowness, suspected memory leak) is open and unaddressed in the git log shown, worth checking `state/live.ts`/transcript ring-buffers first given the CLAUDE.md's per-tab derived-state architecture.",
-    "Scheduler reliability has had multiple recent fixes: `94445fd` changed dead-job reaping to read from `queue.json` instead of an in-memory `runningSet`, and `a98fccd` added an 'investigating' status — consistent with the completed Epic history of scheduler status desyncs ('stuck running after clean exit') and 'nothing marked as in progress' trust issues."
+    "The core domain model is **TAB = project cwd**, **EPIC = tagged claude session** (`PromptSession`) with a strict `proposed → active → completed` lifecycle, and **PRD** = scheduler work items minted under an Epic. Recent commits (`b2b1b82`, `92280db`, `3d12e19`) hardened this invariant so nothing can mint an Epic directly into `active` and `active-index.json` writes are read-merge-write, not blind overwrites.",
+    "A **single-writer law** (`opsOwnership.cjs`) governs `session-manager-operations/<namespace>/` — each namespace has exactly one owning surface, fail-closed on violation. `feedback/` intake is fully retired in favor of `status: 'proposed'` Epics as the human-approval gate.",
+    "Recent work (v0.47–v0.53) focused on **nav consolidation** (merging Scheduler's Home/Project faces, distinct Home-tab vs Project-tab left-nav, dropping redundant horizontal tabs), **Epic Queue UX** (single Actions menu, Build toolbar button, discuss-first path), and a **Canvas-2 Scheduler redesign** (`f559d59`) plus **Epic UI audit** driven by Claude-Code-Design-MCP mocks.",
+    "`v51 Perf Issues` (slow tab-switching, suspected memory leaks) was addressed in `3e72cb1` alongside epic-creation review-gate fixes, landed together in the v0.53.0 release.",
+    "**Project Pages** is a newer subsystem (`projectPages.cjs`, `projectBrief.cjs`) — a static-HTML component-library renderer with deterministic variant selection (Stage 2) and summary validation (Stage 3/4), built out across several `feat(project-pages)` commits."
   ],
   "areas": [
     {
-      "name": "scheduler",
-      "files": 8,
-      "note": "queue/PRD execution engine; recent fixes to dead-job reaping and status surfacing",
-      "epic": "v51 has big Perf Issues (adjacent)",
+      "name": "src/main/scheduler.cjs + lib/queueStore.cjs",
+      "files": 1,
+      "note": "PRD execution engine — boot reconciliation, dead-process reaping, feedback sweep; recent fix drives reaping from queue.json not runningSet",
+      "epic": "Scheduler job status desyncs from run completion — stuck 'running' after clean exit",
       "heat": 0.8
     },
     {
-      "name": "epics / prompt-sessions",
-      "files": 6,
-      "note": "Epic Queue UI, Actions menu consolidation, composer redesign",
-      "epic": "Actions Dropwn in EPIC Queue",
+      "name": "src/renderer/state/promptSessions.ts",
+      "files": 1,
+      "note": "Epic lifecycle state — status transitions, rename/delete guards; currently has uncommitted changes",
+      "epic": "Scheduller Redesign UI",
       "heat": 0.9
     },
     {
-      "name": "project-pages / project-home",
-      "files": 4,
-      "note": "static HTML page generation pipeline (Stage 2-4), component library",
+      "name": "src/main/lib/epicMint.cjs + activeIndexMerge.cjs (new)",
+      "files": 2,
+      "note": "Epic minting/index-merge invariants; new untracked test + lib file suggest in-progress hardening of read-merge-write logic",
       "epic": null,
+      "heat": 0.85
+    },
+    {
+      "name": "src/main/index.cjs, ipcSchemas.cjs, promptSessionEvents.cjs",
+      "files": 3,
+      "note": "Main-process IPC surface for Epic lifecycle, currently modified but uncommitted",
+      "epic": "Actions Dropwn in EPIC Queue",
       "heat": 0.7
     },
     {
-      "name": "nav / left-nav",
-      "files": 5,
-      "note": "Home-face vs Project-face split, distinct left-nav per face",
+      "name": "src/main/projectPages.cjs / projectBrief.cjs",
+      "files": 2,
+      "note": "Static Project Page generation pipeline (Stage 2-4), several recent feature commits",
       "epic": null,
       "heat": 0.5
     },
     {
-      "name": "chat / composer",
-      "files": 4,
-      "note": "diff rendering, quote-reply, long-token wrapping",
-      "epic": null,
+      "name": "src/renderer/components/tabs/scheduler/",
+      "files": 1,
+      "note": "Almanac design primitives, Canvas-2 restyle just landed",
+      "epic": "Scheduller Redesign UI",
+      "heat": 0.6
+    },
+    {
+      "name": "src/main/browserAgentServer.cjs / browserView.cjs",
+      "files": 2,
+      "note": "Embedded browser for Claude.ai login — flagged broken for Google OAuth flow",
+      "epic": "Browser Broken",
       "heat": 0.3
     }
   ],
   "scope": [
-    {
-      "when": "2026-07-31",
-      "kind": "decided",
-      "text": "No 'general' OWNERS namespace — architecture/design-mocks/HUMAN_LEARN/reviews are skill-authored artifacts outside the app's IPC write path, not runtime state needing single-writer protection",
-      "src": "CLAUDE.md"
-    },
-    {
-      "when": "2026-07-31",
-      "kind": "added",
-      "text": "Scheduler reimplemented as a viewer/operator over TAB→EPIC→PRD, scoped to active TAB's project by default (v0.39.4)",
-      "src": "CLAUDE.md"
-    },
-    {
-      "when": "recent",
-      "kind": "narrowed",
-      "text": "Scheduler's Home/Project faces merged back into one combined screen after being split, then re-split into 'Scheduler Configs' vs 'Epic's Execution Queue'",
-      "src": "git_log 119c20d, 481cef1"
-    },
-    {
-      "when": "recent",
-      "kind": "added",
-      "text": "Epic Queue toolbar consolidated into a single Actions menu (New Epic / Run Build), replacing separate buttons",
-      "src": "git_log c246810 / active epic"
-    }
+    "2026-07-31",
+    "decided",
+    "No 'general' OWNERS namespace — architecture/design-mocks/HUMAN_LEARN/reviews stay outside single-writer law as skill-authored documentation, not app-owned runtime state",
+    "CLAUDE.md"
   ],
   "conventions": [
-    "Every Epic is born `proposed`; only Approve&start or first-prompt-submit transitions to `active` — never created directly active.",
-    "status:'proposed' replaced the retired feedback-folder intake; propose-epic is the only way to file async work.",
-    "Single-writer law (`opsOwnership.cjs`) is fail-closed per operations namespace; cross-writer needs are explicit path-scoped delegations.",
-    "Never return a freshly-built value from a zustand selector (causes React #185 blank-app crash) — three prior incidents.",
-    "Cap `claude -p` concurrency at 3 machine-wide; OOM incident on 2026-06-10 at 5 parallel.",
-    "Pin `--model` explicitly on any automated `claude -p`/`claude --print` call site."
+    "Epic status has exactly 3 states (proposed/active/completed); never create directly as 'active' — enforced structurally now in ensureEpic and createPromptSession.",
+    "Single-writer law: every ops namespace has one owner; cross-writer needs a declared delegation, not ad-hoc fs writes.",
+    "Scheduler cap of ≤3 concurrent `claude -p` sessions (session slot pool) — do not raise casually; a related Epic requested making this configurable 0-10 (default 5).",
+    "Zustand selectors must never return a freshly-built reference (three prior blank-app incidents) — guarded by `npm run lint:selectors`.",
+    "Nav destinations are deduped as independent 'micro-services' — extend an existing surface (e.g. Scheduler) before adding a new LeftNav tab."
   ],
   "pins": {
     "what": false,

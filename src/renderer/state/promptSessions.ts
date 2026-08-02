@@ -62,10 +62,17 @@ export interface PromptSession {
   source?: EpicSource
   /** Name of the Agent Library persona (`~/.claude/agents/<name>.md`) chosen to
    *  run this Epic's session, distinct from `tag` (the Epic's mission —
-   *  feature/bug/discussion). Absent when the default agent was left selected.
-   *  Display-only on the Epic; the persona's framing is folded into
-   *  `openingPrompt` once, at creation, by composeEpicIntake (epicIntake.ts). */
-  agent?: string
+   *  feature/bug/discussion). Named `agentType` (not `agent`) to match the
+   *  same concept's existing name elsewhere in this app: Claude Code's own
+   *  SubagentStart/Stop hook payloads use `agent_type`, the Task tool's own
+   *  parameter is `subagent_type` (tracked as `subagentType` in
+   *  state/live.ts's ToolUseTrace), and a Team member's persona field in
+   *  teams.cjs is `agentType` — this is the same "which persona" value, so it
+   *  carries the same field name rather than inventing a new one. Absent
+   *  when the default agent was left selected. Display-only on the Epic; the
+   *  persona's framing is folded into `openingPrompt` once, at creation, by
+   *  composeEpicIntake (epicIntake.ts). */
+  agentType?: string
 }
 
 /** On-disk archive shape written by markCompleted and read back by any
@@ -176,7 +183,7 @@ interface PromptSessionsState {
     goalText: string,
     tag?: PromptSession['tag'],
     source?: string,
-    agent?: string,
+    agentType?: string,
   ) => PromptSession
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -342,7 +349,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: (cwd, goalText, tag, source, agent) => {
+  createPromptSession: (cwd, goalText, tag, source, agentType) => {
     const now = new Date().toISOString()
     const session: PromptSession = {
       id: mintId('psess'),
@@ -353,7 +360,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       createdAt: now,
       completedAt: null,
       ...(tag ? { tag } : {}),
-      ...(agent ? { agent } : {}),
+      ...(agentType ? { agentType } : {}),
     }
     const firstEvent: PromptSessionEvent = {
       id: mintId('pevt'),

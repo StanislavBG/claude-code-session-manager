@@ -57,4 +57,23 @@ describe('composeEpicIntake', () => {
     const { openingPrompt } = composeEpicIntake({ title: 'T', goal: 'G' })
     expect(openingPrompt).toBe('Goal: T\n\nG')
   })
+
+  it('prepends the agent persona framing before the tag grounding, leaving goalText untouched', () => {
+    const { goalText, openingPrompt } = composeEpicIntake({
+      title: 'T',
+      goal: 'G',
+      tag: 'bug',
+      agentName: 'debugger',
+      agentDescription: 'Diagnoses a failing test from a stack trace.',
+    })
+    expect(goalText).toBe('T\n\nG')
+    expect(openingPrompt.startsWith('You are acting as the "debugger" agent: Diagnoses a failing test from a stack trace.')).toBe(true)
+    expect(openingPrompt).toContain('You are diagnosing a reported bug.')
+    expect(openingPrompt.endsWith('Goal: T\n\nG')).toBe(true)
+  })
+
+  it('omits agent framing when agentName or agentDescription is missing', () => {
+    expect(composeEpicIntake({ title: 'T', goal: 'G', agentName: 'debugger' }).openingPrompt).toBe('Goal: T\n\nG')
+    expect(composeEpicIntake({ title: 'T', goal: 'G', agentDescription: 'desc' }).openingPrompt).toBe('Goal: T\n\nG')
+  })
 })

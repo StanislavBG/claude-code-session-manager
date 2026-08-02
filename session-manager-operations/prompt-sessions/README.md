@@ -52,9 +52,10 @@ interface PromptSession {
   createdAt: string
   completedAt: string | null
   resumedFromId?: string | null          // set only when minted via resumeArchived()
-  tag?: 'feature' | 'bug' | 'discussion' // Epic-level intent tag
+  tag?: 'feature' | 'bug' | 'discussion' // Epic-level MISSION (Tag Library) — the "what"
   openingPrompt?: string | null          // full first-prompt body, when it differs from goalText
   source?: EpicSource                    // which automated producer minted this Epic (absent if human-created)
+  agentType?: string                     // Agent Library persona name chosen to run this Epic — the "who" (named to match Claude Code's own agent_type/subagent_type vocabulary, not a new one)
 }
 ```
 

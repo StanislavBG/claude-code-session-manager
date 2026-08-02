@@ -68,12 +68,17 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
  * Display order for tag-keyed UI (NewEpicCard's KIND_OPTIONS, Home's
  * AgentsCard) — deliberately NOT `Object.keys(AGENT_TAG_DEFS)`. 'build' has
  * no UI surface to create Epics of that tag yet, so it's left out. NewEpicCard's
- * KIND_OPTIONS is a hardcoded array (not derived from this list), so
+ * KIND_OPTIONS is a hardcoded {tag, label} array (which tags it exposes is a
+ * deliberate 3-of-5 subset, not derived from this list), so
  * 'project-home-builder' appearing here only surfaces it in Home's read-only
  * AgentsCard reference — it is never hand-picked in the New Epic form. The
  * actual Epic-creation call for this tag lives in Project Home's "Generate
  * Now"/"Regenerate" buttons (ProjectPagesSection.tsx), which pass the tag
- * directly, not via this list.
+ * directly, not via this list. What KIND_OPTIONS never hardcodes twice is the
+ * MISSION TEXT itself — its Mission-column blurb reads `agentTagDef(tag)
+ * .description` from this file at render time, the same one composeEpicIntake
+ * (epicIntake.ts) grounds the opening prompt with, so the "what a tag means"
+ * wording has exactly one source no matter how many UI surfaces show it.
  */
 export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder']
 

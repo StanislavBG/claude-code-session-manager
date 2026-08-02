@@ -1,1 +1,2 @@
 {"v":1,"epicId":"psess-msbv6w4d-10","eventId":null,"role":"user","at":"2026-08-02T15:56:56.485Z","text":"commit to git"}
+{"v":1,"epicId":"psess-msbv6w4d-10","eventId":null,"role":"assistant","at":"2026-08-02T15:57:35.711Z","text":"Committed as `1c8f5ed`. Typecheck passed clean beforehand. Working tree is now clean (21 files: New Epic card's Agent/Mission split + grounding board inspector, PRD 944's main-side merge landing, and accumulated prompt-sessions state). Not pushed — say the word if you want it on `origin/main`."}

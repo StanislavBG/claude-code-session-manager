@@ -77,6 +77,14 @@
         "causedByEventId": "6226c22a-1a33-4f72-9ff8-2be04b64a69e",
         "at": "2026-08-02T14:59:08.708Z",
         "prdSlug": "944-active-index-tombstones-and-locked-merge"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "43c0aaf2-42c6-4121-b5b1-1a0cd5a698eb",
+        "text": "Committed as `1c8f5ed`. Typecheck passed clean beforehand. Working tree is now clean (21 files: New Epic card's Agent/Mission split + grounding board inspector, PRD 944's main-side merge landing, and accumulated prompt-sessions state). Not pushed — say the word if you want it on `origin/main`.",
+        "id": "pevt-msbzhp3y-8",
+        "promptSessionId": "psess-msbv6w4d-10",
+        "at": "2026-08-02T15:57:35.710Z"
       }
     ],
     "psess-msby9bx8-4": [
@@ -103,6 +111,14 @@
         "id": "pevt-msbz5uhw-7",
         "promptSessionId": "psess-msby9bx8-4",
         "at": "2026-08-02T15:48:22.820Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msbz5uhw-7",
+        "text": "Good — the final `agentType` rename is safely captured in the committed state. Everything is verified working and committed (by an automated hook I didn't invoke — flagging this below).\n\n## Summary\n\nFixed two concrete drift bugs the previous pass introduced, so the New Epic card is now genuinely backed by the same global concepts session-manager already exposes elsewhere:\n\n1. **Mission text was a third, drifted copy.** `NewEpicCard.tsx`'s Mission pills carried hand-authored blurb text lifted from the design mockup, diverging from both `lib/tagLibrary.ts`'s `TAG_LIBRARY` (the Tag Library page's own source) and `lib/agentTagDefs.ts`'s `AGENT_TAG_DEFS` (already the canonical \"what this tag means\" text, already used by `epicIntake.ts`'s grounding template). Fixed: the Mission blurb now reads through `agentTagDef(tag).description` at render time — one source, everywhere. Added a regression test (`shows the Mission blurb from the single global agentTagDef source, never a local copy`) that would fail if this drifts again. Updated `agentTagDefs.ts`'s doc comment to describe the new relationship.\n\n2. **`PromptSession.agent` was a newly-invented field name for a concept that already has an established name in this app.** Claude Code's own `SubagentStart`/`SubagentStop` hook payloads use `agent_type`, the Task tool's own parameter is `subagent_type` (tracked as `subagentType` in `state/live.ts`), and a Team member's persona field in `teams.cjs` is `agentType`. Renamed `PromptSession.agent` → `agentType` (and `createPromptSession`'s 5th param to match) throughout `promptSessions.ts`, so the \"which persona\" concept carries the same name it already carries everywhere else in the codebase instead of a fourth synonym. Updated `prompt-sessions/README.md` and `CLAUDE.md` accordingly.\n\nThe Agent side was already correctly sourced from the same global `window.api.agents.listPersonas()` API `AgentLibrary.tsx` uses — no drift there, confirmed by inspection.\n\nVerified: `npm run typecheck`…",
+        "id": "pevt-msbzjgi9-9",
+        "promptSessionId": "psess-msby9bx8-4",
+        "at": "2026-08-02T15:58:57.873Z"
       }
     ]
   }

@@ -31,6 +31,7 @@ const prdCreate = require('./lib/prdCreate.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
+const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
@@ -685,6 +686,13 @@ ipcMain.handle('app:git-branch', validated(schemas.appGitBranch, async ({ cwd })
       resolve(out.length ? out : null);
     });
   });
+}));
+
+// Resolves a project's publish target for 'build'-tagged Epics — see
+// lib/buildTarget.cjs. Null means the Build toolbar button should be disabled
+// (no explicit config, no auto-discoverable publishable package.json).
+ipcMain.handle('build:resolve-target', validated(schemas.buildResolveTarget, ({ cwd }) => {
+  return resolveBuildTarget(cwd);
 }));
 
 // Containment check for the open-in-{editor,finder,terminal} handlers lives

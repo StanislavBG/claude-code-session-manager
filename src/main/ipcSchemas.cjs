@@ -687,6 +687,12 @@ const appGitBranch = z.object({
   cwd: z.string().min(1).max(4096),
 }).passthrough();
 
+// build:resolve-target — see src/main/lib/buildTarget.cjs. cwd is a trusted
+// TAB cwd, not validatePath'd here (same invariant as appGitBranch above).
+const buildResolveTarget = z.object({
+  cwd: z.string().min(1).max(4096),
+}).passthrough();
+
 // git:status / git:file-status — see src/main/git.cjs. cwd is validatePath'd
 // inside the handler (allowedRoots = home), so the schema only enforces shape.
 const gitStatus = z.object({
@@ -857,6 +863,7 @@ module.exports = {
     voiceSetRecording,
     appTestFireHook,
     appGitBranch,
+    buildResolveTarget,
     gitStatus,
     gitFileStatus,
     repoAnalyze,

@@ -12,6 +12,8 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
+import { useSessions } from '../../state/sessions'
+import { useChat } from '../../state/chat'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { toast } from '../../state/toast'
 import { splitTitleAndGoal } from './EpicDetail'
@@ -26,6 +28,63 @@ import {
 import { EpicStatusChip, EpicKindTag, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
+import { composeEpicIntake } from '../../lib/epicIntake'
+import { useBuildTarget } from '../../lib/useBuildTarget'
+
+const BUILD_GOAL_TEXT =
+  '/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there\'s anything new.'
+
+/** Toolbar action (not per-row — Builder isn't scoped to one Epic): creates a
+ *  brand-new 'build'-tagged Epic via the same creation path NewEpicCard's
+ *  submit uses, and auto-sends its opening prompt so a fresh, isolated agent
+ *  session starts the git-diff -> publish loop immediately. Disabled when
+ *  the active project has no resolvable publish target. */
+function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
+  const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
+  const target = useBuildTarget(activeTabCwd)
+  const [creating, setCreating] = useState(false)
+  const disabled = !activeTabCwd || !target || creating
+
+  const handleClick = async () => {
+    if (!activeTabCwd || !target || creating) return
+    setCreating(true)
+    try {
+      const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: BUILD_GOAL_TEXT, tag: 'build' })
+      const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'proposed')
+      usePromptSessions.getState().approveProposed(session.id)
+      useChat.getState().send({
+        tabId: session.id,
+        sessionId: session.claudeSessionId,
+        cwd: activeTabCwd,
+        prompt: openingPrompt,
+      })
+      onSelect(session.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const tooltip = !activeTabCwd
+    ? 'No active project tab — open a project to use Build'
+    : !target
+      ? 'No publish target found for this project — add session-manager-operations/architecture/build-target.json or a publishable package.json'
+      : 'Start a fresh Epic that checks git vs the published package and publishes if there\'s anything new'
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      disabled={disabled}
+      data-testid="epic-queue-build"
+      title={tooltip}
+      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      Build
+    </button>
+  )
+}
 
 const STATUS_ORDER: EpicDisplayStatus[] = ['running', 'needs', 'queued', 'active', 'completed']
 
@@ -601,13 +660,16 @@ export function EpicQueue({
       <div className={`flex items-center gap-2 px-3.5 py-3 ${filters ? '' : 'border-b border-line'}`}>
         <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Epic queue</span>
         <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
-        <button
-          type="button"
-          onClick={onNew}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 bg-accent text-white text-xs font-semibold shadow-sm"
-        >
-          + New Epic
-        </button>
+        <span className="ml-auto flex items-center gap-1.5">
+          <BuildButton onSelect={onSelect} />
+          <button
+            type="button"
+            onClick={onNew}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 bg-accent text-white text-xs font-semibold shadow-sm"
+          >
+            + New Epic
+          </button>
+        </span>
       </div>
 
       {filters}

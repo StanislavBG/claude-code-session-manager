@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
     engageRulesPath: () => ipcRenderer.invoke('app:engage-rules-path'),
     pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
+    resolveBuildTarget: (cwd) => ipcRenderer.invoke('build:resolve-target', { cwd }),
     rebootApp: () => ipcRenderer.send('app:reboot-app'),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),

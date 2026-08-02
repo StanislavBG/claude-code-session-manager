@@ -1,3 +1,11 @@
+export interface BuildTarget {
+  registry: string;
+  packageName: string;
+  versionBumpPolicy: string;
+  gates: string[];
+  discovered?: boolean;
+}
+
 export interface ActionOutcome {
   ok: boolean;
   kind?: 'info' | 'warn' | 'error';
@@ -1181,6 +1189,8 @@ export interface SessionManagerAPI {
     engageRulesPath: () => Promise<string | null>;
     pickDirectory: () => Promise<string | null>;
     gitBranch: (cwd: string) => Promise<string | null>;
+    /** Publish target for 'build'-tagged Epics — null disables the Build toolbar button. */
+    resolveBuildTarget: (cwd: string) => Promise<BuildTarget | null>;
     rebootApp: () => void;
     testFireHook: (args: TestFireHookArgs) => Promise<TestFireHookResult>;
     /** F7 — true under SM_E2E=1; renderer uses this to suppress wizard auto-trigger. */

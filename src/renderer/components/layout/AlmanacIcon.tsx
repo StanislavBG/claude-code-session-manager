@@ -20,6 +20,7 @@ export type AlmanacIconName =
   | 'browser' | 'target' | 'record' | 'eye' | 'camera'
   | 'arrowleft' | 'arrowright' | 'reload' | 'lock' | 'stop'
   | 'star' | 'minus' | 'paperclip'
+  | 'expand' | 'collapse'
 
 interface IconProps {
   name: AlmanacIconName
@@ -97,6 +98,8 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'star':         return <svg {...props}><path d="M12 3l2.6 5.6 6.1.6-4.6 4.1 1.3 6-5.4-3.2-5.4 3.2 1.3-6-4.6-4.1 6.1-.6z" /></svg>
     case 'minus':        return <svg {...props}><path d="M5 12h14" /></svg>
     case 'paperclip':    return <svg {...props}><path d="M8 12.5l6.5-6.5a3 3 0 014.2 4.2L11 18a5 5 0 01-7-7l7.5-7.5" /></svg>
+    case 'expand':       return <svg {...props}><path d="M8 3H3v5" /><path d="M16 3h5v5" /><path d="M8 21H3v-5" /><path d="M16 21h5v-5" /></svg>
+    case 'collapse':     return <svg {...props}><path d="M3 8h5V3" /><path d="M21 8h-5V3" /><path d="M3 16h5v5" /><path d="M21 16h-5v5" /></svg>
     default: return null
   }
 }

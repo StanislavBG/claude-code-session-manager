@@ -72,7 +72,7 @@ describe('ProjectPagesSection', () => {
     expect(el.textContent).toContain('Generate Now')
   })
 
-  it('renders the iframe display with the home html as srcDoc by default when output is present', async () => {
+  it('renders the iframe display with the marketing html as srcDoc by default when output is present', async () => {
     ;(globalThis as any).window.api = {
       projectPages: {
         get: vi.fn().mockResolvedValue({
@@ -91,14 +91,19 @@ describe('ProjectPagesSection', () => {
     await flush()
     const iframe = el.querySelector('iframe') as HTMLIFrameElement
     expect(iframe).toBeTruthy()
-    expect(iframe.getAttribute('srcdoc')).toContain('HOME')
+    expect(iframe.getAttribute('srcdoc')).toContain('MARKETING')
     expect(el.textContent).toContain('Regenerate')
+    expect(el.textContent).toContain('Full screen')
     expect(el.textContent).toContain('About these templates')
 
-    const marketingTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Marketing') as HTMLButtonElement
-    act(() => marketingTab.click())
+    const homeTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Home') as HTMLButtonElement
+    act(() => homeTab.click())
     const iframeAfter = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframeAfter.getAttribute('srcdoc')).toContain('MARKETING')
+    expect(iframeAfter.getAttribute('srcdoc')).toContain('HOME')
+
+    const fullscreenBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Full screen') as HTMLButtonElement
+    act(() => fullscreenBtn.click())
+    expect(el.textContent).toContain('Exit full screen')
   })
 
   it('clicking Generate Now with no existing project-home-builder Epic calls createPromptSession with tag project-home-builder', async () => {

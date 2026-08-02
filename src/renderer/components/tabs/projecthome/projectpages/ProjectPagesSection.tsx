@@ -15,6 +15,7 @@ import { setPendingPromptSessionId } from '../../../../lib/promptSessionDeepLink
 import { EmptyState } from '../../../ui/EmptyState'
 import { ViewTabs } from '../../../ui/ViewTabs'
 import { PhBlock, PhCard } from '../ph-primitives'
+import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { toast } from '../../../../state/toast'
 import type { ProjectPagesOutput } from '../../../../../preload/api'
 
@@ -55,7 +56,11 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
 
   const [output, setOutput] = useState<ProjectPagesOutput | null>(null)
   const [loaded, setLoaded] = useState(false)
-  const [activeView, setActiveView] = useState<ViewKey>('home')
+  // Marketing is the default lens shown on first load — the outward-facing
+  // page is what "click and see the project page" means for most people;
+  // Home/Feature/Architecture and the explainer tab are one click away.
+  const [activeView, setActiveView] = useState<ViewKey>('marketing')
+  const [fullscreen, setFullscreen] = useState(false)
   // The registered Agent Library persona (~/.claude/agents/project-home-builder.md,
   // overlaid by this repo's own .claude/agents/project-home-builder.md) this
   // Epic is bound to — resolved once so Generate Now names a real "who" in the
@@ -98,6 +103,15 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
       cancelled = true
     }
   }, [cwd])
+
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [fullscreen])
 
   const existingBuilderEpic = useMemo(() => findActiveBuilderEpic(sessions, cwd), [sessions, cwd])
 
@@ -175,6 +189,38 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
     )
   }
 
+  const iframe = (
+    <iframe
+      title={`Project Page — ${activeView}`}
+      sandbox="allow-same-origin"
+      srcDoc={output[activeView]}
+      style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+    />
+  )
+
+  if (fullscreen) {
+    return (
+      <div className="fixed inset-0 z-50 bg-bg flex flex-col">
+        <div className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 shrink-0">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-faint mr-auto">
+            Project Pages · {VIEW_OPTIONS.find((o) => o.key === activeView)?.label}
+          </span>
+          <ViewTabs options={VIEW_OPTIONS} active={activeView} onChange={setActiveView} />
+          <button
+            type="button"
+            onClick={() => setFullscreen(false)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg-hi px-2.5 py-1 text-[11px] font-semibold text-fg-dim hover:text-fg"
+            title="Exit full screen (Esc)"
+          >
+            <AlmanacIcon name="collapse" size={13} />
+            Exit full screen
+          </button>
+        </div>
+        <div className="flex-1 min-h-0">{iframe}</div>
+      </div>
+    )
+  }
+
   return (
     <PhBlock
       kicker="pages"
@@ -185,6 +231,15 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
           <ViewTabs options={VIEW_OPTIONS} active={activeView} onChange={setActiveView} />
           <button
             type="button"
+            onClick={() => setFullscreen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg-hi px-2.5 py-1 text-[11px] font-semibold text-fg-dim hover:text-fg"
+            title="Full screen"
+          >
+            <AlmanacIcon name="expand" size={13} />
+            Full screen
+          </button>
+          <button
+            type="button"
             onClick={handleGenerate}
             className="rounded-md border border-line bg-bg-hi px-2.5 py-1 text-[11px] font-semibold text-fg-dim hover:text-fg"
           >
@@ -193,13 +248,8 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
         </div>
       }
     >
-      <PhCard className="overflow-hidden">
-        <iframe
-          title={`Project Page — ${activeView}`}
-          sandbox="allow-same-origin"
-          srcDoc={output[activeView]}
-          style={{ width: '100%', minHeight: 600, border: 'none', display: 'block' }}
-        />
+      <PhCard className="overflow-hidden" style={{ height: 'calc(100vh - 260px)', minHeight: 520 }}>
+        {iframe}
       </PhCard>
     </PhBlock>
   )

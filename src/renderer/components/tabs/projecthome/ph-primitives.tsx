@@ -5,7 +5,7 @@
  * reuse `components/epics/epic-primitives.tsx` rather than the mock's own
  * hex `PH_ST` map.
  */
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { AlmanacIcon } from '../../layout/AlmanacIcon'
 
 interface PhBlockProps {
@@ -48,6 +48,18 @@ export function PhBlock({ kicker, title, note, children, pinned, onPin, right }:
   )
 }
 
-export function PhCard({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-line bg-bg-hi ${className}`}>{children}</div>
+export function PhCard({
+  children,
+  className = '',
+  style,
+}: {
+  children: ReactNode
+  className?: string
+  style?: CSSProperties
+}) {
+  return (
+    <div className={`rounded-xl border border-line bg-bg-hi ${className}`} style={style}>
+      {children}
+    </div>
+  )
 }

@@ -245,7 +245,7 @@ export function NewEpicCard({
               One goal per Epic — fixed for the life of its session. The title and objective are sent
               as the first message the moment you start it, so the agent is already working when it opens.
             </p>
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
 
             {showProjectSelector ? (
               <label className="mb-2.5 flex flex-col gap-1">
@@ -275,24 +275,24 @@ export function NewEpicCard({
             )}
 
             <div className="mb-3.5 grid grid-cols-2 gap-3.5">
-              <div>
+              <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
                   title="Who runs this Epic — from the Agent Library (~/.claude/agents)."
                 >
                   1 · agent — who is working
                 </div>
-                <div className="grid gap-1">
+                <div className="grid min-w-0 gap-1">
                   <button
                     type="button"
                     data-testid="new-epic-agent-default"
                     onClick={() => setAgentName('')}
-                    className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
+                    className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
                       agentName === '' ? 'border-accent bg-bg-elev' : 'border-line bg-bg'
                     }`}
                   >
-                    <span className="h-1.5 w-1.5 rotate-45 rounded-sm bg-fg-faint" />
-                    <span className="font-mono text-xs font-medium text-fg">Default</span>
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm bg-fg-faint" />
+                    <span className="flex-shrink-0 font-mono text-xs font-medium text-fg">Default</span>
                   </button>
                   {(agents ?? []).map((a) => {
                     const on = agentName === a.name
@@ -302,21 +302,21 @@ export function NewEpicCard({
                         type="button"
                         data-testid={`new-epic-agent-${a.name}`}
                         onClick={() => setAgentName(a.name)}
-                        className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
+                        className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
                           on ? 'border-accent bg-bg-elev' : 'border-line bg-bg'
                         }`}
                       >
-                        <span className="h-1.5 w-1.5 rotate-45 rounded-sm" style={{ background: agentDot(a.name) }} />
-                        <span className={`font-mono text-xs ${on ? 'font-semibold' : 'font-medium'} text-fg`}>{a.name}</span>
+                        <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm" style={{ background: agentDot(a.name) }} />
+                        <span className={`flex-shrink-0 font-mono text-xs ${on ? 'font-semibold' : 'font-medium'} text-fg`}>{a.name}</span>
                         {a.description && (
-                          <span className="ml-auto truncate whitespace-nowrap text-[11px] text-fg-faint">{a.description}</span>
+                          <span className="min-w-0 flex-1 truncate text-right text-[11px] text-fg-faint">{a.description}</span>
                         )}
                       </button>
                     )
                   })}
                 </div>
               </div>
-              <div>
+              <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
                   title="The Epic's mission — from the Tag Library. Sets how eagerly /develop fires."
@@ -421,7 +421,7 @@ export function NewEpicCard({
               real files this app can read, never a guess. Read-only: session-manager has no way to
               tell the claude CLI to skip one of these once it's on disk.
             </p>
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
 
             <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5">
               <div className="flex flex-wrap items-center gap-1.5">

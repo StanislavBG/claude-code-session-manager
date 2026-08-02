@@ -10,16 +10,6 @@
       "completedAt": null,
       "tag": "feature"
     },
-    "psess-msbzla9l-12": {
-      "id": "psess-msbzla9l-12",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
-      "claudeSessionId": "a6822bcd-6219-4877-b52b-78b1157c9151",
-      "status": "active",
-      "createdAt": "2026-08-02T16:00:23.097Z",
-      "completedAt": null,
-      "tag": "build"
-    },
     "psess-msbzzx39-2": {
       "id": "psess-msbzzx39-2",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -40,16 +30,15 @@
       "completedAt": null,
       "tag": "bug"
     },
-    "psess-msc0t9zi-14": {
-      "id": "psess-msc0t9zi-14",
+    "psess-msc225fk-23": {
+      "id": "psess-msc225fk-23",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Message Shows Twice in Chat\n\nMessage that are reposnses from the Agent render in chat twice, once with the 'formated' and once raw. There is no need to show the raw, only on demand and must be 'hidden' behind a user action that will flip the summary into the raw view \n\n\nSummary\nReviewed the other 3 open Epics in this repo to ground the language update in current reality, not guesswork:\n\n/builder — routine release (v0.53.0→v0.54.0), unrelated to terminology.\n\"Redesign Agent and Tag Library\" — the one directly relevant: it made AgentLibrary.tsx a full CRUD editor (New/Duplicate/Save/Revert/Delete, writing ~/.claude/agents/<name>.md) and gave each persona a tags: frontmatter field, making agent↔tag membership editable from either the Agent Library or Tag Library page. Still in progress/uncommitted on disk (not mine to touch).\n\"Project Home Redesign\" — bug fix running the Project Pages generate pipeline; unrelated to terminology.\nCLAUDE.md changes made (docs only, no API/code changes, per your instruction):\n\nAdded a short framing note under the domain-model header: Agent (persona, \"who\") + Tag (mission, \"what\") is the current UI vocabulary — explicitly not a rename of \"Epic\" or its underlying PromptSession.agentType/tag fields.\nFixed the \"New Epic creation is two independent selections\" bullet, which still called AgentLibrary.tsx/TagLibrary.tsx \"read-only directories\" — stale as of the in-flight redesign. Now describes the real CRUD editor and the many-to-many agent↔tag membership.\nReplaced a stale \"Knowledge Graph\" mention in the intro tab list with \"Agent Library, Tag Library\" (KG was already retired per the Architecture section, replaced by Memory Clusters).\nRemoved the dead \"Knowledge graph data pipeline\" convention bullet — it described a retired feature and directly contradicted the Architecture section in the same file.\nCommitted as cf752fe (only CLAUDE.md + this Epic's own transcript state — left the other Epic's uncommitted agentLibrary.cjs/AgentLibrary.tsx/etc. changes untouched, same isolation as before).\n\n— Summary Reviewed the other 3 open Epics in this repo to ground the language update in current reality, not guesswork: /builder — routine release (v0.53.0→v0.54.0), unrelated to terminology. \"Redesign Agent and Tag Library\" — the one directly relevant: it made AgentLibrary.tsx a full CRUD editor (New/Duplicate/Save/Revert/Delete, writing ~/.claude/agents/<name>.md) and gave each persona a tags: frontmatter field, making agent↔tag membership editable from either the Agent Library or Tag Library page. Still in progress/uncommitted on disk (not mine to touch). \"Project Home Redesign\" — bug fix running the Project Pages generate pipeline; unrelated to terminology. CLAUDE.md changes made (docs only, no API/code changes, per your instruction): Added a short framing note under the domain-model header: Agent (persona, \"who\") + Tag (mission, \"what\") is the current UI vocabulary — explicitly not a rename of \"Epic\" or its underlying PromptSession.agentType/tag fields. Fixed the \"New Epic creation is two independent selections\" bullet, which still called AgentLibrary.tsx/TagLibrary.tsx \"read-only directories\" — stale as of the in-flight redesign. Now describes the real CRUD editor and the many-to-many agent↔tag membership. Replaced a stale \"Knowledge Graph\" mention in the intro tab list with \"Agent Library, Tag Library\" (KG was already retired per the Architecture section, replaced by Memory Clusters). Removed the dead \"Knowledge graph data pipeline\" convention bullet — it described a retired feature and directly contradicted the Architecture section in the same file. Committed as cf752fe (only CLAUDE.md + this Epic's own transcript state — left the other Epic's uncommitted agentLibrary.cjs/AgentLibrary.tsx/etc. changes untouched, same isolation as before). —",
-      "claudeSessionId": "410a9b75-de0d-423b-8c45-2dd976b2a043",
+      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
+      "claudeSessionId": "6dfe056b-7475-4835-87ac-33e8f7c8c8c5",
       "status": "active",
-      "createdAt": "2026-08-02T16:34:35.598Z",
+      "createdAt": "2026-08-02T17:09:29.216Z",
       "completedAt": null,
-      "tag": "bug",
-      "agentType": "debugger"
+      "tag": "build"
     }
   },
   "events": {
@@ -135,24 +124,6 @@
         "at": "2026-08-02T17:00:33.033Z"
       }
     ],
-    "psess-msbzla9l-12": [
-      {
-        "id": "pevt-msbzla9l-13",
-        "promptSessionId": "psess-msbzla9l-12",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-02T16:00:23.097Z",
-        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msbzla9l-13",
-        "text": "Published and pushed successfully.\n\n**Summary:**\n- **v0.53.0 → v0.54.0** (minor bump: 1 feat, 1 fix, 1 chore since last release, no breaking changes)\n- Commits covered: `8109fa8` (fix: active-index merge tombstones), `1c8f5ed` (feat: two-axis Agent/Mission Epic picker + grounding board), `218251c` (chore: prompt-sessions sync)\n- Gate: typecheck clean; test:unit 2034/2034 passed (2 tests timed out under full-suite parallel load, confirmed flaky — both pass cleanly in isolation)\n- Published from an isolated worktree (`npm ci` + `vite build` + `npm publish`), verified live on the registry as `0.54.0`/`latest`\n- Tag `v0.54.0` and the version-bump commit pushed to `main`; worktree cleaned up\n\nUnrelated to the release: your working tree still has uncommitted changes to `prompt-sessions/active-index.json` and transcript files, plus a new untracked error log — left untouched since they're outside this task's scope.",
-        "id": "pevt-msbzs9my-14",
-        "promptSessionId": "psess-msbzla9l-12",
-        "at": "2026-08-02T16:05:48.874Z"
-      }
-    ],
     "psess-msbzzx39-2": [
       {
         "id": "pevt-msbzzx39-3",
@@ -185,6 +156,22 @@
         "id": "pevt-msc1vfvr-21",
         "promptSessionId": "psess-msbzzx39-2",
         "at": "2026-08-02T17:04:16.167Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msc1vfvr-21",
+        "text": "Everything is committed and pushed. `git status` is empty, and local `main` matches `origin/main` at `3b59257`.\n\n**Summary:** Committed and pushed the remaining ops-state diff (`chore(ops): sync prompt-sessions state` — the Epics store update plus two transcript files that had accumulated since the last push) on top of the Agent/Tag Library feature commit from before. Both commits are now on `origin/main`, and the working tree is fully clean — nothing left uncommitted.",
+        "id": "pevt-msc21570-22",
+        "promptSessionId": "psess-msbzzx39-2",
+        "at": "2026-08-02T17:08:42.252Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msc21570-22",
+        "text": "Pushed successfully.\n\n## Summary\n\n**Root cause:** Agent Library and Tag Library are each an independently-mounted dockview panel, and each fetches `listPersonas()` into its own component-local `useState` exactly once on mount. Both pages *do* read/write the identical file (`~/.claude/agents/<name>.md`'s `tags:` frontmatter, via `agentLibrary.cjs`'s `savePersona`) — but neither had any way to learn the other had changed it. So toggling tags on `project-home-builder` in Agent Library persisted correctly, but if the Tag Library panel was already open, it kept showing its stale first-mount snapshot (0 linked agents) until fully closed and reopened.\n\n**Fix:**\n- `src/main/index.cjs`: every `agents:save-persona` / `agents:delete-persona` / `agents:remove-override` handler now broadcasts an `agents:changed` IPC event after the write completes.\n- `src/preload/index.cjs` + `api.d.ts`: exposed `window.api.agents.onChanged(handler)` to subscribe to that broadcast.\n- `AgentLibrary.tsx` and `TagLibrary.tsx`: both now subscribe to `onChanged` and re-run their `load()` — so an edit from either side refreshes both live, no remount needed.\n- Added 5 new tests (`TagLibrary.test.tsx` — new file — plus one in `AgentLibrary.test.tsx`) covering the assign/unassign flow and the cross-panel refresh; full suite is 2045/2045 passing, typecheck and selector-lint clean.\n\nCommitted as `80bb5cc` and pushed to `origin/main`.\n\nOne thing I couldn't reproduce independently: on disk, `project-home-builder.md` (both the global file and this repo's project overlay) currently has **no `tags:` field at all** — so the \"4 tags\" you saw were either an unsaved draft (visible via the \"edited\"/\"unsaved draft\" badge, not yet written to disk) or exactly the stale-panel symptom above. The fix addresses the stale-panel case; if it was an unsaved draft, that's expected — click Save before checking the other page.",
+        "id": "pevt-msc2mkzn-5",
+        "promptSessionId": "psess-msbzzx39-2",
+        "at": "2026-08-02T17:25:22.499Z"
       }
     ],
     "psess-msc06fh7-6": [
@@ -219,44 +206,38 @@
         "id": "pevt-msc1p06v-18",
         "promptSessionId": "psess-msc06fh7-6",
         "at": "2026-08-02T16:59:15.895Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msc1p06v-18",
+        "text": "## Findings\n\nThe work **is** committed, pushed, and published — but the app you're looking at almost certainly isn't running that build yet.\n\n**Confirmed via git + npm:**\n- `v0.55.0`'s release commit (`daa2227`, published to npm at `2026-08-02T17:11:57Z`) explicitly includes both of my commits in its changelog:\n  - `feat(project-pages): run the generate pipeline for this project`\n  - `feat(project-pages): register project-home-builder in the Agent Library, bind Generate Now to it`\n- `npm view claude-code-session-manager version` → `0.55.0`, matching `package.json`. So the registry is current.\n\n**Why you're not seeing it:** `ps aux` shows the currently-running Electron instance (PID `2310626`, launched today at 10:12) is running out of `~/.npm/_npx/5346543b21849140/node_modules/claude-code-session-manager` — a cached `npx` install, tagged `_version=0.55.0` in its crashpad annotations. That cache directory is only refreshed when `npx` is told to check for a newer version; a plain `npx claude-code-session-manager` (no `@latest`) or an already-open window from earlier today won't silently pick up a registry publish that happened while it was running — Electron main-process code (which several of today's other concurrent Epics touched: `index.cjs`, `preload/index.cjs`) can't hot-reload the way Vite HMR does for the renderer, and `npx`'s local cache won't refetch on its own either.\n\n**What \"same fixed design\" actually is, for clarity:** the Brief header + \"Refresh brief\" job (`PhHeader`/`handleRefresh` in `ProjectHome.tsx`) is a *separate*, deliberately-unchanged feature from what I built. What's new is the **Project Pages** block rendered underneath it (`ProjectPagesSection.tsx`) — that's the part with the Marketing/Feature/Architecture lens toggle and Generate Now/Regenerate. If you're only looking at the top Brief section, you wouldn't see any change even on a fully up-to-date build.\n\n## To actually see it\n\n1. Quit the running app instance.\n2. Relaunch with `npx claude…",
+        "id": "pevt-msc2ju6e-4",
+        "promptSessionId": "psess-msc06fh7-6",
+        "at": "2026-08-02T17:23:14.438Z"
       }
     ],
-    "psess-msc0t9zi-14": [
+    "psess-msc225fk-23": [
       {
-        "id": "pevt-msc0t9zi-15",
-        "promptSessionId": "psess-msc0t9zi-14",
+        "id": "pevt-msc225fk-24",
+        "promptSessionId": "psess-msc225fk-23",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-02T16:34:35.598Z",
-        "text": "Message Shows Twice in Chat\n\nMessage that are reposnses from the Agent render in chat twice, once with the 'formated' and once raw. There is no need to show the raw, only on demand and must be 'hidden' behind a user action that will flip the summary into the raw view \n\n\nSummary\nReviewed the other 3 open Epics in this repo to ground the language update in current reality, not guesswork:\n\n/builder — routine release (v0.53.0→v0.54.0), unrelated to terminology.\n\"Redesign Agent and Tag Library\" — the one directly relevant: it made AgentLibrary.tsx a full CRUD editor (New/Duplicate/Save/Revert/Delete, writing ~/.claude/agents/<name>.md) and gave each persona a tags: frontmatter field, making agent↔tag membership editable from either the Agent Library or Tag Library page. Still in progress/uncommitted on disk (not mine to touch).\n\"Project Home Redesign\" — bug fix running the Project Pages generate pipeline; unrelated to terminology.\nCLAUDE.md changes made (docs only, no API/code changes, per your instruction):\n\nAdded a short framing note under the domain-model header: Agent (persona, \"who\") + Tag (mission, \"what\") is the current UI vocabulary — explicitly not a rename of \"Epic\" or its underlying PromptSession.agentType/tag fields.\nFixed the \"New Epic creation is two independent selections\" bullet, which still called AgentLibrary.tsx/TagLibrary.tsx \"read-only directories\" — stale as of the in-flight redesign. Now describes the real CRUD editor and the many-to-many agent↔tag membership.\nReplaced a stale \"Knowledge Graph\" mention in the intro tab list with \"Agent Library, Tag Library\" (KG was already retired per the Architecture section, replaced by Memory Clusters).\nRemoved the dead \"Knowledge graph data pipeline\" convention bullet — it described a retired feature and directly contradicted the Architecture section in the same file.\nCommitted as cf752fe (only CLAUDE.md + this Epic's own transcript state — left the other Epic's uncommitted agentLibrary.cjs/AgentLibrary.tsx/etc. changes untouched, same isolation as before).\n\n— Summary Reviewed the other 3 open Epics in this repo to ground the language update in current reality, not guesswork: /builder — routine release (v0.53.0→v0.54.0), unrelated to terminology. \"Redesign Agent and Tag Library\" — the one directly relevant: it made AgentLibrary.tsx a full CRUD editor (New/Duplicate/Save/Revert/Delete, writing ~/.claude/agents/<name>.md) and gave each persona a tags: frontmatter field, making agent↔tag membership editable from either the Agent Library or Tag Library page. Still in progress/uncommitted on disk (not mine to touch). \"Project Home Redesign\" — bug fix running the Project Pages generate pipeline; unrelated to terminology. CLAUDE.md changes made (docs only, no API/code changes, per your instruction): Added a short framing note under the domain-model header: Agent (persona, \"who\") + Tag (mission, \"what\") is the current UI vocabulary — explicitly not a rename of \"Epic\" or its underlying PromptSession.agentType/tag fields. Fixed the \"New Epic creation is two independent selections\" bullet, which still called AgentLibrary.tsx/TagLibrary.tsx \"read-only directories\" — stale as of the in-flight redesign. Now describes the real CRUD editor and the many-to-many agent↔tag membership. Replaced a stale \"Knowledge Graph\" mention in the intro tab list with \"Agent Library, Tag Library\" (KG was already retired per the Architecture section, replaced by Memory Clusters). Removed the dead \"Knowledge graph data pipeline\" convention bullet — it described a retired feature and directly contradicted the Architecture section in the same file. Committed as cf752fe (only CLAUDE.md + this Epic's own transcript state — left the other Epic's uncommitted agentLibrary.cjs/AgentLibrary.tsx/etc. changes untouched, same isolation as before). —"
+        "at": "2026-08-02T17:09:29.216Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc0t9zi-15",
-        "text": "## Diagnosis\n\n**Root cause**: `chat.ts`'s `onComplete`/`onNeedsInput` handlers (`src/renderer/state/chat.ts:910-912, 917-918`) do two things on every completed assistant turn:\n1. `pushTurn(...)` — appends the reply as a live `ChatTurn`, rendered in `EpicDetail`'s Discussion timeline via the fully-formatted `<Turn>` bubble.\n2. `appendResponseEvent(tabId, finalMessage)` — appends a `'response'`-kind `PromptSessionEvent` with the *same text*, whose real purpose (per `promptSessions.ts`'s `mergeAppendedEvent`) is to toast the user when a **different, unfocused** Epic gets an update.\n\n`EpicDetail.tsx`'s merged `timeline` (lines 377-384, pre-fix) rendered **every** `'response'` event regardless of whether the Epic was currently focused, via the compact `<ResponseEvent>` component — so the same assistant message showed up twice: once as the normal chat bubble, once as a second, unstyled/compact line right below it. That second line is what read as \"raw\" to you — same content, no bubble chrome, no tool trace.\n\nThis wasn't a problem for the events' *other* legitimate producers (scheduler PRD-completion notices via `notifyOriginatingTab`, Terminal-handoff markers) since those have no matching live `Turn` to duplicate — they're the intended \"compact by default, expand for raw\" pattern (`ResponseEvent`'s existing \"show more\" toggle).\n\n## Fix\n\n`src/renderer/components/epics/EpicDetail.tsx`: before merging `'response'` events into the timeline, filter out any whose text matches (or is a truncated prefix of) an already-rendered assistant `Turn`'s text. Genuinely out-of-band `'response'` events (no matching live turn) still render with their existing expand-on-demand summary.\n\nAdded a regression test in `EpicDetail.test.tsx` asserting a duplicated `'response'` event is suppressed while a distinct one (a PRD-finished notice) still renders. `tsc --noEmit` and the full `epics`/`chat`/`promptSessions` test suites (209 tests) pass.",
-        "id": "pevt-msc10yv2-16",
-        "promptSessionId": "psess-msc0t9zi-14",
-        "at": "2026-08-02T16:40:34.430Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc10yv2-16",
-        "text": "That screenshot is a live example of the exact bug I just diagnosed and fixed in `EpicDetail.tsx`. You can see it clearly:\n\n- **Top block** (with ✓ checkmarks, bold headers, code chips) — the properly formatted assistant `Turn` bubble rendering the \"Summary\" reply from a completed Epic turn.\n- **Bottom block** (dense bold run-on text, no line breaks, no formatting) — the *same* summary text rendered a second time as a duplicate `'response'` PromptSessionEvent via `ResponseEvent`'s `[&_*]:inline [&_*]:m-0` CSS override, which forces every markdown element (headers, lists, bold) onto one squashed inline line. For a short PRD-notice string that override just looks like a compact \"— text —\" line; for this much markdown content it collapses into the garbled bold wall of text you're seeing — which reads exactly like \"the raw version\" of the message.\n\nThis confirms the root cause precisely: `chat.ts`'s `onComplete` handler both `pushTurn`s the real formatted reply *and* `appendResponseEvent`s the identical text as an audit/toast event, and `EpicDetail.tsx` was rendering both. The fix already applied (this session, prior turn) filters `'response'` events out of the Discussion timeline when their text duplicates an already-rendered assistant `Turn`, while still showing genuinely out-of-band ones (PRD-completion notices with no matching live turn) via the same compact/expandable summary.\n\nNo further action needed on my end — the screenshot is corroborating evidence for the already-committed fix, not a new issue. Note: the annotation text overlaid at the top of the image (\"The modal does not seem integratd with the Agent's Libray...\") is about a *different*, unrelated New-Epic-modal complaint referencing another attachment (`t4i9qtygan-image.png`) — let me know if you want that one triaged separately, since it wasn't part of this bug.",
-        "id": "pevt-msc11mxv-17",
-        "promptSessionId": "psess-msc0t9zi-14",
-        "at": "2026-08-02T16:41:05.635Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc11mxv-17",
-        "text": "## Summary\n\n**Published**: `src/renderer/components/epics/EpicDetail.tsx` + its test — the fix for assistant replies rendering twice in the Discussion timeline (once as the formatted `Turn` bubble, once as a duplicate raw `ResponseEvent`).\n\n**Incident during publish, now resolved**: My first commit attempt (`a41c2f6`) accidentally swept in 11 unrelated files from a different, still-in-progress Epic (the Agent/Tag Library CRUD redesign) — the git index already had those staged from that other session before I added mine. That commit reached `origin/main` before I could catch it locally (git `ls-remote` confirmed it, though I never ran `git push` for it myself — worth being aware something in this environment may auto-sync commits).\n\nFixed without any force-push or history rewrite:\n1. Added a corrective commit (`30b11c8`) reverting only the 11 incidental files' tracked content back to pre-existing state.\n2. Restored those files' working-tree content to their in-progress (unstaged) edits, so that other Epic's session finds its dirty files exactly as it left them.\n3. Fast-forward pushed — `origin/main` is now at `30b11c8`, containing cleanly only my Discussion-duplicate-render fix.\n\nVerified: `git status --short` now matches the pre-mistake state exactly, and `git ls-remote origin main` confirms the corrected tip is live.",
-        "id": "pevt-msc1tfjv-20",
-        "promptSessionId": "psess-msc0t9zi-14",
-        "at": "2026-08-02T17:02:42.427Z"
+        "causedByEventId": "pevt-msc225fk-24",
+        "text": "Published and verified — `claude-code-session-manager@0.55.0` is now `latest` on npm.\n\n**Summary:**\n- Bump: **0.54.0 → 0.55.0** (minor, driven by `feat:` commits)\n- Covers 7 commits since the last published version: Agent Library CRUD editor + agent↔tag assignment, two Epics/discussion fixes, project-pages generation pipeline wiring, and a claude-md docs update\n- Gate: typecheck clean, 218 test files / 2039 tests passed\n- Publish ran from isolated worktree `/tmp/sm-publish-v0.55.0` (removed after)\n- `git push origin main` and `git push origin v0.55.0` both succeeded\n- npm registry confirms version `0.55.0`, dist-tag `latest` → `0.55.0`\n\nNote: the working tree still has unrelated uncommitted ops-state changes (`active-index.json`, transcript files) that were untouched by this release — left as-is since they weren't part of the diff being published.",
+        "id": "pevt-msc25mfx-25",
+        "promptSessionId": "psess-msc225fk-23",
+        "at": "2026-08-02T17:12:11.229Z"
       }
     ]
   },
   "tombstones": {
-    "psess-msbv6w4d-10": "2026-08-02T16:19:27.301Z"
+    "psess-msbv6w4d-10": "2026-08-02T16:19:27.301Z",
+    "psess-msc0t9zi-14": "2026-08-02T17:19:19.162Z",
+    "psess-msbzla9l-12": "2026-08-02T17:21:51.861Z"
   }
 }

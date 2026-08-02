@@ -308,4 +308,34 @@ describe('NewEpicCard', () => {
     act(() => back.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('Investigate the leak')
   })
+
+  it('truncates a long real persona description instead of forcing the row to overflow', async () => {
+    // Regression for a real bug: a flex row's children default to
+    // min-width:auto, so `truncate` on the description span silently did
+    // nothing until the row (and the whole two-column grid) was given
+    // min-w-0 all the way down — with the short mock personas used
+    // elsewhere in this file that never showed up, but a real persona like
+    // project-home-builder's full-sentence description blew the layout out
+    // sideways in the actual app.
+    listPersonasSpy.mockResolvedValue([
+      {
+        name: 'project-home-builder',
+        description:
+          "Generates a project's static Project Home/Project Pages from that project's own saved component library and a computed project summary, if that pipeline exists in this repo yet.",
+        tools: [],
+        path: '',
+        body: '',
+        overridingProjects: [],
+      },
+    ])
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+
+    const row = el.querySelector('[data-testid="new-epic-agent-project-home-builder"]') as HTMLButtonElement
+    expect(row.className).toContain('min-w-0')
+    const descriptionSpan = Array.from(row.querySelectorAll('span')).find((s) => s.textContent?.includes('Generates a project'))
+    expect(descriptionSpan).toBeTruthy()
+    expect(descriptionSpan!.className).toContain('truncate')
+    expect(descriptionSpan!.className).toContain('min-w-0')
+  })
 })

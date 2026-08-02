@@ -30,7 +30,6 @@ import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useBuildTarget } from '../../lib/useBuildTarget'
-import { setPendingEpicDraft } from '../../lib/epicDraftText'
 
 const BUILD_GOAL_TEXT =
   '/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there\'s anything new.'
@@ -75,7 +74,7 @@ function useBuildAction(onSelect: (id: string) => void) {
   const createBuildEpic = () => {
     if (!activeTabCwd || !target) return null
     const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: BUILD_GOAL_TEXT, tag: 'build' })
-    const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'proposed')
+    const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build')
     usePromptSessions.getState().approveProposed(session.id)
     return { session, openingPrompt }
   }
@@ -107,32 +106,6 @@ function useBuildAction(onSelect: (id: string) => void) {
     }
   }
 
-  /** Advanced path (the "discuss first" menu item): mints the same fresh
-   *  Epic but skips the auto-send — the opening prompt lands in the Epic's
-   *  composer as editable draft text so the user can discuss or adjust
-   *  before running anything. */
-  const handleAdvanced = async () => {
-    if (!activeTabCwd || creating) return
-    if (inFlight) {
-      onSelect(inFlight.id)
-      toast.info('A Build Epic is already in flight for this project — opening it.')
-      return
-    }
-    if (!target) return
-    setCreating(true)
-    try {
-      const created = createBuildEpic()
-      if (!created) return
-      const { session, openingPrompt } = created
-      setPendingEpicDraft(session.id, openingPrompt)
-      onSelect(session.id)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      setCreating(false)
-    }
-  }
-
   const tooltip = !activeTabCwd
     ? 'No active project tab — open a project to use Build'
     : !target
@@ -141,12 +114,7 @@ function useBuildAction(onSelect: (id: string) => void) {
         ? 'A Build Epic is already in flight for this project — opens it instead of starting a new one'
         : 'Start a fresh Epic that checks git vs the published package and publishes if there\'s anything new'
 
-  const advancedTooltip =
-    !activeTabCwd || !target || inFlight
-      ? tooltip
-      : 'Discuss before running — opens a fresh Epic with the Build prompt in the composer, unsent'
-
-  return { disabled, inFlight, tooltip, advancedTooltip, handleClick, handleAdvanced }
+  return { disabled, inFlight, tooltip, handleClick }
 }
 
 const STATUS_ORDER: EpicDisplayStatus[] = ['running', 'needs', 'queued', 'active', 'completed']
@@ -517,10 +485,9 @@ function RowMenuButton({
 
 /** Toolbar's single entry point, replacing the old split Build button + "+ New
  *  Epic" button trio with one accent "Actions" trigger + RowMenu — reuses the
- *  same dropdown pattern as the per-row overflow menu. Lists "+ New Epic",
- *  "Build Project" (quick-fire), and "Build Project (discuss first)" (the
- *  PRD 924 advanced path, preserved as an explicit third item rather than
- *  teaching RowMenu a second, per-item right-click gesture). */
+ *  same dropdown pattern as the per-row overflow menu. Exactly two items:
+ *  "+ New Epic" and "Run Build" — no further split of Run Build into a
+ *  separate "discuss first" entry. */
 function ActionsMenuButton({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement | null>(null)
@@ -533,18 +500,11 @@ function ActionsMenuButton({ onNew, onSelect }: { onNew: () => void; onSelect: (
       testId: 'epic-queue-new',
     },
     {
-      label: build.inFlight ? 'Open Build in progress' : 'Build Project',
+      label: build.inFlight ? 'Open Build in progress' : 'Run Build',
       onSelect: () => void build.handleClick(),
       disabled: build.disabled,
       title: build.tooltip,
       testId: 'epic-queue-build',
-    },
-    {
-      label: 'Build Project (discuss first)',
-      onSelect: () => void build.handleAdvanced(),
-      disabled: build.disabled,
-      title: build.advancedTooltip,
-      testId: 'epic-queue-build-advanced',
     },
   ]
 

@@ -63,7 +63,9 @@ describe('promptSessions.ts', () => {
       expect(tab.sessionId).not.toBe(session.claudeSessionId)
     }
     expect(session.id).not.toBe(session.claudeSessionId)
-    expect(session.status).toBe('active')
+    // Every Epic is born 'proposed' — createPromptSession can never mint
+    // 'active' directly; only approveProposed may flip it.
+    expect(session.status).toBe('proposed')
     expect(session.completedAt).toBeNull()
 
     // createPromptSession must not reuse or mutate any existing SessionTab.
@@ -74,6 +76,20 @@ describe('promptSessions.ts', () => {
     expect(events).toHaveLength(1)
     expect(events[0].kind).toBe('prompt')
     expect(events[0].causedByEventId).toBeNull()
+  })
+
+  it('regression: createPromptSession called with no tag arg (the chat.ts:712 dispatch shape) still mints proposed, never active', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    // Incident 2026-08-02 (psess-msbv6w4d-10): createPromptSession used to
+    // default an omitted `status` arg to 'active', so any caller that didn't
+    // pass a status — like chat.ts's dispatch path — rogue-created a live
+    // Epic. The status parameter is gone entirely now; this call shape must
+    // always land on 'proposed'.
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'rogue dispatch text')
+
+    expect(session.status).toBe('proposed')
   })
 
   it('appends a valid chain prompt -> prd_created -> response -> prd_created -> response -> closed', async () => {
@@ -337,7 +353,7 @@ describe('promptSessions.ts', () => {
     expect(archive.durableTurns).toBeUndefined()
   })
 
-  it('resumeArchived mints a fresh independent session id and records the link back to the archived session', async () => {
+  it('resumeArchived mints a fresh independent session id, born proposed and activated only via approveProposed, and records the link back to the archived session', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
@@ -345,10 +361,14 @@ describe('promptSessions.ts', () => {
     const archived = store.createPromptSession('/proj', 'Ship the feature')
     await usePromptSessions.getState().markCompleted(archived.id)
 
+    const approveSpy = vi.spyOn(usePromptSessions.getState(), 'approveProposed')
     const resumed = usePromptSessions.getState().resumeArchived(archived.id)
 
     expect(resumed.id).not.toBe(archived.id)
     expect(resumed.claudeSessionId).not.toBe(archived.claudeSessionId)
+    // The only way resumeArchived's result can be 'active' is via
+    // approveProposed — it can never be minted 'active' directly.
+    expect(approveSpy).toHaveBeenCalledWith(resumed.id)
     expect(resumed.status).toBe('active')
     expect(resumed.resumedFromId).toBe(archived.id)
     expect(resumed.cwd).toBe(archived.cwd)
@@ -803,7 +823,7 @@ describe('promptSessions.ts', () => {
     await usePromptSessions.getState().hydrateArchived('/proj')
 
     expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('Live in memory')
-    expect(usePromptSessions.getState().sessions[session.id].status).toBe('active')
+    expect(usePromptSessions.getState().sessions[session.id].status).toBe('proposed')
   })
 })
 
@@ -824,9 +844,7 @@ describe('proposed Epics are durable (never erased)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
 
-    const proposed = usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'agent-filed work', 'bug', 'proposed')
+    const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
 
     await vi.waitFor(() => expect(api.config.writeJson).toHaveBeenCalled())
     expect(lastIndexWrite(api, promptSessionActiveIndexPath('/proj'))?.sessions[proposed.id]).toEqual(proposed)
@@ -840,10 +858,9 @@ describe('proposed Epics are durable (never erased)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
 
-    const proposed = usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'agent-filed work', 'bug', 'proposed')
-    const active = usePromptSessions.getState().createPromptSession('/proj', 'human work', 'feature')
+    const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
+    const activeProposal = usePromptSessions.getState().createPromptSession('/proj', 'human work', 'feature')
+    const active = usePromptSessions.getState().approveProposed(activeProposal.id)!
 
     usePromptSessions.getState().appendPromptSessionEvent(active.id, {
       kind: 'response',
@@ -861,9 +878,7 @@ describe('proposed Epics are durable (never erased)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
 
-    const proposed = usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'agent-filed work', 'bug', 'proposed')
+    const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
     await usePromptSessions.getState().markCompleted(proposed.id)
 
     // Wait on the CONDITION, not on writeJson having been called at all —
@@ -914,11 +929,12 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     expect(goalText.indexOf('\n\n')).toBe(goalText.indexOf('\n\ngoal body'))
   })
 
-  it('duplicateEpic mints a fresh Epic with the same cwd/goalText/tag but a new id + claudeSessionId', async () => {
+  it('duplicateEpic mints a fresh Epic with the same cwd/goalText/tag but a new id + claudeSessionId, activated only via approveProposed', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
     const source = usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
+    const approveSpy = vi.spyOn(usePromptSessions.getState(), 'approveProposed')
     const copy = usePromptSessions.getState().duplicateEpic(source.id)
 
     expect(copy.id).not.toBe(source.id)
@@ -926,6 +942,9 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     expect(copy.cwd).toBe(source.cwd)
     expect(copy.goalText).toBe(source.goalText)
     expect(copy.tag).toBe(source.tag)
+    // duplicateEpic can never mint 'active' directly — it is born 'proposed'
+    // then activated exclusively through approveProposed.
+    expect(approveSpy).toHaveBeenCalledWith(copy.id)
     expect(copy.status).toBe('active')
   })
 

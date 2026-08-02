@@ -162,14 +162,10 @@ interface PromptSessionsState {
    *  become per-instance state instead of clobbering across them. */
   focusedEpicId: string | null
   setFocusedEpicId: (promptSessionId: string | null) => void
-  /** `status` defaults to 'active'. Pass 'proposed' to file an Epic that is
-   *  NOT started — nothing runs until approveProposed() is called. */
-  createPromptSession: (
-    cwd: string,
-    goalText: string,
-    tag?: PromptSession['tag'],
-    status?: PromptSession['status'],
-  ) => PromptSession
+  /** Every Epic is born 'proposed' — this is the ONLY place a PromptSession
+   *  is minted, and it can never write any other status. Nothing runs until
+   *  approveProposed() flips it to 'active'. */
+  createPromptSession: (cwd: string, goalText: string, tag?: PromptSession['tag']) => PromptSession
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
    *  Starting its session is the caller's job (it owns the opening prompt). */
@@ -262,6 +258,12 @@ function hasPendingWrite(path: string): boolean {
  *  await). No-ops outside a renderer (tests that never stub window.api). */
 function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>, events: Record<string, PromptSessionEvent[]>): Promise<void> {
   if (typeof window === 'undefined' || !window.api?.config?.writeJson) return Promise.resolve()
+  // Captured now, not re-read from the global inside the .then/.catch below —
+  // those run on a later microtask, and in tests vi.unstubAllGlobals() in the
+  // NEXT test's beforeEach can delete `window` out from under this closure
+  // before this write settles, turning a benign write-failure log into an
+  // unhandled ReferenceError.
+  const api = window.api
   const index: PromptSessionActiveIndex = {
     sessions: Object.fromEntries(
       // Everything NOT YET ARCHIVED — 'proposed' as well as 'active'. A
@@ -286,12 +288,12 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
   pendingWriteCounts.set(path, (pendingWriteCounts.get(path) ?? 0) + 1)
   const prior = pendingWritesByPath.get(path) ?? Promise.resolve()
   const next = prior
-    .then(() => window.api!.config.writeJson(path, index, 'epics'))
+    .then(() => api!.config.writeJson(path, index, 'epics'))
     .then(
       () => undefined,
       (err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
-        window.api?.logs?.write('promptSessions', 'warn', `persistActiveIndex failed for ${cwd}: ${msg}`)
+        api?.logs?.write('promptSessions', 'warn', `persistActiveIndex failed for ${cwd}: ${msg}`)
       },
     )
     .finally(() => {
@@ -306,14 +308,14 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: (cwd, goalText, tag, status = 'active') => {
+  createPromptSession: (cwd, goalText, tag) => {
     const now = new Date().toISOString()
     const session: PromptSession = {
       id: mintId('psess'),
       cwd,
       goalText,
       claudeSessionId: crypto.randomUUID(),
-      status,
+      status: 'proposed',
       createdAt: now,
       completedAt: null,
       ...(tag ? { tag } : {}),
@@ -449,12 +451,16 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (!archived) {
       throw new Error(`resumeArchived: no PromptSession with id "${archivedId}"`)
     }
-    const session = get().createPromptSession(archived.cwd, archived.goalText)
-    const linked: PromptSession = { ...session, resumedFromId: archivedId }
-    const sessions = { ...get().sessions, [session.id]: linked }
+    // Born 'proposed' like every Epic, then immediately approved — this is a
+    // direct user button click (explicit intent), so activation is correct,
+    // but it must still go through the one proposed->active transition.
+    const proposed = get().createPromptSession(archived.cwd, archived.goalText)
+    const linked: PromptSession = { ...proposed, resumedFromId: archivedId }
+    const sessions = { ...get().sessions, [proposed.id]: linked }
     set({ sessions })
-    persistActiveIndex(session.cwd, sessions, get().events)
-    return linked
+    persistActiveIndex(linked.cwd, sessions, get().events)
+    const approved = get().approveProposed(linked.id)
+    return approved ?? linked
   },
   renameEpic: async (promptSessionId, title, goal) => {
     const session = get().sessions[promptSessionId]
@@ -480,7 +486,11 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (!source) {
       throw new Error(`duplicateEpic: no PromptSession with id "${promptSessionId}"`)
     }
-    return get().createPromptSession(source.cwd, source.goalText, source.tag, 'active')
+    // Born 'proposed' like every Epic, then immediately approved — this is a
+    // direct user button click (explicit intent), so activation is correct,
+    // but it must still go through the one proposed->active transition.
+    const proposed = get().createPromptSession(source.cwd, source.goalText, source.tag)
+    return get().approveProposed(proposed.id) ?? proposed
   },
   deleteEpic: async (promptSessionId) => {
     const session = get().sessions[promptSessionId]

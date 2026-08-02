@@ -6,7 +6,6 @@ import { EpicQueue } from '../EpicQueue'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
-import { takePendingEpicDraft } from '../../../lib/epicDraftText'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
@@ -79,13 +78,13 @@ describe('EpicQueue — Actions toolbar menu', () => {
     expect(el.querySelector('[data-testid="epic-queue-build"]')).toBeNull()
   })
 
-  it('opens a menu with New Epic, Build Project, and Build Project (discuss first)', async () => {
+  it('opens a menu with exactly New Epic and Run Build', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
     const menu = openActionsMenu(el)
     const labels = Array.from(menu.querySelectorAll('button')).map((b) => b.textContent)
-    expect(labels).toEqual(['+ New Epic', 'Build Project', 'Build Project (discuss first)'])
+    expect(labels).toEqual(['+ New Epic', 'Run Build'])
   })
 
   it('New Epic item calls onNew', async () => {
@@ -99,7 +98,7 @@ describe('EpicQueue — Actions toolbar menu', () => {
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 
-  it('Build Project item is disabled with a tooltip when resolveBuildTarget returns null', async () => {
+  it('Run Build item is disabled with a tooltip when resolveBuildTarget returns null', async () => {
     resolveBuildTargetMock.mockResolvedValue(null)
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
@@ -109,7 +108,7 @@ describe('EpicQueue — Actions toolbar menu', () => {
     expect(btn.title.length).toBeGreaterThan(0)
   })
 
-  it('is enabled once resolveBuildTarget resolves a target, and clicking Build Project creates a build-tagged Epic via createPromptSession + approveProposed + chat send, then selects it', async () => {
+  it('is enabled once resolveBuildTarget resolves a target, and clicking Run Build creates a build-tagged Epic via createPromptSession + approveProposed + chat send, then selects it', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
@@ -122,10 +121,9 @@ describe('EpicQueue — Actions toolbar menu', () => {
     await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
-    const [cwd, goalText, tag, status] = createPromptSessionSpy.mock.calls[0]
+    const [cwd, goalText, tag] = createPromptSessionSpy.mock.calls[0]
     expect(cwd).toBe('/home/bilko/Projects/alpha')
     expect(tag).toBe('build')
-    expect(status).toBe('proposed')
     expect(goalText).toContain('/builder')
 
     const created = Object.values(usePromptSessions.getState().sessions)[0]
@@ -138,28 +136,6 @@ describe('EpicQueue — Actions toolbar menu', () => {
       prompt: expect.stringContaining('/builder'),
     })
     expect(onSelect).toHaveBeenCalledWith(created.id)
-  })
-
-  it('"Build Project (discuss first)" creates+selects the Epic without auto-sending, leaving the opening prompt as a pending draft', async () => {
-    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
-    const onSelect = vi.fn()
-    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
-    await act(async () => {})
-    openActionsMenu(el)
-    const btn = el.querySelector('[data-testid="epic-queue-build-advanced"]') as HTMLButtonElement
-    expect(btn.disabled).toBe(false)
-
-    act(() => btn.click())
-    await act(async () => {})
-
-    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
-    const created = Object.values(usePromptSessions.getState().sessions)[0]
-    expect(approveProposedSpy).toHaveBeenCalledWith(created.id)
-    expect(sendSpy).not.toHaveBeenCalled()
-    expect(onSelect).toHaveBeenCalledWith(created.id)
-
-    const draft = takePendingEpicDraft(created.id)
-    expect(draft).toContain('/builder')
   })
 
   it('duplicate-Build guard: an existing non-completed build Epic for this cwd is opened instead of creating a second one', async () => {
@@ -214,33 +190,6 @@ describe('EpicQueue — Actions toolbar menu', () => {
     await act(async () => {})
 
     expect(createPromptSessionSpy).not.toHaveBeenCalled()
-    expect(onSelect).toHaveBeenCalledWith(existing.id)
-  })
-
-  it('duplicate-Build guard also covers the discuss-first entry point', async () => {
-    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
-    const existing = {
-      id: 'epic-existing-build-3',
-      cwd: '/home/bilko/Projects/alpha',
-      goalText: '/builder\n\nalready running',
-      claudeSessionId: 'claude-existing-3',
-      status: 'active' as const,
-      createdAt: new Date().toISOString(),
-      completedAt: null,
-      tag: 'build' as const,
-    }
-    usePromptSessions.setState({ sessions: { [existing.id]: existing } })
-    const onSelect = vi.fn()
-    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
-    await act(async () => {})
-    openActionsMenu(el)
-
-    const btn = el.querySelector('[data-testid="epic-queue-build-advanced"]') as HTMLButtonElement
-    act(() => btn.click())
-    await act(async () => {})
-
-    expect(createPromptSessionSpy).not.toHaveBeenCalled()
-    expect(sendSpy).not.toHaveBeenCalled()
     expect(onSelect).toHaveBeenCalledWith(existing.id)
   })
 })

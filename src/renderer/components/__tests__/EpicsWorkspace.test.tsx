@@ -177,7 +177,7 @@ describe('EpicsWorkspace', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'a brand new goal', 'feature', 'proposed')
+    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'a brand new goal', 'feature')
     expect(el.querySelector('[data-testid="new-epic-card"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })
@@ -285,7 +285,8 @@ describe('EpicsWorkspace', () => {
     const api = installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
     act(() => {
-      session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'epic with surviving pty')
+      const proposed = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'epic with surviving pty')
+      session = usePromptSessions.getState().approveProposed(proposed.id)!
     })
     ;(api.pty as Record<string, unknown>).alive = vi
       .fn()

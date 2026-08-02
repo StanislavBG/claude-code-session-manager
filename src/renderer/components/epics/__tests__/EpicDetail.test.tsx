@@ -80,7 +80,8 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
+    const proposed = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 

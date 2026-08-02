@@ -84,11 +84,11 @@ export function NewEpicCard({
     // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
     // Submitting this form is not a second kind of creation — it is the one
     // 'proposed -> active' transition, the same one EpicApprovalBar's
-    // Approve & start takes. Creating it 'active' (the createPromptSession
-    // default) set the state as a side effect of creation and meant the New
-    // Epic path never went through that shared transition at all.
+    // Approve & start takes. createPromptSession can only ever mint
+    // 'proposed', so this call and the approveProposed below are what perform
+    // that transition.
     // See prompt-sessions/README.md#lifecycle.
-    const session = createPromptSession(effectiveCwd, goalText, tag, 'proposed')
+    const session = createPromptSession(effectiveCwd, goalText, tag)
     approveProposed(session.id)
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is

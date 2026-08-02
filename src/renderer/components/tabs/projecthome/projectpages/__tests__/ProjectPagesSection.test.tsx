@@ -87,7 +87,7 @@ describe('ProjectPagesSection', () => {
     await flush()
     const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Generate Now') as HTMLButtonElement
     act(() => btn.click())
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(CWD, expect.any(String), 'project-home-builder', 'proposed')
+    expect(createPromptSessionSpy).toHaveBeenCalledWith(CWD, expect.any(String), 'project-home-builder')
     expect(approveProposedSpy).toHaveBeenCalled()
     expect(sendSpy).toHaveBeenCalled()
   })

@@ -87,7 +87,7 @@ describe('NewEpicCard', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'Fix the flaky test', 'feature', 'proposed')
+    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'Fix the flaky test', 'feature')
     const created = Object.values(usePromptSessions.getState().sessions)[0]
     expect(onCreated).toHaveBeenCalledWith(created.id)
   })
@@ -112,7 +112,6 @@ describe('NewEpicCard', () => {
       '/home/bilko/Projects/alpha',
       'Flaky test\n\nMake CI stop flaking',
       'bug',
-      'proposed',
     )
   })
 
@@ -138,7 +137,6 @@ describe('NewEpicCard', () => {
       '/home/bilko/Projects/alpha',
       'Investigate the crash\n\nReference: /home/bilko/Downloads/crash.log',
       'feature',
-      'proposed',
     )
   })
 

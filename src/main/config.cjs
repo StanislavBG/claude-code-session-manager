@@ -136,14 +136,6 @@ function validateWrite(realAbs) {
       if (realAbs === browserSub || realAbs.startsWith(browserSub + path.sep)) {
         return;
       }
-      // Feedback inbox writes (scheduler RCA hook — rcaFeedbackHook.cjs — and
-      // any interactive feedback filing): narrowly scoped to
-      // session-manager-operations/feedback/, this repo's existing
-      // per-project intake convention.
-      const feedbackSub = path.join(realRoot, 'session-manager-operations', 'feedback');
-      if (realAbs === feedbackSub || realAbs.startsWith(feedbackSub + path.sep)) {
-        return;
-      }
       // PromptSession persistence (active-index.json + per-session archives,
       // promptSessions.ts) and the scheduler's own read-modify-write of that
       // same active index (promptSessionEvents.cjs, PRD 814) — narrowly

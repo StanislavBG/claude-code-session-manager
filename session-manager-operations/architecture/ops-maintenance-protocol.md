@@ -27,6 +27,13 @@ README) agree on what should happen to a namespace. When code, CLAUDE.md, and th
 disagree with each other (Pattern A below), that's a stop-and-decide case, not an
 auto-delete — file a proposed Epic, don't act unilaterally.
 
+**Update 2026-08-02: Pattern A resolved.** Decision: full retirement (option a). The `feedback`
+`OWNERS` entry and its `config.cjs` write grant are removed; the 69 historical files were
+archived to `session-manager-operations/feedback/archived-2026-08-02/`; `feedback/README.md` now
+points readers at `/propose-epic`; `CLAUDE.md`'s two contradictory bullets now agree. Zero open
+(un-triaged) items were on disk at decision time, confirming the folder had no live manual-inbox
+usage independent of the now-retired `/process-feedback` pass.
+
 ## Patterns (found by running this protocol against session-manager's own ops folder, 2026-08-02)
 
 ### Pattern A — retired-in-docs, live-in-code namespace

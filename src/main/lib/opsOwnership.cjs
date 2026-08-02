@@ -48,8 +48,6 @@ const OWNERS = Object.freeze({
   'scheduler': 'scheduler',
   // Project Home owns the synthesized Brief (generate + hand-edit).
   'project-brief': 'project-home',
-  // The feedback intake folder — written by the RCA hook and feedback filing.
-  'feedback': 'feedback',
   // Browser tab scratch saves (DOM captures, screenshots, recorded flows).
   'browser': 'browser',
   // Structured per-tab error log lines (JSONL), tagged for tracing/analysis.

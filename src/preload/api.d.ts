@@ -968,6 +968,19 @@ export type ProjectBriefUpdateResult =
   | { ok: true; brief: ProjectBrief }
   | { ok: false; error: string };
 
+// ────────────────────────────────────────────── Project Pages (PRD 929-932)
+export interface ProjectPagesOutput {
+  marketing: string;
+  feature: string;
+  architecture: string;
+  generatedAt: string;
+}
+
+export interface ProjectPagesGetResult {
+  /** null when no manifest/output files exist yet — the empty-state signal. */
+  output: ProjectPagesOutput | null;
+}
+
 // ────────────────────────────────────────────── Per-subagent memory
 // Stored at ~/.claude/session-manager/agent-memory/<agentId>.json. Keyed by
 // agent name (the .md filename in ~/.claude/agents/), not by workspace cwd.
@@ -1118,7 +1131,7 @@ export interface ChatCreatePrdPayload {
   /** Originating tab id — used at job completion to route a status prompt back into the tab. */
   sourceTabId?: string;
   /** User-selected Feature/Bug tag (PRD 774) carried from the originating PromptTicket. */
-  tag?: 'feature' | 'bug' | 'discussion' | 'build';
+  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder';
 }
 
 export type ChatCreatePrdResult =
@@ -1528,6 +1541,10 @@ export interface SessionManagerAPI {
     setPin: (cwd: string, block: ProjectBriefPinnableBlock, pinned: boolean) => Promise<ProjectBriefSetPinResult>;
     /** Hand-edit brief.json in place — no LLM cost. Edited pinnable blocks are auto-pinned so the next refresh preserves them. */
     update: (cwd: string, patch: ProjectBriefPatch) => Promise<ProjectBriefUpdateResult>;
+  };
+  projectPages: {
+    /** Read output/*.html + manifest.json (or `{output: null}` if none exist yet). Never fires an LLM call. */
+    get: (cwd: string) => Promise<ProjectPagesGetResult>;
   };
   promptSessionTranscript: {
     /** Append one full-text turn to an Epic's durable JSONL transcript. Best-effort — resolves `{ok:false}` rather than throwing on failure. */

@@ -47,17 +47,35 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
       'You are preparing a release build. Treat the goal below as the full objective — verify ' +
       "the project's build target configuration before publishing.",
   },
+  'project-home-builder': {
+    description:
+      "Generates this project's 3 static Project Page HTML files (Marketing/Feature/Architecture) from the saved component library and a computed project summary.",
+    initialPromptTemplate:
+      'You are generating this project\'s Project Pages. Read ' +
+      '`session-manager-operations/architecture/project-pages-pipeline.md` first — it is the ' +
+      'source of truth for the schema, file paths and non-negotiables (static HTML output only, ' +
+      'never a live React recomposition; never fabricate summary content). Then follow ' +
+      '`.claude/agents/project-home-builder.md` as your operating protocol. The component library ' +
+      'to select from is at ' +
+      '`session-manager-operations/design-mocks/project-pages-component-library/` — read its ' +
+      'README before choosing any component. If the pipeline infrastructure described in the spec ' +
+      "doesn't exist in this repo yet, treat building it as this Epic's first PRD chain via " +
+      '/develop rather than hand-rolling a one-off script.',
+  },
 }
 
 /**
  * Display order for tag-keyed UI (NewEpicCard's KIND_OPTIONS, Home's
  * AgentsCard) — deliberately NOT `Object.keys(AGENT_TAG_DEFS)`. 'build' has
- * an entry above so `agentTagDef()` stays total over `TicketTag` (e.g. for
- * epicIntake.ts's prompt-priming), but no UI surface to create a build-tagged
- * Epic exists yet (separate PRDs in this Epic own that) — surfacing it here
- * would advertise a workflow nothing can start.
+ * no UI surface to create Epics of that tag yet, so it's left out. NewEpicCard's
+ * KIND_OPTIONS is a hardcoded array (not derived from this list), so
+ * 'project-home-builder' appearing here only surfaces it in Home's read-only
+ * AgentsCard reference — it is never hand-picked in the New Epic form. The
+ * actual Epic-creation call for this tag lives in Project Home's "Generate
+ * Now"/"Regenerate" buttons (ProjectPagesSection.tsx), which pass the tag
+ * directly, not via this list.
  */
-export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion']
+export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder']
 
 export function agentTagDef(tag: TicketTag): AgentTagDef {
   return AGENT_TAG_DEFS[tag]

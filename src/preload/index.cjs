@@ -330,6 +330,9 @@ contextBridge.exposeInMainWorld('api', {
     setPin: (cwd, block, pinned) => ipcRenderer.invoke('project-brief:set-pin', { cwd, block, pinned }),
     update: (cwd, patch) => ipcRenderer.invoke('project-brief:update', { cwd, patch }),
   },
+  projectPages: {
+    get: (cwd) => ipcRenderer.invoke('project-pages:get', { cwd }),
+  },
   promptSessionTranscript: {
     append: (cwd, epicId, turn) =>
       ipcRenderer.invoke('promptSessionTranscript:append', { cwd, epicId, ...turn }),

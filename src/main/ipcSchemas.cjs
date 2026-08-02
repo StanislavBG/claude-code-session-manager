@@ -313,7 +313,7 @@ const schedulerCreatePrd = z.object({
   originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // User-selected Feature/Bug tag (PRD 774) carried from the originating
   // PromptTicket — deterministic, never LLM-classified.
-  tag: z.enum(['feature', 'bug', 'discussion', 'build']).optional(),
+  tag: z.enum(['feature', 'bug', 'discussion', 'build', 'project-home-builder']).optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
@@ -444,6 +444,13 @@ const memoryAggregate = z.object({
 // the wire shape.
 const PROJECT_BRIEF_BLOCK = z.enum(['what', 'conventions']);
 const projectBriefCwd = z.object({
+  cwd: z.string().min(1).max(4096),
+}).strict();
+
+// ──────────────────────────────────────────── Project Pages (PRD 932)
+// Same validation split as projectBriefCwd above: real path validation is
+// config.cjs's validatePath at first fs access in projectPages.cjs.
+const projectPagesCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 const projectBriefSetPin = z.object({
@@ -877,6 +884,7 @@ module.exports = {
     memoryAggregate,
     memoryStale,
     projectBriefCwd,
+    projectPagesCwd,
     projectBriefSetPin,
     projectBriefUpdate,
     promptSessionTranscriptAppend,

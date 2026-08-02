@@ -35,6 +35,7 @@ import { AlmanacIcon } from '../../layout/AlmanacIcon'
 import { EmptyState } from '../../ui/EmptyState'
 import { toast } from '../../../state/toast'
 import { PhBlock, PhCard } from './ph-primitives'
+import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
 
 const EMPTY_JOBS: ScheduleJob[] = []
 
@@ -646,6 +647,8 @@ export function ProjectHome() {
             </div>
           </>
         )}
+
+        <ProjectPagesSection cwd={activeTab.cwd} />
       </div>
     </div>
   )

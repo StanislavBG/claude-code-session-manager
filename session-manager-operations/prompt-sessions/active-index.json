@@ -29,6 +29,16 @@
       "createdAt": "2026-08-01T21:18:25.184Z",
       "completedAt": null,
       "tag": "feature"
+    },
+    "psess-msb30ix2-2": {
+      "id": "psess-msb30ix2-2",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "General Enhancmenets\n\nThese are small change on the app in various places, no major work. \n\n(1) The highlight of the current tab is not sufficient, Home's tile should be more pronounced and the current active tab should have complete surround border highlight to leave no doubt what is the current selection; \n\nMore to come lets get this one going",
+      "claudeSessionId": "035fe4c5-ddca-4bbf-9231-712af4f13730",
+      "status": "active",
+      "createdAt": "2026-08-02T00:48:26.822Z",
+      "completedAt": null,
+      "tag": "bug"
     }
   },
   "events": {
@@ -112,6 +122,14 @@
         "id": "pevt-msax00ps-13",
         "promptSessionId": "psess-msase2q4-1",
         "at": "2026-08-01T22:00:05.536Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msax00ps-13",
+        "text": "**Published `claude-code-session-manager@0.47.0`.** Registry `latest` confirmed, `main` and tag `v0.47.0` pushed to origin.\n\nCovered: chat-turn diff/outcome rendering (Edit/Write diff cards, `ChatTurn.outcome` producer), Epics composer panel redesign, several nav/chat polish fixes (long-token wrapping, assistant-card border, BOTH-face sub-view visibility), plus docs/ops-state sync commits. Minor bump (multiple `feat:` commits in the set).\n\nGit and npm are fully in sync — no commits ahead of the published tag.",
+        "id": "pevt-msb2ypag-1",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T00:47:01.768Z"
       }
     ],
     "psess-msaup10i-1": [
@@ -210,6 +228,22 @@
         "id": "pevt-msaxu5ux-4",
         "promptSessionId": "psess-msaup10i-1",
         "at": "2026-08-01T22:23:31.881Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msaxu5ux-4",
+        "text": "## Summary\n\nMade 4 commits, not pushed (you didn't ask to push this time):\n\n1. `a170d40` **feat(epics): redesign composer prompt panel to match Epics.html mock** — `EpicComposer.tsx`, `attachments.tsx`, its test.\n2. `a82edbf` **docs(epics): tag-aware /develop default + refresh design-mock reference docs** — the `SKILL.md` feature/bug-vs-discussion policy + refreshed `DESIGN_SPEC.md`/`epics-mock.jsx`/`epic-thread-mock.jsx`.\n3. `59d0a7e` **fix(chat): wrap long unbroken tokens instead of overflowing the chat column** — this was a small, unrelated `styles.css` fix that had been sitting dirty since *before* this whole conversation started (not something I authored) — committing it now since it's a legitimate, self-contained, non-sensitive change, called out here so you know it's included.\n4. `f1628d9` **chore(ops): sync scheduler/Epics state** — active-index, transcripts, archived PRDs 907–916, reserved-number markers — matches this repo's own established convention for this exact kind of commit (verified against prior `chore(ops): sync scheduler/Epics state` commits in the log).\n\n`npm run typecheck` is green post-commit.\n\n**Left untracked, not committed**: `src/renderer/session-manager-operations/scheduler/state/queue.json` — an oddly-nested duplicate `session-manager-operations/` directory that appeared *inside* `src/renderer/`. This looks like an accidental artifact (something resolved its cwd wrong and wrote scheduler state under the renderer source tree instead of the project root), not real source — I left it alone rather than guess whether to delete or keep it.",
+        "id": "pevt-msb28cwj-6",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-02T00:26:32.659Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb28cwj-6",
+        "text": "Cleaned up — the stray directory is gone. The remaining modified files are just this conversation's own live transcript/active-index churn (updates as this session keeps running), not something to commit mid-flight.\n\n## Summary\n- Pushed the 5 pending commits — `origin/main` is now at `6327fda`.\n- Investigated and removed `src/renderer/session-manager-operations/` — a stray, empty, untracked scheduler-state artifact (`{\"jobs\": []}`, created today) with no legitimate code path pointing at it; confirmed harmless before deleting.",
+        "id": "pevt-msb2gxxy-8",
+        "promptSessionId": "psess-msaup10i-1",
+        "at": "2026-08-02T00:33:13.174Z"
       }
     ],
     "psess-msaviffk-7": [
@@ -268,6 +302,56 @@
         "id": "pevt-msb25wse-5",
         "promptSessionId": "psess-msaviffk-7",
         "at": "2026-08-02T00:24:38.462Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb25wse-5",
+        "text": "Committed as `6327fda`.\n\n## Summary\n\nExtended the earlier BOTH-face audit into an actual fix: found that **Settings' Telemetry & Session Manager sub-views, Permissions' Presets, and Hooks' Library** are all static/global-only content (`~/.config/session-manager/otel.json`, `localStorage`, and hardcoded reference catalogs respectively) with zero `cwd`/scope dependency — they rendered identically on both faces despite being reachable from the Project sidebar too.\n\n**Changed:** `Settings.tsx`, `Permissions.tsx`, `Hooks.tsx` — each screen's inner `ViewTabs` options are now filtered to `navFace === 'home'` for these four global-only sub-tabs, with a reset effect that snaps the view back to `effective`/`Guided` if you're mid-viewing one when the face flips to Project (mirrors the existing `manuallyTouchedRef`/`prevNavFaceRef` pattern already used for scope defaults).\n\n**Tests:** added matching cases to the three existing `*.navface.test.tsx` files (show-on-home, hide-on-project, bounce-back-on-face-flip) — 21 new assertions total.\n\n**Verified:** typecheck clean, `lint:selectors` clean, full suite 1904/1904 passing. Committed as `6327fda` (not pushed — say the word if you want it pushed too).\n\nStill outstanding from earlier: the **Epics → Project-only** change, and your call on **Voice**.",
+        "id": "pevt-msb2ck65-7",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-02T00:29:48.701Z"
+      }
+    ],
+    "psess-msb30ix2-2": [
+      {
+        "id": "pevt-msb30ix2-3",
+        "promptSessionId": "psess-msb30ix2-2",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-02T00:48:26.822Z",
+        "text": "General Enhancmenets\n\nThese are small change on the app in various places, no major work. \n\n(1) The highlight of the current tab is not sufficient, Home's tile should be more pronounced and the current active tab should have complete surround border highlight to leave no doubt what is the current selection; \n\nMore to come lets get this one going"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb30ix2-3",
+        "text": "Typecheck passes. Summary: Home pill and the active project tab in `TabBar.tsx` now get a full `border-accent` surround (all four sides, previously just top/left/right border-line or an inset-shadow-only for Home) plus the inset accent shadow retained, and Home's active label is now `font-semibold` for extra prominence. Ready for more items whenever you have them.",
+        "id": "pevt-msb31n3t-4",
+        "promptSessionId": "psess-msb30ix2-2",
+        "at": "2026-08-02T00:49:18.905Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb31n3t-4",
+        "text": "This looks good — Home now reads as a distinct rounded-full \"beacon\" pill (filled solid `bg-accent` when selected) permanently anchored leftmost, clearly differentiated in shape and fill from the rectangular, top-rounded Project tabs, which keep their outlined `border-accent` surround-highlight for the active selection.\n\nTypecheck passes. Both changes are in `src/renderer/components/TabBar.tsx`, uncommitted — let me know if you'd like these committed, or send the next enhancement.",
+        "id": "pevt-msb33lhw-5",
+        "promptSessionId": "psess-msb30ix2-2",
+        "at": "2026-08-02T00:50:50.132Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb33lhw-5",
+        "text": "All green. Summary of this change:\n\n- `src/renderer/lib/navGroups.ts`: `terminal` (labeled \"Epics\" in the sidebar) is now `faces: PROJECT` instead of `faces: BOTH` — it no longer appears in the Left-Nav while on the Home tab, only while a Project tab is active, matching Epics being scoped/unique to that project's file-path. Tweaked its hint text to drop the stale \"grouped by project\" wording (it's now inherently single-project).\n- `src/renderer/lib/__tests__/navGroupsHome.test.ts`: updated the `BOTH`/`PROJECT_ONLY` fixture lists and added a \"terminal (Epics) is project-only\" test block, following the same pattern already used for `memory`, `repoviz`, etc.\n\nNote: the \"Active sessions\" widget on the Home screen still has a deep-link (`Home.tsx:454-456`) that can navigate directly to a specific Epic's terminal panel by epic id, bypassing the sidebar. I left that as-is since it's a targeted action on a specific epic, not a general \"Epics\" nav affordance — flag if you want that closed off too.\n\nTypecheck and the affected unit tests (`navGroupsHome`, `layout`, `EpicsWorkspace` — 44+50 tests) all pass.",
+        "id": "pevt-msb37snx-6",
+        "promptSessionId": "psess-msb30ix2-2",
+        "at": "2026-08-02T00:54:06.045Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb37snx-6",
+        "text": "Summary:\n\n- `src/renderer/lib/navGroups.ts`: added a new `overview` sidebar row (label \"Dashboard\", `faces: HOME`) that lands on the same `<Home>` screen already reachable via the TabBar's Home chip — it's now also reachable as a Left-Nav tile while on the Home tab. Renamed `project-home`'s label from \"Home\" to \"Project Home\" (`faces: PROJECT`, unchanged behavior). Updated the file's stale header comment accordingly.\n- No routing/store changes needed: `openPanel('overview')` already sets `navFace: 'home'` and `screenComponents.tsx` already renders `<Home>` for `overview` — the sidebar row was the only missing piece.\n- `src/renderer/lib/__tests__/navGroupsHome.test.ts`: updated the \"first Workspace item\" test to expect `overview`/\"Dashboard\", added a \"project-home is labeled Project Home\" check, added `overview` to `HOME_ONLY`, and added a dedicated \"overview (Dashboard) is home-only\" describe block mirroring existing patterns.\n\nVerified: `npm run typecheck`, `npm run lint:selectors`, and the 5 affected test files (94 tests) all pass.\n\nGoing forward I'll use your naming: **Dashboard** (Home tab's Left-Nav item, `overview`) vs **Project Home** (Project tab's Left-Nav item, `project-home`).",
+        "id": "pevt-msb3bugg-7",
+        "promptSessionId": "psess-msb30ix2-2",
+        "at": "2026-08-02T00:57:14.992Z"
       }
     ]
   }

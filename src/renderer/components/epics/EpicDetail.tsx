@@ -371,6 +371,30 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
 
+  // A 'response' PromptSessionEvent is appended by chat.ts for EVERY completed
+  // turn (onComplete/onNeedsInput), not only for out-of-band ones (PRD-finished
+  // notices, Terminal-stint markers) — it doubles as the "toast the user if
+  // this Epic isn't focused" signal (promptSessions.ts's mergeAppendedEvent).
+  // When this Epic IS focused, that same text already rendered in full as a
+  // live assistant Turn below, so showing it again as a compact ResponseEvent
+  // line is a pure duplicate, not a distinct raw/summary pairing. Drop only
+  // the events that duplicate an already-rendered turn; genuine out-of-band
+  // ones (no matching live turn, e.g. a scheduler PRD reply) still render.
+  const assistantTurnTexts = new Set(turns.filter((t) => t.role === 'assistant').map((t) => t.text))
+  const isDuplicateResponseEvent = (e: PromptSessionEvent): boolean => {
+    if (!e.text) return false
+    if (assistantTurnTexts.has(e.text)) return true
+    // appendResponseEvent truncates to RESPONSE_EVENT_PREVIEW_MAX chars with a
+    // trailing '…' (chat.ts) — compare against that truncated prefix too.
+    if (e.text.endsWith('…')) {
+      const prefix = e.text.slice(0, -1)
+      for (const text of assistantTurnTexts) {
+        if (text.startsWith(prefix)) return true
+      }
+    }
+    return false
+  }
+
   // Merged timeline: chat turns + this Epic's own 'prd_created'/'closed'/
   // 'response' (Terminal-stint marker, PRD 831) audit events, ordered by
   // time — the same timeline construction the retired PromptSessionConversation.tsx used.
@@ -378,7 +402,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     ...turns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
     ...sessionEvents
       .filter((e): e is PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' } =>
-        e.kind === 'prd_created' || e.kind === 'closed' || e.kind === 'response',
+        e.kind === 'prd_created' || e.kind === 'closed' || (e.kind === 'response' && !isDuplicateResponseEvent(e)),
       )
       .map((e) => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
   ].sort((a, b) => a.at - b.at)

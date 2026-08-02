@@ -189,6 +189,56 @@ describe('EpicDetail (PRD 827)', () => {
     expect(rendered[2].textContent).toContain('latest turn')
   })
 
+  it('does not double-render an assistant reply as both a chat Turn and a duplicate ResponseEvent', async () => {
+    // chat.ts's onComplete handler appends a 'response' PromptSessionEvent
+    // (for the cross-Epic "toast if unfocused" signal, promptSessions.ts's
+    // mergeAppendedEvent) alongside pushing the real assistant Turn — both
+    // land in this Epic's own store. When viewing THIS Epic, the ResponseEvent
+    // must be suppressed since the Turn already shows the same text in full;
+    // a genuinely out-of-band 'response' (no matching turn) must still render.
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            { id: 't-user', role: 'user', text: 'do the thing', at: 1000 },
+            { id: 't-assistant', role: 'assistant', text: 'done — here is the result', at: 2000 },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: initialEvent.id,
+      text: 'done — here is the result',
+    })
+    const tailAfterFirst = usePromptSessions.getState().events[session.id].slice(-1)[0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: tailAfterFirst.id,
+      text: 'PRD 9-widget finished: completed. Check Scheduler for details.',
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const turnBubbles = el.querySelectorAll('[id^="epic-detail-turn-"]')
+    expect(turnBubbles).toHaveLength(2)
+    const responseEvents = el.querySelectorAll('[data-testid="epic-response-event"]')
+    expect(responseEvents).toHaveLength(1)
+    expect(responseEvents[0].textContent).toContain('PRD 9-widget finished')
+    expect(el.textContent).not.toMatch(/done — here is the result.*done — here is the result/s)
+  })
+
   it('wires onQuote into the Discussion timeline\'s Turn so its hover Quote button reports the turn text', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

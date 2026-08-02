@@ -148,6 +148,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   agents: {
     listPersonas: () => ipcRenderer.invoke('agents:list-personas'),
+    savePersona: (payload) => ipcRenderer.invoke('agents:save-persona', payload),
+    deletePersona: (payload) => ipcRenderer.invoke('agents:delete-persona', payload),
+    removeOverride: (payload) => ipcRenderer.invoke('agents:remove-override', payload),
   },
   logs: {
     // ctx is optional: { cwd, tabId, epicId, tags } — when present and

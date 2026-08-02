@@ -215,6 +215,12 @@ function withPathLock(lockPath, task) {
  */
 function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null, forceNewEpic = false } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
+  // A relative cwd (e.g. a caller passing '.') would otherwise get stored
+  // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
+  // matches Epics to a tab by exact `s.cwd === effectiveCwd` string equality
+  // against the tab's absolute path, so a relative value silently produces an
+  // Epic that exists on disk but never renders in any project's queue.
+  cwd = path.resolve(cwd);
   return withPathLock(activeIndexPath(cwd), () => {
     const index = readActiveIndex(cwd);
 

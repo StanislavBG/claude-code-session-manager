@@ -146,7 +146,7 @@ function useBuildAction(onSelect: (id: string) => void) {
   return { disabled, inFlight, tooltip, handleClick }
 }
 
-const STATUS_ORDER: EpicDisplayStatus[] = ['running', 'needs', 'queued', 'active', 'completed']
+const STATUS_ORDER: EpicDisplayStatus[] = ['proposed', 'running', 'needs', 'queued', 'active', 'completed']
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (

@@ -3,6 +3,10 @@
     "session-manager-scheduler": {
       "command": "node",
       "args": ["scripts/scheduler-mcp-server.cjs"]
+    },
+    "bilko-host": {
+      "command": "node",
+      "args": ["/home/bilko/Projects/Bilko/mcp-host-server/dist/server.js"]
     }
   }
 }

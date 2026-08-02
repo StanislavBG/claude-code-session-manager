@@ -62,6 +62,7 @@ const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const { registerProjectBriefIpc } = require('./projectBrief.cjs');
 const { registerProjectPagesIpc } = require('./projectPages.cjs');
+const { registerBilkoHostIpc } = require('./bilkoHost.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
@@ -821,6 +822,7 @@ activeIndexMerge.registerActiveIndexMergeHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();
 registerProjectPagesIpc();
+registerBilkoHostIpc();
 ipcMain.handle('promptSessionTranscript:append', validated(schemas.promptSessionTranscriptAppend, async ({ cwd, epicId, role, text, at, eventId }) => {
   const ok = await promptSessionTranscript.appendTurn(cwd, epicId, { role, text, at, eventId });
   return { ok };

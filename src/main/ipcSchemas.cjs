@@ -486,6 +486,31 @@ const projectBriefCwd = z.object({
 const projectPagesCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
+
+// ──────────────────────────────────────────── Host on Bilko.run
+// Same validation split: real path validation is config.cjs's validatePath
+// at first fs access in bilkoHost.cjs — these schemas only bound wire shape.
+const bilkoHostCwd = z.object({
+  cwd: z.string().min(1).max(4096),
+}).strict();
+const bilkoHostPrepareBundle = z.object({
+  cwd: z.string().min(1).max(4096),
+  slug: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/, 'slug must be lowercase kebab-case'),
+}).strict();
+const BILKO_HOST_DOCUMENT_SOURCE = z.union([
+  z.object({ kind: z.literal('project-page-lens'), lens: z.enum(['home', 'marketing', 'feature', 'architecture']) }).strict(),
+  z.object({ kind: z.literal('file'), path: z.string().min(1).max(4096) }).strict(),
+]);
+const bilkoHostAddDocument = z.object({
+  cwd: z.string().min(1).max(4096),
+  subpath: z.string().min(1).max(200),
+  title: z.string().min(1).max(200),
+  source: BILKO_HOST_DOCUMENT_SOURCE,
+}).strict();
+const bilkoHostRemoveDocument = z.object({
+  cwd: z.string().min(1).max(4096),
+  id: z.string().min(1).max(200),
+}).strict();
 const projectBriefSetPin = z.object({
   cwd: z.string().min(1).max(4096),
   block: PROJECT_BRIEF_BLOCK,
@@ -937,6 +962,10 @@ module.exports = {
     memoryStale,
     projectBriefCwd,
     projectPagesCwd,
+    bilkoHostCwd,
+    bilkoHostPrepareBundle,
+    bilkoHostAddDocument,
+    bilkoHostRemoveDocument,
     projectBriefSetPin,
     projectBriefUpdate,
     promptSessionTranscriptAppend,

@@ -999,6 +999,76 @@ export interface ProjectPagesGetResult {
   output: ProjectPagesOutput | null;
 }
 
+// ────────────────────────────────────────────── Host on Bilko.run
+export interface BilkoHostBundleManifest {
+  schemaVersion: 1;
+  slug: string;
+  version: string;
+  builtAt: string;
+  gitSha: string;
+  gitBranch: string;
+  hostKit: { version: string };
+  golden: { path: string; expect: string };
+  health: Record<string, unknown>;
+  bundle: { sizeBytesGz: number; fileCount: number };
+  /** Not part of the host-contract schema itself — this app's own staleness bookkeeping (see BilkoHostGetResult.bundleStale). */
+  documentCount: number;
+  documents: Array<{ subpath: string; title: string }>;
+}
+
+export type BilkoHostPublishStatus =
+  | 'not-published'
+  | 'bundle-ready'
+  | 'publishing'
+  | 'published'
+  | 'publish-failed';
+
+export interface BilkoHostPublishState {
+  status: BilkoHostPublishStatus;
+  slug: string;
+  url?: string;
+  lastAttemptAt?: string;
+  lastError?: string;
+}
+
+export type BilkoHostDocumentSource =
+  | { kind: 'project-page-lens'; lens: 'home' | 'marketing' | 'feature' | 'architecture' }
+  | { kind: 'file'; path: string };
+
+export interface BilkoHostDocument {
+  id: string;
+  /** '' for the root document (dist/index.html); otherwise a '/'-joined lowercase-kebab path, e.g. 'special-doc/01'. */
+  subpath: string;
+  title: string;
+  source: BilkoHostDocumentSource;
+  addedAt: string;
+  /** Where this document resolves once published, given the project's current/derived slug. */
+  url: string;
+}
+
+export interface BilkoHostGetResult {
+  hasMarketingPage: boolean;
+  projectName: string;
+  packagePrivate: boolean;
+  packageHomepage: string | null;
+  packageVersion: string;
+  defaultSlug: string;
+  documents: BilkoHostDocument[];
+  /** True when the on-disk dist/ bundle doesn't reflect the current document list — Prepare Bundle (then Publish) is owed. */
+  bundleStale: boolean;
+  bundleManifest: BilkoHostBundleManifest | null;
+  publishState: BilkoHostPublishState | null;
+}
+
+export interface BilkoHostPrepareBundleResult {
+  distPath: string;
+  manifest: BilkoHostBundleManifest;
+}
+
+export interface BilkoHostDocumentListResult {
+  documents: Array<Omit<BilkoHostDocument, 'url'>>;
+}
+
 // ────────────────────────────────────────────── Per-subagent memory
 // Stored at ~/.claude/session-manager/agent-memory/<agentId>.json. Keyed by
 // agent name (the .md filename in ~/.claude/agents/), not by workspace cwd.
@@ -1149,7 +1219,7 @@ export interface ChatCreatePrdPayload {
   /** Originating tab id — used at job completion to route a status prompt back into the tab. */
   sourceTabId?: string;
   /** User-selected Feature/Bug tag (PRD 774) carried from the originating PromptTicket. */
-  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder';
+  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher';
 }
 
 export type ChatCreatePrdResult =
@@ -1568,6 +1638,16 @@ export interface SessionManagerAPI {
   projectPages: {
     /** Read output/*.html + manifest.json (or `{output: null}` if none exist yet). Never fires an LLM call. */
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
+  };
+  bilkoHost: {
+    /** Read compatibility-gate inputs + any existing bundle/publish state. Never fires an LLM call. */
+    get: (cwd: string) => Promise<BilkoHostGetResult>;
+    /** Stage A: rebuild the whole dist/ tree + dist/manifest.json from the current document list. Pure, no cost, idempotent. */
+    prepareBundle: (cwd: string, slug: string) => Promise<BilkoHostPrepareBundleResult>;
+    /** Add a hosted sub-path document (never the root, which always exists). Does not touch dist/ — Prepare Bundle picks it up. */
+    addDocument: (cwd: string, subpath: string, title: string, source: BilkoHostDocumentSource) => Promise<BilkoHostDocumentListResult>;
+    /** Remove a hosted document (never the root). Only updates documents.json — the file stays live until the next Prepare Bundle + Publish. */
+    removeDocument: (cwd: string, id: string) => Promise<BilkoHostDocumentListResult>;
   };
   promptSessionTranscript: {
     /** Append one full-text turn to an Epic's durable JSONL transcript. Best-effort — resolves `{ok:false}` rather than throwing on failure. */

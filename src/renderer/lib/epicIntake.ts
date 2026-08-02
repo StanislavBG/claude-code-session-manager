@@ -39,6 +39,16 @@ export interface EpicIntakeFields {
    *  alongside `agentName` in the framing line. Omitted from the framing
    *  line entirely when either is absent. */
   agentDescription?: string
+  /**
+   * AIM's "Input" axis, stated explicitly: one line naming what's grounding
+   * this session (System/Project/Local CLAUDE.md, skills, mcp servers, etc.),
+   * from `groundingBoard.ts`'s `summarizeGroundingBoard`. Placed after the
+   * Actor line and before the Mission template — who, then what they're
+   * standing on, then what they're here to do. Omitted entirely when absent
+   * (e.g. callers that never computed a grounding board, like EpicQueue's
+   * scripted 'build' Epic).
+   */
+  inputSummary?: string
 }
 
 export interface EpicIntake {
@@ -69,6 +79,7 @@ export function composeEpicIntake({
   tag,
   agentName,
   agentDescription,
+  inputSummary,
 }: EpicIntakeFields): EpicIntake {
   const trimmedTitle = singleLine(title.trim())
   const trimmedGoal = goal.trim()
@@ -80,12 +91,13 @@ export function composeEpicIntake({
   // The tag's grounding template comes first — it's the agent's framing
   // instruction, read before the human's own goal.
   const taggedPromptBody = tag ? `${agentTagDef(tag).initialPromptTemplate}\n\n${promptBody}` : promptBody
-  // The persona framing comes before even the tag's mission template — who is
-  // running this Epic is read before what its mission is.
+  // AIM order: Actor, then Input, then Mission, then the human's own goal —
+  // who is running this Epic, what it's standing on, what it's here to do.
+  const inputPromptBody = inputSummary ? `${singleLine(inputSummary)}\n\n${taggedPromptBody}` : taggedPromptBody
   const groundedPromptBody =
     agentName && agentDescription
-      ? `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}\n\n${taggedPromptBody}`
-      : taggedPromptBody
+      ? `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}\n\n${inputPromptBody}`
+      : inputPromptBody
 
   return {
     goalText: withReferences(body, referencePaths),

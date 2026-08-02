@@ -7,7 +7,7 @@ import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments }
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
-import { computeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
+import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
 import type { AgentPersona } from '../../../preload/api'
 
@@ -169,6 +169,23 @@ export function NewEpicCard({
     // goal text — otherwise the reference line names a file that never
     // existed (PRD 865).
     const referencePaths = await resolveAttachmentPaths(att.items, effectiveCwd)
+    // AIM's "Input" line: reuse the cached grounding board if "advanced" was
+    // already opened; otherwise compute it fresh here (same real fs/IPC
+    // reads the board UI performs, no separate code path) so every Epic
+    // states what it's grounded in, not just the ones where the human
+    // happened to flip the card open.
+    const groundingForPrompt =
+      board ??
+      (home
+        ? await computeGroundingBoard({
+            home,
+            cwd: effectiveCwd,
+            agentPersonaPath: selectedAgent?.path ?? null,
+            agentPersonaName: selectedAgent?.name ?? null,
+            openTerminalTabsInProject: tabs.filter((t) => t.cwd === effectiveCwd).length,
+            otherEpicsInProject: Object.values(allEpics).filter((e) => e.cwd === effectiveCwd).length,
+          }).catch(() => null)
+        : null)
     const { goalText, openingPrompt } = composeEpicIntake({
       title,
       goal,
@@ -176,6 +193,7 @@ export function NewEpicCard({
       tag,
       agentName: selectedAgent?.name,
       agentDescription: selectedAgent?.description ?? undefined,
+      inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt) : undefined,
     })
     // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
     // Submitting this form is not a second kind of creation — it is the one

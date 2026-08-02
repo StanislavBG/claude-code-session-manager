@@ -15,6 +15,7 @@ const resolveBuildTargetMock = vi.fn()
 
 ;(globalThis as any).window.api = {
   app: { resolveBuildTarget: resolveBuildTargetMock },
+  agents: { listPersonas: vi.fn().mockResolvedValue([]) },
 }
 
 let container: HTMLDivElement | null = null

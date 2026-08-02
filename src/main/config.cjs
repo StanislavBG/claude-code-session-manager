@@ -170,6 +170,14 @@ function validateWrite(realAbs) {
       if (realAbs === briefSub || realAbs.startsWith(briefSub + path.sep)) {
         return;
       }
+      // Host on Bilko.run bundle prep (bilkoHost.cjs's prepareBundle/
+      // addDocument/removeDocument): narrowly scoped to
+      // session-manager-operations/bilko-host/, this repo's existing
+      // per-project artifact-store convention.
+      const bilkoHostSub = path.join(realRoot, 'session-manager-operations', 'bilko-host');
+      if (realAbs === bilkoHostSub || realAbs.startsWith(bilkoHostSub + path.sep)) {
+        return;
+      }
     }
   }
   throw new Error(`Write outside allowed write boundaries: ${realAbs}`);

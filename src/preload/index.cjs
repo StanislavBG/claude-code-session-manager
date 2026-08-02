@@ -343,6 +343,13 @@ contextBridge.exposeInMainWorld('api', {
   projectPages: {
     get: (cwd) => ipcRenderer.invoke('project-pages:get', { cwd }),
   },
+  bilkoHost: {
+    get: (cwd) => ipcRenderer.invoke('bilko-host:get', { cwd }),
+    prepareBundle: (cwd, slug) => ipcRenderer.invoke('bilko-host:prepare-bundle', { cwd, slug }),
+    addDocument: (cwd, subpath, title, source) =>
+      ipcRenderer.invoke('bilko-host:add-document', { cwd, subpath, title, source }),
+    removeDocument: (cwd, id) => ipcRenderer.invoke('bilko-host:remove-document', { cwd, id }),
+  },
   promptSessionTranscript: {
     append: (cwd, epicId, turn) =>
       ipcRenderer.invoke('promptSessionTranscript:append', { cwd, epicId, ...turn }),

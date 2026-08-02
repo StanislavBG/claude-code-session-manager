@@ -45,3 +45,6 @@ export type NavKey =
   | 'agent-library'
   // Read-only directory of the Epic intent-tag taxonomy (Home face only).
   | 'tag-library'
+  // Publish this project's generated Marketing Project Page to bilko.run
+  // via the bilko-host MCP's gated static-path pipeline (Project face only).
+  | 'bilko-host'

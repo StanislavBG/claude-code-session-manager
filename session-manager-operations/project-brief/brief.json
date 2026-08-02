@@ -1,79 +1,93 @@
 {
   "version": 1,
-  "synthesizedAt": "2026-08-02T15:19:45.382Z",
+  "synthesizedAt": "2026-08-02T19:17:51.440Z",
   "editedAt": null,
   "model": "sonnet",
-  "purpose": "Electron desktop cockpit for driving Claude Code CLI sessions across projects via a TAB→Epic→PRD hierarchy, with scheduling, chat/terminal views, and mobile relay.",
+  "purpose": "Electron desktop cockpit for driving Claude Code CLI sessions, organizing per-project work into Epics tracked from proposal through scheduled PRD execution.",
   "what": [
-    "The core domain model is **TAB = project cwd**, **EPIC = tagged claude session** (`PromptSession`) with a strict `proposed → active → completed` lifecycle, and **PRD** = scheduler work items minted under an Epic. Recent commits (`b2b1b82`, `92280db`, `3d12e19`) hardened this invariant so nothing can mint an Epic directly into `active` and `active-index.json` writes are read-merge-write, not blind overwrites.",
-    "A **single-writer law** (`opsOwnership.cjs`) governs `session-manager-operations/<namespace>/` — each namespace has exactly one owning surface, fail-closed on violation. `feedback/` intake is fully retired in favor of `status: 'proposed'` Epics as the human-approval gate.",
-    "Recent work (v0.47–v0.53) focused on **nav consolidation** (merging Scheduler's Home/Project faces, distinct Home-tab vs Project-tab left-nav, dropping redundant horizontal tabs), **Epic Queue UX** (single Actions menu, Build toolbar button, discuss-first path), and a **Canvas-2 Scheduler redesign** (`f559d59`) plus **Epic UI audit** driven by Claude-Code-Design-MCP mocks.",
-    "`v51 Perf Issues` (slow tab-switching, suspected memory leaks) was addressed in `3e72cb1` alongside epic-creation review-gate fixes, landed together in the v0.53.0 release.",
-    "**Project Pages** is a newer subsystem (`projectPages.cjs`, `projectBrief.cjs`) — a static-HTML component-library renderer with deterministic variant selection (Stage 2) and summary validation (Stage 3/4), built out across several `feat(project-pages)` commits."
+    "The app centers on a **TAB → operations-root → EPIC → session** hierarchy: a Terminal tab is anchored to one project cwd, which owns a `session-manager-operations/` folder governed by a **single-writer law** (`opsOwnership.cjs`), and each Epic (`PromptSession`) is a 1:1 tagged `claude` session viewable as either Chat or Terminal.",
+    "Recent work (v0.53–v0.55) reworked Epic creation into two independent axes — **Agent** (`agentType`, a persona from the now-CRUD-editable Agent Library, `agentLibrary.cjs`/`AgentLibrary.tsx`) and **Tag** (mission: feature/bug/discussion, from `TagLibrary.tsx`) — with a many-to-many `tags:` frontmatter membership editable from either library page, both writing through `savePersona`.",
+    "The **Scheduler** is a browser over PRDs minted per-Epic (`scheduler/epics/<epic-id>/prds/`), run as capped-concurrency `claude -p` jobs with boot reconciliation, a dead-process reaper, and a definition-of-done gate that re-verifies completed PRDs' acceptance criteria at queue-drain.",
+    "A parallel design-import track (via `claude_design` MCP) is redesigning major surfaces — Libraries, Scheduler (Canvas-2/Almanac), Epics, Project Home — translating Figma-like `.jsx`/`.html` mocks into the renderer's component set.",
+    "Distribution is `npx claude-code-session-manager@latest` (Electron+node-pty rebuilt via postinstall), driven through an in-repo `/builder` skill that diffs git against the published npm package and decides version bumps."
   ],
   "areas": [
     {
-      "name": "src/main/scheduler.cjs + lib/queueStore.cjs",
-      "files": 1,
-      "note": "PRD execution engine — boot reconciliation, dead-process reaping, feedback sweep; recent fix drives reaping from queue.json not runningSet",
-      "epic": "Scheduler job status desyncs from run completion — stuck 'running' after clean exit",
-      "heat": 0.8
-    },
-    {
-      "name": "src/renderer/state/promptSessions.ts",
-      "files": 1,
-      "note": "Epic lifecycle state — status transitions, rename/delete guards; currently has uncommitted changes",
-      "epic": "Scheduller Redesign UI",
+      "name": "Epics / PromptSessions",
+      "files": 13,
+      "note": "lifecycle (proposed/active/completed), Agent+Tag two-axis creation, active-index.json read-merge-write, dispatch/audit trail",
+      "epic": "Redesign Agent and Tag Library",
       "heat": 0.9
     },
     {
-      "name": "src/main/lib/epicMint.cjs + activeIndexMerge.cjs (new)",
-      "files": 2,
-      "note": "Epic minting/index-merge invariants; new untracked test + lib file suggest in-progress hardening of read-merge-write logic",
-      "epic": null,
-      "heat": 0.85
-    },
-    {
-      "name": "src/main/index.cjs, ipcSchemas.cjs, promptSessionEvents.cjs",
-      "files": 3,
-      "note": "Main-process IPC surface for Epic lifecycle, currently modified but uncommitted",
-      "epic": "Actions Dropwn in EPIC Queue",
-      "heat": 0.7
-    },
-    {
-      "name": "src/main/projectPages.cjs / projectBrief.cjs",
-      "files": 2,
-      "note": "Static Project Page generation pipeline (Stage 2-4), several recent feature commits",
-      "epic": null,
-      "heat": 0.5
-    },
-    {
-      "name": "src/renderer/components/tabs/scheduler/",
-      "files": 1,
-      "note": "Almanac design primitives, Canvas-2 restyle just landed",
+      "name": "Scheduler",
+      "files": 53,
+      "note": "queue/PRD execution, boot reconciliation, dead-process reaper, definition-of-done gate, Almanac/Canvas-2 restyle",
       "epic": "Scheduller Redesign UI",
       "heat": 0.6
     },
     {
-      "name": "src/main/browserAgentServer.cjs / browserView.cjs",
+      "name": "Agent Library / Tag Library",
+      "files": 9,
+      "note": "newly CRUD-editable personas (~/.claude/agents/*.md) with many-to-many tag membership; recent live-refresh + overflow fixes",
+      "epic": "Redesign Agent and Tag Library",
+      "heat": 0.85
+    },
+    {
+      "name": "Renderer components (tabs)",
+      "files": 208,
+      "note": "Settings/Skills/Scheduler/Memory/WebRemote tab surfaces plus shared ui primitives (Panel, SaveBar, JsonEditor)",
+      "epic": null,
+      "heat": 0.4
+    },
+    {
+      "name": "Renderer state stores",
+      "files": 33,
+      "note": "isolated zustand stores (config/live/voice/scheduleState/toast) — no cross-subscription, selector-stability guarded by lint:selectors",
+      "epic": null,
+      "heat": 0.2
+    },
+    {
+      "name": "Project Home / Project Pages",
+      "files": 6,
+      "note": "generate pipeline producing static HTML from the Component Library; wiring to Home page still incomplete",
+      "epic": "Project Home Redesign",
+      "heat": 0.5
+    },
+    {
+      "name": "Browser (in-app)",
+      "files": 18,
+      "note": "embedded browser for Claude.ai auth flows; flagged broken for Google OAuth login, candidate for open-source browser swap",
+      "epic": null,
+      "heat": 0.3
+    },
+    {
+      "name": "Web Remote (mobile cockpit)",
       "files": 2,
-      "note": "Embedded browser for Claude.ai login — flagged broken for Google OAuth flow",
-      "epic": "Browser Broken",
+      "note": "same-origin relay + session state/summary protocol serving bilko.run mobile cockpit",
+      "epic": null,
+      "heat": 0.15
+    },
+    {
+      "name": "Main process core (config/pty/transcripts/supervisor)",
+      "files": 186,
+      "note": "fs layer with validatePath+atomic writes, PTY sessions, transcript tailing, Opus-probe supervisor",
+      "epic": null,
       "heat": 0.3
     }
   ],
   "scope": [
     "2026-07-31",
     "decided",
-    "No 'general' OWNERS namespace — architecture/design-mocks/HUMAN_LEARN/reviews stay outside single-writer law as skill-authored documentation, not app-owned runtime state",
-    "CLAUDE.md"
+    "Scheduler formally scoped as a browser over TAB→EPIC→PRD; global scheduler bookkeeping retired in favor of per-project queue/state shards",
+    "git_log/CLAUDE.md"
   ],
   "conventions": [
-    "Epic status has exactly 3 states (proposed/active/completed); never create directly as 'active' — enforced structurally now in ensureEpic and createPromptSession.",
-    "Single-writer law: every ops namespace has one owner; cross-writer needs a declared delegation, not ad-hoc fs writes.",
-    "Scheduler cap of ≤3 concurrent `claude -p` sessions (session slot pool) — do not raise casually; a related Epic requested making this configurable 0-10 (default 5).",
-    "Zustand selectors must never return a freshly-built reference (three prior blank-app incidents) — guarded by `npm run lint:selectors`.",
-    "Nav destinations are deduped as independent 'micro-services' — extend an existing surface (e.g. Scheduler) before adding a new LeftNav tab."
+    "Two-axis Epic creation is now real: `agentType` (who) and `tag` (mission/what) are separate, both editable via full CRUD Agent/Tag Library pages — never describe either library as read-only in new docs.",
+    "Every Epic is born `proposed`; `ensureEpic`/`createPromptSession` are structurally prevented from minting an `active` Epic directly — `proposed → active` has exactly one transition (Approve & start, or the New Epic first-prompt submit).",
+    "`active-index.json` writes must be read-merge-write, never a blind overwrite (past incident: lost Epics from concurrent writers).",
+    "Zustand selectors must return the raw stored slice, never a freshly-built array/object inline — three prior blank-app incidents (`lint:selectors` guards this).",
+    "Never shell out to `claude -p` without an explicit `--model` pin, and keep concurrent `claude -p` jobs capped at the configured slot pool (historically 3, discussed raising toward a configurable 0–10 default 5) to avoid OOM."
   ],
   "pins": {
     "what": false,

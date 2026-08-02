@@ -153,3 +153,20 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
 
   return [system, project, local]
 }
+
+/**
+ * Compact one-line Input summary for the Epic's openingPrompt — the AIM
+ * framework's "Input" axis stated explicitly, alongside Actor (agent framing
+ * line) and Mission (tag template), instead of left to the `claude` CLI's own
+ * silent file-discovery. Pure derivation over an already-computed board — no
+ * extra fs/IPC reads beyond what the grounding board UI already performs.
+ */
+export function summarizeGroundingBoard(groups: GroundingGroup[]): string {
+  const parts = groups
+    .map((g) => {
+      const present = g.items.filter((i) => i.present).map((i) => i.name)
+      return present.length ? `${g.label} (${present.join(', ')})` : null
+    })
+    .filter((s): s is string => s !== null)
+  return parts.length ? `Grounding: ${parts.join(' · ')}` : 'Grounding: none detected'
+}

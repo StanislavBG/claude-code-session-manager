@@ -67,6 +67,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'remote',         group: 'Configure', label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default', faces: HOME },
   { key: 'agent-library',  group: 'Configure', label: 'Agent Library',  icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
   { key: 'tag-library',    group: 'Configure', label: 'Tag Library',    icon: 'target',         hint: 'Epic intent tags and their /develop behavior', faces: HOME },
+  { key: 'bilko-host',     group: 'Configure', label: 'Host on Bilko.run', icon: 'link',        hint: 'Publish this project\'s Marketing page to bilko.run', faces: PROJECT },
 
   // Tools
   { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk', faces: HOME },

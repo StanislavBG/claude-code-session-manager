@@ -62,6 +62,27 @@ function useBuildAction(onSelect: (id: string) => void) {
   const target = useBuildTarget(activeTabCwd)
   const [creating, setCreating] = useState(false)
   const inFlight = useInFlightBuildEpic(activeTabCwd)
+  // Actor for the 'build' Epic — same lookup-by-name pattern HostBilko.tsx
+  // and ProjectPagesSection.tsx already use for their own dedicated-pipeline
+  // agents, so Build Epics get an Actor line instead of opening on Default.
+  const [builderPersona, setBuilderPersona] = useState<{ name: string; description: string | null } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const listPersonas = window.api?.agents?.listPersonas
+    if (!listPersonas) return
+    listPersonas()
+      .then((list) => {
+        if (cancelled) return
+        const found = list.find((a) => a.name === 'builder')
+        setBuilderPersona(found ? { name: found.name, description: found.description } : null)
+      })
+      .catch(() => {
+        if (!cancelled) setBuilderPersona(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   // Reaching an in-flight build Epic must stay possible even when the
   // project currently has no resolvable publish target — the guard's whole
   // point is getting the user back to that Epic, not blocking them.
@@ -73,8 +94,16 @@ function useBuildAction(onSelect: (id: string) => void) {
    *  composer as a draft). */
   const createBuildEpic = () => {
     if (!activeTabCwd || !target) return null
-    const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: BUILD_GOAL_TEXT, tag: 'build' })
-    const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build')
+    const { goalText, openingPrompt } = composeEpicIntake({
+      title: '',
+      goal: BUILD_GOAL_TEXT,
+      tag: 'build',
+      agentName: builderPersona?.name,
+      agentDescription: builderPersona?.description ?? undefined,
+    })
+    const session = builderPersona
+      ? usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build', builderPersona.name)
+      : usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build')
     usePromptSessions.getState().approveProposed(session.id, 'EpicQueue Run Build')
     return { session, openingPrompt }
   }

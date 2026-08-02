@@ -33,6 +33,7 @@ export const SCREEN_KEYS: NavKey[] = [
   'remote',
   'agent-library',
   'tag-library',
+  'bilko-host',
   // Tools (promoted from modal in v0.13.1)
   'voice',
   'repoviz',

@@ -54,6 +54,11 @@ const OWNERS = Object.freeze({
   'browser': 'browser',
   // Structured per-tab error log lines (JSONL), tagged for tracing/analysis.
   'logs': 'logs',
+  // Host on Bilko.run tab's deterministic bundle prep (dist/index.html +
+  // dist/manifest.json only — publish-state.json and anything the
+  // bilko-host-publisher Epic authors beyond dist/ is agent-Write-tool
+  // output, same unenforceable-by-construction class as project-pages/output.
+  'bilko-host': 'bilko-host',
 });
 
 /**

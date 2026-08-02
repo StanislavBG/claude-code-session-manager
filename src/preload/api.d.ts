@@ -267,6 +267,9 @@ export interface AgentPersona {
   color: string | null;
   /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
   tags: string[];
+  /** "<Department> — <Human title>" (e.g. "Engineering — Architect"), free text — drives
+   *  department grouping in the New Epic Agent picker. Optional/null when not set. */
+  title?: string | null;
   path: string;
   body: string;
   /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
@@ -283,6 +286,7 @@ export interface AgentPersonaSaveInput {
   model: string;
   color: string;
   tags: string[];
+  title?: string;
   body: string;
 }
 

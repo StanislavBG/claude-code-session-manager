@@ -42,13 +42,14 @@ const PERSONA_NAME_RE = /^[a-z][a-z0-9-]*$/;
  * assign/remove the relationship from either side. Stored the same
  * comma-list way as `tools` for one parser to cover both.
  */
-function serializePersona({ name, description, tools, model, color, tags, body }) {
+function serializePersona({ name, description, tools, model, color, tags, title, body }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
   if (model && model !== 'inherit') lines.push(`model: ${model}`);
   if (color) lines.push(`color: ${color}`);
   if (tags && tags.length) lines.push(`tags: ${tags.join(', ')}`);
+  if (title) lines.push(`title: ${title}`);
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
 }
@@ -66,6 +67,7 @@ async function savePersona({
   model,
   color,
   tags,
+  title,
   body,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
   validatePath = configMgr.validatePath,
@@ -75,7 +77,7 @@ async function savePersona({
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
-  const text = serializePersona({ name, description, tools, model, color, tags, body });
+  const text = serializePersona({ name, description, tools, model, color, tags, title, body });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
@@ -201,6 +203,7 @@ async function listPersonas({
       model: fm.model || null,
       color: fm.color || null,
       tags: parseTools(fm.tags),
+      title: fm.title || null,
       path: real,
       body: body.trim(),
       overridingProjects,

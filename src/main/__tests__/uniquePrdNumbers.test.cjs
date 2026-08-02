@@ -6,6 +6,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// HOME stubbed BEFORE requiring scheduler.cjs (PRD 812 fix): the last
+// describe block below calls scheduler.reconcile(), which internally calls
+// ensureDirs() → fs.mkdirSync on PRDS_DIR/RUNS_DIR — paths baked from
+// os.homedir() at require time. Without this stub that mkdirSync lands in
+// the real `~/.claude/session-manager/scheduled-plans/` tree.
+const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-832-home-'));
+process.env.HOME = tmpHome;
+
 const prdParser = require('../scheduler/prdParser.cjs');
 const { pickForProject } = require('../lib/schedulerBatch.cjs');
 

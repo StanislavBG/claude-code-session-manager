@@ -532,6 +532,11 @@ test('resolveSourcePromptIdFromClaudeSession finds the Epic whose claudeSessionI
   }
 });
 
+// Real-homedir-rooted like the chat-only-epic test above (see its comment at
+// line ~449): validatePath's read boundary is home-dir-wide, and this
+// exercises createPrd's real config.addAllowedRoot/writeTextAtomic path. Safe
+// because the random suffix is never a registered project the live scheduler
+// scans for PRDs, and it's removed in `finally`.
 test('createPrd resolves sourcePromptId from originClaudeSessionId when the caller omitted sourcePromptId', async () => {
   const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-origin-session-epic-'));
   config.addAllowedRoot(root);
@@ -555,6 +560,7 @@ test('createPrd resolves sourcePromptId from originClaudeSessionId when the call
   }
 });
 
+// Same real-homedir rationale as the two tests above.
 test('createPrd leaves sourcePromptId unset when originClaudeSessionId matches no known Epic (plain SessionTab chat)', async () => {
   const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-origin-session-no-match-'));
   config.addAllowedRoot(root);

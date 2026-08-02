@@ -105,6 +105,11 @@ test('migratePrds ignores non-.md and dotfiles, and no-ops on a missing legacy d
 
 test('migratePrds expands a tilde-prefixed cwd and moves the file', async () => {
   const legacyDir = await mkLegacyDir();
+  // Deliberately rooted under the REAL os.homedir() (not os.tmpdir()) — the
+  // assertion under test is tilde-expansion relative to the actual home dir,
+  // so a real homedir path is load-bearing here, not incidental. Still safe:
+  // the random suffix is never a registered project the live scheduler scans
+  // for PRDs, and it's removed in afterEach via tmpDirs/fsp.rm.
   const projectCwd = await fsp.mkdtemp(path.join(os.homedir(), '.sm-prdmigration-tilde-'));
   tmpDirs.push(projectCwd);
   const tildeCwd = path.join('~', path.relative(os.homedir(), projectCwd));

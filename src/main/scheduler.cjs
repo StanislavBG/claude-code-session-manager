@@ -565,22 +565,33 @@ async function archivedTwinExists(job) {
 }
 
 /**
- * Build the non-failure result + run meta for a job whose PRD has already
- * been archived (work shipped, queue entry is stale). Shared by both
- * PRD-read failure exits in executeJob so the stale-skip logic isn't
- * duplicated.
+ * Build the non-failure result + run meta for a queued job whose PRD source
+ * is gone. Shared by both PRD-read failure exits in executeJob so the
+ * stale-skip logic isn't duplicated. Two reasons, both exitCode: 0 (no RCA
+ * feedback item, since neither is a real work failure):
+ *   - 'prd-archived': the source was archived — archivedTwinExists found it
+ *     under a prds-archived/ dir. The work already shipped.
+ *   - 'prd-missing': the source is gone everywhere (ENOENT on every
+ *     candidate dir, no archived twin either) — most commonly a PRD that
+ *     existed at enqueue time and was deleted before dispatch (e.g. a test
+ *     fixture that leaked into the live queue and was cleaned up by its own
+ *     `finally` block). Retire the row rather than fail it.
  */
-function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath) {
-  const archivedTwin = archivedPrdPathForJob(job);
-  const msg = `PRD already archived (${archivedTwin}) — work shipped; retiring stale queue entry`;
+function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, reason = 'prd-archived') {
+  const msg = reason === 'prd-missing'
+    ? 'PRD source no longer exists on disk — retiring stale queue entry'
+    : (() => {
+        const archivedTwin = archivedPrdPathForJob(job);
+        return `PRD already archived (${archivedTwin}) — work shipped; retiring stale queue entry`;
+      })();
   safeLog(`[scheduler] ${msg}\n`);
   closeFd();
   const finishedAt = Date.now();
   config.writeJsonSync(metaPath, {
-    slug: job.slug, cwd, sessionId, exitCode: 0, skipped: 'prd-archived',
+    slug: job.slug, cwd, sessionId, exitCode: 0, skipped: reason,
     note: msg, startedAt, finishedAt, durationMs: 0,
   });
-  return { exitCode: 0, durationMs: 0, skipped: 'prd-archived', note: msg, sessionId };
+  return { exitCode: 0, durationMs: 0, skipped: reason, note: msg, sessionId };
 }
 
 /**
@@ -2032,16 +2043,34 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
         prompt = parsed.body + FINISH_PROTOCOL;
         prdPath = fallbackPath;
       } catch (e2) {
+        // Found the dir a moment ago but the read still failed. Case A: the
+        // source has since been archived — stale-skip as usual. Case B: it
+        // was deleted out from under us in the window between findPrdDir and
+        // parsePrd (ENOENT) with no archived twin — also a stale row, not a
+        // real failure. Anything else (malformed/unreadable PRD) is a real
+        // failure and keeps exitCode: -1.
         if (await archivedTwinExists(job)) {
-          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath);
+          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
+        }
+        if (e2 && e2.code === 'ENOENT') {
+          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
         }
         safeLog(`[scheduler] failed to read PRD: ${e2?.message}\n`);
         closeFd();
         return { exitCode: -1, durationMs: 0, error: e2?.message };
       }
     } else {
+      // No candidate dir has the slug at all. Case A: it was archived —
+      // stale-skip. Case B: the read error is ENOENT (the common case: a
+      // source that existed at enqueue time and is gone by dispatch, e.g. a
+      // leaked test fixture) with no archived twin — retire as stale rather
+      // than a hard failure. Anything else (a real read/parse error) still
+      // fails the job.
       if (await archivedTwinExists(job)) {
-        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath);
+        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
+      }
+      if (e && e.code === 'ENOENT') {
+        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
       }
       safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
       closeFd();
@@ -4480,4 +4509,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };

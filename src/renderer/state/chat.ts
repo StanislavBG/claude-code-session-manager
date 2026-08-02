@@ -202,6 +202,10 @@ interface ChatState {
    * prior exchanges, or if the exchanges API is unavailable.
    */
   hydrate: (args: { tabId: string; cwd: string; sessionId: string }) => Promise<void>
+  /** Drops a tab's chat slice entirely — called when a SessionTab closes. Never
+   *  called for Epic ids (Epics live in this same store but are never removed
+   *  via sessions.ts; their chat history persists for the Epic's own lifetime). */
+  dropTab: (tabId: string) => void
 }
 
 const EMPTY: TabChat = {
@@ -348,6 +352,14 @@ export const useChat = create<ChatState>((set, get) => ({
   },
   clearPendingVoiceText: (tabId) => {
     patch(tabId, (c) => ({ ...c, pendingVoiceText: undefined }))
+  },
+  dropTab: (tabId) => {
+    if (!(tabId in get().chats) && !(tabId in get().hydratedTabs)) return
+    const chats = { ...get().chats }
+    delete chats[tabId]
+    const hydratedTabs = { ...get().hydratedTabs }
+    delete hydratedTabs[tabId]
+    set({ chats, hydratedTabs })
   },
 }))
 
@@ -506,6 +518,15 @@ function dequeueNext(tabId: string): void {
   // forking the conversation out of session context. Sessions must never
   // create Epics without explicit user approval — only the New Epic card and
   // the propose→approve flow do that.
+  // This check is deliberately synchronous/in-memory-only, unlike
+  // resolveDispatchPromptSessionId's disk-fallback join — a ticket queued on
+  // an Epic tab before that Epic has hydrated into memory can still slip
+  // past here, get classified, and (if 'develop') land in dispatchToPrd(),
+  // which resolves and joins the same Epic via disk but authors a mechanical
+  // templated PRD instead of staying in-session. That's a known, accepted
+  // gap (never a rogue mint — dispatchToPrd only ever joins or refuses now),
+  // not a second bug: closing it would mean hydrating here on every dequeue,
+  // which is out of scope for this fix (dequeueNext's ordering is untouched).
   if (usePromptSessions.getState().sessions[tabId]) {
     dispatchQueuedInline(tabId, next)
     return
@@ -686,18 +707,47 @@ export async function dispatchPromptSessionToPrd(
   }
 }
 
-function resolveDispatchPromptSessionId(tabId: string, ticket: PromptTicket): string {
+/**
+ * Join-only: resolves the real, independently-sessioned PromptSession
+ * (promptSessions.ts) this dispatch's PRD should be linked to, WITHOUT ever
+ * minting a new one — sessions must never create Epics; only the New Epic
+ * card and the propose→approve flow do that (2026-08-02 incident:
+ * psess-msbv6w4d-10 was minted straight from a follow-up ticket's raw text).
+ * A "New item" ticket (no chainRootId) must resolve to the driving tab's own
+ * Epic (tabId === promptSessionId whenever chat is rendered from
+ * EpicDetail/EpicComposer). A continuation ("Continue: <open item>") reuses
+ * the ROOT ticket's already-minted PromptSession, looked up from
+ * ticketHistory. Falls back to a disk read (hydrate) before giving up, so a
+ * legitimate Epic that simply hasn't hydrated into the in-memory sessions
+ * map yet is joined rather than refused. Returns null — never mints — when
+ * no PromptSession can be resolved either way.
+ */
+async function resolveDispatchPromptSessionId(tabId: string, ticket: PromptTicket): Promise<string | null> {
   if (ticket.chainRootId) {
     const cur = useChat.getState().chats[tabId] ?? EMPTY
     const root = (cur.ticketHistory ?? []).find((t) => t.id === ticket.chainRootId)
     if (root?.promptSessionId) return root.promptSessionId
+  }
+
+  if (usePromptSessions.getState().sessions[tabId]) return tabId
+
+  await usePromptSessions.getState().hydrate(ticket.cwd)
+  if (usePromptSessions.getState().sessions[tabId]) return tabId
+
+  if (ticket.chainRootId) {
     window.api?.logs?.write(
       'chat',
       'warn',
-      `continuation ticket ${ticket.id}: no resolvable PromptSession for chainRootId ${ticket.chainRootId} — minting a new one`,
+      `continuation ticket ${ticket.id}: no resolvable PromptSession for chainRootId ${ticket.chainRootId} — refusing dispatch (sessions must never mint an Epic)`,
+    )
+  } else {
+    window.api?.logs?.write(
+      'chat',
+      'warn',
+      `ticket ${ticket.id}: no resolvable PromptSession for tab ${tabId} — refusing dispatch (sessions must never mint an Epic)`,
     )
   }
-  return usePromptSessions.getState().createPromptSession(ticket.cwd, ticket.text).id
+  return null
 }
 
 function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
@@ -716,76 +766,84 @@ function dispatchToPrd(tabId: string, ticket: PromptTicket): void {
     dequeueNext(tabId)
   }
 
-  const promptSessionId = resolveDispatchPromptSessionId(tabId, ticket)
+  resolveDispatchPromptSessionId(tabId, ticket).then((promptSessionId) => {
+    if (!promptSessionId) {
+      failPrd(
+        `→ Ticket ${ticket.id}: no Epic to dispatch this PRD into. Create one via the New Epic card (or approve a proposed one), then resend.`,
+      )
+      return
+    }
 
-  window.api.chat
-    .createPrd({
-      title: deriveTitleFromTicketText(ticket.text),
-      cwd: ticket.cwd,
-      estimateMinutes: 15,
-      goal: ticket.text,
-      acceptanceCriteria: [
-        'Implement the request described in Goal.',
-        'timeout 300 npm run typecheck passes',
-      ],
-      implementationNotes: `Target project: ${ticket.cwd}`,
-      // The real PromptSession this dispatch is linked to — freshly minted
-      // for a "New item" ticket, or the ROOT ticket's existing one for a
-      // continuation (PRD 775/813).
-      sourcePromptId: promptSessionId,
-      sourceTabId: ticket.tabId,
-      tag: ticket.tag,
-    })
-    .then((result) => {
-      if (!result?.ok) {
-        failPrd(`→ PRD authoring failed for ticket ${ticket.id}: ${result?.error ?? 'unknown error'}`)
-        return
-      }
-      const filename = result.filename
-      const slug = filename.endsWith('.md') ? filename.slice(0, -3) : filename
-      // Isolated from the ticket-finalization path below: the PRD file is
-      // already written and real by this point, so a throw here (a stale
-      // tail, a missing session) must never fall through to the outer
-      // .catch() and get this dispatch mislabeled 'failed' — that would
-      // leave a real PRD orphaned with no prdSlugs and invite a duplicate
-      // re-dispatch. appendPrdCreatedEvent is itself best-effort (never throws).
-      appendPrdCreatedEvent(promptSessionId, slug)
-      // A continuation does NOT carry prdSlugs on its own history entry — the
-      // slug is appended to the ROOT ticket's prdSlugs below instead, so the
-      // chip UI (which iterates a ticket's prdSlugs) shows the whole chain
-      // under the single root entry rather than splitting it across tickets.
-      const dispatched: PromptTicket = {
-        ...ticket,
-        status: 'dispatched-to-prd',
-        completedAt: Date.now(),
-        promptSessionId,
-        ...(ticket.chainRootId ? {} : { prdSlugs: [slug] }),
-      }
-      applyNotice(tabId, dispatched.sessionId, `→ dispatched to PRD ${filename} (ticket ${dispatched.id})`)
-      patch(tabId, (c) => {
-        let history = appendTicketHistory(c.ticketHistory ?? [], dispatched)
-        if (ticket.chainRootId) {
-          const rootId = ticket.chainRootId
-          history = history.map((t) =>
-            t.id === rootId ? { ...t, prdSlugs: [...(t.prdSlugs ?? []), slug] } : t,
-          )
-        }
-        return {
-          ...c,
-          running: false,
-          queuedPosition: 0,
-          stream: '',
-          liveToolUses: [],
-          activeTicket: null,
-          ticketHistory: history,
-        }
+    window.api.chat
+      .createPrd({
+        title: deriveTitleFromTicketText(ticket.text),
+        cwd: ticket.cwd,
+        estimateMinutes: 15,
+        goal: ticket.text,
+        acceptanceCriteria: [
+          'Implement the request described in Goal.',
+          'timeout 300 npm run typecheck passes',
+        ],
+        implementationNotes: `Target project: ${ticket.cwd}`,
+        // The real PromptSession this dispatch is linked to — the driving
+        // tab's own Epic for a "New item" ticket, or the ROOT ticket's
+        // existing one for a continuation (PRD 775/813). Never freshly
+        // minted here.
+        sourcePromptId: promptSessionId,
+        sourceTabId: ticket.tabId,
+        tag: ticket.tag,
       })
-      dequeueNext(tabId)
-    })
-    .catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err)
-      failPrd(`→ PRD authoring failed for ticket ${ticket.id}: ${msg}`)
-    })
+      .then((result) => {
+        if (!result?.ok) {
+          failPrd(`→ PRD authoring failed for ticket ${ticket.id}: ${result?.error ?? 'unknown error'}`)
+          return
+        }
+        const filename = result.filename
+        const slug = filename.endsWith('.md') ? filename.slice(0, -3) : filename
+        // Isolated from the ticket-finalization path below: the PRD file is
+        // already written and real by this point, so a throw here (a stale
+        // tail, a missing session) must never fall through to the outer
+        // .catch() and get this dispatch mislabeled 'failed' — that would
+        // leave a real PRD orphaned with no prdSlugs and invite a duplicate
+        // re-dispatch. appendPrdCreatedEvent is itself best-effort (never throws).
+        appendPrdCreatedEvent(promptSessionId, slug)
+        // A continuation does NOT carry prdSlugs on its own history entry — the
+        // slug is appended to the ROOT ticket's prdSlugs below instead, so the
+        // chip UI (which iterates a ticket's prdSlugs) shows the whole chain
+        // under the single root entry rather than splitting it across tickets.
+        const dispatched: PromptTicket = {
+          ...ticket,
+          status: 'dispatched-to-prd',
+          completedAt: Date.now(),
+          promptSessionId,
+          ...(ticket.chainRootId ? {} : { prdSlugs: [slug] }),
+        }
+        applyNotice(tabId, dispatched.sessionId, `→ dispatched to PRD ${filename} (ticket ${dispatched.id})`)
+        patch(tabId, (c) => {
+          let history = appendTicketHistory(c.ticketHistory ?? [], dispatched)
+          if (ticket.chainRootId) {
+            const rootId = ticket.chainRootId
+            history = history.map((t) =>
+              t.id === rootId ? { ...t, prdSlugs: [...(t.prdSlugs ?? []), slug] } : t,
+            )
+          }
+          return {
+            ...c,
+            running: false,
+            queuedPosition: 0,
+            stream: '',
+            liveToolUses: [],
+            activeTicket: null,
+            ticketHistory: history,
+          }
+        })
+        dequeueNext(tabId)
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        failPrd(`→ PRD authoring failed for ticket ${ticket.id}: ${msg}`)
+      })
+  })
 }
 
 function applyError(tabId: string, _sessionId: string, message: string): void {

@@ -12,10 +12,16 @@ function installWindowApiMock(opts: {
   transcriptExists: boolean
   classifyTicket?: (payload: { text: string }) => Promise<'inline' | 'develop'>
   createPrd?: (payload: unknown) => Promise<{ ok: true; nn: number; filename: string } | { ok: false; status: number; error: string }>
+  // Fixture for hydrate()'s disk read of active-index.json — resolveDispatchPromptSessionId
+  // falls back to this when a tab's PromptSession hasn't hydrated into memory yet.
+  activeIndexOnDisk?: { sessions: Record<string, unknown>; events: Record<string, unknown> }
 }) {
   const run = vi.fn().mockResolvedValue(undefined)
   const classifyTicket = vi.fn(opts.classifyTicket ?? (async () => 'inline' as const))
   const createPrd = vi.fn(opts.createPrd ?? (async () => ({ ok: true as const, nn: 42, filename: '42-fake-prd.md' })))
+  const readJson = vi.fn().mockResolvedValue(
+    opts.activeIndexOnDisk ? { exists: true, data: opts.activeIndexOnDisk } : { exists: false, data: null },
+  )
   let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
   let errorHandler: ((e: { tabId: string; sessionId: string; message: string }) => void) | null = null
@@ -53,6 +59,7 @@ function installWindowApiMock(opts: {
     },
     config: {
       exists: vi.fn().mockResolvedValue(opts.transcriptExists),
+      readJson,
     },
     logs: { write: vi.fn() },
     promptSessionTranscript: {
@@ -66,6 +73,7 @@ function installWindowApiMock(opts: {
     run,
     classifyTicket,
     createPrd,
+    readJson,
     getNeedsInputHandler: () => needsInputHandler,
     getCompleteHandler: () => completeHandler,
     getErrorHandler: () => errorHandler,
@@ -702,30 +710,39 @@ describe('chat.ts prompt queue', () => {
     expect(Object.keys(usePromptSessions.getState().sessions)).toEqual(sessionsBefore)
   })
 
-  it('transitions a dequeued ticket to dispatched-to-prd, calls createPrd with the mapped payload, and populates prdSlugs when classified "develop"', async () => {
+  it('transitions a dequeued ticket to dispatched-to-prd, calls createPrd with the mapped payload, and populates prdSlugs when classified "develop" (Epic tab resolved from disk, never minted)', async () => {
+    // Sessions must NEVER mint a new Epic (2026-08-02 incident). This ticket's
+    // tab IS a real Epic on disk, just not yet hydrated into the in-memory
+    // sessions map at classification time — resolveDispatchPromptSessionId's
+    // disk fallback must join it, not refuse or mint.
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 7, filename: '7-build-a-whole-feature.md' }),
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
     const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build a whole feature' })
-    const queuedTicket = useChat.getState().get('t1').queue[0]
 
     getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
 
     await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build a whole feature' }))
     await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
 
-    const createPrdCall = createPrd.mock.calls[0][0] as { sourcePromptId: string }
-    // A "New item" dev-work ticket mints its own real PromptSession — the
-    // sourcePromptId is that session's id, never the ticket's own id.
-    expect(createPrdCall.sourcePromptId).not.toBe(queuedTicket.id)
-    expect(typeof createPrdCall.sourcePromptId).toBe('string')
+    // The Epic's own id (the tab's id) is the sourcePromptId — resolved by
+    // joining the on-disk Epic, never by minting a fresh one.
+    expect(createSpy).not.toHaveBeenCalled()
     expect(createPrd).toHaveBeenCalledWith({
       title: 'build a whole feature',
       cwd: '/proj',
@@ -733,7 +750,7 @@ describe('chat.ts prompt queue', () => {
       goal: 'build a whole feature',
       acceptanceCriteria: ['Implement the request described in Goal.', 'timeout 300 npm run typecheck passes'],
       implementationNotes: 'Target project: /proj',
-      sourcePromptId: createPrdCall.sourcePromptId,
+      sourcePromptId: 't1',
       sourceTabId: 't1',
     })
 
@@ -753,10 +770,16 @@ describe('chat.ts prompt queue', () => {
   })
 
   it('marks a dequeued ticket "failed" with a notice when createPrd rejects', async () => {
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => { throw new Error('write failed') },
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
     const { useChat } = await import('../chat')
 
@@ -781,10 +804,16 @@ describe('chat.ts prompt queue', () => {
   })
 
   it('marks a dequeued ticket "failed" with a notice when createPrd resolves not-ok', async () => {
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: false, status: 400, error: 'cwd rejected' }),
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
     const { useChat } = await import('../chat')
 
@@ -809,10 +838,17 @@ describe('chat.ts prompt queue', () => {
   })
 
   it('a throwing appendPromptSessionEvent does not mislabel a successful PRD creation as failed (PRD 813)', async () => {
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
+    const tailEvent = { id: 'evt-1', promptSessionId: 't1', kind: 'prompt', causedByEventId: null, at: new Date().toISOString() }
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 22, filename: '22-real-prd.md' }),
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: { t1: [tailEvent] } },
     })
     const { useChat } = await import('../chat')
     const { usePromptSessions } = await import('../promptSessions')
@@ -843,10 +879,16 @@ describe('chat.ts prompt queue', () => {
   })
 
   it('threads the composer-selected tag from send() through the queued ticket and into the createPrd payload (PRD 774)', async () => {
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 9, filename: '9-fix-a-bug.md' }),
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
     const { useChat } = await import('../chat')
 
@@ -944,6 +986,169 @@ describe('chat.ts prompt queue', () => {
     expect(classifyTicket).not.toHaveBeenCalled()
     expect(createPrd).not.toHaveBeenCalled()
     expect(useChat.getState().get('t1').running).toBe(true)
+  })
+})
+
+describe('chat.ts resolveDispatchPromptSessionId is join-only, never mints (2026-08-02 incident regression)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('(a) non-Epic tab + "develop" verdict + no chainRootId: refuses instead of minting — createPromptSession/createPrd never called, ticket fails, toast fires', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+    })
+    const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useToast } = await import('../toast')
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build me a whole feature' })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build me a whole feature' }))
+
+    await vi.waitFor(() => {
+      const failed = useChat.getState().get('t1').ticketHistory?.find((t) => t.text === 'build me a whole feature')
+      expect(failed?.status).toBe('failed')
+    })
+
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(createPrd).not.toHaveBeenCalled()
+    expect(Object.keys(usePromptSessions.getState().sessions)).toHaveLength(0)
+    expect(
+      useToast.getState().toasts.some((t) => t.kind === 'error' && /no epic/i.test(t.message) && /new epic/i.test(t.message)),
+    ).toBe(true)
+  })
+
+  it('(b) continuation ticket with an unresolvable chainRootId: refuses instead of minting', async () => {
+    const { run, classifyTicket, createPrd, getCompleteHandler, readJson } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+    })
+    const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useToast } = await import('../toast')
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
+
+    // ticketHistory has NO entry for 'missing-root' — the chain root is gone
+    // (e.g. cleared history, cross-tab id) so it can never be resolved.
+    useChat.setState({
+      chats: {
+        t1: {
+          turns: [], running: false, queuedPosition: 0, started: true, stream: '', liveToolUses: [],
+          queue: [], activeTicket: null, ticketHistory: [],
+        },
+      },
+    })
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({
+      tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'continue the initiative', chainRootId: 'missing-root',
+    })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'continue the initiative' }))
+
+    await vi.waitFor(() => {
+      const failed = useChat.getState().get('t1').ticketHistory?.find((t) => t.text === 'continue the initiative')
+      expect(failed?.status).toBe('failed')
+    })
+
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(createPrd).not.toHaveBeenCalled()
+    // Confirms the disk fallback genuinely ran (and came up empty) before
+    // refusing, rather than short-circuiting straight to refusal.
+    expect(readJson).toHaveBeenCalled()
+    expect(useToast.getState().toasts.some((t) => t.kind === 'error')).toBe(true)
+  })
+
+  it('(c) Epic tab whose session exists on disk but not yet in the in-memory map: dispatch joins that Epic — no mint, no refusal', async () => {
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
+    const { run, classifyTicket, createPrd, getCompleteHandler, readJson } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+      createPrd: async () => ({ ok: true, nn: 99, filename: '99-joined-epic-prd.md' }),
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
+    })
+    const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
+
+    // Confirm this Epic is genuinely absent from the in-memory store up front.
+    expect(usePromptSessions.getState().sessions.t1).toBeUndefined()
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'build me a whole feature' })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'build me a whole feature' }))
+    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
+
+    // Resolved via the disk fallback (hydrate), not by minting.
+    expect(readJson).toHaveBeenCalled()
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(createPrd.mock.calls[0][0]).toMatchObject({ sourcePromptId: 't1' })
+
+    await vi.waitFor(() => {
+      const dispatched = useChat.getState().get('t1').ticketHistory?.find((t) => t.text === 'build me a whole feature')
+      expect(dispatched?.status).toBe('dispatched-to-prd')
+    })
+    expect(usePromptSessions.getState().sessions.t1).toBeDefined()
+  })
+
+  it('(d) a ticket sent via chat:external-send never reaches the classifier or dispatchToPrd, even with "develop"-looking text — pinning the :507 external short-circuit', async () => {
+    // The 2026-08-02 incident's actual trigger: a scheduler completion/failure
+    // notification (PRD-authoring-failed style text, which reads exactly like
+    // a dev-work request) routed in via onExternalSend on a build predating
+    // the :507 external guard, got classified 'develop', and dispatchToPrd
+    // minted psess-msbv6w4d-10 out of it. This pins that the guard still
+    // intercepts before classification, on text engineered to look dev-shaped.
+    const { run, classifyTicket, createPrd, getExternalSendHandler, getCompleteHandler } = installWindowApiMock({
+      transcriptExists: true,
+      classifyTicket: async () => 'develop',
+    })
+    const { useChat } = await import('../chat')
+    const { useSessions } = await import('../sessions')
+    const { usePromptSessions } = await import('../promptSessions')
+    useSessions.setState({
+      tabs: [{ id: 't1', sessionId: 's1', cwd: '/proj' } as any],
+    } as any)
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
+
+    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+
+    const notificationText =
+      'PRD authoring failed for 933-fix-the-thing: build me a whole new feature to replace it. Check Scheduler for details.'
+    getExternalSendHandler()!({ tabId: 't1', prompt: notificationText })
+
+    const queued = useChat.getState().get('t1').queue
+    expect(queued).toHaveLength(1)
+    expect(queued[0].external).toBe(true)
+
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ tabId: 't1', sessionId: 's1', prompt: notificationText }))
+
+    expect(classifyTicket).not.toHaveBeenCalled()
+    expect(createPrd).not.toHaveBeenCalled()
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(Object.keys(usePromptSessions.getState().sessions)).toHaveLength(0)
   })
 })
 
@@ -1092,13 +1297,19 @@ describe('chat.ts chain continuation (PRD 775)', () => {
     expect(followUp?.prdSlugs).toBeUndefined()
   })
 
-  it('choosing "New item" (no chainRootId) creates an independent ticket using its own id as sourcePromptId, even while a chain is open', async () => {
+  it('choosing "New item" (no chainRootId) on a non-Epic tab refuses the dispatch instead of minting an independent PromptSession', async () => {
+    // Rewritten from a test that pinned the rogue mint (2026-08-02 incident):
+    // this tab is a plain dormant Terminal tab, not a hydrated or on-disk
+    // Epic, so resolveDispatchPromptSessionId has nothing to join and must
+    // refuse rather than mint a brand-new Epic from the raw ticket text.
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 11, filename: '11-independent-prd.md' }),
     })
     const { useChat } = await import('../chat')
+    const { usePromptSessions } = await import('../promptSessions')
+    const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     useChat.setState({
       chats: {
@@ -1139,32 +1350,41 @@ describe('chat.ts chain continuation (PRD 775)', () => {
     getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with kickoff' })
 
     await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'a totally new thing' }))
-    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
-
-    // "New item" mints its own independent PromptSession — sourcePromptId is
-    // that fresh session's id, never the ticket's own id or the open root's.
-    const newTicketId = queuedTicket.id
-    const createPrdCall = createPrd.mock.calls[0][0] as { sourcePromptId: string }
-    expect(createPrdCall.sourcePromptId).not.toBe(newTicketId)
-    expect(typeof createPrdCall.sourcePromptId).toBe('string')
 
     await vi.waitFor(() => {
       const after = useChat.getState().get('t1')
-      const dispatched = after.ticketHistory?.find((t) => t.text === 'a totally new thing')
-      expect(dispatched?.prdSlugs).toEqual(['11-independent-prd'])
+      const failed = after.ticketHistory?.find((t) => t.text === 'a totally new thing')
+      expect(failed?.status).toBe('failed')
     })
 
-    // The root chain's own prdSlugs are untouched by the independent ticket.
+    expect(createPrd).not.toHaveBeenCalled()
+    expect(createSpy).not.toHaveBeenCalled()
+
+    // The root chain's own prdSlugs are untouched.
     const after = useChat.getState().get('t1')
     const root = after.ticketHistory?.find((t) => t.id === 'root-1')
     expect(root?.prdSlugs).toEqual(['9-first-prd'])
+    expect(after.turns.some((t) => t.role === 'notice' && /no epic/i.test(t.text))).toBe(true)
   })
 
-  it('mints exactly one real PromptSession for a fresh dev-work ticket, and a continuation reuses it without minting a second one (PRD 813)', async () => {
+  it('never mints a PromptSession — a fresh dev-work ticket joins its Epic tab, resolved from disk (PRD 813)', async () => {
+    // Once resolveDispatchPromptSessionId joins t1's on-disk Epic, t1 becomes
+    // a known in-memory Epic — so any LATER ticket on t1 hits dequeueNext's
+    // own Epic-tab guard (chat.ts:521) and never reaches the classifier at
+    // all (see 'never classifies or dispatches to PRD a ticket queued on an
+    // Epic tab' above). Continuation-reuse-without-minting is covered
+    // separately by 'continuing an open chain' below, on a tab that is not
+    // itself a known Epic.
+    const epicOnDisk = {
+      id: 't1', cwd: '/proj', goalText: 'General Enhancements',
+      claudeSessionId: 's1', status: 'active',
+      createdAt: new Date().toISOString(), completedAt: null, tag: 'feature',
+    }
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 20, filename: '20-first-prd.md' }),
+      activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
     const { useChat } = await import('../chat')
     const { usePromptSessions } = await import('../promptSessions')
@@ -1177,30 +1397,11 @@ describe('chat.ts chain continuation (PRD 775)', () => {
 
     await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'new dev work' }))
     await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(1))
-    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(createSpy).not.toHaveBeenCalled()
 
     const root = useChat.getState().get('t1').ticketHistory?.find((t) => t.text === 'new dev work')
-    expect(root?.promptSessionId).toBeTruthy()
-    expect(usePromptSessions.getState().sessions[root!.promptSessionId!]).toBeDefined()
-
-    useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off 2' })
-    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
-    useChat.getState().send({
-      tabId: 't1',
-      sessionId: 's1',
-      cwd: '/proj',
-      prompt: 'continue dev work',
-      chainRootId: root!.id,
-    })
-    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with kickoff 2' })
-
-    await vi.waitFor(() => expect(classifyTicket).toHaveBeenCalledWith({ text: 'continue dev work' }))
-    await vi.waitFor(() => expect(createPrd).toHaveBeenCalledTimes(2))
-
-    // Still exactly one PromptSession minted overall — the continuation
-    // reused the root's, it did not mint a second one.
-    expect(createSpy).toHaveBeenCalledTimes(1)
-    expect(createPrd.mock.calls[1][0]).toMatchObject({ sourcePromptId: root!.promptSessionId })
+    expect(root?.promptSessionId).toBe('t1')
+    expect(createPrd.mock.calls[0][0]).toMatchObject({ sourcePromptId: 't1' })
   })
 })
 

@@ -182,9 +182,13 @@ function withPathLock(lockPath, task) {
  *
  * `status` defaults to 'proposed' — a fail-safe default so any caller that
  * forgets to pass it files an Epic that waits for human approval rather than
- * one that starts running immediately. Pass 'active' explicitly only for the
- * one legitimate immediate-start path (the New Epic UI's own proposed→active
- * transition, `promptSessions.ts`'s `approveProposed`).
+ * one that starts running immediately. Every Epic is BORN 'proposed' — the
+ * mint branch below ignores/rejects any other requested status; it is
+ * fail-closed, mirroring opsOwnership.cjs's assertOpsWrite. Activation
+ * ('proposed' → 'active') happens exactly once, entirely in the renderer
+ * store's `approveProposed` (`state/promptSessions.ts`) — that code path
+ * never calls ensureEpic(). Joining an already-'active' Epic (this function's
+ * join branches, above the mint branch) remains legal and unchanged.
  *
  * `mintIfMissing` defaults to true for the small set of callers that are
  * themselves the human-intent gate (propose-epic, the RCA hook, the feedback
@@ -223,6 +227,12 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
         return { epicId: explicitEpicId, prdDir, created: false };
       }
       console.warn(`[epicMint] ensureEpic: explicit epicId ${explicitEpicId} exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join, falling through`);
+      appendAuditEvent('epic_mint_refused', {
+        cwd,
+        epicId: explicitEpicId,
+        status,
+        reason: `explicit epicId exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join, falling through to mint`,
+      });
     }
 
     if (reuseByGoal) {
@@ -251,11 +261,11 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
     }
 
     if (!mintIfMissing) {
-      throw new Error(
-        `ensureEpic: no existing Epic found (epicId=${explicitEpicId ?? 'none'}) and mintIfMissing is false — `
-        + 'a new Epic can only be created by explicit human intent (New Epic UI, or /propose-epic + Approve & start), '
-        + 'never implicitly by a PRD-authoring path',
-      );
+      const reason = 'no existing Epic found and mintIfMissing is false — a new Epic can only be created by '
+        + 'explicit human intent (New Epic UI, or /propose-epic + Approve & start), never implicitly by a '
+        + 'PRD-authoring path';
+      appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason });
+      throw new Error(`ensureEpic: ${reason} (epicId=${explicitEpicId ?? 'none'})`);
     }
 
     if (!forceNewEpic) {
@@ -265,6 +275,20 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
         fs.mkdirSync(prdDir, { recursive: true });
         return { epicId: joinable.epicId, prdDir, created: false };
       }
+    }
+
+    // BORN-PROPOSED LAW (fail-closed, mirrors opsOwnership.cjs's
+    // assertOpsWrite): a mint always writes 'proposed', regardless of what
+    // status the caller requested. A caller explicitly asking to mint
+    // 'active' is refused outright rather than silently downgraded — that
+    // shape (mint + already-active) should never occur, so it is treated as
+    // a bug in the caller, not a normal fallback path.
+    if (status !== 'proposed') {
+      const reason = `ensureEpic: refusing to mint a new Epic with status '${status}' — every Epic is born `
+        + "'proposed' (CLAUDE.md domain model); activation happens only via the renderer store's "
+        + 'approveProposed, never through ensureEpic()';
+      appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason });
+      throw new Error(reason);
     }
 
     const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;

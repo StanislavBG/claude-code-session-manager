@@ -71,6 +71,7 @@ export default defineConfig({
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',
       'scripts/__tests__/active-sessions.test.cjs',
+      'scripts/__tests__/propose-epic.test.cjs',
     ],
     globals: true,
   },

@@ -200,6 +200,116 @@ test('findJoinableEpic falls through to the similarity check when preferEpicId p
   expect(joined).toEqual({ epicId: sibling.epicId, matchedBy: 'similarity', score: expect.any(Number) });
 });
 
+test('ensureEpic mints with status "proposed" by default', async () => {
+  const cwd = await mkCwd();
+
+  const minted = await ensureEpic(cwd, { goalText: 'default status epic' });
+
+  const index = readActiveIndex(cwd);
+  expect(index.sessions[minted.epicId].status).toBe('proposed');
+});
+
+test('ensureEpic throws when a mint is requested with status "active" (born-proposed law), and appends an audit event', async () => {
+  const cwd = await mkCwd();
+  const auditLog = require('../lib/auditLog.cjs');
+
+  await expect(
+    ensureEpic(cwd, { goalText: 'should never mint active', status: 'active' }),
+  ).rejects.toThrow(/born 'proposed'/);
+
+  const index = readActiveIndex(cwd);
+  expect(Object.keys(index.sessions)).toHaveLength(0);
+
+  const records = fs.readFileSync(auditLog.AUDIT_LOG_PATH, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((r) => r.cwd === cwd);
+  expect(records).toHaveLength(1);
+  expect(records[0].kind).toBe('epic_mint_refused');
+  expect(records[0].status).toBe('active');
+});
+
+test('ensureEpic still joins an existing active Epic via preferEpicId even when status:"active" is requested', async () => {
+  const cwd = await mkCwd();
+  const first = await ensureEpic(cwd, { goalText: 'already running epic' });
+  const index = readActiveIndex(cwd);
+  index.sessions[first.epicId].status = 'active';
+  fs.writeFileSync(
+    path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'),
+    JSON.stringify(index, null, 2),
+  );
+
+  const second = await ensureEpic(cwd, { goalText: 'unrelated text', epicId: first.epicId, status: 'active' });
+
+  expect(second.created).toBe(false);
+  expect(second.epicId).toBe(first.epicId);
+});
+
+test('ensureEpic falls through to a "proposed" mint when explicit epicId is archived/completed, never throwing', async () => {
+  const cwd = await mkCwd();
+  const first = await ensureEpic(cwd, { goalText: 'completed epic' });
+  const index = readActiveIndex(cwd);
+  index.sessions[first.epicId].status = 'completed';
+  fs.writeFileSync(
+    path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'),
+    JSON.stringify(index, null, 2),
+  );
+
+  const second = await ensureEpic(cwd, { goalText: 'totally unrelated goal text here', epicId: first.epicId });
+
+  expect(second.created).toBe(true);
+  expect(second.epicId).not.toBe(first.epicId);
+  const after = readActiveIndex(cwd);
+  expect(after.sessions[second.epicId].status).toBe('proposed');
+});
+
+function readAuditRecordsForCwd(auditLog, cwd) {
+  if (!fs.existsSync(auditLog.AUDIT_LOG_PATH)) return [];
+  return fs.readFileSync(auditLog.AUDIT_LOG_PATH, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter((record) => record && record.cwd === cwd);
+}
+
+test('mintIfMissing:false refusal appends an epic_mint_refused audit event', async () => {
+  const cwd = await mkCwd();
+  const auditLog = require('../lib/auditLog.cjs');
+
+  await expect(ensureEpic(cwd, { goalText: 'no epic yet', mintIfMissing: false })).rejects.toThrow();
+
+  const records = readAuditRecordsForCwd(auditLog, cwd);
+  expect(records).toHaveLength(1);
+  expect(records[0].kind).toBe('epic_mint_refused');
+  expect(records[0].cwd).toBe(cwd);
+});
+
+test('not-open explicit-epicId fall-through appends an epic_mint_refused audit event', async () => {
+  const cwd = await mkCwd();
+  const first = await ensureEpic(cwd, { goalText: 'to be completed' });
+  const index = readActiveIndex(cwd);
+  index.sessions[first.epicId].status = 'completed';
+  fs.writeFileSync(
+    path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'),
+    JSON.stringify(index, null, 2),
+  );
+  const auditLog = require('../lib/auditLog.cjs');
+
+  await ensureEpic(cwd, { goalText: 'unrelated fresh goal xyz', epicId: first.epicId });
+
+  const records = readAuditRecordsForCwd(auditLog, cwd);
+  const refusal = records.find((r) => r.kind === 'epic_mint_refused');
+  expect(refusal).toBeDefined();
+  expect(refusal.epicId).toBe(first.epicId);
+});
+
 test('ensureEpic with forceNewEpic:true mints even when a near-identical open Epic exists', async () => {
   const cwd = await mkCwd();
 

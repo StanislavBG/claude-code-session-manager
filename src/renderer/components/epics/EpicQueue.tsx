@@ -16,12 +16,12 @@ import { useSessions } from '../../state/sessions'
 import { useChat } from '../../state/chat'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { toast } from '../../state/toast'
-import { splitTitleAndGoal } from './EpicDetail'
 import {
   epicDisplayStatus,
   epicPrds,
   epicQueuedDetail,
   epicStats,
+  splitTitleAndGoal,
   type EpicDisplayStatus,
   type EpicSnapshots,
 } from '../../lib/epicDerive'

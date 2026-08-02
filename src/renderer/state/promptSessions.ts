@@ -3,6 +3,8 @@ import { useChat } from './chat'
 import { useScheduleState } from './scheduleState'
 import { useEpicTerminal } from './epicTerminal'
 import { epicIdCandidates } from '../lib/epicProvenance'
+import { splitTitleAndGoal } from '../lib/epicDerive'
+import { toast } from './toast'
 
 /**
  * A top-level goal-oriented prompt, promoted to its own independent Claude
@@ -147,6 +149,18 @@ function compareEventsChainAware(a: PromptSessionEvent, b: PromptSessionEvent): 
 interface PromptSessionsState {
   sessions: Record<string, PromptSession>
   events: Record<string, PromptSessionEvent[]>
+  /** The Epic id currently open in the detail pane, kept in sync by
+   *  EpicsWorkspace on every selection change (null when none is open).
+   *  mergeAppendedEvent reads this to decide whether a landed 'response'
+   *  event needs a toast — an Epic the user is already looking at doesn't,
+   *  since its Discussion timeline already shows the event live. A single
+   *  global slot assumes only one EpicsWorkspace instance is ever mounted
+   *  at a time (true today — its two mount sites, TerminalStage's singleton
+   *  and Terminal.tsx's per-dormant-tab mount, are mutually exclusive at
+   *  runtime); if a future feature mounts two concurrently, this needs to
+   *  become per-instance state instead of clobbering across them. */
+  focusedEpicId: string | null
+  setFocusedEpicId: (promptSessionId: string | null) => void
   /** `status` defaults to 'active'. Pass 'proposed' to file an Epic that is
    *  NOT started — nothing runs until approveProposed() is called. */
   createPromptSession: (
@@ -289,6 +303,8 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
 export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   sessions: {},
   events: {},
+  focusedEpicId: null,
+  setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
   createPromptSession: (cwd, goalText, tag, status = 'active') => {
     const now = new Date().toISOString()
     const session: PromptSession = {
@@ -605,12 +621,30 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const session = get().sessions[promptSessionId]
     if (!session || session.cwd !== cwd) return
     const existing = get().events[promptSessionId] ?? []
+    // Dedup guard doubles as the "genuinely new, not a reload" check below —
+    // a re-hydrate/re-broadcast of an event this store already has never
+    // reaches the toast call past this early return.
     if (existing.some((e) => e.id === event.id)) return
     const events = {
       ...get().events,
       [promptSessionId]: [...existing, event].sort(compareEventsChainAware),
     }
     set({ events })
+    // A PRD-completion notification landing on an Epic the user isn't
+    // currently looking at is otherwise only discoverable by scrolling into
+    // that Epic's own Discussion timeline — surface it via toast instead.
+    if (event.kind === 'response' && promptSessionId !== get().focusedEpicId) {
+      const { title } = splitTitleAndGoal(session.goalText)
+      // Matches the one template notifyOriginatingTab's appendResponseEvent
+      // call currently sends (`PRD ${slug} finished: ${status}. Check
+      // Scheduler for details.`, src/main/scheduler.cjs's notifyOriginatingTab)
+      // — keep this in sync if that message copy changes. Falls back
+      // gracefully to a generic summary for any other 'response' text (e.g.
+      // a future producer) rather than showing a broken toast.
+      const slugMatch = event.text ? /^PRD (\S+) finished/.exec(event.text) : null
+      const summary = slugMatch ? `PRD ${slugMatch[1]} finished` : 'Epic updated'
+      toast.info(`${summary} — ${title}`)
+    }
   },
 }))
 

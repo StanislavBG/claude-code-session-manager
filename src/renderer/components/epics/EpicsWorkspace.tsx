@@ -51,6 +51,16 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const { rows, enriched } = useKnownProjects()
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Mirrors the open Epic into the store so mergeAppendedEvent (main-process
+  // 'response' events landing via IPC) can tell whether the user is already
+  // looking at the Epic a PRD just reported back to, and skip the toast if
+  // so. Cleared on unmount so a torn-down workspace mount (this component
+  // has more than one possible mount site — see the doc comment above)
+  // never leaves a stale focus id blocking a toast for the other one.
+  useEffect(() => {
+    usePromptSessions.getState().setFocusedEpicId(selectedId)
+    return () => usePromptSessions.getState().setFocusedEpicId(null)
+  }, [selectedId])
   const [showNewEpic, setShowNewEpic] = useState(false)
   const prds = useScheduledPrds()
   // Reply-context quote (Turn's hover "Quote" button -> EpicComposer's

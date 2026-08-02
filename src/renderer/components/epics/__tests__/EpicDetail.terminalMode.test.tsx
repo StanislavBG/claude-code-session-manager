@@ -229,4 +229,27 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
       ),
     )
   })
+
+  it('renders a response event\'s markdown as formatted output, not literal asterisks/backticks', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const firstEvent = usePromptSessions.getState().events[session.id][0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: firstEvent.id,
+      text: 'PRD 999-fake finished: **completed** with `npm test` green.',
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const textEl = el.querySelector('[data-testid="epic-response-event-text"]') as HTMLElement
+    expect(textEl).not.toBeNull()
+    expect(textEl.innerHTML).toContain('<strong>completed</strong>')
+    expect(textEl.innerHTML).toContain('<code>npm test</code>')
+    expect(textEl.textContent).not.toContain('**')
+    expect(textEl.textContent).not.toContain('`npm test`')
+  })
 })

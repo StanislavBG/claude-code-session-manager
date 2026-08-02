@@ -4,7 +4,7 @@ import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
-import { epicDisplayStatus, epicPrds, epicStats, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
+import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
@@ -14,6 +14,7 @@ import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
 import { formatAgo, formatDuration, formatTimingLabel } from '../../lib/formatTime'
+import { renderChatMarkdown } from '../../lib/renderChatMarkdown'
 import { toast } from '../../state/toast'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { useBranch } from '../../lib/useBranch'
@@ -130,9 +131,28 @@ function ResponseEvent({
     setExpanded((v) => !v)
   }
 
+  const displayText = expanded && fullText ? fullText : (event.text ?? '')
+
   return (
     <div data-testid="epic-response-event" className="break-words text-center text-[11px] text-fg-faint">
-      <span>— {expanded && fullText ? fullText : event.text} —</span>
+      <span aria-hidden="true">— </span>
+      {/* Reuses the same renderChatMarkdown() the Discussion timeline's chat
+       *  Turn bubbles render through (ChatTranscriptTurn.tsx) so a PRD result
+       *  containing markdown (bold, code, lists) formats instead of showing
+       *  literal asterisks/backticks. marked can emit any of <p>/<ul>/<ol>/
+       *  <pre>/<blockquote>/<h1-6>/<table> depending on the source text —
+       *  the blanket `[&_*]:inline [&_*]:m-0` override forces every one of
+       *  them inline with no margin so this stays a single-line, centered
+       *  '— ... —' event even for markdown well beyond a stray paragraph,
+       *  rather than only guarding the one <p> case a hand-picked selector
+       *  list would miss. */}
+      <span
+        data-testid="epic-response-event-text"
+        className="prose-chat inline [&_*]:m-0 [&_*]:inline"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: renderChatMarkdown(displayText) }}
+      />
+      <span aria-hidden="true"> —</span>
       {truncated && (
         <button
           type="button"
@@ -292,16 +312,6 @@ function RunCard({ job }: { job: ScheduleJob }) {
       )}
     </div>
   )
-}
-
-/** NewEpicCard.tsx writes goalText as `${title}\n\n${goal}` (no separate
- *  title field on PromptSession) — split back apart for the header's h1 +
- *  goal paragraph. Older/Epics with no blank-line separator render the
- *  whole text as the title with no goal paragraph. */
-export function splitTitleAndGoal(goalText: string): { title: string; goal: string } {
-  const idx = goalText.indexOf('\n\n')
-  if (idx === -1) return { title: goalText, goal: '' }
-  return { title: goalText.slice(0, idx), goal: goalText.slice(idx + 2) }
 }
 
 /** Latest activity timestamp across the Epic's audit events + chat turns,

@@ -609,6 +609,80 @@ describe('promptSessions.ts', () => {
     expect(events.filter((e) => e.id === optimistic.id)).toHaveLength(1)
   })
 
+  it('mergeAppendedEvent toasts a response event for an Epic that is not currently focused', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useToast } = await import('../toast')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature\n\nMake it fast')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+    store.setFocusedEpicId('some-other-epic')
+
+    store.mergeAppendedEvent(session.cwd, session.id, {
+      id: 'pevt-response-1',
+      promptSessionId: session.id,
+      kind: 'response',
+      causedByEventId: promptEvent.id,
+      at: new Date(Date.parse(promptEvent.at) + 60_000).toISOString(),
+      text: 'PRD 900-ship-the-feature finished: completed. Check Scheduler for details.',
+    })
+
+    const toasts = useToast.getState().toasts
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0].kind).toBe('info')
+    expect(toasts[0].message).toContain('PRD 900-ship-the-feature finished')
+    expect(toasts[0].message).toContain('Ship the feature')
+  })
+
+  it('mergeAppendedEvent does not toast for the Epic the user is currently focused on', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useToast } = await import('../toast')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+    store.setFocusedEpicId(session.id)
+
+    store.mergeAppendedEvent(session.cwd, session.id, {
+      id: 'pevt-response-1',
+      promptSessionId: session.id,
+      kind: 'response',
+      causedByEventId: promptEvent.id,
+      at: new Date(Date.parse(promptEvent.at) + 60_000).toISOString(),
+      text: 'PRD 900-ship-the-feature finished: completed. Check Scheduler for details.',
+    })
+
+    expect(useToast.getState().toasts).toHaveLength(0)
+  })
+
+  it('mergeAppendedEvent does not re-toast on a duplicate merge of an already-known event (reload/re-hydration)', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { useToast } = await import('../toast')
+    const store = usePromptSessions.getState()
+
+    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const promptEvent = usePromptSessions.getState().events[session.id][0]
+    store.setFocusedEpicId(null)
+
+    const responseEvent = {
+      id: 'pevt-response-1',
+      promptSessionId: session.id,
+      kind: 'response' as const,
+      causedByEventId: promptEvent.id,
+      at: new Date(Date.parse(promptEvent.at) + 60_000).toISOString(),
+      text: 'PRD 900-ship-the-feature finished: completed. Check Scheduler for details.',
+    }
+    store.mergeAppendedEvent(session.cwd, session.id, responseEvent)
+    // Simulate a reload re-delivering the same event (e.g. hydrate + a
+    // duplicate broadcast) — must not spam a second toast for it.
+    store.mergeAppendedEvent(session.cwd, session.id, { ...responseEvent })
+
+    expect(useToast.getState().toasts).toHaveLength(1)
+  })
+
   it('mergeAppendedEvent silently ignores a broadcast for a session never hydrated into this store', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')

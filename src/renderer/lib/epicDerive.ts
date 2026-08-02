@@ -24,6 +24,17 @@ export interface EpicSnapshots {
 
 export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'proposed' | 'active'
 
+/** NewEpicCard.tsx writes goalText as `${title}\n\n${goal}` (no separate
+ *  title field on PromptSession) — split back apart for the header's h1 +
+ *  goal paragraph, and for any other surface (e.g. a toast) that needs an
+ *  Epic's display title. Older Epics with no blank-line separator render the
+ *  whole text as the title with no goal paragraph. */
+export function splitTitleAndGoal(goalText: string): { title: string; goal: string } {
+  const idx = goalText.indexOf('\n\n')
+  if (idx === -1) return { title: goalText, goal: '' }
+  return { title: goalText.slice(0, idx), goal: goalText.slice(idx + 2) }
+}
+
 /**
  * Derived Epic-level status per the design spec's status vocabulary. Order
  * matters: completed (archived) and needs-you (a stalled question) both take

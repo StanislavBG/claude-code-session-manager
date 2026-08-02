@@ -9,10 +9,12 @@ import type { NavFace } from './navFace'
  * one group here, so the sidebar section and the page eyebrow can never
  * disagree.
  *
- * `NavKey`s that render their own chrome and have no sidebar row (overview,
- * terminal, browser, projects, editor) are intentionally absent. `overview`
- * (the machine-wide Home) is reached only via the fixed TabBar home chip, not
- * a sidebar row — `project-home` (the per-project Brief) took its row.
+ * `NavKey`s that render their own chrome and have no sidebar row (`editor`)
+ * are intentionally absent. `overview` (the machine-wide Dashboard) IS a
+ * sidebar row now, home-face-only, labeled "Dashboard" to stay distinct from
+ * `project-home` ("Project Home", the per-project Brief, project-face-only)
+ * — the two used to share the label "Home", which was confusing since they
+ * are different screens reachable from different tab faces.
  */
 export type NavGroupLabel = 'Workspace' | 'Configure' | 'Tools'
 
@@ -33,8 +35,9 @@ const BOTH: NavFace[] = ['home', 'project']
 
 export const NAV_ITEMS: NavGroupItem[] = [
   // Workspace
-  { key: 'project-home', group: 'Workspace', label: 'Home',     icon: 'home',         hint: 'What this project is, and what is in flight', faces: PROJECT },
-  { key: 'terminal',   group: 'Workspace', label: 'Epics',      icon: 'terminal',     hint: 'Independent goal-scoped Epics, grouped by project', faces: BOTH },
+  { key: 'overview',     group: 'Workspace', label: 'Dashboard', icon: 'home',        hint: 'This machine — every project, every active session', faces: HOME },
+  { key: 'project-home', group: 'Workspace', label: 'Project Home', icon: 'home',     hint: 'What this project is, and what is in flight', faces: PROJECT },
+  { key: 'terminal',   group: 'Workspace', label: 'Epics',      icon: 'terminal',     hint: 'Independent goal-scoped Epics for this project', faces: PROJECT },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences', faces: HOME },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
   { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs', faces: BOTH },

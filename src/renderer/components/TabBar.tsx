@@ -87,9 +87,9 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
         title="This machine — home"
         aria-current={machineHomeActive ? 'true' : undefined}
         data-testid="tabbar-machine-home"
-        className={`flex items-center gap-2 px-3.5 pt-1.5 pb-2 rounded-t-[10px] text-[13px] shrink-0 transition-colors ${
+        className={`flex items-center gap-2 px-3.5 py-1.5 mb-1 rounded-full text-[13px] shrink-0 transition-colors ${
           machineHomeActive
-            ? 'bg-bg text-fg font-medium relative z-10 -mb-px shadow-[inset_0_2px_0_theme(colors.accent.DEFAULT)]'
+            ? 'bg-accent text-bg font-semibold shadow-sm'
             : 'text-fg-dim hover:text-fg hover:bg-bg-hi/40'
         }`}
       >
@@ -114,7 +114,7 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
                 isDragging ? '' : 'cursor-grab'
               } ${
                 active
-                  ? 'bg-bg text-fg font-medium relative z-10 -mb-px border border-b-0 border-line'
+                  ? 'bg-bg text-fg font-medium relative z-10 -mb-px border border-accent shadow-[inset_0_2px_0_theme(colors.accent.DEFAULT)]'
                   : 'text-fg-dim hover:text-fg hover:bg-bg-hi/40'
               }`}
               title={t.cwd}

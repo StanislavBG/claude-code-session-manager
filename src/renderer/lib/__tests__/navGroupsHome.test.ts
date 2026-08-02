@@ -5,22 +5,23 @@ import type { NavFace } from '../navFace'
 const VALID_FACES: NavFace[] = ['home', 'project']
 
 describe('navGroups Home swap', () => {
-  it('first Workspace item is project-home labeled Home', () => {
+  it('first Workspace item is overview labeled Dashboard', () => {
     const workspace = NAV_ITEMS.filter((item) => item.group === 'Workspace')
-    expect(workspace[0]?.key).toBe('project-home')
-    expect(workspace[0]?.label).toBe('Home')
+    expect(workspace[0]?.key).toBe('overview')
+    expect(workspace[0]?.label).toBe('Dashboard')
   })
 
-  it('no NAV_ITEMS entry has key overview', () => {
-    expect(NAV_ITEMS.some((item) => item.key === 'overview')).toBe(false)
+  it('project-home is labeled Project Home', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'project-home')
+    expect(item?.label).toBe('Project Home')
   })
 })
 
 describe('getNavItemsForFace', () => {
-  const HOME_ONLY = ['browser', 'plugins', 'keybindings', 'remote', 'sm-config', 'voice']
-  const PROJECT_ONLY = ['project-home', 'repoviz', 'search', 'memory']
+  const HOME_ONLY = ['overview', 'browser', 'plugins', 'keybindings', 'remote', 'sm-config', 'voice']
+  const PROJECT_ONLY = ['project-home', 'repoviz', 'search', 'memory', 'terminal']
   const BOTH = [
-    'terminal', 'scheduler', 'history', 'system-prompt', 'skills', 'mcp', 'hooks',
+    'scheduler', 'history', 'system-prompt', 'skills', 'mcp', 'hooks',
     'permissions', 'settings', 'projects',
   ]
 
@@ -39,6 +40,23 @@ describe('getNavItemsForFace', () => {
     const allKeysInOrder = NAV_ITEMS.map((item) => item.key)
     const expected = allKeysInOrder.filter((k) => homeKeys.includes(k))
     expect(homeKeys).toEqual(expected)
+  })
+})
+
+describe('overview (Dashboard) is home-only', () => {
+  it('NAV_ITEMS tags overview with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'overview')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes overview', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('overview')
+  })
+
+  it('home face includes overview', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('overview')
   })
 })
 
@@ -126,6 +144,23 @@ describe('projects (File Explorer) is a BOTH-face screen', () => {
   it('project face includes projects', () => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
     expect(keys).toContain('projects')
+  })
+})
+
+describe('terminal (Epics) is project-only', () => {
+  it('NAV_ITEMS tags terminal with faces: [project]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'terminal')
+    expect(item?.faces).toEqual(['project'])
+  })
+
+  it('home face excludes terminal', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).not.toContain('terminal')
+  })
+
+  it('project face includes terminal', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).toContain('terminal')
   })
 })
 

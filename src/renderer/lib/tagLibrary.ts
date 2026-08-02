@@ -16,6 +16,16 @@ export interface TagLibraryEntry {
   label: string
   description: string
   developEagerness: DevelopEagerness
+  /**
+   * Which skill/protocol actually fires for this tag — `developEagerness`
+   * only says how eagerly, not which mechanism. Only `feature`/`bug`/
+   * `discussion` route through the `session-manager-dev:develop` skill
+   * itself; the other three each name a dedicated, different skill/protocol
+   * and never decompose via /develop's own PRD pipeline (project-home-builder
+   * falls back to /develop only as a one-time bootstrap if its own pipeline
+   * doesn't exist yet — see agentTagDefs.ts's template for that tag).
+   */
+  developsVia: string
 }
 
 export const TAG_LIBRARY: TagLibraryEntry[] = [
@@ -25,6 +35,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     description:
       'The tag also sets how eagerly /develop should fire inside that Epic\'s session — see the session-manager-dev:develop skill\'s "Tag-aware default": feature/bug treat PRD decomposition as the expected next step.',
     developEagerness: 'expected-default',
+    developsVia: '/develop',
   },
   {
     tag: 'bug',
@@ -32,6 +43,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     description:
       'The tag also sets how eagerly /develop should fire inside that Epic\'s session — see the session-manager-dev:develop skill\'s "Tag-aware default": feature/bug treat PRD decomposition as the expected next step.',
     developEagerness: 'expected-default',
+    developsVia: '/develop',
   },
   {
     tag: 'discussion',
@@ -39,6 +51,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     description:
       'discussion keeps /develop available but never assumed until whether-to-build is actually settled.',
     developEagerness: 'available-not-assumed',
+    developsVia: '/develop',
   },
   {
     tag: 'build',
@@ -46,6 +59,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     description:
       "A build Epic's whole point is to run the Builder skill — decomposition into PRDs (or a direct build run) is the expected next step, the same as feature/bug.",
     developEagerness: 'expected-default',
+    developsVia: '/builder (not /develop)',
   },
   {
     tag: 'project-home-builder',
@@ -53,6 +67,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     description:
       'Generates a project\'s 3 static Project Page HTML files via the project-home-builder local agent — see session-manager-operations/architecture/project-pages-pipeline.md. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
+    developsVia: 'project-home-builder agent protocol (falls back to /develop only if that pipeline doesn\'t exist yet)',
   },
   {
     tag: 'bilko-host-publisher',
@@ -60,6 +75,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     description:
       'Publishes this project\'s generated Marketing Project Page to bilko.run via the bilko-host MCP\'s gated static-path publish pipeline — see session-manager-operations/architecture/bilko-host-integration.md. Running the publish sequence is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
+    developsVia: 'bilko-host-publisher agent protocol (not /develop)',
   },
 ]
 

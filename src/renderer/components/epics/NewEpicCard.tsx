@@ -9,6 +9,7 @@ import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
+import { tagLibraryEntry } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import type { AgentPersona } from '../../../preload/api'
 
@@ -463,6 +464,15 @@ export function NewEpicCard({
               </div>
               <div className="mt-1 text-sm font-semibold text-fg">{title || 'Untitled Epic'}</div>
               <div className="mt-0.5 text-[12.5px] leading-[1.5] text-fg-dim">{goal || selectedTagMission}</div>
+              {/* Agent has no effect on /develop today — only the Mission tag does
+                  (tagLibrary.ts's developEagerness/developsVia). Stated here,
+                  explicitly, so it's obvious at Epic-creation time rather than only
+                  discoverable in the separate Tag Library nav tab. */}
+              <div className="mt-1.5 border-t border-rule pt-1.5 font-mono text-[11px] text-fg-faint">
+                /develop: <span className="text-fg-dim">{tagLibraryEntry(tag).developsVia}</span>
+                {' · '}
+                {tagLibraryEntry(tag).developEagerness}
+              </div>
             </div>
 
             {/* Context Injections — Session-Manager-authored text, independent

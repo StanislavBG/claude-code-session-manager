@@ -175,6 +175,12 @@ function TagLibraryDetail({
         </span>
       </div>
       <div>
+        <div className="text-[10.5px] uppercase tracking-wide text-fg-faint mb-1.5 font-mono">develops via</div>
+        <span className="px-1.5 py-0.5 text-[10px] rounded border border-line text-fg-dim font-mono">
+          {entry.developsVia}
+        </span>
+      </div>
+      <div>
         <div className="text-[10.5px] uppercase tracking-wide text-fg-faint mb-1.5 font-mono">agents carrying this tag</div>
         {personas === null ? (
           <div className="text-xs text-fg-faint italic">loading…</div>

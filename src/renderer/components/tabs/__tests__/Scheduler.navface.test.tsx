@@ -112,7 +112,7 @@ describe('Scheduler Home face — Scheduler Configs', () => {
 })
 
 describe('Scheduler Project face — Epic\'s Execution Queue', () => {
-  it('renders the PRD queue workflow with the scope toggle defaulted to project', async () => {
+  it('renders the PRD queue workflow force-scoped to the active project, with no scope toggle at all', async () => {
     const el = await mount()
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
@@ -120,36 +120,9 @@ describe('Scheduler Project face — Epic\'s Execution Queue', () => {
       await Promise.resolve()
     })
     expect(el.textContent).toContain("Epic's Execution Queue")
-    const allBtn = el.querySelector('[data-testid="scheduler-scope-all"]') as HTMLButtonElement
-    const projectBtn = el.querySelector('[data-testid="scheduler-scope-project"]') as HTMLButtonElement
-    expect(projectBtn.className).toContain('border-accent/60')
-    expect(allBtn.className).not.toContain('border-accent/60')
-  })
-
-  it('a manual scope toggle survives a re-render at the same navFace', async () => {
-    const el = await mount()
-    await act(async () => {
-      useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
-      useLayout.setState({ navFace: 'project' })
-      await Promise.resolve()
-    })
-    const allBtn = el.querySelector('[data-testid="scheduler-scope-all"]') as HTMLButtonElement
-    const projectBtn = el.querySelector('[data-testid="scheduler-scope-project"]') as HTMLButtonElement
-    expect(projectBtn.className).toContain('border-accent/60')
-
-    await act(async () => {
-      allBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
-    })
-    expect(allBtn.className).toContain('border-accent/60')
-    expect(projectBtn.className).not.toContain('border-accent/60')
-
-    // A re-render at the SAME navFace ('project') must not reset the manual choice.
-    await act(async () => {
-      useSessions.setState({ tabs: [{ ...ALPHA_TAB }], activeTabId: ALPHA_TAB.id })
-      await Promise.resolve()
-    })
-    expect(allBtn.className).toContain('border-accent/60')
+    // No escape hatch — the toggle buttons don't exist at all on Project face.
+    expect(el.querySelector('[data-testid="scheduler-scope-all"]')).toBeNull()
+    expect(el.querySelector('[data-testid="scheduler-scope-project"]')).toBeNull()
   })
 
   it('leaving the Project face and returning to Home swaps back to Scheduler Configs', async () => {

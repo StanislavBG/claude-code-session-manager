@@ -51,24 +51,27 @@ export function HistoryDashboard() {
   const [measure, setMeasure] = useState<Measure>(loadMeasure)
   const [range, setRange] = useState<RangeDays>(loadRange)
 
-  // The project facet defaults from the NavFace (leftnav-two-face-framework):
-  // Home face -> all projects (unchanged default), Project face -> the active
-  // tab's cwd isolated. Mirrors Scheduler's manuallyTouchedRef +
-  // prevNavFaceRef pattern so the default only re-applies on an actual face
-  // transition, never on a same-face re-render, and never once the user has
-  // manually changed the filter since the last transition. `keep`'s initial
-  // value is seeded from the NavFace too, so mounting directly on the
-  // project face (not just transitioning into it) isolates immediately.
+  // The Project face is FORCE-scoped to the active tab's project — no
+  // manual override, no escape hatch (matches Scheduler's Project-face
+  // scoping). `homeKeep` is the free-form multi-project filter state used
+  // ONLY on the Home face (toggle/isolate/showAll below); `keep` derives
+  // from it there, but on the Project face `keep` is always exactly
+  // `{activeCwd}`, recomputed every render — a prior manual filter set
+  // while on Home face must never leak through a transition into Project
+  // face. Transitioning back to Home resets `homeKeep` to "all" rather than
+  // resurrecting whatever was filtered before leaving, since there's no
+  // longer any way to have "manually touched" the filter while away.
   const navFace = useLayout((s) => s.navFace)
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
-  const manuallyTouchedRef = useRef(false)
   const prevNavFaceRef = useRef(navFace)
 
-  const [keep, setKeep] = useState<Set<string> | null>(() => (
-    navFace === 'project' && activeCwd ? new Set([activeCwd]) : null
-  ))
+  const [homeKeep, setHomeKeep] = useState<Set<string> | null>(null)
+  const keep = useMemo(
+    () => (navFace === 'project' && activeCwd ? new Set([activeCwd]) : homeKeep),
+    [navFace, activeCwd, homeKeep],
+  )
   const [selected, setSelected] = useState<string | null>(null)
   const [raw, setRaw] = useState<HistoryDashboardResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -91,29 +94,25 @@ export function HistoryDashboard() {
     return () => { cancelled = true }
   }, [range, tick])
 
-  // Reset facet + selection when the range changes so a stale project key from
-  // a prior range doesn't linger in `keep`. Skips the initial mount so it
-  // doesn't clobber the NavFace-seeded initial value above.
+  // Reset the Home-face facet + selection when the range changes so a stale
+  // project key from a prior range doesn't linger in `homeKeep`. Skips the
+  // initial mount so it doesn't clobber the NavFace-seeded initial value
+  // above. Project face's `keep` is derived, not stateful — nothing to reset.
   const rangeMountedRef = useRef(false)
   useEffect(() => {
     if (!rangeMountedRef.current) { rangeMountedRef.current = true; return }
-    setKeep(null)
+    setHomeKeep(null)
     setSelected(null)
   }, [range])
 
+  // Transitioning back to Home always resets to "show all" — there's no
+  // manual-touch state to preserve, since the Project face (the only place
+  // you could have come from) offers no filter UI to have touched.
   useEffect(() => {
     if (prevNavFaceRef.current === navFace) return
     prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    if (navFace === 'project' && activeCwd) {
-      isolateProject(activeCwd)
-    } else if (navFace === 'home') {
-      showAll()
-    }
-  }, [navFace, activeCwd])
+    if (navFace === 'home') setHomeKeep(null)
+  }, [navFace])
 
   const facet = useMemo(() => (raw ? facetSlice(raw, keep) : null), [raw, keep])
 
@@ -174,8 +173,10 @@ export function HistoryDashboard() {
     if (selected && keep !== null && !keep.has(selected)) setSelected(null)
   }, [selected, keep])
 
+  // Only reachable via ProjectFacet below, which only renders on the Home
+  // face — these mutate homeKeep, never the Project face's forced `keep`.
   function toggleProject(projectDir: string) {
-    setKeep((prev) => {
+    setHomeKeep((prev) => {
       const all = new Set(allProjectRows.map((r) => r.projectDir))
       const cur = prev ?? new Set(all)
       const next = new Set(cur)
@@ -185,10 +186,10 @@ export function HistoryDashboard() {
     })
   }
   function isolateProject(projectDir: string) {
-    setKeep(new Set([projectDir]))
+    setHomeKeep(new Set([projectDir]))
   }
   function showAll() {
-    setKeep(null)
+    setHomeKeep(null)
   }
 
   function handleExport() {
@@ -255,13 +256,19 @@ export function HistoryDashboard() {
           totalSessions={facet.totals.sessionCount}
         />
         <BudgetStrip days={raw.days} />
-        <ProjectFacet
-          chips={allProjectRows.map((r) => ({ projectDir: r.projectDir, value: r.value }))}
-          keep={keep}
-          onToggle={(projectDir) => { manuallyTouchedRef.current = true; toggleProject(projectDir) }}
-          onIsolate={(projectDir) => { manuallyTouchedRef.current = true; isolateProject(projectDir) }}
-          onShowAll={() => { manuallyTouchedRef.current = true; showAll() }}
-        />
+        {/* Project face is force-scoped to the active project (see `keep`
+            above) — nothing to facet with only one project ever shown, and
+            no escape hatch to peek at others. Home face keeps the full
+            multi-project filter. */}
+        {navFace === 'home' && (
+          <ProjectFacet
+            chips={allProjectRows.map((r) => ({ projectDir: r.projectDir, value: r.value }))}
+            keep={keep}
+            onToggle={toggleProject}
+            onIsolate={isolateProject}
+            onShowAll={showAll}
+          />
+        )}
         <StackedTrend days={stackedDays} measure={measure} selected={selected} onSelect={setSelected} />
         <Ranking rows={projectRows} measure={measure} selected={selected} onSelect={setSelected} />
         {selected && selectedDrill && (

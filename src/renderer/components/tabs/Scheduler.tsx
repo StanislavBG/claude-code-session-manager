@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { usePromptSessions } from '../../state/promptSessions'
 import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
@@ -37,9 +37,11 @@ import type { NavKey } from '../LeftNav'
  *       • PRDs    — AUTHOR: edit the .md source (structured frontmatter form +
  *         body editor, lint, archive/retag) — the old "Plans"
  *       • History — last 50 completed/failed jobs with project + date-range filters
- *     Still has its own project/all scope toggle (an explicit machine-wide
- *     escape hatch to peek at other projects' queues) — that toggle only
- *     exists here now, since Home face never shows PRDs at all.
+ *     FORCE-scoped to the active tab's project — scopeCwd derives directly
+ *     from activeCwd every render, no stored scope state, so there is no
+ *     "All projects" escape hatch and no way for it to leak in via a stale
+ *     manual choice across a face transition (matches HistoryDashboard's
+ *     Project-face scoping). To see another project's queue, switch tabs.
  */
 
 type SubView = 'queue' | 'prds' | 'history'
@@ -230,53 +232,26 @@ export function Scheduler({ navigate }: SchedulerProps = {}) {
     const stored = localStorage.getItem(LS_KEY)
     return (stored === 'prds' || stored === 'history') ? stored : 'queue'
   })
-  // Scheduler is a BROWSER over TAB → EPIC → PRD (CLAUDE.md domain model):
-  // default to the active tab's project. "All projects" stays as an explicit
-  // machine-wide escape hatch. The default is NavFace-driven (see the
-  // module docstring) — Home face defaults to 'all', Project face to
-  // 'project' — and only re-applies on an actual face transition.
+  // Project face is FORCE-scoped to the active tab's project — no manual
+  // override, no "all projects" escape hatch (matches History's Project-face
+  // scoping). scopeCwd is derived directly from activeCwd every render, not
+  // stored state, so there's nothing that could survive a face transition.
   const navFace = useLayout((s) => s.navFace)
-  const [scope, setScope] = useState<'project' | 'all'>(() => (navFace === 'project' ? 'project' : 'all'))
-  const manuallyTouchedRef = useRef(false)
-  const prevNavFaceRef = useRef(navFace)
-  const handleScopeChange = (next: 'project' | 'all') => {
-    manuallyTouchedRef.current = true
-    setScope(next)
-  }
-  useEffect(() => {
-    if (prevNavFaceRef.current === navFace) return
-    prevNavFaceRef.current = navFace
-    if (manuallyTouchedRef.current) {
-      manuallyTouchedRef.current = false
-      return
-    }
-    setScope(navFace === 'project' ? 'project' : 'all')
-  }, [navFace])
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
-  const scopeCwd = scope === 'project' ? activeCwd : null
+  const scopeCwd = activeCwd
 
   // Epic names shown on Queue/PRD/History rows come from the promptSessions
   // store, which is hydrated lazily per project. Without this, booting
   // straight into Scheduler renders bare epic ids until the user happens to
   // visit Home or Epics. Archived Epics are hydrated too — History rows point
   // at Epics that are, by definition, usually finished.
-  const openCwds = useMemo(() => {
-    const seen: string[] = []
-    for (const t of tabs) {
-      if (t.cwd && !seen.includes(t.cwd)) seen.push(t.cwd)
-    }
-    return seen
-  }, [tabs])
-
   useEffect(() => {
-    const targets = scope === 'project' ? (activeCwd ? [activeCwd] : []) : openCwds
-    for (const cwd of targets) {
-      void usePromptSessions.getState().hydrate(cwd)
-      void usePromptSessions.getState().hydrateArchived(cwd)
-    }
-  }, [scope, activeCwd, openCwds])
+    if (!activeCwd) return
+    void usePromptSessions.getState().hydrate(activeCwd)
+    void usePromptSessions.getState().hydrateArchived(activeCwd)
+  }, [activeCwd])
 
   useEffect(() => {
     localStorage.setItem(LS_KEY, subView)
@@ -337,34 +312,6 @@ export function Scheduler({ navigate }: SchedulerProps = {}) {
 
         <div className="flex items-center gap-3 pb-0">
           <SchedulerSubTabs options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
-          {/* Project scope toggle — Scheduler browses the active TAB's project by default */}
-          <div className="ml-auto flex items-center gap-1 text-[12px]" role="group" aria-label="Scheduler scope">
-            <button
-              type="button"
-              data-testid="scheduler-scope-project"
-              onClick={() => handleScopeChange('project')}
-              className={`px-2.5 py-1 rounded-full border transition-colors ${
-                scope === 'project'
-                  ? 'border-accent/60 bg-accent/10 text-fg font-medium'
-                  : 'border-line text-fg-faint hover:text-fg-dim'
-              }`}
-              title={activeCwd ? `Only ${activeCwd}` : 'No active tab — showing all projects'}
-            >
-              This project
-            </button>
-            <button
-              type="button"
-              data-testid="scheduler-scope-all"
-              onClick={() => handleScopeChange('all')}
-              className={`px-2.5 py-1 rounded-full border transition-colors ${
-                scope === 'all'
-                  ? 'border-accent/60 bg-accent/10 text-fg font-medium'
-                  : 'border-line text-fg-faint hover:text-fg-dim'
-              }`}
-            >
-              All projects
-            </button>
-          </div>
         </div>
 
         {subView === 'queue' && (

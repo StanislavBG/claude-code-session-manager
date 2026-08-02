@@ -61,34 +61,64 @@ afterEach(() => {
   root = null
 })
 
-describe('EpicQueue — Build toolbar action', () => {
-  it('renders a Build button in the header', async () => {
+function openActionsMenu(el: HTMLElement) {
+  const trigger = el.querySelector('[data-testid="epic-queue-actions"]') as HTMLButtonElement
+  act(() => trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  return el.querySelector('[data-testid="epic-queue-row-menu"]') as HTMLDivElement
+}
+
+describe('EpicQueue — Actions toolbar menu', () => {
+  it('renders a single accent "Actions" button in the header, with no other toolbar buttons', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
-    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+    const btn = el.querySelector('[data-testid="epic-queue-actions"]') as HTMLButtonElement
     expect(btn).not.toBeNull()
-    expect(btn.textContent).toContain('Build')
+    expect(btn.textContent).toBe('Actions')
+    expect(btn.className).toContain('bg-accent')
+    expect(el.querySelector('[data-testid="epic-queue-build"]')).toBeNull()
   })
 
-  it('is disabled with a tooltip when resolveBuildTarget returns null', async () => {
+  it('opens a menu with New Epic, Build Project, and Build Project (discuss first)', async () => {
+    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
+    const el = mount(<EpicQueue {...baseProps()} />)
+    await act(async () => {})
+    const menu = openActionsMenu(el)
+    const labels = Array.from(menu.querySelectorAll('button')).map((b) => b.textContent)
+    expect(labels).toEqual(['+ New Epic', 'Build Project', 'Build Project (discuss first)'])
+  })
+
+  it('New Epic item calls onNew', async () => {
+    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
+    const onNew = vi.fn()
+    const el = mount(<EpicQueue {...baseProps()} onNew={onNew} />)
+    await act(async () => {})
+    openActionsMenu(el)
+    const btn = el.querySelector('[data-testid="epic-queue-new"]') as HTMLButtonElement
+    act(() => btn.click())
+    expect(onNew).toHaveBeenCalledTimes(1)
+  })
+
+  it('Build Project item is disabled with a tooltip when resolveBuildTarget returns null', async () => {
     resolveBuildTargetMock.mockResolvedValue(null)
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
+    openActionsMenu(el)
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     expect(btn.title.length).toBeGreaterThan(0)
   })
 
-  it('is enabled once resolveBuildTarget resolves a target, and clicking creates a build-tagged Epic via createPromptSession + approveProposed + chat send, then selects it', async () => {
+  it('is enabled once resolveBuildTarget resolves a target, and clicking Build Project creates a build-tagged Epic via createPromptSession + approveProposed + chat send, then selects it', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
     await act(async () => {})
+    openActionsMenu(el)
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     expect(btn.disabled).toBe(false)
 
-    act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    act(() => btn.click())
     await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
@@ -110,15 +140,16 @@ describe('EpicQueue — Build toolbar action', () => {
     expect(onSelect).toHaveBeenCalledWith(created.id)
   })
 
-  it('right-clicking Build creates+selects the Epic without auto-sending, leaving the opening prompt as a pending draft', async () => {
+  it('"Build Project (discuss first)" creates+selects the Epic without auto-sending, leaving the opening prompt as a pending draft', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
     await act(async () => {})
-    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+    openActionsMenu(el)
+    const btn = el.querySelector('[data-testid="epic-queue-build-advanced"]') as HTMLButtonElement
     expect(btn.disabled).toBe(false)
 
-    act(() => btn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+    act(() => btn.click())
     await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
@@ -131,22 +162,85 @@ describe('EpicQueue — Build toolbar action', () => {
     expect(draft).toContain('/builder')
   })
 
-  it('the caret trigger next to Build also reaches the advanced (discuss-first) path', async () => {
+  it('duplicate-Build guard: an existing non-completed build Epic for this cwd is opened instead of creating a second one', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
+    const existing = {
+      id: 'epic-existing-build',
+      cwd: '/home/bilko/Projects/alpha',
+      goalText: '/builder\n\nalready running',
+      claudeSessionId: 'claude-existing',
+      status: 'active' as const,
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      tag: 'build' as const,
+    }
+    usePromptSessions.setState({ sessions: { [existing.id]: existing } })
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
     await act(async () => {})
-    const caret = el.querySelector('[data-testid="epic-queue-build-advanced"]') as HTMLButtonElement
-    expect(caret).not.toBeNull()
-    expect(caret.disabled).toBe(false)
+    const menu = openActionsMenu(el)
+    const labels = Array.from(menu.querySelectorAll('button')).map((b) => b.textContent)
+    expect(labels).toContain('Open Build in progress')
 
-    act(() => caret.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+    act(() => btn.click())
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
-    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    expect(onSelect).toHaveBeenCalledWith(existing.id)
+  })
+
+  it('duplicate-Build guard still opens the in-flight Epic even when this project has no resolvable publish target', async () => {
+    resolveBuildTargetMock.mockResolvedValue(null)
+    const existing = {
+      id: 'epic-existing-build-2',
+      cwd: '/home/bilko/Projects/alpha',
+      goalText: '/builder\n\nalready running',
+      claudeSessionId: 'claude-existing-2',
+      status: 'proposed' as const,
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      tag: 'build' as const,
+    }
+    usePromptSessions.setState({ sessions: { [existing.id]: existing } })
+    const onSelect = vi.fn()
+    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
+    await act(async () => {})
+    openActionsMenu(el)
+
+    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+    expect(btn.disabled).toBe(false)
+    act(() => btn.click())
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    expect(onSelect).toHaveBeenCalledWith(existing.id)
+  })
+
+  it('duplicate-Build guard also covers the discuss-first entry point', async () => {
+    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
+    const existing = {
+      id: 'epic-existing-build-3',
+      cwd: '/home/bilko/Projects/alpha',
+      goalText: '/builder\n\nalready running',
+      claudeSessionId: 'claude-existing-3',
+      status: 'active' as const,
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      tag: 'build' as const,
+    }
+    usePromptSessions.setState({ sessions: { [existing.id]: existing } })
+    const onSelect = vi.fn()
+    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
+    await act(async () => {})
+    openActionsMenu(el)
+
+    const btn = el.querySelector('[data-testid="epic-queue-build-advanced"]') as HTMLButtonElement
+    act(() => btn.click())
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).not.toHaveBeenCalled()
     expect(sendSpy).not.toHaveBeenCalled()
-    expect(onSelect).toHaveBeenCalledWith(created.id)
-    expect(takePendingEpicDraft(created.id)).toContain('/builder')
+    expect(onSelect).toHaveBeenCalledWith(existing.id)
   })
 })

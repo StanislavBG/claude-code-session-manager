@@ -35,16 +35,38 @@ import { setPendingEpicDraft } from '../../lib/epicDraftText'
 const BUILD_GOAL_TEXT =
   '/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there\'s anything new.'
 
+/** Any other 'build'-tagged Epic for this cwd that hasn't been marked
+ *  completed yet — used to stop "Build Project" from spawning a second,
+ *  redundant build Epic while one is already running. Returns a reference
+ *  into the store's own session objects (not a fresh allocation) so this
+ *  stays a stable zustand selector. */
+function useInFlightBuildEpic(cwd: string | null): PromptSession | null {
+  return usePromptSessions((s) => {
+    if (!cwd) return null
+    for (const key in s.sessions) {
+      const session = s.sessions[key]
+      if (session.cwd === cwd && session.tag === 'build' && session.status !== 'completed') return session
+    }
+    return null
+  })
+}
+
 /** Toolbar action (not per-row — Builder isn't scoped to one Epic): creates a
  *  brand-new 'build'-tagged Epic via the same creation path NewEpicCard's
  *  submit uses, and auto-sends its opening prompt so a fresh, isolated agent
  *  session starts the git-diff -> publish loop immediately. Disabled when
- *  the active project has no resolvable publish target. */
-function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
+ *  the active project has no resolvable publish target. If a build Epic for
+ *  this cwd is already in flight, both entry points open it instead of
+ *  minting a second one. */
+function useBuildAction(onSelect: (id: string) => void) {
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const target = useBuildTarget(activeTabCwd)
   const [creating, setCreating] = useState(false)
-  const disabled = !activeTabCwd || !target || creating
+  const inFlight = useInFlightBuildEpic(activeTabCwd)
+  // Reaching an in-flight build Epic must stay possible even when the
+  // project currently has no resolvable publish target — the guard's whole
+  // point is getting the user back to that Epic, not blocking them.
+  const disabled = !activeTabCwd || (!target && !inFlight) || creating
 
   /** Shared creation sequence for both entry points: mints the fresh
    *  'build'-tagged Epic and approves it out of `proposed`. Callers decide
@@ -59,7 +81,13 @@ function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
   }
 
   const handleClick = async () => {
-    if (!activeTabCwd || !target || creating) return
+    if (!activeTabCwd || creating) return
+    if (inFlight) {
+      onSelect(inFlight.id)
+      toast.info('A Build Epic is already in flight for this project — opening it.')
+      return
+    }
+    if (!target) return
     setCreating(true)
     try {
       const created = createBuildEpic()
@@ -79,12 +107,18 @@ function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
     }
   }
 
-  /** Advanced path (right-click on Build, or the adjacent caret): mints the
-   *  same fresh Epic but skips the auto-send — the opening prompt lands in
-   *  the Epic's composer as editable draft text so the user can discuss or
-   *  adjust before running anything. */
+  /** Advanced path (the "discuss first" menu item): mints the same fresh
+   *  Epic but skips the auto-send — the opening prompt lands in the Epic's
+   *  composer as editable draft text so the user can discuss or adjust
+   *  before running anything. */
   const handleAdvanced = async () => {
-    if (!activeTabCwd || !target || creating) return
+    if (!activeTabCwd || creating) return
+    if (inFlight) {
+      onSelect(inFlight.id)
+      toast.info('A Build Epic is already in flight for this project — opening it.')
+      return
+    }
+    if (!target) return
     setCreating(true)
     try {
       const created = createBuildEpic()
@@ -103,41 +137,16 @@ function BuildButton({ onSelect }: { onSelect: (id: string) => void }) {
     ? 'No active project tab — open a project to use Build'
     : !target
       ? 'No publish target found for this project — add session-manager-operations/architecture/build-target.json or a publishable package.json'
-      : 'Start a fresh Epic that checks git vs the published package and publishes if there\'s anything new'
+      : inFlight
+        ? 'A Build Epic is already in flight for this project — opens it instead of starting a new one'
+        : 'Start a fresh Epic that checks git vs the published package and publishes if there\'s anything new'
 
-  const advancedTooltip = !activeTabCwd || !target
-    ? tooltip
-    : 'Discuss before running — opens a fresh Epic with the Build prompt in the composer, unsent'
+  const advancedTooltip =
+    !activeTabCwd || !target || inFlight
+      ? tooltip
+      : 'Discuss before running — opens a fresh Epic with the Build prompt in the composer, unsent'
 
-  return (
-    <span className="inline-flex items-stretch">
-      <button
-        type="button"
-        onClick={() => void handleClick()}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          void handleAdvanced()
-        }}
-        disabled={disabled}
-        data-testid="epic-queue-build"
-        title={tooltip}
-        className="inline-flex items-center gap-1.5 rounded-l-md rounded-r-none border border-line bg-bg px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        Build
-      </button>
-      <button
-        type="button"
-        onClick={() => void handleAdvanced()}
-        disabled={disabled}
-        data-testid="epic-queue-build-advanced"
-        aria-label="Discuss before running"
-        title={advancedTooltip}
-        className="inline-flex items-center rounded-r-md rounded-l-none border border-l-0 border-line bg-bg px-1.5 py-1.5 text-fg-dim hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        <ChevronIcon open />
-      </button>
-    </span>
-  )
+  return { disabled, inFlight, tooltip, advancedTooltip, handleClick, handleAdvanced }
 }
 
 const STATUS_ORDER: EpicDisplayStatus[] = ['running', 'needs', 'queued', 'active', 'completed']
@@ -183,6 +192,12 @@ interface MenuItem {
    *  native window.confirm popup. */
   confirm?: boolean
   confirmLabel?: string
+  /** Greys the item out and blocks its onSelect — for entry points that
+   *  genuinely can't act right now (e.g. Build with no publish target). */
+  disabled?: boolean
+  /** Optional hover tooltip, e.g. explaining why an item is disabled. */
+  title?: string
+  testId?: string
 }
 
 const CONFIRM_WINDOW_MS = 3000
@@ -243,6 +258,7 @@ function RowMenu({ anchor, items, onClose }: { anchor: HTMLElement; items: MenuI
             type="button"
             onClick={(ev) => {
               ev.stopPropagation()
+              if (it.disabled) return
               if (it.confirm && !confirming) {
                 setConfirmingLabel(it.label)
                 if (confirmTimer.current) clearTimeout(confirmTimer.current)
@@ -253,8 +269,10 @@ function RowMenu({ anchor, items, onClose }: { anchor: HTMLElement; items: MenuI
               onClose()
               it.onSelect()
             }}
-            data-testid={confirming ? 'epic-queue-row-menu-confirm' : undefined}
-            className={`rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium hover:bg-bg-hi ${
+            disabled={it.disabled}
+            title={it.title}
+            data-testid={confirming ? 'epic-queue-row-menu-confirm' : it.testId}
+            className={`rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium hover:bg-bg-hi disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
               it.danger ? 'text-delta-bad' : 'text-fg'
             }`}
           >
@@ -497,6 +515,55 @@ function RowMenuButton({
   )
 }
 
+/** Toolbar's single entry point, replacing the old split Build button + "+ New
+ *  Epic" button trio with one accent "Actions" trigger + RowMenu — reuses the
+ *  same dropdown pattern as the per-row overflow menu. Lists "+ New Epic",
+ *  "Build Project" (quick-fire), and "Build Project (discuss first)" (the
+ *  PRD 924 advanced path, preserved as an explicit third item rather than
+ *  teaching RowMenu a second, per-item right-click gesture). */
+function ActionsMenuButton({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const build = useBuildAction(onSelect)
+
+  const items: MenuItem[] = [
+    {
+      label: '+ New Epic',
+      onSelect: onNew,
+      testId: 'epic-queue-new',
+    },
+    {
+      label: build.inFlight ? 'Open Build in progress' : 'Build Project',
+      onSelect: () => void build.handleClick(),
+      disabled: build.disabled,
+      title: build.tooltip,
+      testId: 'epic-queue-build',
+    },
+    {
+      label: 'Build Project (discuss first)',
+      onSelect: () => void build.handleAdvanced(),
+      disabled: build.disabled,
+      title: build.advancedTooltip,
+      testId: 'epic-queue-build-advanced',
+    },
+  ]
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="epic-queue-actions"
+        className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 bg-accent text-white text-xs font-semibold shadow-sm"
+      >
+        Actions
+      </button>
+      {open && btnRef.current && <RowMenu anchor={btnRef.current} items={items} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
   const [editing, setEditing] = useState<'title' | 'goal' | null>(null)
   const age = activityAgeLabel(epic.id, epic, events, now)
@@ -715,14 +782,7 @@ export function EpicQueue({
         <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Epic queue</span>
         <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
         <span className="ml-auto flex items-center gap-1.5">
-          <BuildButton onSelect={onSelect} />
-          <button
-            type="button"
-            onClick={onNew}
-            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 bg-accent text-white text-xs font-semibold shadow-sm"
-          >
-            + New Epic
-          </button>
+          <ActionsMenuButton onNew={onNew} onSelect={onSelect} />
         </span>
       </div>
 

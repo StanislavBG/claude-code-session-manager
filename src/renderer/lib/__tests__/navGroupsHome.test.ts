@@ -18,7 +18,7 @@ describe('navGroups Home swap', () => {
 })
 
 describe('getNavItemsForFace', () => {
-  const HOME_ONLY = ['overview', 'browser', 'plugins', 'keybindings', 'remote', 'sm-config', 'voice', 'agent-library', 'tag-library']
+  const HOME_ONLY = ['overview', 'browser', 'plugins', 'keybindings', 'remote', 'voice', 'agent-library', 'tag-library']
   const PROJECT_ONLY = ['project-home', 'repoviz', 'search', 'memory', 'terminal']
   const BOTH = [
     'scheduler', 'history', 'system-prompt', 'skills', 'mcp', 'hooks',
@@ -198,20 +198,26 @@ describe('remote is home-only', () => {
   })
 })
 
-describe('sm-config is home-only', () => {
-  it('NAV_ITEMS tags sm-config with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'sm-config')
-    expect(item?.faces).toEqual(['home'])
+describe('scheduler labelByFace — retired standalone sm-config folded in here', () => {
+  it('NAV_ITEMS tags scheduler with faces: [home, project] and per-face label overrides', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'scheduler')
+    expect(item?.faces).toEqual(['home', 'project'])
+    expect(item?.labelByFace?.home).toBe('Scheduler Configs')
+    expect(item?.labelByFace?.project).toBe("Epic's Execution Queue")
   })
 
-  it('project face excludes sm-config', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('sm-config')
+  it('getNavItemsForFace resolves the Home-face label', () => {
+    const item = getNavItemsForFace('home').find((i) => i.key === 'scheduler')
+    expect(item?.label).toBe('Scheduler Configs')
   })
 
-  it('home face includes sm-config', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('sm-config')
+  it('getNavItemsForFace resolves the Project-face label', () => {
+    const item = getNavItemsForFace('project').find((i) => i.key === 'scheduler')
+    expect(item?.label).toBe("Epic's Execution Queue")
+  })
+
+  it('no NAV_ITEMS entry has key sm-config — folded into scheduler', () => {
+    expect(NAV_ITEMS.some((item) => (item.key as string) === 'sm-config')).toBe(false)
   })
 })
 

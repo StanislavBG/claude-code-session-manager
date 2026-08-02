@@ -31,7 +31,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'permissions',
   'settings',
   'remote',
-  'sm-config',
   'agent-library',
   'tag-library',
   // Tools (promoted from modal in v0.13.1)

@@ -81,8 +81,11 @@ describe('AlmanacSidebar', () => {
       expect(nav).not.toBeNull()
       const text = nav?.textContent ?? ''
 
-      // Workspace row: label + its navGroups.ts hint should both be visible text.
-      expect(text).toContain('Scheduler')
+      // Workspace row: label + its navGroups.ts hint should both be visible
+      // text. Scheduler's Project-face label is "Epic's Execution Queue"
+      // (see navGroups.ts's labelByFace) — the Home-face label "Scheduler
+      // Configs" is a distinct screen, not shown here.
+      expect(text).toContain("Epic's Execution Queue")
       expect(text).toContain('Author PRDs + run them as claude -p jobs')
 
       // Tools row: label + its hint should both be visible text.

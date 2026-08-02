@@ -26,6 +26,11 @@ export type NavKey =
   | 'projects'
   | 'history'
   | 'keybindings'
+  // Two faces, genuinely different content (see lib/navGroups.ts's
+  // labelByFace): Home shows global scheduler policy + session-pool
+  // controls ("Scheduler Configs" — formerly the standalone 'sm-config'
+  // key, folded in here); Project shows this project's live PRD queue
+  // ("Epic's Execution Queue").
   | 'scheduler'
   // In-app file editor scene. Launched from the Files sidebar + terminal links
   // (no left-nav row of its own — Files is the launch point).
@@ -37,8 +42,6 @@ export type NavKey =
   | 'repoviz'
   | 'search'
   | 'remote'
-  // Global (machine-level) Session-Manager configuration — session pool, scheduler policy.
-  | 'sm-config'
   // Read-only directory of global + per-project agent personas (Home face only).
   | 'agent-library'
   // Read-only directory of the Epic intent-tag taxonomy (Home face only).

@@ -20,7 +20,6 @@ import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
 import { Browser } from './tabs/Browser'
 import { Scheduler } from './tabs/Scheduler'
 import { WebRemote } from './tabs/WebRemote'
-import { SessionManagerConfig } from './tabs/SessionManagerConfig'
 import { AgentLibrary } from './tabs/AgentLibrary'
 import { TagLibrary } from './tabs/TagLibrary'
 import { SectionFrame } from './layout/SectionFrame'
@@ -60,7 +59,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'permissions':   { title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },
   'settings':      { title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
-  'sm-config':     { title: 'Session-Manager configuration', intro: 'Machine-level configuration — the global session pool, guardrails, and scheduler runtime policy. Everything project-scoped lives with its project; only what is global by nature lives here.' },
   'agent-library': { title: 'Agent Library',                 intro: 'Every agent persona available on this machine — global definitions in ~/.claude/agents, and which currently-open projects override them locally. Read-only.' },
   'tag-library':   { title: 'Tag Library',                   intro: 'Every Epic intent tag, its meaning, and its /develop-eagerness default. Read-only.' },
   'remote':        { title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
@@ -104,7 +102,7 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
     switch (active) {
       case 'skills':        return <Skills />
       case 'history':       return <History />
-      case 'scheduler':     return <Scheduler />
+      case 'scheduler':     return <Scheduler navigate={ctx.onNavigate} />
       case 'plugins':       return <Plugins />
       case 'mcp':           return <McpServers />
       case 'hooks':         return <Hooks />
@@ -114,7 +112,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       case 'permissions':   return <Permissions />
       case 'settings':      return <Settings />
       case 'remote':        return <WebRemote />
-      case 'sm-config':     return <SessionManagerConfig navigate={ctx.onNavigate} />
       case 'agent-library': return <AgentLibrary />
       case 'tag-library':   return <TagLibrary />
       // Former-modal tools rendered with variant="page" so they paint inline

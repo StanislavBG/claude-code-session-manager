@@ -5,36 +5,41 @@ import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
 import { SchedulePanel } from '../SchedulePanel'
 import { SchedulerPrdsView } from './plans/SchedulerPrdsView'
 import { SchedulerHistoryView } from './plans/SchedulerHistoryView'
+import { SessionManagerConfig } from './SessionManagerConfig'
 import { useScheduleState } from '../../state/scheduleState'
 import { formatAgo, formatRelative } from '../../lib/formatTime'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { LegendItem } from './scheduler/sched-primitives'
 import { LearningPanel } from '../LearningPanel'
 import { useLayout } from '../../state/layout'
+import type { NavKey } from '../LeftNav'
 
 /**
- * Scheduler — the single home for the claude -p batch workflow. Three tabs,
- * split by operate vs. author rather than by item set — scheduler.cjs's
- * reconcile() (src/main/scheduler.cjs:35, run on every scan/tick) walks
- * prds/ and gives every .md a queue.json entry immediately, so Queue and
- * PRDs always show the same underlying slugs; there is no "authored but not
- * yet queued" state to distinguish them by:
- *   • Queue   — OPERATE: monitor job execution (fire policy, concurrency,
- *     per-job status/ETA/logs, reset/resume actions)
- *   • PRDs    — AUTHOR: edit the .md source (structured frontmatter form +
- *     body editor, lint, archive/retag) — the old "Plans"
- *   • History — last 50 completed/failed jobs with project + date-range filters
+ * Scheduler — two genuinely different screens sharing one NavKey, split by
+ * navFace (see lib/navGroups.ts's labelByFace — sidebar reads "Scheduler
+ * Configs" on Home, "Epic's Execution Queue" on Project):
  *
- * Consolidates what used to be three separate nav destinations (Scheduler,
- * Plans, and the duplicate "Background Agents" tool) — all three read the same
- * queue.json + each active project's <cwd>/session-manager-operations/scheduler/prds/
- * files. One surface, no duplication.
- *
- * The project/all scope toggle defaults from the NavFace
- * (leftnav-two-face-framework): Home face -> all projects, Project face ->
- * the active tab's cwd. The default only re-applies on an actual face
- * transition, never on a same-face re-render, and never once the user has
- * manually toggled scope since the last transition.
+ *   • Home face ("Scheduler Configs")   — global policy, never any PRDs:
+ *     the machine-wide session pool, scheduler fire policy/concurrency,
+ *     and quick links into the six dual-scope config tabs. Renders
+ *     SessionManagerConfig's content directly — this folds in what used to
+ *     be the standalone 'sm-config' nav item, so there's one Home-face home
+ *     for global scheduler controls, not two.
+ *   • Project face ("Epic's Execution Queue") — the claude -p batch
+ *     workflow for THIS project, three tabs split by operate vs. author
+ *     rather than by item set — scheduler.cjs's reconcile()
+ *     (src/main/scheduler.cjs:35, run on every scan/tick) walks prds/ and
+ *     gives every .md a queue.json entry immediately, so Queue and PRDs
+ *     always show the same underlying slugs; there is no "authored but not
+ *     yet queued" state to distinguish them by:
+ *       • Queue   — OPERATE: monitor job execution (fire policy, concurrency,
+ *         per-job status/ETA/logs, reset/resume actions)
+ *       • PRDs    — AUTHOR: edit the .md source (structured frontmatter form +
+ *         body editor, lint, archive/retag) — the old "Plans"
+ *       • History — last 50 completed/failed jobs with project + date-range filters
+ *     Still has its own project/all scope toggle (an explicit machine-wide
+ *     escape hatch to peek at other projects' queues) — that toggle only
+ *     exists here now, since Home face never shows PRDs at all.
  */
 
 type SubView = 'queue' | 'prds' | 'history'
@@ -179,9 +184,48 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
   )
 }
 
+// ─── Architecture summary (Home face only) ──────────────────────────────────
+
+/**
+ * Reserved slot for an agentic-generated architecture summary — a
+ * cost-gated claude -p pass over this project's scheduler/queue code,
+ * cached to disk, mirroring memoryAggregate.cjs's pattern (only fires on
+ * explicit refresh, model pinned). Not wired to a backend yet: this is the
+ * layout + interaction shell so a follow-up PRD can drop in the real IPC
+ * call without redesigning the card.
+ */
+function ArchitectureSummarySection() {
+  return (
+    <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Architecture summary</h2>
+          <p className="mt-0 mb-0 text-[13px] text-fg-dim leading-relaxed">
+            An agent-generated overview of how the scheduler pieces fit together — reconcile loop,
+            queue/history shards, boot reconciliation, the dead-process reaper. Not generated yet.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled
+          title="Coming soon — will run a cost-gated claude -p pass over the scheduler source, cached to disk"
+          className="shrink-0 px-2.5 py-1 rounded border border-line text-fg-faint text-[12px] font-medium cursor-not-allowed opacity-60"
+        >
+          Generate summary
+        </button>
+      </div>
+      <p className="mt-3 text-[12.5px] text-fg-faint italic">No summary generated yet.</p>
+    </section>
+  )
+}
+
 // ─── Scheduler shell ─────────────────────────────────────────────────────────
 
-export function Scheduler() {
+interface SchedulerProps {
+  navigate?: (k: NavKey) => void
+}
+
+export function Scheduler({ navigate }: SchedulerProps = {}) {
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
     return (stored === 'prds' || stored === 'history') ? stored : 'queue'
@@ -238,6 +282,35 @@ export function Scheduler() {
     localStorage.setItem(LS_KEY, subView)
   }, [subView])
 
+  if (navFace === 'home') {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="shrink-0 px-9 pt-7 pb-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="text-xs font-bold text-fg-faint tracking-[0.8px] uppercase mb-1">
+              Workspace
+            </div>
+            <LearningPanel active="scheduler" />
+          </div>
+          <h1 className="m-0 font-serif text-[40px] font-semibold leading-none tracking-tight text-fg">
+            Scheduler Configs
+          </h1>
+          <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
+            Global scheduler policy and the machine-wide session pool — applies across every
+            project. No PRDs here; each project's live queue lives on that project's own tab.
+          </p>
+          <div className="mt-[18px] mb-[22px]">
+            <WindowStrip scopeCwd={null} />
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto px-9 pb-9 space-y-6">
+          <SessionManagerConfig navigate={navigate} />
+          <ArchitectureSummarySection />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* ── Header + window strip + sub-tabs ─────────────────────── */}
@@ -249,7 +322,7 @@ export function Scheduler() {
           <LearningPanel active="scheduler" />
         </div>
         <h1 className="m-0 font-serif text-[40px] font-semibold leading-none tracking-tight text-fg">
-          Scheduler
+          Epic's Execution Queue
         </h1>
         <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
           Author PRDs and run them as{' '}

@@ -509,10 +509,20 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
             { term: 'estimateMinutes', body: 'Roughly how long you expect the job to take. The scheduler uses this to pick jobs that fit in your remaining 5-hour budget.' },
           ],
         },
+        {
+          // Folded in from the retired standalone 'sm-config' key — this
+          // material is now the Home-face "Scheduler Configs" content.
+          title: 'Home face — the session pool (global, not per-project)',
+          items: [
+            { term: 'One pool, every consumer', body: 'Session-Manager owns a machine-wide pool of concurrent Claude sessions (3 by default). Scheduler jobs and Epic chat runs each request a slot before launching and release it when they finish — no subsystem has a private cap that can stack with another\'s.' },
+            { term: 'Guardrails', body: 'Beyond the slot cap, a memory gate defers new jobs when free RAM drops below a per-job budget, and each job gets an OOM-score bias so the kernel prefers killing a restartable job over the app itself.' },
+          ],
+        },
       ],
       tips: [
         'Use the /prd skill to create a fresh PRD with the right structure — manually-written ones often miss the cwd or estimate fields.',
         'Read PRD_AUTHORING.md before queueing a new job — it codifies two real stuck-job incidents (the fizzpop poll-hang and the etch-engine post-AC overrun).',
+        'SM_SESSION_SLOTS (1–3) overrides the pool size for one launch; the default is sized to keep three 1 GB+ jobs from starving the app.',
       ],
     },
   'editor':           { headline: 'View and edit files in-app', intro: 'Opens when you click a file in the File Explorer sidebar or a file link in the terminal. Text files open in Monaco (syntax highlighting, font zoom, word wrap, minimap, Dark/Paper theme); Markdown adds Edit / Wysiwyg / Preview / Split, HTML adds Edit / Preview. Images, PDFs, CSV/TSV tables, and JSONL records each get their own viewer; binary or oversized files show a summary instead. URLs still open in your browser.', sections: [{ title: 'Editing', items: [{ term: 'Cmd/Ctrl-S', body: 'Save the active file. With Autosave on (the "Auto" toggle), edits also save automatically ~1.2 s after you stop typing.' }, { term: 'Cmd/Ctrl-Shift-F', body: 'Toggle Focus mode — hides the tabs and header for distraction-free editing. Esc exits.' }, { term: 'Close guard', body: 'Closing a tab with unsaved changes asks before discarding.' }], }, { title: 'Markdown', items: [{ term: 'Wysiwyg', body: 'A rich-text mode built on Tiptap with a floating formatting toolbar (bold, italic, headings, lists, code, blockquote, links) — edit the rendered document directly instead of raw markdown. YAML frontmatter is split off, kept read-only, and rejoined on save; switch to Edit for surgical edits to PRDs and agent files, since Wysiwyg normalizes list markers and heading style.' }, { term: 'Outline', body: 'In Preview or Split mode, a document outline lists headings; click to jump. Toggle it with the Outline button.' }, { term: 'Toolbar', body: 'A formatting toolbar sits above the editor for Markdown files.' }], }], tips: ['Use the view toggle (Edit / Wysiwyg / Preview / Split) for Markdown, or Edit / Preview for HTML. HTML previews are sandboxed — page scripts run with no access to your files or session.', 'Open and Reveal buttons hand the file to your OS default app or file manager.'] },
@@ -607,31 +617,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       tips: [
         'Pair a device by clicking "Pair Device…" and entering the 8-character code shown under "Add Device" in the web app.',
         'Revoke a single device from the Paired Devices list, or hit Panic / "Revoke all" to tear down every session and invalidate all device tokens at once if you suspect compromise.',
-      ],
-    },
-  'sm-config': {
-      headline: 'Session-Manager configuration — the global layer',
-      intro: 'Everything project-scoped lives inside that project\'s session-manager-operations/ folder; this page holds the small set of things that are global by nature: the machine-wide session pool, its guardrails, and the scheduler\'s runtime policy.',
-      sections: [
-        {
-          title: 'The session pool',
-          items: [
-            { term: 'One pool, every consumer', body: 'Session-Manager owns a machine-wide pool of concurrent Claude sessions (3 by default). Scheduler jobs and Epic chat runs each request a slot before launching and release it when they finish — no subsystem has a private cap that can stack with another\'s.' },
-            { term: 'Guardrails', body: 'Beyond the slot cap, a memory gate defers new jobs when free RAM drops below a per-job budget, and each job gets an OOM-score bias so the kernel prefers killing a restartable job over the app itself.' },
-          ],
-        },
-        {
-          title: 'How work flows',
-          items: [
-            { term: 'Tab = project', body: 'A tab is anchored to one folder — that folder IS the project. All of its operational state lives under session-manager-operations/ inside it.' },
-            { term: 'Epic = one goal', body: 'Inside a project, work is organized into Epics: small goals, each with its own conversation and a 1:1 Claude session.' },
-            { term: 'PRD = one job', body: 'An Epic dispatches PRDs — self-contained work orders the scheduler runs headlessly when a session slot and token budget are available.' },
-          ],
-        },
-      ],
-      tips: [
-        'The Scheduler tab shows the active project by default — flip to "All projects" for the machine-wide view.',
-        'SM_SESSION_SLOTS (1–3) overrides the pool size for one launch; the default is sized to keep three 1 GB+ jobs from starving the app.',
       ],
     },
   'agent-library': {

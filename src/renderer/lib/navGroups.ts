@@ -27,6 +27,16 @@ export interface NavGroupItem {
   hint?: string
   /** Which sidebar face(s) (home / project) this item appears under. See lib/navFace.ts. */
   faces: NavFace[]
+  /**
+   * Per-face override of `label`/`hint`. For items whose two faces render
+   * genuinely DIFFERENT content (not just a scope filter over the same
+   * screen) — e.g. Scheduler: Home shows global scheduler policy/session-pool
+   * controls ("Scheduler Configs"), Project shows this project's live PRD
+   * queue ("Epic's Execution Queue"). Resolved by getNavItemsForFace; falls
+   * back to the base `label`/`hint` when the current face has no override.
+   */
+  labelByFace?: Partial<Record<NavFace, string>>
+  hintByFace?: Partial<Record<NavFace, string>>
 }
 
 const HOME: NavFace[] = ['home']
@@ -40,7 +50,9 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'terminal',   group: 'Workspace', label: 'Epics',      icon: 'terminal',     hint: 'Independent goal-scoped Epics for this project', faces: PROJECT },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences', faces: HOME },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
-  { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs', faces: BOTH },
+  { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs', faces: BOTH,
+    labelByFace: { home: 'Scheduler Configs', project: "Epic's Execution Queue" },
+    hintByFace: { home: 'Global scheduler policy, session pool, and architecture', project: 'Author PRDs + run them as claude -p jobs' } },
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: BOTH },
 
   // Configure
@@ -54,7 +66,6 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'permissions',    group: 'Configure', label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules', faces: BOTH },
   { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window', faces: BOTH },
   { key: 'remote',         group: 'Configure', label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default', faces: HOME },
-  { key: 'sm-config',      group: 'Configure', label: 'Session-Manager', icon: 'settings',      hint: 'Global session pool, guardrails, scheduler policy', faces: HOME },
   { key: 'agent-library',  group: 'Configure', label: 'Agent Library',  icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
   { key: 'tag-library',    group: 'Configure', label: 'Tag Library',    icon: 'target',         hint: 'Epic intent tags and their /develop behavior', faces: HOME },
 
@@ -64,9 +75,17 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'search',   group: 'Tools', label: 'Search',   icon: 'global-search', hint: '⌘P file · ⌘⇧F content', faces: PROJECT },
 ]
 
-/** Filters NAV_ITEMS by sidebar face, preserving NAV_ITEMS' existing group order. */
+/**
+ * Filters NAV_ITEMS by sidebar face, preserving NAV_ITEMS' existing group
+ * order, and resolves any `labelByFace`/`hintByFace` override for the
+ * current face over the base `label`/`hint`.
+ */
 export function getNavItemsForFace(face: NavFace): NavGroupItem[] {
-  return NAV_ITEMS.filter((item) => item.faces.includes(face))
+  return NAV_ITEMS.filter((item) => item.faces.includes(face)).map((item) => ({
+    ...item,
+    label: item.labelByFace?.[face] ?? item.label,
+    hint: item.hintByFace?.[face] ?? item.hint,
+  }))
 }
 
 export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = Object.fromEntries(

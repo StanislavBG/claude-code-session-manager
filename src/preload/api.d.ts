@@ -385,7 +385,7 @@ export interface ScheduleConfig {
   schemaVersion: 1;
 }
 
-export type ScheduleJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'needs_review';
+export type ScheduleJobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review';
 
 export interface ScheduleJobRuntime {
   pid: number;

@@ -25,11 +25,12 @@ function projectDot(cwd?: string | null, name?: string): string {
 
 // ─── SchBadge ────────────────────────────────────────────────────────────────
 const BADGE_CLASSES: Record<ScheduleJobStatus, string> = {
-  running:      'bg-accent text-white',
-  pending:      'bg-bg text-fg-dim border border-line',
-  completed:    'bg-sage/20 text-sage',
-  needs_review: 'bg-butter/25 text-fg-dim',
-  failed:       'bg-accent/15 text-accent',
+  running:       'bg-accent text-white',
+  investigating: 'bg-accent text-white',
+  pending:       'bg-bg text-fg-dim border border-line',
+  completed:     'bg-sage/20 text-sage',
+  needs_review:  'bg-butter/25 text-fg-dim',
+  failed:        'bg-accent/15 text-accent',
 }
 
 const BADGE_MARKS: Partial<Record<ScheduleJobStatus, string>> = {
@@ -47,7 +48,7 @@ export function SchBadge({ status }: { status: ScheduleJobStatus }) {
       role="status"
       aria-label={`Status: ${status.replace('_', ' ')}`}
     >
-      {status === 'running' ? (
+      {status === 'running' || status === 'investigating' ? (
         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
       ) : (
         mark && <span aria-hidden="true">{mark}</span>
@@ -210,6 +211,7 @@ export function PrdNumberBadge({ n }: { n: string }) {
 // Consumed by SchedulerPrdsView restyle (PRD 20-scheduler-prds).
 export const STATUS_TONE: Record<string, { bg: string; text: string; border: boolean; label: string }> = {
   running:      { bg: 'bg-butter/30', text: 'text-fg-dim',   border: false, label: 'running' },
+  investigating: { bg: 'bg-butter/30', text: 'text-fg-dim',  border: false, label: 'investigating' },
   queued:       { bg: 'bg-sage/25',   text: 'text-sage',     border: false, label: 'queued' },
   ready:        { bg: 'bg-bg',        text: 'text-fg-dim',   border: true,  label: 'ready to run' },
   draft:        { bg: 'bg-bg',        text: 'text-fg-faint', border: true,  label: 'draft' },

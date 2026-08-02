@@ -2487,6 +2487,16 @@ async function spawnInvestigation(failedJob, runDir) {
     return { deferred: false };
   }
 
+  // Mark the job 'investigating' so the Queue UI shows an active status for
+  // the whole probe duration — previously this left the job's persisted
+  // status frozen at 'failed'/'needs_review' the entire time, which read as
+  // "nothing is happening" even though an Opus process was actively running.
+  await mutate((s) => {
+    const j = s.jobs.find((x) => x.slug === failedJob.slug);
+    if (j) j.status = 'investigating';
+  });
+  await broadcast({ flush: true });
+
   const claudeBin = resolveClaudeBin();
   const childEnv = cleanChildEnv({ PATH: pathWithUserBins() }); // Homebrew/user bins for macOS
 
@@ -2524,6 +2534,14 @@ async function spawnInvestigation(failedJob, runDir) {
     watchdogs: [deadmanWatchdog],
     onExit({ exitCode, error, spawnFailed, safeLog: sl }) {
       releaseSlot();
+      // Restore the pre-investigation status now that the probe has exited —
+      // 'investigating' must never be the job's resting state.
+      mutate((s) => {
+        const j = s.jobs.find((x) => x.slug === failedJob.slug);
+        if (j && j.status === 'investigating') j.status = failedJob.status || 'failed';
+      })
+        .then(() => broadcast({ flush: true }))
+        .catch(() => {});
       if (error) {
         const errMsg = spawnFailed
           ? `investigation spawn failed: ${error?.message ?? String(error)}`
@@ -2570,8 +2588,15 @@ async function spawnInvestigation(failedJob, runDir) {
   return { deferred: false };
   } catch (e) {
     // A synchronous throw before onExit is wired (e.g. resolveClaudeBin not found,
-    // openLog failure, spawn setup) must not strand the reserved slot.
+    // openLog failure, spawn setup) must not strand the reserved slot, and must
+    // not strand the job on the transient 'investigating' status either.
     releaseSlot();
+    mutate((s) => {
+      const j = s.jobs.find((x) => x.slug === failedJob.slug);
+      if (j && j.status === 'investigating') j.status = failedJob.status || 'failed';
+    })
+      .then(() => broadcast({ flush: true }))
+      .catch(() => {});
     throw e;
   }
 }

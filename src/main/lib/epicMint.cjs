@@ -208,11 +208,21 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
     const index = readActiveIndex(cwd);
 
     // A dispatch that already knows its Epic (sourcePromptId frontmatter from
-    // an Epic-conversation dispatch) joins it rather than minting a sibling.
+    // an Epic-conversation dispatch) joins it rather than minting a sibling —
+    // but only while that Epic is still open. Joining unconditionally here
+    // let a stale/hallucinated sourcePromptId silently attach a PRD (and its
+    // follow-on events/chat activity) to an unrelated or even completed
+    // Epic — the "this session ran again without my knowledge, and it was
+    // really another Epic's prompt" cross-contamination bug. Mirrors
+    // findJoinableEpicInIndex()'s preferEpicId open-check (line ~124).
     if (explicitEpicId && hasOwn(index.sessions, explicitEpicId)) {
-      const prdDir = resolveEpicPrdWriteDir(cwd, explicitEpicId);
-      fs.mkdirSync(prdDir, { recursive: true });
-      return { epicId: explicitEpicId, prdDir, created: false };
+      const preferred = index.sessions[explicitEpicId];
+      if (preferred && (preferred.status === 'proposed' || preferred.status === 'active')) {
+        const prdDir = resolveEpicPrdWriteDir(cwd, explicitEpicId);
+        fs.mkdirSync(prdDir, { recursive: true });
+        return { epicId: explicitEpicId, prdDir, created: false };
+      }
+      console.warn(`[epicMint] ensureEpic: explicit epicId ${explicitEpicId} exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join, falling through`);
     }
 
     if (reuseByGoal) {

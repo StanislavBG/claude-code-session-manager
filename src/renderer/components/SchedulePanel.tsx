@@ -33,10 +33,10 @@ function truncateLabel(text: string, max = 60): string {
   return `${trimmed.slice(0, max - 1)}…`
 }
 
-type FilterStatus = 'all' | 'running' | 'pending' | 'completed' | 'needs_review' | 'failed'
+type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'needs_review' | 'failed'
 interface QueueFilter { text: string; status: FilterStatus }
 
-const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'pending', 'completed', 'needs_review', 'failed']
+const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'investigating', 'pending', 'completed', 'needs_review', 'failed']
 
 function loadFilter(): QueueFilter {
   try {
@@ -190,7 +190,7 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
   }
 
   const { config, jobs, paused, lastRunAt, nextReset, effectiveConcurrency } = snap
-  const counts = { pending: 0, running: 0, completed: 0, needs_review: 0, failed: 0 }
+  const counts = { pending: 0, running: 0, investigating: 0, completed: 0, needs_review: 0, failed: 0 }
   for (const j of jobs) {
     if (j.status in counts) counts[j.status as keyof typeof counts]++
   }
@@ -968,6 +968,7 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
   const chips: Array<{ label: string; value: FilterStatus }> = [
     { label: 'All', value: 'all' },
     { label: 'Running', value: 'running' },
+    { label: 'Investigating', value: 'investigating' },
     { label: 'Pending', value: 'pending' },
     { label: 'Completed', value: 'completed' },
     { label: 'Needs review', value: 'needs_review' },

@@ -170,7 +170,7 @@ describe('EpicQueue row menu', () => {
     const menu = openMenu(el)
     clickMenuItem(menu, 'Mark completed')
 
-    expect(markCompleted).toHaveBeenCalledWith(epic.id)
+    expect(markCompleted).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
   })
 
   it('Resume in terminal selects the epic and switches EpicTerminal mode to terminal', () => {
@@ -295,7 +295,7 @@ describe('EpicQueue row menu', () => {
     const menu = openMenu(el)
     clickMenuItem(menu, 'Duplicate as new Epic')
 
-    expect(duplicateEpic).toHaveBeenCalledWith(epic.id)
+    expect(duplicateEpic).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
     expect(onSelect).toHaveBeenCalledWith('epic-dup')
   })
 
@@ -312,7 +312,7 @@ describe('EpicQueue row menu', () => {
       expect(first.textContent).toBe('Click again to delete…')
 
       act(() => first.click())
-      expect(deleteEpic).toHaveBeenCalledWith(epic.id)
+      expect(deleteEpic).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
     })
 
     it('surfaces a thrown deleteEpic error via toast.error and leaves the row in place', async () => {
@@ -338,6 +338,6 @@ describe('EpicQueue row menu', () => {
     const menu = openMenu(el)
     clickMenuItem(menu, 'Reopen')
 
-    expect(resumeArchived).toHaveBeenCalledWith(epic.id)
+    expect(resumeArchived).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
   })
 })

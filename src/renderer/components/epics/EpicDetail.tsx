@@ -420,7 +420,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     // guard latched on a session that no longer exists.
     setAttached(epicId, false)
     setMode(epicId, 'chat')
-    void markCompleted(epicId).finally(() => setMarkingCompleted(false))
+    void markCompleted(epicId, 'EpicDetail').finally(() => setMarkingCompleted(false))
   }
 
   // Mutual exclusion: a chatRunner run in flight (or queued behind one) for
@@ -536,7 +536,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             {isCompleted ? (
               <button
                 type="button"
-                onClick={() => resumeArchived(epicId)}
+                onClick={() => resumeArchived(epicId, 'EpicDetail')}
                 data-testid="epic-resume"
                 className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90"
               >

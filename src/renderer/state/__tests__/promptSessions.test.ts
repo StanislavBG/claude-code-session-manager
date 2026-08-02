@@ -36,6 +36,9 @@ function installWindowApiMock() {
       append: vi.fn().mockResolvedValue({ ok: true }),
       read: vi.fn().mockResolvedValue({ turns: [] }),
     },
+    auditLog: {
+      append: vi.fn().mockResolvedValue({ ok: true }),
+    },
   }
   vi.stubGlobal('window', { api })
   return api
@@ -369,7 +372,7 @@ describe('promptSessions.ts', () => {
     expect(resumed.claudeSessionId).not.toBe(archived.claudeSessionId)
     // The only way resumeArchived's result can be 'active' is via
     // approveProposed — it can never be minted 'active' directly.
-    expect(approveSpy).toHaveBeenCalledWith(resumed.id)
+    expect(approveSpy).toHaveBeenCalledWith(resumed.id, 'unknown')
     expect(resumed.status).toBe('active')
     expect(resumed.resumedFromId).toBe(archived.id)
     expect(resumed.cwd).toBe(archived.cwd)
@@ -945,7 +948,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     expect(copy.tag).toBe(source.tag)
     // duplicateEpic can never mint 'active' directly — it is born 'proposed'
     // then activated exclusively through approveProposed.
-    expect(approveSpy).toHaveBeenCalledWith(copy.id)
+    expect(approveSpy).toHaveBeenCalledWith(copy.id, 'unknown')
     expect(copy.status).toBe('active')
   })
 
@@ -1241,5 +1244,132 @@ describe('persistActiveIndex is a read-merge-write, never a blind overwrite', ()
       'warn',
       expect.stringContaining('disk read-merge failed'),
     )
+  })
+})
+
+describe('audit log emission (PRD 940)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('createPromptSession fires an epic_create audit event with cwd/epicId/source', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature', undefined, 'NewEpicCard')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_create', {
+      cwd: '/proj',
+      epicId: session.id,
+      source: 'NewEpicCard',
+    })
+  })
+
+  it('createPromptSession defaults source to "unknown" when the caller omits it', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_create', {
+      cwd: '/proj',
+      epicId: session.id,
+      source: 'unknown',
+    })
+  })
+
+  it('approveProposed fires an epic_approve audit event', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    api.auditLog.append.mockClear()
+    usePromptSessions.getState().approveProposed(session.id, 'EpicApprovalBar')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_approve', {
+      cwd: '/proj',
+      epicId: session.id,
+      source: 'EpicApprovalBar',
+    })
+  })
+
+  it('markCompleted fires an epic_complete audit event', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    api.auditLog.append.mockClear()
+    await usePromptSessions.getState().markCompleted(session.id, 'EpicDetail')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_complete', {
+      cwd: '/proj',
+      epicId: session.id,
+      source: 'EpicDetail',
+    })
+  })
+
+  it('deleteEpic fires an epic_delete audit event', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
+    api.auditLog.append.mockClear()
+    await usePromptSessions.getState().deleteEpic(session.id, 'EpicQueue row menu')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_delete', {
+      cwd: '/proj',
+      epicId: session.id,
+      source: 'EpicQueue row menu',
+    })
+  })
+
+  it('resumeArchived fires an epic_resume audit event for the new Epic id', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const archived = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    await usePromptSessions.getState().markCompleted(archived.id)
+    api.auditLog.append.mockClear()
+    const resumed = usePromptSessions.getState().resumeArchived(archived.id, 'EpicDetail')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_resume', {
+      cwd: resumed.cwd,
+      epicId: resumed.id,
+      source: 'EpicDetail',
+    })
+  })
+
+  it('duplicateEpic fires an epic_duplicate audit event for the new Epic id', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const source = usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
+    api.auditLog.append.mockClear()
+    const copy = usePromptSessions.getState().duplicateEpic(source.id, 'EpicQueue row menu')
+
+    expect(api.auditLog.append).toHaveBeenCalledWith('epic_duplicate', {
+      cwd: source.cwd,
+      epicId: copy.id,
+      source: 'EpicQueue row menu',
+    })
+  })
+
+  it('audit IPC failure logs a console warning and never rejects the store mutation', async () => {
+    const api = installWindowApiMock()
+    api.auditLog.append.mockRejectedValue(new Error('ipc down'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    expect(session.status).toBe('proposed')
+
+    await vi.waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('epic_create'),
+        expect.any(Error),
+      )
+    })
+    warnSpy.mockRestore()
   })
 })

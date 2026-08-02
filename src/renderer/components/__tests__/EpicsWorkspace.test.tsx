@@ -177,7 +177,7 @@ describe('EpicsWorkspace', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'a brand new goal', 'feature')
+    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'a brand new goal', 'feature', 'NewEpicCard')
     expect(el.querySelector('[data-testid="new-epic-card"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })

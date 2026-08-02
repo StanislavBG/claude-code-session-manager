@@ -165,11 +165,11 @@ interface PromptSessionsState {
   /** Every Epic is born 'proposed' — this is the ONLY place a PromptSession
    *  is minted, and it can never write any other status. Nothing runs until
    *  approveProposed() flips it to 'active'. */
-  createPromptSession: (cwd: string, goalText: string, tag?: PromptSession['tag']) => PromptSession
+  createPromptSession: (cwd: string, goalText: string, tag?: PromptSession['tag'], source?: string) => PromptSession
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
    *  Starting its session is the caller's job (it owns the opening prompt). */
-  approveProposed: (promptSessionId: string) => PromptSession | null
+  approveProposed: (promptSessionId: string, source?: string) => PromptSession | null
   appendPromptSessionEvent: (
     promptSessionId: string,
     event: Omit<PromptSessionEvent, 'id' | 'promptSessionId' | 'at'>,
@@ -178,11 +178,11 @@ interface PromptSessionsState {
    *  session's live chatRunner process, appends a 'closed' event, flips
    *  status to 'completed', and persists the full event chain + transcript
    *  to session-manager-operations/prompt-sessions/<id>.json. */
-  markCompleted: (promptSessionId: string) => Promise<void>
+  markCompleted: (promptSessionId: string, source?: string) => Promise<void>
   /** Mints a brand-new independent PromptSession (fresh claudeSessionId —
    *  the archived one is dead) that carries a traceability link back to the
    *  archived session it follows on from. */
-  resumeArchived: (archivedId: string) => PromptSession
+  resumeArchived: (archivedId: string, source?: string) => PromptSession
   /** Cosmetic correction only (typo/clarity in the queue row menu) — not a
    *  re-purposing of the Epic's goal. Re-encodes goalText as `${title}\n\n${goal}`,
    *  the same encoding EpicDetail.tsx's splitTitleAndGoal reads, and persists
@@ -193,13 +193,13 @@ interface PromptSessionsState {
    *  existing createPromptSession — fresh id + claudeSessionId, no PRDs/
    *  thread history/scheduler jobs carried over. Mirrors a hand-created Epic
    *  whose opening prompt happens to match an existing one. */
-  duplicateEpic: (promptSessionId: string) => PromptSession
+  duplicateEpic: (promptSessionId: string, source?: string) => PromptSession
   /** Removes the Epic from in-memory sessions/events and persists the removal
    *  through the active-index write path. Throws (never silently no-ops) if
    *  the Epic has a running/queued scheduler job or a chat run in flight —
    *  never deletes out from under live work. Does not touch on-disk PRD
    *  files or scheduler run logs. */
-  deleteEpic: (promptSessionId: string) => Promise<void>
+  deleteEpic: (promptSessionId: string, source?: string) => Promise<void>
   /** Reads a cwd's active-session index back from disk and merges it into
    *  the store — best-effort, one-shot per cwd at call time (safe to call
    *  repeatedly as ProjectsLanding discovers known cwds). In-memory state
@@ -228,6 +228,25 @@ let seq = 0
 function mintId(prefix: string): string {
   seq += 1
   return `${prefix}-${Date.now().toString(36)}-${seq}`
+}
+
+type AuditEventKind =
+  | 'epic_create'
+  | 'epic_approve'
+  | 'epic_complete'
+  | 'epic_delete'
+  | 'epic_resume'
+  | 'epic_duplicate'
+
+/** Fire-and-forget: an IPC failure logs a console warning and never blocks or
+ *  rejects the store mutation it accompanies. `source` traces which renderer
+ *  surface initiated the transition (NewEpicCard, EpicQueue Run Build, the
+ *  approve bar, etc) — see auditLog.cjs's doc comment for why this exists. */
+function emitAuditEvent(kind: AuditEventKind, fields: { cwd: string; epicId: string; source: string }): void {
+  if (typeof window === 'undefined' || !window.api?.auditLog?.append) return
+  window.api.auditLog.append(kind, fields).catch((err: unknown) => {
+    console.warn(`[auditLog] failed to append ${kind}`, err)
+  })
 }
 
 // Two independent fire-and-forget writes to the SAME path (e.g.
@@ -350,7 +369,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: (cwd, goalText, tag) => {
+  createPromptSession: (cwd, goalText, tag, source) => {
     const now = new Date().toISOString()
     const session: PromptSession = {
       id: mintId('psess'),
@@ -374,15 +393,17 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const events = { ...get().events, [session.id]: [firstEvent] }
     set({ sessions, events })
     persistActiveIndex(cwd, sessions, events)
+    emitAuditEvent('epic_create', { cwd, epicId: session.id, source: source ?? 'unknown' })
     return session
   },
-  approveProposed: (promptSessionId) => {
+  approveProposed: (promptSessionId, source) => {
     const session = get().sessions[promptSessionId]
     if (!session || session.status !== 'proposed') return null
     const approved: PromptSession = { ...session, status: 'active' }
     const sessions = { ...get().sessions, [promptSessionId]: approved }
     set({ sessions })
     persistActiveIndex(session.cwd, sessions, get().events)
+    emitAuditEvent('epic_approve', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
     return approved
   },
   appendPromptSessionEvent: (promptSessionId, event) => {
@@ -419,7 +440,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     persistActiveIndex(session.cwd, get().sessions, events)
     return fullEvent
   },
-  markCompleted: async (promptSessionId) => {
+  markCompleted: async (promptSessionId, source) => {
     const session = get().sessions[promptSessionId]
     if (!session) {
       throw new Error(`markCompleted: no PromptSession with id "${promptSessionId}"`)
@@ -452,6 +473,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // 'proposed'). The explicit removedIds also strips it from disk even if
     // another writer's row for this id is still sitting there stale.
     persistActiveIndex(session.cwd, sessions, get().events, [promptSessionId])
+    emitAuditEvent('epic_complete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
 
     let transcript = ''
     try {
@@ -489,7 +511,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     }
     await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive, 'epics')
   },
-  resumeArchived: (archivedId) => {
+  resumeArchived: (archivedId, source) => {
     const archived = get().sessions[archivedId]
     if (!archived) {
       throw new Error(`resumeArchived: no PromptSession with id "${archivedId}"`)
@@ -497,12 +519,14 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // Born 'proposed' like every Epic, then immediately approved — this is a
     // direct user button click (explicit intent), so activation is correct,
     // but it must still go through the one proposed->active transition.
-    const proposed = get().createPromptSession(archived.cwd, archived.goalText)
+    const resolvedSource = source ?? 'unknown'
+    const proposed = get().createPromptSession(archived.cwd, archived.goalText, undefined, resolvedSource)
     const linked: PromptSession = { ...proposed, resumedFromId: archivedId }
     const sessions = { ...get().sessions, [proposed.id]: linked }
     set({ sessions })
     persistActiveIndex(linked.cwd, sessions, get().events)
-    const approved = get().approveProposed(linked.id)
+    const approved = get().approveProposed(linked.id, resolvedSource)
+    emitAuditEvent('epic_resume', { cwd: linked.cwd, epicId: linked.id, source: resolvedSource })
     return approved ?? linked
   },
   renameEpic: async (promptSessionId, title, goal) => {
@@ -524,18 +548,21 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     set({ sessions })
     await persistActiveIndex(session.cwd, sessions, get().events)
   },
-  duplicateEpic: (promptSessionId) => {
-    const source = get().sessions[promptSessionId]
-    if (!source) {
+  duplicateEpic: (promptSessionId, source) => {
+    const sourceSession = get().sessions[promptSessionId]
+    if (!sourceSession) {
       throw new Error(`duplicateEpic: no PromptSession with id "${promptSessionId}"`)
     }
     // Born 'proposed' like every Epic, then immediately approved — this is a
     // direct user button click (explicit intent), so activation is correct,
     // but it must still go through the one proposed->active transition.
-    const proposed = get().createPromptSession(source.cwd, source.goalText, source.tag)
-    return get().approveProposed(proposed.id) ?? proposed
+    const resolvedSource = source ?? 'unknown'
+    const proposed = get().createPromptSession(sourceSession.cwd, sourceSession.goalText, sourceSession.tag, resolvedSource)
+    const approved = get().approveProposed(proposed.id, resolvedSource) ?? proposed
+    emitAuditEvent('epic_duplicate', { cwd: sourceSession.cwd, epicId: approved.id, source: resolvedSource })
+    return approved
   },
-  deleteEpic: async (promptSessionId) => {
+  deleteEpic: async (promptSessionId, source) => {
     const session = get().sessions[promptSessionId]
     if (!session) {
       throw new Error(`deleteEpic: no PromptSession with id "${promptSessionId}"`)
@@ -565,6 +592,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     delete events[promptSessionId]
     set({ sessions, events })
     await persistActiveIndex(session.cwd, sessions, events, [promptSessionId])
+    emitAuditEvent('epic_delete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
   },
   hydrate: async (cwd) => {
     if (typeof window === 'undefined' || !window.api?.config?.readJson) return

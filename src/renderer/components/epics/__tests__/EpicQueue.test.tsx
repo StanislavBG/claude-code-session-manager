@@ -127,7 +127,7 @@ describe('EpicQueue — Actions toolbar menu', () => {
     expect(goalText).toContain('/builder')
 
     const created = Object.values(usePromptSessions.getState().sessions)[0]
-    expect(approveProposedSpy).toHaveBeenCalledWith(created.id)
+    expect(approveProposedSpy).toHaveBeenCalledWith(created.id, 'EpicQueue Run Build')
     expect(sendSpy).toHaveBeenCalledTimes(1)
     expect(sendSpy).toHaveBeenCalledWith({
       tabId: created.id,

@@ -493,6 +493,25 @@ const promptSessionTranscriptRead = z.object({
   limit: z.number().int().positive().max(10_000).optional(),
 }).strict();
 
+// ──────────────────────────────────────────── Audit log (renderer Epic
+// lifecycle trace, PRD 940). Kind allowlist is enforced HERE, main-side — the
+// renderer cannot write arbitrary kinds through this channel, only the six
+// Epic lifecycle transitions it emits from promptSessions.ts.
+const AUDIT_LOG_KIND = z.enum([
+  'epic_create',
+  'epic_approve',
+  'epic_complete',
+  'epic_delete',
+  'epic_resume',
+  'epic_duplicate',
+]);
+const auditLogAppend = z.object({
+  kind: AUDIT_LOG_KIND,
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().min(1).max(256),
+  source: z.string().min(1).max(256),
+}).strict();
+
 // ──────────────────────────────────────────── Per-subagent memory
 // Distinct from the workspace-scoped Memory tool: agentMemory is keyed by
 // subagent name (the .md filename in ~/.claude/agents/, e.g. "code-reviewer"),
@@ -889,6 +908,7 @@ module.exports = {
     projectBriefUpdate,
     promptSessionTranscriptAppend,
     promptSessionTranscriptRead,
+    auditLogAppend,
     agentMemoryList,
     agentMemoryGet,
     agentMemorySet,

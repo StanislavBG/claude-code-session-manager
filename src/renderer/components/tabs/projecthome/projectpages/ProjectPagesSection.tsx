@@ -82,8 +82,8 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
     // born 'proposed' then immediately approved, matching the domain model's
     // single proposed->active transition rather than a second creation kind.
     const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: GENERATE_GOAL, tag: BUILDER_TAG })
-    const session = createPromptSession(cwd, goalText, BUILDER_TAG)
-    approveProposed(session.id)
+    const session = createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection')
+    approveProposed(session.id, 'ProjectPagesSection')
     useChat.getState().send({
       tabId: session.id,
       sessionId: session.claudeSessionId,

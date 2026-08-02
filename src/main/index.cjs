@@ -28,6 +28,7 @@ const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
 const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
+const { appendAuditEvent } = require('./lib/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
@@ -798,6 +799,12 @@ ipcMain.handle('promptSessionTranscript:append', validated(schemas.promptSession
 ipcMain.handle('promptSessionTranscript:read', validated(schemas.promptSessionTranscriptRead, async ({ cwd, epicId, limit }) => {
   const turns = await promptSessionTranscript.readTurns(cwd, epicId, { limit });
   return { turns };
+}));
+// Renderer Epic lifecycle trace (PRD 940) — append-only, no read/list IPC.
+// Kind allowlist enforced by schemas.auditLogAppend, not here.
+ipcMain.handle('auditLog:append', validated(schemas.auditLogAppend, async ({ kind, cwd, epicId, source }) => {
+  appendAuditEvent(kind, { cwd, epicId, source });
+  return { ok: true };
 }));
 agentMemory.registerAgentMemoryHandlers();
 git.register(ipcMain);

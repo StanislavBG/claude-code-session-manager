@@ -74,8 +74,8 @@ function useBuildAction(onSelect: (id: string) => void) {
   const createBuildEpic = () => {
     if (!activeTabCwd || !target) return null
     const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: BUILD_GOAL_TEXT, tag: 'build' })
-    const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build')
-    usePromptSessions.getState().approveProposed(session.id)
+    const session = usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build')
+    usePromptSessions.getState().approveProposed(session.id, 'EpicQueue Run Build')
     return { session, openingPrompt }
   }
 
@@ -404,7 +404,7 @@ function useRowMenuItems(
     if (status !== 'completed') {
       items.push({
         label: 'Mark completed',
-        onSelect: () => void usePromptSessions.getState().markCompleted(epic.id),
+        onSelect: () => void usePromptSessions.getState().markCompleted(epic.id, 'EpicQueue row menu'),
       })
     }
   }
@@ -413,7 +413,7 @@ function useRowMenuItems(
       label: 'Reopen',
       onSelect: () => {
         try {
-          usePromptSessions.getState().resumeArchived(epic.id)
+          usePromptSessions.getState().resumeArchived(epic.id, 'EpicQueue row menu')
         } catch (err) {
           toast.error(err instanceof Error ? err.message : String(err))
         }
@@ -424,7 +424,7 @@ function useRowMenuItems(
     label: 'Duplicate as new Epic',
     onSelect: () => {
       try {
-        const dup = usePromptSessions.getState().duplicateEpic(epic.id)
+        const dup = usePromptSessions.getState().duplicateEpic(epic.id, 'EpicQueue row menu')
         onSelect(dup.id)
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
@@ -439,7 +439,7 @@ function useRowMenuItems(
     onSelect: () => {
       usePromptSessions
         .getState()
-        .deleteEpic(epic.id)
+        .deleteEpic(epic.id, 'EpicQueue row menu')
         .catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
     },
   })

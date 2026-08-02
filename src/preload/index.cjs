@@ -339,6 +339,9 @@ contextBridge.exposeInMainWorld('api', {
     read: (cwd, epicId, limit) =>
       ipcRenderer.invoke('promptSessionTranscript:read', { cwd, epicId, ...(limit ? { limit } : {}) }),
   },
+  auditLog: {
+    append: (kind, fields) => ipcRenderer.invoke('auditLog:append', { kind, ...fields }),
+  },
   agentMemory: {
     list: (agentId) => ipcRenderer.invoke('agent-memory:list', { agentId }),
     get: (agentId, entryId) => ipcRenderer.invoke('agent-memory:get', { agentId, entryId }),

@@ -1556,6 +1556,15 @@ export interface SessionManagerAPI {
     /** Read back an Epic's full-text turns (optionally capped to the last `limit`). Skips corrupt lines rather than throwing. */
     read: (cwd: string, epicId: string, limit?: number) => Promise<{ turns: PromptSessionTranscriptTurn[] }>;
   };
+  auditLog: {
+    /** Append one Epic-lifecycle audit event to ~/.claude/session-manager/audit-log.jsonl.
+     *  Kind allowlist is enforced main-side (ipcSchemas.cjs) — this channel is
+     *  append-only, no read/list IPC exists. */
+    append: (
+      kind: 'epic_create' | 'epic_approve' | 'epic_complete' | 'epic_delete' | 'epic_resume' | 'epic_duplicate',
+      fields: { cwd: string; epicId: string; source: string },
+    ) => Promise<{ ok: boolean }>;
+  };
   agentMemory: {
     /** List all memory entries for one subagent. Sorted newest first. */
     list: (agentId: string) => Promise<AgentMemoryListResult>;

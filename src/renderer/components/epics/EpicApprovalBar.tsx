@@ -25,7 +25,7 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
     if (busy) return
     setBusy(true)
     try {
-      const approved = usePromptSessions.getState().approveProposed(epic.id)
+      const approved = usePromptSessions.getState().approveProposed(epic.id, 'EpicApprovalBar')
       if (!approved) {
         toast.error('This Epic is no longer awaiting approval.')
         return
@@ -46,7 +46,7 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
     setBusy(true)
     void usePromptSessions
       .getState()
-      .markCompleted(epic.id)
+      .markCompleted(epic.id, 'EpicApprovalBar discard')
       .catch((err) => toast.error(`Could not discard: ${err instanceof Error ? err.message : String(err)}`))
       .finally(() => setBusy(false))
   }

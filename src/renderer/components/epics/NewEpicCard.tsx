@@ -88,8 +88,8 @@ export function NewEpicCard({
     // 'proposed', so this call and the approveProposed below are what perform
     // that transition.
     // See prompt-sessions/README.md#lifecycle.
-    const session = createPromptSession(effectiveCwd, goalText, tag)
-    approveProposed(session.id)
+    const session = createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard')
+    approveProposed(session.id, 'NewEpicCard')
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is
     // nothing further for them to enter. Chat (not PRD dispatch) on purpose:

@@ -49,7 +49,7 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   },
   'project-home-builder': {
     description:
-      "Generates this project's 3 static Project Page HTML files (Marketing/Feature/Architecture) from the saved component library and a computed project summary.",
+      "Generates this project's 4 static Project Page HTML files (Home/Marketing/Feature/Architecture) from the saved component library and a computed project summary.",
     initialPromptTemplate:
       'You are generating this project\'s Project Pages. Read ' +
       '`session-manager-operations/architecture/project-pages-pipeline.md` first — it is the ' +

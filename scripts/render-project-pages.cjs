@@ -59,12 +59,12 @@ function main() {
   const pages = renderProjectPages(summary, picks);
 
   fs.mkdirSync(outDir, { recursive: true });
-  for (const lens of ['marketing', 'feature', 'architecture']) {
+  for (const lens of ['home', 'marketing', 'feature', 'architecture']) {
     fs.writeFileSync(path.join(outDir, `${lens}.html`), pages[lens]);
   }
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({ generatedAt }, null, 2));
 
-  console.log(`Wrote marketing.html, feature.html, architecture.html, manifest.json to ${outDir}`);
+  console.log(`Wrote home.html, marketing.html, feature.html, architecture.html, manifest.json to ${outDir}`);
 }
 
 main();

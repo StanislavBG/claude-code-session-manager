@@ -1,4 +1,8 @@
 {
+  "home": {
+    "overview": "dashboard",
+    "pillars": "grid"
+  },
   "marketing": {
     "hero": "editorial",
     "proof": "stats",

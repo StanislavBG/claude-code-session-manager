@@ -1,6 +1,6 @@
 ---
 name: project-home-builder
-description: Generates session-manager's 3 static Project Page HTML files (Marketing Landing / Feature Description / Architecture Overview) from the saved component library and a computed project summary.
+description: Generates session-manager's 4 static Project Page HTML files (Home / Marketing Landing / Feature Description / Architecture Overview) from the saved component library and a computed project summary.
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
@@ -21,21 +21,29 @@ stale — fix this file, don't improvise around it.
 Runs inside an Epic tagged `project-home-builder` (`src/renderer/lib/
 tagLibrary.ts` / `agentTagDefs.ts`). Its whole job is Stages 1-3 of the
 pipeline: turn the active project into a computed summary, pick components
-from the saved library, and write 3 self-contained static HTML files. It
-does **not** build the pipeline's infrastructure (that's regular `/develop`
-PRD work against the app's own source) — it's the agent that *runs* the
-pipeline once the infrastructure exists, and can also be asked to author
-that infrastructure the first time it doesn't exist yet.
+from the saved library, and write 4 self-contained static HTML files (Home,
+Marketing, Feature, Architecture). It does **not** build the pipeline's
+infrastructure (that's regular `/develop` PRD work against the app's own
+source) — it's the agent that *runs* the pipeline once the infrastructure
+exists, and can also be asked to author that infrastructure the first time
+it doesn't exist yet.
 
 ## Component library
 
-Never invent components. The library lives at
+Never invent components. Three of the four lenses (marketing/feature/
+architecture) have a saved design mock at
 `session-manager-operations/design-mocks/project-pages-component-library/`
 — read its `README.md`, then `source/*.jsx` in the numeric order the
 filenames imply (00 → 40; later files splice slots into earlier globals,
 see `40-shell.jsx`'s `PAGES` array and each `windows.PAGE_*` assignment).
 This is design-tool output extracted to readable JSX, not hand-authored —
-treat it as read-only reference, not something to edit in place.
+treat it as read-only reference, not something to edit in place. The 4th
+lens, `home`, has no saved design mock — it was authored directly at
+`src/renderer/lib/projectPages/library/homeSlots.tsx`, reusing the same
+`identity`/`stats`/`pillars` summary fields the marketing lens's hero/proof/
+pillars slots already read, styled as an internal dashboard rather than an
+outward pitch. Extending it follows the same rule as the other three: no
+invented content, only real `ProjectPageSummary` fields.
 
 ## Hard rules
 

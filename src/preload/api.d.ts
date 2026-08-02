@@ -987,6 +987,7 @@ export type ProjectBriefUpdateResult =
 
 // ────────────────────────────────────────────── Project Pages (PRD 929-932)
 export interface ProjectPagesOutput {
+  home: string;
   marketing: string;
   feature: string;
   architecture: string;

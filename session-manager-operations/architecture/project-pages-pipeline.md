@@ -1,21 +1,41 @@
 # Project Pages pipeline — architecture spec
 
-Canonical design for the "Project Page" feature: Project Home generates 3
-static HTML pages per project (Marketing Landing, Feature Description,
-Architecture Overview) from a fixed component library. This is the single
-source of truth both the `project-home-builder` local agent
-(`.claude/agents/project-home-builder.md`) and the `project-home-builder`
-Epic tag's grounding prompt (`src/renderer/lib/agentTagDefs.ts`) point at —
-edit here, not in either of those, when the design changes.
+Canonical design for the "Project Page" feature: Project Home generates 4
+static HTML pages per project (**Home**, Marketing Landing, Feature
+Description, Architecture Overview) from a fixed component library, plus a
+5th, never-generated "About these templates" view explaining the other four
+and where to hand-edit them. This is the single source of truth both the
+`project-home-builder` local agent (`.claude/agents/project-home-builder.md`)
+and the `project-home-builder` Epic tag's grounding prompt
+(`src/renderer/lib/agentTagDefs.ts`) point at — edit here, not in either of
+those, when the design changes.
 
-## Inputs (as specified by the human, 2026-08-01)
+**Correction, 2026-08-02:** the original spec shipped 3 lenses
+(marketing/feature/architecture) only, with Project Home's own live Brief
+dashboard staying a separate, hand-built React view above the generated
+block. The human then asked for the Brief's own content to be available as a
+4th generated template too ("Home") — same component-library/summary/picks
+pipeline as the other three, reusing `identity`/`stats`/`pillars` (already
+in `ProjectPageSummary`, no schema change needed) rather than the live
+Epic-queue data the React Brief shows (that stays live-only; a static page
+can't show "what's running right now" truthfully). The live Brief dashboard
+above the Project Pages block is unchanged and still the primary live view —
+Home is an *additional* static snapshot, not a replacement for it.
 
-1. **Component Library** — fixed, ships with the app. Source design saved at
+## Inputs (as specified by the human, 2026-08-01, extended 2026-08-02)
+
+1. **Component Library** — fixed, ships with the app. Source design for the
+   original 3 lenses saved at
    `session-manager-operations/design-mocks/project-pages-component-library/`
-   (read its `README.md` first). Shape: 3 lenses (`marketing` / `feature` /
-   `architecture`), each a stack of **slots**, each slot 3-4 **variant**
-   components, each lens shipping 3 named **presets** (fixed slot→variant
-   picks) plus a "custom" override state.
+   (read its `README.md` first) — the 4th lens (`home`) has no saved design
+   mock; it was authored directly in
+   `src/renderer/lib/projectPages/library/homeSlots.tsx` reusing the same
+   `PageLensDef` shape and the marketing lens's `identity`/`stats`/`pillars`
+   fields, styled as an internal dashboard rather than an outward pitch.
+   Shape: 4 lenses (`home` / `marketing` / `feature` / `architecture`), each
+   a stack of **slots**, each slot 2-4 **variant** components, each lens
+   shipping named **presets** (fixed slot→variant picks) plus a "custom"
+   override state.
 2. **Project summary** — a JSON computed per project (see schema below).
 3. **Summary → component mapping** — picks the best-fitting variant per slot
    (and/or a whole preset) from the summary's content, then renders.
@@ -131,11 +151,22 @@ architecture}.html` plus a `manifest.json` (`generatedAt`, `model`,
   `project-home-builder` in the active project and sends it the tag's
   grounding prompt (see Epic tag below) as the opening message — the Epic
   IS the unit of work, same as every other Epic in this app.
-- Once `output/*.html` exists, Project Home renders the 3 pages via a
+- Once `output/*.html` exists, Project Home renders the 4 pages via a
   sandboxed `<iframe sandbox="allow-same-origin" srcDoc={html} />`, toggled
-  by lens (Marketing / Feature / Architecture) — never re-parsed into the
-  app's own React tree. A **Regenerate** button re-runs Stages 1-3 (same
+  by lens (Home / Marketing / Feature / Architecture) — never re-parsed into
+  the app's own React tree. A **Regenerate** button re-runs Stages 1-3 (same
   cost-gated UX as Brief refresh).
+- A 5th tab, **"About these templates,"** is always reachable (even before
+  the first Generate) and is never part of `output/*.html` — it's static
+  explainer copy (`ProjectPagesLibraryExplainer` in `ProjectPagesSection.tsx`)
+  naming the 4 lenses, their source slot files, and the 3 real on-disk paths
+  a human would touch to change what gets generated:
+  `project-pages/summary.json` (the computed inputs), `project-pages/
+  picks.json` (per-project, per-slot overrides — hand-edit a pick here and
+  Regenerate preserves it via `select.ts`'s `mergePicks`, same mechanism
+  Stage 2 already had), and `src/renderer/lib/projectPages/library/` (the
+  component library itself, shared across every project — editing it is a
+  code change, not a per-project override).
 
 ## Storage / ownership
 

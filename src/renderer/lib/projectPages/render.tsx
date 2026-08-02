@@ -93,13 +93,14 @@ ${bodyHtml}
 export function renderProjectPages(
   summary: ProjectPageSummary,
   picks: ProjectPagePicks,
-): { marketing: string; feature: string; architecture: string } {
+): { home: string; marketing: string; feature: string; architecture: string } {
   const fontFaces = buildFontFaces();
-  const [marketing, feature, architecture] = LENS_ORDER.map(lensId => {
+  const pages = {} as { home: string; marketing: string; feature: string; architecture: string };
+  for (const lensId of LENS_ORDER) {
     const lens = LENS_LIBRARY[lensId];
     const body = renderLensBody(lensId, summary, picks);
     const title = `${summary.identity.name} — ${lens.label}`;
-    return htmlDocument(title, summary.identity.oneLine, body, fontFaces);
-  });
-  return { marketing, feature, architecture };
+    pages[lensId] = htmlDocument(title, summary.identity.oneLine, body, fontFaces);
+  }
+  return pages;
 }

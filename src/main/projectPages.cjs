@@ -21,7 +21,7 @@ function outputDir(cwd) {
   return path.join(cwd, 'session-manager-operations', 'project-pages', 'output');
 }
 
-const LENSES = ['marketing', 'feature', 'architecture'];
+const LENSES = ['home', 'marketing', 'feature', 'architecture'];
 
 async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
@@ -38,7 +38,7 @@ async function get({ cwd }) {
     return { output: null };
   }
 
-  const [marketing, feature, architecture] = htmlResults;
+  const [home, marketing, feature, architecture] = htmlResults;
   const generatedAt = typeof manifestResult.data.generatedAt === 'string' ? manifestResult.data.generatedAt : null;
   if (!generatedAt) {
     return { output: null };
@@ -46,6 +46,7 @@ async function get({ cwd }) {
 
   return {
     output: {
+      home: home.text,
       marketing: marketing.text,
       feature: feature.text,
       architecture: architecture.text,

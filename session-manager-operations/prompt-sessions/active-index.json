@@ -10,16 +10,6 @@
       "completedAt": null,
       "tag": "bug"
     },
-    "psess-msc6bwrf-7": {
-      "id": "psess-msc6bwrf-7",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
-      "claudeSessionId": "9dfa8cb1-0ec9-4df6-a93f-2c3d0b7b6214",
-      "status": "active",
-      "createdAt": "2026-08-02T19:09:03.003Z",
-      "completedAt": null,
-      "tag": "build"
-    },
     "psess-msc6lz8u-2": {
       "id": "psess-msc6lz8u-2",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -124,24 +114,6 @@
         "id": "pevt-msc77olb-13",
         "promptSessionId": "psess-msc06fh7-6",
         "at": "2026-08-02T19:33:45.407Z"
-      }
-    ],
-    "psess-msc6bwrf-7": [
-      {
-        "id": "pevt-msc6bwrf-8",
-        "promptSessionId": "psess-msc6bwrf-7",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-02T19:09:03.003Z",
-        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc6bwrf-8",
-        "text": "## Summary\n\nPublished **claude-code-session-manager v0.55.1** to npm (patch bump from v0.55.0).\n\n- **Diff**: 3 commits since v0.55.0, all `fix:` prefixed → patch bump.\n- **Gate**: typecheck initially **failed** — `e8e2b0e` (in the diff) had added a test fixture in `NewEpicCard.test.tsx` missing `model`/`color`/`tags` fields now required by `AgentPersona`. Fixed and committed (`df3b604`) before re-running the gate. Typecheck + full unit suite (2046 tests) then passed clean.\n- **Publish**: isolated worktree, `npm ci` + `vite build` + `npm publish` — succeeded. Tagged `v0.55.1`, pushed commit + tag to `origin/main`, local `main` fast-forwarded to match.\n- **Verified**: npm `dist-tags.latest` = `0.55.1`. Worktree cleaned up.\n\nNothing else outstanding — HEAD, origin/main, and the published package are all in sync at v0.55.1.",
-        "id": "pevt-msc6i168-12",
-        "promptSessionId": "psess-msc6bwrf-7",
-        "at": "2026-08-02T19:13:48.656Z"
       }
     ],
     "psess-msc6lz8u-2": [
@@ -264,6 +236,14 @@
         "id": "pevt-mscat8sl-50",
         "promptSessionId": "psess-msc6lz8u-2",
         "at": "2026-08-02T21:14:30.213Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscat8sl-50",
+        "text": "Pushed — `212085d..dfc46ab` on `main`. Working tree is clean.\n\n**Summary:** All three of this session's code commits (`7fff199` General Behaviour injection, `5bce769` `/develop`-routing surfacing, `fd841f1` title/department field + grouped Agent picker) were already on `origin/main` — the concurrent scheduler job that was running earlier must have pushed on top of them as part of its own commit flow. I committed the one remaining bit (routine Epic transcript/active-index sync) and pushed. Nothing outstanding; `main` is fully in sync with `origin`.",
+        "id": "pevt-mscb0itk-52",
+        "promptSessionId": "psess-msc6lz8u-2",
+        "at": "2026-08-02T21:20:09.800Z"
       }
     ],
     "psess-msc7vrsg-15": [
@@ -444,6 +424,30 @@
         "id": "pevt-mscaxk9w-51",
         "promptSessionId": "psess-msc8lmfl-19",
         "at": "2026-08-02T21:17:51.716Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscaxk9w-51",
+        "text": "v0.57.0 is real — it's already published to npm (registry confirms `0.57.0` is live) and 3 new commits landed on `main` since I last pushed, independent of anything I did this turn:\n\n```\n8b853e5 fix(scheduler): isolate queueHistory tests from live-app + real project state\n564f784 chore(release): bump to v0.57.0\ndfc46ab chore(ops): sync runtime state — Epic transcripts and active-index\n```\n\nWhat happened: another Epic's session on this machine ran the `/builder` skill (diff HEAD vs. published npm, bump version from conventional-commit prefixes, gate on tests, publish) independently of this conversation — this matches the builder skill's exact commit-message pattern (`chore(release): bump to vX.Y.Z`). It picked up everything on `main` at that point — including the `fix(scheduler)` and `fix(epics)` commits I pushed this session (`14b75f8`, `cef58ee`) — bumped to 0.57.0, and published.\n\nThe `8b853e5` commit (\"isolate queueHistory tests from live-app + real project state\") landed *after* the release bump, meaning it's a separate, later fix from that same concurrent activity — worth noting since it touches `queueHistory` tests, adjacent to the scheduler-history bug I fixed. I haven't reviewed its contents.\n\nThis isn't something I triggered — it's other autonomous activity that happened to run in parallel on this machine, most likely from one of your other open Epics/sessions doing routine release maintenance. Nothing from my work this turn is blocked or affected by it; my two fixes are already included in the published 0.57.0.",
+        "id": "pevt-mscbq735-1",
+        "promptSessionId": "psess-msc8lmfl-19",
+        "at": "2026-08-02T21:40:07.649Z"
+      },
+      {
+        "id": "ce246880-b32a-4183-a50c-6ba6bee895fc",
+        "promptSessionId": "psess-msc8lmfl-19",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscbq735-1",
+        "at": "2026-08-02T21:50:54.609Z",
+        "prdSlug": "949-state-a-retention-policy-for-prompt-sessions-attachments-tra"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscbq735-1",
+        "text": "**PRD 949 queued** on this session's Epic — closes the one remaining namespace (and the largest, by far) with no stated retention policy.\n\n## Summary\n\n- **No, opening the folder doesn't auto-clean anything** — every deletion/archival this session went through an explicit PRD, and the retention policies already landed (948) explicitly say \"keep indefinitely, no automatic pruning\" for `feedback/` and `scheduler/`.\n- **Real optimization target: `prompt-sessions/` (43M, ~80% of the whole ops folder)** — it's the one namespace with zero stated retention policy. PRD 949 is now queued to close that gap the same way PRD 948 did.\n- **Everything else is either already fine** (small, or already has an explicit \"keep forever\" policy) **or unaudited** — I flagged `design-mocks/` (2.7M) as worth a look but didn't investigate its contents, so I'm not recommending action there without actually checking what's in it first.",
+        "id": "pevt-mscc47mz-7",
+        "promptSessionId": "psess-msc8lmfl-19",
+        "at": "2026-08-02T21:51:01.547Z"
       }
     ]
   },
@@ -454,6 +458,9 @@
     "psess-msby9bx8-4": "2026-08-02T19:17:07.533Z",
     "psess-msc225fk-23": "2026-08-02T19:25:53.946Z",
     "psess-msbzzx39-2": "2026-08-02T19:26:05.226Z",
-    "psess-msc9499x-35": "2026-08-02T20:34:51.822Z"
+    "psess-msc9499x-35": "2026-08-02T20:34:51.822Z",
+    "fix-queuehistory-test-cjs-isolation-races-with-l-f3c899ec": "2026-08-02T21:38:39.982Z",
+    "psess-mscb1rnc-53": "2026-08-02T21:38:43.875Z",
+    "psess-msc6bwrf-7": "2026-08-02T22:32:07.681Z"
   }
 }

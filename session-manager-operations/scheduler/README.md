@@ -85,3 +85,19 @@ writer for one file in `prompt-sessions/`, not the other way around — see that
    sibling `.../prds-archived/` (same Epic, or the flat layout's own archive for pre-migration
    PRDs) so a completed slug can't be re-fired; `state/history.jsonl` gets an append-only record
    of the run.
+
+## Retention policy for `prds-archived/`
+
+**Keep indefinitely.** This directory (both the top-level flat-layout archive and each Epic's own
+`epics/<epic-id>/prds-archived/`) is the durable record of every PRD that has already run — the
+slug-can't-be-re-fired guard depends on the file staying there, and it's the only place to read a
+completed PRD's original acceptance criteria without digging through `state/history.jsonl` or git
+history. There is no automatic pruning by age or count: `consolidateFlatPrds` only *moves* files
+into this archive (flat → `prds-archived/`), it never deletes from it, and no other code, cron, or
+scheduler tick touches these files after that. Enforcement is manual — per `OWNERS`, `scheduler`
+is this namespace's sole writer, so any pruning would run through that same write path, but no
+such pruning call exists today. If retention here is ever revisited (e.g. because the count grows
+large enough to matter), that's a deliberate decision made via a proposed Epic (`/propose-epic`),
+per `ops-maintenance-protocol.md` Pattern E/F — never a file-age/size-based deletion made
+unilaterally by a sweep agent or ad hoc script. Building an automatic pruning mechanism is out of
+scope here and would need its own proposed Epic.

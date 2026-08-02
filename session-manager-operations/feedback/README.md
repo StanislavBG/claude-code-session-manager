@@ -22,3 +22,16 @@ triaged and dispositioned) are preserved for reference in `archived-2026-08-02/`
 See `session-manager-operations/architecture/ops-maintenance-protocol.md` Pattern A for the audit
 that found this folder's retirement status contradicted across code/CLAUDE.md/README, and the
 decision (full retirement) that resolved it.
+
+## Retention policy for `archived-2026-08-02/`
+
+**Keep indefinitely.** This is the sole historical record of the 71 feedback items dispositioned
+before this folder's retirement (2026-06-10 through 2026-07-31) — nothing else preserves that
+triage/status log. There is no automatic pruning: no code, cron, or skill deletes files here
+(this folder is not an `OWNERS` namespace, so `assertOpsWrite` doesn't cover it either — see
+`CLAUDE.md`'s "No general OWNERS namespace" bullet). Enforcement is manual: pruning or moving
+this archive would be a deliberate human decision made via a proposed Epic (`/propose-epic`), not
+an automatic process — see `ops-maintenance-protocol.md` Pattern E/F, which requires a
+documented, agreed-upon rule before any file-age/size-based deletion and never lets a sweep agent
+delete directly. No pruning mechanism exists today; building one is out of scope for this note
+and would need its own proposed Epic.

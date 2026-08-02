@@ -21,6 +21,47 @@ Path helpers: `promptSessionActiveIndexPath(cwd)` and `promptSessionArchivePath(
 `src/renderer/state/promptSessions.ts` are the single source of truth for both — don't
 reconstruct these paths ad hoc.
 
+## Retention policy
+
+This namespace holds three growing, unbounded categories. Unlike `scheduler/prds-archived/` and
+`feedback/archived-*/` (both settled by PRD 948 as "keep indefinitely"), none of the three had a
+stated answer before this section — each gets one now, and each is allowed to differ.
+
+### Archived Epic JSON files (top level, `<promptSessionId>.json`)
+
+**Keep indefinitely.** An archived Epic is the durable audit record of what was asked, what the
+session did (`events`), and its full transcript at the moment of archiving — `hydrateArchived(cwd)`
+walks every file here on load to backfill the completed-Epics list, and `resumeArchived()` reads
+one back to mint a resumed Epic with `resumedFromId` tracing to it. Deleting one destroys that
+Epic's history irrecoverably; there is no other copy. No code prunes these today, and none should
+be added without a proposed Epic — same reasoning as `scheduler/README.md`'s `prds-archived/`
+policy.
+
+### `attachments/`
+
+**Keep indefinitely, for now — but this is the namespace's best candidate for a future
+time-boxed rule.** Pasted images are referenced by path from an Epic's `goalText`/`openingPrompt`,
+including archived Epics kept indefinitely per above — deleting an attachment while its owning
+Epic archive still references it would leave a broken link in an otherwise-permanent record, so
+today's answer has to match the archive's. This is also the largest and fastest-growing category
+(4.8M/26 files, dwarfing the other two combined) and the one where "keep forever" is least
+obviously right: images add little value once their owning Epic is old and unlikely to be
+resumed, unlike the JSON archive itself. **Follow-up (out of scope here):** a time-boxed prune
+rule for attachments belonging only to Epics archived past some age, with orphan-reference
+detection so a prune never breaks a still-relevant archive — this needs its own proposed Epic
+(`/propose-epic`) per `ops-maintenance-protocol.md`'s rule against unilateral file-age/size-based
+deletion, not an ad hoc script.
+
+### `transcripts/`
+
+**Keep indefinitely.** This is `promptSessionTranscript.cjs`'s durable per-Epic transcript store —
+the fallback source for an archive's `durableTurns` when the one-shot copy of the raw
+`~/.claude/projects/.../<sessionUuid>.jsonl` came back empty (see the archive shape below). It is
+also the smallest of the three categories today (664K/57 files) and the plain-text/JSONL content
+compresses far better than the image attachments above, so there is no size pressure forcing a
+different answer yet. No code prunes these today, and none should be added without a proposed
+Epic if that changes.
+
 ## Required shape
 
 ### `active-index.json`

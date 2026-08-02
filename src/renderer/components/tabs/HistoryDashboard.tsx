@@ -7,6 +7,7 @@ import { buildUsageCsv } from '../../lib/usageCsv'
 import { toast } from '../../state/toast'
 import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
+import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import { ControlBar, type RangeDays } from './history/analytics/ControlBar'
 import { Headline } from './history/analytics/Headline'
 import { BudgetStrip } from './history/analytics/BudgetStrip'
@@ -67,10 +68,18 @@ export function HistoryDashboard() {
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
   const prevNavFaceRef = useRef(navFace)
 
+  // `byProject` keys returned by `history:dashboard` are the encoded cwd
+  // slug (same encoding as `~/.claude/projects/<encoded>/`), not the raw
+  // path — see encodeCwd.cjs. Must encode `activeCwd` the same way before
+  // matching, or every project whose path contains a literal `-` (e.g.
+  // this repo's own `session-manager`) silently fails to match and Project
+  // face renders empty.
+  const activeCwdEncoded = activeCwd ? encodeWorkspace(activeCwd) : null
+
   const [homeKeep, setHomeKeep] = useState<Set<string> | null>(null)
   const keep = useMemo(
-    () => (navFace === 'project' && activeCwd ? new Set([activeCwd]) : homeKeep),
-    [navFace, activeCwd, homeKeep],
+    () => (navFace === 'project' && activeCwdEncoded ? new Set([activeCwdEncoded]) : homeKeep),
+    [navFace, activeCwdEncoded, homeKeep],
   )
   const [selected, setSelected] = useState<string | null>(null)
   const [raw, setRaw] = useState<HistoryDashboardResult | null>(null)

@@ -5,6 +5,7 @@ import { act } from 'react-dom/test-utils'
 import { HistoryDashboard } from '../HistoryDashboard'
 import { useLayout } from '../../../state/layout'
 import { useSessions, type SessionTab } from '../../../state/sessions'
+import { encodeWorkspace } from '../../../lib/encodeWorkspace'
 import type { HistoryDashboardProjectRow, HistoryDashboardResult, HistoryDashboardTotals } from '../../../../preload/api'
 
 /**
@@ -13,10 +14,18 @@ import type { HistoryDashboardProjectRow, HistoryDashboardResult, HistoryDashboa
  * activeCwd every render (matches Scheduler.navface.test.tsx's Project-face
  * force-scoping coverage). Home face keeps the full multi-project
  * toggle/isolate/show-all filter, resetting to "all" on transition back in.
+ *
+ * `history:dashboard` keys `byProject` by the ENCODED cwd slug (same
+ * encoding as `~/.claude/projects/<encoded>/`), not the raw path — so the
+ * fixture below mirrors that real shape via `encodeWorkspace`, and UI
+ * lookups (title attr = `chip.projectDir` = the encoded key) match against
+ * the encoded key too.
  */
 
 const ALPHA_CWD = '/home/bilko/Projects/alpha'
 const BETA_CWD = '/home/bilko/Projects/beta'
+const ALPHA_KEY = encodeWorkspace(ALPHA_CWD)
+const BETA_KEY = encodeWorkspace(BETA_CWD)
 
 const ALPHA_TAB: SessionTab = {
   id: 'tab-alpha',
@@ -55,10 +64,10 @@ function buildRaw(): HistoryDashboardResult {
   return {
     from: date,
     to: date,
-    days: [{ date, byProject: { [ALPHA_CWD]: row(ALPHA_CWD, date), [BETA_CWD]: row(BETA_CWD, date) } }],
+    days: [{ date, byProject: { [ALPHA_KEY]: row(ALPHA_KEY, date), [BETA_KEY]: row(BETA_KEY, date) } }],
     prevTotals: emptyTotals(),
     totals: emptyTotals(),
-    byProjectTotals: { [ALPHA_CWD]: emptyTotals(), [BETA_CWD]: emptyTotals() },
+    byProjectTotals: { [ALPHA_KEY]: emptyTotals(), [BETA_KEY]: emptyTotals() },
     byModelTotals: {},
     toolsByProject: {},
     generatedAt: 0,
@@ -99,18 +108,18 @@ function showAllBtn(el: HTMLElement): HTMLButtonElement | undefined {
 }
 
 function isIsolatedTo(el: HTMLElement, cwd: string): boolean {
-  const alpha = isolateBtn(el, ALPHA_CWD)
-  const beta = isolateBtn(el, BETA_CWD)
+  const alpha = isolateBtn(el, ALPHA_KEY)
+  const beta = isolateBtn(el, BETA_KEY)
   if (!alpha || !beta) return false
   const alphaActive = !alpha.className.includes('opacity-40')
   const betaActive = !beta.className.includes('opacity-40')
-  if (cwd === ALPHA_CWD) return alphaActive && !betaActive
+  if (cwd === ALPHA_KEY) return alphaActive && !betaActive
   return betaActive && !alphaActive
 }
 
 function isShowingAll(el: HTMLElement): boolean {
-  const alpha = isolateBtn(el, ALPHA_CWD)
-  const beta = isolateBtn(el, BETA_CWD)
+  const alpha = isolateBtn(el, ALPHA_KEY)
+  const beta = isolateBtn(el, BETA_KEY)
   if (!alpha || !beta) return false
   return !alpha.className.includes('opacity-40') && !beta.className.includes('opacity-40')
 }
@@ -141,17 +150,17 @@ describe('HistoryDashboard Home face — full multi-project facet', () => {
     // Shift-click isolates to just this project (plain click toggles it — see
     // ProjectFacet.tsx's onClick={(e) => e.shiftKey ? onIsolate : onToggle}).
     await act(async () => {
-      isolateBtn(el, ALPHA_CWD)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+      isolateBtn(el, ALPHA_KEY)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
       await Promise.resolve()
     })
-    expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
+    expect(isIsolatedTo(el, ALPHA_KEY)).toBe(true)
 
     // A re-render on the SAME navFace ('home') must not reset the manual choice.
     await act(async () => {
       useSessions.setState({ tabs: [], activeTabId: null })
       await Promise.resolve()
     })
-    expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
+    expect(isIsolatedTo(el, ALPHA_KEY)).toBe(true)
   })
 })
 
@@ -160,8 +169,8 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
     useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
     useLayout.setState({ navFace: 'project' })
     const el = await mount(<HistoryDashboard />)
-    expect(isolateBtn(el, ALPHA_CWD)).toBeNull()
-    expect(isolateBtn(el, BETA_CWD)).toBeNull()
+    expect(isolateBtn(el, ALPHA_KEY)).toBeNull()
+    expect(isolateBtn(el, BETA_KEY)).toBeNull()
     expect(showAllBtn(el)).toBeUndefined()
   })
 
@@ -180,8 +189,8 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
       await Promise.resolve()
     })
     // Force-scoped: no facet UI, no way to see beta's data from here.
-    expect(isolateBtn(el, ALPHA_CWD)).toBeNull()
-    expect(el.textContent).not.toContain(BETA_CWD)
+    expect(isolateBtn(el, ALPHA_KEY)).toBeNull()
+    expect(el.textContent).not.toContain(BETA_KEY)
   })
 
   it('transitioning back to Home resets to "show all"', async () => {
@@ -196,5 +205,34 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
       await Promise.resolve()
     })
     expect(isShowingAll(el)).toBe(true)
+  })
+
+  it('scopes correctly even when the raw cwd contains a literal dash (e.g. "session-manager")', async () => {
+    // Regression test: byProject is keyed by the ENCODED cwd slug, where
+    // every non-alnum char (including a literal "-" already in the path)
+    // becomes "-". Matching against the raw activeCwd instead of its
+    // encoded form silently fails to scope any project whose path has a
+    // dash in a segment name — this repo's own cwd is exactly such a case.
+    const dashCwd = '/home/bilko/Projects/session-manager'
+    const dashTab: SessionTab = { ...ALPHA_TAB, id: 'tab-dash', sessionId: 'tab-dash', cwd: dashCwd }
+    const dashKey = encodeWorkspace(dashCwd)
+    const api = installWindowApiMock()
+    api.history.dashboard.mockResolvedValue({
+      from: '2026-07-30',
+      to: '2026-07-30',
+      days: [{ date: '2026-07-30', byProject: { [dashKey]: row(dashKey, '2026-07-30'), [BETA_KEY]: row(BETA_KEY, '2026-07-30') } }],
+      prevTotals: emptyTotals(),
+      totals: emptyTotals(),
+      byProjectTotals: { [dashKey]: emptyTotals(), [BETA_KEY]: emptyTotals() },
+      byModelTotals: {},
+      toolsByProject: {},
+      generatedAt: 0,
+      provisionalDates: [],
+    })
+    useSessions.setState({ tabs: [dashTab], activeTabId: dashTab.id })
+    useLayout.setState({ navFace: 'project' })
+    const el = await mount(<HistoryDashboard />)
+    expect(el.textContent).not.toContain('no sessions in range')
+    expect(el.textContent).not.toContain(BETA_KEY)
   })
 })

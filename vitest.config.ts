@@ -72,6 +72,7 @@ export default defineConfig({
       'src/main/__tests__/bilkoHost-deriveSlug.test.cjs',
       'src/main/__tests__/bilkoHostCore.test.cjs',
       'src/main/__tests__/bilkoHost-integration.test.cjs',
+      'src/main/__tests__/epicContextDigest.test.cjs',
       'scripts/__tests__/feedback-sweep.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',

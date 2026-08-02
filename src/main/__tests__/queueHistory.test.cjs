@@ -36,8 +36,20 @@ function old(overrides = {}) {
 }
 
 let queueHistory;
+let prevOverride;
 
 beforeEach(() => {
+  // Point HISTORY_PATH at an isolated tmpdir file (SM_HISTORY_PATH_OVERRIDE)
+  // instead of the real machine-global history.jsonl — a live Electron
+  // instance's scheduler.cjs writes that same global file concurrently,
+  // which races this suite's unlink/append calls and produces real
+  // production data in place of the expected empty state.
+  prevOverride = process.env.SM_HISTORY_PATH_OVERRIDE;
+  process.env.SM_HISTORY_PATH_OVERRIDE = path.join(
+    os.tmpdir(),
+    `queueHistory-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
+  );
+
   // Fresh require per test so HISTORY_PATH's target file starts clean.
   delete require.cache[require.resolve('../lib/queueHistory.cjs')];
   queueHistory = require('../lib/queueHistory.cjs');
@@ -46,6 +58,8 @@ beforeEach(() => {
 
 afterEach(() => {
   try { fs.unlinkSync(queueHistory.HISTORY_PATH); } catch { /* ok if absent */ }
+  if (prevOverride === undefined) delete process.env.SM_HISTORY_PATH_OVERRIDE;
+  else process.env.SM_HISTORY_PATH_OVERRIDE = prevOverride;
 });
 
 // ---------- partitionJobs ----------

@@ -21,10 +21,22 @@ const { projectHistoryPath, stateCwds } = require('./queueStore.cjs');
 // resolved via queueStore.cjs). Old rows stay readable from here; new appends
 // go to the owning project's shard (entries without a cwd still land here so
 // nothing is ever dropped).
-const HISTORY_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'history.jsonl');
+//
+// Overridable via SM_HISTORY_PATH_OVERRIDE so queueHistory.test.cjs can point
+// this at an isolated tmpdir path instead of racing a live Electron
+// instance's scheduler.cjs, which writes this same machine-global file.
+const HISTORY_PATH = process.env.SM_HISTORY_PATH_OVERRIDE
+  || path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'history.jsonl');
 
-/** Every history file currently in play: each project's shard + the legacy global. */
+/**
+ * Every history file currently in play: each project's shard + the legacy
+ * global. Under SM_HISTORY_PATH_OVERRIDE (queueHistory.test.cjs), skip the
+ * federated per-project shards entirely — they're real files under whatever
+ * projects exist on this machine's ~/.claude/projects, so including them
+ * would leak real production history rows into an otherwise-isolated test.
+ */
 function historyPaths() {
+  if (process.env.SM_HISTORY_PATH_OVERRIDE) return [HISTORY_PATH];
   const paths = [];
   for (const cwd of stateCwds()) {
     try { paths.push(projectHistoryPath(cwd)); } catch { /* unusable cwd */ }

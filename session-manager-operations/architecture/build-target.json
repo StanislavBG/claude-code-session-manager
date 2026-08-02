@@ -1,0 +1,6 @@
+{
+  "registry": "npm",
+  "packageName": "claude-code-session-manager",
+  "versionBumpPolicy": "conventional-commits",
+  "gates": ["typecheck", "test:unit"]
+}

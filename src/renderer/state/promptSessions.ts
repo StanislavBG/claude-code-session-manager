@@ -47,7 +47,7 @@ export interface PromptSession {
   /** Epic-level intent tag. Also written by src/main/lib/epicMint.cjs for
    *  Epics auto-minted from a headless PRD dispatch — stay shape-compatible
    *  so hydrate() reading a main-written active-index.json round-trips it. */
-  tag?: 'feature' | 'bug' | 'discussion'
+  tag?: 'feature' | 'bug' | 'discussion' | 'build'
   /** Full first-prompt body, when it differs from the display `goalText`
    *  (a proposal filed by automation: goalText is a one-line title, this is
    *  the RCA/analysis body). Sent verbatim on approval; falls back to

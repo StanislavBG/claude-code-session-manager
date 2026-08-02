@@ -41,9 +41,23 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
       'not a code change — do not start editing files unless the human explicitly asks you to ' +
       'after the discussion lands somewhere.',
   },
+  build: {
+    description: "Prepares and publishes a release build to this project's configured registry.",
+    initialPromptTemplate:
+      'You are preparing a release build. Treat the goal below as the full objective — verify ' +
+      "the project's build target configuration before publishing.",
+  },
 }
 
-export const AGENT_TAG_ORDER = Object.keys(AGENT_TAG_DEFS) as TicketTag[]
+/**
+ * Display order for tag-keyed UI (NewEpicCard's KIND_OPTIONS, Home's
+ * AgentsCard) — deliberately NOT `Object.keys(AGENT_TAG_DEFS)`. 'build' has
+ * an entry above so `agentTagDef()` stays total over `TicketTag` (e.g. for
+ * epicIntake.ts's prompt-priming), but no UI surface to create a build-tagged
+ * Epic exists yet (separate PRDs in this Epic own that) — surfacing it here
+ * would advertise a workflow nothing can start.
+ */
+export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion']
 
 export function agentTagDef(tag: TicketTag): AgentTagDef {
   return AGENT_TAG_DEFS[tag]

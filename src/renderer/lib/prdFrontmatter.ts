@@ -15,11 +15,12 @@
  *   - sourceTabId: string (optional) — the tab that originated this PRD, used
  *     by the scheduler (PRD 761) to route a completion status prompt back
  *     into that tab's chat queue via enqueueExternalPrompt. Additive only.
- *   - tag: 'feature' | 'bug' | 'discussion' (optional) — the user-selected
- *     composer tag (PRD 774) carried through from the originating
- *     PromptTicket. Additive only; absent on every PRD authored before this
- *     field existed. A 'discussion' ticket never reaches PRD authoring, so
- *     the value is only ever seen here on legacy or hand-edited files.
+ *   - tag: 'feature' | 'bug' | 'build' (optional) — the user-selected
+ *     composer tag (PRD 774; 'build' added later) carried through from the
+ *     originating PromptTicket. Additive only; absent on every PRD authored
+ *     before this field existed. A 'discussion' ticket never reaches PRD
+ *     authoring, so that value is never parsed here even if present in a
+ *     hand-edited file.
  *
  * Round-trip invariant: keys not in `PrdFrontmatter` are preserved verbatim
  * in their original line range via `extras`. Edits only touch lines that own
@@ -33,7 +34,7 @@ export type PrdFrontmatter = {
   parallelGroup?: number
   sourcePromptId?: string
   sourceTabId?: string
-  tag?: 'feature' | 'bug' | 'discussion'
+  tag?: 'feature' | 'bug' | 'discussion' | 'build'
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -191,7 +192,7 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       fm.sourceTabId = String(v)
       return
     case 'tag':
-      if (v === 'feature' || v === 'bug') fm.tag = v
+      if (v === 'feature' || v === 'bug' || v === 'build') fm.tag = v
       return
   }
 }

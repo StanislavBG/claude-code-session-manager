@@ -313,7 +313,7 @@ const schedulerCreatePrd = z.object({
   originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // User-selected Feature/Bug tag (PRD 774) carried from the originating
   // PromptTicket — deterministic, never LLM-classified.
-  tag: z.enum(['feature', 'bug', 'discussion']).optional(),
+  tag: z.enum(['feature', 'bug', 'discussion', 'build']).optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.

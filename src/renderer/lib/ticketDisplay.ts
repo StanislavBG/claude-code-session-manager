@@ -31,7 +31,7 @@ export function ticketDisplayStatus(status: PromptTicket['status']): PrdDisplayS
  * declares up front that the goal is back-and-forth research with the agent,
  * so it must never be routed to PRD authoring — see isDiscussionTag below.
  */
-export type TicketTag = 'feature' | 'bug' | 'discussion'
+export type TicketTag = 'feature' | 'bug' | 'discussion' | 'build'
 
 /**
  * Tone for a ticket's user-selected tag — the same {bg,text,border,label}
@@ -43,6 +43,7 @@ const TAG_TONE: Record<TicketTag, { bg: string; text: string; border: boolean; l
   feature: { bg: 'bg-sage/20', text: 'text-sage', border: true, label: 'Feature' },
   bug: { bg: 'bg-accent/15', text: 'text-accent', border: true, label: 'Bug' },
   discussion: { bg: 'bg-butter/25', text: 'text-fg-dim', border: true, label: 'Discussion' },
+  build: { bg: 'bg-hive-teal/20', text: 'text-hive-teal', border: true, label: 'Build' },
 }
 
 export function ticketTagTone(tag: TicketTag) {

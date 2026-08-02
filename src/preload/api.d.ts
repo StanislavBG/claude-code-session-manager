@@ -250,6 +250,17 @@ export interface McpStatusResult {
   checkedAt: number;
 }
 
+/** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
+export interface AgentPersona {
+  name: string;
+  description: string | null;
+  tools: string[];
+  path: string;
+  body: string;
+  /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
+  overridingProjects: string[];
+}
+
 export interface VoiceHotkeyConfig {
   accelerator: string;
   mode: 'hold' | 'toggle';
@@ -1283,6 +1294,9 @@ export interface SessionManagerAPI {
   };
   mcp: {
     status: () => Promise<McpStatusResult>;
+  };
+  agents: {
+    listPersonas: () => Promise<AgentPersona[]>;
   };
   logs: {
     write: (

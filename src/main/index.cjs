@@ -30,6 +30,7 @@ const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
+const agentLibrary = require('./agentLibrary.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
@@ -444,6 +445,11 @@ ipcMain.handle('app:launch-mode', () => ({
 // MCP Servers tab (PRD 456 consumes this): probes live connection status via
 // `claude mcp list`. Read-only, single in-flight call — no polling.
 ipcMain.handle('mcp:status', () => probeMcpStatus());
+
+// Agent Library nav page (Home face only): global `~/.claude/agents/*.md`
+// personas plus, per currently-open project tab, whether that project
+// overlays the same agent name at `<cwd>/.claude/agents/<name>.md`. Read-only.
+ipcMain.handle('agents:list-personas', () => agentLibrary.listPersonas());
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
 

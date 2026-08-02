@@ -145,6 +145,9 @@ contextBridge.exposeInMainWorld('api', {
   mcp: {
     status: () => ipcRenderer.invoke('mcp:status'),
   },
+  agents: {
+    listPersonas: () => ipcRenderer.invoke('agents:list-personas'),
+  },
   logs: {
     // ctx is optional: { cwd, tabId, epicId, tags } — when present and
     // level is 'error', main also appends a tagged line to that project's

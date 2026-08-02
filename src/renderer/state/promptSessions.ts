@@ -252,11 +252,28 @@ function hasPendingWrite(path: string): boolean {
 }
 
 /** Fire-and-forget persist of a cwd's active-session slice — called after
- *  every mutation so a reload never loses in-progress work. Best-effort: a
- *  write failure is logged, never thrown into the caller (createPromptSession
- *  and appendPromptSessionEvent are synchronous APIs their callers don't
- *  await). No-ops outside a renderer (tests that never stub window.api). */
-function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>, events: Record<string, PromptSessionEvent[]>): Promise<void> {
+ *  every mutation so a reload never loses in-progress work. Read-merge-write:
+ *  re-reads the on-disk index immediately before writing and merges it with
+ *  this renderer's in-memory view, rather than overwriting the file with
+ *  whatever this renderer instance happens to hold. A renderer whose store
+ *  hasn't hydrated every Epic for this cwd (e.g. a just-booted window that
+ *  immediately creates one Epic) used to silently erase every other session's
+ *  row and event chain on its first write — incident 2026-08-02, where two
+ *  Epics created by another window were wiped with no archive written, only
+ *  minutes after creation. Disk rows not present in memory are preserved
+ *  verbatim; memory wins on id collision; `removedIds` is the ONLY way an id
+ *  disappears from the written file (markCompleted/deleteEpic pass their own
+ *  id there — the two entry points the domain model allows to erase a row).
+ *  Best-effort: a write failure is logged, never thrown into the caller
+ *  (createPromptSession and appendPromptSessionEvent are synchronous APIs
+ *  their callers don't await). No-ops outside a renderer (tests that never
+ *  stub window.api). */
+function persistActiveIndex(
+  cwd: string,
+  sessions: Record<string, PromptSession>,
+  events: Record<string, PromptSessionEvent[]>,
+  removedIds: string[] = [],
+): Promise<void> {
   if (typeof window === 'undefined' || !window.api?.config?.writeJson) return Promise.resolve()
   // Captured now, not re-read from the global inside the .then/.catch below —
   // those run on a later microtask, and in tests vi.unstubAllGlobals() in the
@@ -264,31 +281,56 @@ function persistActiveIndex(cwd: string, sessions: Record<string, PromptSession>
   // before this write settles, turning a benign write-failure log into an
   // unhandled ReferenceError.
   const api = window.api
-  const index: PromptSessionActiveIndex = {
-    sessions: Object.fromEntries(
-      // Everything NOT YET ARCHIVED — 'proposed' as well as 'active'. A
-      // proposed Epic is a valid minimal row (id + claudeSessionId are enough:
-      // reserved and ready to spawn, with goalText/openingPrompt filling in
-      // later), not junk to filter out. Filtering to 'active' alone meant every
-      // renderer mutation rewrote this file without the proposals that
-      // epicMint.cjs (main) had written into it, silently destroying the
-      // agent-proposal intake that replaced the feedback folder. Only
-      // markCompleted removes a row from here, by moving it to its archive.
-      // See prompt-sessions/README.md#lifecycle.
-      Object.entries(sessions).filter(
-        ([, s]) => s.cwd === cwd && (s.status === 'active' || s.status === 'proposed'),
-      ),
+  // Everything NOT YET ARCHIVED — 'proposed' as well as 'active'. A proposed
+  // Epic is a valid minimal row (id + claudeSessionId are enough: reserved
+  // and ready to spawn, with goalText/openingPrompt filling in later), not
+  // junk to filter out. See prompt-sessions/README.md#lifecycle.
+  const memorySessions = Object.fromEntries(
+    Object.entries(sessions).filter(
+      ([, s]) => s.cwd === cwd && (s.status === 'active' || s.status === 'proposed'),
     ),
-    events: {},
-  }
-  for (const id of Object.keys(index.sessions)) {
-    index.events[id] = events[id] ?? []
+  )
+  const memoryEvents: Record<string, PromptSessionEvent[]> = {}
+  for (const id of Object.keys(memorySessions)) {
+    memoryEvents[id] = events[id] ?? []
   }
   const path = promptSessionActiveIndexPath(cwd)
   pendingWriteCounts.set(path, (pendingWriteCounts.get(path) ?? 0) + 1)
   const prior = pendingWritesByPath.get(path) ?? Promise.resolve()
   const next = prior
-    .then(() => api!.config.writeJson(path, index, 'epics'))
+    .then(async () => {
+      let diskSessions: Record<string, PromptSession> = {}
+      let diskEvents: Record<string, PromptSessionEvent[]> = {}
+      try {
+        const result = await api!.config.readJson(path)
+        if (result.exists && result.data) {
+          const disk = result.data as Partial<PromptSessionActiveIndex>
+          diskSessions = disk.sessions ?? {}
+          diskEvents = disk.events ?? {}
+        }
+      } catch (err) {
+        // Corrupt/unreadable disk index: fall back to writing memory state
+        // alone (this renderer's best-known truth) rather than crashing or
+        // propagating a data-dependent throw — same best-effort contract as
+        // every other failure path in this function.
+        const msg = err instanceof Error ? err.message : String(err)
+        api?.logs?.write(
+          'promptSessions',
+          'warn',
+          `persistActiveIndex: disk read-merge failed for ${cwd}, writing memory state only: ${msg}`,
+        )
+        diskSessions = {}
+        diskEvents = {}
+      }
+      const mergedSessions: Record<string, PromptSession> = { ...diskSessions, ...memorySessions }
+      for (const id of removedIds) delete mergedSessions[id]
+      const mergedEvents: Record<string, PromptSessionEvent[]> = {}
+      for (const id of Object.keys(mergedSessions)) {
+        mergedEvents[id] = memoryEvents[id] ?? diskEvents[id] ?? []
+      }
+      const index: PromptSessionActiveIndex = { sessions: mergedSessions, events: mergedEvents }
+      await api!.config.writeJson(path, index, 'epics')
+    })
     .then(
       () => undefined,
       (err: unknown) => {
@@ -407,8 +449,9 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     set({ sessions })
     // Status flipped to 'completed' — persisting now drops it out of the
     // active index (which keeps everything not yet archived, i.e. 'active' and
-    // 'proposed'). This is the ONLY way a row leaves that file.
-    persistActiveIndex(session.cwd, sessions, get().events)
+    // 'proposed'). The explicit removedIds also strips it from disk even if
+    // another writer's row for this id is still sitting there stale.
+    persistActiveIndex(session.cwd, sessions, get().events, [promptSessionId])
 
     let transcript = ''
     try {
@@ -521,7 +564,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     delete sessions[promptSessionId]
     delete events[promptSessionId]
     set({ sessions, events })
-    await persistActiveIndex(session.cwd, sessions, events)
+    await persistActiveIndex(session.cwd, sessions, events, [promptSessionId])
   },
   hydrate: async (cwd) => {
     if (typeof window === 'undefined' || !window.api?.config?.readJson) return

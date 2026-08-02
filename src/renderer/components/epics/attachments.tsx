@@ -119,7 +119,25 @@ export async function resolveAttachmentPaths(items: AttachmentItem[], cwd: strin
 /** Paste (⌘V) / drag-drop / file-picker tray for reference attachments.
  *  Chips show a thumbnail (images) or file icon, name, size, and a remove
  *  button. Matches the design mock's AttachTray. */
-export function AttachTray({ att, tall, testId }: { att: AttachmentsState; tall?: boolean; testId?: string }) {
+export function AttachTray({
+  att,
+  tall,
+  testId,
+  hideZoneWhenEmpty,
+}: {
+  att: AttachmentsState
+  tall?: boolean
+  testId?: string
+  /** Suppress the dashed drop-zone prompt row entirely while there are no
+   *  attachments yet — used by EpicComposer, whose own input-tools row
+   *  already carries a dedicated attach button and whose outer container
+   *  already handles paste/drag-drop, so the full-width dashed prompt would
+   *  be a redundant second affordance (Epics.html composer screenshot,
+   *  2026-08-01 sync: no dashed zone shown once the input row exists).
+   *  NewEpicCard (tall variant) omits this — it has no other attach entry
+   *  point, so its dashed zone stays the primary one. */
+  hideZoneWhenEmpty?: boolean
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
 
@@ -130,42 +148,46 @@ export function AttachTray({ att, tall, testId }: { att: AttachmentsState; tall?
     if (e.dataTransfer.files.length) att.add(e.dataTransfer.files)
   }
 
+  const showZone = !hideZoneWhenEmpty || att.items.length > 0 || over
+
   return (
     <div data-testid={testId}>
-      <div
-        onPaste={onPaste}
-        onDragOver={(e) => { e.preventDefault(); setOver(true) }}
-        onDragLeave={() => setOver(false)}
-        onDrop={onDrop}
-        tabIndex={0}
-        className={`flex items-center gap-2.5 rounded-[10px] border border-dashed outline-none ${
-          tall ? 'p-3.5' : 'px-3 py-2.5'
-        } ${over ? 'border-accent bg-accent/10' : 'border-rule'}`}
-      >
-        <span className={over ? 'text-accent' : 'text-fg-faint'} aria-hidden="true">
-          <AlmanacIcon name="paperclip" size={14} />
-        </span>
-        <span className="text-[12.5px] leading-snug text-fg-faint">
-          Paste a screenshot (⌘V) or drop files here
-        </span>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="ml-auto shrink-0 rounded-lg border border-line bg-bg-hi px-2.5 py-1 text-xs font-semibold text-fg-dim hover:bg-bg-hi/80"
+      {showZone && (
+        <div
+          onPaste={onPaste}
+          onDragOver={(e) => { e.preventDefault(); setOver(true) }}
+          onDragLeave={() => setOver(false)}
+          onDrop={onDrop}
+          tabIndex={0}
+          className={`flex items-center gap-2.5 rounded-[10px] border border-dashed outline-none ${
+            tall ? 'p-3.5' : 'px-3 py-2.5'
+          } ${over ? 'border-accent bg-accent/10' : 'border-rule'}`}
         >
-          Attach
-        </button>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files) att.add(e.target.files)
-            e.target.value = ''
-          }}
-        />
-      </div>
+          <span className={over ? 'text-accent' : 'text-fg-faint'} aria-hidden="true">
+            <AlmanacIcon name="paperclip" size={14} />
+          </span>
+          <span className="text-[12.5px] leading-snug text-fg-faint">
+            Paste a screenshot (⌘V) or drop files here
+          </span>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="ml-auto shrink-0 rounded-lg border border-line bg-bg-hi px-2.5 py-1 text-xs font-semibold text-fg-dim hover:bg-bg-hi/80"
+          >
+            Attach
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) att.add(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        </div>
+      )}
       {att.items.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-2">
           {att.items.map((i) => (

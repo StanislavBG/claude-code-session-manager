@@ -184,7 +184,7 @@ describe('EpicComposer', () => {
 
   it('adds and removes an attachment chip', () => {
     const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
-    const fileInput = el.querySelector('[data-testid="epic-composer-attach-tray"] input[type="file"]') as HTMLInputElement
+    const fileInput = el.querySelector('[data-testid="epic-composer-attach-input"]') as HTMLInputElement
     const file = new File(['x'], 'shot.png', { type: 'image/png' })
     Object.defineProperty(fileInput, 'files', { value: [file] })
     act(() => fileInput.dispatchEvent(new Event('change', { bubbles: true })))

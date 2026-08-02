@@ -5,6 +5,7 @@ import type { PromptSession } from '../../state/promptSessions'
 import { epicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
 import { EpicKindTag, epicStatusDotClass } from './epic-primitives'
 import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
+import { AlmanacIcon } from '../layout/AlmanacIcon'
 import type { TicketTag } from '../../lib/ticketDisplay'
 import { useVoice, selectCanRecord } from '../../state/voice'
 import { copyFor } from '../../lib/voiceCopy'
@@ -149,6 +150,8 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
     if (e.dataTransfer.files.length) att.add(e.dataTransfer.files)
   }
 
+  const attachInputRef = useRef<HTMLInputElement | null>(null)
+
   return (
     <div
       data-testid="epic-composer"
@@ -157,8 +160,28 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
       onDrop={onDrop}
       className={`border-t px-[22px] pb-3 pt-2 ${dragOver ? 'border-accent bg-accent/5' : 'border-rule bg-bg'}`}
     >
-      <div className="mb-2 flex items-center gap-2 border-b border-line pb-2" data-testid="epic-composer-context">
-        <span className="font-mono text-[10.5px] text-fg-faint">iterating in</span>
+      <div className="mb-2 flex items-center gap-2" data-testid="epic-composer-context">
+        <span className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-bg-hi p-0.5" data-testid="epic-composer-action-toggle">
+          <button
+            type="button"
+            onClick={() => setAction('chat')}
+            data-testid="epic-composer-action-chat"
+            aria-pressed={action === 'chat'}
+            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${action === 'chat' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setAction('dispatch')}
+            data-testid="epic-composer-action-dispatch"
+            aria-pressed={action === 'dispatch'}
+            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${action === 'dispatch' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
+          >
+            Dispatch as PRD
+          </button>
+        </span>
+        <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">in</span>
         <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] font-semibold text-fg">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${epicStatusDotClass(status)}`} aria-hidden="true" />
           <span className="truncate">{epic.goalText}</span>
@@ -171,28 +194,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
         )}
       </div>
 
-      <div className="mb-2 flex items-center gap-1 rounded-lg border border-line bg-bg-hi p-0.5" data-testid="epic-composer-action-toggle">
-        <button
-          type="button"
-          onClick={() => setAction('chat')}
-          data-testid="epic-composer-action-chat"
-          aria-pressed={action === 'chat'}
-          className={`rounded-md px-2.5 py-1 text-xs font-semibold ${action === 'chat' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
-        >
-          Chat
-        </button>
-        <button
-          type="button"
-          onClick={() => setAction('dispatch')}
-          data-testid="epic-composer-action-dispatch"
-          aria-pressed={action === 'dispatch'}
-          className={`rounded-md px-2.5 py-1 text-xs font-semibold ${action === 'dispatch' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
-        >
-          Dispatch as PRD
-        </button>
-      </div>
-
-      <AttachTray att={att} testId="epic-composer-attach-tray" />
+      <AttachTray att={att} testId="epic-composer-attach-tray" hideZoneWhenEmpty />
 
       {quote && (
         <div
@@ -236,6 +238,28 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
               <line x1="8" y1="21" x2="16" y2="21" />
             </svg>
           </button>
+          <span className="h-full w-px bg-line" aria-hidden="true" />
+          <button
+            type="button"
+            data-testid="epic-composer-attach"
+            onClick={() => attachInputRef.current?.click()}
+            aria-label="Attach files or paste a screenshot"
+            title="Attach files or paste a screenshot"
+            className="grid h-full w-11 place-items-center text-fg-dim hover:text-fg"
+          >
+            <AlmanacIcon name="folder" size={17} />
+          </button>
+          <input
+            ref={attachInputRef}
+            data-testid="epic-composer-attach-input"
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) att.add(e.target.files)
+              e.target.value = ''
+            }}
+          />
         </div>
         <textarea
           ref={textareaRef}
@@ -245,11 +269,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
           onKeyDown={onKeyDown}
           onPaste={(e) => attachPastedFiles(e, att)}
           rows={2}
-          placeholder={
-            running
-              ? 'Running… send to queue a follow-up in this Epic'
-              : `Add to "${epic.goalText}" — Enter to send, ⌘V to attach a screenshot`
-          }
+          placeholder={running ? 'Queue a follow-up…' : `Add to "${epic.goalText}" — Enter to send, ⌘V to attach a screenshot`}
           className="min-h-[58px] max-h-[180px] flex-1 resize-none overflow-y-auto rounded-[10px] border border-line bg-bg-hi px-3 py-2.5 text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none"
         />
         {running && (
@@ -267,10 +287,11 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
           data-testid="epic-composer-send"
           onClick={() => void submit()}
           disabled={!canSend || sending}
-          className={`h-[58px] shrink-0 rounded-[10px] px-5 text-[13px] font-semibold ${
+          className={`inline-flex h-[58px] shrink-0 items-center gap-1.5 rounded-[10px] px-5 text-[13px] font-semibold ${
             canSend && !sending ? 'bg-accent text-white hover:bg-accent/90' : 'bg-bg-hi text-fg-faint'
           }`}
         >
+          <AlmanacIcon name="send" size={13} />
           {running ? 'Queue' : 'Send'}
         </button>
       </div>

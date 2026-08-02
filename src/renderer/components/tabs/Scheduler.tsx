@@ -23,19 +23,21 @@ import type { NavKey } from '../LeftNav'
  * (SessionManagerConfig's "Scheduler policy" section duplicated the exact
  * same fire-policy/concurrency/threshold controls SchedulePanel's PolicyBar
  * already renders live) instead of resolving it, so it's back to one
- * combined view — Options (global session pool / fire policy / where state
- * lives) stacked directly above this project's PRD monitoring — with three
- * tabs split by operate vs. author rather than by item set — scheduler.cjs's
- * reconcile() (src/main/scheduler.cjs:35, run on every scan/tick) walks
- * prds/ and gives every .md a queue.json entry immediately, so Queue and
- * PRDs always show the same underlying slugs; there is no "authored but not
- * yet queued" state to distinguish them by:
- *   • Queue   — OPERATE: global Options (session pool, fire policy, on-disk
- *     paths) plus monitoring job execution for this project (per-job
- *     status/ETA/logs, reset/resume actions) — combined into one scroll.
+ * combined view — with four destinations split by how often the content
+ * changes (2026-08 restyle): three tabs in one segmented pillbar for the
+ * per-project, minute-to-minute surfaces, plus a separate "Machine" pill for
+ * the monthly-changing global config — scheduler.cjs's reconcile()
+ * (src/main/scheduler.cjs:35, run on every scan/tick) walks prds/ and gives
+ * every .md a queue.json entry immediately, so Queue and PRDs always show the
+ * same underlying slugs; there is no "authored but not yet queued" state to
+ * distinguish them by:
+ *   • Queue   — OPERATE: live status strip, fire policy, and this project's
+ *     job execution (per-job status/ETA/logs, reset/resume actions).
  *   • PRDs    — AUTHOR: edit the .md source (structured frontmatter form +
  *     body editor, lint, archive/retag) — the old "Plans"
  *   • History — last 50 completed/failed jobs with project + date-range filters
+ *   • Machine — global session pool, fire-policy scaffolding, on-disk paths;
+ *     applies to every project, not just the active tab (SessionManagerConfig).
  * scopeCwd derives directly from the active tab's cwd every render (no
  * stored scope state): the currently-active project's tab, or null (every
  * project) if no tab is active — e.g. sitting on the Home face with nothing
@@ -43,10 +45,9 @@ import type { NavKey } from '../LeftNav'
  * project's queue, switch tabs (matches HistoryDashboard's scoping).
  */
 
-type SubView = 'queue' | 'prds' | 'history'
+type SubView = 'queue' | 'prds' | 'history' | 'machine'
 
 const LS_KEY = 'sm.schedulerTab.subView'
-const ADVANCED_LS_KEY = 'sm.schedulerTab.advancedOpen'
 
 const VIEW_OPTIONS = [
   { key: 'queue' as const, label: 'Queue' },
@@ -186,85 +187,6 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
   )
 }
 
-// ─── Advanced & global settings disclosure ──────────────────────────────────
-
-/**
- * Collapses SessionManagerConfig (Global Controls / Behavior / Session pool /
- * On disk) plus the architecture-summary stub behind one disclosure, closed
- * by default. These are machine-wide, rarely-touched settings — stacking them
- * open above the live job queue meant a first-time user had to scroll past 4+
- * config cards before finding "is my work running." The queue is now the
- * first thing in view; this content is one click away, not gone.
- */
-function AdvancedSettingsSection({ navigate }: { navigate?: (k: NavKey) => void }) {
-  const [open, setOpen] = useState(() => localStorage.getItem(ADVANCED_LS_KEY) === '1')
-
-  useEffect(() => {
-    localStorage.setItem(ADVANCED_LS_KEY, open ? '1' : '0')
-  }, [open])
-
-  return (
-    <section className="border border-line rounded-xl bg-bg-hi overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="w-full flex items-center gap-2 px-5 py-3.5 text-left hover:bg-bg-elev/60 transition-colors"
-      >
-        <span
-          className={`text-fg-faint inline-flex transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
-          aria-hidden="true"
-        >
-          <AlmanacIcon name="chevron" size={13} />
-        </span>
-        <span className="text-[13.5px] font-semibold text-fg">Advanced &amp; global settings</span>
-        <span className="text-[12.5px] text-fg-faint">
-          — session pool, on-disk paths, diagnostics. Machine-wide, rarely touched.
-        </span>
-      </button>
-      {open && (
-        <div className="px-5 pb-5 pt-1 border-t border-line space-y-6">
-          <SessionManagerConfig navigate={navigate} />
-          <ArchitectureSummarySection />
-        </div>
-      )}
-    </section>
-  )
-}
-
-/**
- * Reserved slot for an agentic-generated architecture summary — a
- * cost-gated claude -p pass over this project's scheduler/queue code,
- * cached to disk, mirroring memoryAggregate.cjs's pattern (only fires on
- * explicit refresh, model pinned). Not wired to a backend yet: this is the
- * layout + interaction shell so a follow-up PRD can drop in the real IPC
- * call without redesigning the card.
- */
-function ArchitectureSummarySection() {
-  return (
-    <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Architecture summary</h2>
-          <p className="mt-0 mb-0 text-[13px] text-fg-dim leading-relaxed">
-            An agent-generated overview of how the scheduler pieces fit together — reconcile loop,
-            queue/history shards, boot reconciliation, the dead-process reaper. Not generated yet.
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled
-          title="Coming soon — will run a cost-gated claude -p pass over the scheduler source, cached to disk"
-          className="shrink-0 px-2.5 py-1 rounded border border-line text-fg-faint text-[12px] font-medium cursor-not-allowed opacity-60"
-        >
-          Generate summary
-        </button>
-      </div>
-      <p className="mt-3 text-[12.5px] text-fg-faint italic">No summary generated yet.</p>
-    </section>
-  )
-}
-
 // ─── Scheduler shell ─────────────────────────────────────────────────────────
 
 interface SchedulerProps {
@@ -274,7 +196,7 @@ interface SchedulerProps {
 export function Scheduler({ navigate }: SchedulerProps = {}) {
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
-    return (stored === 'prds' || stored === 'history') ? stored : 'queue'
+    return (stored === 'prds' || stored === 'history' || stored === 'machine') ? stored : 'queue'
   })
   // scopeCwd is derived directly from activeCwd every render, not stored
   // state — the currently-active project's tab, or null (every project) if
@@ -325,13 +247,25 @@ export function Scheduler({ navigate }: SchedulerProps = {}) {
         </div>
 
         <div className="flex items-center gap-3 pb-0">
-          <SchedulerSubTabs options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
+          <SchedulerSubTabs<SubView> options={VIEW_OPTIONS} active={subView} onChange={setSubView} />
+          <button
+            type="button"
+            onClick={() => setSubView('machine')}
+            aria-pressed={subView === 'machine'}
+            className={`inline-flex items-center gap-1.5 px-[15px] py-2 rounded-lg text-[13.5px] transition-colors ${
+              subView === 'machine'
+                ? 'bg-bg-elev border border-line font-semibold text-fg'
+                : 'text-fg-faint hover:text-fg-dim'
+            }`}
+            title="Machine-wide config that applies to every project — not this project's live queue."
+          >
+            <span aria-hidden="true">⚙</span> Machine
+          </button>
         </div>
 
         {subView === 'queue' && (
           <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
-            Options — session pool, fire policy, on-disk paths — and this project's live job
-            status: pending, running, needs review, completed, failed.
+            What's running right now, and what fires next.
           </p>
         )}
         {subView === 'prds' && (
@@ -344,22 +278,23 @@ export function Scheduler({ navigate }: SchedulerProps = {}) {
             The last 50 completed and failed jobs, for this project.
           </p>
         )}
+        {subView === 'machine' && (
+          <p className="mt-2 text-[14.5px] text-fg-dim leading-relaxed max-w-[600px]">
+            Machine-wide setup that applies to every project.
+          </p>
+        )}
       </div>
 
       {/* ── Content ──────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0">
-        {subView === 'queue' && (
-          <div className="h-full flex flex-col">
-            <div className="flex-1 min-h-0">
-              <SchedulePanel scopeCwd={scopeCwd} />
-            </div>
-            <div className="shrink-0 px-9 py-4 border-t border-line">
-              <AdvancedSettingsSection navigate={navigate} />
-            </div>
-          </div>
-        )}
+        {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} navigate={navigate} />}
         {subView === 'prds' && <SchedulerPrdsView scopeCwd={scopeCwd} />}
         {subView === 'history' && <SchedulerHistoryView scopeCwd={scopeCwd} />}
+        {subView === 'machine' && (
+          <div className="h-full overflow-y-auto px-9 py-6">
+            <SessionManagerConfig navigate={navigate} />
+          </div>
+        )}
       </div>
     </div>
   )

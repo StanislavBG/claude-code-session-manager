@@ -68,20 +68,6 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
       {/* ── Global Controls ──────────────────────────────────────── */}
       <GlobalControlsSection navigate={navigate} />
 
-      {/* ── Behavior ──────────────────────────────────────────────── */}
-      <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
-        <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Behavior</h2>
-        <p className="mt-0 mb-3 text-[13px] text-fg-dim leading-relaxed">
-          Cross-project app behavior, independent of any single project's config.
-        </p>
-        <Toggle
-          checked={openToHomeOnLaunch}
-          onChange={toggleOpenToHomeOnLaunch}
-          disabled={prefsSaving}
-          label="Open to Home on launch"
-        />
-      </section>
-
       {/* ── Session pool ─────────────────────────────────────────── */}
       <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
         <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Session pool</h2>
@@ -114,6 +100,20 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* ── Behavior ──────────────────────────────────────────────── */}
+      <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
+        <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Behavior</h2>
+        <p className="mt-0 mb-3 text-[13px] text-fg-dim leading-relaxed">
+          Cross-project app behavior, independent of any single project's config.
+        </p>
+        <Toggle
+          checked={openToHomeOnLaunch}
+          onChange={toggleOpenToHomeOnLaunch}
+          disabled={prefsSaving}
+          label="Open to Home on launch"
+        />
       </section>
 
       {/* ── Where global state lives ─────────────────────────────── */}

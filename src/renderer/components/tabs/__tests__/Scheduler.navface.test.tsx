@@ -15,10 +15,10 @@ import { flushAsync } from '../../../testUtils/domFlush'
  * Scheduler is ONE combined screen on both sidebar faces (Home and Project)
  * — no fork on navFace (reverted from the short-lived Home/"Scheduler
  * Configs" vs Project/"Epic's Execution Queue" split, see Scheduler.tsx's
- * module docstring). The Queue tab combines global Options
- * (SessionManagerConfig) with this project's live PRD queue monitoring
- * (SchedulePanel) in one scroll — scoped to whichever tab is active, or
- * every project if none is.
+ * module docstring). Global Options (SessionManagerConfig) live on their own
+ * "Machine" destination; Queue shows this project's live PRD monitoring
+ * (SchedulePanel) — scoped to whichever tab is active, or every project if
+ * none is.
  */
 
 // GlobalControlsSection (rendered inside SessionManagerConfig) pulls in a
@@ -101,15 +101,15 @@ async function mount() {
   return container
 }
 
-// Global Options (SessionManagerConfig) now sits behind a closed-by-default
-// "Advanced & global settings" disclosure below the job queue — see
-// Scheduler.tsx's AdvancedSettingsSection. Tests that assert on its content
-// need to open it first.
-async function openAdvancedSettings(el: HTMLElement) {
+// Global Options (SessionManagerConfig) now lives on its own "Machine"
+// destination, a peer pill beside the Queue/PRDs/History segmented control
+// — see Scheduler.tsx. Tests that assert on its content need to switch to it
+// first.
+async function openMachine(el: HTMLElement) {
   const toggle = Array.from(el.querySelectorAll('button')).find((b) =>
-    b.textContent?.includes('Advanced & global settings'),
+    b.textContent?.includes('Machine'),
   )
-  if (!toggle) throw new Error('Advanced & global settings toggle not found')
+  if (!toggle) throw new Error('Machine toggle not found')
   await act(async () => {
     toggle.click()
     await Promise.resolve()
@@ -139,9 +139,8 @@ describe('Scheduler — one combined screen on both faces', () => {
     expect(el.textContent).toContain('Scheduler')
     expect(el.textContent).not.toContain('Scheduler Configs')
     expect(el.textContent).not.toContain("Epic's Execution Queue")
-    await openAdvancedSettings(el)
+    await openMachine(el)
     expect(el.textContent).toContain('Session pool')
-    expect(el.textContent).toContain('Architecture summary')
   })
 
   it('renders the same combined Options + Queue content on the Project face, force-scoped, with no scope toggle', async () => {
@@ -153,7 +152,7 @@ describe('Scheduler — one combined screen on both faces', () => {
     })
     expect(el.textContent).toContain('Scheduler')
     expect(el.textContent).not.toContain("Epic's Execution Queue")
-    await openAdvancedSettings(el)
+    await openMachine(el)
     expect(el.textContent).toContain('Session pool')
     // No escape hatch — the toggle buttons don't exist at all.
     expect(el.querySelector('[data-testid="scheduler-scope-all"]')).toBeNull()
@@ -162,7 +161,7 @@ describe('Scheduler — one combined screen on both faces', () => {
 
   it('flipping between faces does not change which screen renders', async () => {
     const el = await mount()
-    await openAdvancedSettings(el)
+    await openMachine(el)
     expect(el.textContent).toContain('Session pool')
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })

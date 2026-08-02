@@ -12,6 +12,7 @@ import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { SchBadge, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 import { resolveEpicRef } from '../lib/epicProvenance'
+import type { NavKey } from './LeftNav'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -90,7 +91,7 @@ function saveHidden(set: Set<string>) {
  * SchedulePanel — Queue sub-view of the Scheduler tab. Shows policy controls,
  * filter chips, and an expandable job list wired to the live queue snapshot.
  */
-export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null }) {
+export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string | null; navigate?: (k: NavKey) => void }) {
   const rawSnap = useScheduleState((s) => s.snapshot)
   // Scheduler-as-browser (2026-07-31 domain model): the panel shows one
   // TAB/project's jobs when scoped. Derived AFTER selection (memoized) — never
@@ -190,6 +191,14 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
   }
 
   const { config, jobs, paused, lastRunAt, nextReset, effectiveConcurrency } = snap
+
+  // First run — nothing queued for this scope yet. PRDs are authored by an
+  // Epic's session, not written here, so the only real first step is
+  // creating one; there is deliberately no "New PRD" button on this screen.
+  if (jobs.length === 0) {
+    return <FirstRunGuide navigate={navigate} />
+  }
+
   const counts = { pending: 0, running: 0, investigating: 0, completed: 0, needs_review: 0, failed: 0 }
   for (const j of jobs) {
     if (j.status in counts) counts[j.status as keyof typeof counts]++
@@ -267,12 +276,16 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
 
         {/* Meter rate-limited banner */}
         {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
-          <div className="flex items-center justify-between gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl">
-            <span className="text-[12.5px] text-amber-400 font-medium">Meter rate-limited — firing on heuristic</span>
+          <div className="flex items-center gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl">
+            <span aria-hidden="true">⚠</span>
+            <span className="text-[13.5px] text-amber-400/90">
+              <strong className="font-semibold">Usage meter unavailable</strong> — last good reading{' '}
+              {formatAgo(health.lastPollAt, now)}. Firing on a conservative estimate until it recovers.
+            </span>
             <button
               type="button"
               onClick={() => setMeterBannerDismissed(true)}
-              className="text-[12px] text-amber-400/70 hover:text-amber-400 shrink-0"
+              className="ml-auto text-[12px] text-amber-400/70 hover:text-amber-400 shrink-0"
               title="Dismiss this banner. The scheduler continues firing normally."
             >
               Dismiss
@@ -425,21 +438,7 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
             </div>
           </div>
 
-          {/* Empty state */}
-          {jobs.length === 0 && (
-            <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">
-              No PRDs queued. Drop .md files in:
-              <button
-                type="button"
-                onClick={() => window.api.schedule.openFolder()}
-                className="block mt-1 text-fg-dim hover:text-fg underline truncate w-full text-left"
-              >
-                {'<project>/session-manager-operations/scheduler/prds/'}
-              </button>
-            </div>
-          )}
-
-          {jobs.length > 0 && inline.length === 0 && collapsedCount === 0 && (
+          {inline.length === 0 && collapsedCount === 0 && (
             <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">no matching jobs</div>
           )}
 
@@ -490,11 +489,19 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
           )}
         </div>
 
-        {/* Bundle D — queue-health linter widget */}
-        <QueueHealthSection snap={snap} />
+        {/* Diagnostics — poll health + queue lint merged into one line */}
+        <DiagnosticsSection snap={snap} health={health} now={now} open={showHealth} setOpen={setShowHealth} />
 
-        {/* Scheduler health disclosure */}
-        <SchedulerHealthSection health={health} now={now} showHealth={showHealth} setShowHealth={setShowHealth} />
+        {/* Coach — reassurance that nothing is needed while things run automatically */}
+        {!paused && (
+          <div className="flex gap-2.5 bg-sage/10 border border-sage/30 rounded-xl px-3.5 py-2.5 text-[13.5px] text-fg-dim leading-relaxed">
+            <span aria-hidden="true">✓</span>
+            <span>
+              <strong className="font-semibold text-fg">Nothing needed from you.</strong>{' '}
+              Close the app if you like — jobs keep running, and History shows how each one ended.
+            </span>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between text-[12px] text-fg-faint pt-1 border-t border-line">
@@ -519,6 +526,96 @@ export function SchedulePanel({ scopeCwd = null }: { scopeCwd?: string | null })
               folder
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── First-run guide ─────────────────────────────────────────────────────────
+
+const GUIDE_STEPS: Array<{ title: string; body: string }> = [
+  {
+    title: 'Create an Epic',
+    body: "Describe the outcome you want in the Epics tab. Its thread writes the PRD files into the epic's folder.",
+  },
+  {
+    title: 'Queue what it wrote',
+    body: 'The PRDs tab lists every file the epic produced. Queue one, or the whole epic, and they appear here.',
+  },
+  {
+    title: 'Leave it alone',
+    body: 'Jobs start themselves inside your window, pause on rate-limit, and resume at the reset. History records how each ended.',
+  },
+]
+
+const GUIDE_GLOSSARY: Array<{ term: string; def: string }> = [
+  { term: 'Epic', def: 'A goal, and the folder of PRDs written to reach it.' },
+  { term: 'PRD', def: 'One markdown file = one job. Authored by the epic.' },
+  { term: '5-hour window', def: 'Your Claude billing window, on a rolling clock.' },
+  { term: 'Session pool', def: '5 slots shared with terminal and epic chats.' },
+]
+
+/**
+ * Shown instead of the job table when this scope has zero PRDs anywhere —
+ * not a filtered-to-empty view. Nothing here writes a PRD: that happens in
+ * an Epic's session, so the only real action is "go create one." A "New
+ * PRD" button would offer a capability this screen doesn't have.
+ */
+function FirstRunGuide({ navigate }: { navigate?: (k: NavKey) => void }) {
+  return (
+    <div className="overflow-y-auto h-full">
+      <div className="px-9 py-6 max-w-[900px] mx-auto">
+        <div className="bg-bg-hi border border-line rounded-2xl px-9 py-8">
+          <h2 className="m-0 font-serif text-[25px] font-semibold text-fg">
+            Nothing to run yet — the scheduler needs an Epic.
+          </h2>
+          <p className="mt-2 mb-6 text-[14.5px] text-fg-dim leading-relaxed max-w-[580px]">
+            You don't write PRDs here. An Epic breaks its goal into numbered PRD files, and this
+            page runs them in order. Two steps, once.
+          </p>
+
+          <div className="grid grid-cols-3 gap-3.5">
+            {GUIDE_STEPS.map((step, i) => {
+              const isNow = i === 0
+              return (
+                <div
+                  key={step.title}
+                  className={`bg-bg border rounded-xl px-4 py-4 flex flex-col gap-2 ${
+                    isNow ? 'border-accent shadow-[0_0_0_3px_rgba(184,92,52,.09)]' : 'border-line'
+                  }`}
+                >
+                  <span
+                    className={`w-6 h-6 rounded-full grid place-items-center font-mono text-[12px] font-semibold ${
+                      isNow ? 'bg-accent text-white' : 'bg-bg-elev text-fg-dim'
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                  <h3 className="m-0 text-[15px] font-semibold text-fg">{step.title}</h3>
+                  <p className="m-0 text-[13.5px] text-fg-dim leading-relaxed">{step.body}</p>
+                  {isNow && (
+                    <button
+                      type="button"
+                      onClick={() => navigate?.('terminal')}
+                      className="self-start bg-accent text-white rounded-lg px-3.5 py-1.5 text-[13px] font-semibold mt-1"
+                    >
+                      Go to Epics →
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <dl className="flex mt-[22px] pt-4 border-t border-line gap-5 flex-wrap">
+            {GUIDE_GLOSSARY.map(({ term, def }) => (
+              <div key={term} className="flex-1 min-w-[150px]">
+                <dt className="text-[13.5px] font-semibold text-fg mb-0.5">{term}</dt>
+                <dd className="m-0 text-[12.5px] text-fg-faint leading-relaxed">{def}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
       </div>
     </div>
@@ -1144,166 +1241,129 @@ function SupervisorLogRow({ entry, now }: { entry: SupervisorLogEntry; now: numb
 }
 
 
-function SchedulerHealthSection({
+/**
+ * DiagnosticsSection — scheduler poll health and the queue-health linter
+ * (unbounded loops, missing frontmatter, missing cwd, --no-verify, etc.)
+ * collapsed into ONE row. These used to be two separate collapsed drawers
+ * stacked on top of each other — both are "is anything quietly wrong,"
+ * just from different sources, so a user checking on the queue had to open
+ * two things to get one answer. One amber dot now covers both; expanding
+ * shows the full detail from each underneath.
+ */
+function DiagnosticsSection({
+  snap,
   health,
   now,
-  showHealth,
-  setShowHealth,
+  open,
+  setOpen,
 }: {
+  snap: ScheduleStateSnapshot
   health: ScheduleHealthSnapshot | null
   now: number
-  showHealth: boolean
-  setShowHealth: (v: boolean) => void
+  open: boolean
+  setOpen: (v: boolean) => void
 }) {
-  if (!health) return null
-  const hasIssue = health.consecutiveFailures > 0 || health.pauseReason !== null
-  return (
-    <div className="text-[9px] text-fg-faint border-t border-line pt-1">
-      <button
-        type="button"
-        onClick={() => setShowHealth(!showHealth)}
-        className={`flex items-center gap-1 hover:text-fg-dim w-full text-left ${hasIssue ? 'text-amber-400' : ''}`}
-        title="Scheduler diagnostic info"
-      >
-        <span>{showHealth ? '▾' : '▸'}</span>
-        <span>
-          {hasIssue
-            ? health.consecutiveFailures > 0
-              ? `scheduler health · ${health.consecutiveFailures} failure${health.consecutiveFailures !== 1 ? 's' : ''}`
-              : 'scheduler health · paused'
-            : 'scheduler health'}
-        </span>
-      </button>
-      {showHealth && (
-        <div className="mt-1 space-y-0.5 font-mono pl-2">
-          <div>booted: {formatAgo(health.bootedAt, now)}</div>
-          <div>last poll: {formatAgo(health.lastPollAt, now)} · {health.lastPollOk ? 'ok' : 'failed'}</div>
-          {health.consecutiveFailures > 0 && (
-            <div className="text-amber-400">failures: {health.consecutiveFailures}</div>
-          )}
-          {health.backoffNextAt !== null && health.backoffNextAt > now && (
-            <div>retry in: {formatRelative(health.backoffNextAt - now)}</div>
-          )}
-          {health.nextResetCached && (
-            <div>cached reset: {formatClock(Date.parse(health.nextResetCached))}</div>
-          )}
-          {health.runningJobs.length > 0 && (
-            <div>
-              running: {health.runningJobs.map((j) => `${j.slug}(pid ${j.pid})`).join(', ')}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Bundle D — queue-health linter widget ──────────────────────────────────
-
-/**
- * QueueHealthSection — scans queued PRDs for anti-patterns (unbounded loops,
- * missing frontmatter, missing cwd, --no-verify, etc.). Auto-runs once on
- * mount and re-runs whenever the schedule:state broadcast comes in (i.e. the
- * scheduler has nudged the queue — PRDs may have been added/edited).
- *
- * When there are errors the panel is expanded by default so they're visible
- * without user interaction.
- */
-function QueueHealthSection({ snap }: { snap: ScheduleStateSnapshot }) {
   const [report, setReport] = useState<LintQueueResult | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [open, setOpen] = useState(false)
+  const [lintLoading, setLintLoading] = useState(false)
 
   const signal = `${snap.jobs.length}:${snap.lastRunAt ?? ''}`
   useEffect(() => {
     let alive = true
-    setLoading(true)
+    setLintLoading(true)
     getLintQueueCached()
-      .then((r) => {
-        if (!alive) return
-        setReport(r)
-        const hasErrors = r.reports.some((rep) => rep.findings.some((f) => f.severity === 'error'))
-        if (hasErrors) setOpen(true)
-      })
+      .then((r) => { if (alive) setReport(r) })
       .catch(() => { /* */ })
-      .finally(() => { if (alive) setLoading(false) })
+      .finally(() => { if (alive) setLintLoading(false) })
     return () => { alive = false }
   }, [signal])
 
-  if (!report) {
-    return (
-      <div className="text-[9px] text-fg-faint border-t border-line pt-1">
-        {loading ? 'queue health · scanning…' : 'queue health · idle'}
-      </div>
-    )
-  }
-
-  let errors = 0
-  let warns = 0
-  const flaggedPrds = report.reports.filter((r) => r.findings.length > 0)
+  let lintErrors = 0
+  let lintWarns = 0
+  const flaggedPrds = report ? report.reports.filter((r) => r.findings.length > 0) : []
   for (const r of flaggedPrds) {
     for (const f of r.findings) {
-      if (f.severity === 'error') errors++
-      else warns++
+      if (f.severity === 'error') lintErrors++
+      else lintWarns++
     }
   }
+  const lintClean = lintErrors === 0 && lintWarns === 0
+  const lintLabel = !report
+    ? (lintLoading ? 'scanning…' : 'idle')
+    : lintClean
+      ? `queue lint clear (${report.reports.length} scanned)`
+      : `queue lint ${lintErrors} error${lintErrors === 1 ? '' : 's'}${lintWarns > 0 ? `, ${lintWarns} warn${lintWarns === 1 ? '' : 's'}` : ''}`
 
-  const clean = errors === 0 && warns === 0
-  const summaryClass = errors > 0 ? 'text-red-400' : warns > 0 ? 'text-amber-400' : ''
+  const pollFailures = health?.consecutiveFailures ?? 0
+  const pollLabel = health
+    ? `${pollFailures} poll failure${pollFailures === 1 ? '' : 's'} since boot`
+    : null
+
+  const hasIssue = pollFailures > 0 || (health?.pauseReason ?? null) !== null || !lintClean
+  const summaryParts = [pollLabel, lintLabel].filter(Boolean)
 
   return (
-    <div className="text-[9px] text-fg-faint border-t border-line pt-1">
-      <div className={`flex items-center gap-1 w-full ${summaryClass}`}>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 hover:text-fg-dim flex-1 text-left"
-          title="Static lint of queued PRDs for unbounded loops, missing frontmatter, etc."
-          aria-expanded={open}
-        >
-          <span>{open ? '▾' : '▸'}</span>
-          <span>
-            {clean
-              ? `queue health · all clear (${report.reports.length} scanned)`
-              : `queue health · ${errors} error${errors === 1 ? '' : 's'}${warns > 0 ? `, ${warns} warn${warns === 1 ? '' : 's'}` : ''}`}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setLoading(true)
-            getLintQueueCached({ fresh: true })
-              .then(setReport)
-              .catch(() => {})
-              .finally(() => setLoading(false))
-          }}
-          className="ml-auto text-fg-faint hover:text-fg-dim underline"
-          title="Re-run the lint now"
-        >
-          {loading ? '…' : 'rerun'}
-        </button>
-      </div>
-      {open && !clean && (
-        <div className="mt-1 space-y-1 max-h-48 overflow-y-auto pl-2">
-          {flaggedPrds.map((r) => (
-            <div key={r.slug} className="font-mono">
-              <div className="text-fg-dim truncate" title={r.slug}>{r.slug}</div>
-              {r.findings.map((f, i) => (
-                <div
-                  key={`${r.slug}-${i}`}
-                  className={`pl-3 truncate ${f.severity === 'error' ? 'text-red-400/80' : 'text-amber-400/70'}`}
-                  title={f.snippet}
-                >
-                  {f.severity === 'error' ? '✗' : '⚠'} L{f.line}: {f.snippet}
-                </div>
-              ))}
+    <div className="flex flex-col gap-2 bg-bg-hi border border-line rounded-xl px-4 py-3 text-[13.5px] text-fg-dim">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2.5 w-full text-left"
+        aria-expanded={open}
+        title="Scheduler poll health and queue-lint findings, in one place"
+      >
+        <span className={`w-2 h-2 rounded-full shrink-0 ${hasIssue ? 'bg-butter' : 'bg-sage'}`} aria-hidden="true" />
+        <strong className="text-fg font-semibold shrink-0">Diagnostics</strong>
+        <span className="truncate">{summaryParts.join(' · ')}</span>
+        <span className="ml-auto text-fg-faint shrink-0" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="pl-[18px] space-y-3 font-mono text-[12px]">
+          {health && (
+            <div className="space-y-0.5">
+              <div>booted: {formatAgo(health.bootedAt, now)}</div>
+              <div>last poll: {formatAgo(health.lastPollAt, now)} · {health.lastPollOk ? 'ok' : 'failed'}</div>
+              {health.backoffNextAt !== null && health.backoffNextAt > now && (
+                <div>retry in: {formatRelative(health.backoffNextAt - now)}</div>
+              )}
+              {health.nextResetCached && (
+                <div>cached reset: {formatClock(Date.parse(health.nextResetCached))}</div>
+              )}
+              {health.runningJobs.length > 0 && (
+                <div>running: {health.runningJobs.map((j) => `${j.slug}(pid ${j.pid})`).join(', ')}</div>
+              )}
             </div>
-          ))}
-        </div>
-      )}
-      {open && clean && (
-        <div className="mt-1 pl-2 text-green-400/70 font-mono">
-          ✓ no issues in {report.reports.length} PRD{report.reports.length !== 1 ? 's' : ''}
+          )}
+          {report && (
+            <div className="space-y-1">
+              {lintClean ? (
+                <div className="text-sage">✓ no issues in {report.reports.length} PRD{report.reports.length !== 1 ? 's' : ''}</div>
+              ) : (
+                flaggedPrds.map((r) => (
+                  <div key={r.slug}>
+                    <div className="text-fg-dim truncate" title={r.slug}>{r.slug}</div>
+                    {r.findings.map((f, i) => (
+                      <div
+                        key={`${r.slug}-${i}`}
+                        className={`pl-3 truncate ${f.severity === 'error' ? 'text-accent/80' : 'text-butter/90'}`}
+                        title={f.snippet}
+                      >
+                        {f.severity === 'error' ? '✗' : '⚠'} L{f.line}: {f.snippet}
+                      </div>
+                    ))}
+                  </div>
+                ))
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setLintLoading(true)
+                  getLintQueueCached({ fresh: true }).then(setReport).catch(() => {}).finally(() => setLintLoading(false))
+                }}
+                className="text-fg-faint hover:text-fg-dim underline"
+              >
+                {lintLoading ? '…' : 'rerun lint'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

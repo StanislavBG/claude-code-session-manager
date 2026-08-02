@@ -37,6 +37,16 @@ one it had to guess at. Before doing anything else:
    inside that Epic. Do not mint one yourself, do not fall back to writing an epicless PRD, and
    do not proceed with authoring.
 
+**Tag-aware default (2026-08-01).** The Epic's own intent tag (`feature` / `bug` /
+`discussion` — CLAUDE.md's domain model) sets how eagerly this skill should fire, not just
+what to write once it does:
+- **`feature` / `bug`** — decomposition into PRDs is the expected default path for these once
+  scope is reasonably clear. Reach for `/develop` proactively; don't wait to be re-asked.
+- **`discussion`** — whether development is even warranted is often still the open question.
+  `/develop` stays fully available inside a Discussion Epic (a discussion can conclude "yes,
+  build this"), but never assume it's the next step — don't jump straight to decomposing PRDs
+  just because the conversation is active. Keep exploring/deciding until that's actually settled.
+
 **Never** hand-implement the work inline in chat, and never restate rules that live elsewhere:
 the engineering rules belong to `standards.md`. Reference it; don't fork it.
 

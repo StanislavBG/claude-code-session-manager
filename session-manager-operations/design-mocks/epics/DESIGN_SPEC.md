@@ -1,9 +1,30 @@
 # Epics workspace redesign — design spec
 
 Source: claude.ai/design project `0ca33cd3-c2fa-4644-b728-bde42292abbd`, file `Epics.html`
-(imports `variants/epics.jsx` — decoded copy saved next to this file as `epics-mock.jsx`;
-mock uses inline styles + an `ALMANAC` palette object; the real app implements the same
-palette as Tailwind theme tokens, so **translate to Tailwind classes**, do not port inline styles).
+(imports `variants/shared.jsx`, `variants/almanac.jsx`, `variants/epics-data.jsx`,
+`variants/epics.jsx`, `variants/epic-thread.jsx` — decoded copies saved next to this file as
+`epics-mock.jsx` and `epic-thread-mock.jsx`; mock uses inline styles + an `ALMANAC` palette
+object; the real app implements the same palette as Tailwind theme tokens, so **translate to
+Tailwind classes**, do not port inline styles). `variants/epics-data.jsx` (bulk-generated
+synthetic Epics for at-scale UI testing) is a mock-only fixture with no real-app analogue and
+is not mirrored here.
+
+**Sync history**: originally synced ~2026-07-31 (PRDs 827/828/829/831/833/837 landed the
+two-pane workspace, search/filter/group/sort/pin/paging/keyboard-nav queue, Chat⇄Terminal
+mode toggle, and contextual-chat threading — all described below are DONE). Re-synced
+2026-08-01: the remote design had grown a per-row overflow menu (rename/duplicate/delete/
+resume-in-terminal/copy-id), inline row rename+goal editing, a Composer quote-reply
+affordance, and split its `Turn` renderer out into 8 named situations
+(`epic-thread-mock.jsx`). Of that delta: **Copy Epic ID / Mark completed / Resume in
+terminal** are implemented in `EpicQueue.tsx`'s new `RowMenuButton`/`RowMenu` (2026-08-01,
+this session — all backed by pre-existing store actions, no new persistence). **Rename
+title / Edit goal / Duplicate / Delete** need new store+IPC mutations respecting the
+single-writer law and are filed as proposed Epic
+`epic-queue-row-actions-rename-duplicate-delete-63b84dd6` rather than rushed in. The
+8-situation Turn split is **not a code gap** — `ChatTranscriptTurn.tsx` already renders the
+real equivalents of ask/perm/plan/diff/error/stream/note/summary against actual transcript
+data; see `epic-thread-mock.jsx`'s note. **Composer quote-reply is a genuine small gap**,
+not yet filed as its own Epic.
 
 ## What it replaces
 

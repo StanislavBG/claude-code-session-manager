@@ -35,6 +35,13 @@
 /* Editor markdown preview — Google-Docs page typography, paper-warm palette.
  * (@tailwindcss/typography is not installed, so `prose` is a no-op; this is the
  *  real styling, mirroring .tiptap-content.) */
+/* Long unbroken tokens (session ids, file paths, commit subjects inside
+ * inline `code`) have no space for the browser's default soft-wrap to use,
+ * so without this a single long token pushes the whole chat column wider
+ * than its flex/grid track and the nearest scrolling ancestor grows a
+ * horizontal scrollbar instead of wrapping the text. */
+.markdown-body, .prose-chat { overflow-wrap: anywhere; }
+.markdown-body code, .prose-chat code { word-break: break-word; }
 .markdown-body { color: #2a221a; }
 .markdown-body h1 { font-size: 1.9rem; font-weight: 600; margin: 1.4rem 0 0.7rem; line-height: 1.25; font-family: 'Newsreader', Georgia, serif; }
 .markdown-body h2 { font-size: 1.5rem; font-weight: 600; margin: 1.2rem 0 0.6rem; line-height: 1.3; font-family: 'Newsreader', Georgia, serif; border-bottom: 1px solid #e6dcc4; padding-bottom: 0.2rem; }

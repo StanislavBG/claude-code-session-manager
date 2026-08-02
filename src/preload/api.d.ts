@@ -490,6 +490,15 @@ export interface PrdListItem {
   sourcePromptId?: string | null;
   /** Owning Epic id, derived from the PRD's directory. See ScheduleJob.epicId. */
   epicId?: string | null;
+  /** True when this PRD's source .md was found in a `prds-archived/` dir
+   *  (its scheduler job already ran to completion) rather than the live
+   *  `prds/` dir. Archived PRDs have no matching queue.json job row (the
+   *  row may have aged out into history.jsonl), so consumers must read
+   *  `archivedStatus` instead of joining on a job to know the outcome. */
+  archived?: boolean;
+  /** Only present when `archived` is true — the resolved terminal outcome
+   *  ('completed' vs 'failed') of the job that produced this archived PRD. */
+  archivedStatus?: 'completed' | 'failed';
 }
 
 export interface SupervisorConfig {

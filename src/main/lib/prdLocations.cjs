@@ -146,6 +146,39 @@ function resolvePrdsDirs(maxAgeMin, opts) {
 }
 
 /**
+ * resolveArchivedPrdsDirs(maxAgeMin?, opts?) → string[]
+ *
+ * The `prds-archived/` counterpart of resolvePrdsDirs — every archive dir
+ * (the flat per-project sibling plus each Epic's own sibling, per
+ * listArchivedPrdDirs) that exists on disk, across every historical AND
+ * currently-active project. Same "not recency-filtered" rationale as
+ * resolvePrdsDirs: a quiet project's completed-PRD history is still real
+ * history, not something list-prds should stop counting.
+ */
+function resolveArchivedPrdsDirs(maxAgeMin, opts) {
+  const dirs = [];
+  const seen = new Set();
+  const add = (dir) => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    dirs.push(dir);
+  };
+
+  for (const cwd of allProjectCwds(opts)) {
+    for (const dir of listArchivedPrdDirs(cwd)) {
+      if (fs.existsSync(dir)) add(dir);
+    }
+  }
+  for (const cwd of activeProjectCwds(maxAgeMin, opts)) {
+    for (const dir of listArchivedPrdDirs(cwd)) {
+      if (fs.existsSync(dir)) add(dir);
+    }
+  }
+
+  return dirs;
+}
+
+/**
  * deriveEpicIdFromPrdPath(filePath) → epicId | null
  *
  * A PRD's file location already IS its Epic membership (epic id == parent
@@ -160,7 +193,11 @@ function resolvePrdsDirs(maxAgeMin, opts) {
 function deriveEpicIdFromPrdPath(filePath) {
   if (!filePath || typeof filePath !== 'string') return null;
   const prdsDir = path.dirname(filePath);
-  if (path.basename(prdsDir) !== 'prds') return null;
+  // Accept both an Epic's live `prds/` dir and its sibling `prds-archived/`
+  // dir — archived PRDs still belong to the Epic they were dispatched from,
+  // and callers (parsePrdRaw, list-prds) need epicId for archived files too.
+  const dirName = path.basename(prdsDir);
+  if (dirName !== 'prds' && dirName !== 'prds-archived') return null;
   const epicDir = path.dirname(prdsDir);
   const epicId = path.basename(epicDir);
   if (!epicId || epicId === '.' || epicId === path.sep) return null;
@@ -168,13 +205,14 @@ function deriveEpicIdFromPrdPath(filePath) {
   for (let i = 0; i < EPICS_SUBPATH.length; i++) projectCwd = path.dirname(projectCwd);
   let epicsRoot;
   try { epicsRoot = resolveEpicsRoot(projectCwd); } catch { return null; }
-  if (path.join(epicsRoot, epicId, 'prds') !== prdsDir) return null;
+  if (path.join(epicsRoot, epicId, dirName) !== prdsDir) return null;
   return epicId;
 }
 
 module.exports = {
   resolvePrdWriteDir,
   resolvePrdsDirs,
+  resolveArchivedPrdsDirs,
   resolveEpicsRoot,
   resolveEpicPrdWriteDir,
   listEpicPrdDirs,

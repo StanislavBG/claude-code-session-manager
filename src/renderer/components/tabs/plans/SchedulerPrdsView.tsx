@@ -27,6 +27,20 @@ interface PrdMeta {
    *  here while the same PRD's queue row showed one. */
   epicId?: string | null
   sourcePromptId?: string | null
+  archived?: boolean
+}
+
+/**
+ * This view is a live editor over `prds/`'s .md files — `prdAbsPath()`
+ * below resolves an edit path directly under that dir — so an archived
+ * PRD (already moved to `prds-archived/`) is excluded at every fetch site,
+ * not just the initial one, or a card would render a broken "open PRD"
+ * link (most visibly right after `confirmArchive()` calls `refreshPrds()`
+ * on the very PRDs it just archived). Archived PRDs still show up via
+ * useScheduledPrds() in the Epics workspace (EpicDetail's PRDs tab).
+ */
+function excludeArchived(list: PrdMeta[]): PrdMeta[] {
+  return list.filter((p) => !p.archived)
 }
 
 /** Deep-link into the Epic workspace, same handler the Queue rows use. */
@@ -90,7 +104,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
       .listPrds()
       .then((list) => {
         if (alive) {
-          setPrds(list)
+          setPrds(excludeArchived(list))
           setLoading(false)
         }
       })
@@ -220,7 +234,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
   async function refreshPrds() {
     try {
       const list = await window.api.schedule.listPrds()
-      setPrds(list)
+      setPrds(excludeArchived(list))
     } catch { /* */ }
   }
 
@@ -255,7 +269,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
         return
       }
       const list = await window.api.schedule.listPrds()
-      setPrds(list)
+      setPrds(excludeArchived(list))
       openPrd(slug)
     } catch (e: unknown) {
       toast.error(`Failed to create PRD: ${e instanceof Error ? e.message : String(e)}`)

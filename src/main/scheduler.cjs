@@ -85,7 +85,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
@@ -484,6 +484,35 @@ function biasJobOomScore(pid) {
  */
 function candidatePrdsDirs() {
   return [PRDS_DIR, ...resolvePrdsDirs()];
+}
+
+/**
+ * Every `prds-archived/` dir across every project (the sibling-of-source
+ * layout archiveCompletedPrd writes into — see that function's comment).
+ * Used only by list-prds so the PRDs/Runs tabs can show an Epic's REAL
+ * historical PRD count, not just its currently-pending one. Deliberately
+ * excludes the flat legacy PRDS_ARCHIVE_DIR (manual `schedule:archive-prd`
+ * timestamped-subdir layout) — that path is for a different, unused-by-
+ * any-renderer manual archive flow, not Epic-scoped completion archiving.
+ */
+function candidateArchivedPrdsDirs() {
+  return resolveArchivedPrdsDirs();
+}
+
+/**
+ * Resolve an archived PRD's real terminal outcome for `schedule:list-prds`:
+ * its live queue.json row (if the job hasn't aged out yet), else its
+ * history.jsonl row, else 'completed' — archiveCompletedPrd only ever
+ * archives a job whose effective status is 'completed' (a 'failed' job's
+ * PRD source stays in the live prds/ dir), so 'completed' is a safe
+ * default, not a guess; the live/history lookups are defensive in case
+ * that archiving invariant ever changes. Exported as a pure function (no
+ * IPC/fs) so this fallback chain is unit-testable without an Electron
+ * harness.
+ */
+function resolveArchivedPrdStatus(slug, liveStatusBySlug, histBySlug) {
+  const resolved = liveStatusBySlug.get(slug) ?? histBySlug.get(slug)?.status ?? 'completed';
+  return resolved === 'failed' ? 'failed' : 'completed';
 }
 
 /** The PRD-source directory for a given job cwd (falls back to DEFAULT_PROJECT_CWD). */
@@ -3925,7 +3954,9 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:list-prds', async () => {
     ensureDirs();
     const out = [];
-    for (const dir of candidatePrdsDirs()) {
+    const seenSlugs = new Set();
+
+    async function readDirInto(dir, { archived }) {
       let entries;
       try {
         entries = await fsp.readdir(dir);
@@ -3933,15 +3964,21 @@ function registerScheduleHandlers() {
         if (e?.code !== 'ENOENT') {
           logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: readdir failed', meta: { dir, error: e?.message } });
         }
-        continue;
+        return;
       }
       for (const name of entries) {
         if (!name.endsWith('.md') || name.startsWith('.')) continue;
         const filePath = path.join(dir, name);
         try {
           const parsed = await parsePrd(filePath);
+          // A slug can't be both live and archived at once, but a duplicate
+          // slug found in two archive dirs (shouldn't happen — archiving is
+          // a single rename — but is cheap to guard) is skipped rather than
+          // double-counted.
+          if (seenSlugs.has(parsed.slug)) continue;
+          seenSlugs.add(parsed.slug);
           const stat = await fsp.stat(filePath);
-          out.push({
+          const entry = {
             slug: parsed.slug,
             parallelGroup: parsed.parallelGroup,
             title: parsed.title,
@@ -3950,12 +3987,46 @@ function registerScheduleHandlers() {
             sourcePromptId: parsed.sourcePromptId,
             epicId: parsed.epicId ?? null,
             mtimeMs: stat.mtimeMs,
-          });
+            archived,
+          };
+          out.push(entry);
         } catch (e) {
           logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
         }
       }
     }
+
+    // Live PRDs first, so an archived duplicate (shouldn't exist, but a
+    // stale rename copy is possible) never shadows the still-runnable live
+    // entry.
+    for (const dir of candidatePrdsDirs()) {
+      await readDirInto(dir, { archived: false });
+    }
+
+    const archivedStart = out.length;
+    for (const dir of candidateArchivedPrdsDirs()) {
+      await readDirInto(dir, { archived: true });
+    }
+
+    // Archived PRDs need a status: archiveCompletedPrd (scheduler.cjs) only
+    // ever archives a job whose effective status is 'completed' — a 'failed'
+    // job's PRD source stays in the live prds/ dir (still visible/countable
+    // there already). Still resolve the real job status defensively (live
+    // queue row, falling back to history.jsonl) rather than hard-coding
+    // 'completed', so this stays correct if that archiving invariant ever
+    // changes.
+    if (out.length > archivedStart) {
+      const [state, histBySlug] = await Promise.all([
+        readQueue(),
+        queueHistory.historyTerminalBySlug().catch(() => new Map()),
+      ]);
+      const liveStatusBySlug = new Map(state.jobs.map((j) => [j.slug, j.status]));
+      for (let i = archivedStart; i < out.length; i++) {
+        const entry = out[i];
+        entry.archivedStatus = resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug);
+      }
+    }
+
     out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
     return out;
   });
@@ -4380,4 +4451,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields };

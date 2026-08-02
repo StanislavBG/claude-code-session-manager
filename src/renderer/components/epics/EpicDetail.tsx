@@ -221,6 +221,15 @@ function PrdCard({ prd }: { prd: EpicPrd }) {
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-[12.5px] font-semibold text-fg">{prd.slug}</span>
           <PrdStatusPill status={prdPillStatus(prd.status)} />
+          {prd.archived && (
+            <span
+              className="text-[11px] font-semibold text-fg-faint"
+              data-testid="epic-prd-archived-tag"
+              title="This PRD's source file has been archived — its job already ran to completion"
+            >
+              archived
+            </span>
+          )}
           {lineCount !== null && (
             <span className="font-mono text-[11px] text-fg-faint" data-testid="epic-prd-line-count">
               {lineCount} lines

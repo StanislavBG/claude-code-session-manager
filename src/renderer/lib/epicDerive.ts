@@ -90,16 +90,26 @@ export interface EpicPrd {
   mtimeMs: number
   estimateMinutes: number | null
   parallelGroup: number
-  /** The joined job's status, or 'draft' when no scheduler job row exists yet for this PRD. */
+  /** The joined job's status; 'draft' when no scheduler job row exists yet
+   *  AND this PRD isn't archived; the archived PRD's resolved outcome
+   *  ('completed'/'failed') when it is — a completed PRD's job row can age
+   *  out of queue.json into history.jsonl, so a missing job row does NOT
+   *  mean "never ran" once `archived` is true. */
   status: ScheduleJob['status'] | 'draft'
+  /** True when this PRD's source .md now lives in `prds-archived/` — its
+   *  job already ran to completion (or failure) and the file was moved out
+   *  of the live `prds/` dir. See PrdListItem.archived. */
+  archived: boolean
   job: ScheduleJob | null
 }
 
 /**
  * Joins `window.api.schedule.listPrds()` file entries with schedule jobs on
  * `sourcePromptId === epicId` — the PRDs + Runs tabs' data source. A PRD
- * file with no matching job row (not yet accepted into the queue) reports
- * status 'draft'.
+ * file with no matching job row reports status 'draft' UNLESS it's archived,
+ * in which case the file's own `archivedStatus` (completed/failed) stands in
+ * for the missing/aged-out job row — an Epic's real historical PRD count
+ * must include these, not just its currently-pending ones.
  */
 export function epicPrds(epicId: string, snapshots: EpicSnapshots): EpicPrd[] {
   const jobsBySlug = new Map(snapshots.jobs.filter((j) => j.sourcePromptId === epicId).map((j) => [j.slug, j]))
@@ -107,6 +117,8 @@ export function epicPrds(epicId: string, snapshots: EpicSnapshots): EpicPrd[] {
     .filter((p) => p.sourcePromptId === epicId)
     .map((p) => {
       const job = jobsBySlug.get(p.slug) ?? null
+      const archived = p.archived === true
+      const status = job?.status ?? (archived ? (p.archivedStatus ?? 'completed') : 'draft')
       return {
         slug: p.slug,
         title: p.title,
@@ -114,7 +126,8 @@ export function epicPrds(epicId: string, snapshots: EpicSnapshots): EpicPrd[] {
         mtimeMs: p.mtimeMs,
         estimateMinutes: p.estimateMinutes,
         parallelGroup: p.parallelGroup,
-        status: job?.status ?? 'draft',
+        status,
+        archived,
         job,
       }
     })

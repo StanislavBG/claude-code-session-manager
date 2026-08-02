@@ -196,6 +196,42 @@ describe('epicDerive.epicPrds', () => {
     expect(result.find((p) => p.slug === '101-gadget')?.status).toBe('draft')
     expect(result.find((p) => p.slug === '101-gadget')?.job).toBeNull()
   })
+
+  it('reports an archived PRD\'s resolved status instead of draft when its job row is gone', () => {
+    const archivedCompleted: PrdListItem = {
+      slug: '200-shipped',
+      parallelGroup: 1,
+      title: 'Shipped',
+      cwd: '/proj',
+      estimateMinutes: 10,
+      mtimeMs: 123,
+      sourcePromptId: 'epic-1',
+      archived: true,
+      archivedStatus: 'completed',
+    }
+    const archivedFailed: PrdListItem = {
+      slug: '201-broke',
+      parallelGroup: 1,
+      title: 'Broke',
+      cwd: '/proj',
+      estimateMinutes: 10,
+      mtimeMs: 124,
+      sourcePromptId: 'epic-1',
+      archived: true,
+      archivedStatus: 'failed',
+    }
+    // No job rows for either slug — the whole point: an archived PRD's job
+    // row can have already aged out of queue.json into history.jsonl.
+    const snapshots = makeSnapshots({ prds: [archivedCompleted, archivedFailed], jobs: [] })
+    const result = epicPrds('epic-1', snapshots)
+    expect(result).toHaveLength(2)
+    const shipped = result.find((p) => p.slug === '200-shipped')
+    expect(shipped?.status).toBe('completed')
+    expect(shipped?.archived).toBe(true)
+    const broke = result.find((p) => p.slug === '201-broke')
+    expect(broke?.status).toBe('failed')
+    expect(broke?.archived).toBe(true)
+  })
 })
 
 describe('epicDerive.epicStats', () => {

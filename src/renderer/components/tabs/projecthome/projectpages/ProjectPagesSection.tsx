@@ -19,6 +19,7 @@ import { toast } from '../../../../state/toast'
 import type { ProjectPagesOutput } from '../../../../../preload/api'
 
 const BUILDER_TAG = 'project-home-builder' as const
+const BUILDER_AGENT_NAME = 'project-home-builder' as const
 const GENERATE_GOAL = 'Generate this project\'s Project Pages (Marketing/Feature/Architecture).'
 
 type Lens = 'marketing' | 'feature' | 'architecture'
@@ -48,6 +49,28 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
   const [output, setOutput] = useState<ProjectPagesOutput | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [activeLens, setActiveLens] = useState<Lens>('marketing')
+  // The registered Agent Library persona (~/.claude/agents/project-home-builder.md,
+  // overlaid by this repo's own .claude/agents/project-home-builder.md) this
+  // Epic is bound to — resolved once so Generate Now names a real "who" in the
+  // opening prompt instead of leaving the Epic on the unnamed default persona.
+  const [builderPersona, setBuilderPersona] = useState<{ name: string; description: string | null } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.agents
+      .listPersonas()
+      .then((list) => {
+        if (cancelled) return
+        const found = list.find((a) => a.name === BUILDER_AGENT_NAME)
+        setBuilderPersona(found ? { name: found.name, description: found.description } : null)
+      })
+      .catch(() => {
+        if (!cancelled) setBuilderPersona(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -81,8 +104,19 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
     // identity and what the agent reads can't drift; createPromptSession is
     // born 'proposed' then immediately approved, matching the domain model's
     // single proposed->active transition rather than a second creation kind.
-    const { goalText, openingPrompt } = composeEpicIntake({ title: '', goal: GENERATE_GOAL, tag: BUILDER_TAG })
-    const session = createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection')
+    // agentName/agentDescription bind the Epic to the registered
+    // project-home-builder persona (the "who") the same way NewEpicCard binds
+    // a hand-picked persona — tag stays the "what" (mission).
+    const { goalText, openingPrompt } = composeEpicIntake({
+      title: '',
+      goal: GENERATE_GOAL,
+      tag: BUILDER_TAG,
+      agentName: builderPersona?.name,
+      agentDescription: builderPersona?.description ?? undefined,
+    })
+    const session = builderPersona
+      ? createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection', builderPersona.name)
+      : createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection')
     approveProposed(session.id, 'ProjectPagesSection')
     useChat.getState().send({
       tabId: session.id,
@@ -91,7 +125,7 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
       prompt: openingPrompt,
     })
     navigateToEpic(session.id)
-  }, [existingBuilderEpic, createPromptSession, approveProposed, cwd])
+  }, [existingBuilderEpic, createPromptSession, approveProposed, cwd, builderPersona])
 
   if (!loaded) return null
 

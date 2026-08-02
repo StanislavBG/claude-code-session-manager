@@ -27,8 +27,21 @@ async function flush() {
   await act(async () => {
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
   })
 }
+
+const BUILDER_PERSONA = {
+  name: 'project-home-builder',
+  description: "Generates a project's static Project Home/Project Pages from that project's own saved component library and a computed project summary, if that pipeline exists there.",
+  tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit'],
+  model: null,
+  color: null,
+  path: '/home/bilko/.claude/agents/project-home-builder.md',
+  body: '',
+  overridingProjects: [],
+}
+const listPersonasMock = vi.fn().mockResolvedValue([BUILDER_PERSONA])
 
 beforeEach(() => {
   usePromptSessions.setState({ sessions: {}, events: {} })
@@ -51,6 +64,7 @@ describe('ProjectPagesSection', () => {
   it('renders the empty state when projectPages.get resolves output: null', async () => {
     ;(globalThis as any).window.api = {
       projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
+      agents: { listPersonas: listPersonasMock },
     }
     const el = mount(<ProjectPagesSection cwd={CWD} />)
     await flush()
@@ -70,6 +84,7 @@ describe('ProjectPagesSection', () => {
           },
         }),
       },
+      agents: { listPersonas: listPersonasMock },
     }
     const el = mount(<ProjectPagesSection cwd={CWD} />)
     await flush()
@@ -82,12 +97,19 @@ describe('ProjectPagesSection', () => {
   it('clicking Generate Now with no existing project-home-builder Epic calls createPromptSession with tag project-home-builder', async () => {
     ;(globalThis as any).window.api = {
       projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
+      agents: { listPersonas: listPersonasMock },
     }
     const el = mount(<ProjectPagesSection cwd={CWD} />)
     await flush()
     const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Generate Now') as HTMLButtonElement
     act(() => btn.click())
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(CWD, expect.any(String), 'project-home-builder', 'ProjectPagesSection')
+    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+      CWD,
+      expect.any(String),
+      'project-home-builder',
+      'ProjectPagesSection',
+      'project-home-builder',
+    )
     expect(approveProposedSpy).toHaveBeenCalled()
     expect(sendSpy).toHaveBeenCalled()
   })
@@ -95,6 +117,7 @@ describe('ProjectPagesSection', () => {
   it('clicking Generate Now when a project-home-builder Epic is already active navigates to it instead of creating a second one', async () => {
     ;(globalThis as any).window.api = {
       projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
+      agents: { listPersonas: listPersonasMock },
     }
     usePromptSessions.setState({
       sessions: {

@@ -13,6 +13,7 @@ playwright-report
 !.claude/agents/
 .claude/agents/*
 !.claude/agents/builder.md
+!.claude/agents/project-home-builder.md
 .research/
 <path>
 

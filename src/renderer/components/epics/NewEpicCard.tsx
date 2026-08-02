@@ -215,19 +215,27 @@ export function NewEpicCard({
   const tokenTotal = board ? board.reduce((n, g) => n + g.items.reduce((s, i) => s + i.tokK, 0), 0) : 0
 
   return (
-    <section className="flex-1 min-w-0 grid place-items-center overflow-y-auto bg-bg p-8" data-testid="new-epic-card">
+    <section className="flex-1 min-w-0 grid place-items-center overflow-y-auto bg-bg p-6" data-testid="new-epic-card">
       <div
         className="w-full transition-[max-width] duration-500"
-        style={{ maxWidth: advanced ? 860 : 660, perspective: 2400 }}
+        style={{ maxWidth: advanced ? 'min(1320px, 94vw)' : 'min(920px, 92vw)', perspective: 2400 }}
       >
+        {/* Fixed-height perspective box — both faces are always position:absolute
+            inset:0 inside it (never toggled with `static`), so the card never
+            resizes/jumps mid-flip and the two faces can never visually overlap.
+            Each face scrolls its own body independently when content is tall. */}
         <div
           className="relative w-full transition-transform duration-500"
-          style={{ transformStyle: 'preserve-3d', transform: advanced ? 'rotateY(180deg)' : 'none' }}
+          style={{
+            height: 'min(760px, 84vh)',
+            transformStyle: 'preserve-3d',
+            transform: advanced ? 'rotateY(180deg)' : 'none',
+          }}
         >
           {/* front */}
           <div
-            className="rounded-2xl border border-line bg-bg-hi px-[26px] pb-[22px] pt-6"
-            style={{ backfaceVisibility: 'hidden', position: advanced ? 'absolute' : 'static', inset: 0 }}
+            className="absolute inset-0 flex flex-col rounded-2xl border border-line bg-bg-hi px-[26px] pt-6 pb-[18px]"
+            style={{ backfaceVisibility: 'hidden' }}
           >
             <NewEpicHeader eyebrow="New Epic" advanced={advanced} setAdvanced={setAdvanced} />
             <h2 className="m-0 font-serif text-2xl font-semibold tracking-[-0.3px] text-fg">
@@ -237,6 +245,7 @@ export function NewEpicCard({
               One goal per Epic — fixed for the life of its session. The title and objective are sent
               as the first message the moment you start it, so the agent is already working when it opens.
             </p>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
 
             {showProjectSelector ? (
               <label className="mb-2.5 flex flex-col gap-1">
@@ -364,8 +373,9 @@ export function NewEpicCard({
               references{att.items.length ? ` · ${att.items.length}` : ''}
             </div>
             <AttachTray att={att} tall testId="new-epic-attach-tray" />
+            </div>
 
-            <div className="mt-4 flex items-center gap-2.5">
+            <div className="mt-3 flex flex-shrink-0 items-center gap-2.5 border-t border-rule pt-3">
               <button
                 type="button"
                 data-testid="new-epic-flip-to-grounding"
@@ -399,8 +409,8 @@ export function NewEpicCard({
 
           {/* back */}
           <div
-            className="rounded-2xl border border-line bg-bg-hi px-[26px] pb-[22px] pt-6"
-            style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)', position: advanced ? 'static' : 'absolute', inset: 0 }}
+            className="absolute inset-0 flex flex-col rounded-2xl border border-line bg-bg-hi px-[26px] pt-6 pb-[18px]"
+            style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
           >
             <NewEpicHeader eyebrow="New Epic · grounding" advanced={advanced} setAdvanced={setAdvanced} />
             <h2 className="m-0 font-serif text-2xl font-semibold tracking-[-0.3px] text-fg">
@@ -411,6 +421,7 @@ export function NewEpicCard({
               real files this app can read, never a guess. Read-only: session-manager has no way to
               tell the claude CLI to skip one of these once it's on disk.
             </p>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
 
             <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -470,8 +481,9 @@ export function NewEpicCard({
                 Reading grounding sources…
               </div>
             )}
+            </div>
 
-            <div className="mt-4 flex items-center gap-2.5">
+            <div className="mt-3 flex flex-shrink-0 items-center gap-2.5 border-t border-rule pt-3">
               <button
                 type="button"
                 data-testid="new-epic-flip-to-goal"

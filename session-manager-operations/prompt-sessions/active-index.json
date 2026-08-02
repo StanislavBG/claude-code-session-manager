@@ -18,6 +18,26 @@
       "createdAt": "2026-08-02T15:23:05.756Z",
       "completedAt": null,
       "tag": "feature"
+    },
+    "psess-msbzla9l-12": {
+      "id": "psess-msbzla9l-12",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
+      "claudeSessionId": "a6822bcd-6219-4877-b52b-78b1157c9151",
+      "status": "active",
+      "createdAt": "2026-08-02T16:00:23.097Z",
+      "completedAt": null,
+      "tag": "build"
+    },
+    "psess-msbzzx39-2": {
+      "id": "psess-msbzzx39-2",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Redesign Agent and Tag Library\n\nUse the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Libraries.html\n\nFocus on these files (the whole project is readable):\n- `Libraries.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/config-kit.jsx`\n- `variants/libraries.jsx`\n- `variants/shared.jsx`\n\nImplement: `Libraries.html`",
+      "claudeSessionId": "8139753e-30a9-4395-b276-c0d28c213507",
+      "status": "active",
+      "createdAt": "2026-08-02T16:11:45.861Z",
+      "completedAt": null,
+      "tag": "feature"
     }
   },
   "events": {
@@ -119,7 +139,60 @@
         "id": "pevt-msbzjgi9-9",
         "promptSessionId": "psess-msby9bx8-4",
         "at": "2026-08-02T15:58:57.873Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msbzjgi9-9",
+        "text": "Committed as `218251c`. Working tree is now clean — this covered the remaining runtime state (active-index.json + the two Epic transcripts logging this conversation), since the actual code fix (the Agent/Mission API-sync pass: `agentType` rename, `agentTagDef`-sourced Mission text) was already captured in the earlier `1c8f5ed` commit. Not pushed to `origin/main` — say so if you want that too.",
+        "id": "pevt-msbzksv1-10",
+        "promptSessionId": "psess-msby9bx8-4",
+        "at": "2026-08-02T16:00:00.541Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msbzksv1-10",
+        "text": "The message came through empty (just \"/\"). Nothing to act on here — could you let me know what you'd like next?",
+        "id": "pevt-msbzl13z-11",
+        "promptSessionId": "psess-msby9bx8-4",
+        "at": "2026-08-02T16:00:11.231Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msbzl13z-11",
+        "text": "The code fix (`NewEpicCard.tsx`) is now in the working tree, uncommitted — I won't commit unless asked.\n\n## Summary\n\nFixed the layout bug and widened the modal in `NewEpicCard.tsx`:\n\n**Root cause of the overlap/off-ness**: the front/back faces toggled between `position: static` and `position: absolute` depending on `advanced`. Since only one face was ever \"in flow\" at a time, the container's height was driven by whichever face happened to be static — the instant you clicked the toggle, the layout height snapped to the *other* face's height before the 3D rotation even started animating, so the visible face got stretched/cropped against a height that belonged to the face flipping in. That read as overlapping/jumbled content mid-flip.\n\n**Fix**: both faces are now permanently `position: absolute; inset: 0` inside a perspective box with a real fixed height (`min(760px, 84vh)`) — never toggled, so there's nothing to snap. Each face is a `flex flex-col` with its own header, a scrollable body (`flex-1 overflow-y-auto`), and a footer pinned to the bottom with a `border-t` divider — so long content (a big Agent Library, a wide grounding board) scrolls internally instead of stretching or clipping the card.\n\n**Wider modal**: max-width went from a fixed 660px/860px to `min(920px, 92vw)` (front) / `min(1320px, 94vw)` (advanced/grounding board) — it now uses most of the available page width on typical windows instead of a narrow fixed column, while still capping sanely on very wide displays.\n\nVerified: `npm run typecheck` clean, `check-unstable-selectors` clean, full `npm run test:unit` — 218 files / 2034 tests passing (including the flip and grounding-board tests, unaffected by the layout change).\n\nNot verified: the actual rendered flip animation in a live window — this is a one-shot headless run and launching a second Electron instance risks killing this repo's live scheduler jobs, so I could not visually confirm the fix beyond the DOM/CSS structure and passing tests.",
+        "id": "pevt-msc03hwh-4",
+        "promptSessionId": "psess-msby9bx8-4",
+        "at": "2026-08-02T16:14:32.801Z"
+      }
+    ],
+    "psess-msbzla9l-12": [
+      {
+        "id": "pevt-msbzla9l-13",
+        "promptSessionId": "psess-msbzla9l-12",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-02T16:00:23.097Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msbzla9l-13",
+        "text": "Published and pushed successfully.\n\n**Summary:**\n- **v0.53.0 → v0.54.0** (minor bump: 1 feat, 1 fix, 1 chore since last release, no breaking changes)\n- Commits covered: `8109fa8` (fix: active-index merge tombstones), `1c8f5ed` (feat: two-axis Agent/Mission Epic picker + grounding board), `218251c` (chore: prompt-sessions sync)\n- Gate: typecheck clean; test:unit 2034/2034 passed (2 tests timed out under full-suite parallel load, confirmed flaky — both pass cleanly in isolation)\n- Published from an isolated worktree (`npm ci` + `vite build` + `npm publish`), verified live on the registry as `0.54.0`/`latest`\n- Tag `v0.54.0` and the version-bump commit pushed to `main`; worktree cleaned up\n\nUnrelated to the release: your working tree still has uncommitted changes to `prompt-sessions/active-index.json` and transcript files, plus a new untracked error log — left untouched since they're outside this task's scope.",
+        "id": "pevt-msbzs9my-14",
+        "promptSessionId": "psess-msbzla9l-12",
+        "at": "2026-08-02T16:05:48.874Z"
+      }
+    ],
+    "psess-msbzzx39-2": [
+      {
+        "id": "pevt-msbzzx39-3",
+        "promptSessionId": "psess-msbzzx39-2",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-02T16:11:45.861Z",
+        "text": "Redesign Agent and Tag Library\n\nUse the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Libraries.html\n\nFocus on these files (the whole project is readable):\n- `Libraries.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/config-kit.jsx`\n- `variants/libraries.jsx`\n- `variants/shared.jsx`\n\nImplement: `Libraries.html`"
       }
     ]
-  }
+  },
+  "tombstones": {}
 }

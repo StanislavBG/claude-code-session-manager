@@ -483,7 +483,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
   'scheduler': {
       headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
       intro:
-        'One home for the headless-batch workflow, split into three tabs. The Queue tab runs and monitors jobs; the PRDs tab is where you author the markdown files those jobs execute; the History tab lists recent completed and failed jobs. PRDs live in each active project\'s own <cwd>/session-manager-operations/scheduler/prds/. A status strip across the top shows when the window resets, how many jobs are pending / running / completed today, and how much of the 5-hour window you have used. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
+        'One home for the headless-batch workflow, split into three tabs. The Queue tab combines global Options (session pool, fire policy, on-disk paths) with monitoring this project\'s jobs; the PRDs tab is where you author the markdown files those jobs execute; the History tab lists recent completed and failed jobs. PRDs live in each active project\'s own <cwd>/session-manager-operations/scheduler/prds/. A status strip across the top shows when the window resets, how many jobs are pending / running / completed today, and how much of the 5-hour window you have used. Jobs auto-pause on rate-limit and auto-resume on the next 5-hour reset.',
       sections: [
         {
           title: 'Queue — when jobs start',
@@ -510,9 +510,9 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
           ],
         },
         {
-          // Folded in from the retired standalone 'sm-config' key — this
-          // material is now the Home-face "Scheduler Configs" content.
-          title: 'Home face — the session pool (global, not per-project)',
+          // Folded in from the retired standalone 'sm-config' key — now
+          // part of the combined Options + Queue view on the Queue tab.
+          title: 'Options — the session pool (global, not per-project)',
           items: [
             { term: 'One pool, every consumer', body: 'Session-Manager owns a machine-wide pool of concurrent Claude sessions (3 by default). Scheduler jobs and Epic chat runs each request a slot before launching and release it when they finish — no subsystem has a private cap that can stack with another\'s.' },
             { term: 'Guardrails', body: 'Beyond the slot cap, a memory gate defers new jobs when free RAM drops below a per-job budget, and each job gets an OOM-score bias so the kernel prefers killing a restartable job over the app itself.' },

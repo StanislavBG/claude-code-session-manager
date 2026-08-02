@@ -28,12 +28,13 @@ export interface NavGroupItem {
   /** Which sidebar face(s) (home / project) this item appears under. See lib/navFace.ts. */
   faces: NavFace[]
   /**
-   * Per-face override of `label`/`hint`. For items whose two faces render
-   * genuinely DIFFERENT content (not just a scope filter over the same
-   * screen) — e.g. Scheduler: Home shows global scheduler policy/session-pool
-   * controls ("Scheduler Configs"), Project shows this project's live PRD
-   * queue ("Epic's Execution Queue"). Resolved by getNavItemsForFace; falls
-   * back to the base `label`/`hint` when the current face has no override.
+   * Per-face override of `label`/`hint`, for the rare item whose two faces
+   * render genuinely DIFFERENT content (not just a scope filter over the
+   * same screen). Resolved by getNavItemsForFace; falls back to the base
+   * `label`/`hint` when the current face has no override. Scheduler used to
+   * use this (Home: "Scheduler Configs", Project: "Epic's Execution Queue")
+   * before the two faces were merged back into one combined screen — kept
+   * as a mechanism for a future case, not currently exercised by any item.
    */
   labelByFace?: Partial<Record<NavFace, string>>
   hintByFace?: Partial<Record<NavFace, string>>
@@ -50,9 +51,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'terminal',   group: 'Workspace', label: 'Epics',      icon: 'terminal',     hint: 'Independent goal-scoped Epics for this project', faces: PROJECT },
   { key: 'browser',    group: 'Workspace', label: 'Browser',    icon: 'browser',      hint: 'Embedded dev browser — capture DOM, record click-sequences', faces: HOME },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
-  { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Author PRDs + run them as claude -p jobs', faces: BOTH,
-    labelByFace: { home: 'Scheduler Configs', project: "Epic's Execution Queue" },
-    hintByFace: { home: 'Global scheduler policy, session pool, and architecture', project: 'Author PRDs + run them as claude -p jobs' } },
+  { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Global policy + this project\'s live PRD queue', faces: BOTH },
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: BOTH },
 
   // Configure

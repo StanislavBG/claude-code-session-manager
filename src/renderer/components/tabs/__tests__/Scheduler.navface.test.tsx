@@ -8,22 +8,22 @@ import { useLayout } from '../../../state/layout'
 import { useSessions, type SessionTab } from '../../../state/sessions'
 import { useScheduleState } from '../../../state/scheduleState'
 import { usePromptSessions } from '../../../state/promptSessions'
+import type { ScheduleStateSnapshot } from '../../../../preload/api'
 import { flushAsync } from '../../../testUtils/domFlush'
 
 /**
- * Scheduler is two genuinely different screens split by navFace (see
- * lib/navGroups.ts's labelByFace and the module docstring in Scheduler.tsx):
- *   - Home face ("Scheduler Configs"): renders SessionManagerConfig's global
- *     policy/session-pool content — no PRDs, no project/all scope toggle.
- *   - Project face ("Epic's Execution Queue"): the Queue/PRDs/History
- *     workflow, with its own project/all scope toggle (an explicit
- *     machine-wide escape hatch), unchanged from before this split.
+ * Scheduler is ONE combined screen on both sidebar faces (Home and Project)
+ * — no fork on navFace (reverted from the short-lived Home/"Scheduler
+ * Configs" vs Project/"Epic's Execution Queue" split, see Scheduler.tsx's
+ * module docstring). The Queue tab combines global Options
+ * (SessionManagerConfig) with this project's live PRD queue monitoring
+ * (SchedulePanel) in one scroll — scoped to whichever tab is active, or
+ * every project if none is.
  */
 
-// GlobalControlsSection (rendered inside SessionManagerConfig on the Home
-// branch) pulls in a much larger IPC surface (config, homeDir, skills)
-// unrelated to what these tests cover — stub it, same as
-// SessionManagerConfig.test.tsx does.
+// GlobalControlsSection (rendered inside SessionManagerConfig) pulls in a
+// much larger IPC surface (config, homeDir, skills) unrelated to what these
+// tests cover — stub it, same as SessionManagerConfig.test.tsx does.
 vi.mock('../GlobalControlsSection', () => ({
   GlobalControlsSection: () => createElement('div', { 'data-testid': 'global-controls-stub' }),
 }))
@@ -39,6 +39,28 @@ const ALPHA_TAB: SessionTab = {
   startupCommand: null,
   presetId: null,
   generation: 0,
+}
+
+function emptySnapshot(): ScheduleStateSnapshot {
+  return {
+    config: {
+      enabled: true,
+      offsetMinutes: 0,
+      concurrencyCap: 3,
+      defaultCwd: '/home/bilko',
+      firePolicy: 'when-available',
+      utilizationThreshold: 90,
+      schemaVersion: 1,
+    },
+    jobs: [],
+    scheduledFor: null,
+    lastRunAt: null,
+    nextReset: null,
+    paused: null,
+    utilization: null,
+    pollHealth: undefined,
+    effectiveConcurrency: { cap: 3, source: 'config' },
+  } as ScheduleStateSnapshot
 }
 
 function installWindowApiMock() {
@@ -84,7 +106,7 @@ beforeEach(() => {
   installWindowApiMock()
   useLayout.setState({ navFace: 'home' })
   useSessions.setState({ tabs: [], activeTabId: null })
-  useScheduleState.setState({ snapshot: null })
+  useScheduleState.setState({ snapshot: emptySnapshot() })
   usePromptSessions.setState({ sessions: {}, events: {} })
 })
 
@@ -96,50 +118,46 @@ afterEach(() => {
   delete (window as unknown as { api?: unknown }).api
 })
 
-describe('Scheduler Home face — Scheduler Configs', () => {
-  it('renders global config content, not the PRD queue', async () => {
+describe('Scheduler — one combined screen on both faces', () => {
+  it('renders a single "Scheduler" title on the Home face, with Options and the PRD queue combined', async () => {
     const el = await mount()
-    expect(el.textContent).toContain('Scheduler Configs')
+    expect(el.textContent).toContain('Scheduler')
+    expect(el.textContent).not.toContain('Scheduler Configs')
+    expect(el.textContent).not.toContain("Epic's Execution Queue")
     expect(el.textContent).toContain('Session pool')
     expect(el.textContent).toContain('Architecture summary')
   })
 
-  it('has no project/all scope toggle on the Home face', async () => {
-    const el = await mount()
-    expect(el.querySelector('[data-testid="scheduler-scope-all"]')).toBeNull()
-    expect(el.querySelector('[data-testid="scheduler-scope-project"]')).toBeNull()
-  })
-})
-
-describe('Scheduler Project face — Epic\'s Execution Queue', () => {
-  it('renders the PRD queue workflow force-scoped to the active project, with no scope toggle at all', async () => {
+  it('renders the same combined Options + Queue content on the Project face, force-scoped, with no scope toggle', async () => {
     const el = await mount()
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
       useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
     })
-    expect(el.textContent).toContain("Epic's Execution Queue")
-    // No escape hatch — the toggle buttons don't exist at all on Project face.
+    expect(el.textContent).toContain('Scheduler')
+    expect(el.textContent).not.toContain("Epic's Execution Queue")
+    expect(el.textContent).toContain('Session pool')
+    // No escape hatch — the toggle buttons don't exist at all.
     expect(el.querySelector('[data-testid="scheduler-scope-all"]')).toBeNull()
     expect(el.querySelector('[data-testid="scheduler-scope-project"]')).toBeNull()
   })
 
-  it('leaving the Project face and returning to Home swaps back to Scheduler Configs', async () => {
+  it('flipping between faces does not change which screen renders', async () => {
     const el = await mount()
+    expect(el.textContent).toContain('Session pool')
     await act(async () => {
       useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
       useLayout.setState({ navFace: 'project' })
       await Promise.resolve()
+      await flushAsync()
     })
-    expect(el.textContent).toContain("Epic's Execution Queue")
-
+    expect(el.textContent).toContain('Session pool')
     await act(async () => {
       useLayout.setState({ navFace: 'home' })
       await Promise.resolve()
       await flushAsync()
     })
-    expect(el.textContent).toContain('Scheduler Configs')
-    expect(el.querySelector('[data-testid="scheduler-scope-project"]')).toBeNull()
+    expect(el.textContent).toContain('Session pool')
   })
 })

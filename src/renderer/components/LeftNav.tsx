@@ -26,11 +26,10 @@ export type NavKey =
   | 'projects'
   | 'history'
   | 'keybindings'
-  // Two faces, genuinely different content (see lib/navGroups.ts's
-  // labelByFace): Home shows global scheduler policy + session-pool
-  // controls ("Scheduler Configs" — formerly the standalone 'sm-config'
-  // key, folded in here); Project shows this project's live PRD queue
-  // ("Epic's Execution Queue").
+  // One combined screen on both faces — global scheduler policy +
+  // session-pool controls (folded in from the former standalone
+  // 'sm-config' key) stacked directly above the active project's live PRD
+  // queue (Queue/PRDs/History sub-tabs). See components/tabs/Scheduler.tsx.
   | 'scheduler'
   // In-app file editor scene. Launched from the Files sidebar + terminal links
   // (no left-nav row of its own — Files is the launch point).

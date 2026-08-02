@@ -198,22 +198,16 @@ describe('remote is home-only', () => {
   })
 })
 
-describe('scheduler labelByFace — retired standalone sm-config folded in here', () => {
-  it('NAV_ITEMS tags scheduler with faces: [home, project] and per-face label overrides', () => {
+describe('scheduler — one combined screen on both faces, retired standalone sm-config folded in here', () => {
+  it('NAV_ITEMS tags scheduler with faces: [home, project] and no per-face label override', () => {
     const item = NAV_ITEMS.find((i) => i.key === 'scheduler')
     expect(item?.faces).toEqual(['home', 'project'])
-    expect(item?.labelByFace?.home).toBe('Scheduler Configs')
-    expect(item?.labelByFace?.project).toBe("Epic's Execution Queue")
+    expect(item?.labelByFace).toBeUndefined()
   })
 
-  it('getNavItemsForFace resolves the Home-face label', () => {
-    const item = getNavItemsForFace('home').find((i) => i.key === 'scheduler')
-    expect(item?.label).toBe('Scheduler Configs')
-  })
-
-  it('getNavItemsForFace resolves the Project-face label', () => {
-    const item = getNavItemsForFace('project').find((i) => i.key === 'scheduler')
-    expect(item?.label).toBe("Epic's Execution Queue")
+  it('getNavItemsForFace resolves the same "Scheduler" label on both faces', () => {
+    expect(getNavItemsForFace('home').find((i) => i.key === 'scheduler')?.label).toBe('Scheduler')
+    expect(getNavItemsForFace('project').find((i) => i.key === 'scheduler')?.label).toBe('Scheduler')
   })
 
   it('no NAV_ITEMS entry has key sm-config — folded into scheduler', () => {

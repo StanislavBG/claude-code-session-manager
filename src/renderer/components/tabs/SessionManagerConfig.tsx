@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useScheduleState } from '../../state/scheduleState'
 import { GlobalControlsSection } from './GlobalControlsSection'
 import { Toggle } from '../ui/Toggle'
 import { readAppPrefs, writeAppPrefs } from '../../lib/appPrefs'
@@ -13,8 +12,13 @@ import type { NavKey } from '../LeftNav'
  * limits, and runtime policy belong to Session-Manager itself:
  *
  *   - the machine-wide claude -p session pool (lib/sessionSlots.cjs)
- *   - scheduler fire policy / utilization threshold (scheduler-machine.json)
  *   - where the global runtime state lives on disk
+ *
+ * Fire policy / utilization threshold / concurrency cap are deliberately
+ * NOT duplicated here — Scheduler.tsx renders this directly above
+ * SchedulePanel, whose PolicyBar already owns those same live-editable
+ * controls (window.api.schedule.setConfig); a second copy here just drifted
+ * out of sync with whichever one the user last touched.
  */
 
 type SlotSnapshot = { total: number; inUse: number; holders: { owner: string; at: string }[] }
@@ -24,9 +28,7 @@ interface SessionManagerConfigProps {
 }
 
 export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
-  const snap = useScheduleState((s) => s.snapshot)
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
-  const [saving, setSaving] = useState(false)
   const [openToHomeOnLaunch, setOpenToHomeOnLaunch] = useState(false)
   const [prefsSaving, setPrefsSaving] = useState(false)
 
@@ -60,13 +62,6 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
     const id = setInterval(poll, 5000)
     return () => { alive = false; clearInterval(id) }
   }, [])
-
-  const config = snap?.config
-
-  const setPolicy = async (partial: Record<string, unknown>) => {
-    setSaving(true)
-    try { await window.api.schedule.setConfig(partial) } finally { setSaving(false) }
-  }
 
   return (
     <div className="max-w-[760px] space-y-6">
@@ -118,52 +113,6 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
               </li>
             ))}
           </ul>
-        )}
-      </section>
-
-      {/* ── Scheduler machine policy ─────────────────────────────── */}
-      <section className="border border-line rounded-xl bg-bg-hi px-5 py-4">
-        <h2 className="m-0 mb-1 font-serif text-[18px] font-semibold text-fg">Scheduler policy</h2>
-        <p className="mt-0 mb-3 text-[13px] text-fg-dim leading-relaxed">
-          Global runtime policy for headless PRD execution — applies across every project.
-          Per-project queues and PRDs live with each project; only policy is global.
-        </p>
-        {config ? (
-          <div className="space-y-3 text-[13px]">
-            <label className="flex items-center gap-3">
-              <span className="w-44 text-fg-dim">Fire policy</span>
-              <select
-                value={config.firePolicy}
-                disabled={saving}
-                onChange={(e) => setPolicy({ firePolicy: e.target.value })}
-                className="bg-bg border border-line rounded px-2 py-1 text-fg"
-              >
-                <option value="when-available">when-available (poll usage)</option>
-                <option value="on-reset">on-reset (after 5h reset)</option>
-                <option value="manual">manual (Run now only)</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-3">
-              <span className="w-44 text-fg-dim">Utilization threshold</span>
-              <input
-                type="number"
-                min={10}
-                max={100}
-                value={config.utilizationThreshold}
-                disabled={saving}
-                onChange={(e) => setPolicy({ utilizationThreshold: Number(e.target.value) })}
-                className="w-20 bg-bg border border-line rounded px-2 py-1 text-fg font-mono"
-              />
-              <span className="text-fg-faint">% of the 5-hour window</span>
-            </label>
-            <label className="flex items-center gap-3">
-              <span className="w-44 text-fg-dim">Concurrency cap</span>
-              <span className="font-mono text-fg">{config.concurrencyCap}</span>
-              <span className="text-fg-faint">jobs (bounded by the session pool above)</span>
-            </label>
-          </div>
-        ) : (
-          <div className="text-[13px] text-fg-faint">loading scheduler config…</div>
         )}
       </section>
 

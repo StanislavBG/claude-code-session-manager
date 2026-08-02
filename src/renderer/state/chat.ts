@@ -723,16 +723,34 @@ export async function dispatchPromptSessionToPrd(
  * no PromptSession can be resolved either way.
  */
 async function resolveDispatchPromptSessionId(tabId: string, ticket: PromptTicket): Promise<string | null> {
+  // Only an ACTIVE Epic may receive PRDs. A 'proposed' Epic hasn't passed the
+  // Approve & start human gate — joining it here would let the scheduler pick
+  // up and execute its PRDs while the Epic was never approved (the gate the
+  // whole born-proposed law exists to enforce). A completed/archived Epic's
+  // session is dead. Both refuse rather than join.
+  const openEpic = (id: string | null | undefined): id is string =>
+    !!id && usePromptSessions.getState().sessions[id]?.status === 'active'
+
   if (ticket.chainRootId) {
     const cur = useChat.getState().chats[tabId] ?? EMPTY
     const root = (cur.ticketHistory ?? []).find((t) => t.id === ticket.chainRootId)
-    if (root?.promptSessionId) return root.promptSessionId
+    const rootEpicId = root?.promptSessionId ?? null
+    if (rootEpicId) {
+      // The root's Epic id was recorded at dispatch time, when that Epic was
+      // necessarily active. If this store now KNOWS it under a non-active
+      // status (approve was never given is impossible here; completed/archived
+      // means the chain's session is dead), refuse locally for a clear error;
+      // if the store simply doesn't know it, trust the recorded id — the
+      // main-side ensureEpic join re-validates and refuses a dead Epic anyway.
+      const known = usePromptSessions.getState().sessions[rootEpicId]
+      if (!known || known.status === 'active') return rootEpicId
+    }
   }
 
-  if (usePromptSessions.getState().sessions[tabId]) return tabId
+  if (openEpic(tabId)) return tabId
 
   await usePromptSessions.getState().hydrate(ticket.cwd)
-  if (usePromptSessions.getState().sessions[tabId]) return tabId
+  if (openEpic(tabId)) return tabId
 
   if (ticket.chainRootId) {
     window.api?.logs?.write(

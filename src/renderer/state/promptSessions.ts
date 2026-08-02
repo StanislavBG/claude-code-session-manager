@@ -343,9 +343,23 @@ function persistActiveIndex(
       }
       const mergedSessions: Record<string, PromptSession> = { ...diskSessions, ...memorySessions }
       for (const id of removedIds) delete mergedSessions[id]
+      // Events are a per-id UNION (same contract as hydrate's merge path,
+      // PRD 855): a scheduler job appends events to disk under the declared
+      // delegation, so memory-wins-wholesale here would silently drop any
+      // event that landed since this renderer's last hydrate. Memory order
+      // wins for events both sides know; disk-only events are appended and
+      // re-sorted chain-aware.
       const mergedEvents: Record<string, PromptSessionEvent[]> = {}
       for (const id of Object.keys(mergedSessions)) {
-        mergedEvents[id] = memoryEvents[id] ?? diskEvents[id] ?? []
+        const memEvts = memoryEvents[id] ?? []
+        const diskEvts = diskEvents[id] ?? []
+        if (memEvts.length === 0) {
+          mergedEvents[id] = diskEvts
+          continue
+        }
+        const memIds = new Set(memEvts.map((e) => e.id))
+        const missing = diskEvts.filter((e) => !memIds.has(e.id))
+        mergedEvents[id] = missing.length > 0 ? [...memEvts, ...missing].sort(compareEventsChainAware) : memEvts
       }
       const index: PromptSessionActiveIndex = { sessions: mergedSessions, events: mergedEvents }
       await api!.config.writeJson(path, index, 'epics')

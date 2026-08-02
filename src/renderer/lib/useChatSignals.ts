@@ -15,16 +15,33 @@ import { useChat, type TabChat } from '../state/chat'
  * re-render the whole Epics workspace (every card, via this hook) on every
  * delta of any running Epic — the exact fan-out this hook exists to avoid.
  */
+// Per-chat piece of the signature, cached by TabChat object reference. A
+// chat's `turns`/`ticketHistory` are only ever appended-to via a fresh array
+// (pushTurn/applyNotice etc.), so an unchanged TabChat reference means an
+// unchanged signature piece — recomputing it by re-walking every turn's
+// toolUses was O(total turns across every Epic ever opened this session) on
+// EVERY store update (any streamed token from any running chat), since a
+// single chat's mutation replaces the whole `chats` map and this used to
+// rescan all of it. A WeakMap lets stale entries (for TabChat objects no
+// chat mutation will ever reference again) get garbage-collected on their
+// own — no manual eviction needed.
+const pieceCache = new WeakMap<TabChat, string>()
+
+function pieceOf(id: string, c: TabChat): string {
+  const cached = pieceCache.get(c)
+  if (cached !== undefined) return cached
+  let needs = 0
+  for (const t of c.ticketHistory ?? []) if (t.status === 'needs-input') needs = 1
+  let tools = 0
+  for (const t of c.turns) tools += t.toolUses?.length ?? 0
+  const piece = `${id}:${c.running ? 1 : 0}:${c.queuedPosition ?? 0}:${c.turns.length}:${tools}:${needs}`
+  pieceCache.set(c, piece)
+  return piece
+}
+
 function signatureOf(chats: Record<string, TabChat>): string {
   const parts: string[] = []
-  for (const id of Object.keys(chats)) {
-    const c = chats[id]
-    let needs = 0
-    for (const t of c.ticketHistory ?? []) if (t.status === 'needs-input') needs = 1
-    let tools = 0
-    for (const t of c.turns) tools += t.toolUses?.length ?? 0
-    parts.push(`${id}:${c.running ? 1 : 0}:${c.queuedPosition ?? 0}:${c.turns.length}:${tools}:${needs}`)
-  }
+  for (const id of Object.keys(chats)) parts.push(pieceOf(id, chats[id]))
   return parts.join('|')
 }
 

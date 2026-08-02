@@ -1349,6 +1349,8 @@ export interface SessionManagerAPI {
     savePersona: (payload: AgentPersonaSaveInput) => Promise<{ ok: boolean; path: string }>;
     deletePersona: (payload: { name: string }) => Promise<{ ok: boolean }>;
     removeOverride: (payload: { name: string; projectName: string }) => Promise<{ ok: boolean }>;
+    /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
+    onChanged: (handler: () => void) => () => void;
   };
   logs: {
     write: (

@@ -151,6 +151,13 @@ contextBridge.exposeInMainWorld('api', {
     savePersona: (payload) => ipcRenderer.invoke('agents:save-persona', payload),
     deletePersona: (payload) => ipcRenderer.invoke('agents:delete-persona', payload),
     removeOverride: (payload) => ipcRenderer.invoke('agents:remove-override', payload),
+    // Fired after any save/delete/removeOverride so every mounted
+    // subscriber (Agent Library, Tag Library) re-fetches the same file.
+    onChanged: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('agents:changed', listener);
+      return () => ipcRenderer.removeListener('agents:changed', listener);
+    },
   },
   logs: {
     // ctx is optional: { cwd, tabId, epicId, tags } — when present and

@@ -33,6 +33,7 @@ const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
 const activeIndexMerge = require('./lib/activeIndexMerge.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
@@ -457,10 +458,29 @@ ipcMain.handle('agents:list-personas', () => agentLibrary.listPersonas());
 // Agent Library CRUD — global personas only (`~/.claude/agents/*.md`); a
 // project's local overlay can only be removed here (removeOverride), never
 // created, since Agent Library is a Home-face, machine-wide surface with no
-// per-tab cwd context of its own.
-ipcMain.handle('agents:save-persona', (_e, payload) => agentLibrary.savePersona(payload));
-ipcMain.handle('agents:delete-persona', (_e, payload) => agentLibrary.deletePersona(payload));
-ipcMain.handle('agents:remove-override', (_e, payload) => agentLibrary.removeOverride(payload));
+// per-tab cwd context of its own. Each mutation broadcasts `agents:changed`
+// so Agent Library and Tag Library — two independently-mounted dockview
+// panels, each with its own component-local `listPersonas()` snapshot —
+// both refresh off the one file on disk instead of one panel going stale
+// after the other edits the agent<->tag relationship.
+function broadcastAgentsChanged() {
+  sendIfAlive(mainWindow, 'agents:changed', {});
+}
+ipcMain.handle('agents:save-persona', async (_e, payload) => {
+  const result = await agentLibrary.savePersona(payload);
+  broadcastAgentsChanged();
+  return result;
+});
+ipcMain.handle('agents:delete-persona', async (_e, payload) => {
+  const result = await agentLibrary.deletePersona(payload);
+  broadcastAgentsChanged();
+  return result;
+});
+ipcMain.handle('agents:remove-override', async (_e, payload) => {
+  const result = await agentLibrary.removeOverride(payload);
+  broadcastAgentsChanged();
+  return result;
+});
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
 

@@ -83,6 +83,10 @@ export function AgentLibrary() {
   }
 
   useEffect(() => { load() }, [])
+  // Tag Library writes to the same persona files (assign/unassign a tag from
+  // its own side) — refresh here too so this panel never shows a stale
+  // snapshot if it's already mounted when that happens.
+  useEffect(() => window.api.agents.onChanged(() => load()), [])
 
   if (personas === null) return <EmptyState title="loading…" />
 

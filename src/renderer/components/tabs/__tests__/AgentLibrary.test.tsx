@@ -39,16 +39,24 @@ const PERSONAS: AgentPersona[] = [
 ]
 
 function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
+  const changedHandlers: Array<() => void> = []
   const api = {
     agents: {
       listPersonas: vi.fn().mockResolvedValue(personas),
       savePersona: vi.fn().mockResolvedValue({ ok: true, path: '' }),
       deletePersona: vi.fn().mockResolvedValue({ ok: true }),
       removeOverride: vi.fn().mockResolvedValue({ ok: true }),
+      onChanged: vi.fn((handler: () => void) => {
+        changedHandlers.push(handler)
+        return () => {
+          const i = changedHandlers.indexOf(handler)
+          if (i >= 0) changedHandlers.splice(i, 1)
+        }
+      }),
     },
   }
   ;(window as unknown as { api: typeof api }).api = api
-  return api
+  return { api, emitChanged: () => changedHandlers.forEach((h) => h()) }
 }
 
 let container: HTMLDivElement | null = null
@@ -119,5 +127,22 @@ describe('AgentLibrary', () => {
     const rowNames = Array.from(el.querySelectorAll('button')).map((b) => b.textContent ?? '')
     expect(rowNames.some((t) => t.includes('debugger'))).toBe(true)
     expect(rowNames.some((t) => t.startsWith('builder'))).toBe(false)
+  })
+
+  it('re-fetches personas when agents:changed fires — Tag Library edits the same file from its own side', async () => {
+    const { api, emitChanged } = installWindowApiMock()
+    const el = await mount()
+    expect(api.agents.listPersonas).toHaveBeenCalledTimes(1)
+
+    api.agents.listPersonas.mockResolvedValueOnce([
+      { ...PERSONAS[0], tags: ['feature'] },
+      PERSONAS[1],
+    ])
+    await act(async () => {
+      emitChanged()
+      await Promise.resolve()
+    })
+    expect(api.agents.listPersonas).toHaveBeenCalledTimes(2)
+    expect(el.textContent).toContain('builder')
   })
 })

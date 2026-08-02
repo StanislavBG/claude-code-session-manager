@@ -130,6 +130,102 @@
         "id": "pevt-msb2ypag-1",
         "promptSessionId": "psess-msase2q4-1",
         "at": "2026-08-02T00:47:01.768Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb2ypag-1",
+        "text": "**Published `claude-code-session-manager@0.47.1`** (patch bump — only a `fix:` + `chore:`, no `feat:`). Registry `latest` confirmed, `main` and tag `v0.47.1` pushed to origin.\n\nCovered: `fix(nav): distinct tab highlighting, project-only Epics, Dashboard vs Project Home`, plus an ops-state sync commit.\n\nGit and npm are fully in sync — no commits ahead of the published tag.",
+        "id": "pevt-msb3g9po-9",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T01:00:41.388Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb3g9po-9",
+        "text": "## How I'd approach this\n\n**(1) Local, decomposed skills** — this repo already has the exact pattern to reuse: `plugins/session-manager-dev/skills/<name>/{SKILL.md, 0-first-step/, 1-next-step/, ...}` (see `pr-review-sweep` and `issue-address` — both orchestrator-SKILL.md + numbered nested sub-skills, each independently invokable/monitorable). I'd add `plugins/session-manager-dev/skills/builder/` following that shape, decomposing exactly the steps I ran by hand this session:\n\n- `0-diff` — last-tag→HEAD commit list + registry-vs-`package.json` sync check (what I did with `git describe`/`npm view` each time)\n- `1-classify-and-bump` — conventional-commit → semver decision (fix/feat/breaking → patch/minor/major)\n- `2-gate` — typecheck (+ test:unit) run inside a clean worktree\n- `3-publish` — the worktree-isolated build+publish+tag+push sequence (the actual novel technique from this session — build from a disposable `git worktree` at the release commit so a dirty live working tree never contaminates `dist/`)\n- `4-report`\n\nOrchestrated by `builder/SKILL.md`, invoked as `/builder`. Reusing the established shape means it inherits the existing conventions for free (each step separately testable/monitorable, consistent with how `pr-review-sweep` and `issue-address` are built) rather than inventing a new skill shape.\n\n**(2) Grounding the persona** — I'd treat the skill package as the *mechanics* and `.claude/agents/builder.md` (global) + this repo's `.claude/agents/builder.md` (project overlay, already created this session) as the *judgment layer* — same split Claude Code already gives every subagent. Right now those two files encode the protocol from *before* I'd actually run it end-to-end; I should update them with what this session proved out empirically:\n- The worktree-isolation technique for the dirty-tree problem (superseded the original \"hold and ask\" fallback — dirty tree is no longer a blocker at all now)\n- Confirmed autonomy: across 4 consecutive runs this session, yo…",
+        "id": "pevt-msb3kxj5-10",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T01:04:18.881Z"
+      },
+      {
+        "id": "0ce48b8d-349f-478b-99f3-7eae7bd5c1a8",
+        "promptSessionId": "psess-msase2q4-1",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msb3kxj5-10",
+        "at": "2026-08-02T01:10:51.437Z",
+        "prdSlug": "917-build-tag-and-target-config"
+      },
+      {
+        "id": "78344b2b-04c5-48f3-aebb-bfc4c41b2d7c",
+        "promptSessionId": "psess-msase2q4-1",
+        "kind": "prd_created",
+        "causedByEventId": "0ce48b8d-349f-478b-99f3-7eae7bd5c1a8",
+        "at": "2026-08-02T01:11:11.277Z",
+        "prdSlug": "918-builder-skill-package"
+      },
+      {
+        "id": "d7e00033-5f32-478b-b165-7262edcaf0f5",
+        "promptSessionId": "psess-msase2q4-1",
+        "kind": "prd_created",
+        "causedByEventId": "78344b2b-04c5-48f3-aebb-bfc4c41b2d7c",
+        "at": "2026-08-02T01:11:44.756Z",
+        "prdSlug": "919-agent-library-nav-page"
+      },
+      {
+        "id": "5208bb8b-f564-4c1e-9aed-9dbcc0a0c9a7",
+        "promptSessionId": "psess-msase2q4-1",
+        "kind": "prd_created",
+        "causedByEventId": "d7e00033-5f32-478b-b165-7262edcaf0f5",
+        "at": "2026-08-02T01:11:58.169Z",
+        "prdSlug": "920-tag-library-nav-page"
+      },
+      {
+        "id": "aaf68955-576f-4609-9386-56308c7b0e90",
+        "promptSessionId": "psess-msase2q4-1",
+        "kind": "prd_created",
+        "causedByEventId": "5208bb8b-f564-4c1e-9aed-9dbcc0a0c9a7",
+        "at": "2026-08-02T01:12:16.432Z",
+        "prdSlug": "921-epic-queue-build-button"
+      },
+      {
+        "id": "67dd0690-686c-4b6a-84a4-a3fb1d81296b",
+        "promptSessionId": "psess-msase2q4-1",
+        "kind": "prd_created",
+        "causedByEventId": "aaf68955-576f-4609-9386-56308c7b0e90",
+        "at": "2026-08-02T01:12:33.351Z",
+        "prdSlug": "922-builder-agent-docs-refresh"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "67dd0690-686c-4b6a-84a4-a3fb1d81296b",
+        "text": "All 6 PRDs queued successfully under Epic `psess-msase2q4-1` (this session), at `session-manager-operations/scheduler/epics/psess-msase2q4-1/prds/`:\n\n| NN | Slug | Depends on | Est. |\n|---|---|---|---|\n| 917 | `build-tag-and-target-config` | — | 15m |\n| 918 | `builder-skill-package` | — | 20m |\n| 919 | `agent-library-nav-page` | — | 25m |\n| 920 | `tag-library-nav-page` | 917 | 15m |\n| 921 | `epic-queue-build-button` | 917, 918 | 25m |\n| 922 | `builder-agent-docs-refresh` | 917 | 10m |\n\n**How this maps to your three points:**\n1. **Tag Library + Agent Library** as new Home-Tab left-nav sections — PRDs 919/920, both read-only v1 viewers following the existing `Skills.tsx` list+detail pattern, added via the documented 3-step NavKey process already commented in `LeftNav.tsx`.\n2. **`build` as a genuinely distinct Epic kind** — PRD 917 lays the foundation (tag enum + `build-target.json` config with npm auto-discovery, mirroring exactly what I did by hand this session), which 920/921/922 build on. `builder` (agent) / `build` (tag) — kept your naming, it fits the existing role-noun/single-noun conventions exactly.\n3. **One-click fresh-agent button on the Epic Queue** — PRD 921, reusing `NewEpicCard`'s existing creation path (fresh `claudeSessionId`, no shared context) rather than inventing new session-isolation plumbing, gated on the actual publish target being resolvable so it can't fire into a project with nowhere to publish.\n\nPRD 918 packages this session's proven technique (worktree-isolated publish) as an invokable `/builder` skill under `plugins/session-manager-dev/skills/`, matching the `pr-review-sweep`/`issue-address` nested-skill shape. PRD 922 folds that back into the two `.claude/agents/builder.md` files so they reference the config/skill instead of duplicating prose.\n\nThis is now in Phase 2 of `/develop` — tracked to completion via the scheduler. Since this turn is one-shot and cannot poll in the background, I'm not launching a monitoring loop here; check the Sc…",
+        "id": "pevt-msb3vrps-11",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T01:12:44.560Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb3vrps-11",
+        "text": "**Understood — noted for when they land.** Here's what I can tell you right now, and why I can't fulfill the \"once done\" part in this turn:\n\n**Current job state** (checked just now): of the 6 PRDs queued (917–922), **1 is running** (started 01:12:45Z) and **5 are still pending**. None are complete.\n\n**Important finding: this project's scheduler `firePolicy` is `\"manual\"`** (`~/.claude/session-manager/scheduler-machine.json`). Per `src/main/scheduler.cjs`, that means jobs do **not** auto-advance the way they would under `when-available` (the default, which polls billing usage every 60s and fires automatically) — each of the remaining 5 PRDs will likely need an explicit \"Run now\" in the SchedulePanel, or the policy needs to change, or they'll simply sit pending. Given the `dependsOn` chains I set up (920/921/922 depend on 917), that could stall the later PRDs entirely if nothing manually advances 917 first.\n\n**Why I can't just wait it out here**: 6 PRDs at a 15–25 min estimate each, capped at 3 concurrent, with real dependency ordering — realistically 45–90+ minutes even under an active fire policy. This turn has a 30-minute hard ceiling and nothing survives past when I stop producing output, so I can't poll toward \"done\" and then chain into a git push within one response.\n\n**What I'd need from you**: switching `firePolicy` to `when-available` would let this actually run to completion unattended (it's the mode this project runs in by default per its own CLAUDE.md — `manual` looks like it may have been set deliberately, possibly for an unrelated reason, so I'm not changing it without checking). Once that's sorted and the PRDs actually complete, \"publish to git\" at that point is simple and I've already got the exact procedure proven from this session — `git push origin main` (each PRD's own executor commits its work; I'd just confirm origin is caught up) — happy to run that the moment you tell me they're done, or you can trigger it yourself once you see all 6 green in t…",
+        "id": "pevt-msb3xu81-12",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T01:14:21.121Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb3xu81-12",
+        "text": "**Fixed the scheduler policy** — `firePolicy` in `~/.claude/session-manager/scheduler-machine.json` changed from `manual` → `when-available` (this project's normal global default), applied via an atomic file write. Confirmed it took effect immediately (no restart needed — this scheduler re-reads its machine-state file fresh on every tick, never caches it in memory): right after the change, PRD 919 (which had hit `needs_review` on its first attempt) picked back up and landed successfully.\n\n**Current status, 4 of 6 PRDs complete and committed locally:**\n- `982321f feat(epics): add 'build' Epic tag + per-project build-target config` (917)\n- `e3b3b24 feat(skills): add builder skill for git-diff → npm publish pipeline` (918) — and indeed, the `/builder` skill is now showing up as an available skill in this very session\n- `f2dc329 feat(nav): add read-only Tag Library page for Epic intent-tag taxonomy` (920)\n- `a93417e feat(nav): Agent Library page listing global agent personas + per-project overlays` (919 — succeeded on retry after the policy fix)\n\n**Still in flight:** 921 (`epic-queue-build-button`) is running now; 922 (`builder-agent-docs-refresh`) is pending, eligible to start as soon as a concurrency slot frees up (cap is 3).\n\n**Not pushed to git yet** — these 4 commits are local-only (`git log origin/main..HEAD` shows all 4). Per your instruction to push once the PRDs are done, I'm holding rather than pushing a partial set, since 921/922 will land more commits on top shortly and you asked for \"once the PRDs are done,\" not \"once some are.\"\n\nI can't wait out the remaining ~15-40 minutes for 921/922 in this one-shot turn — nothing survives past when I stop producing output, so I can't poll further and then push in this same response.",
+        "id": "pevt-msb4r4p1-14",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T01:37:07.717Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb4r4p1-14",
+        "text": "**Published `claude-code-session-manager@0.48.0`.** This is the release that ships the whole Builder feature you had built this session:\n\n- `feat(epics): add 'build' Epic tag + per-project build-target config`\n- `feat(skills): add builder skill for git-diff → npm publish pipeline`\n- `feat(nav): add read-only Tag Library page for Epic intent-tag taxonomy`\n- `feat(nav): Agent Library page listing global agent personas + per-project overlays`\n- `feat(epics): add Build toolbar action to Epic Queue`\n- `fix(agents): track the builder project overlay so its edits are auditable`\n\nAll 6 PRDs (917–922) landed, git is fully synced with origin (`main` + tag `v0.48.0` pushed), npm `latest` confirmed at `0.48.0`. Gates (typecheck + test:unit, per `build-target.json`) both passed — 3 initially-flaky test-suite timeouts were confirmed environmental (unrelated files, clean pass in isolation) before I published through them.\n\nWorth noting: the Builder agent files you saw update mid-session (both `.claude/agents/builder.md` files) are themselves now a shipped part of `0.48.0` — the loop is closed: this session used the manual technique to bootstrap the feature, and the feature's own PRDs then rewrote the agent files to point at the now-real `build-target.json` and the new `/builder` skill instead of the hand-authored prose from earlier in this conversation.",
+        "id": "pevt-msb5h47v-15",
+        "promptSessionId": "psess-msase2q4-1",
+        "at": "2026-08-02T01:57:20.155Z"
       }
     ],
     "psess-msaup10i-1": [
@@ -310,6 +406,38 @@
         "id": "pevt-msb2ck65-7",
         "promptSessionId": "psess-msaviffk-7",
         "at": "2026-08-02T00:29:48.701Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb2ck65-7",
+        "text": "I found something important before writing any code: this feature **already exists**, just under a different name.\n\n## Finding: `sm-config` (\"Session-Manager\") is already \"Global Scheduler controls\"\n\n`src/renderer/components/tabs/SessionManagerConfig.tsx` (nav key `sm-config`, Home-only today) is almost exactly what you're describing:\n- **Session pool** — the machine-wide concurrent `claude -p` slot pool, live in-use/total gauge\n- **Scheduler policy** — fire policy (when-available / on-reset / manual), utilization threshold, concurrency cap\n- **On disk** — where global vs. per-project scheduler state lives\n- **Behavior** — cross-project app prefs (Open to Home on launch)\n\nIt shows zero PRDs — it's pure global controls, exactly the shape you asked for. It's just labeled \"Session-Manager\" in the sidebar, not \"Scheduler,\" so it's easy to miss as the answer to this ask.\n\n## Why I'm not just building a second one\n\nCLAUDE.md's nav rule, which you've enforced before (Scheduler/Plans/Background-Agents were already merged into one destination once): *\"before adding [a nav destination], check if an existing item already owns the data/job and extend it instead of shipping a parallel UI... consolidate rather than duplicate.\"* Building a new \"Global Scheduler controls\" panel under Home's **Scheduler** nav item, alongside an existing near-identical panel under **Session-Manager**, recreates exactly the duplication that rule exists to prevent.\n\n## Recommended plan\n\nFold this into the Scheduler screen itself, face-branched the same way Settings/Permissions/Hooks now are:\n- **Home face → Scheduler**: renders `SessionManagerConfig`'s content directly (Session pool, Scheduler policy, On-disk state) — no Queue/PRDs/History sub-tabs, no scope toggle. Add a new \"Architecture\" section here with a placeholder card reserved for the agentic-generated summary (see below).\n- **Project face → Scheduler**: unchanged — Queue/PRDs/History, scoped to the project.\n- Retire the standalone **Session-M…",
+        "id": "pevt-msb4qm0v-13",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-02T01:36:43.519Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb4qm0v-13",
+        "text": "Committed as `481cef1`.\n\n## Summary\n\nYes, that naming works well. Implemented:\n\n- **`Scheduler.tsx`** now branches by `navFace`: Home face renders **\"Scheduler Configs\"** — a global-only pulse strip (pause/resume, reset countdown, machine-wide job counts) plus `SessionManagerConfig`'s content (session pool, fire policy/concurrency, quick config links) — zero PRDs. Project face renders **\"Epic's Execution Queue\"** — the existing Queue/PRDs/History workflow, unchanged, with its project/all scope toggle now the only place that toggle exists.\n- Retired the standalone **`sm-config`** nav item entirely (removed from `NavKey`, `SCREEN_KEYS`, `navGroups.ts`, `screenComponents.tsx`'s route table, and merged its unique learning content into the `scheduler` entry) — one home for global scheduler controls, not two, per the CLAUDE.md anti-duplication rule.\n- Added a placeholder **\"Architecture summary\"** card on the Home branch — honest stub (disabled \"Generate summary\" button, no invented backend) reserved for a future cost-gated `claude -p` pass mirroring `memoryAggregate.cjs`'s pattern.\n- `navGroups.ts` gained `labelByFace`/`hintByFace` so one `NavGroupItem` can read differently per sidebar face without forking into two `NavKey`s — sidebar row now literally reads \"Scheduler Configs\" vs \"Epic's Execution Queue\".\n\n**Verified:** typecheck clean, `lint:selectors` clean, full suite 1928/1928 passing (updated/added tests in `Scheduler.navface.test.tsx`, `AlmanacSidebar.test.ts`, `navGroupsHome.test.ts` for the new split). Committed as `481cef1`, not pushed.\n\nAlso worth noting: while investigating I found the **Epics → Project-only** change from our earlier discussion had already landed via a background scheduler PRD (`ce878ea`), so that item is done — no longer outstanding.",
+        "id": "pevt-msb5oe44-16",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-02T02:02:59.572Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb5oe44-16",
+        "text": "I don't see any recent code changes that would spam notifications — no OS `Notification` calls added, and toast usage in the app looks normal (183 existing call sites, nothing recently touched).\n\n\"Messages popup\" is ambiguous to me though — it could mean a few different things, and I don't want to guess and fix the wrong one:\n\n1. **Claude Code's own permission-approval prompts** — the \"user will be prompted\" dialogs for each Bash/Edit/tool call, which could be firing a lot given how many tool calls I've been running across these turns.\n2. **In-app toast notifications** in Session Manager itself (`useToast`/`RecordingStatus`-style banners — errors, scheduler pause notices, etc.).\n3. **OS-level desktop notifications** from the app or from some other process.\n4. Something else entirely (e.g. a different app or a browser).\n\nWhich one are you seeing, and roughly where (this CLI/terminal, the Session Manager app UI, or your OS notification tray)? That'll tell me whether this is a \"too many permission prompts\" issue (there's a `/fewer-permission-prompts` skill for that) or an actual bug to chase down in the app's toast/notification code.",
+        "id": "pevt-msb5tppk-19",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-02T02:07:07.880Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb5tppk-19",
+        "text": "Fair — that's on me, I've been running long between-message technical narration. Here's the condensed state of play:\n\n**Done & pushed (origin/main):**\n- Home tab pill now stays lit while browsing Home-face sidebar items (was a stale focus check)\n- File Explorer now works from both Home (roots at home dir) and Project (roots at project cwd) tabs\n- Hid global-only sub-tabs (Telemetry, Session Manager prefs, Permissions Presets, Hooks Library) from the Project face — they're identical everywhere, so Home-only now\n\n**Done, committed locally, not yet pushed:**\n- Split Scheduler into two real screens: Home shows \"Scheduler Configs\" (global policy/session pool, no PRDs), Project shows \"Epic's Execution Queue\" (the PRD queue, unchanged) — retired the old standalone Session-Manager nav item into this\n\n**Already handled by your background scheduler, not by me:** Epics nav item moved to Project-only\n\nNothing is currently blocked on you. Say **\"push\"** if you want the last commit sent to origin, otherwise we're caught up — what would you like next?\n\nI'll keep responses tighter going forward — noted for how I work with you.",
+        "id": "pevt-msb5v19t-21",
+        "promptSessionId": "psess-msaviffk-7",
+        "at": "2026-08-02T02:08:09.521Z"
       }
     ],
     "psess-msb30ix2-2": [
@@ -352,6 +480,14 @@
         "id": "pevt-msb3bugg-7",
         "promptSessionId": "psess-msb30ix2-2",
         "at": "2026-08-02T00:57:14.992Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msb3bugg-7",
+        "text": "Pushed to `main` (`d4ae7b3..727c23b`), working tree clean.\n\nTwo commits landed:\n1. **`ce878ea` fix(nav):** TabBar highlighting (full accent surround on active Project tab, distinct filled-pill Home) + Epics moved to project-only + new Dashboard/Project Home split — all three of today's enhancement requests.\n2. **`727c23b` chore(ops):** the app-owned scheduler/Epics runtime-state files, committed separately per this repo's existing convention.\n\nI did not run `npm publish` — you said \"publish... to git,\" so I scoped this to commit+push only, not a full npm release. Say the word if you also want a version bump + npm publish.",
+        "id": "pevt-msb3dhit-8",
+        "promptSessionId": "psess-msb30ix2-2",
+        "at": "2026-08-02T00:58:31.541Z"
       }
     ]
   }

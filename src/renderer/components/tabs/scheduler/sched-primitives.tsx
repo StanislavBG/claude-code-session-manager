@@ -183,6 +183,7 @@ export const VERDICT_LABELS: Record<string, string> = {
   uncommitted_changes: 'uncommitted changes',
   no_verdict_sentinel: 'no commit or verdict sentinel',
   pass_no_commit: 'PASS sentinel but no commit landed',
+  silent_no_op: 'no commit, clean tree — no evidence of work',
 }
 
 export function verdictLabel(verdict: string): string {

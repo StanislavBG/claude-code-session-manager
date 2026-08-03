@@ -50,6 +50,7 @@ const VERDICT_LABELS = {
   pass_no_commit: 'PASS sentinel but no commit landed',
   pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
   pass_no_commit_prior_run_verified: 'PASS with no commit — prior run of this slug already landed the work',
+  silent_no_op: 'no commit, clean tree — no evidence of work',
 };
 
 function humanVerdict(verdict) {
@@ -166,7 +167,7 @@ function classifyFailure({ verdict, logTail }) {
     }
   }
 
-  if (verdict === 'uncommitted_changes') return FAILURE_CLASSES.UNCOMMITTED;
+  if (verdict === 'uncommitted_changes' || verdict === 'silent_no_op') return FAILURE_CLASSES.UNCOMMITTED;
   if (verdict === 'no_verdict_sentinel' || verdict === 'pass_no_commit') return FAILURE_CLASSES.NO_SENTINEL;
   if (verdict === 'transcript_errors' || verdict === 'verify_unavailable') return FAILURE_CLASSES.TRANSCRIPT_ERRORS;
   return FAILURE_CLASSES.UNKNOWN;

@@ -108,6 +108,7 @@ function resolveOriginSessionId(cwd, epicId) {
   return session && typeof session.claudeSessionId === 'string' ? session.claudeSessionId : null;
 }
 const sessionSlots = require('./lib/sessionSlots.cjs');
+const jobWorktree = require('./lib/jobWorktree.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
 const { migratePrds, consolidateFlatPrds } = require('./lib/prdMigration.cjs');
@@ -2174,27 +2175,62 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  * Commit-guard verdict decision. Pure/no I/O so the false-positive defenses
  * can be unit-tested directly rather than only through a live spawnJob run.
  * Returns the flagged verifyResult replacement, or null if the guard should
- * not fire (any of the four defenses applies).
+ * not fire (any of the defenses below applies).
  *
- * The fourth defense (legitimateNoOp) exists because runVerify.cjs's own
- * pass_no_commit exemptions (COMPLETED_EQUIVALENT_VERDICTS members like
- * pass_no_commit_already_shipped) already independently proved a truthful
- * PASS-with-no-commit is correct; without this check the commit-guard
- * double-punishes that same honest no-op for dirt a concurrent interactive
- * session left behind (incidents: 655-needs-review-rca-feedback-hook,
- * 672-fix-feedback-session-manager, 2026-07-31).
+ * Runs for BOTH shapes of "no commit landed": (a) newlyDirty.length > 0 — the
+ * finish protocol's COMMIT step didn't run and left evidence behind — and
+ * (b) newlyDirty.length === 0 on a clean tree — the strongest possible silent
+ * no-op signal (exitCode 0, no commit, nothing even left dirty; PRD 972's
+ * shape). Before PRD 972-followup, case (b) bypassed the guard entirely
+ * because the call site only invoked commitGuardVerdict when the working
+ * tree was dirty — closed by widening that call site's condition, not by
+ * changing this function's four defenses below, which still apply to both
+ * shapes identically:
+ *   - siblingRunning: a concurrent job in the same cwd makes working-tree
+ *     evidence unreliable in both directions (extra dirt OR a clean tree
+ *     that isn't this job's doing).
+ *   - jobSelfCommitted: HEAD moved during the run, so the job's deliverable
+ *     landed even if dirt (from a concurrent actor) remains.
+ *   - legitimateNoOp (COMPLETED_EQUIVALENT_VERDICTS): runVerify.cjs's own
+ *     pass_no_commit exemptions (pass_no_commit_already_shipped, etc.)
+ *     already independently proved a truthful PASS-with-no-commit is
+ *     correct; without this check the commit-guard double-punishes that
+ *     same honest no-op (incidents: 655-needs-review-rca-feedback-hook,
+ *     672-fix-feedback-session-manager, 2026-07-31).
+ *   - isFixPlanJob (zero-edit case only): a fix-plan investigation
+ *     (slug ^\d+-fix-) legitimately concluding "the original work already
+ *     landed, nothing to change" makes no commit on an already-clean tree —
+ *     runVerify.cjs:896 exempts this same shape from ever raising
+ *     pass_no_commit in the first place (so its verdict stays 'clean', not a
+ *     COMPLETED_EQUIVALENT member — legitimateNoOp alone can't catch it),
+ *     which is why this is a distinct exemption. Only applies when
+ *     newlyDirty is empty: a fix-plan job that left real dirt behind is
+ *     still a genuine finish-protocol violation (incident:
+ *     523-fix-bounded-fix-plan-retry, 2026-07-12).
  */
-function commitGuardVerdict({ newlyDirty, siblingRunning, jobSelfCommitted, legitimateNoOp, verifyResult }) {
-  if (!newlyDirty || newlyDirty.length === 0) return null;
+function commitGuardVerdict({ newlyDirty, siblingRunning, jobSelfCommitted, legitimateNoOp, isFixPlanJob, verifyResult }) {
   if (siblingRunning || jobSelfCommitted || legitimateNoOp) return null;
-  const sample = newlyDirty.slice(0, 3).join(', ');
+  const dirty = newlyDirty || [];
+  if (dirty.length === 0 && isFixPlanJob) return null;
+
   const carried = [...(verifyResult?.annotations ?? [])];
   if (verifyResult && verifyResult.verdict !== 'clean') {
     carried.push({ verdict: verifyResult.verdict, reason: verifyResult.reason });
   }
+
+  if (dirty.length === 0) {
+    return {
+      verdict: 'silent_no_op',
+      reason: 'finish protocol incomplete: run exited 0, made no commit, and left the working tree exactly as it started — no evidence any work was done',
+      downgradeTo: 'needs_review',
+      annotations: carried.length ? carried : undefined,
+    };
+  }
+
+  const sample = dirty.slice(0, 3).join(', ');
   return {
     verdict: 'uncommitted_changes',
-    reason: `finish protocol incomplete: ${newlyDirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
+    reason: `finish protocol incomplete: ${dirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
     downgradeTo: 'needs_review',
     annotations: carried.length ? carried : undefined,
   };
@@ -2218,10 +2254,15 @@ function pickRunDir() {
  * Watchdogs are declared as an array; the result-tailer's exit-code mapping
  * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
-async function executeJob(job, runDir, defaultCwd, onPid) {
+async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
   const logPath = path.join(runDir, `${job.slug}.log`);
   const metaPath = path.join(runDir, `${job.slug}.meta.json`);
+  // `cwd` stays the MAIN tree throughout — PRD lookup (findPrdDir/prdPathForJob)
+  // and every git call below key off this value, never the worktree. Only the
+  // spawned child's own process cwd (spawnCwd) may point at a job worktree —
+  // see jobWorktree.cjs's header comment for why the two must never merge.
   const cwd = job.cwd || defaultCwd;
+  const spawnCwd = execCwd || cwd;
   const startedAt = Date.now();
   const sessionId = randomUUID();
 
@@ -2230,11 +2271,13 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   // of fd/safeLog/closeFd from the point it is called.
   const { fd, safeLog, closeFd } = openLog(logPath);
 
-  safeLog(`[scheduler] starting ${job.slug} at ${new Date().toISOString()}\n[scheduler] cwd=${cwd}\n\n`);
+  safeLog(`[scheduler] starting ${job.slug} at ${new Date().toISOString()}\n[scheduler] cwd=${cwd}` +
+    (spawnCwd !== cwd ? ` (running isolated in worktree ${spawnCwd})` : '') + '\n\n');
 
   // Dead-cwd guard: verify the target directory exists and is traversable
-  // before handing it to the child process.
-  try { fs.accessSync(cwd, fs.constants.X_OK); }
+  // before handing it to the child process. Checks spawnCwd (where the child
+  // ACTUALLY runs) — cwd is only used for PRD/git bookkeeping.
+  try { fs.accessSync(spawnCwd, fs.constants.X_OK); }
   catch {
     const errMsg = `cwd does not exist on this machine: ${cwd}`;
     safeLog(`[scheduler] ${errMsg}\n`);
@@ -2463,7 +2506,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
           '--session-id', sessionId,
         ],
         options: {
-          cwd,
+          cwd: spawnCwd,
           env: childEnv,
           // detached:true puts the child in its own process group so we can kill
           // the entire descendant tree (including any stray background bashes the
@@ -3008,29 +3051,17 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       }
     }
 
-    // Commit guard: a clean exit that left NEW uncommitted changes means the
-    // finish protocol's COMMIT step did not run. Surface it as needs_review
-    // instead of letting it masquerade as 'completed' (the PRD 03/04
-    // left-uncommitted incident). Two false-positive defenses:
-    //   - baseline DELTA: only files dirtied during THIS run count, so
-    //     pre-existing user WIP is excluded; and
-    //   - sibling skip: if another job is concurrently writing the same repo,
-    //     working-tree dirt can't be attributed to this job, so skip the guard.
-    //   - self-commit skip: if HEAD moved during the run, the job committed its
-    //     deliverable; leftover dirt is presumptively a concurrent external edit
-    //     (e.g. an interactive session editing the same repo), not the job's
-    //     unsaved work — so skip rather than false-flag a completed job.
-    //   - legitimate-no-op skip: if the verifier already independently proved
-    //     this run's PASS-with-no-commit is truthful (verdict is one of
-    //     COMPLETED_EQUIVALENT_VERDICTS — pass_no_commit_target_verified,
-    //     _prior_run_verified, _already_shipped), the run itself did nothing
-    //     wrong; dirt left by a concurrent interactive session (e.g.
-    //     /process-feedback writing new PRD .md files into the same repo
-    //     while this job's own AC turned out to already be satisfied) is not
-    //     this job's unfinished work. Without this skip, runVerify.cjs's
-    //     exemption and this guard double-punish the same honest no-op from
-    //     two different code paths (incidents: 655-needs-review-rca-feedback-hook,
-    //     672-fix-feedback-session-manager, 2026-07-31).
+    // Commit guard: a clean exit that landed no commit means the finish
+    // protocol's COMMIT step did not run. Surface it as needs_review instead
+    // of letting it masquerade as 'completed' (the PRD 03/04 left-uncommitted
+    // incident, and PRD 972's zero-edit variant of the same failure). Runs
+    // for BOTH shapes — newly-dirty files left behind, AND an already-clean
+    // tree with no commit at all — since a clean exit that commits nothing
+    // and dirties nothing is the strongest possible silent-no-op signal, not
+    // proof the guard has nothing to check. commitGuardVerdict's own doc
+    // comment (above) covers all four false-positive defenses that apply to
+    // both shapes: baseline DELTA (below), sibling skip, self-commit skip,
+    // legitimate-no-op skip, and (zero-edit only) the fix-plan exemption.
     // Non-git cwds resolve to null and are skipped (the guard is best-effort).
     //
     // Runs even when a transcript-pattern verdict already fired: the commit-guard
@@ -3044,7 +3075,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     const guardIsLegitimateNoOp = verifyResult && COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict);
     if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire && !guardIsLegitimateNoOp) {
       const after = await uncommittedChanges(guardCwd);
-      if (after && after.length > 0) {
+      // after === null means non-git cwd (or git errored) — best-effort skip,
+      // same as always; only a git-status result (even an empty one) counts
+      // as evidence for the zero-edit path.
+      if (after !== null) {
         const baseSet = new Set(guardBaseline || []);
         const newlyDirty = after.filter((p) => !baseSet.has(p));
         const guardState = await readQueue().catch(() => ({ jobs: [] }));
@@ -3058,11 +3092,13 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           siblingRunning,
           jobSelfCommitted,
           legitimateNoOp: guardIsLegitimateNoOp,
+          isFixPlanJob: isFixPlanSlug(job.slug),
           verifyResult,
         });
         if (guardVerdict) {
           verifyResult = guardVerdict;
-          console.log(`[scheduler] commit-guard: ${job.slug} left ${newlyDirty.length} files uncommitted → needs_review`);
+          const what = newlyDirty.length > 0 ? `left ${newlyDirty.length} files uncommitted` : 'made no commit on an already-clean tree';
+          console.log(`[scheduler] commit-guard: ${job.slug} ${what} → needs_review`);
         }
       }
     }

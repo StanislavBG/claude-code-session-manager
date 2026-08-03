@@ -75,12 +75,69 @@ test('commitGuardVerdict: REAL leftover work (no legitimate no-op, no sibling, n
   expect(verdict.reason).toMatch(/finish protocol incomplete/);
 });
 
-test('commitGuardVerdict: no newly-dirty files → no flag regardless of other flags', () => {
+test('commitGuardVerdict: PRD 972 shape — exitCode 0, no commit, clean tree, non-exempt original slug → needs_review (must fail against pre-fix main)', () => {
   const verdict = commitGuardVerdict({
     newlyDirty: [],
     siblingRunning: false,
     jobSelfCommitted: false,
     legitimateNoOp: false,
+    isFixPlanJob: false,
+    verifyResult: null,
+  });
+  expect(verdict).not.toBeNull();
+  expect(verdict.verdict).toBe('silent_no_op');
+  expect(verdict.downgradeTo).toBe('needs_review');
+  expect(verdict.reason).toMatch(/finish protocol incomplete/);
+});
+
+test('commitGuardVerdict: fix-plan job (523-fix-bounded-fix-plan-retry incident) — no commit, clean tree, isFixPlanJob → no flag', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: false,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: true,
+    verifyResult: { verdict: 'clean', reason: null, downgradeTo: null },
+  });
+  expect(verdict).toBeNull();
+});
+
+test('commitGuardVerdict: fix-plan job that DID leave real dirt behind is still flagged (isFixPlanJob only exempts the zero-edit case)', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: ['src/main/someFeature.cjs'],
+    siblingRunning: false,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: true,
+    verifyResult: null,
+  });
+  expect(verdict).not.toBeNull();
+  expect(verdict.verdict).toBe('uncommitted_changes');
+});
+
+test('commitGuardVerdict: COMPLETED_EQUIVALENT verdict, no commit, clean tree → no flag (legitimateNoOp covers the zero-edit case too)', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: false,
+    jobSelfCommitted: false,
+    legitimateNoOp: true,
+    isFixPlanJob: false,
+    verifyResult: {
+      verdict: 'pass_no_commit_already_shipped',
+      reason: 'SCHEDULER_VERDICT: PASS with no commit, but every PRD-named deliverable path is already tracked',
+      downgradeTo: null,
+    },
+  });
+  expect(verdict).toBeNull();
+});
+
+test('commitGuardVerdict: sibling running + zero-edit → no flag (concurrent job makes working-tree evidence unreliable in both directions)', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: true,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: false,
     verifyResult: null,
   });
   expect(verdict).toBeNull();

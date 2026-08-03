@@ -1,6 +1,117 @@
 {
   "jobs": [
     {
+      "slug": "981-chat-turn-three-zone-frame",
+      "title": "Predefined three-zone turn frame with per-message attribution chips",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 981,
+      "estimateMinutes": 22,
+      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "sourceTabId": null,
+      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "dependsOn": [
+        "chat-typed-event-renderers"
+      ],
+      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
+      "bodyPreview": "# Goal\n\nGive every turn kind one predefined frame instead of ad-hoc per-kind layout, so a transcript that now shows everything still reads as one system. Three zones, always present, empty zones collapsing to nothing: Header (role/kind badge, timestamp, attribution chips), Body (the typed renderer from the previous PRD), Footer (expand, show-raw, copy). The attribution chips are the visible payoff of the classifier fix — attributionSkill, attributionPlugin, attributionMcpServer/Tool, effort, gitBranch, isSidechain, isMeta, isApiErrorMessage and interruptedByShutdown are all already on disk today and were being discarded by makeRaw(). Also give the Epic event-chain kinds their own render so a routed question stops looking like ordinary assistant prose.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "980-chat-typed-event-renderers",
+      "title": "Typed renderers per event family — every transcript kind gets a designed card",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 980,
+      "estimateMinutes": 28,
+      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "sourceTabId": null,
+      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "dependsOn": [
+        "chat-feed-from-jsonl"
+      ],
+      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
+      "bodyPreview": "# Goal\n\nWith the JSONL feeding Chat, ~800 events per long Epic become reachable that previously had no UI at all. Rendering them as prose or raw JSON would be worse than hiding them. Give each event family a typed renderer in src/renderer/components/ChatTranscriptTurn.tsx, extending that file in place (its header explicitly says do not fork it). The governing rule, which must be stated as a code comment at the dispatch point: the classifier is a ROUTER, never a FILTER — every event reaches the UI; known kinds get a designed renderer, unknown kinds get a generic Signal card. A future Anthropic event type (e.g. a \"TIP\") must therefore appear automatically with zero code change; a code change only ever upgrades its presentation.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "979-transcript-paged-reads",
+      "title": "Replace the 500-entry transcript ring buffer with indexed paged reads",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 979,
+      "estimateMinutes": 26,
+      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "sourceTabId": null,
+      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "dependsOn": [
+        "transcript-classifier-multi-emit"
+      ],
+      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
+      "bodyPreview": "# Goal\n\nsrc/main/transcripts.cjs caps each subscription's in-memory buffer at 500 entries (`if (sub.buffer.length > 500) sub.buffer.shift()`) and, on first attach to a large transcript, seeks to the last 8 MB and discards everything before it (MAX_DELTA_BYTES). Both silently destroy history on any long-running Epic, which directly contradicts the Simplified Chat promise that nothing is hidden. Replace the memory buffer with an indexed, line-offset-based paged read over the transcript file so the Chat view can scroll back to the first event of a session without holding it all in RAM.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "978-chat-feed-from-jsonl",
+      "title": "Chat view reads the JSONL transcript as its source of truth",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 978,
+      "estimateMinutes": 24,
+      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "sourceTabId": null,
+      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "dependsOn": [
+        "transcript-classifier-multi-emit"
+      ],
+      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
+      "bodyPreview": "# Goal\n\nThe Epic Chat view currently renders from chatRunner.cjs's stream-json output, which is a strictly thinner feed than the on-disk JSONL transcript. Whole classes of real session events exist ONLY in the JSONL and are therefore unreachable by Chat today — verified counts across the last 20 real sessions: attachment 317, last-prompt 252, ai-title 217, queue-operation 122, mode 94, permissionMode 24, file-history-snapshot 5. Make the JSONL tail the source of truth for the Chat view's transcript, demoting chatRunner's stream to a low-latency live tap for in-flight text only. Without this, the typed-renderer PRD downstream has no data to render.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "977-transcript-classifier-multi-emit",
+      "title": "classifyLine becomes multi-emit and stops destroying data at classify time",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 977,
+      "estimateMinutes": 22,
+      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "sourceTabId": null,
+      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "dependsOn": [],
+      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
+      "bodyPreview": "# Goal\n\nsrc/main/lib/classifyTranscriptLine.cjs is lossy at three verified points, and every downstream Chat/Terminal rendering improvement is blocked on fixing them. (a) The `for (const block of content)` loop `return`s on the FIRST tool_use block, so an assistant message containing text plus 3 tool calls emits ONE event and the text plus 2 calls are silently discarded. (b) The `if (obj.usage || msg?.usage)` check runs first, so any message carrying both usage and content is classified 'usage' and its content is never emitted at all. (c) `makeRaw()` keeps only `message.content`, discarding every top-level field on the line. Make classifyLine return an ARRAY of events per line, preserve the whole line, and replace classify-time string truncation with a byte-offset reference so full payloads stay recoverable without holding them in memory.\n\n# Acceptance criteria\n",
+      "status": "running",
+      "runId": "2026-08-03T04-32-59-390Z",
+      "startedAt": "2026-08-03T04:32:59.526Z",
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null,
+      "sessionId": "12b9eca1-4f04-4182-8eab-c7ff23133583",
+      "runtime": {
+        "pid": 3044569,
+        "runId": "2026-08-03T04-32-59-390Z",
+        "startedAt": "2026-08-03T04:32:59.526Z",
+        "sessionId": "12b9eca1-4f04-4182-8eab-c7ff23133583",
+        "cwd": "/home/bilko/Projects/session-manager"
+      }
+    },
+    {
       "slug": "972-notify-epic-prd-path-and-epicid-fallback",
       "title": "Fix PRD→Epic completion notification: resolve PRD from Epic-scoped + archived dirs, fall back to job.epicId",
       "cwd": "/home/bilko/Projects/session-manager",

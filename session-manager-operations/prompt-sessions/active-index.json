@@ -366,6 +366,14 @@
         "id": "pevt-mscngq0f-7",
         "promptSessionId": "psess-mscgxoqw-7",
         "at": "2026-08-03T03:08:41.007Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscngq0f-7",
+        "text": "**Pushed to `origin/main` (`ea89b99..b43c6f9`).**\n\nAll four PRDs from the refactor chain completed and self-committed while we talked — 968 at 03:19, 969 at 03:27, 970 at 03:34, 971 at 03:44 UTC. Verified before pushing:\n\n- `npm run typecheck` — clean\n- `npm run test:unit` — **237 files / 2230 tests passed**\n- `npm run lint:selectors` — OK (424 files scanned)\n\nPushed 5 commits total: the four feature commits already on `main` from other in-flight Epics (`a34da4b`, `e62bd4f`, `870ac00`, `5ff20ea`) plus my `b43c6f9` syncing this Epic's runtime state (archived PRDs 968–971, queue/history, transcripts).\n\n**One thing I found and deliberately did not commit:** there's a stray nested directory at\n```\nsession-manager-operations/scheduler/epics/prd-to-epic-communication-.../prds/session-manager-operations/scheduler/state/queue.json\n```\ncontaining `{\"jobs\": []}` — a PRD executor from a *different* Epic (`prd-to-epic-communication...`, PRD 972) wrote a queue file to a path-joined-twice location instead of the real `scheduler/state/queue.json`. It's an empty-jobs artifact of a relative-vs-absolute path bug, not real state. I left it untracked rather than committing the corruption or deleting someone else's Epic's output — it belongs to that Epic's thread to diagnose, and PRD 972's own title (`notify-epic-prd-path-and-epicid-fallback`) suggests it's already in the neighborhood of that bug.",
+        "id": "pevt-mscqcjhy-29",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T04:29:24.790Z"
       }
     ],
     "psess-msch6x36-16": [
@@ -744,6 +752,54 @@
         "id": "pevt-mscq9eus-27",
         "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
         "at": "2026-08-03T04:26:58.804Z"
+      },
+      {
+        "id": "5169a6d1-82cb-4238-832b-747f5876dbec",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscq9eus-27",
+        "at": "2026-08-03T04:31:21.152Z",
+        "prdSlug": "977-transcript-classifier-multi-emit"
+      },
+      {
+        "id": "46ca2584-0f11-48e6-917e-ae07c4692ba3",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prd_created",
+        "causedByEventId": "5169a6d1-82cb-4238-832b-747f5876dbec",
+        "at": "2026-08-03T04:31:55.232Z",
+        "prdSlug": "978-chat-feed-from-jsonl"
+      },
+      {
+        "id": "cf7891cb-5f42-4b64-bbd0-a86e436c852a",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prd_created",
+        "causedByEventId": "46ca2584-0f11-48e6-917e-ae07c4692ba3",
+        "at": "2026-08-03T04:32:27.109Z",
+        "prdSlug": "979-transcript-paged-reads"
+      },
+      {
+        "id": "ec4b4aa8-00c6-4c9b-b689-3665a1166a65",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prd_created",
+        "causedByEventId": "cf7891cb-5f42-4b64-bbd0-a86e436c852a",
+        "at": "2026-08-03T04:33:06.791Z",
+        "prdSlug": "980-chat-typed-event-renderers"
+      },
+      {
+        "id": "f74f6fd4-f131-4ce6-a382-756a54f9b409",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prd_created",
+        "causedByEventId": "ec4b4aa8-00c6-4c9b-b689-3665a1166a65",
+        "at": "2026-08-03T04:33:37.957Z",
+        "prdSlug": "981-chat-turn-three-zone-frame"
+      },
+      {
+        "id": "b6fe97c8-f15d-4930-88dd-20038f3cb6a1",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prd_created",
+        "causedByEventId": "f74f6fd4-f131-4ce6-a382-756a54f9b409",
+        "at": "2026-08-03T04:34:14.178Z",
+        "prdSlug": "982-epic-intake-structured-sections"
       }
     ]
   },

@@ -91,19 +91,17 @@ invented content, only real `ProjectPageSummary` fields.
    and lists each error (missing/placeholder/wrong-type field) on failure —
    fix `summary.json` and re-run until it passes before proceeding to Stage
    2/3.
-4. Run the Stage 2 selection scorer: `node
-   scripts/select-project-pages-picks.cjs
-   session-manager-operations/project-pages/summary.json <existing
-   picks.json path, or 'none' if this is the first run>
-   session-manager-operations/project-pages/picks.json` (build first with
-   `npm run build:project-pages-logic` if
-   `scripts/project-pages-logic/dist/logic.cjs` doesn't exist yet — same
-   bundle the validator uses). Deterministic and non-LLM: it formalizes each
-   variant's `note` into requires/avoidIf predicates
-   (`src/renderer/lib/projectPages/selectionPredicates.ts`) and picks one
-   variant per slot per lens (`select.ts`'s `scoreVariants`), preserving any
-   existing hand-picks unless you pass a 4th comma-separated `resetSlots`
-   arg for an explicit "start over" on specific slots.
+4. Do the Stage 2 selection yourself — there is no separate scorer script.
+   You already read each lens's slot/variant notes (component library
+   README + source files, step 1) and have `summary.json` (step 3). For
+   each lens, for each slot, read the candidate variants' prose
+   `note`/description and directly choose the one variant that genuinely
+   fits this specific project's summary — real judgment, not a formula.
+   Write your picks to `session-manager-operations/project-pages/picks.json`
+   in the existing `Record<lensId, Record<slotId, variantId>>` shape,
+   preserving any existing entries already in that file unless the request
+   is explicitly "start over" for specific slots — same rule as "Respect
+   existing hand-picks" under Hard rules above.
 5. Call the Stage 0 renderer with (summary, picks), write the 3 HTML files
    + `manifest.json` under `project-pages/output/`.
 6. Report what was generated and where — Project Home's iframe display

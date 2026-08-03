@@ -118,21 +118,28 @@ Cost-gating is inherent: it only runs when a human clicks "Generate Now"
 
 ## Stage 2 — Summary → component mapping (selection)
 
-Formalize each variant's prose `note` (already in the saved library, e.g.
-"Needs a real quote.", "Needs a strong screenshot.") into a structured,
-machine-checkable predicate on the variant: `requires: string[]` /
-`avoidIf: string[]`, evaluated as dot-path truthiness/length checks against
-the summary (e.g. `requires: ['quotes.length>0']`). A deterministic scorer
-picks the highest-scoring variant per slot; ties fall back to preset `v1`
-(the safest, most type-led option in every lens per the library's own
-naming). No LLM call needed for v1 of this stage — nondeterministic re-
-layout on every regenerate is worse than a boring, repeatable rule. An LLM
-taste-pass is a plausible v2, not required to ship.
+**Reversed 2026-08-03 (Epic "Project Home Layout"): there is no separate
+deterministic selection stage.** The `project-home-builder` agent itself
+picks each slot's variant, by reasoning over `summary.json` against the
+component library's own variant notes — the same class of step as Stage 1's
+`summary.json` authoring, not a distinct machine-checkable predicate scorer.
+Concretely: for each lens, for each slot, the agent reads the candidate
+variants' prose `note`/description in
+`src/renderer/lib/projectPages/library/*.tsx` (e.g. "Needs a real quote.",
+"Needs a strong screenshot.") and judges which variant genuinely fits this
+project's `summary.json` content, then writes the picks directly with its
+own Write tool — no intermediate predicate language, no scorer script.
 
 Output persisted to `session-manager-operations/project-pages/picks.json`
-— idempotent regenerate: if a user has hand-picked a slot, don't silently
-overwrite it (mirrors `project-brief`'s per-block `pins`, but per-slot-pick
-here instead of per-paragraph-text).
+in the same shape as before (`Record<lensId, Record<slotId, variantId>>`).
+**The 'respect existing hand-picks unless explicit start-over' rule is
+unchanged and still what keeps selection stable across regenerates**: a
+project's picks are judged once (or on an explicit reset request) and then
+persisted like `project-brief`'s pinned blocks, so moving selection from a
+script to agent judgment does not reintroduce per-regenerate
+nondeterminism — the agent must not silently overwrite it (mirrors
+`project-brief`'s per-block `pins`, but per-slot-pick here instead of
+per-paragraph-text).
 
 ## Stage 3 — Render
 
@@ -163,8 +170,9 @@ architecture}.html` plus a `manifest.json` (`generatedAt`, `model`,
   a human would touch to change what gets generated:
   `project-pages/summary.json` (the computed inputs), `project-pages/
   picks.json` (per-project, per-slot overrides — hand-edit a pick here and
-  Regenerate preserves it via `select.ts`'s `mergePicks`, same mechanism
-  Stage 2 already had), and `src/renderer/lib/projectPages/library/` (the
+  Regenerate preserves it, since the `project-home-builder` agent respects
+  existing picks unless explicitly told to start over, same rule Stage 2
+  already had), and `src/renderer/lib/projectPages/library/` (the
   component library itself, shared across every project — editing it is a
   code change, not a per-project override).
 
@@ -217,7 +225,6 @@ first PRD chain; ship with the honest placeholder pattern until wired.
 
 ## Explicit non-goals for v1
 
-- No LLM-driven variant selection (Stage 2 is rule-based only).
 - No installable "design pack" packaging (Stage 0 ships baked into the app;
   making it swappable is a later roadmap item, not part of this build).
 - No automatic/background regeneration — manual trigger only, same

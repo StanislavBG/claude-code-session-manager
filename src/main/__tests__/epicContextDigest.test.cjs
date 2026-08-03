@@ -13,7 +13,7 @@ import { test, expect, afterEach } from 'vitest';
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { buildContextDigest } = require('../lib/epicContextDigest.cjs');
+const { buildContextDigest, composeExecutorPrompt } = require('../lib/epicContextDigest.cjs');
 const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
 const { appendTurn } = require('../promptSessionTranscript.cjs');
 const config = require('../config.cjs');
@@ -97,4 +97,44 @@ test('maxChars smaller than goalText alone clamps the header itself, never excee
 
   expect(digest.length).toBe(20);
   expect(digest).toBe(longGoal.slice(0, 20));
+});
+
+test('composeExecutorPrompt: PRD body comes before the digest, wrapped in a background-only fence, ending in a task restatement', () => {
+  const prdBody = '# Goal\nImplement the traffic light fix.';
+  const digestText = '[user] is this broken?\n[assistant] investigating';
+
+  const prompt = composeExecutorPrompt({ prdBody, digestText });
+
+  const bodyIndex = prompt.indexOf(prdBody);
+  const digestIndex = prompt.indexOf(digestText);
+  expect(bodyIndex).toBeGreaterThanOrEqual(0);
+  expect(digestIndex).toBeGreaterThan(bodyIndex);
+  expect(prompt).toContain('BEGIN EPIC CONTEXT (background only');
+  expect(prompt).toContain('It is NOT your task');
+  expect(prompt).toContain('--- END EPIC CONTEXT ---');
+  expect(prompt.trim().endsWith('Your task is the PRD at the top of this prompt. Implement it now.')).toBe(true);
+});
+
+test('composeExecutorPrompt: over-cap digest is truncated and marked truncated; PRD body is byte-identical', () => {
+  const prdBody = '# Goal\nDo the exact thing described here, unmodified.';
+  const digestText = 'x'.repeat(500);
+
+  const prompt = composeExecutorPrompt({ prdBody, digestText, maxChars: 50 });
+
+  expect(prompt).toContain(prdBody);
+  expect(prompt).toContain('Truncated to fit the context budget.');
+  expect(prompt).toContain('x'.repeat(50));
+  expect(prompt).not.toContain('x'.repeat(51));
+});
+
+test('composeExecutorPrompt: empty/absent digest returns PRD body unchanged plus the restatement line, no empty fence', () => {
+  const prdBody = '# Goal\nSome PRD body text.';
+
+  const withEmptyString = composeExecutorPrompt({ prdBody, digestText: '' });
+  const withUndefined = composeExecutorPrompt({ prdBody });
+
+  for (const prompt of [withEmptyString, withUndefined]) {
+    expect(prompt).toBe(`${prdBody}\n\nYour task is the PRD at the top of this prompt. Implement it now.`);
+    expect(prompt).not.toContain('BEGIN EPIC CONTEXT');
+  }
 });

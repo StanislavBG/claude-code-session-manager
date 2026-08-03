@@ -88,7 +88,7 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
-const { buildContextDigest } = require('./lib/epicContextDigest.cjs');
+const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -2279,7 +2279,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     try {
       const digestText = await buildContextDigest({ cwd, epicId: digestEpicId });
       if (digestText) {
-        prompt = digestText + '\n\n' + prompt;
+        prompt = composeExecutorPrompt({ prdBody: prompt, digestText });
         contextDigestApplied = true;
       }
     } catch (e) {

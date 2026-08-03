@@ -107,8 +107,15 @@ test('prepends the Epic context digest when job.epicId resolves to a known Epic'
 
     const digestText = await buildContextDigest({ cwd: projectCwd, epicId });
     expect(digestText.length).toBeGreaterThan(0);
-    expect(capturedPrompt.startsWith(digestText)).toBe(true);
-    expect(capturedPrompt.endsWith(bodyText + FINISH_PROTOCOL)).toBe(true);
+    // The PRD body (plus FINISH_PROTOCOL) comes first; the digest is fenced
+    // as background afterward, and the prompt ends with the task restatement
+    // rather than the digest itself (composeExecutorPrompt, PRD 987 Part A).
+    expect(capturedPrompt.startsWith(bodyText + FINISH_PROTOCOL)).toBe(true);
+    const bodyIndex = capturedPrompt.indexOf(bodyText);
+    const digestIndex = capturedPrompt.indexOf(digestText);
+    expect(digestIndex).toBeGreaterThan(bodyIndex);
+    expect(capturedPrompt).toContain('BEGIN EPIC CONTEXT (background only');
+    expect(capturedPrompt.trim().endsWith('Your task is the PRD at the top of this prompt. Implement it now.')).toBe(true);
 
     // The PRD source on disk must never be rewritten with the digest merged in.
     const onDiskPrd = fs.readFileSync(path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds', `${slug}.md`), 'utf8');

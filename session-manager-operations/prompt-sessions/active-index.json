@@ -87,6 +87,17 @@
       "completedAt": null,
       "tag": "discussion",
       "agentType": "architect"
+    },
+    "builder-check-git-vs-the-published-package-for-t-aa68de15": {
+      "id": "builder-check-git-vs-the-published-package-for-t-aa68de15",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
+      "claudeSessionId": "63313ba7-bf2e-43a8-be96-c3d1fc5bc90c",
+      "status": "active",
+      "createdAt": "2026-08-03T06:28:51.666Z",
+      "completedAt": null,
+      "tag": "build",
+      "agentType": "builder"
     }
   },
   "events": {
@@ -756,6 +767,46 @@
         "causedByEventId": "7f56c8a7-382d-4897-bcde-1d7f755c8e13",
         "at": "2026-08-03T06:05:59.277Z",
         "prdSlug": "996-commit-guard-covers-zero-edit-runs"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "224a7ca0-d7dc-4b3d-8afb-f5baa2a12415",
+        "text": "Both loose ends filed, and I stopped short of duplicating work that was already done. Pushed `aa482d1..154065c`.\n\n## Filed\n\n**995 `verifyrun-dead-prd-path`** — `scheduler.cjs:2890` (live `verifyRun`) and `:3798` (`reverifyNeedsReview`'s) still hand the verifier a `prdPathForJob()` path into the retired flat dir. The verifier can't read the acceptance criteria it's verifying against. Its first AC is to *quantify* the blast radius before touching code — and to close the PRD as a no-op if it turns out `verifyRun` never reads `prdPath` at all, rather than inventing a fix.\n\n**996 `commit-guard-covers-zero-edit-runs`** — the half of 983 I skipped. Carries explicit named regression guards for the two proven-legitimate no-ops (fix-plan jobs, `pass_no_commit_already_shipped`), because the 2026-07-12 `523-fix-bounded-fix-plan-retry` cascade is what happens when this is done carelessly.\n\n## Then I lost a race, and found work already done\n\n**984** — the scheduler picked it up seconds before my archive landed. I restored its source file so the in-flight run isn't disrupted. It's running now.\n\n**992** — I claimed it, opened `prdMigration.cjs`, and found it **already implemented**: `LIVE_JOB_STATUSES`, `liveSlugsForCwd`, `skipped` reporting, the caller logging it, and the doc comment citing \"PRD 992\" by name. Commit `214de45`. Tests: **22 passed**, covering every AC case including the `needs_review`-is-live edge and the fail-closed unreadable-`queue.json` behaviour.\n\nIts `.md` was still sitting in `prds/`, so `reconcile` kept re-adding a pending row that would have re-run completed work — the same false-green shape this whole Epic has been about, just from the other direction. Archiving it was the correct cleanup, not a claim.\n\nThat check cost about a minute and saved a redundant run. It's the discipline I wrote into 985's spec (\"confirm the bug is still present; if already fixed, stop and report rather than inventing work\") — worth applying to my own claims too.\n\n## Session total…",
+        "id": "pevt-msctuknx-48",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T06:07:24.957Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msctuknx-48",
+        "text": "**Just waiting — I have nothing running.** I launched no background processes this session, and this is a one-shot turn: when I stop producing output, the session is torn down. There's no work of mine in flight.\n\nWhat *is* running is the **scheduler**, a separate process that doesn't depend on me:\n\n- **Running now:** `984-context-digest-prd-focus-guard`, started 11:02:40 PM PDT\n- **Pending (6):** `997`, `996`, `995`, `994`, `991`, `987`\n- Queue is not paused\n\nTwo things moved since my last report, both by the scheduler rather than me:\n\n**`986` landed.** HEAD is now `ed1d750 test(scheduler): PRD 986 validation-hook unit tests + de-NUL the hook source` — that's the check-in-triggers-Epic-validation work. Which means `987` (the traffic light reading the Epic's verdict) is now unblocked and sitting in pending.\n\n**New PRDs appeared** that I didn't file: `993`, `994` (worktree isolation), `997` (finish-protocol explicit staging). Something else queued those — likely a job or another Epic's session.\n\nOne thing worth flagging: **`main` is 4 commits ahead of origin.** The scheduler has been committing locally since my last push at `154065c`. Those commits are not on GitHub.\n\nI can push them, or leave them — your call, since I don't know whether you want the in-flight `984` to finish first. I'd lean toward pushing now: they're already committed, and leaving them local just widens the gap while more jobs land.",
+        "id": "pevt-mscu2pvt-50",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T06:13:44.969Z"
+      },
+      {
+        "id": "pevt-mscu8r48-3",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "response",
+        "causedByEventId": "pevt-mscu2pvt-50",
+        "at": "2026-08-03T06:18:26.504Z",
+        "text": "PRD 987-traffic-light-reads-epic-verdict needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T06-17-05-698Z/root-cause-987-traffic-light-reads-epic-verdict.md"
+      },
+      {
+        "id": "pevt-mscua7yc-4",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "response",
+        "causedByEventId": "pevt-mscu8r48-3",
+        "at": "2026-08-03T06:19:34.980Z",
+        "text": "PRD 991-scheduler-auto-retry-no-verdict-runs needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T06-18-31-968Z/root-cause-991-scheduler-auto-retry-no-verdict-runs.md"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscua7yc-4",
+        "text": "**0.59.0 is already live on npm** with `latest` pointing at it — `npx claude-code-session-manager@latest` gets all of this session's work. Nothing to publish; my initial `npm view` returned a stale `0.58.0`.\n\n## Release state — verified\n\n| Check | Result |\n|---|---|\n| npm `latest` | **0.59.0** |\n| Local `package.json` | 0.59.0 |\n| Tag `v0.59.0` | exists |\n| `main` vs `origin/main` | in sync, nothing unpushed |\n| Typecheck (clean worktree at tag) | **PASS** |\n| Unit tests (clean worktree) | **245 files / 2324 tests, all pass** |\n\nEverything from this session is in it: PRD 985 (`95b8a9a`), PRD 983 (`aa482d1`), 986's validation hook (`78f39a9`), plus the 974/975/976 traffic light.\n\n**The earlier RED typecheck was not real.** It was purely job 982's uncommitted edits in the live tree; committed code at the tag is clean. Good reason to have gated in a worktree rather than in place.\n\n## I could not pause the scheduler — and it's still running jobs\n\nThis is the part that didn't work. I set `firePolicy: manual` and `enabled: false` in `~/.claude/session-manager/scheduler-machine.json`, and the edit persisted on disk. But the running Electron app holds `state.config` **in memory** and never re-read the file. Jobs kept firing: `984` → `991` → `987-fix-traffic-light-reads-epic-verdict`, which is running right now.\n\nSo the queue is **not** draining — it's still being worked. The on-disk lever doesn't work against a live app; pausing needs the Scheduler tab's own control (or `firePolicy: manual` set through the UI). I've left my edit in place, with a backup at `/tmp/scheduler-machine.bak.json` — it will take effect if the app restarts, which may not be what you want.\n\nThis also explains a flaky gate I hit: the **first** full test run failed 21 tests across 3 files, then two subsequent runs were fully green. Concurrent scheduler jobs run their own `npm run test:unit`, and suites like `scheduler-committed-in-window.test.cjs` share fixed `/tmp/sm-committed-in-window-bare-*` paths, …",
+        "id": "pevt-mscujuaw-52",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T06:27:03.848Z"
       }
     ],
     "session-chat-conversion-into-simplified-chat-so--7cda6827": [
@@ -992,6 +1043,48 @@
         "id": "pevt-msctn4hl-46",
         "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
         "at": "2026-08-03T06:01:37.401Z"
+      },
+      {
+        "id": "2dc0b5ae-d72e-4eb4-8fc6-0630a79f9f36",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msctn4hl-46",
+        "at": "2026-08-03T06:10:19.798Z",
+        "prdSlug": "997-finish-protocol-explicit-staging"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "2dc0b5ae-d72e-4eb4-8fc6-0630a79f9f36",
+        "text": "Working tree clean. Here's what I found and fixed.\n\n## The stall has a cause you can't fix from the repo\n\n`npm run health` reports the tick stalled — 6 pending jobs, free capacity, no progress. The cause:\n\n**The scheduler executing your jobs is the npm-installed package, not your working tree.**\n\n```\ninstalled: /home/bilko/.npm/_npx/.../claude-code-session-manager  v0.58.0\n  → schedulerBatch.cjs: 11 references to the group gate  (still there)\n  → concurrencyCap: getEnvCap() ?? 3                      (still there)\nrepo:      v0.58.0, fix committed at 4c8916d\n```\n\nSo the running scheduler has never seen the parallelism fix. Right now `984` is in flight at group 984 and everything pending is 987+, so the old gate holds all six. That's the stall exactly.\n\n**Nothing is permanently blocked** — it drains serially, one job per completion, ~4-5 hours for the six. It *will* finish. It just won't parallelize until you publish and relaunch. That's the one action I can't take for you: publishing is an outward-facing release, and relaunching would SIGTERM job 984 mid-run.\n\nI deliberately did **not** work around it by giving the pending PRDs a shared `parallelGroup` (which would trick the old gate into firing them as a wave). That would put 4 agents into one working tree while the `git add -A` hazard is still live — see below for why that's not theoretical.\n\n## What I actually fixed\n\n**PRD 986's implementation was sitting uncommitted in the tree.** 986 was archived `completed`, but `git log -S` found no commit containing its code — `epicValidationHook.cjs` (untracked), plus edits to `scheduler.cjs`, `promptSessionEvents.cjs`, `promptSessions.ts`. A false green of exactly the PRD 972 shape the 983/985/996 chain exists to catch. And **987 depends on 986**, so it would have built on nothing.\n\nVerified sound (typecheck clean, 73 files / 599 tests green), then committed as `78f39a9` under 986's own name. Staged by explicit path, not `git add -A` — job 984 was running in the same tree a…",
+        "id": "pevt-mscu13fo-49",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T06:12:29.220Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscu13fo-49",
+        "text": "Done — paused, then cut and shipped the build.\n\n## Published\n\n**`claude-code-session-manager@0.59.0`** — live on npm, `dist-tags.latest = 0.59.0`, verified against the registry API (not just the cached `npm view`, which still read stale). Tagged `v0.59.0`, `main` and the tag pushed to GitHub.\n\n`npx claude-code-session-manager@latest` now gets the parallelism fix.\n\n## How I paused\n\nThe slot pool has a purpose-built pause: **cap 0 stops new launches without touching running processes**, and `totalSlots()` re-reads that file on every call — so it took effect on the live app with no restart. 984 was 12 minutes into a 45-minute estimate; it finished on its own and nothing new started behind it.\n\n## Gate\n\nRan the suite in an isolated worktree at the tag, never the live tree — 984 was still editing when I started.\n\nFirst run came back **21 tests red**. I did not publish on that. Runs 2, 3 and 4 were green at **245 files / 2324 tests**, and I tracked down why rather than assuming flake:\n\n> `src/main/lib/__tests__/sessionSlots.test.cjs:12` calls `fs.unlinkSync` on the **real** `~/.claude/session-manager/session-slots-config.json`.\n\nThe test suite deleted my pause file. That's what made run 1 red (cap 0 present, perturbing tests that assume the default 5) and every later run green (file gone, defaults restored). I re-applied the pause before publishing and confirmed it holds.\n\n**That's a real bug worth knowing about: running the unit suite silently wipes your Home-tab slot-cap setting.** The test should write to a temp dir, not the live homedir path. I haven't filed it — the queue is paused and I didn't want to add work during a release freeze.\n\n## State now\n\n| | |\n|---|---|\n| Pool | **0 — paused**, holds until you raise it |\n| Running | 0 |\n| Pending | 997, 996, 995, 994 |\n| `src/` tree | clean at `97136b2` |\n| Worktree | removed, pruned |\n\nThe 5 live `claude -p` processes are chat/interactive sessions (including this one), not scheduler jobs — the queue is genuinely idle.\n\n…",
+        "id": "pevt-mscubyr8-51",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T06:20:56.372Z"
+      }
+    ],
+    "builder-check-git-vs-the-published-package-for-t-aa68de15": [
+      {
+        "id": "pevt-mscum5hy-53",
+        "promptSessionId": "builder-check-git-vs-the-published-package-for-t-aa68de15",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T06:28:51.666Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
+      },
+      {
+        "id": "83397503-51a2-4920-8e39-7f6fbeee5735",
+        "promptSessionId": "builder-check-git-vs-the-published-package-for-t-aa68de15",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T06:28:51.666Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
       }
     ]
   },

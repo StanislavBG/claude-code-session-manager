@@ -87,6 +87,7 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
+const { buildContextDigest } = require('./lib/epicContextDigest.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -2109,6 +2110,25 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
     }
   }
 
+  // Prepend the Epic's own session digest (PRD 950/958) when this job traces
+  // back to a known Epic — additive only, never mutates the PRD body itself.
+  // A missing/unresolved epicId or a digest build failure is a silent no-op:
+  // the PRD's own body must remain sufficient to complete the job on its own.
+  const digestEpicId = job.epicId ?? job.sourcePromptId ?? null;
+  const originSessionId = resolveOriginSessionId(cwd, digestEpicId);
+  let contextDigestApplied = false;
+  if (originSessionId) {
+    try {
+      const digestText = await buildContextDigest({ cwd, epicId: digestEpicId });
+      if (digestText) {
+        prompt = digestText + '\n\n' + prompt;
+        contextDigestApplied = true;
+      }
+    } catch (e) {
+      safeLog(`[scheduler] context digest build failed (job still dispatches without it): ${e?.message ?? e}\n`);
+    }
+  }
+
   const promptCheck = validatePromptForSpawn(prompt, prdPath);
   if (!promptCheck.ok) {
     safeLog(`[scheduler] ${promptCheck.error}\n`);
@@ -2262,7 +2282,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
           sl(`\n[scheduler] ${errMsg}\n`);
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
-          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA });
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA, originSessionId, contextDigestApplied });
           resolve({ exitCode: -1, durationMs, error: errMsg, sessionId });
           return;
         }
@@ -2293,6 +2313,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
           startedAt, finishedAt: Date.now(), durationMs,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA,
+          originSessionId, contextDigestApplied,
         });
         resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, sessionId });
       },

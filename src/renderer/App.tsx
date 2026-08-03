@@ -7,7 +7,6 @@ import { BroadcastBar } from './components/BroadcastBar'
 import { WatchersPopover } from './components/WatchersPopover'
 import { Workbench } from './components/workbench/Workbench'
 import { SplitAgentBrowser } from './components/SplitAgentBrowser'
-import { type SearchMode } from './components/modals/SearchModal'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
@@ -52,14 +51,13 @@ export function App() {
   // `--simple` launch flag: null until resolved, then true → SimpleShell.
   const [simpleMode, setSimpleMode] = useState<boolean | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [searchMode, setSearchMode] = useState<SearchMode>('files')
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
   const [splitView, setSplitView] = useState(false)
   const [terminalToast, setTerminalToast] = useState<string | null>(null)
 
   // Every NavKey routes through the layout store. Used by CommandPalette
-  // nav:* entries, AlmanacSidebar, and the Cmd-P / Cmd-Shift-F shortcuts.
+  // nav:* entries and AlmanacSidebar.
   const navigate = useCallback((k: NavKey) => {
     // The Epics destination ('terminal') shows the EpicsWorkspace over the
     // terminal layer. Ask for it EXPLICITLY rather than deselecting the
@@ -493,17 +491,10 @@ export function App() {
       // if the binding steals it. xterm's hidden helper-textarea is NOT a
       // "real" input — terminals claim focus at boot, so excluding it
       // would leave these shortcuts unreachable in the most common state.
-      // The SearchModal's own query inputs (QuickOpenModal "Search files" /
-      // GlobalSearchModal "Search query") auto-focus on open, so they're
-      // also excluded — otherwise ⌘P / ⌘⇧F could never toggle Files↔Content
-      // mode while the search screen is already active, contradicting
-      // SearchModal's documented "bump mode even when already open" behavior.
       const target = e.target as HTMLElement | null
       const tag = target?.tagName?.toLowerCase() ?? ''
       const isXtermHelper = target?.classList?.contains('xterm-helper-textarea') ?? false
-      const ariaLabel = target?.getAttribute?.('aria-label')
-      const isSearchInput = ariaLabel === 'Search files' || ariaLabel === 'Search query'
-      if ((tag === 'input' || tag === 'textarea') && !isXtermHelper && !isSearchInput) return true
+      if ((tag === 'input' || tag === 'textarea') && !isXtermHelper) return true
       if (target?.closest('.monaco-editor')) return true
       return false
     }
@@ -514,18 +505,6 @@ export function App() {
         e.preventDefault()
         e.stopPropagation()
         setPaletteOpen((v) => !v)
-      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
-        if (skipForRealInput(e)) return
-        e.preventDefault()
-        e.stopPropagation()
-        setSearchMode('files')
-        navigate('search')
-      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
-        if (skipForRealInput(e)) return
-        e.preventDefault()
-        e.stopPropagation()
-        setSearchMode('content')
-        navigate('search')
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
       } else if (e.key === 'Escape' && splitView) {
@@ -735,7 +714,6 @@ export function App() {
               onNewSession={handleNewSession}
               onOpenVoice={() => navigate('voice')}
               onOpenScheduler={() => navigate('scheduler')}
-              searchMode={searchMode}
             />
           </div>
           {terminalToast && (

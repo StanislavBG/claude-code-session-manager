@@ -71,8 +71,7 @@ function mount(active: 'overview' | 'scheduler' = 'overview') {
 describe('AlmanacSidebar', () => {
   it('renders each row label alongside its hint text in the non-rail (expanded) layout', () => {
     // Project face (navFace is real state now, not derived from `active` —
-    // see state/layout.ts) so both project-only (Search) and both-face
-    // (Scheduler) rows are present.
+    // see state/layout.ts).
     seedActiveTab('/tmp/project')
     useLayout.setState({ navFace: 'project' })
     const { container, root } = mount('scheduler')
@@ -87,17 +86,33 @@ describe('AlmanacSidebar', () => {
       expect(text).toContain('Scheduler')
       expect(text).toContain("Global policy + this project's live PRD queue")
 
-      // Tools row: label + its hint should both be visible text.
-      expect(text).toContain('Search')
-      expect(text).toContain('⌘P file · ⌘⇧F content')
-
       // Group headers show their one-line description.
       expect(text).toContain('Workspace')
       expect(text).toContain('Where you do the work — sessions, files, and everything currently running.')
       expect(text).toContain('Configure')
       expect(text).toContain('How Claude behaves — changes here apply to every session you start.')
+
+      // Tools' only item (Voice) is home-face-only, so the group is entirely
+      // absent on the project face — no dangling empty section header.
+      expect(text).not.toContain('Tools')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('shows the Tools group with Voice on the home face', () => {
+    useLayout.setState({ navFace: 'home' })
+    const { container, root } = mount()
+    try {
+      const nav = container.querySelector('[data-testid="tour-leftnav"]')
+      expect(nav).not.toBeNull()
+      const text = nav?.textContent ?? ''
+
       expect(text).toContain('Tools')
       expect(text).toContain('One-off utilities — not configuration, just things you reach for sometimes.')
+      expect(text).toContain('Voice')
+      expect(text).toContain('Whisper transcription + push-to-talk')
     } finally {
       act(() => root.unmount())
       container.remove()

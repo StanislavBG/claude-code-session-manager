@@ -186,8 +186,6 @@ export function buildCommands(): Command[] {
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
     { id: 'nav:remote', label: 'Go to Remote', section: 'nav', emitOnly: true },
     { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },
-    { id: 'nav:repoviz', label: 'Go to Repo Viz', section: 'nav', emitOnly: true },
-    { id: 'nav:search', label: 'Go to Search', section: 'nav', emitOnly: true },
   ]
   return cmds
 }

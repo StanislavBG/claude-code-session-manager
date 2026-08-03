@@ -551,48 +551,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'Hold-to-talk is best for quick interjections; Tap on/off is better for longer dictation where you don\'t want to hold a key.',
       ],
     },
-  'repoviz': {
-      headline: 'Repo visualization',
-      intro: 'A quick visual map of the project open in your active terminal. It walks the files, counts lines, and reads git status — all locally — then shows you the language mix, the biggest directories, and how many files are uncommitted. Nothing leaves your machine.',
-      sections: [
-        {
-          title: 'What it shows',
-          items: [
-            { term: 'Summary stats', body: 'Three cards at the top: total files, total lines of code, and uncommitted files (highlighted amber when above zero). The current git branch is shown next to the folder name.' },
-            { term: 'Languages', body: 'A colour-coded bar per language (top 12 by file count), each labelled with its file count and line count. Bar length is relative to the largest language.' },
-            { term: 'Top directories', body: 'Treemap-style boxes for the biggest directories, sized by file count so one huge folder doesn\'t crowd out the rest. Hover a box for its exact file and line counts.' },
-          ],
-        },
-      ],
-      tips: [
-        'Open a terminal tab in a folder first — the visualization analyses whichever project your active tab is in, and re-runs automatically when you switch tabs.',
-        'Hit Refresh to re-scan after big changes. Very large repos stop early (5,000-file cap or a 30-second timeout) and are flagged "truncated".',
-      ],
-    },
-  'search': {
-      headline: 'Search',
-      intro: 'One search surface with two modes, both scoped to the project in your active terminal. Files (⌘P) fuzzy-finds a file by name. Content (⌘⇧F) searches inside files for text. Picking a result inserts its path into the active terminal so you can @-mention it to Claude — it does not open the file.',
-      sections: [
-        {
-          title: 'Files mode (⌘P)',
-          items: [
-            { term: 'Fuzzy file find', body: 'Type part of a filename to fuzzy-match files in the current project; filename and path-prefix matches rank highest. With the box empty, recently-opened files show first, then the rest alphabetically.' },
-            { term: 'Insert', body: '↑/↓ to move, Enter (or click) inserts the file\'s path into the active terminal. The path is relative to the project folder when the file lives inside it.' },
-          ],
-        },
-        {
-          title: 'Content mode (⌘⇧F)',
-          items: [
-            { term: 'Search inside files', body: 'Type to search file contents across the whole project. Uses ripgrep when it is installed and falls back to a built-in file walk otherwise (a "fs walk (rg missing)" note appears in that case). Searching is debounced as you type.' },
-            { term: 'Results', body: 'Matches are grouped by file with line numbers; the matched text is highlighted. Enter (or click) inserts that file\'s path and line as path:line into the active terminal.' },
-          ],
-        },
-      ],
-      tips: [
-        'Toggle Files / Content at the top, or jump straight in with ⌘P (Files) / ⌘⇧F (Content).',
-        'In Content mode, the Aa button turns on case-sensitive matching.',
-      ],
-    },
   'remote': {
       headline: 'Remote Access — disabled by default',
       intro: 'Lets a paired phone or web browser see your sessions and, optionally, send commands to this machine over an encrypted relay. It is off until you turn it on, and even then only a fixed list of command types is accepted — there is no "run any shell command" verb exposed to the relay. Two separate switches keep watching and controlling apart.',

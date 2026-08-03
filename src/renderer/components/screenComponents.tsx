@@ -5,8 +5,6 @@ import { ProjectHome } from './tabs/projecthome/ProjectHome'
 import { Skills } from './tabs/Skills'
 import { History } from './tabs/History'
 import { EditorView } from './tabs/EditorView'
-import { RepoVisualizationModal } from './modals/RepoVisualizationModal'
-import { SearchModal, type SearchMode } from './modals/SearchModal'
 import { VoiceModal } from './layout/VoiceModal'
 import { Settings } from './tabs/Settings'
 import { Permissions } from './tabs/Permissions'
@@ -38,7 +36,6 @@ export interface ScreenRenderCtx {
   onNewSession?: () => void
   onOpenVoice?: () => void
   onOpenScheduler?: () => void
-  searchMode?: SearchMode
 }
 
 interface PageConfig {
@@ -66,8 +63,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'remote':        { title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
-  'repoviz':          { title: 'Repo visualization',  intro: 'Language + directory map of the current project, computed locally.' },
-  'search':           { title: 'Search',              intro: 'Find by filename (⌘P) or by content (⌘⇧F) across the active cwd. The chosen path is inserted into the active terminal.' },
 }
 
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
@@ -121,8 +116,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.
       case 'voice':             return <VoiceModal open={true} onClose={noop} variant="page" />
-      case 'repoviz':           return <RepoVisualizationModal open={true} onClose={noop} variant="page" />
-      case 'search':            return <SearchModal open={true} onClose={noop} variant="page" initialMode={ctx.searchMode ?? 'files'} />
       default: return null
     }
   })()

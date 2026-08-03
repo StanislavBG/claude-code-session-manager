@@ -13,8 +13,8 @@ export type AlmanacIconName =
   | 'memory' | 'search' | 'chevron' | 'caret' | 'dot' | 'plus'
   | 'folder' | 'file' | 'play' | 'pause' | 'sparkle' | 'book' | 'compass'
   | 'scheduler' | 'settings' | 'mic' | 'clock' | 'leaf'
-  | 'repoviz' | 'system-prompt'
-  | 'permissions' | 'agent-memory' | 'tool' | 'quick-open' | 'global-search'
+  | 'system-prompt'
+  | 'permissions' | 'agent-memory' | 'tool' | 'quick-open'
   | 'remote' | 'wifi' | 'shield' | 'link' | 'copy'
   | 'check' | 'x' | 'send'
   | 'browser' | 'target' | 'record' | 'eye' | 'camera'
@@ -54,8 +54,7 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'projects':     return <svg {...props}><path d="M3 7l3-3h4l2 2h9v13H3z" /></svg>
     case 'memory':
     case 'agent-memory': return <svg {...props}><path d="M9 4a4 4 0 00-4 4v1a3 3 0 000 6v1a4 4 0 004 4h6a4 4 0 004-4v-1a3 3 0 000-6V8a4 4 0 00-4-4z" /><path d="M9 9v6M12 6v12M15 9v6" /></svg>
-    case 'search':
-    case 'global-search':return <svg {...props}><circle cx="11" cy="11" r="6" /><path d="M16 16l4 4" /></svg>
+    case 'search':       return <svg {...props}><circle cx="11" cy="11" r="6" /><path d="M16 16l4 4" /></svg>
     case 'chevron':      return <svg {...props}><path d="M9 6l6 6-6 6" /></svg>
     case 'caret':        return <svg {...props}><path d="M6 9l6 6 6-6" /></svg>
     case 'dot':          return <svg {...props}><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" /></svg>
@@ -72,7 +71,6 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'mic':          return <svg {...props}><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0014 0M12 18v3M9 21h6" /></svg>
     case 'clock':        return <svg {...props}><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>
     case 'leaf':         return <svg {...props}><path d="M20 4c-9 0-14 5-14 11 0 3 2 5 5 5 6 0 9-5 9-14z" /><path d="M6 20c2-5 5-8 11-11" /></svg>
-    case 'repoviz':      return <svg {...props}><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.5 10.5L15.5 7.5M8.5 13.5L15.5 16.5" /></svg>
     case 'system-prompt':return <svg {...props}><rect x="4" y="4" width="16" height="14" rx="2" /><path d="M8 10h8M8 14h5M9 18l-2 3M15 18l2 3" /></svg>
     case 'permissions':  return <svg {...props}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /><circle cx="12" cy="15.5" r="1.2" fill="currentColor" stroke="none" /></svg>
     case 'tool':         return <svg {...props}><path d="M14 4a4 4 0 014 4l-7 7-4-4 7-7zM7 11l-3 3 6 6 3-3" /></svg>

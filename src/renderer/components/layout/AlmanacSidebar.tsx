@@ -28,7 +28,7 @@ import type { NavFace } from '../../lib/navFace'
 // group below Configure so users see them as workflow surfaces (not
 // configuration). Same NavKey type as Workspace/Configure rows.
 type ToolKey = Extract<NavKey,
-  | 'voice' | 'repoviz' | 'search'
+  | 'voice'
 >
 void useBilling; void useMemo // (kept for future signal additions)
 
@@ -233,7 +233,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
             />
           ))}
 
-          {!rail && (
+          {tools.length > 0 && !rail && (
             <NavGroupHeader
               label="Tools"
               desc={NAV_GROUP_DESCRIPTIONS.Tools}
@@ -242,7 +242,7 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               onToggle={() => toggleGroup('Tools')}
             />
           )}
-          {(rail || !collapsed.has('Tools')) && tools.map((tool) => (
+          {tools.length > 0 && (rail || !collapsed.has('Tools')) && tools.map((tool) => (
             <ToolRow
               key={tool.key}
               tool={tool}

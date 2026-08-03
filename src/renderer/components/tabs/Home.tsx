@@ -1,36 +1,47 @@
 /**
- * Home — the Almanac landing page. Replaces Overview as the `overview` route.
+ * Home — the "control room" Almanac landing page (design: Home Screen A).
+ * Replaces Overview as the `overview` route.
  *
  * Sections (top to bottom):
- *   1. Hero — "This machine" kicker + live session-slot greeting.
- *   2. Grid — 5h billing window card + Projects card.
- *   3. Active sessions — the machine session-slot pool's ≤3 holders, joined
+ *   1. Hero — "This machine · N projects" kicker + live session-slot greeting,
+ *      with the open "needs you" count as a jump-link, plus All history / New
+ *      epic actions.
+ *   2. Grid — 5h billing window card + Projects card + Queued (pending
+ *      scheduler jobs) card.
+ *   3. Needs you — real signals only (see lib/homeNeedsYou.ts): a `proposed`
+ *      Epic awaiting Approve/Discard, a chat stopped on `needs-input`, or a
+ *      scheduler job the queue itself flagged `failed`/`needs_review`. Each
+ *      row expands inline with its real actions — nothing here is mocked.
+ *   4. Active sessions — the machine session-slot pool's ≤3 holders, joined
  *      against running scheduler jobs / chat runs for context.
- *   4. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
+ *   5. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
  *      History tab) and shows the 5 most-recent.
  *
  * Data sources are all existing zustand stores; nothing new on the backend.
  */
 
-import { useMemo, useEffect, useState } from 'react'
+import { useMemo, useEffect, useState, type ReactNode } from 'react'
 import type { NavKey } from '../LeftNav'
 import { useBilling, getBillingData, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'
 import { useLayout } from '../../state/layout'
 import { usePromptSessions } from '../../state/promptSessions'
+import { useChat } from '../../state/chat'
 import { useChatSignals } from '../../lib/useChatSignals'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
 import { buildHomeProjectRows } from '../../lib/homeProjectRows'
 import { activeSessionRows, recentSessionEpicTitle } from '../../lib/homeSessionRows'
+import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { projectColorFor } from '../../lib/projectColor'
 import { UsageMeters } from './home/UsageMeters'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
 import { ticketTagTone } from '../../lib/ticketDisplay'
+import { toast } from '../../state/toast'
 import type { DirEntry, ScheduleJob } from '../../../preload/api'
 
 const EMPTY_JOBS: ScheduleJob[] = []
@@ -53,21 +64,45 @@ export function Home({ onNavigate }: HomeProps) {
   }, [])
 
   useHydrateKnownEpics()
+  const { rows: knownProjectRows } = useKnownProjects()
+  const needsRows = useNeedsYouRows()
 
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
-        <Hero greeting={greeting} />
-        <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
+        <Hero greeting={greeting} projectCount={knownProjectRows.length} needsCount={needsRows.length} onNavigate={onNavigate} />
+        <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 220px' }}>
           <BillingCard />
           <ProjectsCard />
+          <QueuedCard onNavigate={onNavigate} />
         </div>
+        <NeedsYouSection rows={needsRows} onNavigate={onNavigate} />
         <ActiveSessionsCard onNavigate={onNavigate} />
         <RecentSessionsCard onNavigate={onNavigate} />
         <AgentsCard />
       </div>
     </div>
   )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Needs you — real signals only: a `proposed` Epic (the human gate that
+// replaced the feedback folder), a chat mid-run and asking a question
+// (`needs-input`), or a scheduler job the queue itself flagged `failed` /
+// `needs_review`. See lib/homeNeedsYou.ts for the join.
+// ────────────────────────────────────────────────────────────────────
+function useNeedsYouRows(): NeedsYouRow[] {
+  const sessions = usePromptSessions((s) => s.sessions)
+  const chats = useChatSignals()
+  const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
+  return useMemo(() => {
+    const proposed: Record<string, { id: string; cwd: string; goalText: string; tag?: string }> = {}
+    for (const id of Object.keys(sessions)) {
+      const s = sessions[id]
+      if (s.status === 'proposed') proposed[id] = { id, cwd: s.cwd, goalText: s.goalText, tag: s.tag }
+    }
+    return buildNeedsYouRows(proposed, chats, jobs)
+  }, [sessions, chats, jobs])
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -112,7 +147,17 @@ function AgentsCard() {
 // ────────────────────────────────────────────────────────────────────
 // Hero — "This machine" kicker + greeting with live session-slot count.
 // ────────────────────────────────────────────────────────────────────
-function Hero({ greeting }: { greeting: string }) {
+function Hero({
+  greeting,
+  projectCount,
+  needsCount,
+  onNavigate,
+}: {
+  greeting: string
+  projectCount: number
+  needsCount: number
+  onNavigate?: (k: NavKey) => void
+}) {
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
 
   useEffect(() => {
@@ -130,16 +175,235 @@ function Hero({ greeting }: { greeting: string }) {
   const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0
 
+  const scrollToNeeds = () => {
+    document.getElementById('home-needs-you')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
-    <header className="mb-7">
-      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-1.5">
-        This machine
+    <header className="mb-[18px] flex items-end gap-4">
+      <div>
+        <div className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] text-fg-faint mb-1.5">
+          This machine · {projectCount} project{projectCount === 1 ? '' : 's'}
+        </div>
+        <h1 className="m-0 font-serif text-[30px] font-semibold leading-[1.1] text-fg tracking-[-0.01em]">
+          {greeting}. <span className="text-accent">{inUse} of {total}</span> slots busy,{' '}
+          {needsCount > 0 ? (
+            <button
+              onClick={scrollToNeeds}
+              className="underline decoration-dotted underline-offset-4 text-honey-dark hover:text-honey"
+            >
+              {needsCount} thing{needsCount > 1 ? 's' : ''}
+            </button>
+          ) : (
+            <span className="text-sage">nothing</span>
+          )}{' '}
+          need{needsCount === 1 ? 's' : ''} you.
+        </h1>
       </div>
-      <h1 className="m-0 font-serif text-[32px] font-medium leading-[1.15] text-fg tracking-[-0.01em]">
-        {greeting}. <span className="text-accent">{inUse} of {total}</span> session slots are busy.
-      </h1>
+      <div className="ml-auto flex gap-2 shrink-0">
+        <HeroButton onClick={() => onNavigate?.('history')}>All history</HeroButton>
+        <HeroButton primary onClick={() => onNavigate?.('terminal')}>New epic</HeroButton>
+      </div>
     </header>
   )
+}
+
+function HeroButton({ children, onClick, primary }: { children: ReactNode; onClick: () => void; primary?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        primary
+          ? 'rounded-lg bg-accent text-bg-hi px-4 py-2 text-[12.5px] font-semibold hover:bg-accent-dark'
+          : 'rounded-lg border border-line bg-bg-hi px-4 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev'
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Needs you section — expandable rows, one card per real signal.
+// ────────────────────────────────────────────────────────────────────
+function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate?: (k: NavKey) => void }) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  const approve = (row: NeedsYouRow) => {
+    if (!row.epicId || busyId) return
+    setBusyId(row.id)
+    try {
+      const approved = usePromptSessions.getState().approveProposed(row.epicId, 'Home needs-you')
+      if (!approved) {
+        toast.error('This Epic is no longer awaiting approval.')
+        return
+      }
+      useChat.getState().send({
+        tabId: approved.id,
+        sessionId: approved.claudeSessionId,
+        cwd: approved.cwd,
+        prompt: approved.openingPrompt || approved.goalText,
+      })
+      toast.info('Epic approved and started.')
+    } finally {
+      setBusyId(null)
+      setOpenId(null)
+    }
+  }
+
+  const discard = (row: NeedsYouRow) => {
+    if (!row.epicId || busyId) return
+    setBusyId(row.id)
+    void usePromptSessions
+      .getState()
+      .markCompleted(row.epicId, 'Home needs-you discard')
+      .catch((err) => toast.error(`Could not discard: ${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => { setBusyId(null); setOpenId(null) })
+  }
+
+  const openChat = (row: NeedsYouRow) => {
+    if (!row.epicId) return
+    setPendingPromptSessionId(row.epicId)
+    onNavigate?.('terminal')
+  }
+
+  const retryJob = (row: NeedsYouRow) => {
+    if (!row.jobSlug || busyId) return
+    setBusyId(row.id)
+    window.api.schedule
+      .resetJob(row.jobSlug)
+      .then((r) => { if (!r.ok) toast.error(r.error ?? 'Could not reset job.'); else toast.info(`${row.jobSlug} reset to pending.`) })
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+      .finally(() => { setBusyId(null); setOpenId(null) })
+  }
+
+  return (
+    <section id="home-needs-you" className="mb-6 scroll-mt-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="m-0 font-serif text-[22px] font-medium">Needs you</h2>
+        <span className="font-mono text-[12px] text-fg-faint">{rows.length ? `${rows.length} open` : 'all clear'}</span>
+      </div>
+      {rows.length === 0 && (
+        <div className="bg-bg-hi border border-line rounded-[11px] px-4 py-[18px] text-center text-[13px] text-fg-faint">
+          Nothing waiting on you. Proposed Epics, mid-run questions, and failed jobs will surface here.
+        </div>
+      )}
+      <div className="grid gap-[7px]">
+        {rows.map((row) => {
+          const open = openId === row.id
+          const tone = row.kind === 'job-failed' ? 'bg-accent' : row.kind === 'needs-input' ? 'bg-honey' : 'bg-sage'
+          return (
+            <div key={row.id} className={`border rounded-[11px] overflow-hidden ${open ? 'bg-bg-hi border-line' : 'bg-bg border-line/60'}`}>
+              <button
+                onClick={() => setOpenId(open ? null : row.id)}
+                className="w-full grid items-center gap-2.5 px-[13px] py-[10px] text-left"
+                style={{ gridTemplateColumns: '6px minmax(0,1fr) auto' }}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${tone}`} />
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-semibold text-fg">{row.label}</span>
+                  <span className="block text-[11.5px] text-fg-faint truncate">
+                    {row.project ? `${row.project} · ` : ''}{row.detail}
+                  </span>
+                </span>
+                <span className="font-mono text-[11px] text-fg-faint">{open ? '▴' : '▾'}</span>
+              </button>
+              {open && (
+                <div className="border-t border-line px-[13px] pt-[11px] pb-3 grid gap-2.5">
+                  <div className="text-[12.5px] text-fg-dim leading-relaxed">{row.meta}</div>
+                  <div className="flex gap-2">
+                    {row.kind === 'proposed-epic' && (
+                      <>
+                        <NeedsButton onClick={() => approve(row)} disabled={busyId === row.id}>Approve &amp; start</NeedsButton>
+                        <NeedsButton quiet onClick={() => discard(row)} disabled={busyId === row.id}>Discard</NeedsButton>
+                      </>
+                    )}
+                    {row.kind === 'needs-input' && (
+                      <NeedsButton onClick={() => openChat(row)}>Open session</NeedsButton>
+                    )}
+                    {row.kind === 'job-failed' && (
+                      <>
+                        <NeedsButton onClick={() => retryJob(row)} disabled={busyId === row.id}>Retry now</NeedsButton>
+                        <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function NeedsButton({
+  children,
+  onClick,
+  disabled,
+  quiet,
+}: {
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+  quiet?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        quiet
+          ? 'rounded-md border border-line bg-bg px-3 py-[5px] text-[11.5px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-50'
+          : 'rounded-md bg-accent text-bg-hi px-3 py-[5px] text-[11.5px] font-semibold hover:bg-accent-dark disabled:opacity-50'
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Queued — pending scheduler jobs across all known projects, FIFO order.
+// ────────────────────────────────────────────────────────────────────
+function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
+  const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
+  const pending = useMemo(
+    () => jobs.filter((j) => j.status === 'pending').slice(0, 4),
+    [jobs],
+  )
+  return (
+    <button
+      onClick={() => onNavigate?.('scheduler')}
+      className="text-left bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]"
+    >
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2.5">
+        Queued
+      </div>
+      {pending.length === 0 ? (
+        <div className="text-[13px] text-fg-faint py-1">Nothing pending.</div>
+      ) : (
+        <div className="space-y-2.5">
+          {pending.map((q) => (
+            <div key={q.slug}>
+              <div className="font-mono text-[11.5px] font-semibold text-fg truncate">{q.title || q.slug}</div>
+              <div className="text-[11px] text-fg-faint truncate">
+                {q.cwd ? projectNameFromCwdLocal(q.cwd) : '—'}
+                {q.estimateMinutes != null ? ` · ~${q.estimateMinutes}m` : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  )
+}
+
+function projectNameFromCwdLocal(cwd: string): string {
+  const parts = cwd.split('/').filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : cwd
 }
 
 // ────────────────────────────────────────────────────────────────────

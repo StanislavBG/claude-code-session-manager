@@ -263,12 +263,9 @@ export function Workbench(ctx: WorkbenchProps) {
     mountPanel(focusedPanelId)
     // Keyed on focusToken (bumped by every openPanel call, even a same-id
     // one) rather than focusedPanelId itself — see layout.ts's focusToken
-    // doc for why a same-id `set()` must still re-trigger this. Also re-run
-    // whenever ctx.searchMode changes (Files↔Content while 'search' is
-    // already open) so a same-id focus token bump isn't required to
-    // activate the panel — content itself refreshes via WorkbenchCtxContext.
+    // doc for why a same-id `set()` must still re-trigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusToken, ctx.searchMode, mountPanel])
+  }, [focusToken, mountPanel])
 
   // "Reset layout" (CommandPalette) bumps resetToken — the store is how a
   // component with no reference to the live DockviewApi (CommandPalette)

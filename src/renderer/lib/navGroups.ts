@@ -55,15 +55,15 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: BOTH },
 
   // Configure
-  { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior', faces: BOTH },
-  { key: 'skills',        group: 'Configure', label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads', faces: BOTH },
+  { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior', faces: HOME },
+  { key: 'skills',        group: 'Configure', label: 'Skills',         icon: 'skills',         hint: 'Reusable instructions Claude loads', faces: HOME },
   { key: 'plugins',       group: 'Configure', label: 'Plugins',        icon: 'plugins',        hint: 'Extensions for Claude Code', faces: HOME },
-  { key: 'mcp',            group: 'Configure', label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations', faces: BOTH },
-  { key: 'hooks',          group: 'Configure', label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events', faces: BOTH },
+  { key: 'mcp',            group: 'Configure', label: 'MCP Servers',    icon: 'mcp',            hint: 'External tools and integrations', faces: HOME },
+  { key: 'hooks',          group: 'Configure', label: 'Hooks',          icon: 'hooks',          hint: 'Run scripts on session events', faces: HOME },
   { key: 'keybindings',    group: 'Configure', label: 'Keybindings',    icon: 'keys',           hint: 'Shortcuts you can override', faces: HOME },
   { key: 'memory',         group: 'Configure', label: 'Memory',         icon: 'memory',         hint: 'Workspace memory store', faces: PROJECT },
-  { key: 'permissions',    group: 'Configure', label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules', faces: BOTH },
-  { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window — per-Epic model lives in Agent Library', faces: BOTH },
+  { key: 'permissions',    group: 'Configure', label: 'Permissions',    icon: 'permissions',    hint: 'Allow / deny rules', faces: HOME },
+  { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window — per-Epic model lives in Agent Library', faces: HOME },
   { key: 'remote',         group: 'Configure', label: 'Remote',         icon: 'remote',         hint: 'Web remote control — disabled by default', faces: HOME },
   { key: 'agent-library',  group: 'Configure', label: 'Agent Library',  icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
   { key: 'tag-library',    group: 'Configure', label: 'Tag Library',    icon: 'target',         hint: 'Epic intent tags and their /develop behavior', faces: HOME },
@@ -71,8 +71,6 @@ export const NAV_ITEMS: NavGroupItem[] = [
 
   // Tools
   { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk', faces: HOME },
-  { key: 'repoviz',  group: 'Tools', label: 'Repo Viz', icon: 'repoviz',       hint: 'Language + directory map', faces: PROJECT },
-  { key: 'search',   group: 'Tools', label: 'Search',   icon: 'global-search', hint: '⌘P file · ⌘⇧F content', faces: PROJECT },
 ]
 
 /**
@@ -91,6 +89,22 @@ export function getNavItemsForFace(face: NavFace): NavGroupItem[] {
 export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = Object.fromEntries(
   NAV_ITEMS.map((item) => [item.key, item.group]),
 )
+
+/**
+ * True for a NavKey whose NAV_ITEMS entry is `faces: HOME` only (e.g. the
+ * six Settings-shaped editors consolidated onto Home — see this file's
+ * top-of-file precedent note). Keys absent from NAV_ITEMS (editor, terminal,
+ * etc.) are never home-only by this definition. Used by state/layout.ts's
+ * `openPanel`/`focusPanel` to assert `navFace: 'home'` when routing to one
+ * of these screens via a path that doesn't already know the face (e.g.
+ * CommandPalette's `nav:*` commands, which are face-agnostic) — otherwise a
+ * user with a project tab active could land on a Home-only screen while the
+ * sidebar still renders the Project face's item list.
+ */
+export function isHomeOnlyNavKey(key: NavKey): boolean {
+  const item = NAV_ITEMS.find((i) => i.key === key)
+  return item != null && item.faces.length === 1 && item.faces[0] === 'home'
+}
 
 export const NAV_GROUP_DESCRIPTIONS: Record<NavGroupLabel, string> = {
   Workspace: 'Where you do the work — sessions, files, and everything currently running.',

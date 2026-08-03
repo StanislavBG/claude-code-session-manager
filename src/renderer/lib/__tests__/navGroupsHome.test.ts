@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NAV_ITEMS, getNavItemsForFace } from '../navGroups'
+import { NAV_ITEMS, getNavItemsForFace, isHomeOnlyNavKey } from '../navGroups'
 import type { NavFace } from '../navFace'
 
 const VALID_FACES: NavFace[] = ['home', 'project']
@@ -18,12 +18,12 @@ describe('navGroups Home swap', () => {
 })
 
 describe('getNavItemsForFace', () => {
-  const HOME_ONLY = ['overview', 'browser', 'plugins', 'keybindings', 'remote', 'voice', 'agent-library', 'tag-library']
-  const PROJECT_ONLY = ['project-home', 'repoviz', 'search', 'memory', 'terminal', 'bilko-host']
-  const BOTH = [
-    'scheduler', 'history', 'system-prompt', 'skills', 'mcp', 'hooks',
-    'permissions', 'settings', 'projects',
+  const HOME_ONLY = [
+    'overview', 'browser', 'plugins', 'keybindings', 'remote', 'voice', 'agent-library', 'tag-library',
+    'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
   ]
+  const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host']
+  const BOTH = ['scheduler', 'history', 'projects']
 
   it('home face returns home-only + both keys', () => {
     const keys = getNavItemsForFace('home').map((item) => item.key)
@@ -232,37 +232,43 @@ describe('voice is home-only', () => {
   })
 })
 
-describe('repoviz is project-only', () => {
-  it('NAV_ITEMS tags repoviz with faces: [project]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'repoviz')
-    expect(item?.faces).toEqual(['project'])
+describe('settings-shaped editors are HOME-only (consolidated from BOTH)', () => {
+  const MOVED_KEYS = ['system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings'] as const
+
+  it.each(MOVED_KEYS)('NAV_ITEMS tags %s with faces: [home]', (key) => {
+    const item = NAV_ITEMS.find((i) => i.key === key)
+    expect(item?.faces).toEqual(['home'])
   })
 
-  it('home face excludes repoviz', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).not.toContain('repoviz')
-  })
-
-  it('project face includes repoviz', () => {
+  it.each(MOVED_KEYS)('project face excludes %s', (key) => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).toContain('repoviz')
+    expect(keys).not.toContain(key)
+  })
+
+  it.each(MOVED_KEYS)('home face includes %s', (key) => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain(key)
+  })
+
+  it.each(MOVED_KEYS)('isHomeOnlyNavKey(%s) is true', (key) => {
+    expect(isHomeOnlyNavKey(key)).toBe(true)
+  })
+
+  it('memory and bilko-host are left untouched as PROJECT-only', () => {
+    expect(NAV_ITEMS.find((i) => i.key === 'memory')?.faces).toEqual(['project'])
+    expect(NAV_ITEMS.find((i) => i.key === 'bilko-host')?.faces).toEqual(['project'])
+    expect(isHomeOnlyNavKey('memory')).toBe(false)
+    expect(isHomeOnlyNavKey('bilko-host')).toBe(false)
   })
 })
 
-describe('search is project-only', () => {
-  it('NAV_ITEMS tags search with faces: [project]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'search')
-    expect(item?.faces).toEqual(['project'])
+describe('isHomeOnlyNavKey', () => {
+  it('is false for a BOTH-face key', () => {
+    expect(isHomeOnlyNavKey('scheduler')).toBe(false)
   })
 
-  it('home face excludes search', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).not.toContain('search')
-  })
-
-  it('project face includes search', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).toContain('search')
+  it('is false for a NavKey absent from NAV_ITEMS', () => {
+    expect(isHomeOnlyNavKey('editor')).toBe(false)
   })
 })
 

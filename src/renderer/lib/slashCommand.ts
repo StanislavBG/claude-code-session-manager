@@ -19,9 +19,6 @@ const SLASH_NAV_COMMANDS: Record<string, NavKey> = {
   remote: 'remote',
   projects: 'projects',
   voice: 'voice',
-  repoviz: 'repoviz',
-  repo: 'repoviz',
-  search: 'search',
   system: 'system-prompt',
 }
 

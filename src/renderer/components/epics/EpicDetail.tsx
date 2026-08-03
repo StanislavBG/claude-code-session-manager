@@ -7,7 +7,7 @@ import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
-import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
+import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn } from '../ChatTranscriptTurn'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { prettyModel } from '../../lib/prettyModel'
@@ -720,13 +720,18 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               }
               const e = item.event
               if (e.kind === 'prd_created') {
+                const prdJob = scheduleJobs.find((j) => j.slug === e.prdSlug) ?? null
+                const prdStatus = prdStatusFor(prdJob)
+                const tone = STATUS_TONE[prdStatus]
+                const prdStatusLabel = `PRD "${e.prdSlug}" — ${tone.label} — open in Scheduler`
                 return (
                   <div key={e.id} data-testid="epic-prd-event" className="flex justify-center">
                     <button
                       type="button"
                       onClick={() => openPrdSlug(e.prdSlug!)}
-                      title={`Open PRD "${e.prdSlug}" in Scheduler`}
-                      className="rounded-full border border-line px-2.5 py-1 font-mono text-[11px] text-accent hover:bg-hi"
+                      title={prdStatusLabel}
+                      aria-label={prdStatusLabel}
+                      className={`rounded-full px-2.5 py-1 font-mono text-[11px] hover:brightness-95 ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ' border border-transparent'}`}
                     >
                       → dispatched to PRD #{e.prdSlug}
                     </button>

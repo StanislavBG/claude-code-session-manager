@@ -647,6 +647,98 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
   })
 
+  it('tones the dispatched-PRD chip green with "completed" wording when its queue job is completed', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'prd_created',
+      causedByEventId: initialEvent.id,
+      prdSlug: '5-widget',
+    })
+    useScheduleState.setState({ snapshot: { jobs: [{ slug: '5-widget', status: 'completed' } as any] } as any, loaded: true })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
+    expect(chip.getAttribute('title')).toContain('completed')
+    expect(chip.getAttribute('aria-label')).toContain('completed')
+    expect(chip.className).toContain('bg-sage')
+  })
+
+  it('tones the dispatched-PRD chip yellow with "needs review" wording when its queue job is needs_review', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'prd_created',
+      causedByEventId: initialEvent.id,
+      prdSlug: '6-widget',
+    })
+    useScheduleState.setState({ snapshot: { jobs: [{ slug: '6-widget', status: 'needs_review' } as any] } as any, loaded: true })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
+    expect(chip.getAttribute('title')).toContain('needs review')
+    expect(chip.getAttribute('aria-label')).toContain('needs review')
+    expect(chip.className).toContain('bg-butter')
+  })
+
+  it('tones the dispatched-PRD chip red with "failed" wording when its queue job is failed', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'prd_created',
+      causedByEventId: initialEvent.id,
+      prdSlug: '7-widget',
+    })
+    useScheduleState.setState({ snapshot: { jobs: [{ slug: '7-widget', status: 'failed' } as any] } as any, loaded: true })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
+    expect(chip.getAttribute('title')).toContain('failed')
+    expect(chip.getAttribute('aria-label')).toContain('failed')
+    expect(chip.className).toContain('bg-accent')
+  })
+
+  it('falls back to the neutral "ready to run" tone with no crash when the PRD has no matching queue job', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'prd_created',
+      causedByEventId: initialEvent.id,
+      prdSlug: '8-archived-widget',
+    })
+    useScheduleState.setState({ snapshot: { jobs: [] } as any, loaded: true })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
+    expect(chip.getAttribute('title')).toContain('ready to run')
+    expect(chip.getAttribute('aria-label')).toContain('ready to run')
+    expect(chip.className).toContain('bg-bg')
+  })
+
   it('shows the goal as seed context with no crash when there are no chat turns yet', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

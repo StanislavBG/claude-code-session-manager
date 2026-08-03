@@ -70,7 +70,12 @@ export function Home({ onNavigate }: HomeProps) {
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
-        <Hero greeting={greeting} projectCount={knownProjectRows.length} needsCount={needsRows.length} onNavigate={onNavigate} />
+        <HomeHeaderWithLegend
+          greeting={greeting}
+          projectCount={knownProjectRows.length}
+          needsCount={needsRows.length}
+          onNavigate={onNavigate}
+        />
         <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 220px' }}>
           <BillingCard />
           <ProjectsCard />
@@ -145,9 +150,11 @@ function AgentsCard() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Hero — "This machine" kicker + greeting with live session-slot count.
+// Hero + Interactions legend toggle — owns the legend's open/closed state
+// so it can be mounted (and its toggle tested) without every other Home
+// section's store dependencies. Exported for Home.interactionsLegend.test.tsx.
 // ────────────────────────────────────────────────────────────────────
-function Hero({
+export function HomeHeaderWithLegend({
   greeting,
   projectCount,
   needsCount,
@@ -157,6 +164,40 @@ function Hero({
   projectCount: number
   needsCount: number
   onNavigate?: (k: NavKey) => void
+}) {
+  const [legendOpen, setLegendOpen] = useState(false)
+  return (
+    <>
+      <Hero
+        greeting={greeting}
+        projectCount={projectCount}
+        needsCount={needsCount}
+        onNavigate={onNavigate}
+        legendOpen={legendOpen}
+        onToggleLegend={() => setLegendOpen((v) => !v)}
+      />
+      {legendOpen && <InteractionsLegend />}
+    </>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Hero — "This machine" kicker + greeting with live session-slot count.
+// ────────────────────────────────────────────────────────────────────
+function Hero({
+  greeting,
+  projectCount,
+  needsCount,
+  onNavigate,
+  legendOpen,
+  onToggleLegend,
+}: {
+  greeting: string
+  projectCount: number
+  needsCount: number
+  onNavigate?: (k: NavKey) => void
+  legendOpen: boolean
+  onToggleLegend: () => void
 }) {
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
 
@@ -201,10 +242,46 @@ function Hero({
         </h1>
       </div>
       <div className="ml-auto flex gap-2 shrink-0">
+        <HeroButton onClick={onToggleLegend}>{legendOpen ? 'Hide interactions' : 'Interactions'}</HeroButton>
         <HeroButton onClick={() => onNavigate?.('history')}>All history</HeroButton>
         <HeroButton primary onClick={() => onNavigate?.('terminal')}>New epic</HeroButton>
       </div>
     </header>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Interactions legend — a reference panel explaining what each interactive
+// element on this page actually does. Adapted from the Home Screen A mock's
+// `legend` panel (variants/home-a.jsx), but every line below describes a
+// REAL wired action in this codebase — no fictional Pace chart / breakdown
+// popovers, which this Epic deliberately did not build (see file header).
+// ────────────────────────────────────────────────────────────────────
+const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
+  { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
+  { term: 'Queued job', description: 'Click the Queued card to open the Scheduler tab.' },
+  { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed Epic, Open a session waiting on input, or Retry / view a failed job.' },
+  { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view (Epic).' },
+  { term: 'Recent row', description: 'Click resume to open a new Terminal tab that resumes that transcript session.' },
+  { term: 'Project row', description: 'Click a project to activate its open Terminal tab, or open a new dormant one.' },
+  { term: 'New epic', description: 'Opens the Terminal tab to start a new Epic.' },
+]
+
+function InteractionsLegend() {
+  return (
+    <div className="mb-7 bg-bg-hi border border-line rounded-[13px] px-4 py-[13px]">
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2.5">
+        Interactions
+      </div>
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'minmax(0,140px) minmax(0,1fr)' }}>
+        {INTERACTIONS_LEGEND.map((row) => (
+          <div key={row.term} className="contents">
+            <div className="text-[12.5px] font-semibold text-fg underline decoration-dotted underline-offset-4">{row.term}</div>
+            <div className="text-[12.5px] text-fg-dim leading-[1.5]">{row.description}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -367,8 +444,12 @@ function NeedsButton({
 
 // ────────────────────────────────────────────────────────────────────
 // Queued — pending scheduler jobs across all known projects, FIFO order.
+// Exported for a direct regression test (Home.queuedCard.test.tsx) covering
+// both the pre-hydrate (snapshot === null) and empty-snapshot states — the
+// EMPTY_JOBS fallback above already makes both render 'Nothing pending.'
+// rather than a blank card; the test locks that behavior in.
 // ────────────────────────────────────────────────────────────────────
-function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
+export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
   const pending = useMemo(
     () => jobs.filter((j) => j.status === 'pending').slice(0, 4),

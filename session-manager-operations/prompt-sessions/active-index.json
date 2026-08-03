@@ -730,6 +730,22 @@
         "id": "pevt-mscqwky9-32",
         "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
         "at": "2026-08-03T04:44:59.793Z"
+      },
+      {
+        "id": "9d4151c5-18fa-4915-afec-11462f6e652c",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscqwky9-32",
+        "at": "2026-08-03T05:22:23.454Z",
+        "prdSlug": "991-scheduler-auto-retry-no-verdict-runs"
+      },
+      {
+        "id": "078507da-17b1-4aef-bdf2-5870bdffdf20",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "9d4151c5-18fa-4915-afec-11462f6e652c",
+        "at": "2026-08-03T05:22:55.675Z",
+        "prdSlug": "992-flat-prd-consolidation-respects-live-jobs"
       }
     ],
     "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": [
@@ -902,6 +918,14 @@
         "causedByEventId": "pevt-mscrjxf9-1",
         "at": "2026-08-03T05:14:19.574Z",
         "text": "PRD 980-chat-typed-event-renderers needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T05-03-12-912Z/root-cause-980-chat-typed-event-renderers.md"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscryat2-2",
+        "text": "**Committed `41a57d9`.** Here's what actually happened — the picture changed substantially while I was working.\n\n## The chain is half-built already\n\nThe scheduler ran ahead of me. Three of the six PRDs landed during this conversation:\n\n| PRD | State | Evidence |\n|---|---|---|\n| 977 classifier multi-emit | ✅ **landed** | `07202b4`; `classifyTranscriptLine.cjs` now has `events.push`/`return events`, `previewText` + `ref` |\n| 978 Chat feed from JSONL | ✅ **landed** | `8bac5b0` |\n| 979 paged reads | ✅ **landed** | `sub.lineIndex`, `readPage()`, index invalidated on inode-change + truncation, OTEL emit-once guard, 500-ring gone |\n| 980 typed renderers | ❌ **failed, requeued** | first run self-delegated, exited 0 with nothing done |\n| 981, 982 | queued | — |\n\n**Verified, not assumed:** `npx tsc --noEmit` exit 0, and `npx vitest run` → **239 files / 2232 tests, all passing**. So 977–979 are genuinely green, not false-green.\n\nI also checked 979's hardest AC — that paging never materializes the whole file. The one `fsp.readFile` in `transcripts.cjs:440` is `usageForOne`, a pre-existing function guarded by `MAX_USAGE_FILE_BYTES` with skip-and-warn. Not the paging path. AC genuinely satisfied.\n\n## The real bug I found, and fixed\n\nPRD 980's first run **delegated to a subagent and exited 0 having done nothing** — the documented self-delegation failure class. Its retry PRD was then written to `session-manager-operations/scheduler/prds/`, the **retired flat dir**, which the app auto-consolidates into `prds-archived/` at boot *without executing*.\n\nThat's a silent-loss trap, and it has already fired once: `979-fix-transcript-paged-reads.md` is sitting in `prds-archived/` having never run. 979 only landed because a separate attempt succeeded. A 55-minute retry PRD was queued into a dir where it would evaporate.\n\nRather than add a duplicate 988 alongside the still-queued 980, I folded the executor guard directly into `980-chat-typed-event-renderers.md` — the file that will actually be…",
+        "id": "pevt-mscs3v4p-37",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T05:18:39.193Z"
       }
     ],
     "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": [
@@ -954,6 +978,38 @@
         "id": "pevt-mscs2ije-36",
         "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
         "at": "2026-08-03T05:17:36.218Z"
+      },
+      {
+        "id": "8b48459b-5ed8-4352-92da-4b5143bed45e",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscs2ije-36",
+        "at": "2026-08-03T05:19:56.153Z",
+        "prdSlug": "988-batch-picker-drop-parallelgroup-gate"
+      },
+      {
+        "id": "b4f5196c-7728-4533-8843-f88253f8365d",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prd_created",
+        "causedByEventId": "8b48459b-5ed8-4352-92da-4b5143bed45e",
+        "at": "2026-08-03T05:20:23.300Z",
+        "prdSlug": "989-retire-scheduler-private-concurrency-cap"
+      },
+      {
+        "id": "226e99a3-ee94-41b4-a055-3385c26b75a1",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prd_created",
+        "causedByEventId": "b4f5196c-7728-4533-8843-f88253f8365d",
+        "at": "2026-08-03T05:20:48.388Z",
+        "prdSlug": "990-surface-effective-concurrency-gate"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "226e99a3-ee94-41b4-a055-3385c26b75a1",
+        "text": "**You're right that it's 5 — and that's the point: the Home tab's 5 is the pool, but three other gates sat below it. The binding one was 1.**\n\n## Correction to my earlier recommendation\n\nI said \"raise `concurrencyCap` to 5\". Having read `tickQueue` (`scheduler.cjs:3195-3250`), that's wrong — **the cap should be deleted, not raised**. The scheduler already has real gates downstream of the picker:\n\n| Gate | Where | Value |\n|---|---|---|\n| Slot pool | `sessionSlots.available()` | 5 (no config file on disk → `DEFAULT_SLOTS`) |\n| Memory gate | `memoryLimitedBatchSize` | 3000 MB host reserve + 2500 MB/job |\n| Per-job acquire | `spawnJob`, `scheduler.cjs:2728` | atomic |\n\nSo `concurrencyCap: 3` is pure legacy. `sessionSlots.cjs`'s own header says it exists *because* \"the scheduler and chatRunner previously each enforced a private cap (3 and 2)\". chatRunner's was retired; the scheduler's was left behind. And the 2026-06-10 OOM that motivated \"keep it at 3\" is already covered by the memory gate — which is machine-aware and dynamic, unlike a hardcoded 3.\n\nThat makes \"no limit\" **safe as stated**: pool + memory gate are the only limits you actually need.\n\n## Queued\n\nThree PRDs on this Epic, chained:\n\n- **988 · `batch-picker-drop-parallelgroup-gate`** — deletes the wave gate from `schedulerBatch.cjs`. Fires every `dependsOn`-eligible job up to slots. Ships a reproduction one-liner (returns 1 job on main, must return 4 after). Replaces the cross-group failure gate with dependsOn-scoped holds so one failure stops only its transitive dependents, not every higher number.\n- **989 · `retire-scheduler-private-concurrency-cap`** *(deps: 988)* — deletes `concurrencyCap`, points `pickNextBatch` at `sessionSlots.available()`, migrates `scheduler-machine.json`, updates CLAUDE.md's now-false \"keep it at 3\" rule. Explicit AC that the memory gate must still clamp under low memory.\n- **990 · `surface-effective-concurrency-gate`** *(deps: 989)* — surfaces the binding constraint on Home/Schedule…",
+        "id": "pevt-mscs79ol-38",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T05:21:18.021Z"
       }
     ]
   },

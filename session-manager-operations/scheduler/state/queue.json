@@ -1,6 +1,46 @@
 {
   "jobs": [
     {
+      "slug": "986-checkin-triggers-epic-validation",
+      "title": "A PRD check-in triggers validation in the authoring Epic — it never asserts the PRD is done",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 986,
+      "estimateMinutes": 60,
+      "sourcePromptId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "sourceTabId": null,
+      "epicId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "dependsOn": [
+        "985-notify-epic-prd-path-fix-redo"
+      ],
+      "originSessionId": "4d5ad773-6991-49be-9549-322afea56aa7",
+      "bodyPreview": "# Goal\n\nToday a PRD's check-in is an inert text line asserting an outcome the Epic has no reason to believe. PRD 972 proved why that is unsafe: it reported `completed`, shipped zero code, and the authoring Epic had no mechanism to notice. Invert the contract — a check-in is a REQUEST TO VALIDATE and carries no authority about whether the work landed. When a PRD checks in, the scheduler enqueues a validation prompt into the authoring Epic's own session instructing it to independently verify each acceptance criterion against the real working tree and answer VERIFIED or REFUTED with evidence. The job's self-reported status becomes an input to that check, never a substitute for it.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "985-notify-epic-prd-path-fix-redo",
+      "title": "Re-do PRD 972: route completed/failed PRD check-ins back to the authoring Epic (first attempt shipped no code)",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 985,
+      "estimateMinutes": 45,
+      "sourcePromptId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "sourceTabId": null,
+      "epicId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "dependsOn": [],
+      "originSessionId": "4d5ad773-6991-49be-9549-322afea56aa7",
+      "bodyPreview": "# Goal\n\nThis is a RE-QUEUE of PRD 972, which was recorded completed on 2026-08-03 but shipped zero code — the bug it describes is still fully live in main. `notifyOriginatingTab` (`src/main/scheduler.cjs:1840`) resolves a finished PRD via `prdPathForJob(job)` → `resolvePrdWriteDir(cwd)` → the RETIRED flat `<cwd>/session-manager-operations/scheduler/prds/` directory, which today contains only zero-byte `.reserved-NNN` stubs and no `.md` files at all. Every real PRD lives under `scheduler/epics/<epicId>/prds/`, and by notify time `archiveCompletedPrd` (called at scheduler.cjs:3052-3054, immediately before the notify at :3057) has already renamed it into `prds-archived/`. So `parsePrdRaw` ENOENTs, `prd` is null, `sourcePromptId` is null, and both the durable transcript append and the `appendResponseEventIfKnown` response-event append are skipped — a completed PRD never reports back to the Epic that authored it. Verified live: PRDs 961/962/963/964/967 all completed between 02:22 and 03:16 on 2026-08-03 and not one response event landed on either authoring Epic's chain.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
       "slug": "984-context-digest-prd-focus-guard",
       "title": "Stop the Epic context digest from making a PRD executor answer the conversation instead of doing the PRD",
       "cwd": "/home/bilko/Projects/session-manager",

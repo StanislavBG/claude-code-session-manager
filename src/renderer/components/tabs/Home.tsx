@@ -33,11 +33,12 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
 import { buildHomeProjectRows } from '../../lib/homeProjectRows'
-import { activeSessionRows, recentSessionEpicTitle } from '../../lib/homeSessionRows'
+import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
 import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { projectColorFor } from '../../lib/projectColor'
 import { UsageMeters } from './home/UsageMeters'
+import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
 import { ticketTagTone } from '../../lib/ticketDisplay'
@@ -679,10 +680,11 @@ function useRecentSessions(limit = 4): { rows: RecentRow[]; loading: boolean } {
 
 const RECENT_SESSIONS_GRID = '92px minmax(0,1.2fr) minmax(0,1fr) 80px 74px 78px'
 
-function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
+export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const { rows, loading } = useRecentSessions(5)
   const addTab = useSessions((s) => s.addTab)
   const sessions = usePromptSessions((s) => s.sessions)
+  const [drawerRow, setDrawerRow] = useState<RecentRow | null>(null)
   const resume = (r: RecentRow) => {
     const decoded = candidatePath(r.projectEncoded)
     addTab({
@@ -691,6 +693,16 @@ function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
       presetId: 'history-resume',
     })
   }
+  const drawerEpicTitle = drawerRow ? recentSessionEpicTitle(drawerRow.sessionId, sessions) : null
+  const drawerKeyVals: DrawerKeyVal[] = drawerRow
+    ? [
+        { label: 'Session', value: drawerRow.sessionId },
+        { label: 'Project', value: decodeProject(drawerRow.projectEncoded) },
+        { label: 'Epic', value: drawerEpicTitle ?? '—' },
+        { label: 'Last activity', value: `${absoluteTime(drawerRow.mtimeMs)} (${relativeTime(drawerRow.mtimeMs)})` },
+        { label: 'Size', value: `${Math.round(drawerRow.sizeBytes / 1024)}k` },
+      ]
+    : []
   return (
     <section className="mb-6">
       <div className="flex items-baseline justify-between mb-3">
@@ -714,9 +726,10 @@ function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
         {rows.map((r, i) => {
           const epicTitle = recentSessionEpicTitle(r.sessionId, sessions)
           return (
-            <div
+            <button
               key={r.path}
-              className="grid items-center gap-3.5 px-[18px] py-[11px]"
+              onClick={() => setDrawerRow(r)}
+              className="w-full grid items-center gap-3.5 px-[18px] py-[11px] text-left hover:bg-bg/40 transition-colors"
               style={{ gridTemplateColumns: RECENT_SESSIONS_GRID, borderTop: i ? '1px solid #d9c9a8' : 'none' }}
             >
               <span className="text-[11.5px] text-fg-faint font-mono truncate">{r.sessionId.slice(0, 8)}</span>
@@ -728,17 +741,33 @@ function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
                 {Math.round(r.sizeBytes / 1024)}k
               </span>
               <span className="text-[11px] text-fg-faint font-mono text-right">{relativeTime(r.mtimeMs)}</span>
-              <button
-                onClick={() => resume(r)}
-                className="justify-self-end text-[12px] font-semibold px-[11px] py-[5px] rounded-lg text-sage bg-[#e5ecd8] hover:brightness-95 transition-[filter]"
-                title={`Resume ${r.sessionId.slice(0, 8)}…`}
+              <span
+                className="justify-self-end text-[12px] font-semibold px-[11px] py-[5px] rounded-lg text-sage bg-[#e5ecd8]"
+                title={`Open ${r.sessionId.slice(0, 8)}…`}
               >
-                resume
-              </button>
-            </div>
+                details
+              </span>
+            </button>
           )
         })}
       </div>
+      <HomeSessionDrawer
+        open={drawerRow != null}
+        onClose={() => setDrawerRow(null)}
+        title={drawerEpicTitle ?? (drawerRow ? decodeProject(drawerRow.projectEncoded) : '')}
+        sub={drawerRow ? `Recent session · ${drawerRow.sessionId.slice(0, 8)}…` : null}
+        keyVals={drawerKeyVals}
+        footer={
+          drawerRow && (
+            <button
+              onClick={() => { resume(drawerRow); setDrawerRow(null) }}
+              className="text-[12px] font-semibold px-[13px] py-[7px] rounded-lg text-sage bg-[#e5ecd8] hover:brightness-95 transition-[filter]"
+            >
+              Resume
+            </button>
+          )
+        }
+      />
     </section>
   )
 }
@@ -748,6 +777,10 @@ function decodeProject(encoded: string): string {
   // candidatePath so the encoded→path decode logic has one implementation.
   const parts = candidatePath(encoded).split('/').filter(Boolean)
   return parts.length > 0 ? parts[parts.length - 1] : encoded
+}
+
+function absoluteTime(ms: number): string {
+  return new Date(ms).toLocaleString()
 }
 
 function relativeTime(ms: number): string {
@@ -768,11 +801,12 @@ type SlotSnapshot = {
   min: number; max: number; default: number; envOverride: boolean
 }
 
-function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
+export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const [slots, setSlots] = useState<SlotSnapshot | null>(null)
   const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
   const chats = useChatSignals()
   const sessions = usePromptSessions((s) => s.sessions)
+  const [drawerRow, setDrawerRow] = useState<ActiveSessionRow | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -794,13 +828,27 @@ function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
     [slots, runningJobs, chats, sessions],
   )
 
-  const open = (row: ReturnType<typeof activeSessionRows>[number]) => {
+  const open = (row: ActiveSessionRow) => {
     if (row.openTarget === 'scheduler') { onNavigate?.('scheduler'); return }
     if (row.openTarget === 'terminal' && row.epicId) {
       setPendingPromptSessionId(row.epicId)
       onNavigate?.('terminal')
     }
   }
+
+  const drawerTail: DrawerTailLine[] | undefined =
+    drawerRow?.kind === 'chat run' && drawerRow.epicId
+      ? chats[drawerRow.epicId]?.turns.slice(-4).map((t) => ({ id: t.id, role: t.role, text: t.text }))
+      : undefined
+  const drawerKeyVals: DrawerKeyVal[] = drawerRow
+    ? [
+        { label: 'Owner', value: drawerRow.owner },
+        { label: 'Kind', value: drawerRow.kind },
+        { label: 'Epic', value: drawerRow.epicTitle ?? '—' },
+        { label: 'Project', value: drawerRow.project ?? '—' },
+        { label: 'Started', value: `${absoluteTime(new Date(drawerRow.at).getTime())} (${relativeTime(new Date(drawerRow.at).getTime())})` },
+      ]
+    : []
 
   return (
     <section className="mb-6">
@@ -816,9 +864,10 @@ function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
       ) : (
         <div className="grid gap-2">
           {rows.map((row) => (
-            <div
+            <button
               key={row.owner}
-              className="bg-bg-hi border border-line rounded-[13px] px-4 py-[13px] grid items-center gap-3.5"
+              onClick={() => setDrawerRow(row)}
+              className="w-full text-left bg-bg-hi border border-line rounded-[13px] px-4 py-[13px] grid items-center gap-3.5 hover:bg-bg-elev/40 transition-colors"
               style={{ gridTemplateColumns: 'minmax(0,1fr) auto' }}
             >
               <span className="min-w-0">
@@ -836,18 +885,36 @@ function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }
               <span className="flex items-center gap-3.5 shrink-0">
                 <span className="font-mono text-[11px] text-fg-faint">{relativeTime(new Date(row.at).getTime())}</span>
                 {row.openTarget && (
-                  <button
-                    onClick={() => open(row)}
+                  <span
+                    onClick={(e) => { e.stopPropagation(); open(row) }}
                     className="border border-line bg-bg rounded-lg px-[11px] py-[5px] text-[12px] font-semibold text-fg-dim hover:bg-bg/60 transition-colors"
                   >
                     Open
-                  </button>
+                  </span>
                 )}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       )}
+      <HomeSessionDrawer
+        open={drawerRow != null}
+        onClose={() => setDrawerRow(null)}
+        title={drawerRow?.epicTitle ?? drawerRow?.owner ?? ''}
+        sub={drawerRow ? `Active session · ${drawerRow.kind}` : null}
+        keyVals={drawerKeyVals}
+        tail={drawerTail}
+        footer={
+          drawerRow?.openTarget && (
+            <button
+              onClick={() => { open(drawerRow); setDrawerRow(null) }}
+              className="text-[12px] font-semibold px-[13px] py-[7px] rounded-lg bg-accent text-bg-hi hover:bg-accent-dark"
+            >
+              Open
+            </button>
+          )
+        }
+      />
     </section>
   )
 }

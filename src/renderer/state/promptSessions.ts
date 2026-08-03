@@ -249,6 +249,32 @@ function mintId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${seq}`
 }
 
+/** Pure, side-effect-free construction of the PromptSession object literal
+ *  createPromptSession persists — extracted so a plain node/vitest test can
+ *  assert its output against the main-process canonical schema
+ *  (src/main/lib/promptSessionSchema.cjs) without mocking window.api or the
+ *  zustand store. Keep this the SOLE place createPromptSession builds the
+ *  object literal — do not let a future edit reintroduce a second inline copy. */
+export function buildPromptSession(
+  cwd: string,
+  goalText: string,
+  tag?: PromptSession['tag'],
+  agentType?: string,
+): PromptSession {
+  const now = new Date().toISOString()
+  return {
+    id: mintId('psess'),
+    cwd,
+    goalText,
+    claudeSessionId: crypto.randomUUID(),
+    status: 'proposed',
+    createdAt: now,
+    completedAt: null,
+    ...(tag ? { tag } : {}),
+    ...(agentType ? { agentType } : {}),
+  }
+}
+
 type AuditEventKind =
   | 'epic_create'
   | 'epic_approve'
@@ -350,24 +376,13 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
   createPromptSession: (cwd, goalText, tag, source, agentType) => {
-    const now = new Date().toISOString()
-    const session: PromptSession = {
-      id: mintId('psess'),
-      cwd,
-      goalText,
-      claudeSessionId: crypto.randomUUID(),
-      status: 'proposed',
-      createdAt: now,
-      completedAt: null,
-      ...(tag ? { tag } : {}),
-      ...(agentType ? { agentType } : {}),
-    }
+    const session: PromptSession = buildPromptSession(cwd, goalText, tag, agentType)
     const firstEvent: PromptSessionEvent = {
       id: mintId('pevt'),
       promptSessionId: session.id,
       kind: 'prompt',
       causedByEventId: null,
-      at: now,
+      at: session.createdAt,
       text: goalText,
     }
     const sessions = { ...get().sessions, [session.id]: session }

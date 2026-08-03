@@ -8,6 +8,7 @@
 const { z } = require('zod');
 const os = require('node:os');
 const path = require('node:path');
+const { PromptSessionSchema } = require('./lib/promptSessionSchema.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -231,7 +232,7 @@ const configParseImports = z.object({ path: z.string().min(1).max(4096) });
 const PROMPT_SESSION_ID_RE = /^(?!__proto__$|constructor$|prototype$)[A-Za-z0-9_-]{1,64}$/;
 const promptSessionsMergeActiveIndex = z.object({
   cwd: z.string().min(1).max(4096),
-  sessions: z.record(z.string().regex(PROMPT_SESSION_ID_RE), z.unknown()).refine(
+  sessions: z.record(z.string().regex(PROMPT_SESSION_ID_RE), PromptSessionSchema).refine(
     (v) => Object.keys(v).length <= 2000,
     { message: 'too many sessions in one merge payload' },
   ),

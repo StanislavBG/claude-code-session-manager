@@ -8,6 +8,7 @@ import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
 import { TAG_LIBRARY } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
+import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
@@ -88,6 +89,20 @@ export function AgentLibrary() {
   // its own side) — refresh here too so this panel never shows a stale
   // snapshot if it's already mounted when that happens.
   useEffect(() => window.api.agents.onChanged(() => load()), [])
+
+  // Cross-tab deep link: EpicDetail's read-only Agent+model chip (PRD
+  // agent-epic-readback) navigates here to jump straight to the persona a
+  // given Epic is running as. takePendingPersonaName covers the common
+  // case — this component wasn't mounted yet when the chip was clicked — by
+  // checking once on mount; the listener below covers the case where Agent
+  // Library was already open.
+  useEffect(() => {
+    const pendingName = takePendingPersonaName()
+    if (pendingName) setSelectedName(pendingName)
+    const h = (e: Event) => setSelectedName((e as CustomEvent<string>).detail)
+    window.addEventListener('sm:select-persona', h)
+    return () => window.removeEventListener('sm:select-persona', h)
+  }, [])
 
   if (personas === null) return <EmptyState title="loading…" />
 

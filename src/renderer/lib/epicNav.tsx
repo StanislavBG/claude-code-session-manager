@@ -1,5 +1,6 @@
 import { setPendingPrdSlug } from './prdDeepLink'
 import { setPendingPromptSessionId } from './promptSessionDeepLink'
+import { setPendingPersonaName } from './agentLibraryDeepLink'
 import type { TicketTag } from './ticketDisplay'
 
 /**
@@ -28,6 +29,15 @@ export function openPrdSlug(slug: string): void {
 export function openPromptSession(promptSessionId: string): void {
   setPendingPromptSessionId(promptSessionId)
   window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
+}
+
+// Navigates to Agent Library and selects a specific persona there — the
+// read-only "jump to definition" EpicDetail's Agent+model chip uses. Never
+// an inline editor: editing a persona still only happens in Agent Library
+// itself (agent-model-nav-consolidation).
+export function openAgentLibrary(personaName: string): void {
+  setPendingPersonaName(personaName)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'agent-library' }))
 }
 
 // Feature/Bug/Discussion composer tag selector.

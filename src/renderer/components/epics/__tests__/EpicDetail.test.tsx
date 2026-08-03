@@ -16,11 +16,14 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
  * module-load IPC wiring only fires if window.api exists at import time.
  */
 
-function installWindowApiMock(opts: { branch?: string | null } = {}) {
+function installWindowApiMock(opts: { branch?: string | null; personas?: Array<{ name: string; model: string | null }> } = {}) {
   const listPrds = vi.fn().mockResolvedValue([])
   const api = {
     app: {
       gitBranch: vi.fn().mockResolvedValue(opts.branch ?? null),
+    },
+    agents: {
+      listPersonas: vi.fn().mockResolvedValue(opts.personas ?? []),
     },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
@@ -94,6 +97,53 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.textContent).toContain('Get it out the door.')
     expect(el.querySelector('[data-testid="epic-mark-completed"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="epic-resume"]')).toBeNull()
+  })
+
+  it('renders the Agent+model chip with the persona name and pretty-formatted model when the persona has an explicit model', async () => {
+    installWindowApiMock({ personas: [{ name: 'architect', model: 'claude-sonnet-4-5' }] })
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature', undefined, 'architect')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+
+    const chip = el.querySelector('[data-testid="epic-agent-tag"]')
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toContain('architect')
+    expect(chip?.textContent).toContain('Sonnet 4.5')
+  })
+
+  it('renders the Agent chip with just the persona name (no model) when the persona model is inherit/unset', async () => {
+    installWindowApiMock({ personas: [{ name: 'dev-lead', model: 'inherit' }] })
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature', undefined, 'dev-lead')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+
+    const chip = el.querySelector('[data-testid="epic-agent-tag"]')
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toBe('dev-lead')
+  })
+
+  it('renders no Agent chip at all when the Epic has no agentType', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+
+    expect(el.querySelector('[data-testid="epic-agent-tag"]')).toBeNull()
   })
 
   it('renders the Epic cwd\'s branch next to the ProjectTag when useBranch resolves one', async () => {

@@ -5,11 +5,12 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn } from '../ChatTranscriptTurn'
-import { openPrdSlug } from '../../lib/epicNav'
+import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
+import { prettyModel } from '../../lib/prettyModel'
 import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
@@ -363,6 +364,35 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epicId])
 
+  // Resolves the Agent+model readout for the header chip: read-only, mirrors
+  // EpicTerminalPane's resolveEpicModel but for DISPLAY only (never affects
+  // which model actually launches). An unset/'inherit' persona model shows
+  // no model — the Epic still ran with the global default, but this chip
+  // only surfaces an EXPLICIT per-persona override, matching NewEpicCard's
+  // "the persona's own model wins when set" convention.
+  const agentType = promptSession.agentType
+  const [agentModel, setAgentModel] = useState<string | null>(null)
+  useEffect(() => {
+    if (!agentType) {
+      setAgentModel(null)
+      return
+    }
+    let cancelled = false
+    window.api.agents
+      .listPersonas()
+      .then((personas) => {
+        if (cancelled) return
+        const persona = personas.find((p) => p.name === agentType)
+        setAgentModel(persona?.model && persona.model !== 'inherit' ? persona.model : null)
+      })
+      .catch(() => {
+        if (!cancelled) setAgentModel(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agentType])
+
   // Tab state resets to Discussion on every Epic change.
   useEffect(() => {
     setView('discussion')
@@ -519,6 +549,13 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             <div className="mb-1.5 flex items-center gap-2" data-testid="epic-detail-tags">
               <EpicStatusChip status={status} />
               <EpicKindTag kind={promptSession.tag} />
+              {agentType && (
+                <EpicAgentTag
+                  agentType={agentType}
+                  model={agentModel ? prettyModel(agentModel) : null}
+                  onClick={() => openAgentLibrary(agentType)}
+                />
+              )}
               <ProjectTag cwd={cwd} name={projectName} />
               {branch && (
                 <span className="font-mono text-xs text-fg-faint" data-testid="epic-detail-branch">

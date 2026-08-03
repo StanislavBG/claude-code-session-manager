@@ -106,3 +106,42 @@ export function EpicKindTag({ kind, small }: { kind: PromptSession['tag']; small
     </span>
   )
 }
+
+// ─── EpicAgentTag ────────────────────────────────────────────────────────────
+/**
+ * Read-only readout of "which Agent (and, when resolved, which model) is
+ * this Epic actually running as" — the session-specific counterpart to
+ * EpicKindTag, so this fact lives inside the Epic (EPICS is Session Home)
+ * rather than only in Agent Library. Purely presentational: `model` is
+ * expected to already be pretty-formatted (lib/prettyModel.ts) by the
+ * caller, and `onClick` is the caller's read-only jump-to-definition into
+ * Agent Library — this component never edits anything itself.
+ */
+export function EpicAgentTag({
+  agentType,
+  model,
+  onClick,
+  small,
+}: {
+  agentType: string
+  /** Already pretty-formatted (lib/prettyModel.ts), or null when the
+   *  persona has no explicit model override (absent / 'inherit'). */
+  model?: string | null
+  onClick?: () => void
+  small?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`Agent: ${agentType}${model ? ` — ${model}` : ''} — click to open in Agent Library`}
+      data-testid="epic-agent-tag"
+      className={`inline-flex items-center gap-1 rounded font-mono font-semibold uppercase tracking-wide ring-1 ring-inset ring-hive-teal/40 text-hive-teal whitespace-nowrap hover:bg-hive-teal/10 ${
+        small ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-[7px] py-[3px] text-[10.5px]'
+      }`}
+    >
+      {agentType}
+      {model && <span className="normal-case tracking-normal text-fg-faint">· {model}</span>}
+    </button>
+  )
+}

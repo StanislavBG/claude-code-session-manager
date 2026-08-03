@@ -1,3 +1,54 @@
 {
-  "jobs": []
+  "jobs": [
+    {
+      "slug": "964-epic-detail-agent-readout",
+      "title": "Surface this Epic's Agent + resolved model inside EpicDetail — session config belongs in EPICS, not Home/Configure",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 964,
+      "estimateMinutes": 30,
+      "sourcePromptId": "psess-msckxplj-24",
+      "sourceTabId": null,
+      "epicId": "psess-msckxplj-24",
+      "dependsOn": [
+        "agent-model-default-terminal"
+      ],
+      "originSessionId": "473a7285-6dc5-4ade-a2a6-6ce1a9513747",
+      "bodyPreview": "# Goal\n\nEPICS is this app's Session Home — every session-specific fact must be readable from inside the Epic itself, never only from a Home/Configure-face catalog tab. Today EpicDetail.tsx's header (line ~516-619) shows the Epic's Tag (EpicKindTag) and title/goal, but nothing for its Agent (agentType) or the model that Agent's persona resolves to for this Epic's actual claude launch (once agent-model-default-terminal lands). A user currently has no way to answer \"which Agent / which model is THIS Epic running with\" without leaving Epics and cross-referencing Agent Library. Add a compact Agent+model readout to EpicDetail's header, symmetric with the existing EpicKindTag, so this session-specific fact lives where the session lives.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
+      "slug": "963-nav-consolidate-home-scoped-config",
+      "title": "Consolidate substrate config tabs onto Home face only — no Project-face Settings duplication",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 963,
+      "estimateMinutes": 40,
+      "sourcePromptId": "psess-msckxplj-24",
+      "sourceTabId": null,
+      "epicId": "psess-msckxplj-24",
+      "dependsOn": [
+        "agent-model-nav-consolidation"
+      ],
+      "originSessionId": "473a7285-6dc5-4ade-a2a6-6ce1a9513747",
+      "bodyPreview": "# Goal\n\nSystem Prompt, Skills, MCP Servers, Hooks, Permissions, and Settings (lib/navGroups.ts NAV_ITEMS) are all System/Project/Local settings.json-or-sibling-file editors — legitimately Machine/Project-wide substrate, never per-Epic (established earlier in this Epic). All six currently have `faces: BOTH`, duplicating them onto the Project face's left-nav even though Plugins/Keybindings/Remote/Agent Library/Tag Library — the same category of machine-wide config — are already `faces: HOME` only. Home's left-nav exists precisely so Project-face navigation doesn't need its own separate Settings-shaped entries; consolidate these six onto Home only, matching the existing precedent, without breaking Project-scope editing (which resolves via the active tab's cwd, independent of navFace — see lib/navFace.ts's documented navFace/activeTabId separation).\n\n# Acceptance criteria\n",
+      "status": "running",
+      "runId": "2026-08-03T02-30-33-039Z",
+      "startedAt": "2026-08-03T02:30:33.218Z",
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null,
+      "sessionId": "d239f72e-e23c-403f-97c2-c1e9d7f4f30e",
+      "runtime": {
+        "pid": 2873494,
+        "runId": "2026-08-03T02-30-33-039Z",
+        "startedAt": "2026-08-03T02:30:33.218Z",
+        "sessionId": "d239f72e-e23c-403f-97c2-c1e9d7f4f30e",
+        "cwd": "/home/bilko/Projects/session-manager"
+      }
+    }
+  ]
 }

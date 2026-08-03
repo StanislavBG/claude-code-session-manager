@@ -368,6 +368,401 @@ function DiffCards({ items }: { items: ToolUseTrace[] | undefined }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// role:'event' typed renderers (PRD chat-typed-event-renderers). chat.ts's
+// ingestTranscriptEvent lands every JSONL transcript-feed event with no
+// dedicated turn role (mode, queue-operation, attachment/*, tool_use, usage,
+// ai-title, …) as a role:'event' turn carrying `kind` + a bounded `signal`
+// (lib/chatSignals.ts) + `ref` (byte range for re-reading the full untruncated
+// line on expand). renderEventTurn below is the single place those kinds fan
+// out to a typed renderer — see its own comment for the router-never-filter
+// contract.
+// ---------------------------------------------------------------------------
+
+function signalPreviewObject(turn: ChatTurn): Record<string, unknown> {
+  const obj: Record<string, unknown> = { kind: turn.kind ?? 'event' }
+  const s = turn.signal
+  if (s) {
+    for (const [k, v] of Object.entries(s)) {
+      if (v !== undefined) obj[k] = v
+    }
+  } else if (turn.text) {
+    obj.preview = turn.text
+  } else {
+    obj.preview = '(no data)'
+  }
+  return obj
+}
+
+// CORE: the generic Signal card — the forward-compatibility fallback for any
+// event kind (or attachment subtype) with no dedicated renderer. Renders the
+// kind name as a header plus a pretty-printed JSON body, collapsed to 3 lines
+// with an expand affordance that re-reads the full untruncated line from disk
+// via the turn's ref. Never throws on a malformed/undefined signal — falls
+// back to the bounded previewText or an explicit "(no data)" empty state.
+function GenericSignalCard({ turn }: { turn: ChatTurn }) {
+  const [open, setOpen] = useState(false)
+  const [fullText, setFullText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const preview = useMemo(() => JSON.stringify(signalPreviewObject(turn), null, 2), [turn])
+  const previewLines = preview.split('\n')
+  const collapsed = previewLines.slice(0, 3).join('\n')
+  const canExpand = previewLines.length > 3 || !!turn.ref
+  const onToggle = async () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    setOpen(true)
+    if (fullText === null && turn.ref && !loading) {
+      setLoading(true)
+      try {
+        const res = await window.api.transcripts.readRef(turn.ref)
+        setFullText(res.ok && res.text ? fullSignalText(turn.kind ?? '', turn.signal?.subtype, res.text) : preview)
+      } catch {
+        setFullText(preview)
+      } finally {
+        setLoading(false)
+      }
+    }
+  }
+  return (
+    <div
+      className="mb-1.5 overflow-hidden rounded-lg border border-line"
+      data-testid="signal-card"
+      data-signal-kind={turn.kind ?? ''}
+    >
+      <div className="flex items-center justify-between gap-2 bg-elev px-2 py-1 font-mono text-[10.5px] text-fg-dim">
+        <span className="truncate">{turn.kind ?? 'event'}</span>
+        {canExpand && (
+          <button
+            type="button"
+            onClick={() => { void onToggle() }}
+            data-testid="signal-card-toggle"
+            className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] hover:bg-hi"
+          >
+            {open ? 'Collapse' : 'Expand'}
+          </button>
+        )}
+      </div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all bg-bg px-2 py-1.5 font-mono text-[11px] text-fg-dim">
+        {open ? (loading ? 'Loading…' : (fullText ?? preview)) : collapsed}
+      </pre>
+    </div>
+  )
+}
+
+// mode/permissionMode: a state transition is a line, not a card.
+const EVENT_DIVIDER_LABEL: Record<string, string> = { mode: 'mode', permissionMode: 'permission' }
+
+function EventDivider({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="my-1 flex items-center gap-2" data-testid="event-divider">
+      <span className="h-px flex-1 bg-line" aria-hidden="true" />
+      <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
+        — {label} → {value ?? '(unknown)'} —
+      </span>
+      <span className="h-px flex-1 bg-line" aria-hidden="true" />
+    </div>
+  )
+}
+
+function QueueOperationChip({ turn }: { turn: ChatTurn }) {
+  return (
+    <div
+      className="mb-1 inline-flex max-w-full items-center gap-1.5 rounded border border-line bg-elev px-2 py-0.5 font-mono text-[10.5px] text-fg-dim"
+      data-testid="queue-operation-chip"
+    >
+      <span>{turn.signal?.value ?? 'queue'}</span>
+      {turn.signal?.text && <span className="min-w-0 truncate">{turn.signal.text}</span>}
+    </div>
+  )
+}
+
+function QueuedCommandChip({ turn }: { turn: ChatTurn }) {
+  return (
+    <div
+      className="mb-1 inline-flex max-w-full items-center gap-1.5 rounded border border-line bg-elev px-2 py-0.5 font-mono text-[10.5px] text-fg-dim"
+      data-testid="queued-command-chip"
+    >
+      <span aria-hidden>⏳</span>
+      <span>{turn.signal?.value ?? 'queued'}</span>
+      {turn.signal?.text && <span className="min-w-0 truncate">{turn.signal.text}</span>}
+    </div>
+  )
+}
+
+function SnapshotMarker({ turn }: { turn: ChatTurn }) {
+  return (
+    <div className="py-0.5 text-center font-mono text-[10.5px] text-fg-faint" data-testid="snapshot-marker">
+      — restore point{typeof turn.signal?.count === 'number' ? ` · ${turn.signal.count} file${turn.signal.count === 1 ? '' : 's'}` : ''} —
+    </div>
+  )
+}
+
+function TaskReminderStrip({ turn }: { turn: ChatTurn }) {
+  return (
+    <div className="py-0.5 font-mono text-[10.5px] text-fg-faint" data-testid="task-reminder-strip">
+      📋 task reminder{typeof turn.signal?.count === 'number' && turn.signal.count > 0 ? ` · ${turn.signal.count} item${turn.signal.count === 1 ? '' : 's'}` : ''}
+    </div>
+  )
+}
+
+function CommandPermissionsChip({ turn }: { turn: ChatTurn }) {
+  const names = turn.signal?.names ?? []
+  return (
+    <div
+      className={`mb-1 inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-[10.5px] ${AMBER_TINT} ${AMBER_TEXT}`}
+      data-testid="command-permissions-chip"
+    >
+      <span aria-hidden>🔒</span>
+      <span>{turn.signal?.count ?? names.length} allowed command{(turn.signal?.count ?? names.length) === 1 ? '' : 's'}</span>
+    </div>
+  )
+}
+
+function ThinkingBlock({ turn }: { turn: ChatTurn }) {
+  const text = turn.signal?.text ?? ''
+  if (!text) return null
+  return (
+    <div className="mb-1.5 border-l-2 border-line pl-2 text-xs italic text-fg-dim" data-testid="thinking-block">
+      {text}
+    </div>
+  )
+}
+
+function McpInstructionsCard({ turn }: { turn: ChatTurn }) {
+  const signal = turn.signal
+  const serverName = signal?.names?.[0] ?? 'MCP server'
+  return (
+    <div className="mb-1.5 overflow-hidden rounded-lg border border-accent/30" data-testid="mcp-instructions-card">
+      <div className="bg-accent/10 px-2 py-1 font-mono text-[10.5px] text-accent">
+        <span aria-hidden>🔌</span> {serverName}
+      </div>
+      <div
+        className="prose-chat bg-elev px-2 py-1.5 text-xs leading-relaxed text-fg"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: renderChatMarkdown(signal?.text ?? '') }}
+      />
+    </div>
+  )
+}
+
+// count chip → expandable name grid, shared by deferred_tools_delta,
+// agent_listing_delta, skill_listing. Expand re-reads the full uncapped name
+// list from disk (fullSignalNames) since the ingest-time signal caps at
+// SIGNAL_NAMES_MAX.
+function NameCountChip({ turn, label }: { turn: ChatTurn; label: string }) {
+  const [open, setOpen] = useState(false)
+  const [namesFull, setNamesFull] = useState<string[] | null>(null)
+  const signal = turn.signal
+  const added = signal?.count ?? signal?.names?.length ?? 0
+  const removed = signal?.removedCount ?? signal?.removedNames?.length ?? 0
+  const onToggle = async () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    setOpen(true)
+    if (namesFull === null && turn.ref) {
+      const res = await window.api.transcripts.readRef(turn.ref)
+      if (res.ok && res.text) setNamesFull(fullSignalNames(signal?.subtype, res.text) ?? signal?.names ?? [])
+    }
+  }
+  const displayNames = namesFull ?? signal?.names ?? []
+  const hasAny = added > 0 || removed > 0 || displayNames.length > 0
+  return (
+    <div className="mb-1.5" data-testid="name-count-chip" data-signal-subtype={signal?.subtype ?? ''}>
+      <button
+        type="button"
+        onClick={() => { void onToggle() }}
+        className="inline-flex items-center gap-1.5 rounded border border-line bg-elev px-2 py-0.5 font-mono text-[10.5px] text-fg-dim hover:bg-hi"
+      >
+        {added > 0 && <span>+{added} {label}</span>}
+        {removed > 0 && <span>−{removed} {label}</span>}
+        {!hasAny && <span>{label}</span>}
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-wrap gap-1" data-testid="name-count-grid">
+          {displayNames.length === 0 ? (
+            <span className="font-mono text-[10px] text-fg-faint">(no names)</span>
+          ) : (
+            displayNames.map((n) => (
+              <span key={n} className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-fg-dim">
+                {n}
+              </span>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// tool_result: outcome chip (success/error) + first line + byte count,
+// expanding to the full untruncated result body. Reuses DiffCard directly
+// when the result carries an Edit-style diff payload.
+function ToolResultChip({ turn }: { turn: ChatTurn }) {
+  const [open, setOpen] = useState(false)
+  const [fullText, setFullText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const signal = turn.signal
+  if (signal?.diff) return <DiffCard diff={signal.diff} />
+  const line = signal?.value ?? ''
+  const bytes = (turn.text ?? '').length
+  const onToggle = async () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    setOpen(true)
+    if (fullText === null && turn.ref && !loading) {
+      setLoading(true)
+      const res = await window.api.transcripts.readRef(turn.ref)
+      setLoading(false)
+      setFullText(res.ok && res.text ? fullSignalText('tool_result', undefined, res.text) : line)
+    }
+  }
+  return (
+    <div className="mb-1.5 overflow-hidden rounded-lg border border-line" data-testid="tool-result-chip">
+      <button
+        type="button"
+        onClick={() => { void onToggle() }}
+        className={`flex w-full items-center gap-1.5 px-2 py-1 font-mono text-[10.5px] hover:bg-hi ${
+          signal?.isError ? `${ERROR_TINT} ${ERROR_TEXT}` : 'bg-elev text-fg-dim'
+        }`}
+      >
+        <span aria-hidden>{signal?.isError ? '✗' : '✓'}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{line || '(empty result)'}</span>
+        <span className="shrink-0">{formatBytes(bytes)}</span>
+      </button>
+      {open && (
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all bg-bg px-2 py-1.5 font-mono text-[11px] text-fg-dim">
+          {loading ? 'Loading…' : (fullText ?? line)}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+// tool_use/todo_write/plan/agent_spawn: the same icon+label chip the live
+// assistant tool trace uses (ToolUseTraceStrip), fed a single-item run —
+// isToolFamilyKind is what routes these four kinds here.
+function ToolFamilyChip({ turn }: { turn: ChatTurn }) {
+  const tool = turn.signal?.tool
+  if (!tool) return null
+  return <ToolUseTraceStrip items={[{ id: turn.id, kind: tool.kind, label: tool.label }]} />
+}
+
+/**
+ * role:'event' dispatch — maps a JSONL transcript-feed event's `kind` (and,
+ * for 'attachment', its signal.subtype) to a typed renderer.
+ *
+ * ROUTER, NEVER A FILTER: every `default` branch below (outer and the nested
+ * attachment one) is the forward-compatibility guarantee for a kind/subtype
+ * this file has no dedicated renderer for yet — a future CLI event, a typo'd
+ * kind, anything — so it always renders the generic Signal card rather than
+ * silently dropping the turn. The ONLY turns ever omitted from the feed are
+ * the two exact-duplicate suppressions in visibleFeedTurns() below (a
+ * repeated ai-title, a last-prompt duplicating the immediately preceding user
+ * turn) — never a decision made here, and never based on kind.
+ */
+function renderEventTurn(turn: ChatTurn): ReactNode {
+  const kind = turn.kind
+  const signal = turn.signal
+  if (isToolFamilyKind(kind)) return <ToolFamilyChip turn={turn} />
+  switch (kind) {
+    case 'mode':
+    case 'permissionMode':
+      return <EventDivider label={EVENT_DIVIDER_LABEL[kind] ?? kind} value={signal?.value} />
+    case 'queue-operation':
+      return <QueueOperationChip turn={turn} />
+    case 'file-history-snapshot':
+      return <SnapshotMarker turn={turn} />
+    case 'content_thinking':
+      return <ThinkingBlock turn={turn} />
+    case 'tool_result':
+      return <ToolResultChip turn={turn} />
+    case 'attachment': {
+      switch (signal?.subtype) {
+        case 'deferred_tools_delta':
+          return <NameCountChip turn={turn} label="tools" />
+        case 'agent_listing_delta':
+          return <NameCountChip turn={turn} label="agents" />
+        case 'skill_listing':
+          return <NameCountChip turn={turn} label="skills" />
+        case 'mcp_instructions_delta':
+          return <McpInstructionsCard turn={turn} />
+        case 'task_reminder':
+          return <TaskReminderStrip turn={turn} />
+        case 'command_permissions':
+          return <CommandPermissionsChip turn={turn} />
+        case 'edited_text_file':
+          return signal?.diff ? <DiffCard diff={signal.diff} /> : <GenericSignalCard turn={turn} />
+        case 'queued_command':
+          return <QueuedCommandChip turn={turn} />
+        default:
+          // EDGE: an attachment subtype not in the list above (or no subtype
+          // at all — a malformed attachment payload) falls through here.
+          return <GenericSignalCard turn={turn} />
+      }
+    }
+    default:
+      // Unknown/future event kind (ai-title, last-prompt, usage, or anything
+      // not yet given a dedicated renderer) — falls through to the generic
+      // Signal card. This branch is the executable statement of the
+      // forward-compat guarantee: a completely made-up kind still renders.
+      return <GenericSignalCard turn={turn} />
+  }
+}
+
+/**
+ * Drops the two — and only two — permitted exact-duplicate event turns:
+ * a repeated ai-title (shown once, as the session title) and a last-prompt
+ * that duplicates the immediately preceding user turn. No other kind is ever
+ * suppressed here — everything else reaches renderEventTurn's router. Pure
+ * function of the full turns array so both EpicDetail and tests share one
+ * implementation of "immediately preceding user turn" (nearest user-role
+ * turn scanning backward, skipping only role:'event' turns in between).
+ */
+export function visibleFeedTurns(turns: ChatTurn[]): ChatTurn[] {
+  const seenAiTitles = new Set<string>()
+  let lastUserText: string | undefined
+  const out: ChatTurn[] = []
+  for (const t of turns) {
+    if (t.role === 'user') lastUserText = t.text
+    if (t.role === 'event') {
+      if (t.kind === 'ai-title') {
+        const text = t.signal?.text
+        if (text !== undefined) {
+          if (seenAiTitles.has(text)) continue
+          seenAiTitles.add(text)
+        }
+      } else if (t.kind === 'last-prompt') {
+        const text = t.signal?.text
+        if (text !== undefined && text === lastUserText) continue
+      }
+    }
+    out.push(t)
+  }
+  return out
+}
+
+/** Nearest preceding turn's text when it's a plain user prompt, scanning
+ *  backward from `index` and skipping over role:'event' turns (metadata, not
+ *  a real conversational reply) — stops and returns undefined at the first
+ *  non-event, non-user turn it hits. Shared by the consent-notice Retry
+ *  button (via the `precedingUserPrompt` prop below) and last-prompt
+ *  suppression above. */
+export function nearestPrecedingUserPrompt(turns: ChatTurn[], index: number): string | undefined {
+  for (let j = index - 1; j >= 0; j--) {
+    const t = turns[j]
+    if (t.role === 'event') continue
+    return t.role === 'user' ? t.text : undefined
+  }
+  return undefined
+}
+
 export function Turn({
   turn,
   cwd,
@@ -602,6 +997,9 @@ export function Turn({
         )}
       </div>
     )
+  }
+  if (turn.role === 'event') {
+    return <div data-testid="chat-turn-event">{renderEventTurn(turn)}</div>
   }
   // assistant — render the run's final message verbatim (markdown), guarded
   // against empty text (e.g. a resumed turn that opens with a non-rendered

@@ -8,7 +8,7 @@ import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSna
 import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
-import { Turn } from '../ChatTranscriptTurn'
+import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt } from '../ChatTranscriptTurn'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { prettyModel } from '../../lib/prettyModel'
 import { ViewTabs } from '../ui/ViewTabs'
@@ -418,10 +418,22 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
   // role:'event' turns are JSONL transcript-feed events (mode, attachment,
-  // queue-operation, tool_use, usage, …) that have no typed renderer yet —
-  // that is a separate downstream PRD. They stay reachable in the store
-  // (chat.ts's ingestTranscriptEvent) but are not rendered here yet.
-  const visibleTurns = turns.filter((t) => t.role !== 'event')
+  // queue-operation, tool_use, usage, …) — ChatTranscriptTurn.tsx's Turn
+  // routes every one of them to a typed renderer (never filtered by kind).
+  // visibleFeedTurns drops only the two permitted exact-duplicate cases: a
+  // repeated ai-title and a last-prompt duplicating the preceding user turn.
+  const visibleTurns = visibleFeedTurns(turns)
+  // With event turns interleaved, the array's last element is no longer
+  // reliably the last assistant turn (a trailing mode/attachment event is
+  // common) — find it explicitly so the "running" indicator still lands on
+  // the right bubble.
+  let lastAssistantIndex = -1
+  for (let idx = visibleTurns.length - 1; idx >= 0; idx--) {
+    if (visibleTurns[idx].role === 'assistant') {
+      lastAssistantIndex = idx
+      break
+    }
+  }
 
   // A 'response' PromptSessionEvent is appended by chat.ts for EVERY completed
   // turn (onComplete/onNeedsInput), not only for out-of-band ones (PRD-finished
@@ -718,8 +730,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               if (item.kind === 'turn') {
                 const t = item.turn
                 const i = visibleTurns.indexOf(t)
-                const prevTurn = i > 0 ? visibleTurns[i - 1] : undefined
-                const precedingUserPrompt = prevTurn?.role === 'user' ? prevTurn.text : undefined
+                const precedingUserPrompt = nearestPrecedingUserPrompt(visibleTurns, i)
                 return (
                   <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
                     <Turn
@@ -727,7 +738,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       cwd={cwd}
                       tabId={epicId}
                       sessionId={sessionId}
-                      runActive={running && t.role === 'assistant' && i === visibleTurns.length - 1}
+                      runActive={running && t.role === 'assistant' && i === lastAssistantIndex}
                       consentActionDisabled={running}
                       enableRawSessionActions={false}
                       linkTarget="browser"

@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 import { readAppPrefs } from '../lib/appPrefs'
 import type { NavFace } from '../lib/navFace'
+import { isHomeOnlyNavKey } from '../lib/navGroups'
+import type { NavKey } from '../components/LeftNav'
 
 /**
  * Panel registry entry. `component` is a lookup key (not a component
@@ -75,13 +77,18 @@ interface LayoutState {
    * definition of 'project'; it flipped the face the instant you clicked a
    * Home-face row for one of those shared screens). Instead this is real
    * state, changed only by the two genuine entry points: `openPanel` flips it
-   * to 'home' when (and only when) navigating TO 'overview' — the one screen
-   * that is unambiguously home; `openProjectPanel` flips it to 'project' and
-   * is used exclusively by the top-tab-selection call sites (TabBar tab
-   * click, tab-switch effect, new-session flows). Plain `openPanel` calls for
-   * every other id (sidebar rows, CommandPalette nav:*, dockview mirroring)
-   * leave it untouched, so browsing the Home nav list stays on the Home face
-   * end to end. See navFace.spec.ts's regression coverage.
+   * to 'home' when navigating TO 'overview' (the one screen that is
+   * unambiguously home) OR to any other HOME-only NavKey per
+   * `lib/navGroups.ts`'s `isHomeOnlyNavKey` (System Prompt, Skills, MCP
+   * Servers, Hooks, Permissions, Settings — consolidated onto Home; see
+   * that file's top-of-file precedent note) — this covers face-agnostic
+   * entry points like CommandPalette's `nav:*` commands, which don't know
+   * or assert a face themselves. `openProjectPanel` flips it to 'project'
+   * and is used exclusively by the top-tab-selection call sites (TabBar tab
+   * click, tab-switch effect, new-session flows). Plain `openPanel` calls
+   * for every other (BOTH-face or PROJECT-only) id leave it untouched, so
+   * browsing the Home nav list stays on the Home face end to end. See
+   * navFace.spec.ts's regression coverage.
    */
   navFace: NavFace
   setNavFace: (face: NavFace) => void
@@ -89,8 +96,9 @@ interface LayoutState {
    * Register (or focus, if already registered) a panel from an app-driven
    * action (sidebar click, command palette, etc.) — always bumps
    * `focusToken` so Workbench re-mounts/re-activates even for a same-id call.
-   * Sets `navFace: 'home'` when `id === 'overview'`; leaves navFace untouched
-   * for every other id (see `navFace` above / `openProjectPanel` below).
+   * Sets `navFace: 'home'` when `id === 'overview'` or `id` is a HOME-only
+   * NavKey (`isHomeOnlyNavKey`); leaves navFace untouched for every other id
+   * (see `navFace` above / `openProjectPanel` below).
    */
   openPanel: (id: string) => void
   /**
@@ -105,7 +113,8 @@ interface LayoutState {
    * Mirror a dockview-initiated activation (tab click, close, drag) into the
    * store. No-op if the id isn't registered. Does not bump `focusToken` —
    * dockview has already made the panel active, no re-mount is needed. Same
-   * navFace rule as `openPanel`: only 'overview' asserts 'home'.
+   * navFace rule as `openPanel`: 'overview' or a HOME-only NavKey asserts
+   * 'home'.
    */
   focusPanel: (id: string) => void
   /** Reset the workbench to DEFAULT_LAYOUT (CommandPalette "Reset layout"). */
@@ -137,7 +146,7 @@ export const useLayout = create<LayoutState>((set, get) => ({
     set((s) => ({
       focusedPanelId: id,
       focusToken: s.focusToken + 1,
-      ...(id === 'overview' ? { navFace: 'home' as const } : null),
+      ...(id === 'overview' || isHomeOnlyNavKey(id as NavKey) ? { navFace: 'home' as const } : null),
     }))
   },
   openProjectPanel: (id: string) => {
@@ -148,7 +157,10 @@ export const useLayout = create<LayoutState>((set, get) => ({
   focusPanel: (id: string) => {
     const exists = get().panels.some((p) => p.id === id)
     if (!exists) return
-    set({ focusedPanelId: id, ...(id === 'overview' ? { navFace: 'home' as const } : null) })
+    set({
+      focusedPanelId: id,
+      ...(id === 'overview' || isHomeOnlyNavKey(id as NavKey) ? { navFace: 'home' as const } : null),
+    })
   },
   resetLayout: () => {
     set((s) => ({

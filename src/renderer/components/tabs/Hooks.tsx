@@ -170,6 +170,11 @@ export function Hooks() {
   const [selectedEvent, setSelectedEvent] = useState<HookEvent>('PreToolUse')
   const [view, setView] = useState<'effective' | 'events' | 'library'>('effective')
 
+  // Hooks is now HOME-only in the sidebar (navGroups.ts), and every nav path
+  // that focuses it asserts navFace: 'home' — but a background split
+  // (Workbench's `renderer: 'always'`) can keep this screen mounted while a
+  // TabBar click elsewhere calls openProjectPanel, flipping navFace to
+  // 'project' without unmounting this component — so this branch is live.
   useEffect(() => {
     if (prevNavFaceRef.current === navFace) return
     prevNavFaceRef.current = navFace

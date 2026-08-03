@@ -122,6 +122,11 @@ export function McpServers() {
   const [view, setView] = useState<'installed' | 'library'>('installed')
   const [filter, setFilter] = useState('')
 
+  // MCP Servers is now HOME-only in the sidebar (navGroups.ts), and every
+  // nav path that focuses it asserts navFace: 'home' — but a background
+  // split (Workbench's `renderer: 'always'`) can keep this screen mounted
+  // while a TabBar click elsewhere calls openProjectPanel, flipping navFace
+  // to 'project' without unmounting this component — so this branch is live.
   useEffect(() => {
     if (prevNavFaceRef.current === navFace) return
     prevNavFaceRef.current = navFace

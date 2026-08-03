@@ -39,6 +39,11 @@ export function Settings() {
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
   const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'app'>('effective')
 
+  // Settings is now HOME-only in the sidebar (navGroups.ts), and every nav
+  // path that focuses it asserts navFace: 'home' — but a background split
+  // (Workbench's `renderer: 'always'`) can keep this screen mounted while a
+  // TabBar click elsewhere calls openProjectPanel, flipping navFace to
+  // 'project' without unmounting this component — so this branch is live.
   useEffect(() => {
     if (prevNavFaceRef.current === navFace) return
     prevNavFaceRef.current = navFace

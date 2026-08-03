@@ -160,11 +160,25 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
     expect(useLayout.getState().navFace).toBe('home')
   })
 
-  it('openPanel to a non-overview id never changes navFace either way (project stays project too)', () => {
+  it('openPanel to a non-overview BOTH-face id never changes navFace either way (project stays project too)', () => {
     useLayout.setState({ navFace: 'project' })
     useLayout.getState().openPanel('scheduler')
     expect(useLayout.getState().navFace).toBe('project')
   })
+
+  // PRD 963: system-prompt/skills/mcp/hooks/permissions/settings moved to
+  // HOME-only. A face-agnostic entry point (CommandPalette's nav:* commands)
+  // can still call openPanel for one of these while navFace is 'project' —
+  // it must land on the Home face, not leave the Project sidebar showing
+  // while a Home-only screen renders.
+  it.each(['system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings'])(
+    'openPanel("%s") asserts navFace "home" even from "project"',
+    (key) => {
+      useLayout.setState({ navFace: 'project' })
+      useLayout.getState().openPanel(key)
+      expect(useLayout.getState().navFace).toBe('home')
+    },
+  )
 
   it('openProjectPanel asserts navFace "project" — the only path that should', () => {
     useLayout.getState().openProjectPanel('terminal')
@@ -177,11 +191,18 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
     expect(useLayout.getState().navFace).toBe('home')
   })
 
-  it('focusPanel mirrors the same rule: only "overview" asserts home, other ids are untouched', () => {
+  it('focusPanel mirrors the same rule: "overview" and HOME-only ids assert home, other ids are untouched', () => {
     useLayout.setState({ navFace: 'project' })
-    useLayout.getState().focusPanel('skills')
+    // 'scheduler' is a BOTH-face key — focusing it must leave navFace alone.
+    useLayout.getState().focusPanel('scheduler')
     expect(useLayout.getState().navFace).toBe('project')
     useLayout.getState().focusPanel('overview')
+    expect(useLayout.getState().navFace).toBe('home')
+
+    // 'skills' is now HOME-only (navGroups.ts, PRD 963) — focusing it must
+    // assert navFace: 'home' even from 'project', same as 'overview'.
+    useLayout.setState({ navFace: 'project' })
+    useLayout.getState().focusPanel('skills')
     expect(useLayout.getState().navFace).toBe('home')
   })
 

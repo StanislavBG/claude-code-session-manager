@@ -93,9 +93,9 @@ ${bodyHtml}
 export function renderProjectPages(
   summary: ProjectPageSummary,
   picks: ProjectPagePicks,
-): { home: string; marketing: string; feature: string; architecture: string } {
+): { home: string; marketing: string; feature: string; architecture: string; brief: string } {
   const fontFaces = buildFontFaces();
-  const pages = {} as { home: string; marketing: string; feature: string; architecture: string };
+  const pages = {} as { home: string; marketing: string; feature: string; architecture: string; brief: string };
   for (const lensId of LENS_ORDER) {
     const lens = LENS_LIBRARY[lensId];
     const body = renderLensBody(lensId, summary, picks);

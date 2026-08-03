@@ -70,19 +70,19 @@ const PICKS: ProjectPagePicks = Object.fromEntries(
 describe('renderProjectPages', () => {
   const pages = renderProjectPages(SUMMARY, PICKS);
 
-  it('returns all four lenses', () => {
-    expect(Object.keys(pages).sort()).toEqual(['architecture', 'feature', 'home', 'marketing']);
+  it('returns all five lenses', () => {
+    expect(Object.keys(pages).sort()).toEqual(['architecture', 'brief', 'feature', 'home', 'marketing']);
   });
 
-  it.each(['home', 'marketing', 'feature', 'architecture'] as const)('%s starts with a doctype', lens => {
+  it.each(['home', 'marketing', 'feature', 'architecture', 'brief'] as const)('%s starts with a doctype', lens => {
     expect(pages[lens].startsWith('<!DOCTYPE html>')).toBe(true);
   });
 
-  it.each(['home', 'marketing', 'feature', 'architecture'] as const)('%s contains no script tags', lens => {
+  it.each(['home', 'marketing', 'feature', 'architecture', 'brief'] as const)('%s contains no script tags', lens => {
     expect(pages[lens]).not.toMatch(/<script/i);
   });
 
-  it.each(['home', 'marketing', 'feature', 'architecture'] as const)('%s makes no external network calls', lens => {
+  it.each(['home', 'marketing', 'feature', 'architecture', 'brief'] as const)('%s makes no external network calls', lens => {
     expect(pages[lens]).not.toMatch(/googleapis\.com/i);
     expect(pages[lens]).not.toMatch(/https?:\/\//i);
   });

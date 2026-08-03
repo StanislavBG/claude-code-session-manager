@@ -21,7 +21,17 @@ function outputDir(cwd) {
   return path.join(cwd, 'session-manager-operations', 'project-pages', 'output');
 }
 
-const LENSES = ['home', 'marketing', 'feature', 'architecture'];
+// The original 4 lenses stay required — their absence still means "no
+// Project Pages generated yet" (the null empty-state signal). 'brief' was
+// added later (5th lens): a project that generated its output BEFORE 'brief'
+// existed has home/marketing/feature/architecture.html but no brief.html, and
+// that must keep reading as "has output" rather than suddenly regressing to
+// the empty state for every pre-existing project. So brief.html is read
+// tolerantly — present, its text is returned; absent, the field is simply
+// omitted from the payload rather than failing the whole read.
+const REQUIRED_LENSES = ['home', 'marketing', 'feature', 'architecture'];
+const OPTIONAL_LENSES = ['brief'];
+const LENSES = [...REQUIRED_LENSES, ...OPTIONAL_LENSES];
 
 async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
@@ -34,25 +44,28 @@ async function get({ cwd }) {
   const htmlResults = await Promise.all(
     LENSES.map((lens) => config.readText(path.join(dir, `${lens}.html`))),
   );
-  if (htmlResults.some((r) => !r.exists)) {
+  const byLens = Object.fromEntries(LENSES.map((lens, i) => [lens, htmlResults[i]]));
+  if (REQUIRED_LENSES.some((lens) => !byLens[lens].exists)) {
     return { output: null };
   }
 
-  const [home, marketing, feature, architecture] = htmlResults;
   const generatedAt = typeof manifestResult.data.generatedAt === 'string' ? manifestResult.data.generatedAt : null;
   if (!generatedAt) {
     return { output: null };
   }
 
-  return {
-    output: {
-      home: home.text,
-      marketing: marketing.text,
-      feature: feature.text,
-      architecture: architecture.text,
-      generatedAt,
-    },
+  const output = {
+    home: byLens.home.text,
+    marketing: byLens.marketing.text,
+    feature: byLens.feature.text,
+    architecture: byLens.architecture.text,
+    generatedAt,
   };
+  if (byLens.brief.exists) {
+    output.brief = byLens.brief.text;
+  }
+
+  return { output };
 }
 
 function registerProjectPagesIpc() {

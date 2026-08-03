@@ -948,12 +948,15 @@ export type ProjectBriefUpdateResult =
   | { ok: true; brief: ProjectBrief }
   | { ok: false; error: string };
 
-// ────────────────────────────────────────────── Project Pages (PRD 929-932)
+// ────────────────────────────────────────────── Project Pages (PRD 929-932, 969)
 export interface ProjectPagesOutput {
   home: string;
   marketing: string;
   feature: string;
   architecture: string;
+  /** Absent for output generated before the 'brief' lens existed (PRD 969) — a
+   *  project must regenerate to pick it up; its absence does not blank the rest. */
+  brief?: string;
   generatedAt: string;
 }
 

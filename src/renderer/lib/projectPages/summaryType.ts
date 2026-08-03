@@ -123,6 +123,35 @@ export interface ProjectPageArchitecture {
   risks: ProjectPageRisk[];
 }
 
+// ── Brief lens source fields (Stage 1's `brief` mapping) ───────────────────
+// Read directly off ProjectBrief (session-manager-operations/project-brief/brief.json)
+// with no reshaping — field names/shapes mirror ProjectBriefArea/ProjectBriefScopeEntry
+// (src/preload/api.d.ts) exactly, not a parallel schema.
+export interface ProjectPageBriefArea {
+  name: string;
+  files: number;
+  note: string;
+  epic: string | null;
+  heat: number;
+}
+
+export type ProjectPageBriefScopeKind = 'added' | 'narrowed' | 'decided';
+
+export interface ProjectPageBriefScopeEntry {
+  when: string;
+  kind: ProjectPageBriefScopeKind;
+  text: string;
+  src: string;
+}
+
+export interface ProjectPageBrief {
+  purpose: string;
+  what: string[];
+  areas: ProjectPageBriefArea[];
+  scope: ProjectPageBriefScopeEntry[];
+  conventions: string[];
+}
+
 export interface ProjectPageSummary {
   identity: ProjectPageIdentity;
   stats: ProjectPageStat[];
@@ -130,6 +159,8 @@ export interface ProjectPageSummary {
   feature: ProjectPageFeature;
   architecture: ProjectPageArchitecture;
   quotes: ProjectPageQuote[];
+  /** Optional: absent when this project's brief.json has not been generated yet. */
+  brief?: ProjectPageBrief;
 }
 
 // One slot→variant pick per slot id, per lens.

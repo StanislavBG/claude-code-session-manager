@@ -23,7 +23,7 @@ const BUILDER_TAG = 'project-home-builder' as const
 const BUILDER_AGENT_NAME = 'project-home-builder' as const
 const GENERATE_GOAL = 'Generate this project\'s Project Pages (Home/Marketing/Feature/Architecture).'
 
-type Lens = 'home' | 'marketing' | 'feature' | 'architecture'
+type Lens = 'home' | 'marketing' | 'feature' | 'architecture' | 'brief'
 type ViewKey = Lens | 'library'
 
 const LENS_OPTIONS: Array<{ key: Lens; label: string }> = [
@@ -31,6 +31,7 @@ const LENS_OPTIONS: Array<{ key: Lens; label: string }> = [
   { key: 'marketing', label: 'Marketing' },
   { key: 'feature', label: 'Feature' },
   { key: 'architecture', label: 'Architecture' },
+  { key: 'brief', label: 'Brief' },
 ]
 // The 5th tab — not a generated template, a static explainer of the other
 // four: what they are and where their source files live on disk so a human
@@ -172,7 +173,7 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
       <PhBlock
         kicker="pages"
         title="Project Pages"
-        note="What the 4 generated templates are, and where to hand-edit them per project."
+        note="What the 5 generated templates are, and where to hand-edit them per project."
         right={<ViewTabs options={VIEW_OPTIONS} active={activeView} onChange={setActiveView} />}
       >
         <ProjectPagesLibraryExplainer />
@@ -185,7 +186,7 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
       <PhBlock
         kicker="pages"
         title="Project Pages"
-        note="Home, Marketing, Feature, and Architecture pages generated from this project."
+        note="Home, Marketing, Feature, Architecture, and Brief pages generated from this project."
         right={<ViewTabs options={VIEW_OPTIONS} active={activeView} onChange={setActiveView} />}
       >
         <EmptyState title="No Project Pages yet" hint={generateButton} />
@@ -193,12 +194,28 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
     )
   }
 
-  const iframe = (
+  // `output.brief` is absent for output generated before the 'brief' lens
+  // existed (PRD 969) — a project must Regenerate to pick it up. Guard rather
+  // than hand `srcDoc={undefined}` to the iframe. (activeView is narrowed to
+  // Lens here — the 'library' case already returned above.)
+  const activeHtml = output[activeView]
+
+  const iframe = activeHtml ? (
     <iframe
       title={`Project Page — ${activeView}`}
       sandbox="allow-same-origin"
-      srcDoc={output[activeView]}
+      srcDoc={activeHtml}
       style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+    />
+  ) : (
+    <EmptyState
+      title="Brief page not generated yet"
+      hint={
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-xs text-fg-faint">This project's Project Pages were generated before the Brief lens existed.</p>
+          {generateButton}
+        </div>
+      }
     />
   )
 
@@ -285,7 +302,7 @@ function ProjectPagesLibraryExplainer() {
   return (
     <PhCard className="px-5 py-4 grid gap-1">
       <p className="text-xs leading-relaxed text-fg-dim mb-2">
-        Generate Now produces 4 static HTML templates from this project's own component library. Each is a lens on
+        Generate Now produces 5 static HTML templates from this project's own component library. Each is a lens on
         the same computed summary — nothing here is hand-written per project, but every slot's chosen variant can be
         hand-overridden and the override survives the next Regenerate.
       </p>
@@ -308,6 +325,11 @@ function ProjectPagesLibraryExplainer() {
         'Architecture',
         'session-manager-operations/project-pages/output/architecture.html',
         'System summary, module map, control flow, and decisions of record. Source slots: src/renderer/lib/projectPages/library/architectureSlots.tsx.',
+      )}
+      {row(
+        'Brief',
+        'session-manager-operations/project-pages/output/brief.html',
+        "The project's synthesized Brief — purpose, structure, scope history, and conventions — as a static read. Source slots: src/renderer/lib/projectPages/library/briefSlots.tsx.",
       )}
       <div className="mt-3 pt-3 border-t border-rule grid gap-2.5">
         <div>

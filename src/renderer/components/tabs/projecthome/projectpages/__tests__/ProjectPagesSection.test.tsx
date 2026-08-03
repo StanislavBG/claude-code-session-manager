@@ -107,6 +107,54 @@ describe('ProjectPagesSection', () => {
     expect(el.textContent).toContain('Exit full screen')
   })
 
+  it('Brief tab is selectable and renders the brief html as srcDoc when present', async () => {
+    ;(globalThis as any).window.api = {
+      projectPages: {
+        get: vi.fn().mockResolvedValue({
+          output: {
+            home: '<!DOCTYPE html><html><body>HOME</body></html>',
+            marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
+            feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
+            architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
+            brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
+            generatedAt: '2026-08-02T00:00:00.000Z',
+          },
+        }),
+      },
+      agents: { listPersonas: listPersonasMock },
+    }
+    const el = mount(<ProjectPagesSection cwd={CWD} />)
+    await flush()
+    const briefTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Brief') as HTMLButtonElement
+    expect(briefTab).toBeTruthy()
+    act(() => briefTab.click())
+    const iframe = el.querySelector('iframe') as HTMLIFrameElement
+    expect(iframe.getAttribute('srcdoc')).toContain('BRIEF')
+  })
+
+  it('Brief tab shows a fallback empty state (not a crash) when output predates the brief lens', async () => {
+    ;(globalThis as any).window.api = {
+      projectPages: {
+        get: vi.fn().mockResolvedValue({
+          output: {
+            home: '<!DOCTYPE html><html><body>HOME</body></html>',
+            marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
+            feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
+            architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
+            generatedAt: '2026-08-02T00:00:00.000Z',
+          },
+        }),
+      },
+      agents: { listPersonas: listPersonasMock },
+    }
+    const el = mount(<ProjectPagesSection cwd={CWD} />)
+    await flush()
+    const briefTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Brief') as HTMLButtonElement
+    act(() => briefTab.click())
+    expect(el.querySelector('iframe')).toBeNull()
+    expect(el.textContent).toContain('Brief page not generated yet')
+  })
+
   it('clicking Generate Now with no existing project-home-builder Epic calls createPromptSession with tag project-home-builder', async () => {
     ;(globalThis as any).window.api = {
       projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },

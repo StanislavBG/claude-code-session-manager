@@ -90,4 +90,56 @@ describe('validateProjectPageSummary', () => {
       expect(result.errors.some((e) => e.includes('stats'))).toBe(true);
     }
   });
+
+  it('passes when brief is absent (project has not generated brief.json yet)', () => {
+    const summary: any = minimalSummary();
+    delete summary.brief;
+    const result = validateProjectPageSummary(summary);
+    expect(result.ok).toBe(true);
+  });
+
+  it('passes when brief is present with valid fields', () => {
+    const summary: any = minimalSummary();
+    summary.brief = {
+      purpose: 'Local cockpit for Claude Code CLI.',
+      what: ['It runs a terminal.', 'It tracks Epics.'],
+      areas: [{ name: 'src/main', files: 40, note: 'Main process.', epic: null, heat: 0.5 }],
+      scope: [{ when: '2026-08-01', kind: 'decided', text: 'Added the brief lens.', src: 'CLAUDE.md' }],
+      conventions: ['No CommonJS in renderer.'],
+    };
+    const result = validateProjectPageSummary(summary);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects a placeholder brief.purpose', () => {
+    const summary: any = minimalSummary();
+    summary.brief = {
+      purpose: 'TODO',
+      what: [],
+      areas: [],
+      scope: [],
+      conventions: [],
+    };
+    const result = validateProjectPageSummary(summary);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('brief.purpose'))).toBe(true);
+    }
+  });
+
+  it('rejects a non-array brief.areas', () => {
+    const summary: any = minimalSummary();
+    summary.brief = {
+      purpose: 'A real purpose.',
+      what: [],
+      areas: 'not an array',
+      scope: [],
+      conventions: [],
+    };
+    const result = validateProjectPageSummary(summary);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('brief.areas'))).toBe(true);
+    }
+  });
 });

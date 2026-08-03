@@ -26,6 +26,7 @@ const IDENTITY_STRING_FIELDS = ['name', 'tag', 'version', 'oneLine', 'claim', 's
 const FEATURE_STRING_FIELDS = ['name', 'kicker', 'status', 'owner', 'oneLine', 'problem', 'solution'] as const;
 const FEATURE_ARRAY_FIELDS = ['steps', 'rules', 'specs', 'faq', 'timeline'] as const;
 const ARCHITECTURE_ARRAY_FIELDS = ['principles', 'layers', 'modules', 'flow', 'decisions', 'risks'] as const;
+const BRIEF_ARRAY_FIELDS = ['what', 'areas', 'scope', 'conventions'] as const;
 
 export function validateProjectPageSummary(value: unknown): ValidateProjectPageSummaryResult {
   const errors: string[] = [];
@@ -63,6 +64,20 @@ export function validateProjectPageSummary(value: unknown): ValidateProjectPageS
     checkRequiredString(value.architecture, 'summary', 'architecture', errors);
     for (const field of ARCHITECTURE_ARRAY_FIELDS) {
       if (!Array.isArray(value.architecture[field])) errors.push(`architecture.${field} must be an array`);
+    }
+  }
+
+  // `brief` is OPTIONAL — a project whose brief.json has not been generated
+  // yet must still produce a valid summary.json (Stage 1's brief mapping is
+  // additive on top of the pre-existing 4-lens fields above).
+  if (value.brief !== undefined) {
+    if (!isPlainObject(value.brief)) {
+      errors.push('brief must be an object when present');
+    } else {
+      checkRequiredString(value.brief, 'purpose', 'brief', errors);
+      for (const field of BRIEF_ARRAY_FIELDS) {
+        if (!Array.isArray(value.brief[field])) errors.push(`brief.${field} must be an array`);
+      }
     }
   }
 

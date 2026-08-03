@@ -120,6 +120,9 @@ const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 // an exemption it should have applied landed on disk, and nothing in the
 // run record showed that; this is the fix).
 const SCHEDULER_BOOTED_AT = new Date().toISOString();
+// Resolves against __dirname (this app's OWN source checkout) — unaffected by
+// PRD 994's job worktrees, which live under a job's PROJECT cwd, never under
+// this app's install directory.
 const SCHEDULER_CODE_SHA = (() => {
   try {
     return execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], {
@@ -2956,16 +2959,65 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     const guardBaseline = await uncommittedChanges(guardCwd);
     const guardHeadBefore = await gitHead(guardCwd);
 
-    const res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
-      await mutate((s) => {
-        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
-        if (idx >= 0) {
-          s.jobs[idx].sessionId = sessionId;
-          s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
+    // Worktree isolation (PRD 994): give this job its own linked `git worktree`
+    // checkout so its edits/tests/commit never collide with a sibling job or
+    // an interactive session in the SAME repo. `worktree.ok` is false (with a
+    // logged reason) for a non-git cwd, a dirty base tree, the cap being hit,
+    // or SM_JOB_WORKTREE_DISABLE=1 — every case falls back to running in place,
+    // never a hard failure. See jobWorktree.cjs's header comment for why
+    // job.cwd (guardCwd) itself is NEVER repointed at the worktree dir.
+    const worktree = await jobWorktree.createJobWorktree({ cwd: guardCwd, slug: job.slug });
+    if (worktree.ok) {
+      console.log(`[scheduler] ${job.slug}: isolated in worktree ${worktree.dir} (branch ${worktree.branch})`);
+    } else {
+      console.log(`[scheduler] ${job.slug}: running in main tree (worktree not used: ${worktree.reason})`);
+    }
+
+    // Integrate the job's branch back into guardCwd's own HEAD, THEN tear the
+    // worktree checkout down — both must happen BEFORE any git read below
+    // (verify/commit-guard/sigterm check all read guardCwd), so a commit made
+    // inside the worktree is a real commit on the main tree by the time those
+    // checks run, exactly like an in-place commit would be. A leftover
+    // uncommitted file in the worktree would otherwise vanish unnoticed when
+    // the checkout is removed — captured here (worktreeLeftoverDirty) and
+    // folded into the commit-guard's dirty-file list further down.
+    //
+    // Wrapped in try/finally (not straight-line) so an unexpected throw from
+    // executeJob itself still runs integration+cleanup — otherwise a bug
+    // elsewhere in executeJob would leak the worktree checkout (and its
+    // activeWorktreeCount slot) for the rest of this process's life.
+    let res;
+    let worktreeLeftoverDirty = [];
+    let worktreeIntegrationFailure = null;
+    try {
+      res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
+        await mutate((s) => {
+          const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (idx >= 0) {
+            s.jobs[idx].sessionId = sessionId;
+            s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
+          }
+        });
+        await broadcast({ flush: true });
+      }, worktree.ok ? worktree.dir : undefined);
+    } finally {
+      if (worktree.ok) {
+        worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
+        const integration = await jobWorktree.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug });
+        if (!integration.ok) {
+          worktreeIntegrationFailure = integration.reason;
+          console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
+        } else if (integration.integrated) {
+          console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
         }
-      });
-      await broadcast({ flush: true });
-    });
+        await jobWorktree.cleanupJobWorktree({
+          cwd: guardCwd,
+          dir: worktree.dir,
+          branch: worktree.branch,
+          keepBranch: !integration.ok,
+        });
+      }
+    }
 
     if (res.rateLimited) {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
@@ -3080,7 +3132,14 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       // as evidence for the zero-edit path.
       if (after !== null) {
         const baseSet = new Set(guardBaseline || []);
-        const newlyDirty = after.filter((p) => !baseSet.has(p));
+        // worktreeLeftoverDirty was captured from a FRESH checkout (no baseline
+        // to diff against — every path in it is inherently new) right before
+        // the worktree was torn down, so it must be counted here or a job's
+        // uncommitted leftovers silently vanish with the worktree.
+        const newlyDirty = [...new Set([
+          ...after.filter((p) => !baseSet.has(p)),
+          ...worktreeLeftoverDirty,
+        ])];
         const guardState = await readQueue().catch(() => ({ jobs: [] }));
         const siblingRunning = (guardState.jobs || []).some(
           (j) => j.slug !== job.slug && j.status === 'running' && (j.cwd || defaultCwd) === guardCwd,
@@ -3101,6 +3160,20 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           console.log(`[scheduler] commit-guard: ${job.slug} ${what} → needs_review`);
         }
       }
+    }
+
+    // Worktree branch integration failure is a materially-checkable git-state
+    // signal exactly like the commit-guard above, and takes the same priority:
+    // a job whose commit could not be merged back into the main tree is NOT a
+    // success, whatever its exit code or verifier verdict said — the commit
+    // guard AC explicitly requires this failure be surfaced as an explicit job
+    // outcome, never silently dropped alongside the branch it's stranded on.
+    if (worktreeIntegrationFailure) {
+      verifyResult = {
+        verdict: 'worktree_integration_failed',
+        reason: `worktree branch integration failed: ${worktreeIntegrationFailure} — branch preserved for manual merge`,
+        downgradeTo: 'needs_review',
+      };
     }
 
     // SIGTERM commit check: reuse the same commit-window scan the exit=0
@@ -3164,7 +3237,13 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           s.jobs[i2].exitCode = res.exitCode;
           s.jobs[i2].error = effectiveStatus === 'needs_review'
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
-            : (res.error || null);
+            // A failed job (non-zero exit) never consults verifyResult above,
+            // but a worktree integration failure is still worth surfacing on
+            // the row so the stranded branch isn't silently invisible —
+            // concatenated (not `||`), so it's never dropped when res.error
+            // is ALSO set (e.g. a real exit failure whose branch also failed
+            // to integrate must show both, not just the first one).
+            : [res.error, worktreeIntegrationFailure ? verifyResult.reason : null].filter(Boolean).join('; ') || null;
           // Persist the commit THIS run landed (if HEAD advanced) so a later
           // re-fire of the same slug can prove its own no-op re-run is
           // truthful via the pass_no_commit_prior_run_verified exemption.
@@ -3304,7 +3383,14 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       if (maybeTransient) {
         const afterFailure = await uncommittedChanges(guardCwd);
         const baseSet = new Set(guardBaseline || []);
-        const newlyDirty = (afterFailure || []).filter((p) => !baseSet.has(p));
+        // See the commit-guard block above: worktreeLeftoverDirty was captured
+        // (and the checkout already torn down) before this point, so it must
+        // be folded in here too or a transiently-killed job's leftover WIP
+        // silently disappears with its worktree.
+        const newlyDirty = [...new Set([
+          ...(afterFailure || []).filter((p) => !baseSet.has(p)),
+          ...worktreeLeftoverDirty,
+        ])];
         newlyDirtyCount = newlyDirty.length;
         dirtySample = newlyDirty.slice(0, 3).join(', ');
       }
@@ -4500,6 +4586,20 @@ async function init() {
     // see partitionBootOrphans. Everything else (dead pid or no pid) is safe to
     // classify immediately below.
     const bootSnap = readQueueSync();
+
+    // Worktree boot reconciliation (PRD 994): a job worktree that survives an
+    // app crash/host reboot must not leak disk or a dangling branch forever —
+    // this sweeps every known project cwd (every cwd referenced by a queue
+    // row, plus the default project) and removes any of OUR worktrees still
+    // registered there. Best-effort: never blocks the rest of boot.
+    try {
+      const worktreeCwds = new Set(bootSnap.jobs.map((j) => j.cwd).filter(Boolean));
+      worktreeCwds.add(DEFAULT_PROJECT_CWD);
+      await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds]);
+    } catch (e) {
+      console.error('[scheduler] boot worktree reconciliation failed', e?.message);
+    }
+
     const { immediate: immediateSlugs, deferred: deferredSlugs } = partitionBootOrphans(bootSnap.jobs);
     const bootOutcomes = new Map();
     for (const j of bootSnap.jobs) {

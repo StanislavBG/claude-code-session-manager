@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { buildTranscriptDigest, fetchTerminalDigest } from '../terminalDigest'
 
+// Matches the shape classifyLine (main-process) actually emits for a text
+// content block: kind is the message's own role, data is the block's plain
+// text string — see src/main/lib/classifyTranscriptLine.cjs's classifyBlock.
 function userEvent(text: string) {
-  return { kind: 'message', data: { type: 'user', message: { content: [{ type: 'text', text }] } }, raw: '' }
+  return { kind: 'user', data: text, raw: '', previewText: '', ref: null }
 }
 function assistantEvent(text: string) {
-  return { kind: 'message', data: { type: 'assistant', message: { content: [{ type: 'text', text }] } }, raw: '' }
+  return { kind: 'assistant', data: text, raw: '', previewText: '', ref: null }
 }
 
 describe('buildTranscriptDigest', () => {
@@ -14,7 +17,7 @@ describe('buildTranscriptDigest', () => {
   })
 
   it('returns null when there are no message-kind events with text', () => {
-    const events = [{ kind: 'tool_use', data: { name: 'Bash', input: {}, id: '1' }, raw: '' }]
+    const events = [{ kind: 'tool_use', data: { name: 'Bash', input: {}, id: '1' }, raw: '', previewText: '', ref: null }]
     expect(buildTranscriptDigest(events)).toBeNull()
   })
 
@@ -38,11 +41,27 @@ describe('buildTranscriptDigest', () => {
   })
 
   it('skips tool-only turns that have no text blocks', () => {
-    const toolOnly = { kind: 'message', data: { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } }, raw: '' }
+    const toolOnly = { kind: 'tool_use', data: { name: 'Bash', input: {}, id: '2' }, raw: '', previewText: '', ref: null }
     const events = [userEvent('run ls'), toolOnly]
     const digest = buildTranscriptDigest(events)
     expect(digest).toContain('[You] run ls')
     expect(digest).not.toContain('tool_use')
+  })
+
+  it('integrates with the real classifyLine output for a mixed assistant turn', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { classifyLine } = require('../../../main/lib/classifyTranscriptLine.cjs')
+    const events = classifyLine({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'running the tests now' },
+          { type: 'tool_use', name: 'Bash', id: 'tu-1', input: { command: 'npm test' } },
+        ],
+      },
+    })
+    const digest = buildTranscriptDigest(events)
+    expect(digest).toContain('[Claude] running the tests now')
   })
 })
 

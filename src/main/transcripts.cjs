@@ -50,7 +50,11 @@ const MAX_DELTA_BYTES = 8 * 1024 * 1024;
 /**
  * Read new bytes from sub.filePath into sub.offset/pending/inode in place.
  * Resets offset+pending when the file inode changes (rename+replace rotation).
- * Returns parsed line strings ready for JSON.parse.
+ * Returns `{ text, byteOffset, byteLength }` per complete line, so callers can
+ * build a classifyLine `ref` pointing at the exact bytes on disk without
+ * re-deriving offsets downstream. '\n' is always a single UTF-8 byte (0x0A
+ * never appears inside a multi-byte continuation sequence), so byte lengths
+ * computed from the already-decoded string segments are exact.
  */
 async function readDelta(sub) {
   const stat = await fsp.stat(sub.filePath).catch(() => null);
@@ -72,6 +76,9 @@ async function readDelta(sub) {
   let readFrom = sub.offset;
   let length = stat.size - readFrom;
   let skipped = false;
+  // Byte offset of the first char of `sub.pending` — it was already counted
+  // into sub.offset by the previous readDelta call, so back it out here.
+  let textStartOffset = readFrom - Buffer.byteLength(sub.pending, 'utf8');
   if (length > MAX_DELTA_BYTES) {
     // Huge unread span — typically a very large transcript (hundreds of MB) on
     // first attach. Materializing the whole thing into a Buffer + decoded string
@@ -85,6 +92,7 @@ async function readDelta(sub) {
     length = stat.size - readFrom;
     sub.pending = '';
     skipped = true;
+    textStartOffset = readFrom;
   }
   const fd = await fsp.open(sub.filePath, 'r');
   try {
@@ -93,10 +101,23 @@ async function readDelta(sub) {
     const text = sub.pending + buf.toString('utf8');
     const parts = text.split('\n');
     sub.pending = parts.pop() ?? '';
-    if (skipped) parts.shift(); // discard the partial line at the seek boundary
+    let cursor = textStartOffset;
+    if (skipped) {
+      // Discard the partial line at the seek boundary, but still advance the
+      // cursor past its bytes (+1 for the newline) so kept lines' offsets stay
+      // accurate.
+      const discarded = parts.shift() ?? '';
+      cursor += Buffer.byteLength(discarded, 'utf8') + 1;
+    }
+    const lines = [];
+    for (const part of parts) {
+      const byteLength = Buffer.byteLength(part, 'utf8');
+      if (part) lines.push({ text: part, byteOffset: cursor, byteLength });
+      cursor += byteLength + 1; // +1 for the newline separator
+    }
     sub.offset = stat.size;
     sub.inode = stat.ino;
-    return parts.filter(Boolean);
+    return lines;
   } finally {
     await fd.close();
   }
@@ -107,25 +128,30 @@ async function doFlush(sub, { emit = true } = {}) {
   for (const line of lines) {
     let obj;
     try {
-      obj = JSON.parse(line);
+      obj = JSON.parse(line.text);
     } catch {
       continue;
     }
-    const ev = classifyLine(obj);
-    if (!ev) continue;
-    // Ring buffer (cap at 500 entries to bound memory).
-    sub.buffer.push(ev);
-    if (sub.buffer.length > 500) sub.buffer.shift();
-    if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
-    // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
-    // so backfilled transcripts show up in the trace store.
-    otel.recordTranscriptEvent({
-      tabId: sub.tabId,
-      tabCwd: sub.cwd,
-      kind: ev.kind,
-      data: ev.data,
-      ts: Date.now(),
-    });
+    const ref = { filePath: sub.filePath, byteOffset: line.byteOffset, byteLength: line.byteLength };
+    const events = classifyLine(obj, ref);
+    for (const ev of events) {
+      // Ring buffer (cap at 500 entries to bound memory) — capped across the
+      // flattened event stream, not per line, since one line can now emit
+      // several events.
+      sub.buffer.push(ev);
+      if (sub.buffer.length > 500) sub.buffer.shift();
+      if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
+      // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
+      // so backfilled transcripts show up in the trace store. One span per
+      // emitted event, not per line.
+      otel.recordTranscriptEvent({
+        tabId: sub.tabId,
+        tabCwd: sub.cwd,
+        kind: ev.kind,
+        data: ev.data,
+        ts: Date.now(),
+      });
+    }
   }
 }
 
@@ -305,11 +331,13 @@ async function usageForOne(filePath) {
     } catch {
       continue;
     }
-    const ev = classifyLine(obj);
-    if (!ev || ev.kind !== 'usage') continue;
-    const u = ev.data || {};
-    inputTokens += u.input_tokens ?? u.inputTokens ?? 0;
-    outputTokens += u.output_tokens ?? u.outputTokens ?? 0;
+    const events = classifyLine(obj);
+    for (const ev of events) {
+      if (ev.kind !== 'usage') continue;
+      const u = ev.data || {};
+      inputTokens += u.input_tokens ?? u.inputTokens ?? 0;
+      outputTokens += u.output_tokens ?? u.outputTokens ?? 0;
+    }
   }
   const usage = { inputTokens, outputTokens };
   usageCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, usage });
@@ -366,4 +394,8 @@ module.exports = {
   transcriptPath,
   classifyLine,
   usageFor,
+  // Exported for unit tests exercising the array-of-events flush path
+  // (doFlush) and its ring-buffer cap — not part of the IPC surface.
+  subscribe,
+  getBuffer,
 };

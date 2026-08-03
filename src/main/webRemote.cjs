@@ -649,13 +649,14 @@ async function pollSessionWatcher(w) {
   for (const line of res.lines) {
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
-    const ev = require('./transcripts.cjs').classifyLine(obj);
-    if (!ev) continue;
-    const s = deriveState(ev, obj);
-    if (s) nextState = s;
-    if (ev.kind === 'assistant') {
-      const text = extractAssistantText(obj);
-      if (text) { newAssistantText = text; newMsgId = obj.uuid || obj.message?.id || `${w.tabId}:${res.size}`; }
+    const events = require('./transcripts.cjs').classifyLine(obj);
+    for (const ev of events) {
+      const s = deriveState(ev, obj);
+      if (s) nextState = s;
+      if (ev.kind === 'assistant') {
+        const text = extractAssistantText(obj);
+        if (text) { newAssistantText = text; newMsgId = obj.uuid || obj.message?.id || `${w.tabId}:${res.size}`; }
+      }
     }
   }
 

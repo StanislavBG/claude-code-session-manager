@@ -1,7 +1,9 @@
 /**
  * otel — mirrors transcripts.cjs classified events as OpenTelemetry spans.
  *
- * Spans are 0-duration "events": one span per classified transcript line,
+ * Spans are 0-duration "events": one span per classified transcript EVENT
+ * (a single JSONL line can classify to several events — e.g. a usage rollup
+ * alongside real content, or several tool calls in one assistant turn),
  * named `transcript.<kind>`, with structural attributes only. Tool inputs,
  * plan text, and agent prompts are excluded unless `includeContent` is on
  * (matches upstream OTEL_LOG_USER_PROMPTS opt-in).

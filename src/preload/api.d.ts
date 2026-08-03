@@ -171,10 +171,20 @@ export type TranscriptEventKind =
   | 'message'
   | string;
 
+export interface TranscriptEventRef {
+  filePath: string;
+  byteOffset: number;
+  byteLength: number;
+}
+
 export interface TranscriptEvent {
   kind: TranscriptEventKind;
   data: unknown;
   raw: unknown;
+  /** Short, bounded human-scannable preview of `data` — never the source of truth. */
+  previewText: string;
+  /** Byte range of this event's source line on disk; null when classified with no file context. */
+  ref: TranscriptEventRef | null;
 }
 
 export interface SubscribeResult {

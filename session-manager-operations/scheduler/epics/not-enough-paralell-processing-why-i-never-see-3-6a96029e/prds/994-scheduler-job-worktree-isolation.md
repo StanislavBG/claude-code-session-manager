@@ -3,7 +3,7 @@ title: Run each scheduler job in its own git worktree so concurrent jobs cannot 
 cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 90
 sourcePromptId: not-enough-paralell-processing-why-i-never-see-3-6a96029e
-dependsOn: [per-job-commit-attribution]
+dependsOn: [finish-protocol-explicit-staging]
 ---
 # Goal
 

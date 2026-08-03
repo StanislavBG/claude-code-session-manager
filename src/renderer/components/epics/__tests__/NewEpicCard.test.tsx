@@ -239,6 +239,34 @@ describe('NewEpicCard', () => {
     expect(def.className).toContain('border-accent')
   })
 
+  it('pre-selects the "architect" persona by default when one exists in the Agent Library', async () => {
+    listPersonasSpy.mockResolvedValue([
+      { name: 'architect', description: 'Owns overall plan and decomposition.', tools: [], model: 'opus', color: null, tags: [], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
+    ])
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+
+    const architectBtn = el.querySelector('[data-testid="new-epic-agent-architect"]') as HTMLButtonElement
+    expect(architectBtn.className).toContain('border-accent')
+    const def = el.querySelector('[data-testid="new-epic-agent-default"]') as HTMLButtonElement
+    expect(def.className).not.toContain('border-accent')
+
+    const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+    act(() => setNativeValue(goal, 'Plan the next phase'))
+    const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+    act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+      '/home/bilko/Projects/alpha',
+      'Plan the next phase',
+      'feature',
+      'NewEpicCard',
+      'architect',
+    )
+  })
+
   it('threads the selected agent into createPromptSession and grounds the opening prompt with its description', async () => {
     listPersonasSpy.mockResolvedValue([
       { name: 'builder', description: 'Ships releases end to end.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },

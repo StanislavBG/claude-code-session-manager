@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
@@ -108,6 +108,10 @@ export function NewEpicCard({
   // field, so the row always shows a definite choice alongside Mission.
   const [agentName, setAgentName] = useState('')
   const [agents, setAgents] = useState<AgentPersona[] | null>(null)
+  // Tracks whether the human has clicked an Agent chip, so the async
+  // 'architect' default (set once listPersonas() resolves) never clobbers
+  // a manual pick made before or after that resolution.
+  const agentTouchedRef = useRef(false)
   const att = useAttachments()
   const [creating, setCreating] = useState(false)
   const [advanced, setAdvanced] = useState(false)
@@ -126,7 +130,12 @@ export function NewEpicCard({
     ;(async () => {
       try {
         const list = await window.api.agents.listPersonas()
-        if (!cancelled) setAgents(list)
+        if (!cancelled) {
+          setAgents(list)
+          if (!agentTouchedRef.current && list.some((a) => a.name === 'architect')) {
+            setAgentName('architect')
+          }
+        }
       } catch (e) {
         if (!cancelled) {
           setAgents([])
@@ -343,7 +352,10 @@ export function NewEpicCard({
                   <button
                     type="button"
                     data-testid="new-epic-agent-default"
-                    onClick={() => setAgentName('')}
+                    onClick={() => {
+                      agentTouchedRef.current = true
+                      setAgentName('')
+                    }}
                     className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
                       agentName === '' ? 'border-accent bg-bg-elev' : 'border-line bg-bg'
                     }`}
@@ -363,7 +375,10 @@ export function NewEpicCard({
                             key={a.name}
                             type="button"
                             data-testid={`new-epic-agent-${a.name}`}
-                            onClick={() => setAgentName(a.name)}
+                            onClick={() => {
+                              agentTouchedRef.current = true
+                              setAgentName(a.name)
+                            }}
                             className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
                               on ? 'border-accent bg-bg-elev' : 'border-line bg-bg'
                             }`}

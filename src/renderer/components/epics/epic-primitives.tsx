@@ -11,6 +11,12 @@ import type { EpicDisplayStatus } from '../../lib/epicDerive'
 const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: string; ring?: boolean; label: string }> = {
   running:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'running' },
   needs:     { bg: 'bg-delta-bad/15',   text: 'text-delta-bad',   dot: 'bg-delta-bad',   label: 'needs you' },
+  // A PRD in this Epic came back broken — must be re-scoped or re-queued.
+  failed:    { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'failed' },
+  // A PRD in this Epic parked itself asking a question — the primary
+  // "Architect must act" state. Distinct from 'needs', which is a stalled
+  // CHAT run, not a PRD.
+  attention: { bg: 'bg-butter/25',      text: 'text-fg-dim',      dot: 'bg-butter',      label: 'needs review' },
   // Mock (epics-mock.jsx E_STATUS): queued is a FILLED tan pill (#ece0c6) —
   // only active (resting) is the outline variant. Dot is solid muteband (tan),
   // distinct from active's fg-faint grey — in compact rows (dot only, no label text)

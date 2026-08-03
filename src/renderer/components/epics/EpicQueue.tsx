@@ -146,7 +146,7 @@ function useBuildAction(onSelect: (id: string) => void) {
   return { disabled, inFlight, tooltip, handleClick }
 }
 
-const STATUS_ORDER: EpicDisplayStatus[] = ['proposed', 'running', 'needs', 'queued', 'active', 'completed']
+const STATUS_ORDER: EpicDisplayStatus[] = ['proposed', 'failed', 'attention', 'running', 'needs', 'queued', 'active', 'completed']
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
@@ -558,7 +558,10 @@ function ActionsMenuButton({ onNew, onSelect }: { onNew: () => void; onSelect: (
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
   const [editing, setEditing] = useState<'title' | 'goal' | null>(null)
   const age = activityAgeLabel(epic.id, epic, events, now)
-  const queuedDetail = status === 'queued' ? epicQueuedDetail(epic.id, snapshots) : undefined
+  const queuedDetail =
+    status === 'queued' || status === 'failed' || status === 'attention'
+      ? epicQueuedDetail(epic.id, snapshots)
+      : undefined
 
   if (editing) {
     return <RowEditor epic={epic} mode={editing} onCancel={() => setEditing(null)} />

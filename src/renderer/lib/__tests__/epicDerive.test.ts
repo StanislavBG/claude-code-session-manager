@@ -116,6 +116,53 @@ describe('epicDerive.epicDisplayStatus', () => {
     })
     expect(epicDisplayStatus('epic-1', snapshots)).toBe('queued')
   })
+
+  it('returns failed when a job has status failed', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [makeJob({ status: 'failed' })],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('failed')
+  })
+
+  it('returns attention when a job has status needs_review', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [makeJob({ status: 'needs_review' })],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('attention')
+  })
+
+  it('prefers failed over a concurrently running job (a broken PRD outranks an in-flight one)', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [makeJob({ slug: '100-broke', status: 'failed' }), makeJob({ slug: '101-inflight', status: 'running' })],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('failed')
+  })
+
+  it('prefers needs (chat needs-input) over a failed job', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      chats: {
+        'epic-1': makeChat({
+          ticketHistory: [
+            { id: 't1', tabId: 'epic-1', sessionId: 's', cwd: '/proj', text: 'q', status: 'needs-input', createdAt: 0 },
+          ],
+        }),
+      },
+      jobs: [makeJob({ status: 'failed' })],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('needs')
+  })
+
+  it('prefers completed (archived session) over a failed job', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession({ status: 'completed' }) },
+      jobs: [makeJob({ status: 'failed' })],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('completed')
+  })
 })
 
 describe('epicDerive.epicQueuedDetail', () => {
@@ -131,6 +178,22 @@ describe('epicDerive.epicQueuedDetail', () => {
       jobs: [makeJob({ status: 'pending' })],
     })
     expect(epicQueuedDetail('epic-1', snapshots)).toBe('queued — waiting for the scheduler')
+  })
+
+  it('names the failed PRD slug', () => {
+    const snapshots = makeSnapshots({
+      jobs: [makeJob({ slug: '964-epic-detail-agent-readout', status: 'failed' })],
+    })
+    expect(epicQueuedDetail('epic-1', snapshots)).toBe('failed — PRD 964-epic-detail-agent-readout did not complete')
+  })
+
+  it('names the needs_review PRD slug', () => {
+    const snapshots = makeSnapshots({
+      jobs: [makeJob({ slug: '964-epic-detail-agent-readout', status: 'needs_review' })],
+    })
+    expect(epicQueuedDetail('epic-1', snapshots)).toBe(
+      'needs review — PRD 964-epic-detail-agent-readout is asking a question',
+    )
   })
 
   it('returns undefined when nothing is queued', () => {

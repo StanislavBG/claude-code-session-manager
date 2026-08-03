@@ -19,6 +19,10 @@ function noteFor(status: EpicDisplayStatus, epic: PromptSession): string {
       return epic.tag ? `${epic.tag} · ${epic.goalText}` : epic.goalText
     case 'needs':
       return 'waiting on your answer'
+    case 'failed':
+      return 'a PRD failed — needs re-scoping'
+    case 'attention':
+      return 'a PRD is asking a question'
     case 'queued':
       return 'ready to run when a slot frees'
     case 'proposed':

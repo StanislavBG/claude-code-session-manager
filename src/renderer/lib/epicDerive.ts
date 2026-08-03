@@ -22,7 +22,15 @@ export interface EpicSnapshots {
   usage?: Record<string, EpicUsage>
 }
 
-export type EpicDisplayStatus = 'running' | 'needs' | 'queued' | 'completed' | 'proposed' | 'active'
+export type EpicDisplayStatus =
+  | 'running'
+  | 'needs'
+  | 'failed'
+  | 'attention'
+  | 'queued'
+  | 'completed'
+  | 'proposed'
+  | 'active'
 
 /** NewEpicCard.tsx writes goalText as `${title}\n\n${goal}` (no separate
  *  title field on PromptSession) — split back apart for the header's h1 +
@@ -36,10 +44,18 @@ export function splitTitleAndGoal(goalText: string): { title: string; goal: stri
 }
 
 /**
- * Derived Epic-level status per the design spec's status vocabulary. Order
- * matters: completed (archived) and needs-you (a stalled question) both take
- * priority over an in-flight run/queue position, since those are the states
- * that most need surfacing to the user.
+ * Derived Epic-level status per the design spec's status vocabulary.
+ *
+ * Precedence, highest first: `completed` → `proposed` → `needs` (chat
+ * needs-input) → `failed` (any job with status 'failed') → `attention` (any
+ * job with status 'needs_review') → `running` → `queued` → `active`.
+ *
+ * A terminal bad outcome (`failed`/`attention`) outranks an in-flight run
+ * because a later PRD running does not discharge the Architect's obligation
+ * to deal with the one that already broke — surfacing "still running" while
+ * hiding a broken PRD underneath it would let it silently rot. `needs`
+ * (a stalled chat question) outranks both because it blocks the whole Epic's
+ * session, not just one PRD.
  */
 export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): EpicDisplayStatus {
   const session = snapshots.sessions[epicId]
@@ -54,6 +70,9 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
   if (hasPendingNeedsInput) return 'needs'
 
   const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
+  if (epicJobs.some((j) => j.status === 'failed')) return 'failed'
+  if (epicJobs.some((j) => j.status === 'needs_review')) return 'attention'
+
   const chatQueuedPosition = chat?.queuedPosition ?? 0
   const chatRunning = chat?.running === true && chatQueuedPosition === 0
   const jobRunning = epicJobs.some((j) => j.status === 'running')
@@ -78,16 +97,30 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
  * literally waiting on the machine-wide session-slot pool" (chatRunner.cjs's
  * chat:run:queued position) from "a PRD is queued behind the scheduler" so a
  * hover/hidden-when-idle tooltip can say something more specific than the
- * bare 'queued' chip label. Returns undefined for any other status (or when
- * no queue signal is currently present).
+ * bare 'queued' chip label. Also covers 'failed'/'attention' — names the
+ * responsible PRD slug so colour is never the only carrier of the signal.
+ * Returns undefined for any other status (or when no queue signal is
+ * currently present).
  */
 export function epicQueuedDetail(epicId: string, snapshots: EpicSnapshots): string | undefined {
+  // Checked ahead of the chat-queue branch below to match epicDisplayStatus's
+  // own precedence (failed/attention outrank queued) — otherwise an Epic
+  // whose chat is ALSO queued behind the session-slot pool could show a
+  // "failed" chip next to a "queued — waiting on a session slot" tooltip.
+  const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
+  const failedJob = epicJobs.find((j) => j.status === 'failed')
+  if (failedJob) {
+    return `failed — PRD ${failedJob.slug} did not complete`
+  }
+  const needsReviewJob = epicJobs.find((j) => j.status === 'needs_review')
+  if (needsReviewJob) {
+    return `needs review — PRD ${needsReviewJob.slug} is asking a question`
+  }
   const chat = snapshots.chats[epicId]
   const chatQueuedPosition = chat?.queuedPosition ?? 0
   if (chat?.running === true && chatQueuedPosition > 0) {
     return `queued — waiting on a session slot (position ${chatQueuedPosition})`
   }
-  const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
   if (epicJobs.some((j) => j.status === 'pending')) {
     return 'queued — waiting for the scheduler'
   }

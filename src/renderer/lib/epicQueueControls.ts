@@ -18,7 +18,7 @@ export type EpicSortKey = 'recent' | 'title' | 'prdCount' | 'tokens' | 'turns'
 export const PAGE = 18
 export const PAGE_INCREMENT = 40
 
-export const STATUS_GROUP_ORDER: EpicDisplayStatus[] = ['proposed', 'needs', 'running', 'queued', 'active', 'completed']
+export const STATUS_GROUP_ORDER: EpicDisplayStatus[] = ['proposed', 'failed', 'attention', 'running', 'needs', 'queued', 'active', 'completed']
 export { TAG_GROUP_ORDER }
 export const RECENCY_GROUP_ORDER: ReadonlyArray<string> = ['Today', 'This week', 'This month', 'Older']
 

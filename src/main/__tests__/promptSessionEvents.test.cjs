@@ -161,6 +161,35 @@ test('appending with { prdSlug, outcome } persists both onto the event on disk',
   expect(event.outcome).toBe('completed');
 });
 
+// PRD 986: a scheduler check-in event is born 'unvalidated' — the stamp is
+// persisted from meta, and events appended without it carry no validation
+// key at all (pre-existing events keep rendering as they do today).
+test('appending with { validation } persists the stamp; without it no validation key exists', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: {
+      'psess-1': [
+        { id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
+  });
+
+  const routed = await appendResponseEventIfKnown(cwd, 'psess-1', 'PRD 986-foo finished: completed.', {
+    prdSlug: '986-foo',
+    outcome: 'completed',
+    validation: 'unvalidated',
+  });
+  expect(routed).toBe(true);
+
+  await appendResponseEventIfKnown(cwd, 'psess-1', 'plain response, no meta');
+
+  const raw = await fsp.readFile(promptSessionActiveIndexPath(cwd), 'utf8');
+  const onDisk = JSON.parse(raw);
+  const [, checkin, plain] = onDisk.events['psess-1'];
+  expect(checkin.validation).toBe('unvalidated');
+  expect('validation' in plain).toBe(false);
+});
+
 test('appending without { prdSlug, outcome } persists an event with neither key set', async () => {
   await writeIndex({
     sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },

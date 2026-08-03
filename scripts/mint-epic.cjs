@@ -5,11 +5,11 @@
  * manual-write fallback).
  *
  * This script never creates an Epic. It only resolves an EXISTING Epic's
- * prds/ write directory. An Epic may only come into existence through
- * explicit human intent — the New Epic UI, or /propose-epic followed by a
- * human pressing Approve & start — never implicitly from a PRD-authoring
- * path. /develop must already be running inside that Epic's own
- * conversation (or have the approved Epic's id in hand) before it calls this.
+ * prds/ write directory. An Epic comes into existence in exactly one place —
+ * the human pressing New Epic in the app (epicMint.cjs's SINGLE-CREATOR LAW)
+ * — never implicitly from a PRD-authoring path. /develop must already be
+ * running inside that Epic's own conversation (or have its id in hand)
+ * before it calls this.
  *
  * Usage:
  *   node scripts/mint-epic.cjs <cwd> <epic-id>
@@ -31,7 +31,7 @@ if (!cwd || !epicId) {
 
 (async () => {
   try {
-    const { prdDir } = await ensureEpic(cwd, { epicId, mintIfMissing: false });
+    const { prdDir } = await ensureEpic(cwd, { epicId });
     process.stderr.write(`joined epic ${epicId}\n`);
     process.stdout.write(`${prdDir}\n`);
   } catch (e) {

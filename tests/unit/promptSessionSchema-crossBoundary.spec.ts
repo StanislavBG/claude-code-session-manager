@@ -2,30 +2,32 @@
  * Cross-boundary regression test for PRD 953 (dependent on PRD 952's
  * canonical PromptSessionSchema, src/main/lib/promptSessionSchema.cjs).
  *
- * Two independently hand-built PromptSession object literals exist in this
- * codebase: the main-process mint path (epicMint.cjs's ensureEpic, validated
- * against PromptSessionSchema by PRD 952) and the renderer's own construction
- * path (createPromptSession, state/promptSessions.ts). This file closes the
- * second drift risk directly:
- *
- *  - the IPC boundary (`promptSessionsMergeActiveIndex`) must now reject a
- *    malformed session sent by a renderer, not just validate the envelope.
- *  - the renderer's REAL construction output (via the extracted, pure
- *    `buildPromptSession`) must validate cleanly against the same schema —
- *    if either side drifts from the other, this test fails.
+ * Historically two independently hand-built PromptSession object literals
+ * existed: the main-process mint path (epicMint.cjs's ensureEpic) and the
+ * renderer's own construction path (createPromptSession's buildPromptSession,
+ * state/promptSessions.ts). PRD 954 retired the renderer-side construction
+ * entirely — createPromptSession now calls main's ensureEpic over IPC
+ * (window.api.promptSessions.create) instead of hand-building the object, so
+ * there is no second literal left to drift-check here. What remains load-
+ * bearing is the IPC boundary itself: `promptSessionsMergeActiveIndex` must
+ * still validate session CONTENT sent by a renderer for any NON-creation
+ * mutation (event append, approveProposed, etc.), not just the envelope — and
+ * it must do so per-ROW: persistActiveIndex sends every open Epic for a cwd in
+ * one call, so a malformed row is dropped while its valid siblings still
+ * persist, never failing the whole batch.
  *
  * Run: timeout 300 npx vitest run tests/unit/promptSessionSchema-crossBoundary.spec.ts
  */
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
-import { buildPromptSession } from '../../src/renderer/state/promptSessions'
 
 const require = createRequire(import.meta.url)
 const { schemas } = require('../../src/main/ipcSchemas.cjs') as {
-  schemas: { promptSessionsMergeActiveIndex: { safeParse: (v: unknown) => { success: boolean; error?: unknown } } }
-}
-const { PromptSessionSchema } = require('../../src/main/lib/promptSessionSchema.cjs') as {
-  PromptSessionSchema: { safeParse: (v: unknown) => { success: boolean; error?: unknown } }
+  schemas: {
+    promptSessionsMergeActiveIndex: {
+      safeParse: (v: unknown) => { success: boolean; data?: { sessions: Record<string, unknown> }; error?: unknown }
+    }
+  }
 }
 
 function validEnvelope(sessions: Record<string, unknown>) {
@@ -33,7 +35,7 @@ function validEnvelope(sessions: Record<string, unknown>) {
 }
 
 describe('promptSessionsMergeActiveIndex IPC boundary validates session content', () => {
-  it('rejects a session missing claudeSessionId', () => {
+  it('drops a session missing claudeSessionId', () => {
     const malformed = {
       id: 'psess-bad1',
       cwd: '/home/user/project',
@@ -44,10 +46,11 @@ describe('promptSessionsMergeActiveIndex IPC boundary validates session content'
       completedAt: null,
     }
     const result = schemas.promptSessionsMergeActiveIndex.safeParse(validEnvelope({ 'psess-bad1': malformed }))
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
+    expect(result.data?.sessions).toEqual({})
   })
 
-  it('rejects a session with an invalid status value', () => {
+  it('drops a session with an invalid status value', () => {
     const malformed = {
       id: 'psess-bad2',
       cwd: '/home/user/project',
@@ -58,7 +61,8 @@ describe('promptSessionsMergeActiveIndex IPC boundary validates session content'
       completedAt: null,
     }
     const result = schemas.promptSessionsMergeActiveIndex.safeParse(validEnvelope({ 'psess-bad2': malformed }))
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
+    expect(result.data?.sessions).toEqual({})
   })
 
   it('accepts a well-formed session', () => {
@@ -73,21 +77,47 @@ describe('promptSessionsMergeActiveIndex IPC boundary validates session content'
     }
     const result = schemas.promptSessionsMergeActiveIndex.safeParse(validEnvelope({ 'psess-ok1': ok }))
     expect(result.success).toBe(true)
-  })
-})
-
-describe('renderer createPromptSession output matches the canonical schema (drift detector)', () => {
-  it('validates a plain cwd/goalText session cleanly', () => {
-    const session = buildPromptSession('/home/user/project', 'Fix the login bug')
-    const result = PromptSessionSchema.safeParse(session)
-    expect(result.success).toBe(true)
+    expect(Object.keys(result.data?.sessions ?? {})).toEqual(['psess-ok1'])
   })
 
-  it('validates a session with tag + agentType set cleanly', () => {
-    const session = buildPromptSession('/home/user/project', 'Ship the new onboarding flow', 'feature', 'dev-lead')
-    const result = PromptSessionSchema.safeParse(session)
+  // The whole point of per-row validation: one bad Epic must not stop every
+  // other Epic in the same cwd from persisting (they all ride one call).
+  it('persists the valid sessions in a batch that also contains a malformed one', () => {
+    const ok = {
+      id: 'psess-ok2',
+      cwd: '/home/user/project',
+      goalText: 'keep me',
+      claudeSessionId: 'claude-ok2',
+      status: 'active',
+      createdAt: '2026-08-02T13:48:00.000Z',
+      completedAt: null,
+    }
+    const malformed = { id: 'psess-bad3', cwd: '/home/user/project', status: 'active' }
+
+    const result = schemas.promptSessionsMergeActiveIndex.safeParse(
+      validEnvelope({ 'psess-ok2': ok, 'psess-bad3': malformed }),
+    )
+
     expect(result.success).toBe(true)
-    expect(session.tag).toBe('feature')
-    expect(session.agentType).toBe('dev-lead')
+    expect(Object.keys(result.data?.sessions ?? {})).toEqual(['psess-ok2'])
+  })
+
+  it('drops a session whose id is a prototype-pollution key rather than failing the batch', () => {
+    const ok = {
+      id: 'psess-ok3',
+      cwd: '/home/user/project',
+      goalText: 'keep me too',
+      claudeSessionId: 'claude-ok3',
+      status: 'proposed',
+      createdAt: '2026-08-02T13:48:00.000Z',
+      completedAt: null,
+    }
+    const sessions: Record<string, unknown> = { 'psess-ok3': ok }
+    Object.defineProperty(sessions, '__proto__', { value: ok, enumerable: true, configurable: true })
+
+    const result = schemas.promptSessionsMergeActiveIndex.safeParse(validEnvelope(sessions))
+
+    expect(result.success).toBe(true)
+    expect(Object.keys(result.data?.sessions ?? {})).toEqual(['psess-ok3'])
   })
 })

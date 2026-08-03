@@ -21,7 +21,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { mergeActiveIndex } = require('../lib/activeIndexMerge.cjs');
-const { ensureEpic, readActiveIndex } = require('../lib/epicMint.cjs');
+const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
 const { appendResponseEventIfKnown } = require('../promptSessionEvents.cjs');
 const config = require('../config.cjs');
 
@@ -199,7 +199,7 @@ test('mint-during-persist: an ensureEpic mint interleaved with a merge call surv
   await mergeActiveIndex(cwd, { sessions: { [existing.id]: existing }, events: {} });
 
   const [mintResult] = await Promise.all([
-    ensureEpic(cwd, { goalText: 'minted during a concurrent merge' }),
+    ensureEpic(cwd, { goalText: 'minted during a concurrent merge', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI }),
     mergeActiveIndex(cwd, { sessions: { [existing.id]: existing }, events: {} }),
   ]);
 

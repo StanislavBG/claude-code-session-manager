@@ -97,7 +97,7 @@ into this archive (flat → `prds-archived/`), it never deletes from it, and no 
 scheduler tick touches these files after that. Enforcement is manual — per `OWNERS`, `scheduler`
 is this namespace's sole writer, so any pruning would run through that same write path, but no
 such pruning call exists today. If retention here is ever revisited (e.g. because the count grows
-large enough to matter), that's a deliberate decision made via a proposed Epic (`/propose-epic`),
+large enough to matter), that's a deliberate decision made in an Epic the human opened,
 per `ops-maintenance-protocol.md` Pattern E/F — never a file-age/size-based deletion made
 unilaterally by a sweep agent or ad hoc script. Building an automatic pruning mechanism is out of
 scope here and would need its own proposed Epic.

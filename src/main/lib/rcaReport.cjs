@@ -1,12 +1,20 @@
 'use strict';
 
 /**
- * rcaFeedbackHook.cjs — files a deterministic Root Cause Analysis feedback
- * item when a scheduler job is parked in `needs_review`.
+ * rcaReport.cjs — writes a deterministic Root Cause Analysis report into the
+ * run directory when a scheduler job is parked in `needs_review`.
  *
  * Mirrors the dodDrainHook.cjs pattern: fire-and-forget, idempotent,
  * kill-switched, never throws to the caller. Unlike the DoD gate this fires
  * per-job at the needs_review transition, not at queue drain.
+ *
+ * This module creates NOTHING but a markdown file next to the run's own log.
+ * It used to file a `proposed` Epic per parked job; Epics are now created in
+ * exactly one place — the human pressing New Epic (see epicMint.cjs's
+ * SINGLE-CREATOR LAW). Surfacing the parked job back to a human is the
+ * scheduler's job (notifyNeedsReview → appendResponseEventIfKnown), which
+ * routes it into the Epic that AUTHORED the PRD rather than opening a
+ * sibling Epic about it.
  *
  * No LLM calls live here — the RCA body is assembled deterministically from
  * the run's meta.json, log tail, and the original PRD's acceptance-criteria
@@ -17,33 +25,16 @@
  *
  * Kill-switch: SM_RCA_DISABLE=1 (mirrors SM_DOD_DISABLE / SM_SUPERVISOR_DISABLE).
  *
- * Electron-free by design (no require('electron')) so tests stay hermetic.
- * config.cjs itself requires('electron'), but that resolves to a harmless
- * string (not the electron module) when required outside the Electron
- * runtime, and this lib never touches ipcMain — only the atomic-write /
- * path-validation helpers.
+ * Electron-free by design (no require('electron')) so tests stay hermetic —
+ * it only reads run artifacts and writes one markdown file into the run dir
+ * the caller already owns.
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const config = require('../config.cjs');
-const { ensureEpic, findJoinableEpic } = require('./epicMint.cjs');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readTail } = require('./fileTail.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
-
-// The one project this hook always knows how to reach, used as the fallback
-// destination when a job's own cwd has no feedback inbox.
-const SM_REPO_ROOT = path.join(os.homedir(), 'Projects', 'session-manager');
-
-// NEVER write here: ~/.claude/session-manager/feedback/ is the scheduler's
-// auto-PRD intake (src/main/scheduler.cjs's periodic feedback sweep) — it
-// converts anything dropped there into a scheduled PRD automatically. Filing
-// an RCA there would create an RCA → auto-PRD → run → needs_review → RCA
-// cycle with no human in the loop. Both real destinations below are project
-// feedback INBOXES (consumed by /process-feedback), which is a different,
-// human/agent-triaged path.
 
 // ─── VERDICT_LABELS — deliberate duplicate ──────────────────────────────────
 // Mirrors src/renderer/components/tabs/scheduler/sched-primitives.tsx:123-131.
@@ -197,39 +188,10 @@ function extractAcceptanceCriteria(prdBody) {
   return text || null;
 }
 
-// ─── Destination resolution ──────────────────────────────────────────────────
-
-/**
- * Resolve which PROJECT the proposal is filed into.
- *   1. the job's own cwd — Epics live in every project, so this is almost
- *      always the answer.
- *   2. else session-manager's own repo, naming the target project in the body.
- *
- * The old version probed for a `session-manager-operations/feedback/`
- * directory and fell back when it was missing; with proposals there is
- * nothing to probe for — the Epic store is created on demand.
- */
-function resolveDestination(job) {
-  const jobCwd = job?.cwd;
-  if (jobCwd) {
-    return { cwd: jobCwd, allowlistRoot: jobCwd, targetProjectNote: null };
-  }
-  return {
-    cwd: SM_REPO_ROOT,
-    allowlistRoot: SM_REPO_ROOT,
-    targetProjectNote: "Filed into session-manager's own project (job had no cwd on record).",
-  };
-}
-
-/** One-line title for the proposal — goalText is what the Epics list shows,
- *  so it must stay short; the full RCA markdown rides in openingPrompt. */
-function rcaProposalTitle(job, verdict) {
+/** One-line summary of the parked job — used as the report's title and as the
+ *  text the scheduler surfaces back into the Epic that authored the PRD. */
+function rcaSummaryLine(job, verdict) {
   return `PRD ${job?.slug ?? 'unknown'} needs review: ${humanVerdict(verdict)}`;
-}
-
-function shortRunId(runId) {
-  const cleaned = String(runId ?? '').replace(/[^a-zA-Z0-9]/g, '');
-  return cleaned.slice(0, 12) || 'norun';
 }
 
 function lastNLines(text, n) {
@@ -261,7 +223,7 @@ function readPrdBody(cwd, slug) {
  * Assemble the deterministic RCA markdown body (frontmatter + sections).
  * Pure — no I/O, no LLM.
  */
-function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, investigationText, targetProjectNote }) {
+function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, investigationText }) {
   const title = `Root cause: ${job.slug} → needs_review (${humanVerdict(verdict)})`;
   const fm = ['---', `title: ${title}`, 'source: scheduler-rca', 'type: rca', 'severity: normal', `prdSlug: ${job.slug}`, `runId: ${job.runId}`, `verdict: ${verdict}`, '---'].join('\n');
 
@@ -277,21 +239,21 @@ function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, i
     `# The PRD's acceptance criteria\n\n${acText || '(acceptance criteria not found — original PRD may have been archived or removed)'}`,
     `# Likely failure class\n\n**${failureClass}**\n\nPrevention: ${prevention}`,
   ];
-  if (targetProjectNote) sections.push(`# Note\n\n${targetProjectNote}`);
   if (investigationText) sections.push(`## Investigation analysis\n\n${investigationText.trim()}`);
 
   return `${fm}\n\n${sections.join('\n\n')}\n`;
 }
 
 /**
- * File (or update) a deterministic RCA feedback item for a needs_review job.
+ * Write (or refresh) the deterministic RCA report for a needs_review job,
+ * as `<runDir>/root-cause-<slug>.md` — next to the run's own log, the same
+ * place the definition-of-done gate writes its report (dodDrainHook.cjs).
  * Never throws — logs one line on success/skip/error and always resolves.
  *
- * Idempotency: the destination filename is deterministic per (slug, runId).
- * A second call for the same (slug, runId) with no investigationText is a
- * no-op; a second call WITH investigationText overwrites the same file to
- * add/replace the "Investigation analysis" section rather than filing a
- * duplicate. A different runId (new run of the same slug) files a new RCA.
+ * Idempotency: one report per run directory per slug, and a run dir is
+ * per-(runId). A second call for the same run overwrites it in place, which
+ * is exactly what the investigation-enrichment pass wants (it re-renders the
+ * same body plus an "Investigation analysis" section) — never a duplicate.
  *
  * @param {object} opts
  * @param {{slug: string, cwd?: string, runId: string, exitCode?: number, error?: string, epicId?: string}} opts.job
@@ -300,10 +262,9 @@ function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, i
  * @param {Array}  [opts.annotations]  Non-blocking verifier annotations (currently unused
  *                                     in the body beyond being accepted for future use).
  * @param {string} [opts.investigationText]  <RCA> block text from an Opus investigation.
- * @param {Date}   [opts.now]      Override for the date segment of the filename (testing).
- * @returns {Promise<{filed: boolean, path?: string, updated?: boolean, reason?: string}>}
+ * @returns {Promise<{filed: boolean, path?: string, summary?: string, failureClass?: string, reason?: string}>}
  */
-async function fileRcaFeedback({ job, runDir, verdict, annotations, investigationText, now } = {}) {
+async function writeRcaReport({ job, runDir, verdict, annotations, investigationText } = {}) {
   try {
     if (process.env.SM_RCA_DISABLE === '1') {
       console.log('[rca] skip: SM_RCA_DISABLE=1');
@@ -327,7 +288,10 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
       return { filed: false, reason: 'no-verdict' };
     }
 
-    const dest = resolveDestination(job);
+    if (!runDir) {
+      console.log(`[rca] skip: no run directory for ${job.slug}`);
+      return { filed: false, reason: 'no-run-dir' };
+    }
 
     const meta = readRunMeta(runDir, job.slug);
     const logPath = runDir ? path.join(runDir, `${job.slug}.log`) : null;
@@ -336,67 +300,36 @@ async function fileRcaFeedback({ job, runDir, verdict, annotations, investigatio
     const failureClass = classifyFailure({ verdict, logTail });
 
     const markdown = buildRcaMarkdown({
-      job, verdict, meta, logTail, acText, failureClass, investigationText,
-      targetProjectNote: dest.targetProjectNote, annotations,
+      job, verdict, meta, logTail, acText, failureClass, investigationText, annotations,
     });
 
-    // File it as a PROPOSED Epic rather than a markdown file in a feedback
-    // inbox. The proposal lands directly in the Epics workspace behind an
-    // Approve & start gate: nothing runs and nothing is spent until a human
-    // approves it. This replaced the feedback-folder intake (and the
-    // process-feedback triage pass that existed only to read it back out) —
-    // the proposal IS the work item, already carrying its own session and
-    // PRD directory. reuseByGoal makes a re-trigger for the same failure
-    // join the existing proposal instead of duplicating it, which is what
-    // the old live/processed existence checks were for.
-    config.addAllowedRoot(dest.allowlistRoot);
-    const title = rcaProposalTitle(job, verdict);
+    // Raw fs (not config.cjs's writeTextAtomic) for the same reason the rest
+    // of this lib uses it: the run directory lives under
+    // ~/.claude/session-manager/scheduled-plans/runs/, which is Session-Manager
+    // runtime state, not an OWNERS namespace under a project's operations root.
+    const reportPath = path.join(runDir, `root-cause-${job.slug}.md`);
+    fs.mkdirSync(runDir, { recursive: true });
+    const tmp = `${reportPath}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, markdown);
+    fs.renameSync(tmp, reportPath);
 
-    // job.epicId (present on jobs authored after Epic-gating landed; absent
-    // on legacy PRDs) is the known origin Epic this failing job belonged to.
-    // Passing it straight through as ensureEpic's `epicId` would hit its
-    // explicitEpicId join-only branch, which joins unconditionally — even a
-    // 'completed' Epic. findJoinableEpic's preferEpicId strategy is the one
-    // that only joins when the Epic is still open ('proposed'/'active'), so
-    // resolve it here and only forward it when that strategy actually fires
-    // — otherwise fall through to the existing reuseByGoal/mint behavior.
-    // Once forwarded, ensureEpic joins it unconditionally by id (no second
-    // status check) — the status gate lives entirely in this resolve step.
-    let preferredEpicId;
-    if (typeof job.epicId === 'string' && job.epicId) {
-      const joinable = findJoinableEpic(dest.cwd, { goalText: title, preferEpicId: job.epicId, status: 'proposed' });
-      if (joinable && joinable.matchedBy === 'preferEpicId') {
-        preferredEpicId = joinable.epicId;
-      }
-    }
-
-    const { epicId, created } = await ensureEpic(dest.cwd, {
-      goalText: title,
-      tag: 'bug',
-      status: 'proposed',
-      reuseByGoal: true,
-      openingPrompt: markdown,
-      epicId: preferredEpicId,
-      source: { producer: 'rca-hook', prdSlug: job.slug, runId: job.runId },
-    });
-
-    console.log(`[rca] ${created ? 'proposed' : 'joined'} epic ${epicId} for ${job.slug}`);
-    return { filed: true, epicId, created, updated: !created };
+    const summary = rcaSummaryLine(job, verdict);
+    console.log(`[rca] wrote ${reportPath} (${failureClass})`);
+    return { filed: true, path: reportPath, summary, failureClass };
   } catch (e) {
-    console.error('[rca] error filing RCA feedback', e?.message ?? String(e));
+    console.error('[rca] error writing RCA report', e?.message ?? String(e));
     return { filed: false, reason: 'error', error: e?.message ?? String(e) };
   }
 }
 
 module.exports = {
-  fileRcaFeedback,
-  rcaProposalTitle,
+  writeRcaReport,
+  rcaSummaryLine,
   // Pure helpers, exported for unit tests.
   humanVerdict,
   classifyFailure,
   extractAcceptanceCriteria,
   extractRcaBlock,
-  resolveDestination,
   buildRcaMarkdown,
   FAILURE_CLASSES,
   VERDICT_LABELS,

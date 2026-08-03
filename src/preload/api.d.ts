@@ -1747,7 +1747,7 @@ export interface PromptSessionsCreateEpicPayload {
   tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher';
   agentType?: string;
   source?: {
-    producer: 'rca-hook' | 'feedback-sweep' | 'propose-epic' | 'scheduler-dispatch';
+    producer: 'new-epic-ui' | 'scheduler-dispatch';
     prdSlug?: string;
     runId?: string;
     sourceTabId?: string;

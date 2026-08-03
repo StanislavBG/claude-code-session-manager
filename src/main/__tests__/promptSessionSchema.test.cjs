@@ -23,7 +23,7 @@ test('a valid full record parses', () => {
     tag: 'feature',
     openingPrompt: 'full body of the first prompt',
     source: {
-      producer: 'rca-hook',
+      producer: 'new-epic-ui',
       prdSlug: '123-fix-thing',
       runId: 'run-1',
       sourceTabId: 'tab-1',

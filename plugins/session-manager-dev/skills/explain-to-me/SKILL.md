@@ -67,7 +67,7 @@ If you can't state it in the present tense without a date or a PRD, cut it.
 - **The Skill Map** — `session-manager-operations/HUMAN_LEARN/SKILL_MAP.html`, a
   **separate, dedicated** page (NOT a section of index.html) that visualizes the
   *local-development skill chain*: the two intakes (interactive human prompt;
-  agent proposals via `/propose-epic`, approved by the user) converging on `/develop`, which owns
+  human-opened Epics in the app) converging on `/develop`, which owns
   PRD authoring + reads `standards.md`, queues onto the scheduler, and gates with
   review/verify. It is the "how I build on this
   project" companion to index.html's "how this project works." index.html links

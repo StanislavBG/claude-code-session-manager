@@ -32,7 +32,7 @@ const EpicTagSchema = z.enum([
 
 // Mirrors EpicSource (src/renderer/state/promptSessions.ts:22-27).
 const EpicSourceSchema = z.object({
-  producer: z.enum(['rca-hook', 'feedback-sweep', 'propose-epic', 'scheduler-dispatch']),
+  producer: z.enum(['new-epic-ui', 'scheduler-dispatch']),
   prdSlug: z.string().optional(),
   runId: z.string().optional(),
   sourceTabId: z.string().optional(),

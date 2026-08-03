@@ -20,9 +20,10 @@ description: >-
 **Role:** `/develop` owns the *pipeline*: it turns a development request into one or more
 self-contained PRDs, queues them, and tracks them to completion. It is the convergence point
 for both entry paths — an interactive human prompt inside an Epic's own conversation comes
-straight here; an agent feedback file arrives as an approved Epic proposal (`/propose-epic`),
-which the user approves and then calls this skill. Everything from here on is identical
-regardless of who asked.
+straight here; so does an agent that concluded work is needed while running inside that same
+Epic. There is no separate proposal channel any more: an Epic exists because a human opened
+one, and `/develop` authors PRDs into it. Everything from here on is identical regardless of
+who asked.
 
 **Epic-gated — non-negotiable.** `/develop` may only run inside an already-existing,
 already-human-approved Epic's own conversation (Chat or Terminal — the two views over one Epic
@@ -33,9 +34,9 @@ one it had to guess at. Before doing anything else:
    that Epic's `id` is `<epic-id>` for every PRD authored in this pass.
 2. If it doesn't match any Epic — this was invoked as a bare standalone command outside any
    Epic context — **stop and say so**. Tell the human to create the Epic first (the New Epic
-   card in the app, or `/propose-epic` + **Approve & start**), then re-run `/develop` from
-   inside that Epic. Do not mint one yourself, do not fall back to writing an epicless PRD, and
-   do not proceed with authoring.
+   card in the app — the only place an Epic can be created), then re-run `/develop` from
+   inside that Epic. Do not mint one yourself (`ensureEpic` will refuse), do not fall back to
+   writing an epicless PRD, and do not proceed with authoring.
 
 **Tag-aware default (2026-08-01).** The Epic's own intent tag (`feature` / `bug` /
 `discussion` — CLAUDE.md's domain model) sets how eagerly this skill should fire, not just

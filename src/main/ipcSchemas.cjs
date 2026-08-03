@@ -230,9 +230,35 @@ const configParseImports = z.object({ path: z.string().min(1).max(4096) });
 // Real epic ids are `${slugify(goalText)}-${uuid8}` (epicMint.cjs) — max 64
 // mirrors slugify's 48-char cap plus the "-" + 8 hex chars suffix, rounded up.
 const PROMPT_SESSION_ID_RE = /^(?!__proto__$|constructor$|prototype$)[A-Za-z0-9_-]{1,64}$/;
+
+// Per-ROW validation, not per-BATCH. persistActiveIndex (state/promptSessions.ts)
+// sends every open Epic for a cwd in ONE call, so validating the map with a
+// single parse meant one malformed/legacy row rejected the whole payload —
+// every other legitimate Epic for that cwd silently stopped persisting (the
+// renderer only logs the failure). Dropping just the offending row matches how
+// the rest of this pipeline already fails: per-id (activeIndexMerge.cjs's
+// tombstone/resurrection handling), never per-batch.
+const dropInvalidSessions = (raw) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const kept = Object.create(null);
+  for (const id of Object.keys(raw)) {
+    if (!PROMPT_SESSION_ID_RE.test(id)) {
+      console.warn(`[ipc] merge-active-index: dropping session with invalid id ${JSON.stringify(id)}`);
+      continue;
+    }
+    const parsed = PromptSessionSchema.safeParse(raw[id]);
+    if (!parsed.success) {
+      console.warn(`[ipc] merge-active-index: dropping malformed session ${id} — ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      continue;
+    }
+    kept[id] = raw[id];
+  }
+  return kept;
+};
+
 const promptSessionsMergeActiveIndex = z.object({
   cwd: z.string().min(1).max(4096),
-  sessions: z.record(z.string().regex(PROMPT_SESSION_ID_RE), PromptSessionSchema).refine(
+  sessions: z.preprocess(dropInvalidSessions, z.record(z.string().regex(PROMPT_SESSION_ID_RE), PromptSessionSchema)).refine(
     (v) => Object.keys(v).length <= 2000,
     { message: 'too many sessions in one merge payload' },
   ),

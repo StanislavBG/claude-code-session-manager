@@ -8,9 +8,8 @@ description: >-
   all. Diffs declared-vs-actual namespace ownership, flags doc contradictions
   (one doc says retired, another says still owned), and flags archived content
   with no stated retention policy. Never deletes or migrates anything itself —
-  every finding is routed through the target project's own propose-epic
-  mechanism (or, if the user explicitly asks for PRDs in the current session
-  instead, filed there). Use whenever the user says "/ops-sweep", "sweep the
+  findings are reported to the human, or queued as PRDs in the current session
+  when the user asks for that. Use whenever the user says "/ops-sweep", "sweep the
   ops folder", "audit operations hygiene", "check for ops drift", or wants the
   maintenance protocol run against a project (this one or another). Keywords:
   ops sweep, operations hygiene, namespace drift, OWNERS audit, retention
@@ -52,9 +51,9 @@ detection is simply skipped since there's no second doc layer to disagree.
 node "$SM_ROOT/scripts/ops-sweep.cjs" <target-project-cwd>
 ```
 
-`$SM_ROOT` resolves the same way as in the `propose-epic` skill: `.` when
-you're already working inside the session-manager repo, otherwise four
-directories up from this file's own path (the installed package root).
+`$SM_ROOT` is `.` when you're already working inside the session-manager repo,
+otherwise four directories up from this file's own path (the installed package
+root).
 
 `<target-project-cwd>` is the project to sweep — it does **not** need to be
 the project you're currently working in. Sweeping session-manager's own repo
@@ -102,25 +101,17 @@ the drift is real. Don't file findings you can see are heuristic noise.
 This skill (and the script it runs) never deletes, moves, or archives
 anything. Once you've sanity-checked the findings:
 
-- **Default**: file each real finding as a `proposed` Epic in the **target**
-  project, via the `propose-epic` skill/script pointed at `<target-project-cwd>`
-  (not necessarily the project you're running from):
-  ```bash
-  node "$SM_ROOT/scripts/propose-epic.cjs" <target-project-cwd> "<title>" discussion <<'BODY'
-  <finding detail, the namespace, the doc locations that disagree, and what
-  decision needs to be made — written as an instruction to whoever approves it>
-  BODY
-  ```
-  Group related findings for the same namespace into one Epic rather than
-  filing one per finding line — mirrors how Pattern A in the protocol doc was
-  filed as a single Epic covering the whole namespace's resolution.
-- **If the user explicitly asks for PRDs in this session instead** (e.g. "just
-  queue it here", "PRDs on this session" — the mode used when this protocol
-  doc's own findings were resolved) — queue the work as PRDs in the *current*
-  session's scheduler instead of proposing into the target project. Only do
-  this when the user says so explicitly; the default is always the target
-  project's own propose-epic mechanism, especially when target ≠ current
-  project.
+- **Default**: report the findings to the human, grouped by namespace (one
+  block per namespace, not one per finding line — mirrors how Pattern A in the
+  protocol doc was resolved as a single unit). State the namespace, the doc
+  locations that disagree, and what decision needs to be made. Do NOT open an
+  Epic anywhere: an Epic is created only by a human pressing New Epic, and that
+  is doubly true across a project boundary.
+- **If the user asks for PRDs in this session** (e.g. "just queue it here",
+  "PRDs on this session" — the mode used when this protocol doc's own findings
+  were resolved) — queue the work as PRDs in the *current* Epic's scheduler via
+  `/develop`. Only when the sweep target IS the current project; never author
+  PRDs into another project.
 
 Report back: namespace count swept, finding count by type, and the Epic
 id(s) or PRD(s) filed.

@@ -48,9 +48,9 @@ today's answer has to match the archive's. This is also the largest and fastest-
 obviously right: images add little value once their owning Epic is old and unlikely to be
 resumed, unlike the JSON archive itself. **Follow-up (out of scope here):** a time-boxed prune
 rule for attachments belonging only to Epics archived past some age, with orphan-reference
-detection so a prune never breaks a still-relevant archive — this needs its own proposed Epic
-(`/propose-epic`) per `ops-maintenance-protocol.md`'s rule against unilateral file-age/size-based
-deletion, not an ad hoc script.
+detection so a prune never breaks a still-relevant archive — this needs its own Epic, opened by a
+human, per `ops-maintenance-protocol.md`'s rule against unilateral file-age/size-based deletion,
+not an ad hoc script.
 
 ### `transcripts/`
 
@@ -164,7 +164,7 @@ Epic's stage reads this field.
 
 | Status | Meaning | Entered by | Spends tokens |
 | --- | --- | --- | --- |
-| `proposed` | Not started. Either an agent is asking for the work, or a human is still typing it. | `ensureEpic(..., { status: 'proposed' })`, `/propose-epic`, `lib/rcaFeedbackHook.cjs`, **and** the New Epic form | No |
+| `proposed` | Not started — the human opened the Epic but has not started it. | The New Epic form, the only Epic-creation path (`lib/promptSessionsCreateEpic.cjs` → `ensureEpic(..., { mintAuthority })`) | No |
 | `active` | The Epic's session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start**, or finishes the draft — the same transition | Yes |
 | `completed` | Archived. `claudeSessionId` is dead and never reused. | `markCompleted()`, or **Discard** on a proposal | No |
 
@@ -272,12 +272,10 @@ and an Epic that is `active` says nothing about whether a run is in flight right
 
 ### Transitions in detail
 
-1. **Proposed** — an agent/automation files an Epic via `ensureEpic(..., { status: 'proposed' })`
-   or `/propose-epic`. Nothing runs and nothing is spent until a human presses **Approve & start**.
-   A re-trigger for the same goal joins the pending proposal and may enrich its `openingPrompt` in
-   place (`reuseByGoal`) rather than filing a duplicate — legal only while `proposed`, since an
-   `active` Epic's first turn is already history. **Discard** archives the proposal
-   (`markCompleted`) instead of deleting it, so a rejection stays auditable.
+1. **Proposed** — a human creates the Epic in the New Epic card; it is born `proposed`
+   (`ensureEpic(..., { mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI })` — the only path that creates
+   one). Nothing runs and nothing is spent until **Approve & start**. **Discard** archives the
+   proposal (`markCompleted`) instead of deleting it, so a rejection stays auditable.
 2. **Active** — `active-index.json` carries the Epic and its event chain. Every
    create/append mutation re-persists the full active slice for this cwd (fire-and-forget,
    serialized per-path so concurrent writes to the same file can't race each other out of order).

@@ -1,453 +1,302 @@
 {
   "sessions": {
-    "psess-msc06fh7-6": {
-      "id": "psess-msc06fh7-6",
+    "psess-mscdnslc-10": {
+      "id": "psess-mscdnslc-10",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Project Home Redesign\n\nThe Project Home is not getting build from the Components Lirbrary work, this means that some of the final wiring is not there; We want to fill in the components from the library and arrange a home page as part of the generate action on the home page. You an think of hosting a single HTML once the \"Home Page Agents\" creates it",
-      "claudeSessionId": "8c20bd1d-8b9c-40bb-b0f7-09ea13070ed6",
+      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
+      "claudeSessionId": "f39691ff-11ba-4e3b-abf1-7e1fba7f3789",
       "status": "active",
-      "createdAt": "2026-08-02T16:16:49.627Z",
+      "createdAt": "2026-08-02T22:34:14.784Z",
       "completedAt": null,
-      "tag": "bug"
+      "tag": "build",
+      "agentType": "builder"
     },
-    "psess-msc6lz8u-2": {
-      "id": "psess-msc6lz8u-2",
+    "psess-mscg8i3u-2": {
+      "id": "psess-mscg8i3u-2",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Design Agents, Missions and the Develop Skill\n\nWith the shit to Epic with Agent and Mission grounding where does the leave the Develop skill and how to to of it in connection. This session needs to disss the approach going forward until is clear between Human and Agent to capture as learning and update system docs.",
-      "claudeSessionId": "5c6f87a1-307b-4d32-a1f7-a39f1da9650c",
+      "goalText": "Explore the Agent Context and SubAgents\n\nToday the Epic initialization creates an agent that writes PRDs sometiems, then the PRDs get executed from independent sessions. What would be the change to get these session to subsession more close to eachother without violating the Scheduler role of metering sub-sessions effeceively",
+      "claudeSessionId": "bc97fbbb-9c20-47cd-8935-f8683ec5f983",
       "status": "active",
-      "createdAt": "2026-08-02T19:16:52.782Z",
+      "createdAt": "2026-08-02T23:46:20.202Z",
       "completedAt": null,
-      "tag": "discussion"
+      "tag": "discussion",
+      "agentType": "architect"
     },
-    "psess-msc7vrsg-15": {
-      "id": "psess-msc7vrsg-15",
+    "psess-mscgxoqw-7": {
+      "id": "psess-mscgxoqw-7",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Bilko.run Integration\n\nSo Bilko.run or locally /Bilko is a project hosting platform that allows projects to host themself. Well Session-Manager's is project that build projects so therefore we can ahave one of the Project's proectif Left-Navs be called Host on Bilko.run. So some projects may not be compatible but this is wat hte left-nav experience tab will handle it will an agent that will conver the project and host it on Bilko.run design this fully with operations in mind after reading the Bilko'rs project on how to host. Your goal is to design the Integration tab so that for example we can host the Marketing Page with one click eventually. Focus on being able to publish to Bilko.run and we will then design what components get published form a Project",
-      "claudeSessionId": "f2b32f90-6ebe-46ea-a6d4-5c666d23564e",
+      "goalText": "Project Home Layout\n\nDescribe the currely layout for Project Home, it looks really bad. It feels like multiple pages one after the other we need to drive some consistency and fixed workflow",
+      "claudeSessionId": "cd9f3871-5a84-4742-9d79-1f3ee75bf2ed",
       "status": "active",
-      "createdAt": "2026-08-02T19:52:29.296Z",
+      "createdAt": "2026-08-03T00:05:55.208Z",
       "completedAt": null,
-      "tag": "feature"
+      "tag": "discussion",
+      "agentType": "architect"
     },
-    "psess-msc8lmfl-19": {
-      "id": "psess-msc8lmfl-19",
+    "psess-msch2lho-11": {
+      "id": "psess-msch2lho-11",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Session Manager Operations - Maintain\n\nThere are sevel aspects that constantly evolve and we need to be sure of the latest and single source of trugh for varios things and the network effoer and impact they have; \n\nOn the Operations Folder under each project is where histirycally between the different projects and this one as very old project has aquimulated lots of diffeent and now redunant and content poluting content that is best removed. \n\nThis Session goal is identity multiple patterns against the true source of truth delete, migrate, maintain so that is doesn't overbloat. \n\nFundamenatlly this is the backbone for operations of Session Manager and the SOR for default configs that are shipped as part of the tool. So we need to develop an agent that can sweep though multipel Session-Manage-Operation's folders of different Projects and clean-up; \n\nStart by creating a protocol using this project's Operations Folder. Improvements Identified we can also file for futur eversions",
-      "claudeSessionId": "20b2fc46-2ad8-44d7-84aa-9e73bc83238b",
+      "goalText": "Agent Library\n\nAdd CRUD controls so that I can delete Agents and modify existing. This should be exposed on the application, esure action buttons on the List view, Single view",
+      "claudeSessionId": "fe85d55b-4bd5-478d-b6d7-e0b82eda0421",
       "status": "active",
-      "createdAt": "2026-08-02T20:12:35.409Z",
+      "createdAt": "2026-08-03T00:09:44.268Z",
       "completedAt": null,
-      "tag": "feature"
+      "tag": "feature",
+      "agentType": "dev-lead"
+    },
+    "psess-msch6x36-16": {
+      "id": "psess-msch6x36-16",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Home Page\n\nLets implement a new Home Page for Home-Tab in Session Manager \n\nUse the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Home+Screen+A.html\n\nFocus on these files (the whole project is readable):\n- `Home Screen A.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/home-a.jsx`\n\nImplement: `Home Screen A.html`",
+      "claudeSessionId": "a5f7dae5-da46-4b62-9392-0da197fca690",
+      "status": "active",
+      "createdAt": "2026-08-03T00:13:05.922Z",
+      "completedAt": null,
+      "tag": "feature",
+      "agentType": "dev-lead"
     }
   },
   "events": {
-    "psess-msc06fh7-6": [
+    "psess-mscdnslc-10": [
       {
-        "id": "pevt-msc06fh7-7",
-        "promptSessionId": "psess-msc06fh7-6",
+        "id": "pevt-mscdnslc-11",
+        "promptSessionId": "psess-mscdnslc-10",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-02T16:16:49.627Z",
-        "text": "Project Home Redesign\n\nThe Project Home is not getting build from the Components Lirbrary work, this means that some of the final wiring is not there; We want to fill in the components from the library and arrange a home page as part of the generate action on the home page. You an think of hosting a single HTML once the \"Home Page Agents\" creates it"
+        "at": "2026-08-02T22:34:14.784Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc06fh7-7",
-        "text": "Committed. The remaining modified files (agentLibrary.cjs, AgentLibrary.tsx, etc.) belong to other concurrent Epics running against this same repo — not part of this task, left untouched.\n\n## Diagnosis\n\n**Root cause**: the entire Project Pages pipeline (Stage 0 renderer, Stage 1 summary schema, Stage 2 selection scorer, Stage 3 render, Stage 4 UI in `ProjectPagesSection.tsx`) was already fully built and correctly wired — but had **never actually been run** for this project. `session-manager-operations/project-pages/` only had a `README.md`; no `summary.json`, `picks.json`, or `output/*.html` existed, so Project Home was permanently stuck on the \"No Project Pages yet\" empty state. That reads as \"not getting built from the Components Library work,\" but the wiring itself checked out clean end-to-end.\n\n## Fix\n\nRan the actual generate pipeline for session-manager itself, following `.claude/agents/project-home-builder.md`'s protocol:\n1. Composed `summary.json` from real, traceable facts only (`brief.json`, CLAUDE.md, git log, file/test counts) — no fabricated stats or testimonials (`quotes: []`).\n2. Validated it (`validate-project-pages-summary.cjs` → `valid`).\n3. Ran the Stage 2 selection scorer → `picks.json`.\n4. Built and ran the Stage 0 renderer → `output/{marketing,feature,architecture}.html` + `manifest.json`.\n5. Confirmed no `undefined` leaked into the generated HTML, all 30 existing `projectPages`/`ProjectHome` unit tests pass, and `npm run typecheck` is clean.\n\nCommitted the artifacts (`2224fdc`) so Project Home's iframe now has real content instead of the empty state. The \"Regenerate\" button will re-run this same chain from the app once a `project-home-builder` Epic session does it interactively.",
-        "id": "pevt-msc0cnae-10",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T16:21:39.686Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc0cnae-10",
-        "text": "## Answers\n\n**What is the Agent called?** `project-home-builder`.\n\n**Was it registered in the Agent Library?** No — that was the actual gap. `AgentLibrary.tsx`/`agentLibrary.cjs` only enumerate global personas at `~/.claude/agents/*.md`, and this agent's definition lived *only* at this repo's `.claude/agents/project-home-builder.md`. Worse: `.gitignore`'s `.claude/agents/*` rule whitelisted `builder.md` but never `project-home-builder.md` — so it was silently untracked the whole time, invisible both to Agent Library and to git. Fixed both:\n- Added `!.claude/agents/project-home-builder.md` to `.gitignore` and committed the file.\n- Added the missing global counterpart `~/.claude/agents/project-home-builder.md` (generic protocol shape), so this repo's project file now overlays it — same \"global generic + project overlay\" convention `builder.md` already uses. It now shows up in Agent Library like any other persona.\n\n**What tag gets assigned?** Epic tag `project-home-builder` (the Mission/\"what\" axis, `tagLibrary.ts`/`agentTagDefs.ts`) — deliberately excluded from `AGENT_TAG_ORDER` so it can't be hand-picked in the New Epic composer; it's only ever assigned by the Generate Now/Regenerate buttons.\n\n**On your actual ask** (\"Generate should kick off an Agent with dedicated grounding: review templates → select → generate content → build+host, via Epics/session-manager-operations\"): that flow was already the design (`agentTagDefs.ts`'s `initialPromptTemplate` grounds the session to read the pipeline spec + component library README, follow `.claude/agents/project-home-builder.md`'s protocol, then write `summary.json`→`picks.json`→`output/*.html`, which Project Home hosts in a sandboxed iframe). The missing piece was that the Epic had a mission (tag) but no bound *identity* (agentType) — now fixed: `ProjectPagesSection.tsx` resolves the registered persona via `listPersonas()` and passes it into `composeEpicIntake`/`createPromptSession` exactly like `NewEpicCard.tsx` does for a …",
-        "id": "pevt-msc0mgel-12",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T16:29:17.325Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc0mgel-12",
-        "text": "Pushed to `origin/main` (`f1c01af..cf752fe`), including this Epic's commits: `2224fdc` (ran the Project Pages generate pipeline) and `67c2326` (registered `project-home-builder` in the Agent Library + wired Generate Now to it).\n\nLeft untouched: several other files still modified/uncommitted in the working tree (`agentLibrary.cjs`, `AgentLibrary.tsx`, `TagLibrary.tsx`, etc.) — those belong to other concurrent Epics running against this same repo, not this one.",
-        "id": "pevt-msc1p06v-18",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T16:59:15.895Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc1p06v-18",
-        "text": "## Findings\n\nThe work **is** committed, pushed, and published — but the app you're looking at almost certainly isn't running that build yet.\n\n**Confirmed via git + npm:**\n- `v0.55.0`'s release commit (`daa2227`, published to npm at `2026-08-02T17:11:57Z`) explicitly includes both of my commits in its changelog:\n  - `feat(project-pages): run the generate pipeline for this project`\n  - `feat(project-pages): register project-home-builder in the Agent Library, bind Generate Now to it`\n- `npm view claude-code-session-manager version` → `0.55.0`, matching `package.json`. So the registry is current.\n\n**Why you're not seeing it:** `ps aux` shows the currently-running Electron instance (PID `2310626`, launched today at 10:12) is running out of `~/.npm/_npx/5346543b21849140/node_modules/claude-code-session-manager` — a cached `npx` install, tagged `_version=0.55.0` in its crashpad annotations. That cache directory is only refreshed when `npx` is told to check for a newer version; a plain `npx claude-code-session-manager` (no `@latest`) or an already-open window from earlier today won't silently pick up a registry publish that happened while it was running — Electron main-process code (which several of today's other concurrent Epics touched: `index.cjs`, `preload/index.cjs`) can't hot-reload the way Vite HMR does for the renderer, and `npx`'s local cache won't refetch on its own either.\n\n**What \"same fixed design\" actually is, for clarity:** the Brief header + \"Refresh brief\" job (`PhHeader`/`handleRefresh` in `ProjectHome.tsx`) is a *separate*, deliberately-unchanged feature from what I built. What's new is the **Project Pages** block rendered underneath it (`ProjectPagesSection.tsx`) — that's the part with the Marketing/Feature/Architecture lens toggle and Generate Now/Regenerate. If you're only looking at the top Brief section, you wouldn't see any change even on a fully up-to-date build.\n\n## To actually see it\n\n1. Quit the running app instance.\n2. Relaunch with `npx claude…",
-        "id": "pevt-msc2ju6e-4",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T17:23:14.438Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc2ju6e-4",
-        "text": "**Yes — my changes are in the `v0.55.1` tag's history**, but that version hasn't finished publishing to npm yet.\n\nConfirmed via git:\n- `v0.55.1` (commit `162ff31`) is a descendant of both `2224fdc` (ran the generate pipeline) and `67c2326` (registered `project-home-builder` in Agent Library, bound Generate Now to it) — `git merge-base --is-ancestor` confirms both.\n- `package.json` at the `v0.55.1` tag reads `0.55.1`, and its lineage includes 6 total `feat(project-pages)` commits, mine among them, plus unrelated fixes from concurrent Epics (`fix(epics)`, `fix(libraries)`).\n\nBut the npm registry doesn't have it yet — `npm view claude-code-session-manager dist-tags` still shows `latest: 0.55.0`, and `0.55.1` isn't in the versions list. So the tag/release commit has been cut locally and pushed, but the `npm publish` step of that release hasn't landed (or is still running) — that's presumably the concurrent `/builder` Epic's in-flight work, not something in my job to force through.\n\n**Also worth flagging:** my own local checkout was behind — `origin/main` (`fa46c3d`) is ahead of what I had checked out (`df3b604`), from other concurrent Epics' pushes. Not something I need to act on, just noting the repo is moving fast under multiple sessions right now.\n\n**Bottom line:** the fix will be live once `0.55.1` (or whatever version actually gets published) clears npm — check `npm view claude-code-session-manager dist-tags` again after that publish completes, then relaunch via `npx claude-code-session-manager@latest` as before.",
-        "id": "pevt-msc6gwgk-10",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T19:12:55.892Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc6gwgk-10",
-        "text": "Confirmed — the running v0.55.1 build does contain the \"Project Pages\" UI, and the generated output files are on disk. This is not a deployment issue.\n\n## Root cause: it's below the fold, not missing\n\nThe screenshot you attached is scrolled to the **top** of Project Home — it stops at \"What this is.\" The Project Pages block (the one with the component-library lens toggle and Generate/Regenerate) renders **below** the existing Brief content — after \"What this is\" → \"How it is put together\" → \"How the goal has moved\" → \"Conventions\"/\"Waiting on you\" → a small \"Stored at brief.json…\" paragraph → **then** the Project Pages block.\n\nI verified directly against the exact build your app is running:\n- `~/.npm/_npx/.../claude-code-session-manager/dist/assets/index-tW8C4h-7.js` (the v0.55.1 bundle currently loaded) contains `\"Project Pages\"`, `\"project-home-builder\"`, and `\"No Project Pages yet\"` — the UI code is there.\n- `session-manager-operations/project-pages/output/{marketing,feature,architecture}.html` + `manifest.json` already exist on disk in this repo (generated earlier this session, committed in `2224fdc`).\n\nSo scrolling down should show the 3-lens iframe display already populated, not the empty state — since output already exists for this project.\n\n## If it's genuinely not there after scrolling\n\nThat would mean something else broke — most likely `window.api.projectPages.get(cwd)` throwing, or the iframe render failing silently. I can't drive your live Electron window from this headless session, so I need you to check one thing.",
-        "id": "pevt-msc6p0sc-6",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T19:19:14.748Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc6p0sc-6",
-        "text": "Pushed (`162ff31..388eb76`).\n\n## Summary\n\nYou were right — there were only 3 templates before. I've added the 4th (\"Home\") and the explainer tab you asked for:\n\n- **New `home` lens** (`homeSlots.tsx`) — a real, working dashboard-flavored template (2 slots × 2 variants), built from the same `identity`/`stats`/`pillars` data the Marketing lens already uses, so no schema changes were needed. Generalized `LENS_ORDER`/render pipeline/CLI scripts/main-process reader/preload types from 3→4 lenses throughout.\n- **UI**: the lens toggle in Project Home's Project Pages block is now **Home / Marketing / Feature / Architecture** (defaults to Home), plus a **5th \"About these templates\"** tab — static, reachable even before the first Generate — that lists each template's source file and the 3 real on-disk paths for overriding: `summary.json` (computed inputs), **`picks.json`** (the actual per-project override mechanism — a hand-edited slot pick already survives Regenerate via the existing `mergePicks` logic), and the shared component library source.\n- Updated the architecture spec (source of truth), both agent protocol files, and the Epic tag's grounding text to describe 4 lenses.\n- Re-ran the pipeline for this project — `picks.json` gained a `home` block, existing marketing/feature/architecture picks untouched, `output/home.html` generated alongside the other 3, all verified `undefined`-free.\n- 33 relevant unit tests + full `npm run typecheck` pass; ran the full `src/main`+`src/renderer/lib/projectPages`+ProjectHome suite (519 tests) clean.\n- Committed (`388eb76`) and pushed to `origin/main`.\n\nNote: this landed after `v0.55.1`'s publish, so — same as before — it'll show up once the next version is cut and you relaunch via `npx claude-code-session-manager@latest`.",
-        "id": "pevt-msc73swe-12",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T19:30:44.366Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc73swe-12",
-        "text": "Pushed (`388eb76..be83fe8`).\n\n## Summary\n\n- **Default lens is now Marketing** — `ProjectPagesSection.tsx`'s `activeView` starts on `'marketing'` instead of `'home'`; Home/Feature/Architecture and the \"About these templates\" tab are one click away.\n- **Full panel + full-screen option**: the in-flow iframe now fills the block (`height: calc(100vh - 260px)` instead of a fixed 600px), and a new **\"Full screen\"** button renders the same iframe in a fixed full-viewport overlay with its own lens toggle and an **\"Exit full screen\"** control (Esc also closes it).\n- Added `expand`/`collapse` icons to `AlmanacIcon` (none existed) and gave `PhCard` an optional `style` prop to support the taller in-flow sizing.\n- Typecheck clean, `lint:selectors` clean, all 528 relevant tests pass (including updated assertions for the new default lens + full-screen toggle).\n- Committed (`be83fe8`) and pushed to `origin/main`.\n\nSame note as before: this landed after `v0.55.1`'s publish, so it'll be visible once the next version is cut and you relaunch via `npx claude-code-session-manager@latest`.",
-        "id": "pevt-msc77olb-13",
-        "promptSessionId": "psess-msc06fh7-6",
-        "at": "2026-08-02T19:33:45.407Z"
+        "causedByEventId": "pevt-mscdnslc-11",
+        "text": "## Release report \u2014 v0.57.0 \u2192 v0.57.1\n\n**Build target:** npm registry, `claude-code-session-manager` (config confirmed at `session-manager-operations/architecture/build-target.json`, matches `package.json`).\n\n**Diff:** 3 commits since last published tag (`v0.57.0`):\n- `fix(scheduler): isolate queueHistory tests from live-app + real project state`\n- `docs(prompt-sessions): state explicit retention policy for archived Epics, attachments, transcripts`\n- `chore(ops): sync runtime state \u2014 PRD 949 landed, other concurrent Epic activity`\n\n**Bump:** patch (highest-severity commit was `fix:`; no `feat`/breaking).\n\n**Gate:** typecheck PASS, unit tests PASS (224 files / 2084 tests).\n\n**Publish:** isolated worktree (`/tmp/sm-publish-v0.57.1`, `git worktree add` from tag \u2192 `npm ci` \u2192 `npm run typecheck` \u2192 `npm publish`), then pushed `main` + tag `v0.57.1`, worktree removed.\n\n**Verified on registry:** `npm view` reports version `0.57.1`, dist-tag `latest \u2192 0.57.1`.\n\nOther uncommitted runtime-state files (`active-index.json`, `brief.json`, transcript jsonl) were left untouched \u2014 never staged, per the isolated-worktree technique.",
+        "id": "pevt-mscdseiy-21",
+        "promptSessionId": "psess-mscdnslc-10",
+        "at": "2026-08-02T22:37:49.834Z"
       }
     ],
-    "psess-msc6lz8u-2": [
+    "psess-mscg8i3u-2": [
       {
-        "id": "pevt-msc6lz8u-3",
-        "promptSessionId": "psess-msc6lz8u-2",
+        "id": "pevt-mscg8i3u-3",
+        "promptSessionId": "psess-mscg8i3u-2",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-02T19:16:52.782Z",
-        "text": "Design Agents, Missions and the Develop Skill\n\nWith the shit to Epic with Agent and Mission grounding where does the leave the Develop skill and how to to of it in connection. This session needs to disss the approach going forward until is clear between Human and Agent to capture as learning and update system docs."
+        "at": "2026-08-02T23:46:20.202Z",
+        "text": "Explore the Agent Context and SubAgents\n\nToday the Epic initialization creates an agent that writes PRDs sometiems, then the PRDs get executed from independent sessions. What would be the change to get these session to subsession more close to eachother without violating the Scheduler role of metering sub-sessions effeceively"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc6lz8u-3",
-        "text": "Current state, from the SKILL.md and CLAUDE.md:\n\n**Mission (tag) already has a real behavioral hook in `/develop`.** The 2026-08-01 \"Tag-aware default\" section makes `feature`/`bug` eagerly reach for PRD decomposition, while `discussion` keeps `/develop` available but never assumed. Mission drives *eagerness*.\n\n**Agent (persona) has zero hook into `/develop` today.** Per CLAUDE.md's domain model, `agentType` is explicitly \"optional and display-only beyond that... does not change which claude CLI process spawns, only the first message.\" It folds into `openingPrompt` framing via `composeEpicIntake`, and the grounding board is deliberately \"an inspector, not a control.\" `/develop`'s SKILL.md never mentions Agent at all — it only reads the Epic's tag.\n\nSo the real question your prompt is raising: **should Agent stay purely decorative, or should `/develop` start reading it too?** Three shapes, in increasing order of coupling:\n\n1. **Leave it decorative (status quo).** `/develop` continues to ignore Agent entirely; only Mission drives behavior. Consistent with the explicit \"inspector not a control\" design decision already recorded in CLAUDE.md. Cheapest, no new surface, no risk of Agent-persona text silently reinterpreting PRD scope in ways that are hard to audit.\n2. **Agent nudges PRD *content/voice*, not eagerness.** e.g. a \"security-reviewer\" persona biases `/develop`'s step-3 lens pass toward heavier security AC, or a \"perf\" persona toward more perf-hardening PRDs. Risk: this duplicates work Phase 2 step 8's specialist dispatch already does *based on what changed*, not *who asked* — two mechanisms picking the same specialists via different signals is exactly the kind of parallel-path CLAUDE.md's \"Avoid\" section warns against.\n3. **Agent gates something structural** (e.g. blocks `/develop` for certain personas, or changes which model/executor tier a persona's PRDs run on). This contradicts the documented invariant that `agentType` never changes which CLI process spawns …",
-        "id": "pevt-msc6mwo3-5",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T19:17:36.099Z"
+        "causedByEventId": "pevt-mscg8i3u-3",
+        "text": "**Current state (confirmed in code):** Epic session (architect) mints its own `claudeSessionId` via `--session-id`/`--resume` (chatRunner.cjs:533-537). PRD jobs are deliberately isolated \u2014 `scheduler.cjs` spawns `claude -p` with a **fresh** `--session-id` (scheduler.cjs:2240/2590), and PRD_AUTHORING.md explicitly documents this as intentional: \"the PRD body MUST be self-contained \u2014 `claude -p` runs it on a fresh Sonnet session with NO conversation context\" (scheduler.cjs:2399).\n\n**Key finding:** the Scheduler's metering role (`sessionSlots.cjs`) is a pure process-count gate \u2014 \"may one more `claude -p` launch right now?\" \u2014 completely agnostic to whose session identity is being resumed. It doesn't care if a job is `--session-id <fresh>` or `--resume <existing>`. So changing session lineage for PRD jobs doesn't touch metering at all; those are genuinely orthogonal today.\n\n**Two directions, given that:**\n\n- **A \u2014 literal shared session** (`--resume <epicSessionId>` for PRD jobs): real continuity, but forces PRDs of one Epic to run serially (can't `--resume` the same session id concurrently), needs a new mutual-exclusion lock against the Epic's own interactive Chat/Terminal attachment (extends the existing \"mutually exclusive view attachment\" invariant to a third consumer), and pollutes one transcript with both architect discussion and dev-lead tool-call noise \u2014 undermining the \"self-contained PRD, judged on its own AC\" design that PRD_AUTHORING.md's stuck-job postmortems (fizzpop, etch-engine) actually lean on.\n\n- **B \u2014 richer linkage, same isolation** (recommended): keep PRD jobs on fresh, independent, parallelizable sessions, but stop treating the PRD file as the *only* thing dev-lead sees. Derive a condensed context digest from the Epic session's transcript (same AIM-framework spirit as `composeEpicIntake`/`summarizeGroundingBoard`) and prepend it to the PRD's opening prompt, and record provenance (`sourceSessionId`/turn-range) on the PRD so it's inspectable. This ge\u2026",
+        "id": "pevt-mscg9rln-4",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-02T23:47:19.163Z"
+      },
+      {
+        "id": "3f13344a-b2bc-4e13-a781-41079ae553fc",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscg9rln-4",
+        "at": "2026-08-02T23:52:12.713Z",
+        "prdSlug": "950-epic-context-digest-builder"
+      },
+      {
+        "id": "509b9ce1-e667-4a1d-9a0c-9f456effc579",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "3f13344a-b2bc-4e13-a781-41079ae553fc",
+        "at": "2026-08-02T23:52:36.558Z",
+        "prdSlug": "951-wire-epic-digest-into-dispatch"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc6mwo3-5",
-        "text": "## Mapping AIM onto what's already built\n\nYour three letters land almost exactly on the three things already wired into Epic creation — worth confirming the mapping before touching anything:\n\n| AIM | Maps to | Where it lives today |\n|---|---|---|\n| **Actor** | Agent (`agentType`/persona) | `epicIntake.ts:85-88` — folds `agentName` + `agentDescription` into one framing line: `You are acting as the \"X\" agent: <description>`, prepended before everything else in `openingPrompt`. |\n| **Input** | Grounding board | `groundingBoard.ts` — real (never fabricated) inventory of System (`~/.claude/CLAUDE.md`, settings, skills, persona file) / Project (`CLAUDE.md`, skills, mcp servers, hooks, Project Brief) / Local (`CLAUDE.local.md`, git branch, open tabs, other Epics). |\n| **Mission** | Mission (tag) | `epicIntake.ts:82` — `agentTagDef(tag).initialPromptTemplate` prepended after the Actor line, before the human's own goal text; downstream, `/develop`'s \"Tag-aware default\" (SKILL.md:40-48) is the *routine* half of Mission — it reads the same tag to decide how eagerly to decompose into PRDs. |\n\n**The asymmetry worth flagging: Actor and Mission each get an explicit line inside `openingPrompt` — Input does not.** The grounding board is real and comprehensive, but per its own header comment it's deliberately \"an inspector, not a control\" — it's shown to the *human* in the flip-card UI, never summarized into the text the agent actually reads. The agent's awareness of Input today is 100% implicit: it relies on the `claude` CLI's own file-discovery (CLAUDE.md/skills/settings auto-load when the process starts in that cwd) rather than session-manager ever telling the agent \"here's what's grounding you.\"\n\nThat's arguably correct as-is — Input doesn't need injecting since the CLI already loads it, and re-stating it would risk drifting out of sync with what actually loads (same failure class the `standards.md` \"reference it, don't fork it\" rule already guards against for `/develop`). But it…",
-        "id": "pevt-msc6twb7-7",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T19:23:02.227Z"
+        "causedByEventId": "pevt-mscg9rln-4",
+        "text": "Both PRDs are authored and queued to Epic `psess-mscg8i3u-2`, implementing direction B as an evolving 2-link chain:\n\n- **950-epic-context-digest-builder** (~15 min) \u2014 new `src/main/lib/epicContextDigest.cjs`, `buildContextDigest({ cwd, epicId, maxChars })`, reusing `promptSessionTranscript.cjs`'s `readTurns` and `epicMint.cjs`'s `readActiveIndex`. Bounded, best-effort, never throws, oldest-turn-first truncation. Standalone groundwork with its own unit tests.\n- **951-wire-epic-digest-into-dispatch** (~20 min, `dependsOn: [950-...]`) \u2014 prepends that digest into `scheduler.cjs`'s job `prompt` (the `parsed.body + FINISH_PROTOCOL` build site, ~line 2055-2062) only when `job.epicId` resolves via the existing `resolveOriginSessionId`; PRD body itself stays byte-for-byte unchanged (self-containment preserved); a digest failure is caught/logged and never blocks dispatch; persists `originSessionId` + new `contextDigestApplied` into the existing `meta.json` sidecar writes (~2265, ~2291) for provenance; updates `PRD_AUTHORING.md`. Confirms `sessionSlots.cjs` is untouched.\n\n`scheduler_list_jobs` currently returns empty \u2014 that's just the live-run queue, not a signal of failure; both PRDs are on disk and will be picked up by the scheduler's normal `when-available` polling. This is a one-shot headless turn, so I can't run the 30-minute tracking loop myself \u2014 you'll see them run in the Scheduler tab, or ask me again in a fresh turn to check status/verify against AC once they've landed.\n\nReady to move to the next topic \u2014 how Epics are created and schema-consistency enforcement \u2014 whenever you want to start it.",
+        "id": "pevt-mscggznr-5",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-02T23:52:56.199Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc6twb7-7",
-        "text": "All green. Summary of what landed:\n\n**Documentation** — added a new bullet to CLAUDE.md's domain model naming the **AIM framework** explicitly (Actor / Input / Mission), mapping each letter to its real implementation and stating the ordering contract.\n\n**Code** (both were the same decision — \"do both\"):\n- `groundingBoard.ts`: new pure `summarizeGroundingBoard(groups)` — turns the already-computed real System/Project/Local inventory into one compact line (`Grounding: System (CLAUDE.md, settings.json, ...) · Project (...) · Local (...)`). No new fs/IPC reads — it derives from the same `GroundingGroup[]` the board UI already produces.\n- `epicIntake.ts`: `composeEpicIntake` gains an optional `inputSummary` param, inserted into `openingPrompt` between the existing Actor line and the Mission (tag) template — so all three AIM axes now get an explicit line, in Actor → Input → Mission order. Omitted cleanly when absent (existing callers like `EpicQueue.tsx`'s scripted Epic and `ProjectPagesSection.tsx` are unaffected).\n- `NewEpicCard.tsx`: at Epic creation, reuses the cached grounding board if \"advanced\" was already opened, otherwise computes one fresh via the existing `computeGroundingBoard` (no second fetch path), and passes its summary through as `inputSummary` — so every new Epic states what it's grounded in, not just the ones where the human happened to flip the board open.\n\nVerified: `tsc --noEmit` clean, `check-unstable-selectors` clean, all existing `epicIntake`/`groundingBoard`/`NewEpicCard` unit tests pass unchanged (13+13+13 = 39 tests, all green) since the new fields are additive and optional.",
-        "id": "pevt-msc6z3y1-10",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T19:27:05.401Z"
+        "causedByEventId": "pevt-mscggznr-5",
+        "text": "This screenshot is the New Epic card's \"advanced\" grounding board \u2014 `computeGroundingBoard` in `src/renderer/lib/groundingBoard.ts:69-155`. It's a read-only **inspector**, not a control (session-manager can't tell the `claude` CLI to skip a file it would discover anyway). Three columns mirror Claude Code's own config layering: **System < Project < Local**.\n\n## System \u2014 `~/.claude/` (home dir, machine-wide, every session)\n- **`CLAUDE.md`** \u2014 `~/.claude/CLAUDE.md`, your global preferences file (the one that imports `Agents/shared/core.md`). Read via `fileItem`; shows line count and a ~token estimate (chars/4).\n- **`settings.json`** \u2014 `~/.claude/settings.json`. Model/permissions/output-style config.\n- **`skills/`** \u2014 `~/.claude/skills/`, counted via `dirCountItem` (a dir listing, not content read \u2014 hence 0 tok estimate unless present).\n- **`agents/<name>.md`** \u2014 the chosen Agent Library persona's file (e.g. `agents/architect.md` in this screenshot). This one is `locked: true` in the code \u2014 it's the only System row that's *required* once an agent is selected, since it's literally the system prompt for the role. If no persona is chosen, this row instead reads \"no agent selected \u2014 default persona\".\n\n## Project \u2014 `<cwd>/` (checked into git, shared with collaborators)\n- **`CLAUDE.md`** \u2014 the project's own `CLAUDE.md` (this repo's, 172 lines per the screenshot).\n- **`.claude/skills/`** \u2014 project-local skill overrides, dir-counted same as System's.\n- **`mcp servers \u00b7 N`** \u2014 count of keys in `~/.claude.json`'s `mcpServers` object (note: read from the *user*-level `.claude.json`, not a project file \u2014 the label lands in this column because MCP servers are effectively project-scoped in practice, listing the first 3 names as detail).\n- **`hooks \u00b7 N`** \u2014 counted by `countHookRules`, which parses the *project's* `settings.json` (`projectSettingsPath`) and sums rule-array lengths across all hook event types.\n- **`Project brief`** \u2014 presence-checked at `<cwd>/session-manager-operation\u2026",
+        "id": "pevt-mscgpfwk-6",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-02T23:59:30.500Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc6z3y1-10",
-        "text": "## Current Agent Library roster\n\nRead directly from `~/.claude/agents/*.md` (global — `listPersonas()` reads this dir; two of these also have project-local overlays in this repo's own `.claude/agents/`):\n\n| Agent | description (frontmatter) | tags: field |\n|---|---|---|\n| `api-designer` | Review REST/GraphQL API design for consistency and correctness | *(none set)* |\n| `builder` | Watch a project's git history against its published package state and drive the next release | *(none set)* |\n| `code-reviewer` | Review staged changes for bugs, style, and maintainability | *(none set)* |\n| `debugger` | Diagnose a failing test or runtime error from a stack trace | *(none set)* |\n| `dependency-auditor` | Audit dependencies for vulnerabilities and stale versions | *(none set)* |\n| `perf-profiler` | Identify hot paths and perf regressions in changed code | *(none set)* |\n| `project-home-builder` | Generates a project's static Project Home/Project Pages from its component library | *(none set)* |\n| `refactorer` | Propose structural refactors without changing behavior | *(none set)* |\n| `security-auditor` | Scan code for common vulnerabilities and unsafe patterns | *(none set)* |\n\nPlus the implicit **\"Default\"** (`agentName = ''`) — no persona, no framing line.\n\nAlso worth knowing before we decide anything: **not one of these has the `tags:` frontmatter field populated.** CLAUDE.md's domain model describes a many-to-many Agent↔Mission membership (`AgentPersona.tags`, editable from either `AgentLibrary.tsx` or `TagLibrary.tsx`) — that field exists in the type and the editors, but every real persona file on disk today has it empty. So today's picker isn't even using the independence mechanism that's already built.\n\n## Why they don't feel independent from Mission\n\nLook at what these actually encode: 7 of the 9 (`api-designer`, `code-reviewer`, `debugger`, `dependency-auditor`, `perf-profiler`, `refactorer`, `security-auditor`) are **one-shot specialist reviewers** — they're the e…",
-        "id": "pevt-msc73rku-11",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T19:30:42.654Z"
+        "causedByEventId": "pevt-mscgpfwk-6",
+        "text": "## Schema consistency\n\n**No runtime schema exists for the `PromptSession` record itself, at any layer.**\n\n- `PromptSession` (`src/renderer/state/promptSessions.ts:29-76`) is a TS-only interface \u2014 compile-time, erased at runtime. Data read back from disk is `as`-cast, not parsed.\n- The IPC boundary (`ipcSchemas.cjs:217-248`, `promptSessionsMergeActiveIndex`) validates the **envelope** only \u2014 id charset/length, map size caps, prototype-pollution guard \u2014 but each session value is `z.unknown()`. `status`'s 3-value union, `tag`'s enum, `createdAt` format: none of it is checked on the wire.\n- Worse: **two independent code paths hand-construct the same record.** The renderer's New Epic flow (`promptSessions.ts:352-379`, `createPromptSession`) builds a `PromptSession` object literal directly and never touches `ensureEpic`. The CLI/scheduler path (`epicMint.cjs:216-351`, `ensureEpic`) builds a *different* object literal, with its own id scheme (`psess-<ts>-<seq>` vs `<slug>-<uuid8>`). They're kept in sync today by a doc comment (\"stay shape-compatible so `hydrate()` reading a main-written index round-trips it\") \u2014 convention, not enforcement.\n- `ensureEpic` does enforce one real invariant well: the born-`proposed` law is fail-closed (throws if a mint call passes any status but `proposed`, `epicMint.cjs:299-305`) \u2014 so *lifecycle* is actually protected. It's field *shape* that isn't.\n- Schema evolution so far = \"make the new field optional and tolerate its absence\" (`durableTurns`, `promptSessions.ts:85-91`) \u2014 never a real migration pass. `prdMigration.cjs` is a precedent for what a real one would look like; nothing equivalent exists for Epic records.\n\n**Net risk:** a future field added to one constructor and not the other silently drifts \u2014 no test, no schema, no IPC check would catch it. It'd surface as a blank UI cell or a `hydrate()` crash on read, not at write time.\n\n## Scale\n\n- `active-index.json` is **one flat, unsharded JSON file per project**, read-modify-written whole \u2026",
+        "id": "pevt-mscgxzse-9",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-03T00:06:09.518Z"
+      },
+      {
+        "id": "0bcc1c20-a3ab-44a1-90bb-070701e4c3b0",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscgxzse-9",
+        "at": "2026-08-03T00:10:35.220Z",
+        "prdSlug": "952-promptsession-zod-schema-epicmint"
+      },
+      {
+        "id": "2654097d-bc3c-4991-96e3-98887f73b4a3",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "0bcc1c20-a3ab-44a1-90bb-070701e4c3b0",
+        "at": "2026-08-03T00:11:00.313Z",
+        "prdSlug": "953-promptsession-ipc-boundary-drift-test"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc73rku-11",
-        "text": "**What landed:** drafted and wrote `~/.claude/agents/dev-lead.md` — a generalist Actor persona (`tags: feature, bug, discussion`, so it's independent of Mission per your earlier ask) whose whole content is *working style* (clarify → search-before-build → delegate to `/develop` → verify-before-done), with zero task-type framing. It points at the `session-manager-dev:develop` skill and `standards.md` as the actual mechanics rather than restating any of it — same \"reference it, don't fork it\" discipline `/develop` already applies to its own standards file.\n\nThis is one persona, not yet wired into the broader roster cleanup we were discussing (the specialist-reviewer segregation, other generalist roles like frontend/full-stack). Want me to also draft the other generalist roles (frontend, full-stack, researcher) now, or review `dev-lead` first before expanding the roster?",
-        "id": "pevt-msc7t1le-14",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T19:50:22.034Z"
+        "causedByEventId": "2654097d-bc3c-4991-96e3-98887f73b4a3",
+        "text": "Both PRDs queued to Epic `psess-mscg8i3u-2`:\n\n- **952-promptsession-zod-schema-epicmint** (~18 min) \u2014 new `src/main/lib/promptSessionSchema.cjs` canonical zod schema matching the `PromptSession` TS interface (`promptSessions.ts:29-76`) exactly, wired into `ensureEpic`'s mint branch (`epicMint.cjs:309-329`) as a fail-closed check before every disk write, mirroring the existing born-proposed-law pattern.\n- **953-promptsession-ipc-boundary-drift-test** (~20 min, `dependsOn: [952-...]`) \u2014 wires the *same* schema into the IPC boundary (`ipcSchemas.cjs`'s `promptSessionsMergeActiveIndex`, currently `z.unknown()` per-session), closing the gap on the renderer's independent `createPromptSession` path. Also extracts that function's object-literal construction into a pure, testable builder and adds a cross-boundary regression test that asserts the renderer's real output validates against the same schema `ensureEpic` uses \u2014 this is the actual drift-detector: the two hand-written object literals get checked against one shared source of truth instead of staying in sync by doc-comment convention.\n\nDeliberately left out of scope for both (flagged inline so they don't get silently dropped): unifying the two different id-generation schemes, and retroactive migration/validation of already-written on-disk records \u2014 real follow-ups, but separate from closing the \"2x code paths, no schema\" gap you flagged.\n\nThis is a one-shot headless turn, so I can't run the tracking loop now \u2014 check the Scheduler tab, or ask me to verify against AC once 952 has landed (953 depends on it).",
+        "id": "pevt-msch4et4-13",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-03T00:11:08.920Z"
+      },
+      {
+        "id": "74ae7600-86f3-4724-8fe2-be40e20d5dd8",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msch4et4-13",
+        "at": "2026-08-03T00:20:21.393Z",
+        "prdSlug": "954-epic-create-ipc-handler"
+      },
+      {
+        "id": "399be827-abee-42ad-b8f9-431e601ff186",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "74ae7600-86f3-4724-8fe2-be40e20d5dd8",
+        "at": "2026-08-03T00:21:00.534Z",
+        "prdSlug": "955-route-epic-create-through-ipc"
+      },
+      {
+        "id": "29c81b00-21c0-4800-bc29-646d1239eafb",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "kind": "prd_created",
+        "causedByEventId": "399be827-abee-42ad-b8f9-431e601ff186",
+        "at": "2026-08-03T00:21:15.440Z",
+        "prdSlug": "956-confirm-single-epic-construction"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc7t1le-14",
-        "text": "All six parse correctly through the app's own frontmatter reader, so they'll show up in the Agent Library picker and tag-membership views.\n\n**Full generalist roster now in `~/.claude/agents/`:**\n\n| Persona | tags | Role |\n|---|---|---|\n| `dev-lead` | feature, bug, discussion | Engineering — decompose/build/verify via `/develop` |\n| `product-lead` | feature, discussion | Product/PM — scope and build-vs-not calls |\n| `design-lead` | feature, bug | Design/UX — user-facing shape + validation planning |\n| `qa-lead` | bug | QA — reproduce-first, verify-before-done |\n| `ops-lead` | bug, discussion | DevOps/SRE — incident response + infra planning |\n| `growth-lead` | discussion | Marketing/Growth+Analytics — data-grounded calls |\n\nEach follows the same shape as `dev-lead`: role identity + working-style bullets + an explicit \"stays agnostic about task type, that's the Mission tag's job\" note + a short \"what you don't do\" list — no PRD/`/develop` mechanics restated, just pointers to the skill where it applies. Tag sets are all distinct (no two personas claim the same combination), and none defaults to blanket-all-three except `dev-lead`, which genuinely spans all three missions by design.\n\nNarrow specialist reviewers (`api-designer`, `code-reviewer`, `debugger`, `security-auditor`, etc.) and the two pipeline agents (`builder`, `project-home-builder`) are untouched — still correctly scoped for `/develop` step-8 dispatch and their own automations, not part of this generalist Epic-persona roster.",
-        "id": "pevt-msc8i3ss-18",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T20:09:51.292Z"
+        "causedByEventId": "pevt-msch4et4-13",
+        "text": "All three queued to Epic `psess-mscg8i3u-2`, chained off 952:\n\n- **954-epic-create-ipc-handler** (depends on 952) \u2014 additive-only `promptSessions:create-epic` IPC channel wrapping `ensureEpic` directly.\n- **955-route-epic-create-through-ipc** (depends on 954) \u2014 the actual consolidation: `createPromptSession` stops constructing its own record, becomes async, delegates to 954's handler; retires the second id scheme (`psess-<ts>-<seq>`) in favor of `ensureEpic`'s `<slug>-<uuid8>`; updates all real + test call sites in the same PRD (unavoidably wide, flagged as such).\n- **956-confirm-single-epic-construction** (depends on 955) \u2014 repoints 953's drift test into a \"no second constructor exists\" regression guard and fixes stale doc comments.\n\nFull chain now on disk: 950 \u2192 951 (Epic-context digest), 952 \u2192 953 \u2192 954 \u2192 955 \u2192 956 (schema consolidation). This is a one-shot turn, so I can't track execution now \u2014 check the Scheduler tab, or ask me to verify against AC in a future turn once they've run.",
+        "id": "pevt-mschhkh0-20",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-03T00:21:22.788Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8i3ss-18",
-        "text": "All 822 renderer tests pass, typecheck clean, selector lint clean.\n\n## My take on the tags\n\nYour Mission taxonomy is basically sound but has drifted from CLAUDE.md's own description of it: CLAUDE.md still says \"5-tag taxonomy,\" but `tagLibrary.ts` actually has **6** — `bilko-host-publisher` was added after that text was written. Three of the six (`build`, `project-home-builder`, `bilko-host-publisher`) aren't really \"missions\" in the same sense as `feature`/`bug`/`discussion` — they're each a dedicated, scripted, single-purpose pipeline with its own creation entry point, not something a human picks from a general list. That's a legitimate design (matches your \"1 of each, specific\" instinct), but it means the tag taxonomy is really two tiers: 3 general-purpose missions + 3 named pipeline triggers. Worth updating CLAUDE.md's stale \"5-tag\" count regardless of anything else.\n\n## What happened with Builder — found and fixed the real bug\n\nYou were right that something was off. Tracing `builder`'s Agent+Tag pairing turned up three concrete gaps, all now fixed:\n\n1. **The scripted Build Epic never set an Actor at all.** `EpicQueue.tsx`'s `createBuildEpic()` called `composeEpicIntake({ title, goal, tag: 'build' })` with no `agentName`/`agentDescription` — unlike `ProjectPagesSection.tsx` and `HostBilko.tsx`, which both correctly look up their persona by name and pass it through. Every Build Epic was opening on Default, with only the Mission (tag) line ever populated. Fixed: added the same lookup-by-name pattern, so Build Epics now get the `builder` persona as their Actor.\n2. **`bilko-host-publisher` had no global agent file** — only a project-local overlay in this repo's `.claude/agents/`. Since `listPersonas()` (the IPC the picker and `HostBilko.tsx` both use) only scans the *global* `~/.claude/agents/` dir, the overlay was invisible to the app entirely: `HostBilko.tsx`'s own persona lookup always silently returned `null`. Created the missing global file so it's actually res…",
-        "id": "pevt-msc8t35t-24",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T20:18:23.681Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc8t35t-24",
-        "text": "Pushed successfully — `be83fe8..009d69f` on `main`.\n\n**Summary:** Committed and pushed all pending work (51 files, +2643/-196) in one commit on `main`:\n- This session's Agent/Mission work: the AIM framework's explicit Input line (`summarizeGroundingBoard`/`epicIntake.ts`), the fix wiring the `builder` persona as the Build Epic's Actor, the missing global `bilko-host-publisher.md` agent file, and `tags:` frontmatter on the three dedicated-pipeline personas.\n- Pre-existing uncommitted work already in the tree: the bilko-host static-project publishing integration (`HostBilko.tsx`, `bilkoHost.cjs`/`bilkoHostCore.cjs`, its architecture docs) and routine operations-state updates (Epic transcripts, active-index, project brief).\n\nVerified clean before pushing: `tsc --noEmit`, `check-unstable-selectors`, and the full renderer suite (822/822) all green. Working tree is now clean and `main` is up to date with `origin`.",
-        "id": "pevt-msc8xiro-27",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T20:21:50.532Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc8xiro-27",
-        "text": "Clean commit — exactly 4 files, nothing swept in. The 93 remaining unstaged/untracked paths belong to the live scheduler job and are untouched. Not pushing — you didn't ask to publish this turn, and pushing over a still-running job's in-progress state would be premature regardless.\n\n## Summary\n\n**Delivered — \"General Behaviour\" Context Injection (implemented, committed locally):**\n- New `src/renderer/lib/contextInjections.ts` — Session-Manager-authored prompt text, structurally separate from Actor/Input/Mission and from the passive grounding-board inventory. First entry: `general-behavior` (concise, verify-before-done, search-before-build, ask-only-on-genuine-ambiguity).\n- `epicIntake.ts` composes it right after the Actor line, before Input — independent per-key toggle, `undefined`/omitted by default in the pure function (no hidden default), so existing callers are unaffected.\n- `NewEpicCard.tsx`'s advanced grounding board now shows a \"Context injections\" checkbox section, default **on**, wired through to `composeEpicIntake` at creation.\n- Verified: `tsc --noEmit` clean, `epicIntake.test.ts` + `NewEpicCard.test.tsx` green (22/22, including an updated assertion for the new default-on prefix).\n\n**Reported, not yet built — \"Chat UX context\":** it already exists today (`chatRunner.cjs:240-280`, `STOP_SIGNAL_INSTRUCTION` + `CHAT_MODE_TRUTH_INSTRUCTION`, prepended to *every* Chat message — literally the instructions wrapping this whole conversation), but it's hardcoded, unconditional, and injected at a different layer (per-message, main process) than `composeEpicIntake` (once, at creation, renderer). Building a real toggle for it needs a decision on where it lives and what \"off\" means, given it's partly load-bearing for the app's own needs-input detection.\n\n**Operational note:** a live scheduler job (PRD 945, still `status: running`) is actively editing this exact repo concurrently — `CLAUDE.md`, `EpicQueue.tsx`, `config.cjs`, `opsOwnership.cjs`, `epicMint.cjs`, and the `…",
-        "id": "pevt-msc9i8vx-42",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T20:37:57.501Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc9i8vx-42",
-        "text": "Clean commit — exactly 3 files. Not pushed (no publish request this turn). Remaining 15 untracked/modified paths belong to the concurrent scheduler job, untouched.\n\n## Answer to your question\n\n**How `/develop` reaches a session — three separate layers, easy to conflate:**\n\n1. **Availability (Claude Code itself, not Session-Manager).** `/develop` is a plugin skill. Every Epic session has equal access to it regardless of Agent or Tag — Session-Manager has no code that grants or withholds it per Epic. In that literal sense, \"some have it, some don't\" isn't quite right: it's uniformly available everywhere.\n\n2. **Whether it fires is semantic, not structural, for `feature`/`bug`/`discussion`.** `composeEpicIntake` never writes the literal string `/develop` into those three tags' opening prompts — it writes each tag's prose (`agentTagDefs.ts`), which happens to match `/develop`'s own trigger description closely enough that Claude Code's skill-matcher picks it up on its own. `discussion`'s template is deliberately written (\"no code changes expected... don't start editing files\") to suppress that match, not because the skill is blocked.\n\n3. **Three tags explicitly route to a *different* dedicated skill/protocol instead, never `/develop`'s own PRD pipeline:** `build` → the Builder skill (`/builder`, literally typed into its goal text); `project-home-builder` → its own agent protocol (falls back to `/develop` only as a one-time bootstrap if the pipeline doesn't exist yet); `bilko-host-publisher` → its own agent protocol, never `/develop`.\n\n**Agent has zero effect on any of this** — confirmed again while tracing it: none of the 6 persona files mention `/develop`, and `/develop`'s own SKILL.md never reads `agentType`. Only the Mission tag matters.\n\n**What I fixed:** this distinction already existed as real data (`tagLibrary.ts`'s `developEagerness`) but was rendered *only* in the separate Tag Library nav tab — invisible on the New Epic card where you're actually choosing Agent+T…",
-        "id": "pevt-msca4gpk-45",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T20:55:14.072Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msca4gpk-45",
-        "text": "## Commit\n\nNothing of mine is pending — my last two turns' work is already committed (`7fff199` General Behaviour injection, `5bce769` `/develop`-routing surfacing). The current dirty tree (`git status`) is entirely the live scheduler job's in-progress state (`epicMint.cjs`, `EpicQueue.tsx`, PRD reservations, transcripts) — not mine to commit, so there's nothing to do here.\n\n## Persona × Tag matrix (from `~/.claude/agents/*.md`)\n\n| Persona | Tags | Role |\n|---|---|---|\n| `dev-lead` | feature, bug, discussion | Engineering lead — decompose/build/verify via `/develop` |\n| `product-lead` | feature, discussion | Product/PM — scope and build-vs-not calls |\n| `design-lead` | feature, bug | Design/UX — user-facing shape + validation planning |\n| `qa-lead` | bug | QA — reproduce-first, verify-before-done |\n| `ops-lead` | bug, discussion | DevOps/SRE — incident response + infra planning |\n| `growth-lead` | discussion | Marketing/Growth+Analytics |\n| `builder` | build | Release-cutting protocol agent |\n| `project-home-builder` | project-home-builder | Project Pages generation protocol agent |\n| `bilko-host-publisher` | bilko-host-publisher | bilko.run static-publish protocol agent |\n| `api-designer` | *(none)* | Specialist reviewer — API design (`/develop` step-8 dispatch only) |\n| `code-reviewer` | *(none)* | Specialist reviewer — general diff review |\n| `debugger` | *(none)* | Specialist reviewer — stack-trace diagnosis |\n| `dependency-auditor` | *(none)* | Specialist reviewer — CVE/lockfile audit |\n| `perf-profiler` | *(none)* | Specialist reviewer — hot-path/perf regressions |\n| `refactorer` | *(none)* | Specialist reviewer — structural refactors |\n| `security-auditor` | *(none)* | Specialist reviewer — OWASP/CWE scan |\n\nPlus **Default** (no persona, `agentName = ''`) — always selectable, carries no tag membership since it's not a file.\n\nShape: 6 generalist Epic-driving personas (each a distinct tag combination, per the earlier design decision) + 3 dedicated-pipeline pers…",
-        "id": "pevt-mscad7ml-46",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T21:02:02.205Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscad7ml-46",
-        "text": "No repo code references `dev-lead` by name, so nothing to update there — these agent files live outside the git repo (`~/.claude/agents/`), so there's nothing to commit for this change; it's already live.\n\n## Summary\n\nSplit what was one persona into two distinct scopes, matching your distinction exactly:\n\n- **`architect`** (new) — the primary Actor for an Epic's whole interactive conversation: owns the overall plan, decomposition via `/develop`, tracking to completion, and the final done/not-done call. Took over the `feature, bug, discussion` tags. Never implements a PRD itself.\n- **`dev-lead`** (rewritten) — now scoped down to executing exactly one already-scoped PRD at a time, headless, with no visibility into the overall plan. Untagged (no `tags:` — like the specialist reviewers), since it's not meant to be picked as an Epic's Actor.\n\n**Flagged, not glossed over:** there's a real mechanical gap behind \"dev-lead works on 1 PRD at a time\" — PRD execution (`scheduler.cjs`) has **no persona/agentType field at all**; a scheduled job is just `claude -p <prd-body>`. So `dev-lead` can't be *selected* the way `architect` is selected for an Epic — the only way to attach it to a PRD run today is for the PRD's own Implementation notes to say so explicitly (\"work as the dev-lead persona, read `~/.claude/agents/dev-lead.md`\"), the same pattern PRDs already use to point at `standards.md`. I wrote that limitation directly into both files so it isn't silently assumed later. Both parse correctly through the app's frontmatter reader (verified). Nothing to commit — these files live outside the git repo.",
-        "id": "pevt-mscainv2-48",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T21:06:16.526Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscainv2-48",
-        "text": "That screenshot is the 7 untagged specialist reviewers (`api-designer`, `code-reviewer`, `debugger`, `dependency-auditor`, `perf-profiler`, `refactorer`, `security-auditor`) from the table I posted — all pre-existing, not created this session (they predate this conversation, dated back to before we started).\n\nBefore I delete anything, one thing doesn't line up and I want to flag it rather than guess: **these 7 aren't idle or redundant — they're actively load-bearing for `/develop`'s own Phase 2 step 8**, which explicitly dispatches to them by name:\n\n```\napi-designer      → API shape changes\nsecurity-auditor  → auth/input/secrets/storage\nrefactorer        → structural refactors\nperf-profiler     → hot-path changes\ndependency-auditor → dependency adds/updates\ncode-reviewer     → (via requesting-code-review) the generic default\ndebugger          → not in step 8's table, but a distinct diagnose-from-stack-trace role\n```\n\nNone of them overlap in *scope* with `architect`/`dev-lead` (or the other generalist personas from earlier) — those are broad, whole-conversation/whole-PRD roles; these are narrow, single-pass verification specialists dispatched by `/develop` after code lands. So I can't confirm the premise (\"overlap with the one created by this session\") from what I can see — and since these files live outside git (no version-controlled undo), deleting the wrong ones is a real, unrecoverable action, not something to guess on.\n\n**What I can do without more from you:** if you mean something more specific — e.g. `code-reviewer` specifically overlapping with `architect`'s own \"verify before done\" step, or `debugger` overlapping with `qa-lead` (which does lean into reproduce-first bug diagnosis) — I can act on that narrower claim right now. But wholesale-deleting all 7 would break `/develop`'s step 8 dispatch table (it would be routing to agent names that no longer resolve to anything).",
-        "id": "pevt-mscakgug-49",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T21:07:40.744Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscakgug-49",
-        "text": "Clean commit — exactly 3 files. Not pushed (no publish request this turn).\n\n## Summary\n\n**Resolved the overlap:** deleted `debugger.md` — its narrow \"diagnose from stack trace\" niche duplicated `qa-lead`'s broader reproduce-first scope, and it wasn't even part of `/develop`'s step-8 specialist dispatch table, so nothing else depended on it.\n\n**Applied a department taxonomy** (mid-startup shape: Engineering, Product, Design, Quality, Platform, Growth) to all 16 remaining personas via a new `title` frontmatter field (`\"<Department> — <Human title>\"`), wired end-to-end like the `tags` field before it (`agentLibrary.cjs` serialize/save/list, `AgentPersona`/`AgentPersonaSaveInput` types — both optional so nothing else breaks):\n\n| Department | Personas |\n|---|---|\n| **Engineering** | architect (Architect), dev-lead (Software Engineer), api-designer (API Reviewer), code-reviewer (Code Reviewer), dependency-auditor (Dependency Auditor), perf-profiler (Performance Engineer), refactorer (Refactoring Engineer), security-auditor (Security Engineer) |\n| **Product** | product-lead (Product Manager) |\n| **Design** | design-lead (Product Designer) |\n| **Quality** | qa-lead (QA Engineer) |\n| **Platform** | ops-lead (DevOps/SRE Engineer), builder (Release Engineer), project-home-builder (Docs Engineer), bilko-host-publisher (Publishing Engineer) |\n| **Growth** | growth-lead (Growth Marketer) |\n\n**Made it obvious on the advanced page (New Epic card):** the Agent picker now renders grouped by department instead of one flat alphabetical list, with each persona's role label shown next to its name.\n\nVerified: `tsc --noEmit` clean, selector lint clean, 32/32 targeted tests + 821/822 full renderer suite (the one failure is the same pre-existing concurrent scheduler-job artifact from earlier turns, unrelated to this work). Committed locally (3 code files); the 16 persona `.md` files live outside the git repo and aren't part of any commit.",
-        "id": "pevt-mscat8sl-50",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T21:14:30.213Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscat8sl-50",
-        "text": "Pushed — `212085d..dfc46ab` on `main`. Working tree is clean.\n\n**Summary:** All three of this session's code commits (`7fff199` General Behaviour injection, `5bce769` `/develop`-routing surfacing, `fd841f1` title/department field + grouped Agent picker) were already on `origin/main` — the concurrent scheduler job that was running earlier must have pushed on top of them as part of its own commit flow. I committed the one remaining bit (routine Epic transcript/active-index sync) and pushed. Nothing outstanding; `main` is fully in sync with `origin`.",
-        "id": "pevt-mscb0itk-52",
-        "promptSessionId": "psess-msc6lz8u-2",
-        "at": "2026-08-02T21:20:09.800Z"
+        "causedByEventId": "pevt-mschhkh0-20",
+        "text": "Confirmed: PRD 952 has fully landed and is wired into `ensureEpic`.\n\n## The Epic (`PromptSession`) JSON schema\n\nAs-built in `src/main/lib/promptSessionSchema.cjs` \u2014 a zod schema mirroring the TS `PromptSession` interface (`src/renderer/state/promptSessions.ts:29-76`) field-for-field, and now the single validated source of truth for every Epic `ensureEpic` mints (checked right before every disk write, `epicMint.cjs:342`):\n\n```js\nPromptSessionSchema = {\n  id: string,                          // required\n  cwd: string,                         // required\n  goalText: string,                    // required\n  claudeSessionId: string,             // required\n  status: 'proposed' | 'active' | 'completed',  // required\n  createdAt: string,                   // required\n  completedAt: string | null,          // required\n  resumedFromId?: string | null,       // optional\n  tag?: EpicTagSchema,                 // optional\n  openingPrompt?: string | null,       // optional\n  source?: EpicSourceSchema,           // optional\n  agentType?: string,                  // optional\n}\n\nEpicTagSchema = enum:\n  'feature' | 'bug' | 'discussion' | 'build' |\n  'project-home-builder' | 'bilko-host-publisher'\n\nEpicSourceSchema = {\n  producer: 'rca-hook' | 'feedback-sweep' | 'propose-epic' | 'scheduler-dispatch',  // required\n  prdSlug?: string,\n  runId?: string,\n  sourceTabId?: string,\n}\n```\n\nOne thing worth flagging: the executor found and documented (code comment, lines 17-23) that `EpicTagSchema`'s 6-value set is **deliberately distinct** from `ipcSchemas.cjs`'s PRD-tag enum (~line 349), which only covers 5 of these values and is missing `'bilko-host-publisher'` \u2014 a PRD-scheduling tag and an Epic-mission tag are related but not identical concepts, so it wasn't collapsed into one enum. Worth remembering if a future consolidation pass is tempted to merge them.\n\n`assertValidPromptSession(session)` throws a formatted `path: message` error list (not a raw ZodError dump) \u2014 this is what fires on a s\u2026",
+        "id": "pevt-mschi938-21",
+        "promptSessionId": "psess-mscg8i3u-2",
+        "at": "2026-08-03T00:21:54.692Z"
       }
     ],
-    "psess-msc7vrsg-15": [
+    "psess-mscgxoqw-7": [
       {
-        "id": "pevt-msc7vrsg-16",
-        "promptSessionId": "psess-msc7vrsg-15",
+        "id": "pevt-mscgxoqw-8",
+        "promptSessionId": "psess-mscgxoqw-7",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-02T19:52:29.296Z",
-        "text": "Bilko.run Integration\n\nSo Bilko.run or locally /Bilko is a project hosting platform that allows projects to host themself. Well Session-Manager's is project that build projects so therefore we can ahave one of the Project's proectif Left-Navs be called Host on Bilko.run. So some projects may not be compatible but this is wat hte left-nav experience tab will handle it will an agent that will conver the project and host it on Bilko.run design this fully with operations in mind after reading the Bilko'rs project on how to host. Your goal is to design the Integration tab so that for example we can host the Marketing Page with one click eventually. Focus on being able to publish to Bilko.run and we will then design what components get published form a Project"
+        "at": "2026-08-03T00:05:55.208Z",
+        "text": "Project Home Layout\n\nDescribe the currely layout for Project Home, it looks really bad. It feels like multiple pages one after the other we need to drive some consistency and fixed workflow"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc7vrsg-16",
-        "text": "Everything's landed and typechecks/tests are green. Summary:\n\n**Designed** (`session-manager-operations/architecture/bilko-host-integration.md`): a two-stage \"Host on Bilko.run\" pipeline that builds on Bilko's own pre-existing self-service infrastructure — the `bilko-host` MCP server (`register_static_project`/`publish_static_project`/`status`, gated by manifest/budget/golden/a11y/audit checks) — rather than inventing a new hosting mechanism. Stage A (deterministic, this app's own IPC) packages the project's already-generated Marketing Project Page into a host-contract-compliant static bundle; Stage B (an Epic) drives the MCP publish pipeline, grounding itself on Bilko's gate code live each run rather than trusting a hardcoded assumption.\n\n**Implemented:**\n- `.mcp.json` — wired the `bilko-host` MCP server so any session in this repo can use it\n- `src/main/bilkoHost.cjs` + IPC schemas — Stage A bundle prep (`dist/index.html` + host-contract `manifest.json`), new `bilko-host` OWNERS namespace\n- New Epic tag `bilko-host-publisher` (tagLibrary/agentTagDefs/ticketDisplay/epic-primitives) + `.claude/agents/bilko-host-publisher.md` persona with the full operating protocol\n- New `bilko-host` left-nav tab (`HostBilko.tsx`, Configure face, project-scoped) with compatibility gate, Prepare Bundle, and Publish (files/resumes the Epic) — wired through `NavKey`/`navGroups`/`screenKeys`/`screenComponents`/`learningContent`\n- `session-manager-operations/bilko-host/README.md`, CLAUDE.md OWNERS list updated\n- Unit tests for the pure slug/readiness logic (both renderer and main sides); full `typecheck`, `lint:selectors`, and `vitest run` are green (fixed one pre-existing nav fixture test to include the new tab)\n\nNot implemented (by design, per the spec's non-goals): the actual publish execution — that's the Epic's job at runtime, reading Bilko's gate code live rather than this app hardcoding it, which would drift.",
-        "id": "pevt-msc8cjps-17",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:05:31.984Z"
+        "causedByEventId": "pevt-mscgxoqw-8",
+        "text": "## Current layout (top-to-bottom, one scrolling column, `max-w-1080px`)\n\n`ProjectHome.tsx` renders these as independent, self-contained blocks, one after another, each with its own header (mono kicker + serif `h2` + faint note) and its own card style:\n\n1. **`PhHeader`** \u2014 purpose title, Refresh button, provenance chips (\"read from\u2026\")\n2. *(conditional)* refreshing banner\n3. **`PhNow`** \u2014 \"What is in flight\" \u2014 3-col grid of Epic cards\n4. **`PhWhat`** \u2014 \"What this is\" \u2014 paragraph card, editable/pinnable\n5. **`PhAreas`** \u2014 \"How it is put together\" \u2014 a table\n6. **`PhScope`** \u2014 \"How the goal has moved\" \u2014 a timeline list\n7. Two-column row: **`PhConventions`** (checklist) + **`PhOpenQuestions`** (question cards)\n8. *(else, if no brief)* \u2014 its own separate empty state with a Generate button\n9. Footer caption paragraph\n10. **`ProjectPagesSection`** \u2014 a structurally unrelated sub-app bolted onto the bottom: its own tab bar (Home/Marketing/Feature/Architecture/About), its own iframe preview, its own fullscreen mode, its own Generate/Regenerate CTA and empty state\n\n## Why it reads as \"pages stitched together\"\n\n- **Six-plus independent section headers**, each re-declaring the same kicker/title/note chrome (`PhBlock`), but each body uses a *different* content shape: card-grid, prose card, table, timeline, checklist, question-cards, iframe-viewer. Nothing tells the eye these are facets of one thing rather than six unrelated widgets.\n- **No persistent navigation or section anchor** \u2014 it's a pure vertical scroll with hard `mb-7` breaks. There's no way to jump to \"Conventions\" or \"Project Pages\" without scrolling past everything above.\n- **Two unrelated CTA/empty-state patterns**: the brief has its own \"Generate the brief\" empty state (\u00a78), and `ProjectPagesSection` has a *second*, differently-styled \"Generate Now\" empty state further down. A user hits \"generate\" twice, for two different subsystems, with no shared visual language between them.\n- **`ProjectPagesSection` is the biggest \u2026",
+        "id": "pevt-mscgyklb-10",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T00:06:36.479Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8cjps-17",
-        "text": "All 223 test files / 2077 tests pass, typecheck and selector-lint are clean.\n\n## Summary\n\nRedesigned \"Host on Bilko.run\" from a 1-project-per-app model to a **1-project = 1-Bilko-listing = N-documents** model, matching your requirement:\n\n- **Data model** (`session-manager-operations/bilko-host/documents.json`): one root document (`subpath: ''` → `dist/index.html` → `bilko.run/projects/<app-name>/`, defaults to the Marketing Project Page) plus any number of sub-path documents (`subpath: 'special-doc/01'` → `dist/special-doc/01/index.html` → `bilko.run/projects/<app-name>/special-doc/01/`). Sources can be another generated Project Page lens or an arbitrary local HTML file.\n- **Deletion, confirmed not guessed**: I read Bilko's actual `publish_static_project` implementation (`mcp-host-server/src/server.ts`) — it does `rm -rf` then `cp -r` the *entire* `public/projects/<slug>/` tree on every publish, never a merge. So Stage A (`prepareBundle`) always wipes and rebuilds `dist/` from the current document list, and the next Publish is guaranteed to remove anything you deleted locally — no separate delete API needed on Bilko's side, and no risk of orphaned live pages after a \"successful\" delete.\n- **Left-nav tab** (`HostBilko.tsx`): document list with live-URL previews, Add (sub-path + title + source lens) and Remove per row, a staleness indicator (`bundleStale`) so removing a document visibly shows \"not yet live-removed until you Publish\" rather than implying it's already gone.\n- Rewired `src/main/bilkoHost.cjs` (+ new pure `bilkoHostCore.cjs`) and IPC/preload types for the multi-document model.\n- **Caught and fixed a real bug while testing**: `config.cjs`'s `validateWrite` has a second, separate allowlist gate on top of the `OWNERS` law — every existing namespace (`browser`, `feedback`, `prompt-sessions`, `scheduler`, `project-brief`) needs its own carve-out there too, and I'd missed it for `bilko-host`. Without it, every write in `bilkoHost.cjs` would have thrown at runti…",
-        "id": "pevt-msc8m75w-21",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:13:02.276Z"
+        "causedByEventId": "pevt-mscgyklb-10",
+        "text": "This confirms and broadens the finding. Answer below.\n\n## Does the current workflow support dynamic assembly? Not really \u2014 for `home` specifically, no.\n\nI checked the actual selection pipeline (`select.ts`'s `scoreVariants` + `selectionPredicates.ts`), not just the library structure.\n\n**How selection actually works:** `scoreVariants` walks a lens's presets in order (v1, v2, \u2026) and picks the first preset whose per-slot choice is \"eligible.\" A variant is only *conditionally* eligible if it has an entry in `VARIANT_REQUIREMENTS` (`selectionPredicates.ts`) \u2014 a `requires`/`avoidIf` predicate checked against the project's real `ProjectPageSummary`. **If a variant has no entry there, it's unconditionally eligible, which means preset `v1`'s pick always wins the tie-break, on every run, for every project.**\n\n**`VARIANT_REQUIREMENTS` has exactly two entries in the whole codebase, both in `marketing`:**\n```\n'marketing.proof.quote': { requires: ['quotes.length > 0'] }\n'marketing.proof.stats': { requires: ['stats.length > 0'] }\n```\n\nNothing else \u2014 not `home.overview`, not `home.pillars`, not anything in `feature` or `architecture` \u2014 has a predicate. So:\n\n- **`home` lens (the one you're asking about): `overview` always resolves to `dashboard`, `pillars` always resolves to `grid` \u2014 for every project, every regenerate.** The `ledger`/`rows` alternates exist in the library but the deterministic selector can never reach them; they're only reachable if a human hand-edits `picks.json` directly (which `mergePicks` then preserves).\n- Same is true for `feature` (always `v1`'s picks) and `architecture` (always `v1`'s picks) \u2014 `marketing` is the *only* lens with any real content-driven variation, and even there only 2 of its 8 slots actually branch.\n\nSo today, \"assembled dynamically\" is true only in the mechanical sense (there's a selection *pass*, and hand-picks are respected across regenerates) \u2014 it is not true in the sense that layout responds to what's actually in the project. A tiny CL\u2026",
+        "id": "pevt-msch6qe0-15",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T00:12:57.240Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8m75w-21",
-        "text": "All the pass/fail confirms my Bilko.run work is self-contained and clean: `bilkoHost.test.ts`, `bilkoHost-deriveSlug.test.cjs`, `bilkoHostCore.test.cjs`, and `bilkoHost-integration.test.cjs` (33 tests) all pass. The `EpicQueue.tsx` failures are pre-existing, in-flight, uncommitted work by a different process in this repo — not something I touched or should fix mid-flight.\n\n## Summary\n\nConfirmed the mechanism handles your request with no new backend capability needed — Project Pages' Marketing lens already becomes the project root (`bilko.run/projects/session-manager/`), so Home/Feature/Architecture just needed to become sub-path documents under it. What I added:\n\n- **`computeProjectPageLensStatus`** (`src/renderer/lib/bilkoHost.ts`): pure function mapping each of the 4 lenses to `root` (Marketing, implicit or already seeded) / `hosted` (already added as a document) / `available` (not yet hosted, with a suggested flat sub-path — `home`, `feature`, `architecture`). 8 new unit tests.\n- **`HostBilko.tsx`**: new \"Project Pages\" panel above the generic document list — one row per lens showing its status, a **\"+ Host as /‹lens›/\"** button per un-hosted lens, and a **\"Host all N remaining\"** one-click batch action. For \"Session Manager,\" this gets you `bilko.run/projects/session-manager/` (Marketing, root), `.../home/`, `.../feature/`, `.../architecture/` — 4 unique URLs, one Bilko project.\n- Reused the existing `addDocument` IPC per lens (no schema/backend changes required) — confirming last turn's document-list design already generalized to exactly this case.\n\nTypecheck, `lint:selectors`, and all Bilko-host-related test suites pass. Full-repo `vitest run` has 46 failures, all confined to `EpicQueue.tsx`/`EpicsWorkspace`/`EpicQueueControls` — verified via `git stash` that these fail because of an unrelated, uncommitted, in-progress change to `EpicQueue.tsx` already sitting in your working tree before I started (not something I introduced), so I left it alone rather than ed…",
-        "id": "pevt-msc8rbxb-22",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:17:01.727Z"
+        "causedByEventId": "pevt-msch6qe0-15",
+        "text": "Good \u2014 confirms my read. Here's the landed decision and what it changes concretely.\n\n## Confirmed: your 4-piece model replaces the current 5-stage pipeline\n\n| Your term | Maps to (unchanged) |\n|---|---|\n| **The Project** | `project-pages/summary.json` (Stage 1 \u2014 agent reads brief.json + repo, writes summary) |\n| **The Component Library** | `src/renderer/lib/projectPages/library/*.tsx` (Stage 0 \u2014 fixed slots/variants, still the only building blocks; the agent picks *among* these, doesn't invent new markup) |\n| **Home Builder Agent** | `project-home-builder` (Epic tag + `.claude/agents/project-home-builder.md`) \u2014 now owns selection too, not just summary+render |\n| **Place to host output** | `project-pages/picks.json` + `output/*.html` + `manifest.json` (Stage 3, unchanged) |\n\n**What's actually being cut is Stage 2 only** \u2014 the deterministic, non-LLM `scoreVariants` scorer and its `requires`/`avoidIf` predicate language. That's exactly the piece I flagged last turn as producing a fixed layout (`home` always gets `dashboard`+`grid`, `feature`/`architecture` always get `v1`, because almost nothing has a predicate). Removing it and having the agent choose directly \u2014 reading the library's variant notes + `summary.json` itself, the same way it already writes `summary.json` \u2014 is the fix: variant fit becomes real per-project judgment instead of \"whichever preset comes first in a list that's usually untriggered anyway.\"\n\nStage 3 (render) stays a deterministic pure function (`renderProjectPages(summary, picks)`) \u2014 that part was never the problem, it's just template instantiation from whatever `picks.json` says.\n\n## Concrete deltas this implies (for /develop, once you confirm)\n\n**Docs (spec is source of truth, per CLAUDE.md):**\n- `session-manager-operations/architecture/project-pages-pipeline.md` \u2014 rewrite \"Stage 2\" section: delete the scorer/predicate description, replace with \"the Home Builder Agent selects one variant per slot per lens itself, reasoning over `summary.json` ag\u2026",
+        "id": "pevt-mschguv5-19",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T00:20:49.601Z"
+      },
+      {
+        "id": "2e2912dc-6db9-4f23-ab16-3b6fb377b332",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mschguv5-19",
+        "at": "2026-08-03T00:26:40.229Z",
+        "prdSlug": "957-project-pages-pipeline-retire-deterministic-stage-2-selectio"
+      },
+      {
+        "id": "58f222e8-bbe0-453f-a20a-3de9d9eb9840",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "kind": "prd_created",
+        "causedByEventId": "2e2912dc-6db9-4f23-ab16-3b6fb377b332",
+        "at": "2026-08-03T00:27:02.175Z",
+        "prdSlug": "958-delete-deterministic-project-pages-variant-selector-select-t"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8rbxb-22",
-        "text": "# Bilko.run Integration — What Was Built\n\n## The idea\n\nSession Manager builds projects; Bilko.run is Stanislav's own hosting platform. This integration adds a **\"Host on Bilko.run\"** left-nav tab (Configure group, per-project) that publishes a project's already-generated marketing content to bilko.run with a few clicks — using Bilko's *existing* self-service publish infrastructure rather than inventing a new one.\n\n## Key discovery that shaped the design\n\nBilko.run already ships `mcp-host-server` — an MCP server built specifically so sibling repos can publish themselves *without* hand-editing the Bilko repo: `register_static_project`, `publish_static_project` (gated by 5 checks — manifest schema, size budget, a Playwright \"golden path\" smoke test, an a11y scan, `pnpm audit`), and `status`. I read its actual source rather than guessing, which surfaced the one fact the whole delete story depends on: **every publish does `rm -rf` then `cp -r` the entire target directory** — a full replace, never a merge. That single confirmed behavior is what makes local deletion reliably propagate live, with no separate \"delete\" API needed.\n\n## The data model: one Bilko project, many hosted documents\n\nA Bilko \"static-path\" app is just one directory tree served at `bilko.run/projects/<slug>/`. Nothing stops that tree from containing more than one page — so instead of 1 project ↔ 1 URL, the model is 1 project ↔ **N documents**:\n\n- **Root document** (`subpath: ''`) → `dist/index.html` → `bilko.run/projects/<slug>/` — \"the project itself,\" defaults to the Marketing Project Page.\n- **Sub-path documents** (`subpath: 'special-doc/01'`) → `dist/special-doc/01/index.html` → `bilko.run/projects/<slug>/special-doc/01/` — any number of additional explanatory pages, each independently added/removed.\n\nThis directly answers \"I don't want 3 Bilko projects for 1 project with extra docs\" and \"I should be able to post all 4 of Project Pages' generated HTMLs\" — for Session Manager itself, that's Marketing…",
-        "id": "pevt-msc8wjiz-26",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:21:04.859Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc8wjiz-26",
-        "text": "Nothing to publish — it's already there. Summary:\n\n- **`main` is already at `009d69f` and identical to `origin/main`** — the bilko-host feature (including last turn's Project Pages quick-add panel) was already committed and pushed to `github.com/StanislavBG/claude-code-session-manager` by a concurrent process before this turn started. `git log origin/main..HEAD` is empty; nothing local is ahead of the remote.\n- Verified on the pushed commit: `npm run typecheck` clean, and all 4 bilko-host test files (33 tests) pass fresh.\n- Leftover local changes are **not** part of this feature and I left them untouched: `session-manager-operations/prompt-sessions/active-index.json` + a few transcript `.jsonl` files (app runtime/session state, not code) and one uncommitted 2-line edit to `EpicQueue.tsx` (a different in-progress process's WIP, unrelated to Bilko hosting) plus an untracked error log. None of these belong in a \"publish the Bilko integration\" commit, so I didn't stage or push them.\n\nBottom line: your Bilko.run hosting integration is live on `main`/`origin/main` right now — no action needed.",
-        "id": "pevt-msc90ocw-28",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:24:17.744Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc90ocw-28",
-        "text": "**Left sidebar → \"Configure\" group → \"Host on Bilko.run\"** (icon: link icon), sitting right below \"Tag Library.\"\n\nSpecifics:\n- It's **project-scoped** (`faces: PROJECT` in `navGroups.ts`), so it only appears when you're on a project Tab, not on the machine-wide Home screen — same visibility rule as \"Project Home,\" \"Epics,\" \"Repo Viz,\" etc.\n- Order in the Configure group, top to bottom: System Prompt, Skills, Plugins*, MCP Servers, Hooks, Keybindings*, Memory, Permissions, Settings, Remote*, Agent Library*, Tag Library*, **Host on Bilko.run** (items marked `*` are Home-face-only, so on a project tab you'd actually see it right after Memory/Permissions/Settings in practice — the exact interleave depends on which face you're on).\n- Clicking it opens the full-page `HostBilko.tsx` screen (same \"SectionFrame\" chrome as the other Configure pages — eyebrow \"Configure,\" serif title \"Host on Bilko.run,\" intro line explaining it publishes the Marketing page via the gated pipeline).\n\nNo build/publish step is required to see it — this is renderer code, so it shows up on the very next `npm run dev` reload or `npm run build`, same as any other UI change; nothing about it is gated behind the npm package release.",
-        "id": "pevt-msc921fi-32",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:25:21.342Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc921fi-32",
-        "text": "There's nothing new to push — this is the same state as before, confirmed:\n\n- `git fetch origin` returned nothing new; `HEAD` and `origin/main` are identical (`git log origin/main..HEAD` and the reverse are both empty).\n- The Bilko.run integration (commit `009d69f`) is already on `origin/main` on GitHub — it was pushed before you asked the first time.\n- The only local diffs are unrelated: app runtime state (`prompt-sessions/active-index.json`, transcript `.jsonl` files, an error log) and two small edits (`epicMint.cjs`, `EpicQueue.tsx`) that belong to a different, still-in-progress process running in this same repo — not part of the Bilko hosting feature, so I'm not bundling or pushing them under this request.\n\nNothing to do — the Bilko.run integration is already live on `origin/main`.",
-        "id": "pevt-msc92pj8-34",
-        "promptSessionId": "psess-msc7vrsg-15",
-        "at": "2026-08-02T20:25:52.580Z"
+        "causedByEventId": "58f222e8-bbe0-453f-a20a-3de9d9eb9840",
+        "text": "Both PRDs are queued and will run via the scheduler's own polling (independent of this turn):\n\n| NN | File | ETA | Depends on |\n|---|---|---|---|\n| **957** | `957-project-pages-pipeline-retire-deterministic-stage-2-selectio.md` | ~12 min | none |\n| **958** | `958-delete-deterministic-project-pages-variant-selector-select-t.md` | ~18 min | none |\n\nBoth live under `session-manager-operations/scheduler/epics/psess-mscgxoqw-7/prds/`, `cwd` = `/home/bilko/Projects/session-manager`. They're an independent pair (docs vs. code, disjoint files) rather than a chain, so they can run in parallel:\n\n- **957** rewrites `project-pages-pipeline.md`'s Stage 2 section and `.claude/agents/project-home-builder.md`'s protocol step 4 to describe agent-owned selection, drops the \"No LLM-driven variant selection\" non-goal, and cleans up the stale `mergePicks` reference \u2014 docs only, no code touched.\n- **958** deletes `select.ts`, `selectionPredicates.ts`, `select.test.ts`, `scripts/select-project-pages-picks.cjs`, drops the dead export from `logicBundle.ts`, fixes the stale comment in `ProjectPagesSection.tsx`, and gates on `typecheck` + `test:unit` + `lint:selectors` staying green.\n\nToken cost ballpark: small/cheap \u2014 957 is pure prose editing over two files, 958 is deletion + a grep sweep + three bounded test commands; neither should approach the ~30 min ceiling.\n\n**This turn ends here** \u2014 this is a one-shot session, so I can't watch the scheduler run in the background or report back later myself. The jobs will execute on their own per the scheduler's `when-available` polling (or you can hit \"Run now\" in the SchedulePanel). Next time you're in this Epic, ask me to check status and I'll verify both against their acceptance criteria and route 958 to `code-reviewer` before calling it done, per `/develop`'s Phase 2 gate.",
+        "id": "pevt-mschp5t0-22",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T00:27:17.028Z"
       }
     ],
-    "psess-msc8lmfl-19": [
+    "psess-msch2lho-11": [
       {
-        "id": "pevt-msc8lmfl-20",
-        "promptSessionId": "psess-msc8lmfl-19",
+        "id": "pevt-msch2lho-12",
+        "promptSessionId": "psess-msch2lho-11",
         "kind": "prompt",
         "causedByEventId": null,
-        "at": "2026-08-02T20:12:35.409Z",
-        "text": "Session Manager Operations - Maintain\n\nThere are sevel aspects that constantly evolve and we need to be sure of the latest and single source of trugh for varios things and the network effoer and impact they have; \n\nOn the Operations Folder under each project is where histirycally between the different projects and this one as very old project has aquimulated lots of diffeent and now redunant and content poluting content that is best removed. \n\nThis Session goal is identity multiple patterns against the true source of truth delete, migrate, maintain so that is doesn't overbloat. \n\nFundamenatlly this is the backbone for operations of Session Manager and the SOR for default configs that are shipped as part of the tool. So we need to develop an agent that can sweep though multipel Session-Manage-Operation's folders of different Projects and clean-up; \n\nStart by creating a protocol using this project's Operations Folder. Improvements Identified we can also file for futur eversions"
+        "at": "2026-08-03T00:09:44.268Z",
+        "text": "Agent Library\n\nAdd CRUD controls so that I can delete Agents and modify existing. This should be exposed on the application, esure action buttons on the List view, Single view"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8lmfl-20",
-        "text": "All three Epics filed. Summary of what landed this session:\n\n**Protocol document** — `session-manager-operations/architecture/ops-maintenance-protocol.md`: a source-of-truth hierarchy (code OWNERS table → CLAUDE.md → namespace READMEs → on-disk content) plus 6 concrete patterns (A–F) found by actually auditing this project's own operations folder, ending with a generalization section for a future cross-project sweep.\n\n**Fixed directly (low-risk, doc-only)**:\n- CLAUDE.md's \"deliberately NOT in OWNERS\" enumeration was stale — missing `logs/`, `project-pages/`, `bilko-host/` (and didn't call out that `browser/` is the one exception that *is* in OWNERS). Fixed.\n- Flagged (not silently resolved) a genuine internal contradiction in CLAUDE.md itself: one bullet says `feedback/` is \"gone,\" the OWNERS bullet two paragraphs earlier still lists it as a live owner — confirmed in code too (`config.cjs` still grants it a write path, `opsOwnership.cjs` still owns it, 72 files still on disk).\n\n**Filed as proposed Epics** (require human approval, nothing runs yet):\n1. `resolve-feedback-namespace-retired-in-one-claude-b488c10f` — decide feedback/'s real fate (retire vs. keep as manual inbox) and make code/docs agree.\n2. `ops-folder-hygiene-audit-legacy-scheduler-prds-b-5bb62c0f` — investigate the 73 un-migrated legacy `scheduler/prds/` files and the 29 orphaned top-level `prompt-sessions/` JSON files with no matching `scheduler/epics/` dir.\n3. `build-a-cross-project-session-manager-operations-41dbe8fe` — the actual sweep agent for future versions, built to run the protocol against any project.\n\nNo files were deleted this session — every finding that needed a real decision went to a proposed Epic rather than being acted on unilaterally, per the protocol's own two-of-three-layers-must-agree rule.",
-        "id": "pevt-msc8sd56-23",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:17:49.962Z"
+        "causedByEventId": "pevt-msch2lho-12",
+        "text": "**Summary:** Agent Library already had full CRUD in the detail/single view (New, Duplicate, Save, Revert, Delete-with-confirm \u2014 shipped in `50b864e`). The gap against the goal was action buttons on the **list view**: rows were select-only. Added a hover-revealed `\u00d7` delete button per row with inline confirm/cancel that calls the same `deletePersona` IPC, updated the two tests that broke from the row markup change (`button`\u2192`div` with `data-agent-row`), and added a new test covering the row-delete flow. Typecheck, `lint:selectors`, and the full `AgentLibrary.test.tsx` suite (6/6) pass. Committed as `5cacd90`.",
+        "id": "pevt-msch5dgb-14",
+        "promptSessionId": "psess-msch2lho-11",
+        "at": "2026-08-03T00:11:53.819Z"
+      }
+    ],
+    "psess-msch6x36-16": [
+      {
+        "id": "pevt-msch6x36-17",
+        "promptSessionId": "psess-msch6x36-16",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T00:13:05.922Z",
+        "text": "Home Page\n\nLets implement a new Home Page for Home-Tab in Session Manager \n\nUse the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Home+Screen+A.html\n\nFocus on these files (the whole project is readable):\n- `Home Screen A.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/home-a.jsx`\n\nImplement: `Home Screen A.html`"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8sd56-23",
-        "text": "Confirmed — all three are `status: proposed` Epics in `prompt-sessions/active-index.json`, each carrying its own reserved `claudeSessionId` and a full objective as its opening prompt. They'll sit inert in the Epics workspace until you (or an approver) hit **Approve & start** on each; that submit is what mints them `active` and, if you then run `/develop` inside that Epic's session, is when actual PRDs get authored and queued to the scheduler. No PRDs exist yet for any of the three, by design — that's the correct state for proposals awaiting a human decision, not a mistake.",
-        "id": "pevt-msc8vtco-25",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:20:30.936Z"
+        "causedByEventId": "pevt-msch6x36-17",
+        "text": "Implemented the \"Home Screen A\" control-room redesign for the session-manager Home tab, adapted from the design mock to use only real, wired data (no fabricated charts/breakdowns):\n\n**Changed:** `src/renderer/components/tabs/Home.tsx`\n- **Hero**: `This machine \u00b7 N projects` kicker, headline shows real session-slot usage plus a clickable \"needs you\" count that jumps to the new section; added `All history` / `New epic` header actions.\n- **New \"Needs you\" section**: surfaces three real, already-existing human-gate signals \u2014 `proposed` Epics (Approve & start / Discard, reusing `EpicApprovalBar`'s logic), chat tickets stuck on `needs-input` (Open session), and scheduler jobs in `failed`/`needs_review` (Retry now / View in Scheduler). Rows expand inline, matching the design's interaction pattern.\n- **New `QueuedCard`**: shows real pending scheduler jobs (title, project, estimate) as the third column alongside the existing Usage and Projects cards.\n- Left the Active/Recent sessions cards and Agents card as-is (already real-data and functionally aligned with the design).\n\n**New:** `src/renderer/lib/homeNeedsYou.ts` \u2014 pure, dependency-free join helper (`buildNeedsYouRows`) plus `src/renderer/lib/__tests__/homeNeedsYou.test.ts` (5 tests, all passing).\n\nDeliberately **not** implemented from the mock: the fabricated 14-day pace sparkline and per-project token-% breakdown \u2014 no real data source backs either, and the project's grounding-board rule (\"never fabricated placeholder numbers\") rules that out.\n\nVerified: `npm run typecheck` clean, `npm run lint:selectors` clean, full `vitest run` \u2014 2107/2107 passing.",
+        "id": "pevt-msche54m-18",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T00:18:42.934Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msc8vtco-25",
-        "text": "Typecheck passes clean.\n\n## Root cause\n\nThe Epics weren't a display bug — it was my own mistake filing them: I ran `propose-epic.cjs` with `cwd=\".\"` instead of the absolute project path. `ensureEpic()` stored that literal `\".\"` string as the Epic's `cwd` field, and `EpicsWorkspace.tsx:190` scopes the visible Epic list with exact string equality (`s.cwd === effectiveCwd`, the active tab's absolute path) — so `\".\"` never matched anything and the three Epics were invisible in every project's queue, though they existed correctly on disk.\n\n## What's fixed\n\n1. **`src/main/lib/epicMint.cjs`** — `ensureEpic()` now does `cwd = path.resolve(cwd)` before anything else, so a relative `cwd` argument can never again silently mint an unmatchable Epic. This protects every caller (propose-epic.cjs, the RCA hook, MCP `scheduler_create_prd`, etc.), not just my own invocation.\n2. **Repaired the 3 already-corrupted entries** — patched their `cwd` field in `active-index.json` directly to `/home/bilko/Projects/session-manager` via the same lock/atomic-write path `ensureEpic` itself uses. Verified: all three now show `cwd: \"/home/bilko/Projects/session-manager\"`, `status: proposed`.\n3. **`EpicQueue.tsx`'s `STATUS_ORDER`** — separately found and fixed missing `'proposed'` in that array (the fallback default-grouping path used when no `sections` prop is supplied). Not the actual cause here since the live Epics tab renders through `EpicQueueControls.tsx` → `epicQueueControls.ts`'s `STATUS_GROUP_ORDER`, which already included `'proposed'` — but it was still a real latent bug in the component's own default path (used directly by its test suite and any future caller that omits `sections`), so it's fixed too.\n\nTypecheck is clean. The three Epics should now appear under the \"proposed\" group in the Epics workspace for this project.",
-        "id": "pevt-msc91hkn-31",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:24:55.607Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc91hkn-31",
-        "text": "Straight answer to your question: **yes, filing them as Epics is exactly how I get your approval** — that's the whole design of `status: 'proposed'` in this app. A proposed Epic runs nothing: no PRD gets authored, no `claude -p` job spawns, no code changes, until you personally click **Approve & start** on that specific Epic in the UI. That's a stronger approval gate than a PRD would give you — a PRD is already-decided, about-to-execute work; it has no \"proposed\" state at all in this codebase. The 3 items I filed (feedback/ retire-or-keep decision, prds/ backlog investigation, sweep-agent build) were judgment calls that needed a decision from you, not work I'd already decided should happen — so they went through the one mechanism this codebase has for \"surface this, do nothing until approved,\" per CLAUDE.md's own description of that gate.\n\nNow, the actual display problem — I found something important while investigating your screenshot:\n\n**You're not running this git repo.** `ps aux` shows the live Electron process is `/home/bilko/.npm/_npx/.../node_modules/claude-code-session-manager` v0.55.1 — the **published npm package**, not this dev checkout. My source fix to `EpicQueue.tsx` (the `STATUS_ORDER` array) lives only in this git repo and can't reach that running process; it would only take effect after a `/builder` publish + you updating. That fix wasn't the real cause anyway, though — the live app's actual render path (`EpicQueueControls.tsx` → `epicQueueControls.ts`) already had `'proposed'` correctly ordered.\n\nThe data-level fix (the corrupted `cwd: \".\"` on the 3 Epics) **does** apply immediately, since it's a shared file on disk that any app instance reads — and your screenshot's **\"Open 4\"** count is evidence it worked: that's 3 repaired Epics + 1 other. So the count-side is now correct.\n\nYour screenshot is cropped to just the header/filter-pill strip — it doesn't show the row list underneath, so I can't tell from it whether rows are actually failing to render…",
-        "id": "pevt-msc95bvk-37",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:27:54.848Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc95bvk-37",
-        "text": "The 3 proposed Epics filed this session (all `status: proposed`, all correctly scoped to `/home/bilko/Projects/session-manager` after the cwd fix):\n\n1. **`resolve-feedback-namespace-retired-in-one-claude-b488c10f`**\n   *\"Resolve feedback/ namespace: retired in one CLAUDE.md sentence, still live in OWNERS/code/README\"*\n   CLAUDE.md says `session-manager-operations/feedback/` is \"gone,\" but it's still a live OWNERS namespace with an active write grant in `config.cjs`, still owned in `opsOwnership.cjs`, still has 72 files on disk, and its README still points at the now-deleted `/process-feedback` skill. Asks for a decision: fully retire it (drop the grant, archive the files, fix the docs), or keep it as a deliberate manual-only inbox and just fix the docs to say so.\n\n2. **`ops-folder-hygiene-audit-legacy-scheduler-prds-b-5bb62c0f`**\n   *\"Ops-folder hygiene: audit legacy scheduler/prds/ backlog and orphaned prompt-sessions top-level JSON\"*\n   Two things needing investigation before any deletion: (a) `scheduler/prds/` top-level still holds 73 files despite CLAUDE.md claiming it's \"auto-consolidated into prds-archived/ at boot\" — is that migration actually running? (b) 29 top-level `prompt-sessions/*.json` files have no matching `scheduler/epics/` directory — asks to distinguish genuinely-never-started Epics (fine to age out) from real data loss (never delete).\n\n3. **`build-a-cross-project-session-manager-operations-41dbe8fe`**\n   *\"Build a cross-project session-manager-operations sweep agent implementing the ops-maintenance protocol\"*\n   The feature-tagged one — builds the actual automation this whole exercise was warming up for: a skill that runs the same audit-and-flag protocol against *any* project's operations folder, always routing findings back through that project's own `propose-epic`, never deleting directly.\n\nNone have started. Each needs your explicit \"Approve & start\" click in the Epics UI before anything runs.",
-        "id": "pevt-msc9a7ug-39",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:31:42.904Z"
-      },
-      {
-        "id": "633792f0-63c5-4806-b655-75a853acc93b",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-msc9a7ug-39",
-        "at": "2026-08-02T20:33:56.305Z",
-        "prdSlug": "945-resolve-feedback-namespace-retired-in-one-claude-md-sentence"
-      },
-      {
-        "id": "e497cf07-e19a-4625-9adf-7cfcb9c95124",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "kind": "prd_created",
-        "causedByEventId": "633792f0-63c5-4806-b655-75a853acc93b",
-        "at": "2026-08-02T20:34:09.656Z",
-        "prdSlug": "946-ops-folder-hygiene-audit-legacy-scheduler-prds-backlog-and-o"
-      },
-      {
-        "id": "40c5ca01-1af7-45d5-87f1-f691db248e4b",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "kind": "prd_created",
-        "causedByEventId": "e497cf07-e19a-4625-9adf-7cfcb9c95124",
-        "at": "2026-08-02T20:34:22.831Z",
-        "prdSlug": "947-build-a-cross-project-session-manager-operations-sweep-skill"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc9a7ug-39",
-        "text": "All 3 PRDs (945, 946, 947) are now queued and joined to **this session's own Epic** (`psess-msc8lmfl-19`) — not separate proposed Epics. Summary:\n\n- **PRD 945** — Resolve the feedback/ namespace contradiction (retire vs. keep, sync CLAUDE.md/code/README).\n- **PRD 946** — Audit the legacy `scheduler/prds/` backlog and orphaned `prompt-sessions/` JSON files, report-only unless unambiguously safe.\n- **PRD 947** — Build the cross-project ops-sweep skill (depends on 945 + 946 landing first, so its worked examples are settled).\n\nThese will run under the scheduler's normal queue against this Epic's session — no separate approval gate needed since this Epic is already `active`. Also cleaned up: the 3 stray proposed Epics from earlier are confirmed already gone from `active-index.json` (removed via the UI before I checked), so no dangling artifacts remain.",
-        "id": "pevt-msc9dska-40",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:34:29.722Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msc9dska-40",
-        "text": "All three queued PRDs have landed (the protocol doc's own update markers confirm this — PRD 945 resolved Pattern A, PRD 946 resolved Patterns C/D, and PRD 947 shipped the new skill). Here's the full picture of what got built this session:\n\n**1. The protocol** — `session-manager-operations/architecture/ops-maintenance-protocol.md`\nA source-of-truth hierarchy (code OWNERS table → CLAUDE.md → namespace READMEs → on-disk content) plus a rule: a cleanup action is only \"safe\" when ≥2 of those 3 doc layers agree; when they disagree, that's a stop-and-decide case, not an auto-delete.\n\n**2. feedback/ namespace retired (PRD 945)** — CLAUDE.md's self-contradiction (one bullet said \"gone,\" the OWNERS table still listed it live) is resolved for real: the `OWNERS` entry and `config.cjs` write grant are removed, the 69 historical files archived to `feedback/archived-2026-08-02/`, `feedback/README.md` now points at `/propose-epic`, and CLAUDE.md's two bullets agree. Confirmed zero live manual-inbox usage independent of the retired `/process-feedback` pass.\n\n**3. Ops-hygiene audit resolved (PRD 946)** — `scripts/audit-ops-hygiene.cjs` was written to script the two open questions rather than eyeball them:\n   - Pattern C (legacy `scheduler/prds/` backlog): the 73 files were legitimately in-flight PRDs mid-drain, not stuck debt — flat dir now holds 0.\n   - Pattern D (29 orphaned top-level `prompt-sessions/*.json`): 0 real data-loss candidates — each is either a never-started Epic or a PRD that landed under a differently-named auto-minted epic dir.\n   - Findings written to `session-manager-operations/architecture/ops-maintenance-protocol-patterns-c-d-findings.md`.\n\n**4. The sweep skill (PRD 947)** — `session-manager-dev:ops-sweep` now exists and is listed as an invocable skill. It runs this same protocol against *any* project's operations folder (even one with no CLAUDE.md or a different OWNERS scheme), flags doc contradictions and undocumented archival retention, and always routes find…",
-        "id": "pevt-msca2g1d-43",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T20:53:39.889Z"
-      },
-      {
-        "id": "96c9483e-6e43-49de-add4-287ae621904a",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-msca2g1d-43",
-        "at": "2026-08-02T21:03:07.824Z",
-        "prdSlug": "948-state-a-retention-policy-for-feedback-archived-and-scheduler"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msca2g1d-43",
-        "text": "**PRD 948 queued**, joined to this session's Epic — a docs-only PRD to state retention policies for the two archived-content namespaces the sweep flagged.\n\nSummary: `/ops-sweep` works end-to-end — it correctly re-confirmed the earlier feedback/ fix stuck, correctly self-caught a heuristic false positive on `scheduler/` per its own documented caveat, and surfaced one genuine remaining gap (Pattern E retention policy), now queued as PRD 948 on this session.",
-        "id": "pevt-mscaeq0d-47",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T21:03:12.685Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscaeq0d-47",
-        "text": "Pushed. Final summary:\n\n## Root cause of the empty Scheduler tab\n\n`reconcile()` in `src/main/scheduler.cjs` dropped a completed job's queue row the instant its PRD `.md` file was gone from disk, assuming that meant it had already been durably recorded in `history.jsonl`. That assumption only holds for the slow, 7-day-retention archive path. The fast path — `archiveCompletedPrd()`, which moves the file the moment a job finishes — runs immediately, so the very next `reconcile()` pass found the file gone and silently discarded the row with **no history write at all**. Every completed job's record vanished from both the Queue and History views the moment it finished. This wasn't caused by anything I did this session — it's a pre-existing bug in the scheduler, just newly visible because 4 PRDs (945-948) had just completed.\n\n## Fixed\n\n1. **`src/main/scheduler.cjs`** — `reconcile()` now backfills `history.jsonl` for any terminal job about to be dropped, unless it's already recorded there. 2 new regression tests (`scheduler-reconcile-history-backfill.test.cjs`) confirm both the backfill and no-double-write.\n2. **Also fixed a regression I'd introduced earlier this session**: `EpicQueue.tsx`'s `STATUS_ORDER` — my earlier fix had reordered `needs`/`running` unnecessarily, breaking an existing test. Corrected to only prepend `proposed`.\n3. **Backfilled the already-lost history** for PRDs 945-948 directly into this project's `history.jsonl`, so the fix applies retroactively, not just going forward.\n\n## Verified\n- Full suite: **224 test files, 2084 tests, all pass**.\n- `npx tsc --noEmit`: clean.\n\n## Published\n3 commits pushed to `origin/main` (`14b75f8`, `cef58ee`, `212085d`), on top of 6 commits already landed autonomously by the earlier PRD runs (945-948's own scheduler executions) plus 2 unrelated ones from other concurrent activity on this machine.",
-        "id": "pevt-mscaxk9w-51",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T21:17:51.716Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscaxk9w-51",
-        "text": "v0.57.0 is real — it's already published to npm (registry confirms `0.57.0` is live) and 3 new commits landed on `main` since I last pushed, independent of anything I did this turn:\n\n```\n8b853e5 fix(scheduler): isolate queueHistory tests from live-app + real project state\n564f784 chore(release): bump to v0.57.0\ndfc46ab chore(ops): sync runtime state — Epic transcripts and active-index\n```\n\nWhat happened: another Epic's session on this machine ran the `/builder` skill (diff HEAD vs. published npm, bump version from conventional-commit prefixes, gate on tests, publish) independently of this conversation — this matches the builder skill's exact commit-message pattern (`chore(release): bump to vX.Y.Z`). It picked up everything on `main` at that point — including the `fix(scheduler)` and `fix(epics)` commits I pushed this session (`14b75f8`, `cef58ee`) — bumped to 0.57.0, and published.\n\nThe `8b853e5` commit (\"isolate queueHistory tests from live-app + real project state\") landed *after* the release bump, meaning it's a separate, later fix from that same concurrent activity — worth noting since it touches `queueHistory` tests, adjacent to the scheduler-history bug I fixed. I haven't reviewed its contents.\n\nThis isn't something I triggered — it's other autonomous activity that happened to run in parallel on this machine, most likely from one of your other open Epics/sessions doing routine release maintenance. Nothing from my work this turn is blocked or affected by it; my two fixes are already included in the published 0.57.0.",
-        "id": "pevt-mscbq735-1",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T21:40:07.649Z"
-      },
-      {
-        "id": "ce246880-b32a-4183-a50c-6ba6bee895fc",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscbq735-1",
-        "at": "2026-08-02T21:50:54.609Z",
-        "prdSlug": "949-state-a-retention-policy-for-prompt-sessions-attachments-tra"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscbq735-1",
-        "text": "**PRD 949 queued** on this session's Epic — closes the one remaining namespace (and the largest, by far) with no stated retention policy.\n\n## Summary\n\n- **No, opening the folder doesn't auto-clean anything** — every deletion/archival this session went through an explicit PRD, and the retention policies already landed (948) explicitly say \"keep indefinitely, no automatic pruning\" for `feedback/` and `scheduler/`.\n- **Real optimization target: `prompt-sessions/` (43M, ~80% of the whole ops folder)** — it's the one namespace with zero stated retention policy. PRD 949 is now queued to close that gap the same way PRD 948 did.\n- **Everything else is either already fine** (small, or already has an explicit \"keep forever\" policy) **or unaudited** — I flagged `design-mocks/` (2.7M) as worth a look but didn't investigate its contents, so I'm not recommending action there without actually checking what's in it first.",
-        "id": "pevt-mscc47mz-7",
-        "promptSessionId": "psess-msc8lmfl-19",
-        "at": "2026-08-02T21:51:01.547Z"
+        "causedByEventId": "pevt-msche54m-18",
+        "text": "## Summary\n\nRemoved **Repo Viz** and **Search** from the Tools section of the Left Navigation (Project tab), and deleted all related code end-to-end:\n\n**Nav/routing:**\n- `LeftNav.tsx` \u2014 removed `'repoviz'`/`'search'` from the `NavKey` union\n- `navGroups.ts` \u2014 removed both entries from `NAV_ITEMS` (Voice remains, home-face only)\n- `screenKeys.ts`, `screenComponents.tsx` \u2014 removed from `SCREEN_KEYS`, page-meta, and the render switch\n- `AlmanacSidebar.tsx` \u2014 trimmed `ToolKey`; the \"Tools\" group header/rows now only render when non-empty (previously it would've shown an empty \"Tools\" header on the Project face, since Voice is home-only)\n- `AlmanacIcon.tsx` \u2014 removed the now-dead `'repoviz'` and `'global-search'` icon variants (kept `'search'`, still used by AddressBar/FindBar/SchedulePanel)\n- `CommandPalette.tsx`, `slashCommand.ts`, `learningContent.ts` \u2014 removed the corresponding palette entries, `/repoviz` `/repo` `/search` slash routes, and Learn-panel content blocks\n\n**Behavior:**\n- `App.tsx` \u2014 removed the `\u2318P`/`\u2318\u21e7F` global shortcuts, `searchMode` state, and the now-unneeded search-input carve-out in the key-skip logic\n- `Workbench.tsx` \u2014 dropped the `ctx.searchMode` re-mount dependency\n\n**Deleted files:** `RepoVisualizationModal.tsx`, `SearchModal.tsx`, `GlobalSearchModal.tsx`, `QuickOpenModal.tsx`, `main/repoAnalyzer.cjs`, `main/search.cjs`, `tests/e2e/search-mode-toggle.spec.ts`\n\n**Backend:** `main/index.cjs` (dropped requires + IPC registration), `preload/index.cjs` and `preload/api.d.ts` (dropped the `search`/`repo` API namespaces and their now-orphaned types: `SearchFileEntry`, `SearchFilesResult`, `SearchTextMatch`, `SearchTextResult`, `RepoLanguageStats`, `RepoTopDirectory`, `RepoGitStatusSummary`, `RepoAnalyzeResult`, `RepoAnalyzeError`)\n\n**Tests updated** (not just deleted where behavior changed): `AlmanacSidebar.test.ts` (added a test proving Tools is hidden on the project face and still shows Voice on home), `navGroupsHome.test.ts`, `slashCommand.test.ts\u2026",
+        "id": "pevt-mschrj0f-23",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T00:29:07.455Z"
       }
     ]
   },
@@ -461,6 +310,10 @@
     "psess-msc9499x-35": "2026-08-02T20:34:51.822Z",
     "fix-queuehistory-test-cjs-isolation-races-with-l-f3c899ec": "2026-08-02T21:38:39.982Z",
     "psess-mscb1rnc-53": "2026-08-02T21:38:43.875Z",
-    "psess-msc6bwrf-7": "2026-08-02T22:32:07.681Z"
+    "psess-msc6bwrf-7": "2026-08-02T22:32:07.681Z",
+    "psess-msc8lmfl-19": "2026-08-02T22:36:54.704Z",
+    "psess-msc6lz8u-2": "2026-08-02T22:36:57.689Z",
+    "psess-msc06fh7-6": "2026-08-02T22:37:04.555Z",
+    "psess-msc7vrsg-15": "2026-08-02T22:37:08.609Z"
   }
 }

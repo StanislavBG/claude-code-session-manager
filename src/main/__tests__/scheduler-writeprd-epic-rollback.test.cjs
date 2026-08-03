@@ -1,7 +1,7 @@
 /**
  * scheduler-writeprd-epic-rollback.test.cjs — remote.writePrd may only JOIN
  * an existing, already-human-approved Epic (via `sourcePromptId`); it must
- * never mint a new one (mintIfMissing:false, see epicMint.cjs's ensureEpic).
+ * never mint a new one (no mintAuthority, see epicMint.cjs's ensureEpic).
  * A write with no resolvable Epic fails outright with zero residual
  * active-index.json entries — no orphaned Epic can ever be left behind by
  * this path because none is ever created by it.
@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { remote } = require('../scheduler.cjs');
-const { ensureEpic, readActiveIndex } = require('../lib/epicMint.cjs');
+const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
 const config = require('../config.cjs');
 
 const tmpDirs = [];
@@ -61,7 +61,7 @@ test('writePrd: no sourcePromptId refuses to write (no Epic to join) and mints n
 test('writePrd: invalid-slug failure when joining a pre-existing Epic leaves that Epic untouched', async () => {
   const cwd = makeFixtureCwd();
 
-  const preexisting = await ensureEpic(cwd, { goalText: 'pre-existing epic goal' });
+  const preexisting = await ensureEpic(cwd, { goalText: 'pre-existing epic goal', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI });
   expect(preexisting.created).toBe(true);
 
   const beforeIndex = readActiveIndex(cwd);
@@ -81,7 +81,7 @@ test('writePrd: invalid-slug failure when joining a pre-existing Epic leaves tha
 
 // Provenance (PRD 905): writePrd's ensureEpic call passes
 // source: { producer: 'scheduler-dispatch', prdSlug }, but this call is
-// join-only (mintIfMissing:false, explicit epicId) — ensureEpic's
+// join-only (no mintAuthority, explicit epicId) — ensureEpic's
 // explicitEpicId branch returns before ever reading `source`, so a
 // successful join must NOT write/alter the joined Epic's `source` field.
 test('writePrd: successful join does not write a source field onto the pre-existing Epic (join-only no-op)', async () => {
@@ -92,7 +92,7 @@ test('writePrd: successful join does not write a source field onto the pre-exist
   tmpDirs.push(cwd);
   config.addAllowedRoot(cwd);
 
-  const preexisting = await ensureEpic(cwd, { goalText: 'pre-existing epic goal for join' });
+  const preexisting = await ensureEpic(cwd, { goalText: 'pre-existing epic goal for join', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI });
   expect(preexisting.created).toBe(true);
 
   const body = `---\ntitle: Joins the existing epic\nsourcePromptId: ${preexisting.epicId}\n---\n\nbody text\n`;

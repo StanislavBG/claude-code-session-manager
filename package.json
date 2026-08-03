@@ -13,7 +13,6 @@
     "plugins/",
     "scripts/postinstall.cjs",
     "scripts/lib/",
-    "scripts/propose-epic.cjs",
     "scripts/mint-epic.cjs",
     "src/main/",
     "src/preload/",

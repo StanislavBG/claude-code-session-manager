@@ -151,9 +151,9 @@ Then route **this audit's own findings**, by ownership:
 
 1. **A finding that belongs to another project** (an upstream/downstream service
    in the stack — e.g. the data source is stale, a contract drifted): do NOT
-   reach across the boundary. File it with **`/propose-epic <that project's cwd>`**,
-   and note it in the report. (Same rule as everywhere: service boundaries
-   outrank convenience.)
+   reach across the boundary and do NOT open an Epic there — nothing but a human
+   pressing New Epic creates one. Report it, clearly enough that the human can
+   act on it. (Same rule as everywhere: service boundaries outrank convenience.)
 2. **A finding that belongs to THIS project** (a real bug, a missing guard, an
    enhancement the audit revealed — a cold sold-surface, a recurring error in the
    logs, a usage gap): queue it as a scheduled PRD via **`/develop`** — never
@@ -161,9 +161,9 @@ Then route **this audit's own findings**, by ownership:
 3. **Nothing actionable** — just report.
 
 Then stop. There is no automatic improvement gate: findings are routed as
-proposals and PRDs above, and the user decides what gets worked on next.
+PRDs or reported above, and the user decides what gets worked on next.
 
-This sequence — audit → route findings (propose-epic / develop) — is enough to
+This sequence — audit → route findings (develop / report) — is enough to
 bootstrap and evaluate a project from a single `/project-status` invocation. The `-local` owns the *specifics* of each
 step; this framework owns the *loop*.
 

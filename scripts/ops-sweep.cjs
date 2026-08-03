@@ -26,7 +26,7 @@
  *
  * Never deletes/migrates/archives anything and never files Epics itself — it
  * only prints a JSON report. Routing findings into proposed Epics is the
- * calling skill's job (session-manager-dev:ops-sweep), via propose-epic.cjs
+ * calling skill's job (session-manager-dev:ops-sweep), reported to the human
  * pointed at the target project's own cwd.
  *
  * Usage: node scripts/ops-sweep.cjs <target-project-cwd>

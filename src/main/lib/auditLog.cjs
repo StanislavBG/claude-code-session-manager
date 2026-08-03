@@ -8,10 +8,10 @@
  * survive even if the project's ops root doesn't exist yet.
  *
  * Best-effort only: a logging failure must never block the mint/create it is
- * observing (same posture as rcaFeedbackHook.cjs / dodDrainHook.cjs).
+ * observing (same posture as rcaReport.cjs / dodDrainHook.cjs).
  *
  * Plain Node module (no Electron deps) so scripts/mint-epic.cjs and
- * scripts/propose-epic.cjs (which run outside Electron) can require it too.
+ * scripts/mint-epic.cjs (which runs outside Electron) can require it too.
  */
 'use strict';
 

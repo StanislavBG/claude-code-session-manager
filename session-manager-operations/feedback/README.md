@@ -1,18 +1,17 @@
-# Retired — use `/propose-epic` instead
+# Retired — open an Epic in the app instead
 
 This folder was the intake queue for improvement requests, bug reports, and enhancement ideas for
 **claude-code-session-manager**, processed via a now-retired `/process-feedback` triage pass.
 
 **As of 2026-08-02 this folder is fully retired.** It is no longer an `OWNERS` namespace
 (`src/main/lib/opsOwnership.cjs`) and has no write grant in `config.cjs`. Nothing writes here any
-more — `lib/rcaFeedbackHook.cjs` (the scheduler's auto-RCA producer) files **proposed Epics**
-instead, gated behind a human pressing **Approve & start**; see `CLAUDE.md`'s
-"`status: 'proposed'` is the human gate" section.
+more — a scheduler job parked in `needs_review` writes `lib/rcaReport.cjs`'s root-cause report into
+its own run directory and surfaces it on the Epic that authored the PRD.
 
-If you want work done on this project — a bug report, an enhancement idea, a cross-project
-request — use `/propose-epic` (`session-manager-dev:propose-epic` skill). It replaces this folder:
-the proposal IS the work item, already carrying its own session and PRD directory, and nothing
-runs or is spent until a human approves it.
+If you want work done on this project — a bug report, an enhancement idea — open an Epic in the
+app (New Epic). That is the only place an Epic is created; the interim `/propose-epic` channel that
+briefly replaced this folder was itself removed on 2026-08-02. See `CLAUDE.md`'s "An Epic is created
+in exactly ONE place" section.
 
 The 69 historical items this folder accumulated (2026-06-10 through 2026-07-31, all already
 triaged and dispositioned) are preserved for reference in `archived-2026-08-02/` — the original
@@ -30,8 +29,7 @@ before this folder's retirement (2026-06-10 through 2026-07-31) — nothing else
 triage/status log. There is no automatic pruning: no code, cron, or skill deletes files here
 (this folder is not an `OWNERS` namespace, so `assertOpsWrite` doesn't cover it either — see
 `CLAUDE.md`'s "No general OWNERS namespace" bullet). Enforcement is manual: pruning or moving
-this archive would be a deliberate human decision made via a proposed Epic (`/propose-epic`), not
-an automatic process — see `ops-maintenance-protocol.md` Pattern E/F, which requires a
-documented, agreed-upon rule before any file-age/size-based deletion and never lets a sweep agent
-delete directly. No pruning mechanism exists today; building one is out of scope for this note
-and would need its own proposed Epic.
+this archive would be a deliberate human decision made in an Epic a human opened, not an
+automatic process — see `ops-maintenance-protocol.md` Pattern E/F, which requires a documented,
+agreed-upon rule before any file-age/size-based deletion and never lets a sweep agent delete
+directly. No pruning mechanism exists today; building one is out of scope for this note.

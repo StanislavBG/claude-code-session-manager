@@ -77,7 +77,7 @@ const {
 } = require('./lib/schedulerConfig.cjs');
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
-const { fileRcaFeedback, extractRcaBlock } = require('./lib/rcaFeedbackHook.cjs');
+const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
 const queueOps = require('./queueOps.cjs');
 // Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
@@ -1422,8 +1422,8 @@ let heartbeatInterval = null;
 // (The 5-minute feedback sweep that used to piggyback on this heartbeat is
 // gone: it scanned each active project's session-manager-operations/feedback/
 // and auto-queued a /process-feedback PRD. Both the folder and that skill are
-// retired — agents now file a `proposed` Epic that waits for human approval,
-// so there is nothing to sweep for. See lib/rcaFeedbackHook.cjs.)
+// retired, and nothing auto-creates work any more — a parked job is surfaced
+// back into the Epic that authored its PRD instead. See lib/rcaReport.cjs.)
 // In-memory set of slugs currently spawned in this process. Prevents
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
@@ -1891,6 +1891,42 @@ async function notifyOriginatingTab(job, {
     sendPrompt(targetTabId, message);
   } catch (e) {
     console.error('[scheduler] notifyOriginatingTab error', job?.slug, e);
+  }
+}
+
+/**
+ * notifyNeedsReview(job, report) → Promise<boolean>
+ *
+ * A job parked in `needs_review` is a question, not a result: something about
+ * the PRD was unclear, unverifiable, or ran past its acceptance criteria.
+ * That question belongs in the conversation that WROTE the PRD, so this
+ * appends a 'response' event to the authoring Epic's own chain (the same
+ * channel notifyOriginatingTab uses for completed/failed, which deliberately
+ * excludes needs_review — isNotifiableTerminalStatus). It resolves the Epic
+ * from the PRD's `sourcePromptId`, falling back to the job's own `epicId`.
+ *
+ * Join-only by construction: appendResponseEventIfKnown refuses an unknown or
+ * non-active session and returns false. Nothing here can create an Epic — if
+ * no open authoring Epic exists, the root-cause report in the run directory
+ * is the whole record and the Scheduler tab is where it surfaces.
+ */
+async function notifyNeedsReview(job, report, {
+  parsePrdRaw = prdParser.parsePrdRaw,
+  appendResponseEvent = appendResponseEventIfKnown,
+} = {}) {
+  try {
+    if (!job || !report || !report.filed) return false;
+    const prd = await parsePrdRaw(prdPathForJob(job)).catch(() => null);
+    const epicId = prd?.sourcePromptId || job.epicId || null;
+    if (!epicId || !job.cwd) {
+      console.log(`[scheduler] notifyNeedsReview: no authoring Epic for ${job.slug}, report only`);
+      return false;
+    }
+    const message = `${report.summary}. Root-cause report: ${report.path}`;
+    return await appendResponseEvent(job.cwd, epicId, message);
+  } catch (e) {
+    console.error('[scheduler] notifyNeedsReview error', job?.slug, e);
+    return false;
   }
 }
 
@@ -2631,19 +2667,19 @@ async function spawnInvestigation(failedJob, runDir) {
         return;
       }
       sl(`\n[scheduler] investigation exit code=${exitCode}\n`);
-      // Fold the investigation's <RCA> summary into the RCA feedback item already
-      // filed for this job (needs_review jobs only — fileRcaFeedback no-ops when
+      // Fold the investigation's <RCA> summary into the root-cause report already
+      // written for this job (needs_review jobs only — writeRcaReport no-ops when
       // failedJob has no verifierVerdict, e.g. plain 'failed' jobs never got one).
       const investigationText = extractRcaBlock(readTail(investigationLogPath, 64 * 1024));
       if (investigationText) {
-        fileRcaFeedback({
+        writeRcaReport({
           job: failedJob,
           runDir,
           verdict: failedJob.verifierVerdict,
           annotations: failedJob.verifierAnnotations,
           investigationText,
         }).catch((e) => {
-          console.error('[scheduler] fileRcaFeedback (investigation enrichment) error', failedJob.slug, e);
+          console.error('[scheduler] writeRcaReport (investigation enrichment) error', failedJob.slug, e);
         });
       }
       if (fs.existsSync(fixPath)) {
@@ -3027,14 +3063,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     if (needsReviewRcaSnapshot) {
       // Fire-and-forget, mirroring the DoD drain hook: never blocks the status
       // transition, never throws to this caller.
-      fileRcaFeedback({
+      writeRcaReport({
         job: needsReviewRcaSnapshot,
         runDir,
         verdict: needsReviewRcaSnapshot.verifierVerdict,
         annotations: needsReviewRcaSnapshot.verifierAnnotations,
-      }).catch((e) => {
-        console.error('[scheduler] fileRcaFeedback error', job.slug, e);
-      });
+      })
+        .then((report) => notifyNeedsReview(needsReviewRcaSnapshot, report))
+        .catch((e) => {
+          console.error('[scheduler] writeRcaReport error', job.slug, e);
+        });
     }
 
     if (actuallyFailed && failedJobSnapshot) {
@@ -4420,12 +4458,9 @@ const remote = {
         if (candidate && fs.existsSync(candidate)) { dir = d; break; }
       }
       if (!dir) {
-        // Every PRD must join an EXISTING, already-human-approved Epic —
-        // mintIfMissing:false means this never conjures a new one. Only
-        // Epics born from explicit human intent (New Epic UI, or
-        // /propose-epic + Approve & start) may write PRDs; this write path
-        // is not itself a human-intent gate, so it must not become one by
-        // accident.
+        // Every PRD must join an EXISTING, human-created Epic — ensureEpic
+        // is join-only for every caller but the New Epic UI (epicMint.cjs's
+        // SINGLE-CREATOR LAW), so this can never conjure one.
         const { fm } = splitFrontmatter(body);
         try {
           const epic = await ensureEpic(cwd, {
@@ -4436,11 +4471,10 @@ const remote = {
             // a literal-equality join. Any other id (e.g. a PromptTicket.id)
             // simply won't match and this call throws below.
             epicId: fm.sourcePromptId,
-            mintIfMissing: false,
-            // Join-only call (mintIfMissing:false, explicit epicId): the
+            // Join-only call (no mintAuthority, explicit epicId): the
             // explicitEpicId branch in ensureEpic returns before `source` is
             // ever read, so this is a no-op today — kept for symmetry/audit
-            // trail if that join path ever grows a source-touch (PRD 902/905).
+            // trail if that join path ever grows a source-touch.
             source: { producer: 'scheduler-dispatch', prdSlug: slug },
           });
           dir = epic.prdDir;
@@ -4449,7 +4483,7 @@ const remote = {
           return {
             ok: false,
             error: `no existing Epic to join (sourcePromptId=${fm.sourcePromptId ?? 'none'}): ${e?.message ?? 'unknown error'}. `
-              + 'Create the Epic first via the New Epic UI or /propose-epic + Approve & start, then pass its id as sourcePromptId.',
+              + 'Create the Epic first via the New Epic UI, then pass its id as sourcePromptId.',
           };
         }
       }
@@ -4459,7 +4493,7 @@ const remote = {
       if (dir === PRDS_DIR) ensureDirs();
     }
 
-    // writePrd only ever JOINS an existing Epic now (mintIfMissing:false
+    // writePrd only ever JOINS an existing Epic now (no mintAuthority
     // above) — it can never mint one, so there is no orphaned-mint case left
     // to roll back here (contrast the old PRD 825/851 cleanup, removed).
     const resolved = safeSlugPathIn(dir, slug);
@@ -4561,4 +4595,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };

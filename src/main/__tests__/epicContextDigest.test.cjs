@@ -14,7 +14,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { buildContextDigest } = require('../lib/epicContextDigest.cjs');
-const { ensureEpic } = require('../lib/epicMint.cjs');
+const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
 const { appendTurn } = require('../promptSessionTranscript.cjs');
 const config = require('../config.cjs');
 
@@ -35,7 +35,7 @@ async function mkCwd() {
 
 test('normal digest: goalText followed by recent turns', async () => {
   const cwd = await mkCwd();
-  const { epicId } = await ensureEpic(cwd, { goalText: 'Fix the flaky login test', status: 'proposed' });
+  const { epicId } = await ensureEpic(cwd, { goalText: 'Fix the flaky login test', status: 'proposed', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI });
   await appendTurn(cwd, epicId, { role: 'user', text: 'Please investigate the flaky test.' });
   await appendTurn(cwd, epicId, { role: 'assistant', text: 'Found the race condition, fixing now.' });
 
@@ -59,7 +59,7 @@ test('epicId absent from active-index.json returns empty string', async () => {
 
 test('empty transcript still returns goalText only, no throw', async () => {
   const cwd = await mkCwd();
-  const { epicId } = await ensureEpic(cwd, { goalText: 'Empty transcript epic', status: 'proposed' });
+  const { epicId } = await ensureEpic(cwd, { goalText: 'Empty transcript epic', status: 'proposed', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI });
 
   const digest = await buildContextDigest({ cwd, epicId });
   expect(digest).toBe('Empty transcript epic');
@@ -67,7 +67,7 @@ test('empty transcript still returns goalText only, no throw', async () => {
 
 test('maxChars truncation drops the oldest turns first, never a mid-turn slice', async () => {
   const cwd = await mkCwd();
-  const { epicId } = await ensureEpic(cwd, { goalText: 'Truncation epic', status: 'proposed' });
+  const { epicId } = await ensureEpic(cwd, { goalText: 'Truncation epic', status: 'proposed', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI });
   await appendTurn(cwd, epicId, { role: 'user', text: 'oldest turn text goes here' });
   await appendTurn(cwd, epicId, { role: 'assistant', text: 'middle turn text goes here' });
   await appendTurn(cwd, epicId, { role: 'user', text: 'newest turn text goes here' });
@@ -90,7 +90,7 @@ test('maxChars truncation drops the oldest turns first, never a mid-turn slice',
 test('maxChars smaller than goalText alone clamps the header itself, never exceeding the bound', async () => {
   const cwd = await mkCwd();
   const longGoal = 'This is a deliberately long goalText that on its own already exceeds the small maxChars bound used below';
-  const { epicId } = await ensureEpic(cwd, { goalText: longGoal, status: 'proposed' });
+  const { epicId } = await ensureEpic(cwd, { goalText: longGoal, status: 'proposed', mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI });
   await appendTurn(cwd, epicId, { role: 'user', text: 'a turn that cannot possibly fit either' });
 
   const digest = await buildContextDigest({ cwd, epicId, maxChars: 20 });

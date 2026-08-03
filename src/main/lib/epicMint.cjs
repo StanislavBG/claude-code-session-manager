@@ -1,10 +1,20 @@
 /**
- * epicMint.cjs — auto-mint an Epic (PromptSession) for a PRD dispatch.
+ * epicMint.cjs — resolve the Epic (PromptSession) a PRD dispatch belongs to,
+ * and mint the one Epic-creation path there is.
  *
  * Domain rule (CLAUDE.md "Domain model"): every PRD belongs to an Epic; the
- * hierarchy TAB → operations-root → EPIC → PRD is total. Dispatch paths that
- * have no Epic in hand (feedback sweep, ad-hoc /develop, admin/MCP create)
- * call ensureEpic() to create-or-join one instead of writing epicless PRDs.
+ * hierarchy TAB → operations-root → EPIC → PRD is total. Dispatch paths call
+ * ensureEpic() to JOIN the Epic they already belong to instead of writing
+ * epicless PRDs — they can never create one.
+ *
+ * SINGLE-CREATOR LAW (fail-closed, mirrors opsOwnership.cjs's assertOpsWrite):
+ * an Epic comes into existence in exactly ONE place — the human pressing
+ * "New Epic" in the app. That is the only caller allowed to pass
+ * `mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI` (today: lib/
+ * promptSessionsCreateEpic.cjs, the New Epic card's IPC handler). Every other
+ * caller is join-only and throws rather than conjuring an Epic. Agents that
+ * are sure work is needed run /develop inside the Epic they are already in;
+ * agents that are not sure say so and let the human open an Epic.
  *
  * The Epic registry is the renderer's own store: the per-cwd
  * `session-manager-operations/prompt-sessions/active-index.json`
@@ -28,6 +38,12 @@ const { appendAuditEvent } = require('./auditLog.cjs');
 // simulate a corrupted construction — the real construction below is
 // hardcoded and always valid.
 const promptSessionSchema = require('./promptSessionSchema.cjs');
+
+// The one token that unlocks ensureEpic's mint branch. Held by
+// lib/promptSessionsCreateEpic.cjs (the New Epic card's IPC handler) and
+// nothing else — grep for it before adding a second holder, that is a
+// deliberate domain-model change, not a convenience.
+const MINT_AUTHORITY_NEW_EPIC_UI = 'new-epic-ui';
 
 function activeIndexPath(cwd) {
   return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
@@ -68,7 +84,7 @@ function writeActiveIndex(cwd, index) {
 // "constructor" resolves through the prototype chain to a truthy
 // Object.prototype member even though no such Epic was ever written,
 // bypassing every "does this Epic exist" gate below (including the
-// mintIfMissing:false join-only check that PRD-authoring paths rely on).
+// join-only existence check that PRD-authoring paths rely on).
 // Always use this instead of `obj[key]`/`!obj[key]` for existence checks.
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -80,85 +96,6 @@ function slugify(text) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48) || 'epic';
-}
-
-const STOPWORDS = new Set([
-  'the', 'a', 'an', 'is', 'of', 'to', 'for', 'and', 'in', 'on', 'at', 'this', 'that',
-]);
-
-// Lowercase, strip punctuation, split on whitespace, drop stopwords — shared
-// by findJoinableEpic's similarity check. Kept standalone so its behavior is
-// independently testable rather than inlined into the Jaccard computation.
-function tokenize(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]+/g, ' ')
-    .split(/\s+/)
-    .filter((token) => token && !STOPWORDS.has(token));
-}
-
-function jaccardSimilarity(tokensA, tokensB) {
-  const setA = new Set(tokensA);
-  const setB = new Set(tokensB);
-  if (setA.size === 0 && setB.size === 0) return 0;
-  let intersection = 0;
-  for (const token of setA) {
-    if (setB.has(token)) intersection += 1;
-  }
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-const JOIN_SIMILARITY_THRESHOLD = 0.35;
-
-/**
- * findJoinableEpicInIndex(index, { goalText, preferEpicId, status }) → { epicId, matchedBy, score? } | null
- *
- * Same contract as findJoinableEpic() but takes an already-loaded index —
- * lets ensureEpic() consult this without a second readActiveIndex() call
- * inside its own withPathLock critical section. Two strategies, in order:
- *  1. `preferEpicId` — an explicitly-known origin Epic the caller already has
- *     in hand. Joined immediately (no similarity check) as long as it exists
- *     and is still open ('proposed' or 'active') — a 'completed' or unknown
- *     preferEpicId falls through to strategy 2 rather than joining a dead Epic.
- *  2. Keyword-similarity — Jaccard token-set overlap between `goalText` and
- *     every other OPEN Epic's goalText in the same cwd (open = 'proposed' or
- *     'active', regardless of the specific requested `status` — a proposed
- *     RCA report and an active one about the same topic are still the same
- *     underlying issue). Highest score wins if it clears
- *     JOIN_SIMILARITY_THRESHOLD; otherwise no join. `status` is accepted for
- *     signature symmetry with ensureEpic()/reuseByGoal but only participates
- *     in strategy 1's preferEpicId open-check, not the similarity filter.
- */
-function findJoinableEpicInIndex(index, { goalText, preferEpicId = null, status: _status = 'proposed' } = {}) {
-  if (preferEpicId && hasOwn(index.sessions, preferEpicId)) {
-    const preferred = index.sessions[preferEpicId];
-    if (preferred && (preferred.status === 'proposed' || preferred.status === 'active')) {
-      return { epicId: preferEpicId, matchedBy: 'preferEpicId' };
-    }
-  }
-
-  const candidateTokens = tokenize(goalText);
-  let best = null;
-  for (const s of Object.values(index.sessions)) {
-    if (!s || (s.status !== 'proposed' && s.status !== 'active')) continue;
-    const score = jaccardSimilarity(candidateTokens, tokenize(s.goalText));
-    if (score >= JOIN_SIMILARITY_THRESHOLD && (!best || score > best.score)) {
-      best = { epicId: s.id, matchedBy: 'similarity', score };
-    }
-  }
-  return best;
-}
-
-/**
- * findJoinableEpic(cwd, { goalText, preferEpicId, status }) → { epicId, matchedBy, score? } | null
- *
- * Public entry point for callers outside ensureEpic()'s own critical section
- * (tests, future PRD 899/900 wiring) — loads the index itself. See
- * findJoinableEpicInIndex() for the matching logic.
- */
-function findJoinableEpic(cwd, opts = {}) {
-  return findJoinableEpicInIndex(readActiveIndex(cwd), opts);
 }
 
 // Serializes read-modify-write cycles per active-index.json path, mirroring
@@ -185,40 +122,26 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, openingPrompt?, mintIfMissing?, source?, forceNewEpic?, agentType? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { epicId?, goalText, tag?, status?, openingPrompt?, source?, agentType?, mintAuthority? }) → Promise<{ epicId, prdDir, created }>
  *
- * Before minting brand-new, the mint branch consults findJoinableEpic() —
- * minting is the LAST resort, not the default, for automated callers. Pass
- * `forceNewEpic: true` to skip that check and always mint (the one
- * legitimate case being explicit human-authored creation).
+ * Two behaviors, and only two:
+ *  - JOIN (the default, for every automated caller): `epicId` names an Epic
+ *    that already exists and is still open ('proposed'/'active') → its prds/
+ *    directory is returned with `created: false`. Anything else throws.
+ *  - MINT (the New Epic UI alone): `mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI`
+ *    creates a brand-new Epic. No similarity/keyword matching runs first — the
+ *    human asked for a new Epic, so they get a new Epic.
  *
- * `status` defaults to 'proposed' — a fail-safe default so any caller that
- * forgets to pass it files an Epic that waits for human approval rather than
- * one that starts running immediately. Every Epic is BORN 'proposed' — the
- * mint branch below ignores/rejects any other requested status; it is
- * fail-closed, mirroring opsOwnership.cjs's assertOpsWrite. Activation
- * ('proposed' → 'active') happens exactly once, entirely in the renderer
- * store's `approveProposed` (`state/promptSessions.ts`) — that code path
- * never calls ensureEpic(). Joining an already-'active' Epic (this function's
- * join branches, above the mint branch) remains legal and unchanged.
- *
- * `mintIfMissing` defaults to true for the small set of callers that are
- * themselves the human-intent gate (propose-epic, the RCA hook, the feedback
- * sweep — all of which pass `status: 'proposed'`, so "minting" here still
- * never starts anything without a human's Approve & start). Callers that are
- * NOT themselves a human-intent gate (an automated PRD-write path acting on
- * a session's behalf) must pass `mintIfMissing: false` — that path may only
- * JOIN an Epic that already exists; it throws instead of silently creating a
- * new one, so no PRD-authoring surface can conjure Epics on its own.
- *
- * Mints a new Epic — or, with `reuseByGoal`, joins the existing Epic (of the
- * same `status`) whose goalText matches (used by the recurring feedback sweep
- * so successive sweeps chain into one Epic instead of minting one per tick).
+ * Every Epic is BORN 'proposed'; `status` defaults to it and the mint branch
+ * rejects any other value outright (fail-closed, mirroring opsOwnership.cjs's
+ * assertOpsWrite). Activation ('proposed' → 'active') happens exactly once, in
+ * the renderer store's `approveProposed` (`state/promptSessions.ts`) — a path
+ * that never calls ensureEpic().
  *
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null, forceNewEpic = false, agentType = null } = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, source = null, agentType = null, mintAuthority = null } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -235,8 +158,7 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
     // let a stale/hallucinated sourcePromptId silently attach a PRD (and its
     // follow-on events/chat activity) to an unrelated or even completed
     // Epic — the "this session ran again without my knowledge, and it was
-    // really another Epic's prompt" cross-contamination bug. Mirrors
-    // findJoinableEpicInIndex()'s preferEpicId open-check (line ~124).
+    // really another Epic's prompt" cross-contamination bug.
     if (explicitEpicId && hasOwn(index.sessions, explicitEpicId)) {
       const preferred = index.sessions[explicitEpicId];
       if (preferred && (preferred.status === 'proposed' || preferred.status === 'active')) {
@@ -244,55 +166,24 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
         fs.mkdirSync(prdDir, { recursive: true });
         return { epicId: explicitEpicId, prdDir, created: false };
       }
-      console.warn(`[epicMint] ensureEpic: explicit epicId ${explicitEpicId} exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join, falling through`);
+      console.warn(`[epicMint] ensureEpic: explicit epicId ${explicitEpicId} exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join`);
       appendAuditEvent('epic_mint_refused', {
         cwd,
         epicId: explicitEpicId,
         status,
-        reason: `explicit epicId exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join, falling through to mint`,
+        reason: `explicit epicId exists but is not open (status=${preferred?.status ?? 'unknown'}) — refusing to join`,
       });
     }
 
-    if (reuseByGoal) {
-      for (const s of Object.values(index.sessions)) {
-        // Match the status being requested so repeat proposals chain into
-        // one proposal instead of spawning a duplicate per trigger.
-        if (s && s.status === status && s.goalText === goalText) {
-          // A PROPOSED Epic has not started, so its opening prompt is still
-          // mutable: a re-trigger carrying richer detail (e.g. the RCA hook's
-          // later investigation pass) enriches the pending proposal in place
-          // rather than filing a duplicate. Never done for an active Epic —
-          // its first turn is already history.
-          if (s.status === 'proposed' && openingPrompt && openingPrompt !== s.openingPrompt) {
-            s.openingPrompt = String(openingPrompt);
-            const chain = index.events[s.id];
-            if (Array.isArray(chain) && chain[0] && chain[0].kind === 'prompt') {
-              chain[0].text = String(openingPrompt);
-            }
-            writeActiveIndex(cwd, index);
-          }
-          const prdDir = resolveEpicPrdWriteDir(cwd, s.id);
-          fs.mkdirSync(prdDir, { recursive: true });
-          return { epicId: s.id, prdDir, created: false };
-        }
-      }
-    }
-
-    if (!mintIfMissing) {
-      const reason = 'no existing Epic found and mintIfMissing is false — a new Epic can only be created by '
-        + 'explicit human intent (New Epic UI, or /propose-epic + Approve & start), never implicitly by a '
-        + 'PRD-authoring path';
+    // SINGLE-CREATOR LAW (see this file's header). Only the New Epic UI may
+    // mint; every other caller reaching this line was trying to JOIN an Epic
+    // that isn't there, which is a bug in the caller, not a cue to create one.
+    if (mintAuthority !== MINT_AUTHORITY_NEW_EPIC_UI) {
+      const reason = 'no open Epic to join — an Epic is created in exactly one place, the New Epic UI '
+        + '(mintAuthority). Agents that are sure the work is needed run /develop inside the Epic they are '
+        + 'already in; a PRD-authoring path may never conjure one';
       appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason });
       throw new Error(`ensureEpic: ${reason} (epicId=${explicitEpicId ?? 'none'})`);
-    }
-
-    if (!forceNewEpic) {
-      const joinable = findJoinableEpicInIndex(index, { goalText, preferEpicId: explicitEpicId, status });
-      if (joinable) {
-        const prdDir = resolveEpicPrdWriteDir(cwd, joinable.epicId);
-        fs.mkdirSync(prdDir, { recursive: true });
-        return { epicId: joinable.epicId, prdDir, created: false };
-      }
     }
 
     // BORN-PROPOSED LAW (fail-closed, mirrors opsOwnership.cjs's
@@ -318,9 +209,8 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       // Independently minted, never shared with a SessionTab — same invariant
       // as renderer-created PromptSessions (state/promptSessions.ts).
       claudeSessionId: crypto.randomUUID(),
-      // 'proposed' files the Epic WITHOUT starting it — nothing runs until a
-      // human approves it in the Epics workspace. This is the sink that
-      // replaced the feedback-folder intake (see lib/rcaFeedbackHook.cjs).
+      // 'proposed' files the Epic WITHOUT starting it — nothing runs until the
+      // human presses Approve & start in the Epics workspace.
       status,
       createdAt: now,
       completedAt: null,
@@ -328,8 +218,8 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       // Full body for a proposal whose goalText is only a one-line title;
       // sent verbatim as the first prompt when a human approves it.
       ...(openingPrompt ? { openingPrompt: String(openingPrompt) } : {}),
-      // Structured trace of which automated producer minted this Epic — see
-      // EpicSource in state/promptSessions.ts.
+      // Structured trace of which surface minted this Epic — see EpicSource in
+      // state/promptSessions.ts.
       ...(source ? { source } : {}),
       // Display-only "who is working" persona name (New Epic card's Agent
       // picker) — mirrors the renderer's own buildPromptSession
@@ -366,9 +256,8 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
     index.events[epicId] = [firstEvent];
     writeActiveIndex(cwd, index);
 
-    // Every mint is logged, whether the Epic starts 'proposed' (human gate
-    // ahead) or 'active' (started immediately) — this is the trace-back point
-    // for "who/what created this Epic" (see auditLog.cjs).
+    // Every mint is logged — the trace-back point for "who created this Epic"
+    // (see auditLog.cjs).
     appendAuditEvent('epic_mint', { cwd, epicId, status, tag: tag ?? null, goalText: session.goalText, source: source ?? null });
 
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
@@ -426,12 +315,11 @@ function removeEpic(cwd, epicId) {
 
 module.exports = {
   ensureEpic,
+  MINT_AUTHORITY_NEW_EPIC_UI,
   appendPrdCreatedEvent,
   removeEpic,
   activeIndexPath,
   readActiveIndex,
-  findJoinableEpic,
-  tokenize,
   // Exported so lib/activeIndexMerge.cjs's renderer-facing merge IPC handler
   // serializes through the SAME lock instance as ensureEpic/
   // appendPrdCreatedEvent (module-level Map, shared via Node's require

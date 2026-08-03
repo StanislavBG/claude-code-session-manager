@@ -13,21 +13,25 @@
  * itself, since this is IPC-registration plumbing, not Epic-minting logic.
  */
 
-const { ensureEpic, readActiveIndex } = require('./epicMint.cjs');
+const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('./epicMint.cjs');
 const { validatePath } = require('../config.cjs');
 
 /**
  * createEpicViaIpc(cwd, { goalText, tag?, agentType?, source? }) → Promise<{ epicId, session }>
  *
- * Always mints a brand-new 'proposed' Epic (forceNewEpic: true — never joins
- * an existing one via the goalText-similarity check) and returns the just
- * -written record read back from the active-index.json on disk, so the
+ * THE one Epic-creation path (epicMint.cjs's SINGLE-CREATOR LAW): this handler
+ * holds `MINT_AUTHORITY_NEW_EPIC_UI`, the token that unlocks ensureEpic's mint
+ * branch, because it is what the New Epic card calls when a human presses it.
+ * Nothing else may hold it.
+ *
+ * Always mints a brand-new 'proposed' Epic — never joins an existing one — and
+ * returns the just-written record read back from the active-index.json on disk, so the
  * response is guaranteed byte-identical to what a subsequent hydrate would
  * see — never a second, independently re-derived copy of the session shape.
  *
  * `ensureEpic`'s writes go through epicMint.cjs's own raw `fs` calls, not
  * config.cjs's writeJson/validateWrite — fine for its other callers
- * (scheduler, propose-epic, the RCA hook), which all derive `cwd` from a
+ * (the scheduler's join-only dispatch), which derives `cwd` from a
  * project the app already knows about, but this function is reachable from
  * the renderer over IPC with an arbitrary `cwd` string. Explicitly running
  * that `cwd` through config.cjs's own `validatePath` (allowedRoots = home dir
@@ -44,8 +48,7 @@ async function createEpicViaIpc(cwd, { goalText, tag, agentType, source } = {}) 
     tag,
     agentType,
     source,
-    mintIfMissing: true,
-    forceNewEpic: true,
+    mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI,
     status: 'proposed',
   });
   const index = readActiveIndex(cwd);

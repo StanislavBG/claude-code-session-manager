@@ -1145,8 +1145,8 @@ test('pass_no_commit: original PRD, PASS no commit, all deliverable paths alread
   const tmp = makeTmpDir();
   try {
     const slug = '655-needs-review-rca-feedback-hook';
-    writeLog(tmp, slug, noOpRunEvents('Verified rcaFeedbackHook.cjs already shipped in e13168d; typecheck + tests green; no commit needed.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/__tests__/rcaFeedbackHook.test.cjs`.');
+    writeLog(tmp, slug, noOpRunEvents('Verified rcaReport.cjs already shipped in e13168d; typecheck + tests green; no commit needed.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/rcaReport.cjs` and `src/main/__tests__/rcaReport.test.cjs`.');
     const verdict = await verifyRun({
       runDir: tmp,
       prdPath,
@@ -1166,7 +1166,7 @@ test('pass_no_commit: original PRD, PASS no commit, one deliverable path untrack
   try {
     const slug = '655-needs-review-rca-feedback-hook';
     writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/lib/does-not-exist-xyz.cjs`.');
+    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/rcaReport.cjs` and `src/main/lib/does-not-exist-xyz.cjs`.');
     const verdict = await verifyRun({
       runDir: tmp,
       prdPath,
@@ -1227,9 +1227,9 @@ test('pass_no_commit: commit-guard-retry PRD naming scheduler.cjs + its committe
 });
 
 test('extractPrdDeliverablePaths: extracts backticked repo-relative paths, ignores prose', () => {
-  const body = 'Deliverables: `src/main/lib/rcaFeedbackHook.cjs` and `src/main/__tests__/rcaFeedbackHook.test.cjs`. Also see node_modules/foo/bar.js which should be excluded.';
+  const body = 'Deliverables: `src/main/lib/rcaReport.cjs` and `src/main/__tests__/rcaReport.test.cjs`. Also see node_modules/foo/bar.js which should be excluded.';
   const paths = extractPrdDeliverablePaths(body);
-  assert.deepEqual(paths, ['src/main/lib/rcaFeedbackHook.cjs', 'src/main/__tests__/rcaFeedbackHook.test.cjs']);
+  assert.deepEqual(paths, ['src/main/lib/rcaReport.cjs', 'src/main/__tests__/rcaReport.test.cjs']);
   assert.deepEqual(extractPrdDeliverablePaths(''), []);
   assert.deepEqual(extractPrdDeliverablePaths(undefined), []);
 });

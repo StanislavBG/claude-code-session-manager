@@ -103,7 +103,7 @@ describe('AgentLibrary', () => {
 
   it('clicking another persona swaps the detail pane', async () => {
     const el = await mount()
-    const debuggerRow = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('debugger'))
+    const debuggerRow = el.querySelector('[data-agent-row="debugger"]')
     await act(async () => {
       debuggerRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
@@ -124,7 +124,7 @@ describe('AgentLibrary', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
       await Promise.resolve()
     })
-    const rowNames = Array.from(el.querySelectorAll('button')).map((b) => b.textContent ?? '')
+    const rowNames = Array.from(el.querySelectorAll('[data-agent-row]')).map((r) => r.getAttribute('data-agent-row') ?? '')
     expect(rowNames.some((t) => t.includes('debugger'))).toBe(true)
     expect(rowNames.some((t) => t.startsWith('builder'))).toBe(false)
   })
@@ -144,5 +144,22 @@ describe('AgentLibrary', () => {
     })
     expect(api.agents.listPersonas).toHaveBeenCalledTimes(2)
     expect(el.textContent).toContain('builder')
+  })
+
+  it('deletes a persona directly from the list row via its inline delete action', async () => {
+    const { api } = installWindowApiMock()
+    const el = await mount()
+    const debuggerRow = el.querySelector('[data-agent-row="debugger"]')!
+    const deleteBtn = Array.from(debuggerRow.querySelectorAll('button')).find((b) => b.title === 'Delete debugger')!
+    await act(async () => {
+      deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    const confirmBtn = Array.from(debuggerRow.querySelectorAll('button')).find((b) => b.textContent === 'confirm')!
+    await act(async () => {
+      confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(api.agents.deletePersona).toHaveBeenCalledWith({ name: 'debugger' })
   })
 })

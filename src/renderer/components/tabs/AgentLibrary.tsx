@@ -65,6 +65,7 @@ export function AgentLibrary() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [creating, setCreating] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [rowConfirmDelete, setRowConfirmDelete] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
@@ -100,7 +101,7 @@ export function AgentLibrary() {
   const isNew = creating
 
   const pick = (name: string) => {
-    setDraft(null); setCreating(false); setConfirmDelete(false)
+    setDraft(null); setCreating(false); setConfirmDelete(false); setRowConfirmDelete(null)
     setSelectedName(name)
   }
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...(d ?? (saved ? toDraft(saved) : BLANK_DRAFT)), ...patch }))
@@ -156,6 +157,21 @@ export function AgentLibrary() {
     }
   }
 
+  const removeRow = async (name: string) => {
+    setBusy(true)
+    try {
+      await window.api.agents.deletePersona({ name })
+      toast.info(`deleted ${name}`)
+      setRowConfirmDelete(null)
+      if (selectedName === name) { setDraft(null); setCreating(false) }
+      await load()
+    } catch (e) {
+      toast.error((e as Error).message || 'failed to delete agent persona')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const dropOverride = async (projectName: string) => {
     if (!saved) return
     try {
@@ -202,15 +218,17 @@ export function AgentLibrary() {
               filtered.map((p) => {
                 const isSelected = !isNew && p.name === selectedName
                 const isDirty = isSelected && dirty
+                const confirming = rowConfirmDelete === p.name
                 return (
-                  <button
+                  <div
                     key={p.name}
-                    onClick={() => pick(p.name)}
-                    className={`w-full text-left px-3 py-1 text-xs flex flex-col gap-0.5 border-l-2 ${
+                    data-agent-row={p.name}
+                    className={`group w-full text-left px-3 py-1 text-xs flex flex-col gap-0.5 border-l-2 cursor-pointer ${
                       isSelected
                         ? 'bg-bg-hi text-fg border-accent'
                         : 'text-fg-dim hover:text-fg hover:bg-bg-hi border-transparent'
                     }`}
+                    onClick={() => pick(p.name)}
                   >
                     <span className="flex items-center gap-2 justify-between w-full">
                       <span className="flex items-center gap-1.5 min-w-0">
@@ -220,15 +238,42 @@ export function AgentLibrary() {
                         />
                         <span className="truncate font-mono">{p.name}</span>
                       </span>
-                      {isDirty && <span className="shrink-0 text-[10px] font-semibold text-accent">unsaved</span>}
-                      {!isDirty && p.overridingProjects.length > 0 && (
-                        <span className="shrink-0">
+                      <span className="shrink-0 flex items-center gap-1.5">
+                        {isDirty && <span className="text-[10px] font-semibold text-accent">unsaved</span>}
+                        {!isDirty && p.overridingProjects.length > 0 && (
                           <Badge tone="dim">{p.overridingProjects.length} override{p.overridingProjects.length > 1 ? 's' : ''}</Badge>
-                        </span>
-                      )}
+                        )}
+                        {confirming ? (
+                          <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => removeRow(p.name)}
+                              disabled={busy}
+                              title={`Delete ${p.name}`}
+                              className="text-[10px] font-semibold text-red-400 hover:text-red-300"
+                            >
+                              confirm
+                            </button>
+                            <button
+                              onClick={() => setRowConfirmDelete(null)}
+                              title="Cancel"
+                              className="text-[10px] text-fg-faint hover:text-fg"
+                            >
+                              cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setRowConfirmDelete(p.name) }}
+                            title={`Delete ${p.name}`}
+                            className="opacity-0 group-hover:opacity-100 text-fg-faint hover:text-red-400 transition-opacity"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
                     </span>
                     {p.description && <span className="truncate text-fg-faint">{p.description}</span>}
-                  </button>
+                  </div>
                 )
               })
             )}

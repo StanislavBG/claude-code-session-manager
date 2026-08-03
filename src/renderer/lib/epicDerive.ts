@@ -1,4 +1,4 @@
-import type { PromptSession } from '../state/promptSessions'
+import type { PromptSession, PromptSessionEvent } from '../state/promptSessions'
 import type { TabChat, ChatTurn } from '../state/chat'
 import type { ScheduleJob, PrdListItem } from '../../preload/api'
 import type { EpicUsage } from '../state/epicUsage'
@@ -20,11 +20,17 @@ export interface EpicSnapshots {
   /** Keyed by Epic id — batched from `transcripts:usageFor`, see epicUsage.ts.
    *  Optional: older callers that haven't wired the fetch yet just omit tokens. */
   usage?: Record<string, EpicUsage>
+  /** Keyed by Epic id — usePromptSessions' own `events` store shape (PRD
+   *  986/987). Optional: callers that haven't wired it up simply never
+   *  surface 'refuted' — epicDisplayStatus falls back to 'failed'/'attention'
+   *  from job status alone, its pre-987 behavior. */
+  events?: Record<string, PromptSessionEvent[]>
 }
 
 export type EpicDisplayStatus =
   | 'running'
   | 'needs'
+  | 'refuted'
   | 'failed'
   | 'attention'
   | 'queued'
@@ -47,15 +53,22 @@ export function splitTitleAndGoal(goalText: string): { title: string; goal: stri
  * Derived Epic-level status per the design spec's status vocabulary.
  *
  * Precedence, highest first: `completed` → `proposed` → `needs` (chat
- * needs-input) → `failed` (any job with status 'failed') → `attention` (any
- * job with status 'needs_review') → `running` → `queued` → `active`.
+ * needs-input) → `refuted` (a PRD claimed success and this Epic's own
+ * validation pass caught it not delivering) → `failed` (any job with status
+ * 'failed') → `attention` (any job with status 'needs_review') → `running` →
+ * `queued` → `active`.
  *
- * A terminal bad outcome (`failed`/`attention`) outranks an in-flight run
- * because a later PRD running does not discharge the Architect's obligation
- * to deal with the one that already broke — surfacing "still running" while
- * hiding a broken PRD underneath it would let it silently rot. `needs`
- * (a stalled chat question) outranks both because it blocks the whole Epic's
- * session, not just one PRD.
+ * `refuted` ranks above `failed` deliberately (PRD 987): a PRD that reported
+ * success, got a green queue row, and was then caught by the authoring
+ * Epic's own verification NOT actually delivering its acceptance criteria is
+ * the single most urgent thing an Architect can be shown — more urgent than
+ * a PRD that failed honestly, because a `failed` job never lied about its
+ * own state. A terminal bad outcome (`refuted`/`failed`/`attention`) outranks
+ * an in-flight run because a later PRD running does not discharge the
+ * Architect's obligation to deal with the one that already broke —
+ * surfacing "still running" while hiding a broken PRD underneath it would
+ * let it silently rot. `needs` (a stalled chat question) outranks all three
+ * because it blocks the whole Epic's session, not just one PRD.
  */
 export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): EpicDisplayStatus {
   const session = snapshots.sessions[epicId]
@@ -68,6 +81,10 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
   const chat = snapshots.chats[epicId]
   const hasPendingNeedsInput = (chat?.ticketHistory ?? []).some((t) => t.status === 'needs-input')
   if (hasPendingNeedsInput) return 'needs'
+
+  const epicEvents = snapshots.events?.[epicId] ?? []
+  const hasRefutedPrd = epicEvents.some((e) => e.kind === 'response' && e.validation === 'refuted')
+  if (hasRefutedPrd) return 'refuted'
 
   const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
   if (epicJobs.some((j) => j.status === 'failed')) return 'failed'

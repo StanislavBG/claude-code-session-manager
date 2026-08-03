@@ -233,19 +233,68 @@ export const STATUS_TONE: Record<string, { bg: string; text: string; border: boo
   // — amber to match the inline "❓ Needs your answer" question card in
   // TerminalChat.tsx (AMBER_TEXT/AMBER_TINT there use the same retuned hex).
   needs_input:  { bg: 'bg-[#8e641a]/10', text: 'text-[#7a5416]', border: true, label: 'needs your answer' },
+  // PRD 987 — the traffic light reads the authoring Epic's own validation
+  // verdict, not just the job's self-reported outcome. Four states total
+  // (green/red/claimed/in-flight); 'verified'/'refuted'/'validating' reuse
+  // the existing completed/failed/running colors (same palette, distinct
+  // label so the accessible name still states the real state) — only
+  // 'claimed' is a genuinely new tone, deliberately neutral: neither green
+  // (nothing has confirmed the work) nor red (nothing has refuted it
+  // either). A job reporting outcome:'completed' with no validation pass yet
+  // must render here, never in the 'completed' (green) tone above — see
+  // resolveValidatedStatus.
+  claimed:      { bg: 'bg-muteband/60', text: 'text-fg-dim',   border: true,  label: 'claimed — not yet verified' },
+  verified:     { bg: 'bg-sage/20',     text: 'text-sage',     border: false, label: 'verified' },
+  refuted:      { bg: 'bg-accent/15',   text: 'text-accent',   border: false, label: 'refuted' },
+  validating:   { bg: 'bg-accent',      text: 'text-white',    border: false, label: 'validating' },
 }
 
 export type PrdDisplayStatus = keyof typeof STATUS_TONE
 
 /**
+ * PRD 987 — folds an event/job's validation verdict (PRD 986's
+ * `PromptSessionEvent.validation`) into the status word a tone is looked up
+ * by. `outcome` is a `ScheduleJobStatus`-shaped status ('completed' /
+ * 'failed' / 'needs_review' / anything else e.g. 'running'/'pending'/etc).
+ *
+ * Precedence: an honest job-level 'failed'/'needs_review' always wins — "a
+ * job that admits it failed needs no validation to be believed" — then the
+ * validation verdict ('verified' → green, 'refuted' → red, 'validating' →
+ * in-flight), then 'unvalidated' collapses a self-reported 'completed' into
+ * the neutral 'claimed' tone so a PRD that merely claims success can never
+ * render green on its own say-so. Any other combination (no validation
+ * stamp at all — pre-PRD-986 events, or a non-terminal status like
+ * 'running'/'queued') passes `outcome` through unchanged, preserving every
+ * caller's existing behavior when validation data isn't present.
+ */
+export function resolveValidatedStatus(
+  outcome: PrdDisplayStatus,
+  validation?: 'unvalidated' | 'validating' | 'verified' | 'refuted',
+): PrdDisplayStatus {
+  if (outcome === 'failed' || outcome === 'needs_review') return outcome
+  if (validation === 'verified') return 'verified'
+  if (validation === 'refuted') return 'refuted'
+  if (validation === 'validating') return 'validating'
+  if (validation === 'unvalidated' && outcome === 'completed') return 'claimed'
+  return outcome
+}
+
+/**
  * Derive a PRD's display status from its (possibly absent) queue.json job
  * entry — the single source consumed by both the PRDs card list and the PRD
  * editor toolbar, so a PRD's status word is never computed two different
- * ways in the same view family.
+ * ways in the same view family. `validation` (PRD 986/987) is optional so
+ * existing callers that don't yet have an Epic's validation verdict handy
+ * keep their prior behavior unchanged (resolveValidatedStatus passes
+ * `outcome` through as-is when `validation` is absent).
  */
-export function prdStatusFor(job: { status: ScheduleJobStatus } | null | undefined): PrdDisplayStatus {
+export function prdStatusFor(
+  job: { status: ScheduleJobStatus } | null | undefined,
+  validation?: 'unvalidated' | 'validating' | 'verified' | 'refuted',
+): PrdDisplayStatus {
   if (!job) return 'ready'
-  return job.status === 'pending' ? 'queued' : job.status
+  const baseStatus = job.status === 'pending' ? 'queued' : job.status
+  return resolveValidatedStatus(baseStatus, validation)
 }
 
 // ─── PrdStatusPill — STATUS_TONE-backed status pill for PRD cards/editor ────

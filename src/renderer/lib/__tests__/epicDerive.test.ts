@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { epicDisplayStatus, epicPrds, epicQueuedDetail, epicStats, type EpicSnapshots } from '../epicDerive'
-import type { PromptSession } from '../../state/promptSessions'
+import type { PromptSession, PromptSessionEvent } from '../../state/promptSessions'
 import type { TabChat } from '../../state/chat'
 import type { ScheduleJob, PrdListItem } from '../../../preload/api'
 
@@ -57,6 +57,17 @@ function makeSnapshots(overrides: Partial<EpicSnapshots> = {}): EpicSnapshots {
     chats: {},
     jobs: [],
     prds: [],
+    ...overrides,
+  }
+}
+
+function makeResponseEvent(overrides: Partial<PromptSessionEvent> = {}): PromptSessionEvent {
+  return {
+    id: 'evt-1',
+    promptSessionId: 'epic-1',
+    kind: 'response',
+    causedByEventId: null,
+    at: '2026-07-31T00:00:00.000Z',
     ...overrides,
   }
 }
@@ -131,6 +142,33 @@ describe('epicDerive.epicDisplayStatus', () => {
       jobs: [makeJob({ status: 'needs_review' })],
     })
     expect(epicDisplayStatus('epic-1', snapshots)).toBe('attention')
+  })
+
+  it('CORE (PRD 987): returns refuted when a response event validation is refuted, ranked above failed', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [makeJob({ slug: '100-broke', status: 'failed' })],
+      events: { 'epic-1': [makeResponseEvent({ prdSlug: '972-claimed', outcome: 'completed', validation: 'refuted' })] },
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('refuted')
+  })
+
+  it('refuted outranks a concurrently running job too', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [makeJob({ slug: '101-inflight', status: 'running' })],
+      events: { 'epic-1': [makeResponseEvent({ prdSlug: '972-claimed', outcome: 'completed', validation: 'refuted' })] },
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('refuted')
+  })
+
+  it('an unvalidated (claimed) response event does not trigger refuted', () => {
+    const snapshots = makeSnapshots({
+      sessions: { 'epic-1': makeSession() },
+      jobs: [],
+      events: { 'epic-1': [makeResponseEvent({ prdSlug: '972-claimed', outcome: 'completed', validation: 'unvalidated' })] },
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('active')
   })
 
   it('prefers failed over a concurrently running job (a broken PRD outranks an in-flight one)', () => {

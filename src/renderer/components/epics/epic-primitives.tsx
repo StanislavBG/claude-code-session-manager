@@ -11,6 +11,13 @@ import type { EpicDisplayStatus } from '../../lib/epicDerive'
 const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: string; ring?: boolean; label: string }> = {
   running:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'running' },
   needs:     { bg: 'bg-delta-bad/15',   text: 'text-delta-bad',   dot: 'bg-delta-bad',   label: 'needs you' },
+  // PRD 987 — a PRD in this Epic claimed success and this Epic's OWN
+  // validation pass caught it not delivering. Ranked above 'failed' in
+  // epicDerive.ts's epicDisplayStatus precedence (see that function's doc
+  // comment for the rationale) — reuses 'failed'-style red since it's the
+  // same "broken, must act" severity, with its own dot/label so it's never
+  // confused with an honestly-failed job.
+  refuted:   { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'refuted — claimed done, not delivered' },
   // A PRD in this Epic came back broken — must be re-scoped or re-queued.
   failed:    { bg: 'bg-accent/15',      text: 'text-accent',      dot: 'bg-accent',      label: 'failed' },
   // A PRD in this Epic parked itself asking a question — the primary

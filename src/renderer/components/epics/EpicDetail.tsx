@@ -7,7 +7,7 @@ import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
-import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
+import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
@@ -142,7 +142,14 @@ function ResponseEvent({
   // assistant prose or the neutral STATUS_TONE.needs_review pill used
   // elsewhere for PRD status chips.
   const isQuestionForHuman = event.outcome === 'needs_review'
-  const tone = event.outcome && !isQuestionForHuman ? STATUS_TONE[event.outcome] : null
+  // PRD 987 — fold the Epic's own validation verdict (PRD 986's
+  // event.validation) into the tone: a job that self-reported 'completed'
+  // but hasn't been verified by this Epic renders in the neutral CLAIMED
+  // tone, never green on its own say-so.
+  const validatedStatus = event.outcome && !isQuestionForHuman
+    ? resolveValidatedStatus(event.outcome, event.validation)
+    : null
+  const tone = validatedStatus ? STATUS_TONE[validatedStatus] : null
   const accessibleLabel = isQuestionForHuman
     ? `Question routed back from a scheduler run${event.prdSlug ? ` (PRD ${event.prdSlug})` : ''}: ${event.text ?? ''}`
     : event.prdSlug && tone
@@ -487,6 +494,19 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     return false
   }
 
+  // PRD 987 — latest validation verdict per PRD slug, read off this Epic's
+  // own 'response' check-in events (PRD 986's event.validation), so the
+  // 'prd_created' dispatch chip below can render the Epic's verdict rather
+  // than only the job's self-reported outcome. Later events overwrite
+  // earlier ones for the same slug — a re-check-in (e.g. a re-run) always
+  // wins over a stale earlier verdict.
+  const latestValidationBySlug = new Map<string, 'unvalidated' | 'validating' | 'verified' | 'refuted'>()
+  for (const e of sessionEvents) {
+    if (e.kind === 'response' && e.prdSlug && e.validation) {
+      latestValidationBySlug.set(e.prdSlug, e.validation)
+    }
+  }
+
   // Merged timeline: chat turns + this Epic's own 'prd_created'/'closed'/
   // 'response' (Terminal-stint marker, PRD 831) audit events, ordered by
   // time — the same timeline construction the retired PromptSessionConversation.tsx used.
@@ -510,7 +530,13 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // Narrow chats snapshot: the derive helpers only index this Epic's own
   // entry, and subscribing to the whole `chats` record would re-render this
   // component on every streaming token of ANY chat (PRD 833 I6).
-  const snapshots: EpicSnapshots = { sessions, chats: chat ? { [epicId]: chat } : {}, jobs: scheduleJobs, prds }
+  const snapshots: EpicSnapshots = {
+    sessions,
+    chats: chat ? { [epicId]: chat } : {},
+    jobs: scheduleJobs,
+    prds,
+    events: { [epicId]: sessionEvents },
+  }
   const status = epicDisplayStatus(epicId, snapshots)
   const attachedPrds = epicPrds(epicId, snapshots)
   const stats = epicStats(epicId, snapshots)
@@ -800,7 +826,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               const e = item.event
               if (e.kind === 'prd_created') {
                 const prdJob = scheduleJobs.find((j) => j.slug === e.prdSlug) ?? null
-                const prdStatus = prdStatusFor(prdJob)
+                const validation = e.prdSlug ? latestValidationBySlug.get(e.prdSlug) : undefined
+                const prdStatus = prdStatusFor(prdJob, validation)
                 const tone = STATUS_TONE[prdStatus]
                 const prdStatusLabel = `PRD "${e.prdSlug}" — ${tone.label} — open in Scheduler`
                 return (

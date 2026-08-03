@@ -652,6 +652,30 @@
         "id": "pevt-mscqbip1-28",
         "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
         "at": "2026-08-03T04:28:37.093Z"
+      },
+      {
+        "id": "ec9fe705-506e-4341-a638-87c446ce88fd",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscqbip1-28",
+        "at": "2026-08-03T04:38:26.753Z",
+        "prdSlug": "983-verdict-downgrade-must-stick"
+      },
+      {
+        "id": "61ceebec-c121-4ddf-b527-a85ee90d1500",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "ec9fe705-506e-4341-a638-87c446ce88fd",
+        "at": "2026-08-03T04:38:53.208Z",
+        "prdSlug": "984-context-digest-prd-focus-guard"
+      },
+      {
+        "id": "12941a85-b558-44df-8aff-b207fa32ac2c",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "61ceebec-c121-4ddf-b527-a85ee90d1500",
+        "at": "2026-08-03T04:39:24.596Z",
+        "prdSlug": "985-notify-epic-prd-path-fix-redo"
       }
     ],
     "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": [
@@ -800,6 +824,14 @@
         "causedByEventId": "f74f6fd4-f131-4ce6-a382-756a54f9b409",
         "at": "2026-08-03T04:34:14.178Z",
         "prdSlug": "982-epic-intake-structured-sections"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "b6fe97c8-f15d-4930-88dd-20038f3cb6a1",
+        "text": "**Queued and committed as `5fb16f0`.** Six PRDs, verified on disk with correct frontmatter, `sourcePromptId`, and dependency edges:\n\n| NN | Slug | Est | dependsOn |\n|---|---|---|---|\n| 977 | `transcript-classifier-multi-emit` | 22m | — (gates all) |\n| 978 | `chat-feed-from-jsonl` | 24m | 977 |\n| 979 | `transcript-paged-reads` | 26m | 977 |\n| 980 | `chat-typed-event-renderers` | 28m | 978 |\n| 981 | `chat-turn-three-zone-frame` | 22m | 980 |\n| 982 | `epic-intake-structured-sections` | 20m | 981 |\n\n979 branches off 977 and runs parallel to the 978→980→981→982 line. Total ~2h20m of executor wall-clock, ballpark $8–15. `when-available` polling will pick them up; \"Run now\" in SchedulePanel forces it.\n\n**Three deviations from the plain design, all deliberate:**\n- 977 stores a bounded preview + byte reference rather than deleting truncation, because uncapped text in a 500-entry buffer is a memory cliff. Expand re-reads from disk — same behavior you asked for.\n- 977 carries explicit AC for the `live.ts` double-count risk and the `race.ts`/`orchestrator.ts` `raw` consumers. Neither was in the design discussion; both would have bitten during execution.\n- 980/981 are written to *extend* PRDs 845/914/915/916, which already landed the caption layer, outcome label and `DiffCard` in `ChatTranscriptTurn.tsx`. Without that note the executor would have rebuilt them.\n\n**Two things I did not do, stated plainly:**\n\n1. **No npm release.** There was nothing to publish — no `src/` changes, nothing unpushed, `package.json` and npm both at 0.58.0. If you meant a literal release, it needs the PRDs to land first.\n2. **No Phase-2 tracking.** `/develop` normally ends with a 30-minute loop watching the jobs to completion, then a verification gate. This is a one-shot headless run — it terminates when I stop, so I cannot watch them. **You'll need to check the Scheduler tab yourself, or re-run `/develop`'s tracking phase from an interactive session.** Watch for: a job parked in `needs_review` (that's…",
+        "id": "pevt-mscqjj77-30",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T04:34:50.995Z"
       }
     ]
   },

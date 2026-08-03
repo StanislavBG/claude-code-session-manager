@@ -167,3 +167,58 @@ test('zero free slots holds everything with an explicit reason', () => {
   assert.deepEqual(batch, []);
   assert.match(reason, /no slots free/);
 });
+
+// ---------------------------------------------------------------------------
+// Per-job hold records (PRD 990). The picker already knew exactly which dep
+// held which row; it only ever reached console.log. These pin it as data.
+// ---------------------------------------------------------------------------
+
+test('reports a per-job hold record naming the blocking dep and its status', () => {
+  const jobs = [
+    job('985-foundation', 'pending'),
+    job('986-dependent', 'pending', { dependsOn: ['foundation'] }),
+  ];
+  const { batch, holds } = pick(jobs, new Set(), 5);
+  assert.deepEqual(batch.map((j) => j.slug), ['985-foundation']);
+  assert.deepEqual(holds, [
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'pending' },
+  ]);
+});
+
+test('hold record carries a running dep status', () => {
+  const jobs = [
+    job('985-foundation', 'running'),
+    job('986-dependent', 'pending', { dependsOn: ['foundation'] }),
+  ];
+  const { holds } = pick(jobs, new Set(['985-foundation']), 5);
+  assert.deepEqual(holds, [
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'running' },
+  ]);
+});
+
+test('hold record carries a failed dep status alongside the depends-gate reason', () => {
+  const jobs = [
+    job('985-foundation', 'failed'),
+    job('986-dependent', 'pending', { dependsOn: ['foundation'] }),
+  ];
+  const { batch, reason, holds } = pick(jobs, new Set(), 5);
+  assert.deepEqual(batch, []);
+  assert.match(reason, /depends-gate/);
+  assert.deepEqual(holds, [
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'failed' },
+  ]);
+});
+
+test('no holds when nothing is dependency-blocked', () => {
+  const jobs = [job('988-a', 'pending'), job('989-b', 'pending')];
+  const { batch, holds } = pick(jobs, new Set(), 5);
+  assert.equal(batch.length, 2);
+  assert.deepEqual(holds, []);
+});
+
+test('an idle queue reports no holds (empty must not read as blocked)', () => {
+  const jobs = [job('988-a', 'completed')];
+  const { batch, holds } = pick(jobs, new Set(), 5);
+  assert.deepEqual(batch, []);
+  assert.deepEqual(holds, []);
+});

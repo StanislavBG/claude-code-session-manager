@@ -93,14 +93,24 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   const allPending = projectJobs.filter(
     (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug),
   );
-  if (allPending.length === 0) return { batch: [], reason: null };
+  if (allPending.length === 0) return { batch: [], reason: null, holds: [] };
 
   const pending = [];
   const heldByFailedDep = [];
+  // Per-job hold records, surfaced to the UI so a `pending` row can say WHICH
+  // dep is holding it instead of leaving the reason in console.log.
+  const holds = [];
   for (const j of allPending) {
     const dep = blockingDep(j);
     if (!dep) { pending.push(j); continue; }
-    if (rowsForDep(dep).some((d) => d.status === 'failed')) heldByFailedDep.push({ job: j, dep });
+    const depRows = rowsForDep(dep);
+    const failed = depRows.some((d) => d.status === 'failed');
+    if (failed) heldByFailedDep.push({ job: j, dep });
+    holds.push({
+      slug: j.slug,
+      dep,
+      depStatus: depRows.find((d) => d.status !== 'completed')?.status ?? 'unknown',
+    });
     // running/pending/needs_review dep — simply not eligible this tick.
   }
   if (pending.length === 0) {
@@ -108,15 +118,15 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
       const detail = heldByFailedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
       const reason = `[scheduler] depends-gate [${projectCwd}]: holding ${heldByFailedDep.length} job(s) behind failed dependencies [${detail}]. Reset or archive the dep to unblock.`;
       console.log(reason);
-      return { batch: [], reason };
+      return { batch: [], reason, holds };
     }
-    return { batch: [], reason: null };
+    return { batch: [], reason: null, holds };
   }
 
   if (slots <= 0) {
     const reason = `[scheduler] concurrency [${projectCwd}]: no slots free, holding ${pending.length} eligible job(s)`;
     console.log(reason);
-    return { batch: [], reason };
+    return { batch: [], reason, holds };
   }
 
   // parallelGroup is a PRIORITY HINT, not a barrier: when there are more
@@ -130,7 +140,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
     `[scheduler] concurrency [${projectCwd}]: firing ${batch.length} of ${pending.length} ` +
     `eligible job(s) [${batch.map((j) => j.slug).join(', ')}]`,
   );
-  return { batch, reason: null };
+  return { batch, reason: null, holds };
 }
 
 /**
@@ -155,7 +165,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
  */
 function pickNextBatch(allJobs, running, freeSlots) {
   if (!allJobs.some((j) => j.status === 'pending' && !running.has(j.slug))) {
-    return { batch: [], reason: null };
+    return { batch: [], reason: null, holds: [] };
   }
 
   // Orphan correction: a queue.json row still marked `running` that this
@@ -170,7 +180,7 @@ function pickNextBatch(allJobs, running, freeSlots) {
     const reason = `[scheduler] concurrency: no session slots free ` +
       `(${freeSlots} free in pool, ${untrackedRunning} untracked running row(s))`;
     console.log(reason);
-    return { batch: [], reason };
+    return { batch: [], reason, holds: [] };
   }
 
   // Group all jobs by project cwd.
@@ -206,15 +216,17 @@ function pickNextBatch(allJobs, running, freeSlots) {
   // Aggregate batch across projects, consuming global slots as we go. Track
   // the first hold reason seen so callers can explain an empty overall batch.
   const batch = [];
+  const holds = [];
   let heldReason = null;
   for (const { projectJobs, runningSlugsInProject } of projectCandidates) {
     if (slots <= 0) break;
     const projectResult = pickForProject(projectJobs, runningSlugsInProject, slots);
     batch.push(...projectResult.batch);
+    holds.push(...(projectResult.holds ?? []));
     slots -= projectResult.batch.length;
     if (heldReason === null && projectResult.reason) heldReason = projectResult.reason;
   }
-  return { batch, reason: batch.length === 0 ? heldReason : null };
+  return { batch, reason: batch.length === 0 ? heldReason : null, holds };
 }
 
 module.exports = { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD };

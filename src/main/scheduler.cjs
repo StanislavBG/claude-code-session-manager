@@ -1440,6 +1440,18 @@ let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
 let lastMemGate = null;
 
+// Last tickQueue outcome, kept for the UI. tickQueue already computes a precise
+// reason for every way a batch can come back empty (dependency holds, slot
+// exhaustion, the memory gate, pause, manual policy) and used to throw all of
+// it into console.log — so the Home slot count read "5" while the queue was
+// actually pinned at 1 with nothing on screen explaining why. This is that
+// explanation, recorded once per tick and broadcast with the rest of the state.
+let lastTick = null;
+function recordTick(outcome, extra = {}) {
+  lastTick = { ...outcome, ...extra, at: new Date().toISOString() };
+  return outcome;
+}
+
 /**
  * Pure: applies clearPause()'s effect on the tick cancel-token.
  *
@@ -1495,6 +1507,7 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
       lastFailureKind,
     },
     memGate: lastMemGate,
+    lastTick,
     // The machine-wide slot pool IS the concurrency limit — there is no
     // separate scheduler cap any more. `source` distinguishes the
     // SM_SESSION_SLOTS env override from the persisted Home-tab value so the
@@ -1793,6 +1806,43 @@ function extractResultTextFromLog(logPath) {
   } catch {
     return null;
   }
+}
+
+/**
+ * resolveNotifyPrd(job, parsePrdRaw) → Promise<parsed PRD | null>
+ *
+ * Locate and parse a finishing job's PRD for the notification path, trying
+ * the live Epic-scoped dir first (findPrdDir scans candidatePrdsDirs) and
+ * then the archived twin (archivedPrdPathForJob scans listArchivedPrdDirs).
+ *
+ * Both lookups are required, and `prdPathForJob` is deliberately NOT used
+ * here (PRD 985). It resolves to `resolvePrdWriteDir(cwd)` — the RETIRED
+ * flat `<cwd>/session-manager-operations/scheduler/prds/` dir, which today
+ * holds only zero-byte `.reserved-NNN` number stubs and no PRD at all, so it
+ * ENOENT'd for every Epic-scoped PRD. On top of that, archiveCompletedPrd
+ * renames the file into `prds-archived/` immediately BEFORE the notify call
+ * (see tickQueue's newlyCompletedPrds loop), so even a correct live-dir
+ * lookup finds nothing by the time we run. The net effect was that `prd`
+ * was always null on the completed path: sourcePromptId never resolved, no
+ * transcript turn was written, no response event was appended, and the
+ * completed PRD silently never reported back to the Epic that authored it.
+ * Verified live: PRDs 961/962/963/964/967 all completed 2026-08-03 and not
+ * one response event landed on either authoring Epic's chain.
+ *
+ * Never throws — an unreadable/absent PRD returns null and each caller
+ * falls back to the job's own `epicId`.
+ */
+async function resolveNotifyPrd(job, parsePrdRaw) {
+  if (!job || !job.slug) return null;
+  const liveDir = await findPrdDir(job.slug).catch(() => null);
+  const livePath = liveDir ? safeSlugPathIn(liveDir, job.slug) : null;
+  if (livePath) {
+    const parsed = await parsePrdRaw(livePath).catch(() => null);
+    if (parsed) return parsed;
+  }
+  const archivedPath = archivedPrdPathForJob(job);
+  if (!archivedPath) return null;
+  return await parsePrdRaw(archivedPath).catch(() => null);
 }
 
 /**
@@ -3185,7 +3235,7 @@ function tickQueue() {
     }
     if (state.paused) {
       console.log('[scheduler] tickQueue skipped: paused');
-      return { fired: false, reason: 'paused' };
+      return recordTick({ fired: false, reason: 'paused' }, { detail: 'scheduler paused' });
     }
     if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
@@ -3196,12 +3246,15 @@ function tickQueue() {
     // cap that sessionSlots.cjs was written to replace — which silently
     // ceilinged the queue at 3 while the pool the user configured said 5.
     const freeSlots = sessionSlots.available();
-    const { batch, reason: holdReason } = pickNextBatch(state.jobs, runningSet, freeSlots);
+    const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots);
     if (batch.length === 0 && freeSlots === 0) {
       const snap = sessionSlots.snapshot();
       const pendingCount = state.jobs.filter((j) => j.status === 'pending').length;
       console.log(`[scheduler] slot gate: 0 of ${snap.total} session slots free (${snap.holders.map((h) => h.owner).join(', ')}) — deferring ${pendingCount} pending job(s)`);
-      return { fired: false, reason: 'slots-exhausted', deferredCount: pendingCount, holders: snap.holders };
+      return recordTick(
+        { fired: false, reason: 'slots-exhausted', deferredCount: pendingCount, holders: snap.holders },
+        { detail: `${snap.total} of ${snap.total} session slots busy (${snap.holders.map((h) => h.owner).join(', ')})`, holds },
+      );
     }
     if (batch.length === 0) {
       // Queue drained — run the definition-of-done gate fire-and-forget.
@@ -3209,7 +3262,7 @@ function tickQueue() {
       runDefinitionOfDoneOnDrain(state, { cancelToken }).catch((err) => {
         console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
       });
-      if (holdReason) return { fired: false, reason: 'held', detail: holdReason };
+      if (holdReason) return recordTick({ fired: false, reason: 'held', detail: holdReason }, { holds });
       // Distinguish "genuinely nothing to do" from "the batch was already
       // fired by a concurrent tickQueue() call" (e.g. the periodic
       // when-available poll winning a race against a manual force-tick —
@@ -3222,9 +3275,9 @@ function tickQueue() {
         state.jobs.filter((j) => j.status === 'running').length,
       );
       if (runningCount > 0) {
-        return { fired: false, reason: 'already-running', runningCount };
+        return recordTick({ fired: false, reason: 'already-running', runningCount }, { holds });
       }
-      return { fired: false, reason: 'drained' };
+      return recordTick({ fired: false, reason: 'drained' }, { holds });
     }
 
     const availableMb = getAvailableMemMb();
@@ -3241,7 +3294,10 @@ function tickQueue() {
       const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
       console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1}) — deferring ${batch.length} job(s)`);
       lastMemGate = { availableMb, threshold, deferred: true, at: new Date().toISOString() };
-      return { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold };
+      return recordTick(
+        { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold },
+        { detail: `memory gate: ${availableMb} MB free, need ${threshold} MB`, holds },
+      );
     }
     const gatedBatch = batch.slice(0, allowed);
     if (gatedBatch.length < batch.length) {
@@ -3262,7 +3318,7 @@ function tickQueue() {
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
       spawnJob(job, runId, runDir, state.config.defaultCwd).catch(() => {});
     }
-    return { fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup };
+    return recordTick({ fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup }, { holds });
   });
   tickTail = next.catch(() => {});
   return next;

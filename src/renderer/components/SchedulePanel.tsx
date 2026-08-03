@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ScheduleStateSnapshot, ScheduleJob, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
+import type { ScheduleStateSnapshot, ScheduleJob, ScheduleJobHold, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
 import { toast } from '../state/toast'
 import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
 import { useScheduleState } from '../state/scheduleState'
@@ -212,6 +212,15 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
   const aheadCount = computeAheadCounts(filteredJobs)
 
   const { inline, collapsedCount } = partitionJobs(filteredJobs, hiddenSlugs, now, showAllCompleted)
+
+  // Per-row hold reasons from the scheduler's last tick. Built into a Map here
+  // (not inside a selector) so no freshly-built value is ever returned from a
+  // zustand selector — see CLAUDE.md's React #185 rule.
+  const holdBySlug = useMemo(() => {
+    const m = new Map<string, ScheduleJobHold>()
+    for (const h of snap.lastTick?.holds ?? []) m.set(h.slug, h)
+    return m
+  }, [snap.lastTick])
 
   const onClearCompleted = () => {
     const next = new Set(hiddenSlugs)
@@ -454,6 +463,7 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
                 now={now}
                 avgDurationMs={avgDurationMs}
                 listIndex={idx}
+                hold={holdBySlug.get(j.slug)}
                 onFocused={(i) => {
                   setFocusedJobIdx(i)
                   try { localStorage.setItem(FOCUSED_IDX_KEY, String(i)) } catch { /* */ }
@@ -857,13 +867,15 @@ function etaForJob(
   return `~${formatTimingLabel(estMs)}`
 }
 
-export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
+export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused, hold }: {
   job: ScheduleJob
   eta: string | null
   now: number
   avgDurationMs: number
   listIndex: number
   onFocused: (index: number) => void
+  /** Set when the last tick held this pending row behind an unsatisfied dep. */
+  hold?: ScheduleJobHold
 }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
@@ -932,6 +944,11 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused }: {
           {note && (
             <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
               {note}
+            </div>
+          )}
+          {hold && (
+            <div className="text-[12.5px] mt-0.5 text-amber-400/90 font-mono">
+              held · waiting on {hold.dep} ({hold.depStatus})
             </div>
           )}
           <EpicTag

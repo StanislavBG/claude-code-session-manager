@@ -556,6 +556,30 @@ export interface SchedulePollHealth {
   lastFailureKind: string | null;
 }
 
+/** One `pending` job held by an unsatisfied dependency, and which dep. */
+export interface ScheduleJobHold {
+  slug: string;
+  dep: string;
+  depStatus: string;
+}
+
+/** Outcome of the scheduler's last tick — why the batch was (or wasn't) fired.
+ *  Every field is computed by tickQueue; nothing here is derived in the UI. */
+export interface ScheduleLastTick {
+  fired: boolean;
+  reason: 'held' | 'slots-exhausted' | 'memory-deferred' | 'already-running' | 'drained' | 'paused' | string;
+  /** Human-readable one-liner for the binding constraint, when there is one. */
+  detail?: string;
+  deferredCount?: number;
+  runningCount?: number;
+  count?: number;
+  availableMb?: number;
+  threshold?: number;
+  holders?: { owner: string; at: string }[];
+  holds?: ScheduleJobHold[];
+  at: string;
+}
+
 export interface ScheduleEffectiveConcurrency {
   /** Total slots in the machine-wide sessionSlots pool — the ONLY concurrency
    *  limit. The scheduler no longer carries a private concurrencyCap. */
@@ -569,6 +593,8 @@ export interface ScheduleEffectiveConcurrency {
 
 export interface ScheduleStateSnapshot {
   config: ScheduleConfig & { supervisor?: SupervisorConfig };
+  /** Why the last tick fired (or didn't). Null before the first tick. */
+  lastTick?: ScheduleLastTick | null;
   jobs: ScheduleJob[];
   scheduledFor: string | null;
   lastRunAt: string | null;
@@ -1782,6 +1808,16 @@ export interface PromptSessionsCreateEpicPayload {
     runId?: string;
     sourceTabId?: string;
   };
+  /** Full first-prompt body + its labeled sections (epicIntake.ts's
+   *  composeEpicIntake) — carried alongside goalText so the Epic's first
+   *  turn can render a structured AIM briefing card. */
+  openingPrompt?: string;
+  sections?: Array<{
+    kind: 'actor' | 'injection' | 'input' | 'mission' | 'goal' | 'reference';
+    label: string;
+    text: string;
+    source?: string;
+  }>;
 }
 
 export interface PromptSessionsCreateEpicResult {

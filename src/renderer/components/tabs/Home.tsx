@@ -877,6 +877,32 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
   const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0
   const runningJobs = useMemo(() => jobs.filter((j) => j.status === 'running'), [jobs])
+  // Why the queue is running narrower than the pool. Sourced entirely from the
+  // scheduler's own last-tick record — never recomputed here, and deliberately
+  // silent when the queue is simply idle so an empty queue can't read as a
+  // blocked one.
+  const lastTick = useScheduleState((s) => s.snapshot?.lastTick)
+  const constraint = useMemo(() => {
+    if (!lastTick || lastTick.fired) return null
+    const pending = jobs.filter((j) => j.status === 'pending').length
+    if (pending === 0) return null
+    switch (lastTick.reason) {
+      case 'memory-deferred':
+        return `memory gate: ${lastTick.availableMb} MB free, need ${lastTick.threshold} MB`
+      case 'slots-exhausted':
+        return `all ${total} slots busy — ${lastTick.deferredCount ?? pending} pending`
+      case 'held': {
+        const n = lastTick.holds?.length ?? 0
+        return n > 0
+          ? `${n} pending held behind dependencies`
+          : (lastTick.detail ?? 'held')
+      }
+      case 'paused':
+        return 'scheduler paused'
+      default:
+        return null
+    }
+  }, [lastTick, jobs, total])
   const rows = useMemo(
     () => activeSessionRows(slots?.holders ?? [], runningJobs, chats, sessions),
     [slots, runningJobs, chats, sessions],
@@ -909,7 +935,10 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="m-0 font-serif text-[22px] font-medium">Active sessions</h2>
         <span className="flex items-center gap-4">
-          <span className="font-mono text-[12px] text-fg-faint">{inUse} of {total} slots in use</span>
+          <span className="font-mono text-[12px] text-fg-faint">
+            {inUse} of {total} slots in use
+            {constraint && <span className="ml-2 text-amber-400/90">· {constraint}</span>}
+          </span>
           <SessionSlotCapControl slots={slots} />
         </span>
       </div>

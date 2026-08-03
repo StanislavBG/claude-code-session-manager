@@ -121,6 +121,9 @@ contextBridge.exposeInMainWorld('api', {
     unsubscribe: (tabId) => ipcRenderer.invoke('transcript:unsubscribe', { tabId }),
     closeTab: (tabId) => ipcRenderer.invoke('transcript:close', { tabId }),
     buffer: (tabId) => ipcRenderer.invoke('transcript:buffer', { tabId }),
+    page: (tabId, startLine, endLine) =>
+      ipcRenderer.invoke('transcript:page', { tabId, startLine, endLine }),
+    readRef: (ref) => ipcRenderer.invoke('transcript:readRef', ref),
     pathFor: (cwd, sessionUuid) =>
       ipcRenderer.invoke('transcript:path', { cwd, sessionUuid }),
     usageFor: (cwd, sessionIds) =>

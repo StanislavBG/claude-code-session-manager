@@ -1378,6 +1378,11 @@ export interface SessionManagerAPI {
     /** Permanently destroy the sub (genuine tab close). */
     closeTab: (tabId: string) => Promise<{ ok: boolean }>;
     buffer: (tabId: string) => Promise<TranscriptEvent[]>;
+    /** Paged read over the subscribed transcript's line-offset index — [startLine, endLine] inclusive, 0-based.
+     *  Reads only the requested byte range from disk; never materializes the whole file. */
+    page: (tabId: string, startLine: number, endLine: number) => Promise<{ events: (TranscriptEvent & { lineNumber: number })[]; totalLines: number }>;
+    /** Full untruncated single-line read via a classifier byte reference (expand-to-full path). */
+    readRef: (ref: TranscriptEventRef) => Promise<{ ok: boolean; text?: string; error?: string }>;
     pathFor: (cwd: string, sessionUuid: string) => Promise<string>;
     /** Batched token-usage totals, one map entry per requested sessionId. A
      *  session with no transcript file yet (or one over the main-process size

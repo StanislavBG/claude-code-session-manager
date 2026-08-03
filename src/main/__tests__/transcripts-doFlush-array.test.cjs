@@ -2,10 +2,11 @@
  * transcripts-doFlush-array.test.cjs — unit tests for transcripts.cjs's
  * doFlush()/readDelta() handling of classifyLine's array-of-events shape.
  *
- * Covers: one line producing several events all land in sub.buffer flattened
- * (not nested per line), the 500-entry ring cap is enforced across that
- * flattened event stream rather than per line, and each event's byte `ref`
- * correctly points back at its own line in the transcript file on disk.
+ * Covers: one line producing several events all land in the getBuffer()
+ * drain flattened (not nested per line), a session with far more than the
+ * old 500-entry ring cap still returns every event via the line-offset
+ * index (the cap is gone), and each event's byte `ref` correctly points
+ * back at its own line in the transcript file on disk.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/transcripts-doFlush-array.test.cjs
  */
@@ -55,16 +56,16 @@ test('a single multi-block line flattens into multiple buffered events', async (
 
   const res = await subscribe({ tabId, cwd, sessionUuid: sessionId });
   expect(res.ok).toBe(true);
-  const buf = getBuffer(tabId);
+  const buf = await getBuffer(tabId);
   expect(buf).toHaveLength(3);
   expect(buf.map((e) => e.kind)).toEqual(['assistant', 'tool_use', 'tool_use']);
   closeTab(tabId);
 });
 
-test('the 500-entry ring cap is enforced across the flattened event stream, not per line', async () => {
+test('a session with far more than the old 500-entry cap still returns every event — the ring cap is gone', async () => {
   const sessionId = 'sess-cap';
   const tabId = 'tab-cap';
-  // 200 lines * 3 events each = 600 events > 500 cap.
+  // 200 lines * 3 events each = 600 events > the old 500 cap.
   const lines = Array.from({ length: 200 }, (_, i) => ({
     type: 'assistant',
     message: {
@@ -79,9 +80,10 @@ test('the 500-entry ring cap is enforced across the flattened event stream, not 
 
   const res = await subscribe({ tabId, cwd, sessionUuid: sessionId });
   expect(res.ok).toBe(true);
-  const buf = getBuffer(tabId);
-  expect(buf).toHaveLength(500);
-  // Oldest events were evicted — the last event of the last line must be present.
+  const buf = await getBuffer(tabId);
+  expect(buf).toHaveLength(600);
+  // Nothing evicted — both the genuine first and last events survive.
+  expect(buf[0].data).toBe('line 0');
   expect(buf[buf.length - 1].data.id).toBe('tu-199-b');
   closeTab(tabId);
 });
@@ -96,7 +98,7 @@ test('each event ref points at its own line — re-reading those bytes reproduce
 
   const res = await subscribe({ tabId, cwd, sessionUuid: sessionId });
   expect(res.ok).toBe(true);
-  const buf = getBuffer(tabId);
+  const buf = await getBuffer(tabId);
   expect(buf).toHaveLength(2);
 
   const fd = fs.openSync(filePath, 'r');

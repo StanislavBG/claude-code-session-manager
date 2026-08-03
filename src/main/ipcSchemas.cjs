@@ -183,6 +183,23 @@ const transcriptUsageFor = z.object({
   sessionIds: z.array(z.string().regex(SESSION_UUID_RE)).max(500),
 });
 
+// Paged read over a subscribed transcript's line-offset index. Bounded line
+// numbers — a page is a scroll window, never an unbounded range request.
+const transcriptPage = z.object({
+  tabId: z.string().min(1).max(128),
+  startLine: z.number().int().min(0),
+  endLine: z.number().int().min(0),
+});
+
+// Single-line full-payload read via a classifier byte reference (expand-to-
+// full path, PRD chat-typed-event-renderers). byteLength bound mirrors
+// transcripts.cjs's MAX_REF_BYTES — one JSONL line, never a whole-file read.
+const transcriptReadRef = z.object({
+  filePath: z.string().min(1).max(4096),
+  byteOffset: z.number().int().min(0),
+  byteLength: z.number().int().min(1).max(64 * 1024 * 1024),
+});
+
 // ──────────────────────────────────────────── Config
 const configPath = z.object({ path: z.string().min(1).max(4096) });
 
@@ -965,6 +982,8 @@ module.exports = {
     transcriptTabId,
     transcriptPath,
     transcriptUsageFor,
+    transcriptPage,
+    transcriptReadRef,
     configPath,
     configWriteJson,
     configWriteText,

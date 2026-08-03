@@ -59,15 +59,18 @@ const MAX_DELTA_BYTES = 8 * 1024 * 1024;
 async function readDelta(sub) {
   const stat = await fsp.stat(sub.filePath).catch(() => null);
   if (!stat) return [];
-  // Inode changed → file was replaced underfoot; restart from the top.
+  // Inode changed → file was replaced underfoot; restart from the top. The
+  // line index is keyed to byte offsets in the OLD file, so it's invalid too.
   if (sub.inode !== undefined && stat.ino !== sub.inode) {
     sub.offset = 0;
     sub.pending = '';
+    sub.lineIndex.length = 0;
   }
   if (stat.size < sub.offset) {
-    // File was truncated/rotated — start over.
+    // File was truncated/rotated — start over, and the index goes with it.
     sub.offset = 0;
     sub.pending = '';
+    sub.lineIndex.length = 0;
   }
   if (stat.size === sub.offset) {
     sub.inode = stat.ino;
@@ -126,6 +129,10 @@ async function readDelta(sub) {
 async function doFlush(sub, { emit = true } = {}) {
   const lines = await readDelta(sub);
   for (const line of lines) {
+    // Index every line — including ones that fail to parse — so line numbers
+    // and byte offsets stay correct for paged reads regardless of content.
+    // This index (not the parsed events) is what's kept in memory long-term.
+    sub.lineIndex.push({ byteOffset: line.byteOffset, byteLength: line.byteLength });
     let obj;
     try {
       obj = JSON.parse(line.text);
@@ -135,15 +142,13 @@ async function doFlush(sub, { emit = true } = {}) {
     const ref = { filePath: sub.filePath, byteOffset: line.byteOffset, byteLength: line.byteLength };
     const events = classifyLine(obj, ref);
     for (const ev of events) {
-      // Ring buffer (cap at 500 entries to bound memory) — capped across the
-      // flattened event stream, not per line, since one line can now emit
-      // several events.
-      sub.buffer.push(ev);
-      if (sub.buffer.length > 500) sub.buffer.shift();
       if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
       // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
       // so backfilled transcripts show up in the trace store. One span per
-      // emitted event, not per line.
+      // emitted event, not per line. doFlush only ever processes a given
+      // line once (readDelta never re-returns already-consumed bytes), so
+      // this can't double-record — paged re-reads (readPage) go through a
+      // separate code path below that never touches OTEL.
       otel.recordTranscriptEvent({
         tabId: sub.tabId,
         tabCwd: sub.cwd,
@@ -152,6 +157,102 @@ async function doFlush(sub, { emit = true } = {}) {
         ts: Date.now(),
       });
     }
+  }
+}
+
+/**
+ * Read events for JSONL lines [startLine, endLine] (inclusive, 0-based) from
+ * disk using the subscription's line-offset index — never the whole file.
+ * A single positional fd.read covers the byte span for the whole requested
+ * window; lines are then re-split and parsed from that buffer only. This is
+ * the only path a caller should use to fetch history beyond what has already
+ * streamed via transcript:event — it never touches OTEL (which fires exactly
+ * once per line, in doFlush, as new bytes are indexed) and never re-emits.
+ */
+async function readPage(sub, startLine, endLine) {
+  const total = sub.lineIndex.length;
+  const from = Math.max(0, Math.min(startLine, total - 1));
+  const to = Math.max(0, Math.min(endLine, total - 1));
+  if (total === 0 || from > to) return { events: [], totalLines: total };
+  const first = sub.lineIndex[from];
+  const last = sub.lineIndex[to];
+  const spanOffset = first.byteOffset;
+  const spanLength = last.byteOffset + last.byteLength - spanOffset;
+  const events = [];
+  if (spanLength <= 0) return { events, totalLines: total };
+  const fd = await fsp.open(sub.filePath, 'r');
+  try {
+    const buf = Buffer.alloc(spanLength);
+    await fd.read(buf, 0, spanLength, spanOffset);
+    for (let lineNo = from; lineNo <= to; lineNo++) {
+      const entry = sub.lineIndex[lineNo];
+      const relOffset = entry.byteOffset - spanOffset;
+      const text = buf.toString('utf8', relOffset, relOffset + entry.byteLength);
+      let obj;
+      try {
+        obj = JSON.parse(text);
+      } catch {
+        continue; // malformed line: index slot preserved, nothing to render
+      }
+      const ref = { filePath: sub.filePath, byteOffset: entry.byteOffset, byteLength: entry.byteLength };
+      for (const ev of classifyLine(obj, ref)) {
+        events.push({ ...ev, lineNumber: lineNo });
+      }
+    }
+  } finally {
+    await fd.close();
+  }
+  return { events, totalLines: total };
+}
+
+async function pageEvents(tabId, startLine, endLine) {
+  const sub = subs.get(tabId);
+  if (!sub) return { events: [], totalLines: 0 };
+  return readPage(sub, startLine, endLine);
+}
+
+// Defensive ceiling on a single-line ref read (transcript:readRef). The
+// largest real JSONL lines observed are multi-MB tool_results; 64 MB is far
+// beyond plausible for ONE line while still bounding a hostile/corrupt ref.
+const MAX_REF_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Read the exact bytes of ONE JSONL line via the classifier's byte reference
+ * ({ filePath, byteOffset, byteLength } — threaded per-event since PRD
+ * transcript-classifier-multi-emit). This is the renderer's expand-to-full-
+ * payload path: the ring-buffered event carries only a bounded preview, the
+ * full untruncated line lives on disk. Positional fd.read only — never the
+ * whole file (same OOM discipline as readDelta/readPage).
+ *
+ * filePath is renderer-supplied, so it is validated with config.cjs's
+ * realpath boundary check AND pinned to the transcripts root
+ * (~/.claude/projects/) — a ref can never read arbitrary home-dir files.
+ */
+async function readRef({ filePath, byteOffset, byteLength }) {
+  const { validatePath } = require('./config.cjs');
+  let real;
+  try {
+    real = validatePath(filePath);
+  } catch (e) {
+    return { ok: false, error: e?.message || 'invalid path' };
+  }
+  const transcriptsRoot = path.join(os.homedir(), '.claude', 'projects') + path.sep;
+  if (!real.startsWith(transcriptsRoot)) {
+    return { ok: false, error: 'ref outside transcripts root' };
+  }
+  if (byteLength > MAX_REF_BYTES) {
+    return { ok: false, error: 'ref byteLength exceeds cap' };
+  }
+  let fd;
+  try {
+    fd = await fsp.open(real, 'r');
+    const buf = Buffer.alloc(byteLength);
+    const { bytesRead } = await fd.read(buf, 0, byteLength, byteOffset);
+    return { ok: true, text: buf.toString('utf8', 0, bytesRead) };
+  } catch (e) {
+    return { ok: false, error: e?.message || 'read failed' };
+  } finally {
+    await fd?.close().catch(() => {});
   }
 }
 
@@ -253,15 +354,20 @@ async function subscribe({ tabId, cwd, sessionUuid }) {
     filePath,
     offset: 0,
     pending: '',
-    buffer: [],
+    // Line-offset index (byteOffset + byteLength per JSONL line) — this is
+    // what's kept in memory across the life of the subscription, not the
+    // parsed events themselves. See readPage() for how events are re-derived
+    // from it on demand.
+    lineIndex: [],
     watcher: null,
     flushing: null,
     dirty: false,
   };
   // If the file already exists, read current content as replay. Do not emit
-  // during this initial drain — the renderer drains sub.buffer via
-  // `transcript:buffer` after `transcript:subscribe` resolves. Emitting here
-  // would race the renderer's onEvent listener registration and drop events.
+  // during this initial drain — the renderer drains history via
+  // `transcript:buffer` (or `transcript:page`) after `transcript:subscribe`
+  // resolves. Emitting here would race the renderer's onEvent listener
+  // registration and drop events.
   if (fs.existsSync(filePath)) {
     await doFlush(sub, { emit: false });
   }
@@ -283,9 +389,21 @@ function unsubscribe(tabId) {
   release(tabId);
 }
 
-function getBuffer(tabId) {
+/**
+ * Full-history drain used by the `transcript:buffer` IPC (initial replay on
+ * subscribe / tab-switch resume). Pages the entire indexed range from disk —
+ * bounded by the index's byte offsets, never a whole-file read — rather than
+ * the old fixed 500-entry ring buffer, so scrolling to the top of a long
+ * session reaches the genuine first event instead of a truncated window.
+ * Large sessions should prefer transcript:page for a specific window; this
+ * stays for existing consumers (live.ts, chat.ts, terminalDigest.ts) that
+ * expect one full drain.
+ */
+async function getBuffer(tabId) {
   const sub = subs.get(tabId);
-  return sub ? sub.buffer.slice() : [];
+  if (!sub || sub.lineIndex.length === 0) return [];
+  const { events } = await readPage(sub, 0, sub.lineIndex.length - 1);
+  return events;
 }
 
 // Cap on the transcript file we'll fully re-read for a token-usage summary —
@@ -382,6 +500,8 @@ function registerTranscriptHandlers() {
   ipcMain.handle('transcript:buffer', v(s.transcriptTabId, ({ tabId }) => getBuffer(tabId)));
   ipcMain.handle('transcript:path', v(s.transcriptPath, ({ cwd, sessionUuid }) => transcriptPath(cwd, sessionUuid)));
   ipcMain.handle('transcript:usageFor', v(s.transcriptUsageFor, ({ cwd, sessionIds }) => usageFor(cwd, sessionIds)));
+  ipcMain.handle('transcript:page', v(s.transcriptPage, ({ tabId, startLine, endLine }) => pageEvents(tabId, startLine, endLine)));
+  ipcMain.handle('transcript:readRef', v(s.transcriptReadRef, (ref) => readRef(ref)));
 }
 
 module.exports = {
@@ -394,8 +514,15 @@ module.exports = {
   transcriptPath,
   classifyLine,
   usageFor,
+  pageEvents,
+  readRef,
   // Exported for unit tests exercising the array-of-events flush path
-  // (doFlush) and its ring-buffer cap — not part of the IPC surface.
+  // (doFlush) and the line-offset index it maintains — not part of the IPC
+  // surface.
   subscribe,
   getBuffer,
+  // Test-only accessor onto the raw Subscription object (its lineIndex in
+  // particular) — asserting a memory ceiling requires inspecting what's
+  // actually held, not just what a read API returns.
+  __getSubForTest: (tabId) => subs.get(tabId),
 };

@@ -7,6 +7,7 @@ import { isDiscussionTag, type TicketTag } from '../lib/ticketDisplay'
 import { useSessions } from './sessions'
 import { usePromptSessions } from './promptSessions'
 import { useEpicTerminal } from './epicTerminal'
+import { summarizeSignal, type ChatSignal } from '../lib/chatSignals'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -62,6 +63,11 @@ export interface ChatTurn {
   /** Byte range of the source JSONL line on disk (transcript-feed turns only)
    *  — the full untruncated line stays recoverable without holding it here. */
   ref?: TranscriptEventRef | null
+  /** Bounded structured summary for a role:'event' turn (lib/chatSignals.ts),
+   *  computed at ingest while the full payload is in hand. The typed event
+   *  renderers (ChatTranscriptTurn.tsx) read this instead of re-parsing the
+   *  280-char previewText; expanding a card re-reads the full line via `ref`. */
+  signal?: ChatSignal
 }
 
 /**
@@ -1068,11 +1074,21 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
     })
     return
   }
+  // Bounded structured summary for the typed renderers — computed HERE, while
+  // ev.data/ev.raw are still in hand from IPC (the store never keeps them).
+  let signal: ChatSignal | undefined
+  try {
+    signal = summarizeSignal(ev.kind, ev.data, ev.raw)
+  } catch {
+    // A malformed payload must never drop the event — the generic Signal
+    // card renders from previewText/ref with an explicit empty state.
+    signal = undefined
+  }
   patch(tabId, (c) => ({
     ...c,
     turns: capTurns([
       ...c.turns,
-      { id: turnId(), role: 'event', text: ev.previewText ?? '', at, kind: ev.kind, ref: ev.ref },
+      { id: turnId(), role: 'event', text: ev.previewText ?? '', at, kind: ev.kind, ref: ev.ref, signal },
     ]),
   }))
 }

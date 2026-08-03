@@ -459,27 +459,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'Resume lets you pick any directory — handy when you\'ve moved or renamed the original project folder since the session ran.',
     ],
   },
-  'keybindings': {
-    headline: 'Rebind the Claude Code CLI like a game controls screen',
-    intro:
-      'The CLI ships with sensible defaults, but every shortcut can be rebound via ~/.claude/keybindings.json. The Controls view works like a game settings menu: pick a context, click "+ bind" next to an action, press the keys. Presets (Claude defaults / Vim motion / Emacs flow) apply a whole layout in one click. The JSON view edits the same draft directly for chords and command: bindings.',
-    sections: [
-      {
-        title: 'How it maps to the file',
-        items: [
-          { term: 'Contexts', body: 'Bindings are scoped to where you are in the CLI — Global, Chat, Select pickers, Scroll mode, Confirmation dialogs, etc. Global applies everywhere. The left sidebar shows how many keys you\'ve customized in each.' },
-          { term: 'Keycaps', body: 'Each chip is one keystroke pattern ("ctrl+shift+k"). Removing a chip (the ✕) reverts that key to the Claude Code default.' },
-          { term: 'Disable a key', body: 'The "+ disable a key" capture binds a key to null, turning its Claude Code default off in that context.' },
-          { term: 'command: bindings', body: 'A key can fire a slash command as if typed ("command:commit"). These and any unrecognized bindings show under "Command & other bindings" but are edited in the JSON view.' },
-          { term: 'Reserved keys', body: 'ctrl+c, ctrl+d and ctrl+m cannot be rebound; the capture rejects them. Cmd/meta combos are also rejected — Claude Code runs in a terminal.' },
-        ],
-      },
-    ],
-    tips: [
-      'Presets replace the whole file — Save commits, Revert restores what was on disk. Editing any binding turns a preset into a "custom layout".',
-      'Defaults stay in effect for any key you don\'t override; after saving, restart Claude Code so the CLI picks up changes. The "reference ↗" link opens the official docs.',
-    ],
-  },
   'scheduler': {
       headline: 'Author PRDs and run them as claude -p jobs against your 5-hour window',
       intro:

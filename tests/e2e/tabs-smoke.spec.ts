@@ -1,5 +1,5 @@
 /**
- * 14-tab smoke test — every NavKey must mount without pageerror or console.error.
+ * 13-tab smoke test — every NavKey must mount without pageerror or console.error.
  *
  * Parametrized over the full NavKey union from LeftNav.tsx. Each tab is opened
  * via the Cmd-K command palette (deterministic — does not depend on LeftNav
@@ -31,7 +31,6 @@ const TABS: NavKey[] = [
   'memory',
   'projects',
   'history',
-  'keybindings',
 ]
 
 // Compile-time exhaustiveness: if NavKey gains a member, the assignment below
@@ -39,7 +38,7 @@ const TABS: NavKey[] = [
 const _exhaustive: NavKey = TABS[0]
 void _exhaustive
 
-test.describe('14 tabs mount without renderer errors', () => {
+test.describe('13 tabs mount without renderer errors', () => {
   for (const navKey of TABS) {
     test(`${navKey} renders + no console.error`, async () => {
       const { app, win, errors } = await launchApp()

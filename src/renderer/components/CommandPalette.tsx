@@ -182,7 +182,6 @@ export function buildCommands(): Command[] {
     { id: 'nav:memory', label: 'Go to Memory', section: 'nav', emitOnly: true },
     { id: 'nav:projects', label: 'Go to File Explorer', section: 'nav', emitOnly: true },
     { id: 'nav:history', label: 'Go to History', section: 'nav', emitOnly: true },
-    { id: 'nav:keybindings', label: 'Go to Keybindings', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
     { id: 'nav:remote', label: 'Go to Remote', section: 'nav', emitOnly: true },
     { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },

@@ -37,7 +37,7 @@ Screenshots are placeholders right now; see `screenshots/README-screenshots.md` 
 - **Cmd-K command palette** — 41+ commands organised into bands (session, voice, scheduler, config, nav). Fuzzy filter, emit-only dispatch so commands stay decoupled from views.
 - **17 tabs** — every Claude Code surface, broken into three groups:
   - Workspace: Overview · Terminal · System Prompt · Agent-View · Memory.
-  - Config: Settings · Permissions · Skills · Plugins · MCP Servers · Hooks · Subagents · Keybindings.
+  - Config: Settings · Permissions · Skills · Plugins · MCP Servers · Hooks · Subagents.
   - Activity: Plans · Tasks · Projects · History · Usage.
   - Footer dock: Scheduler panel and microphone status, both pinned above the active tab.
 - **Scheduler / PRD queue** — drop a markdown file into `~/.claude/session-manager/scheduled-plans/prds/` and the scheduler will pick it up as a headless `claude -p` job. Multi-select bulk archive and reset. Queue-health linter catches unbounded poll loops and post-AC overrun patterns before they burn tokens. Structured frontmatter editor with a raw-yaml escape hatch for power users.
@@ -83,7 +83,7 @@ Linux needs `build-essential` and `python3` for the rebuild.
 ## Voice setup
 
 - Press F7 to open the first-run wizard. It enumerates your input devices, lets you pick one, records a sample utterance, and persists the choice in `voice.json`.
-- Press F1 for push-to-talk. Hold or toggle, configurable in Keybindings.
+- Press F1 for push-to-talk. Hold or toggle, configurable in the Voice tab.
 - Models download once on first use, then run entirely locally via onnxruntime-web.
 - Auto-submit fires Enter at a configurable countdown (default 6 s); the mic stays open across turns until silence (default 30 s) or an explicit stop.
 

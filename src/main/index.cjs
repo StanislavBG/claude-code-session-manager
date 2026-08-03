@@ -1021,7 +1021,7 @@ app.whenReady().then(async () => {
     "img-src 'self' data: blob: smfile:",
     "font-src 'self' data: https://fonts.gstatic.com",
     // schemastore.org is used by Monaco for JSON schema validation
-    // (settings.json, keybindings.json — see App.tsx::installMonacoSchemas).
+    // (settings.json — see App.tsx::installMonacoSchemas).
     // The json.schemastore.org URL redirects to www.schemastore.org, so both
     // hosts must be in the allowlist or CSP blocks the redirect.
     "connect-src 'self' https://api.anthropic.com https://registry.npmjs.org https://json.schemastore.org https://www.schemastore.org",

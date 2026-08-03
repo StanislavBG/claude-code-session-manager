@@ -66,14 +66,6 @@ export const CLAUDE_MD_SCOPES: ScopeSpec = {
  */
 export const PERMISSIONS_SCOPES: ScopeSpec = SETTINGS_SCOPES
 
-export const KEYBINDINGS_SCOPES: ScopeSpec = {
-  scopes: ['user'],
-  resolve: (scope, home) => {
-    if (scope === 'user') return join(home, '.claude', 'keybindings.json')
-    return null
-  },
-}
-
 export const SCOPE_LABELS: Record<Scope, { label: string; hint: string }> = {
   user: { label: 'User', hint: '~/.claude/ — applies to all projects' },
   project: { label: 'Project', hint: '<cwd>/.claude/ — checked into git' },

@@ -393,10 +393,6 @@ export function App() {
         uri: 'https://json.schemastore.org/claude-code-settings.json',
         fileMatch: ['**/settings.json', '**/settings.local.json'],
       },
-      {
-        uri: 'https://json.schemastore.org/claude-code-keybindings.json',
-        fileMatch: ['**/keybindings.json'],
-      },
     ]).catch((e) => console.warn('[monaco] schema install failed:', e))
 
     // F1 push-to-talk: fetch initial config + subscribe to hotkey events.

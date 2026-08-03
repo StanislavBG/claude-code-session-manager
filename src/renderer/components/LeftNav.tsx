@@ -25,7 +25,6 @@ export type NavKey =
   | 'memory'
   | 'projects'
   | 'history'
-  | 'keybindings'
   // One combined screen on both faces — global scheduler policy +
   // session-pool controls (folded in from the former standalone
   // 'sm-config' key) stacked directly above the active project's live PRD

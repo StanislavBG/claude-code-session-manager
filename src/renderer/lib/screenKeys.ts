@@ -24,7 +24,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'plugins',
   'mcp',
   'hooks',
-  'keybindings',
   'memory',
   'projects',
   'system-prompt',

@@ -9,7 +9,6 @@ import { VoiceModal } from './layout/VoiceModal'
 import { Settings } from './tabs/Settings'
 import { Permissions } from './tabs/Permissions'
 import { SystemPrompt } from './tabs/SystemPrompt'
-import { Keybindings } from './tabs/Keybindings'
 import { Memory } from './tabs/Memory'
 import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
@@ -51,7 +50,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'plugins':       { title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
   'mcp':           { title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
   'hooks':         { title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
-  'keybindings':   { title: 'Keybindings',               intro: 'Shortcuts you can override. Bindings here apply to Claude Code itself, not the Session Manager chrome.' },
   'memory':        { title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
@@ -103,7 +101,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       case 'plugins':       return <Plugins />
       case 'mcp':           return <McpServers />
       case 'hooks':         return <Hooks />
-      case 'keybindings':   return <Keybindings />
       case 'memory':        return <Memory />
       case 'system-prompt': return <SystemPrompt />
       case 'permissions':   return <Permissions />

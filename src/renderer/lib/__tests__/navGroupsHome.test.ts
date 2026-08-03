@@ -19,7 +19,7 @@ describe('navGroups Home swap', () => {
 
 describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
-    'overview', 'browser', 'plugins', 'keybindings', 'remote', 'voice', 'agent-library', 'tag-library',
+    'overview', 'browser', 'plugins', 'remote', 'voice', 'agent-library', 'tag-library',
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host']
@@ -108,23 +108,6 @@ describe('plugins is home-only', () => {
   it('home face includes plugins', () => {
     const keys = getNavItemsForFace('home').map((item) => item.key)
     expect(keys).toContain('plugins')
-  })
-})
-
-describe('keybindings is home-only', () => {
-  it('NAV_ITEMS tags keybindings with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'keybindings')
-    expect(item?.faces).toEqual(['home'])
-  })
-
-  it('project face excludes keybindings', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('keybindings')
-  })
-
-  it('home face includes keybindings', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('keybindings')
   })
 })
 

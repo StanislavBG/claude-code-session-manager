@@ -267,9 +267,10 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
  * Static (never generated) 5th tab: what the 4 templates are and where
  * their source lives, so a human can find the files to hand-edit. Every
  * path here is real — no invented override mechanism. The actual per-
- * project override path is `picks.json`'s per-slot hand-picks, which the
- * Stage 2 selector already preserves on regenerate (select.ts's
- * `mergePicks`) unless a slot is explicitly listed in `resetSlots`.
+ * project override path is `picks.json`'s per-slot hand-picks: the
+ * project-home-builder agent writes it directly with its Write tool and
+ * preserves existing picks on regenerate, only overwriting a slot when
+ * explicitly asked to start over.
  */
 function ProjectPagesLibraryExplainer() {
   const row = (label: string, path: string, desc: string) => (

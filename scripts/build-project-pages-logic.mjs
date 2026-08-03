@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Precompiles src/renderer/lib/projectPages/logicBundle.ts (the non-React
-// Project Pages logic — summary validation, selection scoring) into a single
-// CJS bundle at scripts/project-pages-logic/dist/logic.cjs. Separate from
-// build-project-pages-renderer.mjs's bundle because that one externals
-// react/react-dom for renderToStaticMarkup; this bundle has no such
-// dependency, so its CLI consumers (validate-project-pages-summary.cjs,
-// select-project-pages-picks.cjs) don't need react on their require path.
+// Project Pages logic — summary validation, component library metadata)
+// into a single CJS bundle at scripts/project-pages-logic/dist/logic.cjs.
+// Separate from build-project-pages-renderer.mjs's bundle because that one
+// externals react/react-dom for renderToStaticMarkup; this bundle has no
+// runtime react dependency, so its CLI consumer
+// (validate-project-pages-summary.cjs) doesn't need react on its require
+// path.
 //
 // Run via `npm run build:project-pages-logic`. Re-run whenever logicBundle.ts
 // or anything it re-exports changes.
@@ -30,7 +31,7 @@ async function main() {
     platform: 'node',
     format: 'cjs',
     target: 'node18',
-    // logicBundle.ts now re-exports select.ts, which pulls in library/index.ts
+    // logicBundle.ts re-exports LENS_LIBRARY/LENS_ORDER from library/index.ts
     // (the ported component library) — those slot modules are .tsx files with
     // JSX component definitions (never invoked here, only referenced by id),
     // so the bundle still needs the JSX transform + react as an external,

@@ -76,6 +76,17 @@
       "completedAt": null,
       "tag": "discussion",
       "agentType": "architect"
+    },
+    "session-chat-conversion-into-simplified-chat-so--7cda6827": {
+      "id": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Session Chat conversion into Simplified Chat\n\nSo the Claude sessions that run for the Epics are very important and I want to make sure that all information is surfaced back however trivial and redundant,. What the simlified chat does is translates and organized the information better does not attempt to hide or mask it. I'm specifcally even interestted on things like \"TIPs\" and other unknown stuff that Anthoic might relase in future that show up, I want to see in the Simplifed Chat as well in designated visually pleasant area",
+      "claudeSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
+      "status": "active",
+      "createdAt": "2026-08-03T03:44:17.041Z",
+      "completedAt": null,
+      "tag": "discussion",
+      "agentType": "architect"
     }
   },
   "events": {
@@ -421,6 +432,38 @@
         "id": "pevt-mscob67b-18",
         "promptSessionId": "psess-msch6x36-16",
         "at": "2026-08-03T03:32:21.671Z"
+      },
+      {
+        "id": "418e2d26-6d46-43bb-9833-6dc944485f2c",
+        "promptSessionId": "psess-msch6x36-16",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscob67b-18",
+        "at": "2026-08-03T03:34:23.374Z",
+        "prdSlug": "973-home-queued-popover-new-epic-picker"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "418e2d26-6d46-43bb-9833-6dc944485f2c",
+        "text": "Yes — decomposition is now complete, and most of it has already shipped. Status of the full Home Screen A design against the codebase:\n\n**Already landed (committed):**\n- Hero (kicker, slots-busy greeting, \"N things need you\" jump link, All history / New epic buttons), Needs-you section, Usage meters, Projects card, Active/Recent sessions — `1d87b3a` (this session's first pass)\n- PRD 966 → `8a3e979`: QueuedCard empty-state fix + Interactions legend toggle\n- PRD 967 → `fcb4180`: real slide-in session detail drawer for Active/Recent rows (the mock's ADrawer pattern)\n\n**Just queued (final piece):**\n- PRD 973 `home-queued-popover-new-epic-picker` — the last two real-data-backed mock interactions: the Queued card's per-job popover, and the New-epic project-picker drawer (reusing 967's drawer primitive). Pending in the queue now; dev-lead persona carries `model: fable` as you set up, though note scheduler PRD jobs themselves still pin `--model sonnet` in `scheduler.cjs`.\n\n**Deliberately excluded, never to be decomposed** (documented in Home.tsx's header): the mock's Pace sparkline and Usage per-project breakdown — both run on fabricated numbers (hardcoded 14-day array, invented token splits) with no real data source in this app, and the project rule is real-data-only. \"Skip next\" on queued jobs is likewise excluded — no per-job skip API exists to back it.\n\nOnce 973 completes, every element of Home Screen A that can be honestly backed by real app data will be implemented.",
+        "id": "pevt-mscoe4bx-20",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T03:34:39.213Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscoe4bx-20",
+        "text": "Verified — audited every visual on the Home dashboard against its data source. **Everything currently shipped is built on existing APIs/stores; zero fabricated values.** Here's the full accounting:\n\n| Visual | Data source (existing API/store) |\n|---|---|\n| Hero slot count (\"N of M slots busy\") | `window.api.schedule.sessionSlots()` — live slot pool, polled 5s |\n| Hero \"N things need you\" | Derived from the three real stores below via `homeNeedsYou.ts` |\n| Usage meters (Session 5h / Weekly / Opus / Sonnet / extra usage) | `useBilling` → the real `/api/oauth/usage` billing endpoint |\n| Projects card (names, live counts, last activity) | `useKnownProjects` (real `~/.claude/projects` scan) + running chats join |\n| Queued card | `useScheduleState` snapshot — real scheduler queue.json jobs |\n| Needs-you rows | `usePromptSessions` (proposed Epics), `useChat` ticketHistory (needs-input), scheduler jobs (failed/needs_review); actions wired to real `approveProposed`/`markCompleted`/`send`/`resetJob` |\n| Active sessions + drawer | `sessionSlots()` holders joined to real jobs/chats; drawer KeyVals (owner/kind/Epic/project/started) all from store state; live tail = **real** last 4 chat turns from `useChat` — shown only for running chat runs, omitted otherwise (no placeholder) |\n| Recent sessions + drawer | Real transcript scan via `window.api.config.listDir` (same source as History tab); Resume = real `claude --resume`; drawer shows only real id/project/mtime/size — the mock's invented \"$4.10 est.\" and turn counts were **not** carried over |\n| Interactions legend | Static reference copy describing only interactions that actually exist |\n| Slot cap slider | `window.api.schedule.setSessionSlots()` |\n\nMock elements with **no backing API were excluded, not faked**: Pace sparkline, per-project token split, \"Skip next\", Fork/Export (no backend actions exist) — all documented in Home.tsx's header comment. Grep for fabricated literals (`$`, \"est. cost\", \"3.19M\", spark arrays, placeholde…",
+        "id": "pevt-mscofl5v-21",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T03:35:47.683Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscofl5v-21",
+        "text": "Pushed. `main` is now synced with origin (`591428b..ca3d82a`, 8 commits, 0 ahead/0 behind).\n\nWhat went up includes all the completed Home Screen A work — the control-room dashboard (`1d87b3a`, pushed earlier in that range's history), PRD 966's QueuedCard fix + Interactions legend (`8a3e979`), PRD 967's session detail drawer (`fcb4180`) — plus concurrent work from other Epics on this machine (Epics agent/mission changes, project-pages \"brief\" lens, ops state syncs).\n\nOne thing is deliberately *not* \"all done\": **PRD 973** (Queued-job popover + New-epic project picker, the final fidelity piece) is still `pending` in the scheduler queue — it hasn't executed yet. When it completes it will commit locally per the scheduler's flow, but that future commit won't push itself; it'll be included next time you push or publish.",
+        "id": "pevt-mscoryfq-24",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T03:45:24.758Z"
       }
     ],
     "psess-msckxplj-24": [
@@ -561,6 +604,38 @@
         "id": "pevt-mscntz87-14",
         "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
         "at": "2026-08-03T03:18:59.479Z"
+      },
+      {
+        "id": "ca657b0b-204e-4cbd-8010-2916762e3044",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscntz87-14",
+        "at": "2026-08-03T03:43:50.033Z",
+        "prdSlug": "974-epic-prd-chip-checkin-status-tone"
+      },
+      {
+        "id": "4112ce7c-d607-44fb-9eda-6ef666f6fe28",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "ca657b0b-204e-4cbd-8010-2916762e3044",
+        "at": "2026-08-03T03:44:25.710Z",
+        "prdSlug": "975-epic-row-prd-outcome-rollup"
+      },
+      {
+        "id": "99766216-691e-49a3-8a0e-cb608c9370c5",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "4112ce7c-d607-44fb-9eda-6ef666f6fe28",
+        "at": "2026-08-03T03:44:59.698Z",
+        "prdSlug": "976-response-event-outcome-stamp"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "99766216-691e-49a3-8a0e-cb608c9370c5",
+        "text": "All four PRDs are on disk in this Epic's folder.\n\n## The traffic light\n\nThree states, matched to what the Architect must actually *do*:\n\n| Colour | Job status | Meaning | Architect action |\n|---|---|---|---|\n| 🟢 sage | `completed` | checked in clean | none |\n| 🟡 butter | `needs_review` | checked in **asking a question** | decide — this is the main \"act\" state |\n| 🔴 accent | `failed` | checked in broken | re-scope or re-queue |\n| neutral / pulse | `pending` / `running` | hasn't checked in yet | wait |\n\nNo new palette. All three tones already exist in `sched-primitives.tsx:212` (`STATUS_TONE`) and `epic-primitives.tsx:11` — the app just wasn't using them on these surfaces.\n\n## Queued\n\n**974 `epic-prd-chip-checkin-status-tone`** — the `→ dispatched to PRD #NNN` chip in the Discussion timeline (`EpicDetail.tsx:722-733`) is currently flat neutral regardless of outcome. It gets the live tone. `scheduleJobs` is already in scope at `EpicDetail.tsx:351`, so this is zero new plumbing and **works today, independent of the 972 fix**.\n\n**975 `epic-row-prd-outcome-rollup`** — a real gap I found while designing this: `epicDisplayStatus` (`epicDerive.ts:44`) checks jobs for `running` and `pending` only. It **never checks `failed` or `needs_review`**, so an Epic with a broken PRD falls through to the resting `'active'` grey dot — identical to an idle Epic. Across your 62 active Epics that's the difference between triage-at-a-glance and opening each one. Adds `'failed'` and `'attention'` to the union with a documented precedence order (a terminal bad outcome outranks an in-flight run — a later PRD running doesn't discharge the obligation to deal with the one that already broke). Also independent of 972.\n\n**976 `response-event-outcome-stamp`** — depends on **972** and **974**. The `response` event carries only free text; once a job is archived out of `queue.json`, whether that check-in was a success, a question, or a failure is **permanently unrecoverable** from the Epic's audit tr…",
+        "id": "pevt-mscoruvc-23",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T03:45:20.136Z"
       }
     ],
     "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": [
@@ -611,6 +686,56 @@
         "id": "pevt-msco8ba0-17",
         "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
         "at": "2026-08-03T03:30:08.280Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msco8ba0-17",
+        "text": "Committed — two commits, split along this repo's existing convention (code vs. `chore(ops)` runtime-state sync, matching `e14bbb5`/`a42fff0`).\n\n**Gates run before committing, all green:**\n\n| Gate | Result |\n|---|---|\n| `npm run typecheck` | clean, exit 0 |\n| `vitest src/main/__tests__/projectPages.test.cjs` | 8 passed |\n| `vitest .../ProjectPagesSection.test.tsx` | 7 passed |\n| `npm run lint:selectors` | OK, 415 files scanned |\n\n**`2402369` — `feat(project-pages): ship a default home.html instead of an empty state`** (5 files, +165/−34, plus the new `src/main/templates/project-pages-default-home.html`). A never-generated project returned `{ output: null }` and rendered blank; `get()` now falls back to a shipped build-time default with `isDefault: true` / `generatedAt: null`. `marketing`/`feature`/`architecture` became optional in `ProjectPagesOutput` since the default only covers the home lens.\n\n**`dd66511` — `chore(ops): sync runtime state`** (35 files). PRDs 963–965 and 968–969 archived into their Epics' `prds-archived/`, new Epic records + transcripts + attachments, reserved numbers 965–972, `queue.json`/`history.jsonl` advanced.\n\nWorking tree is clean. Not pushed — per your release convention, push/publish waits for an explicit trigger.\n\nTwo notes:\n\nThe `src/` changes were **not authored in this session** — they were already in the working tree when it started, from a prior scheduler run of the `project-home-hosted-html-spec` PRD. I read the full diff and verified it against its gates before committing, but I didn't write it, and the commit message is reconstructed from the diff rather than from having done the work.\n\n`node --test src/main/__tests__/projectPages.test.cjs` fails, but that's expected and not a real failure — CLAUDE.md documents that this repo doesn't use `node --test` (it can't resolve the TypeScript renderer imports). The same file passes 8/8 under vitest. I ran it the wrong way first; only the vitest result is meaningful.\n\nNothing from the four …",
+        "id": "pevt-mscod5nm-19",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "at": "2026-08-03T03:33:54.274Z"
+      }
+    ],
+    "session-chat-conversion-into-simplified-chat-so--7cda6827": [
+      {
+        "id": "pevt-mscoqi6r-22",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T03:44:17.041Z",
+        "text": "Session Chat conversion into Simplified Chat\n\nSo the Claude sessions that run for the Epics are very important and I want to make sure that all information is surfaced back however trivial and redundant,. What the simlified chat does is translates and organized the information better does not attempt to hide or mask it. I'm specifcally even interestted on things like \"TIPs\" and other unknown stuff that Anthoic might relase in future that show up, I want to see in the Simplifed Chat as well in designated visually pleasant area"
+      },
+      {
+        "id": "273b9019-1950-43a0-b420-d75077e03c99",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T03:44:17.041Z",
+        "text": "Session Chat conversion into Simplified Chat\n\nSo the Claude sessions that run for the Epics are very important and I want to make sure that all information is surfaced back however trivial and redundant,. What the simlified chat does is translates and organized the information better does not attempt to hide or mask it. I'm specifcally even interestted on things like \"TIPs\" and other unknown stuff that Anthoic might relase in future that show up, I want to see in the Simplifed Chat as well in designated visually pleasant area"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "273b9019-1950-43a0-b420-d75077e03c99",
+        "text": "## Where I landed\n\nThe goal — *\"translate and organize, never hide\"* — is achievable, but the current pipeline is **structurally lossy before the renderer ever sees the data**. So Simplified Chat can't be a rendering change; it has to be a change to the classifier's contract. The one-line rule I'd adopt:\n\n> **The classifier is a router, never a filter. Every JSONL line reaches the UI. Known kinds get a designed card; unknown kinds get a generic card. A code change upgrades presentation — it never decides whether something is shown.**\n\nThat rule is what makes future Anthropic surfaces (TIPs or anything else) appear *automatically* on the day they ship, instead of silently vanishing until someone notices.\n\n## What's actually being dropped today (verified in code)\n\n`src/main/lib/classifyTranscriptLine.cjs`:\n\n- **Only the first tool_use block survives.** The `for (const block of content)` loop `return`s on the first match — an assistant message with text + 3 tool calls emits one event, and the text and the other two calls are gone.\n- **`usage` short-circuits everything.** The `if (obj.usage || msg?.usage)` check is first, so any message carrying both usage and content is classified `usage` and its content is never emitted.\n- **`makeRaw()` keeps only `message.content`.** Every top-level field is stripped before it reaches the renderer. In your live transcripts that's `attributionSkill`, `attributionPlugin`, `attributionMcpServer`/`attributionMcpTool`, `effort`, `gitBranch`, `isSidechain`, `isMeta`, `requestId`, `isApiErrorMessage`, `interruptedByShutdown`, `permissionMode`, `promptSource`, `toolUseResult`.\n- **`MAX_RAW_STR = 4096`** truncates text blocks mid-token.\n- **500-entry ring buffer + 8 MB seek-to-tail** in `transcripts.cjs` — older events are unrecoverable in memory, so \"all information\" is already false for any long Epic.\n\n`src/renderer/state/live.ts:193` handles 7 kinds and has an explicit `default: break`. So these real line types in your transcripts have **n…",
+        "id": "pevt-mscosoei-25",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T03:45:58.410Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscosoei-25",
+        "text": "All three settled. Here's the resolved design.\n\n## Decisions locked\n\n1. **Uncapped on inspect.** `MAX_RAW_STR` truncation is removed from the *stored* event; the card renders a bounded preview and the full untruncated payload loads on expand. Nothing is destroyed at classify time — that's the part that's currently unrecoverable.\n2. **One surface.** \"Chat\" and \"Simplified Chat\" are the same view. No new tab, no parallel UI — this is a rework of the existing Chat view's ingest + rendering. (Consistent with the nav rule in CLAUDE.md: extend the surface that already owns the data.)\n3. **Show everything by default**, and earn that by formatting it properly. No collapsed-by-default signal rail.\n\n## The formatting principle\n\nThe reason \"show everything\" normally fails is that everything gets rendered as *one shape* — a paragraph of text or a JSON blob. So the rule is:\n\n> **Every event family gets a typed renderer. The generic JSON card is the fallback of last resort, not the default path.**\n\nConcretely, ~90% of what's currently dropped is highly structured (deltas, listings, mode switches, snapshots) and renders far better as a chip, a table, or a two-line strip than as prose. You already have the primitive vocabulary for this in `ChatTranscriptTurn.tsx` — `TOOL_USE_TONE`/`TOOL_USE_ICON`, `collapseToolUseRuns`, `CollapsibleToolStrip`, `DiffCard`, the tint constants. Extend that set; don't fork it (the file header already says so).\n\n## Renderer per event family\n\n**Conversation lane** — full-width, the reading column:\n\n| Family | Compact render | Expanded |\n|---|---|---|\n| assistant text | markdown via `renderChatMarkdown` (as today) | — |\n| thinking blocks | italic dimmed block, distinct left-border tint, rendered *inline in order* rather than suppressed | full text |\n| tool_use | existing icon + one-line label strip, runs collapsed via `collapseToolUseRuns` | full input JSON, syntax-highlighted |\n| tool_result | outcome chip (ok/error) + first line + byte count | **uncappe…",
+        "id": "pevt-mscq84ca-26",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T04:25:58.522Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscq84ca-26",
+        "text": "Right — and the structure already exists in code; it's just discarded at the moment of composition.\n\n## The problem, precisely\n\n`composeEpicIntake` (`src/renderer/lib/epicIntake.ts:87`) builds `openingPrompt` by string-concatenating **six known sections** in a fixed order, then returns a single flat string. The section boundaries are known at compose time and unrecoverable afterwards — so the chat renderer receives a ~2 KB prose blob and has no way to know it's structured. That's exactly the \"dumping text in a paragraph\" complaint, and it lands on the *first and most important* turn of every Epic.\n\nThe emitted order, from the code:\n\n| # | Section | Source |\n|---|---|---|\n| 1 | **Actor** | `You are acting as the \"<name>\" agent: <description>` |\n| 2 | **Context Injections** | `CONTEXT_INJECTIONS[key].text`, in key order, only enabled ones |\n| 3 | **Input** | `inputSummary` — `summarizeGroundingBoard()`, forced to one line |\n| 4 | **Mission** | `agentTagDef(tag).initialPromptTemplate` |\n| 5 | **Goal** | `Goal: <title>` + the human's objective |\n| 6 | **References** | `Reference: <path>` lines |\n\n## Fix: carry the structure, don't re-parse it\n\n`composeEpicIntake` returns a third field alongside `goalText`/`openingPrompt`:\n\n```\nsections: Array<{ kind: 'actor'|'injection'|'input'|'mission'|'goal'|'reference',\n                  label: string, text: string, source?: string }>\n```\n\n`openingPrompt` stays byte-identical (it's what goes on the wire to the CLI — don't touch it). `sections` is persisted on the `PromptSession` next to `openingPrompt` and is what the first turn renders from. Regex-parsing the prose back apart would work today and break the first time anyone edits a template — data, not re-derivation.\n\n## The predefined turn template\n\nEvery turn — grounding, user, assistant, signal — renders into the same three-zone frame. Zones are always present; empty zones collapse to nothing:\n\n- **Header** — role/kind badge, timestamp, attribution chips (skill / plugin / MCP to…",
+        "id": "pevt-mscq9eus-27",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T04:26:58.804Z"
       }
     ]
   },

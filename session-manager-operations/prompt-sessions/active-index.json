@@ -98,6 +98,17 @@
       "completedAt": null,
       "tag": "feature",
       "agentType": "architect"
+    },
+    "not-enough-paralell-processing-why-i-never-see-3-6a96029e": {
+      "id": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Not enough paralell processing\n\nWhy? I never see 3+ sessions running even though the global limit is 5. Why? Is a problem of how the PRDs are wirring, depencies, or capacity?",
+      "claudeSessionId": "b9f9b845-a29a-4bfd-b558-79f065a65fff",
+      "status": "active",
+      "createdAt": "2026-08-03T05:16:06.109Z",
+      "completedAt": null,
+      "tag": "discussion",
+      "agentType": "architect"
     }
   },
   "events": {
@@ -875,6 +886,22 @@
         "id": "pevt-mscqjj77-30",
         "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
         "at": "2026-08-03T04:34:50.995Z"
+      },
+      {
+        "id": "pevt-mscrjxf9-1",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "response",
+        "causedByEventId": "pevt-mscqjj77-30",
+        "at": "2026-08-03T05:03:09.045Z",
+        "text": "PRD 979-transcript-paged-reads needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T05-02-12-093Z/root-cause-979-transcript-paged-reads.md"
+      },
+      {
+        "id": "pevt-mscryat2-2",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "kind": "response",
+        "causedByEventId": "pevt-mscrjxf9-1",
+        "at": "2026-08-03T05:14:19.574Z",
+        "text": "PRD 980-chat-typed-event-renderers needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T05-03-12-912Z/root-cause-980-chat-typed-event-renderers.md"
       }
     ],
     "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": [
@@ -901,6 +928,32 @@
         "id": "pevt-mscrhi4c-34",
         "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
         "at": "2026-08-03T05:01:15.900Z"
+      }
+    ],
+    "not-enough-paralell-processing-why-i-never-see-3-6a96029e": [
+      {
+        "id": "pevt-mscs0l0h-35",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T05:16:06.109Z",
+        "text": "Not enough paralell processing\n\nWhy? I never see 3+ sessions running even though the global limit is 5. Why? Is a problem of how the PRDs are wirring, depencies, or capacity?"
+      },
+      {
+        "id": "9824328e-dba2-4a4d-87b2-96883b554482",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T05:16:06.109Z",
+        "text": "Not enough paralell processing\n\nWhy? I never see 3+ sessions running even though the global limit is 5. Why? Is a problem of how the PRDs are wirring, depencies, or capacity?"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "9824328e-dba2-4a4d-87b2-96883b554482",
+        "text": "**It's neither dependencies nor capacity. It's a dead grouping gate in the batch picker — max achievable concurrency is structurally 1.**\n\n## Evidence\n\nMeasured from `history.jsonl` (25 jobs with real start/finish times):\n\n```\nmax observed concurrency: 1\nminutes at concurrency 1: 191    minutes at 0: 240\n```\n\nNot \"rarely 3\" — literally never 2.\n\n## Root cause\n\nPRD 832 changed `parallelGroup` to be **unique per PRD** and moved ordering to `dependsOn`. `prdCreate.cjs:173` even warns that an explicit `parallelGroup` is *\"deprecated and ignored — numbers are unique per project\"*.\n\nBut `schedulerBatch.cjs` was never updated. It still treats `parallelGroup` as a **wave number**:\n\n- `pickForProject` computes `lowestPendingGroup`, then filters the batch to **only jobs in that one group** (`schedulerBatch.cjs:156,171,188`). Unique numbers ⇒ every group is a singleton ⇒ **batch size is always 1**.\n- Worse, the running-gate at `schedulerBatch.cjs:141-145`: if any lower group is in flight, every higher group is **held**. Since numbers are monotonically allocated upward, new PRDs always sit above the running one — so the queue is fully serialized on top of that.\n- The `late-arrival` escape hatch (line 147, fires in parallel when `lowestPendingGroup < lowestActive`) is unreachable in practice for the same monotonic-allocation reason.\n\nSimulated against your live queue with 5 free slots and nothing running:\n\n```\npickNextBatch(idle jobs, cap 5) → [\"979-fix-transcript-paged-reads\"]   // 1 job\n```\n\nMeanwhile `dependsOn` says **4 jobs are eligible right now**:\n\n```\n985-notify-epic-prd-path-fix-redo   ELIGIBLE\n984-context-digest-prd-focus-guard  ELIGIBLE\n983-verdict-downgrade-must-stick    ELIGIBLE\n980-fix-chat-typed-event-renderers  ELIGIBLE\n987 / 986 / 982 / 981               BLOCKED (real, correct chains)\n```\n\nSo your PRD wiring is fine — `dependsOn` is doing exactly the right thing, gating 4 and freeing 4. The group gate then throws that away and picks one.\n\n## Second-order: your c…",
+        "id": "pevt-mscs2ije-36",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T05:17:36.218Z"
       }
     ]
   },

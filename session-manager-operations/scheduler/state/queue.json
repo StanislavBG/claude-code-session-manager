@@ -142,6 +142,34 @@
       "error": null
     },
     {
+      "slug": "980-fix-chat-typed-event-renderers",
+      "title": "Fix: implement PRD 980's typed event renderers inline (prior run delegated to a background subagent and exited 0 with nothing done)",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 980,
+      "estimateMinutes": 55,
+      "sourcePromptId": null,
+      "sourceTabId": null,
+      "epicId": null,
+      "dependsOn": [],
+      "originSessionId": null,
+      "bodyPreview": "# READ THIS FIRST — the failure class you must not repeat\n\nThe previous run of this work failed as a **self-delegation failure**. Quoting the canonical rule\nfrom `plugins/session-manager-dev/skills/develop/standards.md`, \"Execution discipline (headless\nruns)\", VERBATIM:\n",
+      "status": "running",
+      "runId": "2026-08-03T05-17-05-317Z",
+      "startedAt": "2026-08-03T05:17:05.515Z",
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null,
+      "investigationDepth": 2,
+      "sessionId": "7954ca50-a8be-4afc-85d6-32a07e38d420",
+      "runtime": {
+        "pid": 3101885,
+        "runId": "2026-08-03T05-17-05-317Z",
+        "startedAt": "2026-08-03T05:17:05.515Z",
+        "sessionId": "7954ca50-a8be-4afc-85d6-32a07e38d420",
+        "cwd": "/home/bilko/Projects/session-manager"
+      }
+    },
+    {
       "slug": "980-chat-typed-event-renderers",
       "title": "Typed renderers per event family — every transcript kind gets a designed card",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -155,62 +183,15 @@
       ],
       "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
       "bodyPreview": "# Goal\n\nWith the JSONL feeding Chat, ~800 events per long Epic become reachable that previously had no UI at all. Rendering them as prose or raw JSON would be worse than hiding them. Give each event family a typed renderer in src/renderer/components/ChatTranscriptTurn.tsx, extending that file in place (its header explicitly says do not fork it). The governing rule, which must be stated as a code comment at the dispatch point: the classifier is a ROUTER, never a FILTER — every event reaches the UI; known kinds get a designed renderer, unknown kinds get a generic Signal card. A future Anthropic event type (e.g. a \"TIP\") must therefore appear automatically with zero code change; a code change only ever upgrades its presentation.\n\n# Acceptance criteria\n",
-      "status": "pending",
-      "runId": null,
-      "startedAt": null,
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null
-    },
-    {
-      "slug": "979-transcript-paged-reads",
-      "title": "Replace the 500-entry transcript ring buffer with indexed paged reads",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 979,
-      "estimateMinutes": 26,
-      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "sourceTabId": null,
-      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "dependsOn": [
-        "transcript-classifier-multi-emit"
-      ],
-      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
-      "bodyPreview": "# Goal\n\nsrc/main/transcripts.cjs caps each subscription's in-memory buffer at 500 entries (`if (sub.buffer.length > 500) sub.buffer.shift()`) and, on first attach to a large transcript, seeks to the last 8 MB and discards everything before it (MAX_DELTA_BYTES). Both silently destroy history on any long-running Epic, which directly contradicts the Simplified Chat promise that nothing is hidden. Replace the memory buffer with an indexed, line-offset-based paged read over the transcript file so the Chat view can scroll back to the first event of a session without holding it all in RAM.\n\n# Acceptance criteria\n",
-      "status": "pending",
-      "runId": null,
-      "startedAt": null,
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null
-    },
-    {
-      "slug": "978-chat-feed-from-jsonl",
-      "title": "Chat view reads the JSONL transcript as its source of truth",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 978,
-      "estimateMinutes": 24,
-      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "sourceTabId": null,
-      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "dependsOn": [
-        "transcript-classifier-multi-emit"
-      ],
-      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
-      "bodyPreview": "# Goal\n\nThe Epic Chat view currently renders from chatRunner.cjs's stream-json output, which is a strictly thinner feed than the on-disk JSONL transcript. Whole classes of real session events exist ONLY in the JSONL and are therefore unreachable by Chat today — verified counts across the last 20 real sessions: attachment 317, last-prompt 252, ai-title 217, queue-operation 122, mode 94, permissionMode 24, file-history-snapshot 5. Make the JSONL tail the source of truth for the Chat view's transcript, demoting chatRunner's stream to a low-latency live tap for in-flight text only. Without this, the typed-renderer PRD downstream has no data to render.\n\n# Acceptance criteria\n",
-      "status": "running",
-      "runId": "2026-08-03T04-48-46-476Z",
-      "startedAt": "2026-08-03T04:48:46.641Z",
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null,
-      "sessionId": "2ebcdb36-7215-4855-9623-6db89aa5bab0",
-      "runtime": {
-        "pid": 3063369,
-        "runId": "2026-08-03T04-48-46-476Z",
-        "startedAt": "2026-08-03T04:48:46.641Z",
-        "sessionId": "2ebcdb36-7215-4855-9623-6db89aa5bab0",
-        "cwd": "/home/bilko/Projects/session-manager"
-      }
+      "status": "needs_review",
+      "runId": "2026-08-03T05-03-12-912Z",
+      "startedAt": "2026-08-03T05:03:15.579Z",
+      "finishedAt": "2026-08-03T05:14:18.919Z",
+      "exitCode": 0,
+      "error": "run made no commit and emitted no SCHEDULER_VERDICT sentinel — likely ended before the finish protocol (e.g. stopped on a clarifying question)",
+      "sessionId": "25dac54d-7feb-42aa-83cd-adb467faf82f",
+      "verifierVerdict": "no_verdict_sentinel",
+      "autoFixAttempted": true
     },
     {
       "slug": "972-notify-epic-prd-path-and-epicid-fallback",

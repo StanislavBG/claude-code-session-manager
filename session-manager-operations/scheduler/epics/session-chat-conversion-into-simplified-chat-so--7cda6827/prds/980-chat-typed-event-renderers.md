@@ -5,6 +5,26 @@ estimateMinutes: 28
 sourcePromptId: session-chat-conversion-into-simplified-chat-so--7cda6827
 dependsOn: [chat-feed-from-jsonl]
 ---
+# READ THIS FIRST — the failure class that killed the previous run of this exact PRD
+
+A prior run of this PRD **delegated the implementation to a background subagent and exited 0 with
+nothing done** (no commit, no sentinel → parked `needs_review`). Do not repeat it.
+
+> **You ARE the executor — never re-queue or self-schedule.** Perform the acceptance criteria
+> directly, with your own Edit/Write calls, in this run. Do NOT call the Task/Agent tool with
+> `subagent_type: dev-lead` (or any other) to "implement the PRD". Do NOT invoke `/develop` or any
+> queue-authoring skill. Do NOT call `ScheduleWakeup` or start a tracking loop — a headless run has
+> no next turn. If the AC call for a review pass, run it **synchronously, inline, before the finish
+> protocol**; never fire-and-wait.
+
+Your deliverable is a committed code diff in this repo produced by your own tool calls in this run.
+This queued PRD is the task, not evidence that the task is done.
+
+Note also: 977, 978 and 979 in this chain have ALREADY LANDED (commits 07202b4, 8bac5b0, plus the
+paged-reads work in src/main/transcripts.cjs — sub.lineIndex/readPage). Read their real landed state
+before building; do not re-implement them.
+
+
 # Goal
 
 With the JSONL feeding Chat, ~800 events per long Epic become reachable that previously had no UI at all. Rendering them as prose or raw JSON would be worse than hiding them. Give each event family a typed renderer in src/renderer/components/ChatTranscriptTurn.tsx, extending that file in place (its header explicitly says do not fork it). The governing rule, which must be stated as a code comment at the dispatch point: the classifier is a ROUTER, never a FILTER — every event reaches the UI; known kinds get a designed renderer, unknown kinds get a generic Signal card. A future Anthropic event type (e.g. a "TIP") must therefore appear automatically with zero code change; a code change only ever upgrades its presentation.

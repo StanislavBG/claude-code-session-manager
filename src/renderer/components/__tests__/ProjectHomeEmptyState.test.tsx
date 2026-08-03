@@ -12,7 +12,8 @@ beforeEach(() => {
   useSessions.setState({ tabs: [], activeTabId: null })
   ;(globalThis as any).window.api = {
     schedule: { listPrds: vi.fn().mockResolvedValue([]) },
-    projectBrief: { get: vi.fn().mockResolvedValue({ brief: null, sources: [] }) },
+    projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
+    agents: { listPersonas: vi.fn().mockResolvedValue([]) },
   }
 })
 

@@ -1,17 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
-import { usePromptSessions } from '../../../../../state/promptSessions'
-import { useChat } from '../../../../../state/chat'
-import { fakePromptSessionsCreate } from '../../../../../testUtils/fakePromptSessionsCreate'
-
-const CWD = '/home/bilko/Projects/alpha'
-
-const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
-const approveProposedSpy = vi.fn(usePromptSessions.getState().approveProposed)
-const sendSpy = vi.fn()
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -24,109 +15,69 @@ function mount(el: React.ReactElement) {
   return container
 }
 
-async function flush() {
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
-
-const BUILDER_PERSONA = {
-  name: 'project-home-builder',
-  description: "Generates a project's static Project Home/Project Pages from that project's own saved component library and a computed project summary, if that pipeline exists there.",
-  tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit'],
-  model: null,
-  color: null,
-  path: '/home/bilko/.claude/agents/project-home-builder.md',
-  body: '',
-  overridingProjects: [],
-}
-const listPersonasMock = vi.fn().mockResolvedValue([BUILDER_PERSONA])
-
-beforeEach(() => {
-  usePromptSessions.setState({ sessions: {}, events: {} })
-  usePromptSessions.setState({ createPromptSession: createPromptSessionSpy, approveProposed: approveProposedSpy })
-  createPromptSessionSpy.mockClear()
-  approveProposedSpy.mockClear()
-  useChat.setState({ send: sendSpy })
-  sendSpy.mockClear()
-})
-
 afterEach(() => {
   act(() => root?.unmount())
   container?.remove()
   container = null
   root = null
-  vi.restoreAllMocks()
 })
 
 describe('ProjectPagesSection', () => {
-  it('renders the empty state when projectPages.get resolves output: null', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
-      agents: { listPersonas: listPersonasMock },
-    }
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
-    expect(el.textContent).toContain('No Project Pages yet')
-    expect(el.textContent).toContain('Generate Now')
+  it('renders nothing while loaded is false', () => {
+    const el = mount(<ProjectPagesSection output={null} loaded={false} />)
+    expect(el.textContent).toBe('')
   })
 
-  it('renders the iframe display with the marketing html as srcDoc by default when output is present', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: {
-        get: vi.fn().mockResolvedValue({
-          output: {
-            home: '<!DOCTYPE html><html><body>HOME</body></html>',
-            marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-            feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-            architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-            generatedAt: '2026-08-02T00:00:00.000Z',
-            isDefault: false,
-          },
-        }),
-      },
-      agents: { listPersonas: listPersonasMock },
-    }
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
+  it('renders the empty state when output is null and loaded is true', () => {
+    const el = mount(<ProjectPagesSection output={null} loaded />)
+    expect(el.textContent).toContain('No Project Pages yet')
+    expect(el.textContent).toContain('Generate My Project Home')
+    // No second generate action lives in this section — only ProjectHome's own.
+    expect(Array.from(el.querySelectorAll('button')).some((b) => /generate/i.test(b.textContent ?? ''))).toBe(false)
+  })
+
+  it('renders the iframe display with the marketing html as srcDoc by default when output is present', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={{
+          home: '<!DOCTYPE html><html><body>HOME</body></html>',
+          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
+          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
+          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
+          generatedAt: '2026-08-02T00:00:00.000Z',
+          isDefault: false,
+        }}
+        loaded
+      />,
+    )
     const iframe = el.querySelector('iframe') as HTMLIFrameElement
     expect(iframe).toBeTruthy()
     expect(iframe.getAttribute('srcdoc')).toContain('MARKETING')
-    expect(el.textContent).toContain('Regenerate')
     expect(el.textContent).toContain('Full screen')
     expect(el.textContent).toContain('About these templates')
-
-    const homeTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Home') as HTMLButtonElement
-    act(() => homeTab.click())
-    const iframeAfter = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframeAfter.getAttribute('srcdoc')).toContain('HOME')
+    // 'home' is ProjectHome's own hosted document now, not a tab here.
+    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Home')).toBe(false)
 
     const fullscreenBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Full screen') as HTMLButtonElement
     act(() => fullscreenBtn.click())
     expect(el.textContent).toContain('Exit full screen')
   })
 
-  it('Brief tab is selectable and renders the brief html as srcDoc when present', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: {
-        get: vi.fn().mockResolvedValue({
-          output: {
-            home: '<!DOCTYPE html><html><body>HOME</body></html>',
-            marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-            feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-            architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-            brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
-            generatedAt: '2026-08-02T00:00:00.000Z',
-            isDefault: false,
-          },
-        }),
-      },
-      agents: { listPersonas: listPersonasMock },
-    }
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
+  it('Brief tab is selectable and renders the brief html as srcDoc when present', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={{
+          home: '<!DOCTYPE html><html><body>HOME</body></html>',
+          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
+          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
+          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
+          brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
+          generatedAt: '2026-08-02T00:00:00.000Z',
+          isDefault: false,
+        }}
+        loaded
+      />,
+    )
     const briefTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Brief') as HTMLButtonElement
     expect(briefTab).toBeTruthy()
     act(() => briefTab.click())
@@ -134,102 +85,48 @@ describe('ProjectPagesSection', () => {
     expect(iframe.getAttribute('srcdoc')).toContain('BRIEF')
   })
 
-  it('Brief tab shows a fallback empty state (not a crash) when output predates the brief lens', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: {
-        get: vi.fn().mockResolvedValue({
-          output: {
-            home: '<!DOCTYPE html><html><body>HOME</body></html>',
-            marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-            feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-            architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-            generatedAt: '2026-08-02T00:00:00.000Z',
-            isDefault: false,
-          },
-        }),
-      },
-      agents: { listPersonas: listPersonasMock },
-    }
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
+  it('Brief tab shows a fallback empty state (not a crash) when output predates the brief lens', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={{
+          home: '<!DOCTYPE html><html><body>HOME</body></html>',
+          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
+          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
+          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
+          generatedAt: '2026-08-02T00:00:00.000Z',
+          isDefault: false,
+        }}
+        loaded
+      />,
+    )
     const briefTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Brief') as HTMLButtonElement
     act(() => briefTab.click())
     expect(el.querySelector('iframe')).toBeNull()
     expect(el.textContent).toContain('Brief page not generated yet')
   })
 
-  it('renders the shipped default home document with a provenance chip when the project has no generated output', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: {
-        get: vi.fn().mockResolvedValue({
-          output: {
-            home: '<!DOCTYPE html><html><body>SHIPPED DEFAULT</body></html>',
-            generatedAt: null,
-            isDefault: true,
-          },
-        }),
-      },
-      agents: { listPersonas: listPersonasMock },
-    }
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
-    const iframe = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframe).toBeTruthy()
-    expect(iframe.getAttribute('srcdoc')).toContain('SHIPPED DEFAULT')
-    expect(el.textContent).toContain('Shipped default')
-    expect(el.textContent).toContain('Generate Now')
-    expect(el.textContent).not.toContain('Regenerate')
+  it('shows the "About these templates" explainer without depending on output', () => {
+    const el = mount(<ProjectPagesSection output={null} loaded />)
+    const libraryTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'About these templates') as HTMLButtonElement
+    act(() => libraryTab.click())
+    expect(el.textContent).toContain('Component library (shared across every project)')
   })
 
-  it('clicking Generate Now with no existing project-home-builder Epic calls createPromptSession with tag project-home-builder', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
-      agents: { listPersonas: listPersonasMock },
-      promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
-    }
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
-    const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Generate Now') as HTMLButtonElement
-    act(() => btn.click())
-    await flush()
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(
-      CWD,
-      expect.any(String),
-      'project-home-builder',
-      'ProjectPagesSection',
-      'project-home-builder',
+  it('a non-home lens is missing for the shipped default and points at the primary generate action instead of showing a second button', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={{
+          home: '<!DOCTYPE html><html><body>SHIPPED DEFAULT</body></html>',
+          generatedAt: null,
+          isDefault: true,
+        }}
+        loaded
+      />,
     )
-    expect(approveProposedSpy).toHaveBeenCalled()
-    expect(sendSpy).toHaveBeenCalled()
-  })
-
-  it('clicking Generate Now when a project-home-builder Epic is already active navigates to it instead of creating a second one', async () => {
-    ;(globalThis as any).window.api = {
-      projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
-      agents: { listPersonas: listPersonasMock },
-    }
-    usePromptSessions.setState({
-      sessions: {
-        'existing-epic': {
-          id: 'existing-epic',
-          cwd: CWD,
-          goalText: 'Generate pages',
-          claudeSessionId: 'sess-1',
-          status: 'active',
-          createdAt: '2026-08-02T00:00:00.000Z',
-          completedAt: null,
-          tag: 'project-home-builder',
-        } as any,
-      },
-    })
-    const navigateSpy = vi.fn()
-    window.addEventListener('sm:navigate', navigateSpy)
-    const el = mount(<ProjectPagesSection cwd={CWD} />)
-    await flush()
-    const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Generate Now') as HTMLButtonElement
-    act(() => btn.click())
-    expect(createPromptSessionSpy).not.toHaveBeenCalled()
-    expect(navigateSpy).toHaveBeenCalled()
-    window.removeEventListener('sm:navigate', navigateSpy)
+    expect(el.querySelector('iframe')).toBeNull()
+    expect(el.textContent).toContain('Marketing page not generated yet')
+    expect(el.textContent).toContain('Generate My Project Home')
+    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Marketing')).toBe(true)
+    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Regenerate')).toBe(false)
   })
 })

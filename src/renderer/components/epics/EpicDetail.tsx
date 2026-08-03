@@ -133,9 +133,15 @@ function ResponseEvent({
   }
 
   const displayText = expanded && fullText ? fullText : (event.text ?? '')
+  const tone = event.outcome ? STATUS_TONE[event.outcome] : null
+  const accessibleLabel = event.prdSlug && tone ? `PRD ${event.prdSlug} — ${tone.label}` : undefined
 
   return (
-    <div data-testid="epic-response-event" className="break-words text-center text-[11px] text-fg-faint">
+    <div
+      data-testid="epic-response-event"
+      aria-label={accessibleLabel}
+      className={`break-words text-center text-[11px] ${tone ? `${tone.bg} ${tone.text} rounded-lg px-2 py-1` : 'text-fg-faint'}`}
+    >
       <span aria-hidden="true">— </span>
       {/* Reuses the same renderChatMarkdown() the Discussion timeline's chat
        *  Turn bubbles render through (ChatTranscriptTurn.tsx) so a PRD result

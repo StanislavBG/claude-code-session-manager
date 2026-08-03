@@ -51,8 +51,15 @@ function mintEventId() {
  * unknown id, a completed session, an empty event chain, or any I/O error —
  * so notifyOriginatingTab's existing tab-external-ticket path stays the
  * safety net, not a special case.
+ *
+ * The optional 4th argument stamps `prdSlug`/`outcome` onto the appended
+ * event (PRD 976) — which PRD checked in and whether it completed, failed,
+ * or needs review — so the Epic's own event chain keeps that signal even
+ * after the job is archived out of queue.json. Both keys are added to the
+ * event object only when present in `meta`, never as `undefined`-valued
+ * keys, so events appended without them serialize identically to before.
  */
-async function appendResponseEventIfKnown(cwd, sourcePromptId, text) {
+async function appendResponseEventIfKnown(cwd, sourcePromptId, text, meta = {}) {
   if (!cwd || !sourcePromptId) return false;
   const path = promptSessionActiveIndexPath(cwd);
   try {
@@ -73,6 +80,8 @@ async function appendResponseEventIfKnown(cwd, sourcePromptId, text) {
         at: new Date().toISOString(),
         text,
       };
+      if (meta && meta.prdSlug) event.prdSlug = meta.prdSlug;
+      if (meta && meta.outcome) event.outcome = meta.outcome;
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });

@@ -139,6 +139,51 @@ test('broadcasts EVENT_APPENDED_CHANNEL to the attached window on a successful a
   }
 });
 
+test('appending with { prdSlug, outcome } persists both onto the event on disk', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: {
+      'psess-1': [
+        { id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
+  });
+
+  const routed = await appendResponseEventIfKnown(cwd, 'psess-1', 'PRD 976-foo finished: completed.', {
+    prdSlug: '976-foo',
+    outcome: 'completed',
+  });
+  expect(routed).toBe(true);
+
+  const onDisk = JSON.parse(await fsp.readFile(promptSessionActiveIndexPath(cwd), 'utf8'));
+  const event = onDisk.events['psess-1'][1];
+  expect(event.prdSlug).toBe('976-foo');
+  expect(event.outcome).toBe('completed');
+});
+
+test('appending without { prdSlug, outcome } persists an event with neither key set', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: {
+      'psess-1': [
+        { id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
+  });
+
+  const routed = await appendResponseEventIfKnown(cwd, 'psess-1', 'no meta here');
+  expect(routed).toBe(true);
+
+  const raw = await fsp.readFile(promptSessionActiveIndexPath(cwd), 'utf8');
+  const onDisk = JSON.parse(raw);
+  const event = onDisk.events['psess-1'][1];
+  expect('prdSlug' in event).toBe(false);
+  expect('outcome' in event).toBe(false);
+  // Also assert the raw JSON text has no undefined-valued keys serialized in.
+  expect(raw).not.toMatch(/"prdSlug"/);
+  expect(raw).not.toMatch(/"outcome"/);
+});
+
 test('does not throw broadcasting before a window is attached, or after it is destroyed', async () => {
   await writeIndex({
     sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },

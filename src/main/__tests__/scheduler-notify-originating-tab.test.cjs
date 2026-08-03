@@ -116,6 +116,7 @@ test('routes into the known PromptSession event chain and never falls back to a 
     '/some/cwd',
     'psess-1',
     expect.stringContaining('814-notify'),
+    { prdSlug: '814-notify', outcome: 'completed' },
   );
   expect(sendPrompt).not.toHaveBeenCalled();
 });

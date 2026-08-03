@@ -131,10 +131,22 @@ export interface PromptSessionEvent {
    *  first 'prompt' event in a session. */
   causedByEventId: string | null
   at: string
-  /** Required for kind: 'prd_created' — the PRD's actual filename/slug. */
+  /** Required for kind: 'prd_created' — the PRD's actual filename/slug.
+   *  Also carried on kind: 'response' when the scheduler's check-in names
+   *  the PRD it came from (notifyOriginatingTab/notifyNeedsReview) — same
+   *  field, not a parallel one, since both cases mean "which PRD is this
+   *  event about." Optional so events written before this existed still
+   *  decode fine. */
   prdSlug?: string
   /** Free-form text payload (prompt text, response text, closing note). */
   text?: string
+  /** Present on kind: 'response' events the scheduler appends for a PRD
+   *  check-in — the job's terminal or needs-review status at the moment it
+   *  wrote this event, so the Epic's own audit trail keeps the outcome even
+   *  after the job is archived out of queue.json. Optional so pre-existing
+   *  on-disk events (and 'response' events from other sources, e.g. chat's
+   *  onComplete) stay valid with no outcome tone. */
+  outcome?: 'completed' | 'failed' | 'needs_review'
 }
 
 /**

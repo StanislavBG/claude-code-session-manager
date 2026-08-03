@@ -291,6 +291,36 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.textContent).not.toMatch(/done — here is the result.*done — here is the result/s)
   })
 
+  it('tones a response event\'s accessible text by outcome, and falls back to neutral when outcome is absent', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: initialEvent.id,
+      text: 'PRD 976-foo finished: failed. Check Scheduler for details.',
+      prdSlug: '976-foo',
+      outcome: 'failed',
+    })
+    const tailAfterFirst = usePromptSessions.getState().events[session.id].slice(-1)[0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: tailAfterFirst.id,
+      text: 'no outcome on this one',
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const responseEvents = el.querySelectorAll('[data-testid="epic-response-event"]')
+    expect(responseEvents).toHaveLength(2)
+    expect(responseEvents[0].getAttribute('aria-label')).toBe('PRD 976-foo — failed')
+    expect(responseEvents[1].getAttribute('aria-label')).toBeNull()
+  })
+
   it('wires onQuote into the Discussion timeline\'s Turn so its hover Quote button reports the turn text', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

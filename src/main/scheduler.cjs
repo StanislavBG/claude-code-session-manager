@@ -1861,7 +1861,10 @@ async function notifyOriginatingTab(job, {
     }
 
     if (prd?.sourcePromptId) {
-      const routed = await appendResponseEvent(job.cwd || null, prd.sourcePromptId, message).catch((e) => {
+      const routed = await appendResponseEvent(job.cwd || null, prd.sourcePromptId, message, {
+        prdSlug: job.slug,
+        outcome: job.status,
+      }).catch((e) => {
         console.error('[scheduler] notifyOriginatingTab appendResponseEvent error', job?.slug, e);
         return false;
       });
@@ -1923,7 +1926,7 @@ async function notifyNeedsReview(job, report, {
       return false;
     }
     const message = `${report.summary}. Root-cause report: ${report.path}`;
-    return await appendResponseEvent(job.cwd, epicId, message);
+    return await appendResponseEvent(job.cwd, epicId, message, { prdSlug: job.slug, outcome: 'needs_review' });
   } catch (e) {
     console.error('[scheduler] notifyNeedsReview error', job?.slug, e);
     return false;

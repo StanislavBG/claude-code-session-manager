@@ -9,23 +9,30 @@ import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
-import { tagLibraryEntry } from '../../lib/tagLibrary'
+import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import type { AgentPersona } from '../../../preload/api'
 
-// Tag list + labels only — deliberately hardcoded and scoped to 3 (see
-// agentTagDefs.ts's AGENT_TAG_ORDER doc comment: 'build' and
-// 'project-home-builder' each have their own dedicated creation entry point
-// elsewhere, so they're never hand-picked here). The MISSION TEXT itself is
-// never a second copy, though — every description below reads through
-// `agentTagDef(tag).description`, the same single source TagLibrary.tsx and
-// epicIntake.ts's grounding template both use, so this picker can drift on
-// which tags it exposes but never on what a tag actually means.
-const KIND_OPTIONS: Array<{ tag: NonNullable<PromptSession['tag']>; label: string }> = [
-  { tag: 'feature', label: 'Feature' },
-  { tag: 'bug', label: 'Bug' },
-  { tag: 'discussion', label: 'Discussion' },
-]
+/** Missions offered when the selected persona declares no `tags:` of its own
+ *  (or the Agent Library is empty) — the three general-purpose ones. */
+const FALLBACK_MISSION_TAGS: EpicTag[] = ['feature', 'bug', 'discussion']
+
+/**
+ * Which missions this Epic may be given, derived from the SELECTED persona's
+ * own `tags:` frontmatter (AgentPersona.tags — the same many-to-many
+ * membership TagLibrary.tsx and AgentLibrary.tsx both edit through
+ * savePersona) rather than a hardcoded 3-tag list. Agent and Mission remain
+ * two independent axes, but not every mission belongs to every actor:
+ * `builder` carries only `build`, `project-home-builder` only
+ * `project-home-builder`, `architect` feature/bug/discussion — so the pills
+ * change when the agent changes. Unknown tag strings in a persona file are
+ * dropped rather than crashing tagLibraryEntry(); labels and mission text
+ * still come from TAG_LIBRARY / agentTagDef, never a second copy.
+ */
+function missionTagsForAgent(agent: AgentPersona | null): EpicTag[] {
+  const known = (agent?.tags ?? []).filter((t): t is EpicTag => TAG_GROUP_ORDER.includes(t as EpicTag))
+  return known.length ? known : FALLBACK_MISSION_TAGS
+}
 
 /** Deterministic dot color per agent name, same hashed-palette idea
  *  sched-primitives.tsx's ProjectTag uses for project dots — a stable,
@@ -62,6 +69,33 @@ function groupAgentsByDepartment(agents: AgentPersona[]): Array<{ department: st
   const unknown = [...byDept.keys()].filter((d) => !DEPARTMENT_ORDER.includes(d)).sort()
     .map((department) => ({ department, agents: byDept.get(department)! }))
   return [...known, ...unknown]
+}
+
+/** One persona row. Same shape whether it's the pinned "who is working" tile
+ *  or one of the alternatives below it — the pinned one deliberately carries
+ *  NO accent ring: sitting under "1 · agent — who is working", separated from
+ *  "available agents by role", is already the whole selection signal. */
+function AgentTile({ agent, pinned, onPick }: { agent: AgentPersona; pinned: boolean; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid={`new-epic-agent-${agent.name}`}
+      data-selected={pinned ? 'true' : 'false'}
+      onClick={onPick}
+      className={`flex min-w-0 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left ${
+        pinned ? 'bg-bg-elev' : 'bg-bg'
+      }`}
+    >
+      <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm" style={{ background: agentDot(agent.name) }} />
+      <span className={`flex-shrink-0 font-mono text-xs ${pinned ? 'font-semibold' : 'font-medium'} text-fg`}>{agent.name}</span>
+      {agent.title && (
+        <span className="flex-shrink-0 text-[10.5px] text-fg-faint">{agent.title.split(' — ')[1]}</span>
+      )}
+      {agent.description && (
+        <span className="min-w-0 flex-1 truncate text-right text-[11px] text-fg-faint">{agent.description}</span>
+      )}
+    </button>
+  )
 }
 
 /**
@@ -104,8 +138,9 @@ export function NewEpicCard({
   const [title, setTitle] = useState('')
   const [goal, setGoal] = useState('')
   const [tag, setTag] = useState<NonNullable<PromptSession['tag']>>('feature')
-  // '' means "default agent" — a real, selectable third option, not an unset
-  // field, so the row always shows a definite choice alongside Mission.
+  // '' only until the Agent Library resolves (or when it is genuinely empty) —
+  // there is no "Default" pseudo-agent, the real 'architect' persona is the
+  // default pick, so the pinned "who is working" tile always names a real one.
   const [agentName, setAgentName] = useState('')
   const [agents, setAgents] = useState<AgentPersona[] | null>(null)
   // Tracks whether the human has clicked an Agent chip, so the async
@@ -132,9 +167,8 @@ export function NewEpicCard({
         const list = await window.api.agents.listPersonas()
         if (!cancelled) {
           setAgents(list)
-          if (!agentTouchedRef.current && list.some((a) => a.name === 'architect')) {
-            setAgentName('architect')
-          }
+          const preferred = list.find((a) => a.name === 'architect') ?? list[0]
+          if (!agentTouchedRef.current && preferred) setAgentName(preferred.name)
         }
       } catch (e) {
         if (!cancelled) {
@@ -158,6 +192,18 @@ export function NewEpicCard({
   }, [])
 
   const selectedAgent = agents?.find((a) => a.name === agentName) ?? null
+  const missionTags = missionTagsForAgent(selectedAgent)
+  const missionKey = missionTags.join(',')
+
+  // Missions are conditional on the Actor, so switching agent can invalidate
+  // the currently-picked mission (architect's 'feature' -> builder, which
+  // carries only 'build'): snap to that agent's first mission when the current
+  // one isn't one of theirs.
+  useEffect(() => {
+    const allowed = missionKey.split(',') as EpicTag[]
+    if (!allowed.includes(tag)) setTag(allowed[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionKey])
 
   const effectiveCwd = cwd || (activeTabCwd && knownCwds.includes(activeTabCwd) ? activeTabCwd : '') || knownCwds[0] || ''
   const trimmedGoal = goal.trim()
@@ -193,7 +239,8 @@ export function NewEpicCard({
     setTitle('')
     setGoal('')
     setTag('feature')
-    setAgentName('')
+    agentTouchedRef.current = false
+    setAgentName((agents?.find((a) => a.name === 'architect') ?? agents?.[0])?.name ?? '')
     setAdvanced(false)
     setBoard(null)
     setContextInjectionsOn(Object.fromEntries(CONTEXT_INJECTION_ORDER.map((k) => [k, true])) as Record<ContextInjectionKey, boolean>)
@@ -349,51 +396,30 @@ export function NewEpicCard({
                   1 · agent — who is working
                 </div>
                 <div className="grid min-w-0 gap-1">
-                  <button
-                    type="button"
-                    data-testid="new-epic-agent-default"
-                    onClick={() => {
-                      agentTouchedRef.current = true
-                      setAgentName('')
-                    }}
-                    className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
-                      agentName === '' ? 'border-accent bg-bg-elev' : 'border-line bg-bg'
-                    }`}
-                  >
-                    <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm bg-fg-faint" />
-                    <span className="flex-shrink-0 font-mono text-xs font-medium text-fg">Default</span>
-                  </button>
-                  {groupAgentsByDepartment(agents ?? []).map((group) => (
+                  {selectedAgent && (
+                    <AgentTile agent={selectedAgent} pinned onPick={() => {}} />
+                  )}
+                  {(agents ?? []).length > 0 && (
+                    <div className="mt-2.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
+                      available agents by role
+                    </div>
+                  )}
+                  {groupAgentsByDepartment((agents ?? []).filter((a) => a.name !== agentName)).map((group) => (
                     <div key={group.department} className="contents">
-                      <div className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint first:mt-0">
+                      <div className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
                         {group.department}
                       </div>
-                      {group.agents.map((a) => {
-                        const on = agentName === a.name
-                        return (
-                          <button
-                            key={a.name}
-                            type="button"
-                            data-testid={`new-epic-agent-${a.name}`}
-                            onClick={() => {
-                              agentTouchedRef.current = true
-                              setAgentName(a.name)
-                            }}
-                            className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
-                              on ? 'border-accent bg-bg-elev' : 'border-line bg-bg'
-                            }`}
-                          >
-                            <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm" style={{ background: agentDot(a.name) }} />
-                            <span className={`flex-shrink-0 font-mono text-xs ${on ? 'font-semibold' : 'font-medium'} text-fg`}>{a.name}</span>
-                            {a.title && (
-                              <span className="flex-shrink-0 text-[10.5px] text-fg-faint">{a.title.split(' — ')[1]}</span>
-                            )}
-                            {a.description && (
-                              <span className="min-w-0 flex-1 truncate text-right text-[11px] text-fg-faint">{a.description}</span>
-                            )}
-                          </button>
-                        )
-                      })}
+                      {group.agents.map((a) => (
+                        <AgentTile
+                          key={a.name}
+                          agent={a}
+                          pinned={false}
+                          onPick={() => {
+                            agentTouchedRef.current = true
+                            setAgentName(a.name)
+                          }}
+                        />
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -406,19 +432,19 @@ export function NewEpicCard({
                   2 · mission — how they work
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {KIND_OPTIONS.map((opt) => {
-                    const on = tag === opt.tag
+                  {missionTags.map((t) => {
+                    const on = tag === t
                     return (
                       <button
-                        key={opt.tag}
+                        key={t}
                         type="button"
-                        data-testid={`new-epic-kind-${opt.tag}`}
-                        onClick={() => setTag(opt.tag)}
+                        data-testid={`new-epic-kind-${t}`}
+                        onClick={() => setTag(t)}
                         className={`rounded-md px-2.5 py-1 text-xs font-medium ${
                           on ? 'bg-bg text-fg ring-1 ring-inset ring-line font-semibold' : 'text-fg-faint'
                         }`}
                       >
-                        {opt.label}
+                        {tagLibraryEntry(t).label}
                       </button>
                     )
                   })}
@@ -426,7 +452,8 @@ export function NewEpicCard({
                 <div className="mt-2 border-l-2 border-accent-muted pl-2.5 text-[12.5px] leading-[1.5] text-fg-dim">
                   {selectedTagMission}
                   <div className="mt-1 font-mono text-[11px] text-fg-faint">
-                    sonnet{selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
+                    {selectedAgent?.model && selectedAgent.model !== 'inherit' ? selectedAgent.model : 'sonnet'}
+                    {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
                   </div>
                 </div>
               </div>

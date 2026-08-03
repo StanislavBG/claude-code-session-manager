@@ -21,8 +21,8 @@ export const CONTEXT_INJECTIONS = {
     label: 'General behaviour',
     description:
       'Universal working-style rules for every Epic, independent of which Agent persona or ' +
-      'Mission tag is chosen — the floor every session stands on, including Epics with no ' +
-      'persona selected (Default).',
+      'Mission tag is chosen — the floor every session stands on, including Epics created ' +
+      'before any persona resolved.',
     text:
       'Work concisely: lead with the answer or the result, skip preamble, and don\'t recap what ' +
       'you just did unless asked. Verify before claiming something is done — run the check, read ' +

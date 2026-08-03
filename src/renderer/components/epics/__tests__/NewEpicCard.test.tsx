@@ -224,7 +224,7 @@ describe('NewEpicCard', () => {
     expect(args.prompt.endsWith('Just the objective')).toBe(true)
   })
 
-  it('loads the Agent Library as a button list under "1 · agent", defaulting to "Default"', async () => {
+  it('loads the Agent Library as a button list under "1 · agent", with no "Default" pseudo-agent', async () => {
     listPersonasSpy.mockResolvedValue([
       { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
       { name: 'debugger', description: 'Diagnoses failures.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
@@ -232,11 +232,13 @@ describe('NewEpicCard', () => {
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
 
-    expect(el.querySelector('[data-testid="new-epic-agent-builder"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="new-epic-agent-default"]')).toBeNull()
+    expect(el.textContent).not.toContain('Default')
+    // No 'architect' in this library, so the first persona is pinned instead —
+    // the "who is working" slot always names a real agent.
+    const builder = el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement
+    expect(builder.getAttribute('data-selected')).toBe('true')
     expect(el.querySelector('[data-testid="new-epic-agent-debugger"]')).not.toBeNull()
-    // Default starts selected (accent border) until the user picks a persona.
-    const def = el.querySelector('[data-testid="new-epic-agent-default"]') as HTMLButtonElement
-    expect(def.className).toContain('border-accent')
   })
 
   it('pre-selects the "architect" persona by default when one exists in the Agent Library', async () => {
@@ -247,10 +249,15 @@ describe('NewEpicCard', () => {
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
 
+    // Pinned as the one "who is working" — position is the signal, no accent ring.
     const architectBtn = el.querySelector('[data-testid="new-epic-agent-architect"]') as HTMLButtonElement
-    expect(architectBtn.className).toContain('border-accent')
-    const def = el.querySelector('[data-testid="new-epic-agent-default"]') as HTMLButtonElement
-    expect(def.className).not.toContain('border-accent')
+    expect(architectBtn.getAttribute('data-selected')).toBe('true')
+    expect(architectBtn.className).not.toContain('border-accent')
+    expect(el.querySelector('[data-testid="new-epic-agent-default"]')).toBeNull()
+    // ...and it is not also repeated in the "available agents by role" list.
+    expect(el.querySelectorAll('[data-testid="new-epic-agent-architect"]').length).toBe(1)
+    expect((el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement)
+      .getAttribute('data-selected')).toBe('false')
 
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
     act(() => setNativeValue(goal, 'Plan the next phase'))
@@ -295,7 +302,7 @@ describe('NewEpicCard', () => {
     expect(args.prompt.startsWith('You are acting as the "builder" agent: Ships releases end to end.')).toBe(true)
   })
 
-  it('leaves createPromptSession at 4 args and the prompt un-grounded when "Default" agent stays selected', async () => {
+  it('leaves createPromptSession at 4 args and the prompt un-grounded when the Agent Library is empty', async () => {
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
@@ -305,6 +312,49 @@ describe('NewEpicCard', () => {
     await act(async () => {})
 
     expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/alpha', 'Ship it', 'feature', 'NewEpicCard')
+  })
+
+  it('derives the Mission pills from the selected persona\'s own tags, and re-derives them when the agent changes', async () => {
+    listPersonasSpy.mockResolvedValue([
+      { name: 'architect', description: 'Plans.', tools: [], model: 'opus', color: null, tags: ['feature', 'bug', 'discussion'], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: ['build'], path: '', body: '', overridingProjects: [] },
+      { name: 'project-home-builder', description: 'Generates pages.', tools: [], model: null, color: null, tags: ['project-home-builder'], path: '', body: '', overridingProjects: [] },
+    ])
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+
+    expect(el.querySelector('[data-testid="new-epic-kind-feature"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="new-epic-kind-build"]')).toBeNull()
+
+    const builderBtn = el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement
+    await act(async () => { builderBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(el.querySelector('[data-testid="new-epic-kind-build"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="new-epic-kind-feature"]')).toBeNull()
+    // The invalidated 'feature' pick snaps to the new agent's only mission.
+    expect(el.textContent).toContain(agentTagDef('build').description)
+
+    const phb = el.querySelector('[data-testid="new-epic-agent-project-home-builder"]') as HTMLButtonElement
+    await act(async () => { phb.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(el.querySelector('[data-testid="new-epic-kind-project-home-builder"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="new-epic-kind-build"]')).toBeNull()
+  })
+
+  it('sends the tag from the selected agent\'s own tags into createPromptSession', async () => {
+    listPersonasSpy.mockResolvedValue([
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: ['build'], path: '', body: '', overridingProjects: [] },
+    ])
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+
+    const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+    act(() => setNativeValue(goal, 'Cut v1'))
+    const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+    act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+      '/home/bilko/Projects/alpha', 'Cut v1', 'build', 'NewEpicCard', 'builder',
+    )
   })
 
   it('shows the Mission blurb from the single global agentTagDef source, never a local copy', async () => {

@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 /**
  * EpicDetail's Chat <-> Terminal mode toggle (PRD 831). EpicTerminalPane
@@ -52,6 +53,7 @@ function installWindowApiMock() {
       append: vi.fn().mockResolvedValue({ ok: true }),
       read: vi.fn().mockResolvedValue({ turns: [] }),
     },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api }
@@ -86,7 +88,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     usePromptSessions.setState({
       sessions: {
         ...usePromptSessions.getState().sessions,
@@ -105,7 +107,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
@@ -120,7 +122,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: { turns: [], running: true, stream: '', queuedPosition: 0 } as any,
@@ -146,7 +148,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: { turns: [], running: false, stream: '', queuedPosition: 1 } as any,
@@ -163,7 +165,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     const terminalBtn = el.querySelector('[data-testid="epic-mode-terminal"]') as HTMLButtonElement
@@ -180,7 +182,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     expect((el.querySelector('[data-testid="epic-mark-completed"]') as HTMLButtonElement).disabled).toBe(false)
@@ -196,7 +198,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const firstEvent = usePromptSessions.getState().events[session.id][0]
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
@@ -235,7 +237,7 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const firstEvent = usePromptSessions.getState().events[session.id][0]
     usePromptSessions.getState().appendPromptSessionEvent(session.id, {
       kind: 'response',

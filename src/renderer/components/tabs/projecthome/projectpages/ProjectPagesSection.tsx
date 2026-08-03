@@ -115,7 +115,7 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
 
   const existingBuilderEpic = useMemo(() => findActiveBuilderEpic(sessions, cwd), [sessions, cwd])
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     if (existingBuilderEpic) {
       navigateToEpic(existingBuilderEpic.id)
       return
@@ -136,8 +136,8 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
       agentDescription: builderPersona?.description ?? undefined,
     })
     const session = builderPersona
-      ? createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection', builderPersona.name)
-      : createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection')
+      ? await createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection', builderPersona.name)
+      : await createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectPagesSection')
     approveProposed(session.id, 'ProjectPagesSection')
     useChat.getState().send({
       tabId: session.id,
@@ -153,7 +153,11 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
   const generateButton = (
     <button
       type="button"
-      onClick={handleGenerate}
+      onClick={() => {
+        handleGenerate().catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
+      }}
       className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-bg-hi hover:bg-accent-dark"
     >
       Generate Now
@@ -240,7 +244,11 @@ export function ProjectPagesSection({ cwd }: { cwd: string }) {
           </button>
           <button
             type="button"
-            onClick={handleGenerate}
+            onClick={() => {
+              handleGenerate().catch((err: unknown) => {
+                toast.error(err instanceof Error ? err.message : String(err))
+              })
+            }}
             className="rounded-md border border-line bg-bg-hi px-2.5 py-1 text-[11px] font-semibold text-fg-dim hover:text-fg"
           >
             Regenerate

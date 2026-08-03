@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { flushAsync } from '../../../testUtils/domFlush'
+import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 /**
  * EpicTerminalPane (PRD 831) — the Epic Terminal-mode PTY pane. @xterm/xterm
@@ -87,6 +88,7 @@ function installFullWindowApiMock() {
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
     },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
     logs: { write: vi.fn() },
     schedule: { listPrds: vi.fn().mockResolvedValue([]) },
   })
@@ -233,8 +235,8 @@ describe('EpicTerminalPane (PRD 831)', () => {
     const { useEpicTerminal } = await import('../../../state/epicTerminal')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const sessionA = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
-    const sessionB = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
+    const sessionA = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
+    const sessionB = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
     useEpicTerminal.getState().setMode(sessionA.id, 'terminal')
     useEpicTerminal.getState().setMode(sessionB.id, 'terminal')
 

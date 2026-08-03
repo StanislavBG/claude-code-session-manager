@@ -10,6 +10,7 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicUsage } from '../../state/epicUsage'
 import { useSessions, type SessionTab } from '../../state/sessions'
 import { flushAsync } from '../../testUtils/domFlush'
+import { fakePromptSessionsCreate } from '../../testUtils/fakePromptSessionsCreate'
 
 /**
  * EpicsWorkspace (PRD 829) — the two-pane Epics workspace that replaced
@@ -76,6 +77,7 @@ function installWindowApiMock() {
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }),
     },
     schedule: { listPrds: vi.fn().mockResolvedValue([]) },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return api
@@ -115,11 +117,11 @@ afterEach(() => {
 })
 
 describe('EpicsWorkspace', () => {
-  it('renders queue rows for known epics and opens the detail pane on select', () => {
+  it('renders queue rows for known epics and opens the detail pane on select', async () => {
     installWindowApiMock()
-    act(() => {
-      usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
-      usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'fix the flaky test')
+    await act(async () => {
+      await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
+      await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'fix the flaky test')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -185,8 +187,8 @@ describe('EpicsWorkspace', () => {
   it('"Mark completed" kills the underlying process and flips the Epic to completed', async () => {
     const api = installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
-    act(() => {
-      session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
+    await act(async () => {
+      session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -209,8 +211,8 @@ describe('EpicsWorkspace', () => {
   it('a completed Epic opens its detail read-only, with no composer, and "Resume" mints a new active Epic', async () => {
     const api = installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
-    act(() => {
-      session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
+    await act(async () => {
+      session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
     })
     await act(async () => {
       await usePromptSessions.getState().markCompleted(session!.id)
@@ -229,7 +231,7 @@ describe('EpicsWorkspace', () => {
     expect(el.querySelector('[data-testid="epic-composer"]')).toBeNull()
 
     const resumeBtn = el.querySelector('[data-testid="epic-resume"]') as HTMLButtonElement
-    act(() => {
+    await act(async () => {
       resumeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
@@ -240,11 +242,11 @@ describe('EpicsWorkspace', () => {
     expect(resumed.resumedFromId).toBe(session!.id)
   })
 
-  it('selecting via the sm:select-prompt-session deep link opens that Epic\'s detail, including a completed one', () => {
+  it('selecting via the sm:select-prompt-session deep link opens that Epic\'s detail, including a completed one', async () => {
     installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
-    act(() => {
-      session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
+    await act(async () => {
+      session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'ship the widget')
     })
 
     const el = mount(<EpicsWorkspace />)
@@ -257,7 +259,7 @@ describe('EpicsWorkspace', () => {
     expect(detail!.textContent).toContain('ship the widget')
   })
 
-  it('PRD 833 I4: a deep link to a not-yet-hydrated Epic is held and selected once hydration delivers it', () => {
+  it('PRD 833 I4: a deep link to a not-yet-hydrated Epic is held and selected once hydration delivers it', async () => {
     installWindowApiMock()
     const el = mount(<EpicsWorkspace />)
 
@@ -268,8 +270,8 @@ describe('EpicsWorkspace', () => {
     expect(el.querySelector('[data-testid="epic-detail"]')).toBeNull()
 
     // Hydration lands the Epic afterwards — the held deep link resolves.
+    const session = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'late arriving epic')
     act(() => {
-      const session = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'late arriving epic')
       usePromptSessions.setState((s) => {
         const { [session.id]: created, ...rest } = s.sessions
         return { sessions: { ...rest, 'late-epic': { ...created, id: 'late-epic' } } }
@@ -284,8 +286,8 @@ describe('EpicsWorkspace', () => {
   it('PRD 833 C1: a surviving pty for an active Epic is re-adopted into Terminal mode with attachment re-recorded', async () => {
     const api = installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
+    const proposed = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'epic with surviving pty')
     act(() => {
-      const proposed = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'epic with surviving pty')
       session = usePromptSessions.getState().approveProposed(proposed.id)!
     })
     ;(api.pty as Record<string, unknown>).alive = vi
@@ -304,11 +306,11 @@ describe('EpicsWorkspace', () => {
   // (retiring the old TerminalChat surface) — these cover the scoping +
   // preselect behavior that swap depends on.
   describe('cwd scoping (dormant SessionTab mount)', () => {
-    it('shows only the scoped project\'s Epics when `cwd` is passed', () => {
+    it('shows only the scoped project\'s Epics when `cwd` is passed', async () => {
       installWindowApiMock()
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      await act(async () => {
+        await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
       })
 
       const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)
@@ -318,11 +320,11 @@ describe('EpicsWorkspace', () => {
       expect(el.textContent).not.toContain('beta epic')
     })
 
-    it('with no `cwd` prop, scopes to the active tab\'s cwd (the only reachable state via the Epics nav)', () => {
+    it('with no `cwd` prop, scopes to the active tab\'s cwd (the only reachable state via the Epics nav)', async () => {
       installWindowApiMock()
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      await act(async () => {
+        await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+        await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
       })
 
       const el = mount(<EpicsWorkspace />)
@@ -332,11 +334,11 @@ describe('EpicsWorkspace', () => {
       expect(el.textContent).not.toContain('beta epic')
     })
 
-    it('with no `cwd` prop and no active tab, shows an empty state instead of a project picker', () => {
+    it('with no `cwd` prop and no active tab, shows an empty state instead of a project picker', async () => {
       installWindowApiMock()
       useSessions.setState({ tabs: [], activeTabId: null })
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
+      await act(async () => {
+        await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'alpha epic')
       })
 
       const el = mount(<EpicsWorkspace />)
@@ -345,13 +347,13 @@ describe('EpicsWorkspace', () => {
       expect(el.textContent).toContain('No project open')
     })
 
-    it('preselects the scoped project\'s most recently active Epic on mount', () => {
+    it('preselects the scoped project\'s most recently active Epic on mount', async () => {
       installWindowApiMock()
       let older: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
       let newer: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
-      act(() => {
-        older = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'older alpha epic')
-        newer = usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'newer alpha epic')
+      await act(async () => {
+        older = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'older alpha epic')
+        newer = await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/alpha', 'newer alpha epic')
       })
       // Force a deterministic activity ordering regardless of same-millisecond createdAt.
       act(() => {
@@ -370,10 +372,10 @@ describe('EpicsWorkspace', () => {
       expect(detail!.textContent).toContain('newer alpha epic')
     })
 
-    it('does not preselect when the scoped project has no Epics yet', () => {
+    it('does not preselect when the scoped project has no Epics yet', async () => {
       installWindowApiMock()
-      act(() => {
-        usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
+      await act(async () => {
+        await usePromptSessions.getState().createPromptSession('/home/bilko/Projects/beta', 'beta epic')
       })
 
       const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)

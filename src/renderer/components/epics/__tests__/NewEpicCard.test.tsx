@@ -9,6 +9,7 @@ import { useChat } from '../../../state/chat'
 import { agentTagDef } from '../../../lib/agentTagDefs'
 import { CONTEXT_INJECTIONS } from '../../../lib/contextInjections'
 import type { AgentPersona } from '../../../../preload/api'
+import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const sendSpy = vi.fn()
@@ -65,6 +66,7 @@ beforeEach(() => {
       listDir: vi.fn().mockResolvedValue({ ok: true, entries: [], error: null }),
       exists: vi.fn().mockResolvedValue(false),
     },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
   }
 })
 

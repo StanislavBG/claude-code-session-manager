@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { PromptSession } from '../promptSessions'
+import { fakePromptSessionsCreate } from '../../testUtils/fakePromptSessionsCreate'
 
 function installWindowApiMock() {
   const api = {
@@ -39,6 +40,7 @@ function installWindowApiMock() {
     promptSessions: {
       onEventAppended: vi.fn(),
       mergeActiveIndex: vi.fn().mockResolvedValue({ sessions: {}, events: {} }),
+      create: fakePromptSessionsCreate(),
     },
     auditLog: {
       append: vi.fn().mockResolvedValue({ ok: true }),
@@ -63,7 +65,7 @@ describe('promptSessions.ts', () => {
     useSessions.getState().addTab({ id: 'tab-2', cwd: '/proj', startupCommand: null, dormant: true })
     const tabsBefore = useSessions.getState().tabs.map((t) => ({ ...t }))
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Build the widget')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Build the widget')
 
     expect(session.claudeSessionId).toBeTruthy()
     for (const tab of useSessions.getState().tabs) {
@@ -86,6 +88,19 @@ describe('promptSessions.ts', () => {
     expect(events[0].causedByEventId).toBeNull()
   })
 
+  it('createPromptSession mints its id through main\'s ensureEpic (<slug>-<uuid8>), never the old psess-<ts>-<seq> format', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Build the widget')
+
+    expect(api.promptSessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/proj', goalText: 'Build the widget' }),
+    )
+    expect(session.id).toMatch(/^[a-z0-9-]+-[0-9a-f]{8}$/)
+    expect(session.id).not.toMatch(/^psess-/)
+  })
+
   it('regression: createPromptSession called with no tag arg (the chat.ts:712 dispatch shape) still mints proposed, never active', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
@@ -95,16 +110,17 @@ describe('promptSessions.ts', () => {
     // pass a status — like chat.ts's dispatch path — rogue-created a live
     // Epic. The status parameter is gone entirely now; this call shape must
     // always land on 'proposed'.
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'rogue dispatch text')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'rogue dispatch text')
 
     expect(session.status).toBe('proposed')
   })
 
   it('appends a valid chain prompt -> prd_created -> response -> prd_created -> response -> closed', async () => {
+    installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const events = usePromptSessions.getState().events[session.id]
     const promptEvent = events[0]
 
@@ -160,10 +176,11 @@ describe('promptSessions.ts', () => {
   })
 
   it('rejects an event whose causedByEventId points at a non-existent event', async () => {
+    installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
 
     expect(() =>
       store.appendPromptSessionEvent(session.id, {
@@ -175,10 +192,11 @@ describe('promptSessions.ts', () => {
   })
 
   it('rejects a second null-caused event once the session already has a first event', async () => {
+    installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
 
     expect(() =>
       store.appendPromptSessionEvent(session.id, {
@@ -203,11 +221,12 @@ describe('promptSessions.ts', () => {
   })
 
   it('rejects a causedByEventId that is valid in a different session\'s chain', async () => {
+    installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const sessionA = store.createPromptSession('/proj', 'Goal A')
-    const sessionB = store.createPromptSession('/proj', 'Goal B')
+    const sessionA = await store.createPromptSession('/proj', 'Goal A')
+    const sessionB = await store.createPromptSession('/proj', 'Goal B')
     const eventFromA = usePromptSessions.getState().events[sessionA.id][0]
 
     expect(() =>
@@ -220,10 +239,11 @@ describe('promptSessions.ts', () => {
   })
 
   it('rejects branching: causedByEventId must be the current tail, not an earlier event', async () => {
+    installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const events = usePromptSessions.getState().events[session.id]
     const promptEvent = events[0]
 
@@ -245,10 +265,11 @@ describe('promptSessions.ts', () => {
   })
 
   it('rejects a prd_created event with no prdSlug', async () => {
+    installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const events = usePromptSessions.getState().events[session.id]
     const promptEvent = events[0]
 
@@ -265,7 +286,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     store.appendPromptSessionEvent(session.id, {
       kind: 'response',
       causedByEventId: usePromptSessions.getState().events[session.id][0].id,
@@ -306,7 +327,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     await usePromptSessions.getState().markCompleted(session.id)
     api.chat.cancel.mockClear()
     api.config.writeJson.mockClear()
@@ -329,7 +350,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     await usePromptSessions.getState().markCompleted(session.id)
 
     const archiveCall = api.config.writeJson.mock.calls.find(
@@ -349,7 +370,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     await usePromptSessions.getState().markCompleted(session.id)
 
     expect(api.promptSessionTranscript.read).not.toHaveBeenCalled()
@@ -366,11 +387,11 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const archived = store.createPromptSession('/proj', 'Ship the feature')
+    const archived = await store.createPromptSession('/proj', 'Ship the feature')
     await usePromptSessions.getState().markCompleted(archived.id)
 
     const approveSpy = vi.spyOn(usePromptSessions.getState(), 'approveProposed')
-    const resumed = usePromptSessions.getState().resumeArchived(archived.id)
+    const resumed = await usePromptSessions.getState().resumeArchived(archived.id)
 
     expect(resumed.id).not.toBe(archived.id)
     expect(resumed.claudeSessionId).not.toBe(archived.claudeSessionId)
@@ -390,7 +411,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the widget')
+    const session = await store.createPromptSession('/proj', 'Ship the widget')
     store.appendPromptSessionEvent(session.id, {
       kind: 'response',
       causedByEventId: usePromptSessions.getState().events[session.id][0].id,
@@ -442,7 +463,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the widget')
+    const session = await store.createPromptSession('/proj', 'Ship the widget')
     await usePromptSessions.getState().markCompleted(session.id)
 
     // persistActiveIndex's merge calls fire as microtasks — give the last one
@@ -470,9 +491,9 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const kept = store.createPromptSession('/proj', 'Still open')
-    const deleted = usePromptSessions.getState().createPromptSession('/proj', 'Removed on disk')
-    const otherProject = usePromptSessions.getState().createPromptSession('/other', 'Different cwd')
+    const kept = await store.createPromptSession('/proj', 'Still open')
+    const deleted = await usePromptSessions.getState().createPromptSession('/proj', 'Removed on disk')
+    const otherProject = await usePromptSessions.getState().createPromptSession('/other', 'Different cwd')
 
     // Let the in-flight persists drain — hydrate() intentionally declines to
     // reconcile removals while disk is knowably behind memory.
@@ -512,7 +533,7 @@ describe('promptSessions.ts', () => {
     )
     const { usePromptSessions } = await import('../promptSessions')
 
-    const fresh = usePromptSessions.getState().createPromptSession('/proj', 'Brand new')
+    const fresh = await usePromptSessions.getState().createPromptSession('/proj', 'Brand new')
     // Disk has nothing yet — the write hasn't landed.
     api.config.readJson.mockResolvedValue({
       exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null,
@@ -529,7 +550,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the widget', 'bug')
+    const session = await store.createPromptSession('/proj', 'Ship the widget', 'bug')
     expect(session.tag).toBe('bug')
 
     await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
@@ -612,7 +633,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
 
     store.mergeAppendedEvent(session.cwd, session.id, {
@@ -636,7 +657,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
 
     const optimistic = store.appendPromptSessionEvent(session.id, {
@@ -660,7 +681,7 @@ describe('promptSessions.ts', () => {
     const { useToast } = await import('../toast')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature\n\nMake it fast')
+    const session = await store.createPromptSession('/proj', 'Ship the feature\n\nMake it fast')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
     store.setFocusedEpicId('some-other-epic')
 
@@ -686,7 +707,7 @@ describe('promptSessions.ts', () => {
     const { useToast } = await import('../toast')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
     store.setFocusedEpicId(session.id)
 
@@ -708,7 +729,7 @@ describe('promptSessions.ts', () => {
     const { useToast } = await import('../toast')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the feature')
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
     store.setFocusedEpicId(null)
 
@@ -750,7 +771,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the widget')
+    const session = await store.createPromptSession('/proj', 'Ship the widget')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
 
     await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
@@ -790,7 +811,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Ship the widget')
+    const session = await store.createPromptSession('/proj', 'Ship the widget')
     const promptEvent = usePromptSessions.getState().events[session.id][0]
 
     // An optimistic append not yet reflected on disk.
@@ -826,7 +847,7 @@ describe('promptSessions.ts', () => {
     const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = store.createPromptSession('/proj', 'Live in memory')
+    const session = await store.createPromptSession('/proj', 'Live in memory')
     const archivePath = promptSessionArchivePath('/proj', session.id)
 
     api.config.listDir.mockResolvedValue({
@@ -871,7 +892,7 @@ describe('proposed Epics are durable (never erased)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
 
     await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
     expect(lastIndexWrite(api, '/proj')?.sessions[proposed.id]).toEqual(proposed)
@@ -885,8 +906,8 @@ describe('proposed Epics are durable (never erased)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
-    const activeProposal = usePromptSessions.getState().createPromptSession('/proj', 'human work', 'feature')
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
+    const activeProposal = await usePromptSessions.getState().createPromptSession('/proj', 'human work', 'feature')
     const active = usePromptSessions.getState().approveProposed(activeProposal.id)!
 
     usePromptSessions.getState().appendPromptSessionEvent(active.id, {
@@ -905,7 +926,7 @@ describe('proposed Epics are durable (never erased)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const proposed = usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'agent-filed work', 'bug')
     await usePromptSessions.getState().markCompleted(proposed.id)
 
     // Wait on the CONDITION, not on the merge call having happened at all —
@@ -927,7 +948,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
     await usePromptSessions.getState().renameEpic(session.id, 'New title', 'New goal body')
 
     expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('New title\n\nNew goal body')
@@ -937,7 +958,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
 
     await expect(usePromptSessions.getState().renameEpic(session.id, '   ', 'goal')).rejects.toThrow()
     expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('Old title\n\nOld goal body')
@@ -947,7 +968,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Old title\n\nOld goal body')
     await usePromptSessions.getState().renameEpic(session.id, 'Line one\n\nLine two', 'goal body')
 
     const goalText = usePromptSessions.getState().sessions[session.id].goalText
@@ -960,9 +981,9 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const source = usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
+    const source = await usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
     const approveSpy = vi.spyOn(usePromptSessions.getState(), 'approveProposed')
-    const copy = usePromptSessions.getState().duplicateEpic(source.id)
+    const copy = await usePromptSessions.getState().duplicateEpic(source.id)
 
     expect(copy.id).not.toBe(source.id)
     expect(copy.claudeSessionId).not.toBe(source.claudeSessionId)
@@ -979,7 +1000,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
     await usePromptSessions.getState().deleteEpic(session.id)
 
     expect(usePromptSessions.getState().sessions[session.id]).toBeUndefined()
@@ -991,7 +1012,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const { useScheduleState } = await import('../scheduleState')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Has a running job')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Has a running job')
     useScheduleState.setState({
       loaded: true,
       snapshot: {
@@ -1024,7 +1045,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const { useScheduleState } = await import('../scheduleState')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Has a pending job, stale sourcePromptId')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Has a pending job, stale sourcePromptId')
     useScheduleState.setState({
       loaded: true,
       snapshot: {
@@ -1058,7 +1079,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const { useChat } = await import('../chat')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Has a live chat run')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Has a live chat run')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -1083,7 +1104,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
     const { usePromptSessions } = await import('../promptSessions')
     const { useEpicTerminal } = await import('../epicTerminal')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Attached to Terminal')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Attached to Terminal')
     useEpicTerminal.getState().setAttached(session.id, true)
 
     await expect(usePromptSessions.getState().deleteEpic(session.id)).rejects.toThrow()
@@ -1122,8 +1143,8 @@ describe('persistActiveIndex forwards its contribution to the main-process merge
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Fresh title')
-    usePromptSessions.getState().createPromptSession('/other', 'A different project')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Fresh title')
+    await usePromptSessions.getState().createPromptSession('/other', 'A different project')
 
     await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
     const persisted = lastIndexWrite(api, '/proj')
@@ -1141,7 +1162,7 @@ describe('persistActiveIndex forwards its contribution to the main-process merge
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Will complete')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Will complete')
     await usePromptSessions.getState().markCompleted(session.id)
 
     await vi.waitFor(() => {
@@ -1155,7 +1176,7 @@ describe('persistActiveIndex forwards its contribution to the main-process merge
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Will delete')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Will delete')
     await usePromptSessions.getState().deleteEpic(session.id)
 
     await vi.waitFor(() => {
@@ -1172,9 +1193,9 @@ describe('persistActiveIndex forwards its contribution to the main-process merge
     ;(api as unknown as { logs: { write: typeof logsWrite } }).logs = { write: logsWrite }
     const { usePromptSessions } = await import('../promptSessions')
 
-    expect(() =>
+    await expect(
       usePromptSessions.getState().createPromptSession('/proj', 'Survives a merge failure'),
-    ).not.toThrow()
+    ).resolves.toBeDefined()
 
     await vi.waitFor(() => {
       expect(logsWrite).toHaveBeenCalledWith(
@@ -1196,7 +1217,7 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature', undefined, 'NewEpicCard')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature', undefined, 'NewEpicCard')
 
     expect(api.auditLog.append).toHaveBeenCalledWith('epic_create', {
       cwd: '/proj',
@@ -1209,7 +1230,7 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
 
     expect(api.auditLog.append).toHaveBeenCalledWith('epic_create', {
       cwd: '/proj',
@@ -1222,7 +1243,7 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
     api.auditLog.append.mockClear()
     usePromptSessions.getState().approveProposed(session.id, 'EpicApprovalBar')
 
@@ -1237,7 +1258,7 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
     api.auditLog.append.mockClear()
     await usePromptSessions.getState().markCompleted(session.id, 'EpicDetail')
 
@@ -1252,7 +1273,7 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
     api.auditLog.append.mockClear()
     await usePromptSessions.getState().deleteEpic(session.id, 'EpicQueue row menu')
 
@@ -1267,10 +1288,10 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const archived = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    const archived = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
     await usePromptSessions.getState().markCompleted(archived.id)
     api.auditLog.append.mockClear()
-    const resumed = usePromptSessions.getState().resumeArchived(archived.id, 'EpicDetail')
+    const resumed = await usePromptSessions.getState().resumeArchived(archived.id, 'EpicDetail')
 
     expect(api.auditLog.append).toHaveBeenCalledWith('epic_resume', {
       cwd: resumed.cwd,
@@ -1283,9 +1304,9 @@ describe('audit log emission (PRD 940)', () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const source = usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
+    const source = await usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
     api.auditLog.append.mockClear()
-    const copy = usePromptSessions.getState().duplicateEpic(source.id, 'EpicQueue row menu')
+    const copy = await usePromptSessions.getState().duplicateEpic(source.id, 'EpicQueue row menu')
 
     expect(api.auditLog.append).toHaveBeenCalledWith('epic_duplicate', {
       cwd: source.cwd,
@@ -1300,7 +1321,7 @@ describe('audit log emission (PRD 940)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { usePromptSessions } = await import('../promptSessions')
 
-    const session = usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
     expect(session.status).toBe('proposed')
 
     await vi.waitFor(() => {

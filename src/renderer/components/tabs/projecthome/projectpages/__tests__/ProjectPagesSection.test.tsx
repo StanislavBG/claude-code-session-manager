@@ -5,6 +5,7 @@ import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
 import { usePromptSessions } from '../../../../../state/promptSessions'
 import { useChat } from '../../../../../state/chat'
+import { fakePromptSessionsCreate } from '../../../../../testUtils/fakePromptSessionsCreate'
 
 const CWD = '/home/bilko/Projects/alpha'
 
@@ -110,11 +111,13 @@ describe('ProjectPagesSection', () => {
     ;(globalThis as any).window.api = {
       projectPages: { get: vi.fn().mockResolvedValue({ output: null }) },
       agents: { listPersonas: listPersonasMock },
+      promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
     }
     const el = mount(<ProjectPagesSection cwd={CWD} />)
     await flush()
     const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Generate Now') as HTMLButtonElement
     act(() => btn.click())
+    await flush()
     expect(createPromptSessionSpy).toHaveBeenCalledWith(
       CWD,
       expect.any(String),

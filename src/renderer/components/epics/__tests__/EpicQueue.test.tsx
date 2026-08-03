@@ -7,6 +7,7 @@ import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
+import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const approveProposedSpy = vi.fn()
@@ -16,6 +17,7 @@ const resolveBuildTargetMock = vi.fn()
 ;(globalThis as any).window.api = {
   app: { resolveBuildTarget: resolveBuildTargetMock },
   agents: { listPersonas: vi.fn().mockResolvedValue([]) },
+  promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
 }
 
 let container: HTMLDivElement | null = null

@@ -286,14 +286,15 @@ describe('EpicQueue row menu', () => {
     })
   })
 
-  it('Duplicate as new Epic calls duplicateEpic and selects the returned epic', () => {
+  it('Duplicate as new Epic calls duplicateEpic and selects the returned epic', async () => {
     const dup = makeEpic({ id: 'epic-dup', claudeSessionId: 'claude-dup' })
-    const duplicateEpic = vi.spyOn(usePromptSessions.getState(), 'duplicateEpic').mockReturnValue(dup)
+    const duplicateEpic = vi.spyOn(usePromptSessions.getState(), 'duplicateEpic').mockResolvedValue(dup)
     const epic = makeEpic()
     const onSelect = vi.fn()
     const el = mount(createElement(EpicQueue, baseProps(epic, { onSelect })))
     const menu = openMenu(el)
     clickMenuItem(menu, 'Duplicate as new Epic')
+    await flushAsync(2)
 
     expect(duplicateEpic).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
     expect(onSelect).toHaveBeenCalledWith('epic-dup')
@@ -331,12 +332,13 @@ describe('EpicQueue row menu', () => {
     })
   })
 
-  it('Reopen calls resumeArchived with the epic id', () => {
-    const resumeArchived = vi.spyOn(usePromptSessions.getState(), 'resumeArchived').mockReturnValue(makeEpic())
+  it('Reopen calls resumeArchived with the epic id', async () => {
+    const resumeArchived = vi.spyOn(usePromptSessions.getState(), 'resumeArchived').mockResolvedValue(makeEpic())
     const epic = makeEpic({ status: 'completed', completedAt: new Date().toISOString() })
     const el = mount(createElement(EpicQueue, baseProps(epic)))
     const menu = openMenu(el)
     clickMenuItem(menu, 'Reopen')
+    await flushAsync(2)
 
     expect(resumeArchived).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
   })

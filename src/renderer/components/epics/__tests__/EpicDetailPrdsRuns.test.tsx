@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { flushAsync } from '../../../testUtils/domFlush'
+import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 /**
  * EpicDetail PRDs/Runs tabs (PRD 828-epic-detail-prds-runs) — the PRD file ×
@@ -41,6 +42,7 @@ function installWindowApiMock(prds: unknown[] = []) {
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },
     schedule: { listPrds, readLog },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, listPrds, readLog }
@@ -84,7 +86,7 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flush()
 
@@ -104,7 +106,7 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     const { EpicDetail } = await import('../EpicDetail')
 
     useScheduleState.setState({ snapshot: { jobs: [] } as any, loaded: true })
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     // Force the mint id so the mocked PRD's sourcePromptId matches it.
     usePromptSessions.setState({
       sessions: {
@@ -141,7 +143,7 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     const { EpicDetail } = await import('../EpicDetail')
 
     useScheduleState.setState({ snapshot: { jobs: [] } as any, loaded: true })
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     usePromptSessions.setState({
       sessions: { ...usePromptSessions.getState().sessions, [session.id]: session },
     })
@@ -162,10 +164,11 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
   })
 
   it('joins a PRD file with a matching job row as the job status, and shows a live PRDs count', async () => {
+    installWindowApiMock([])
     const { usePromptSessions } = await import('../../../state/promptSessions')
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
-    installWindowApiMock([
+    ;(window.api.schedule.listPrds as any).mockResolvedValue([
       { slug: '5-widget', title: 'Widget', cwd: '/tmp/proj', estimateMinutes: 30, mtimeMs: 1, parallelGroup: 1, sourcePromptId: session.id },
     ])
     const { useScheduleState } = await import('../../../state/scheduleState')
@@ -210,13 +213,12 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
   })
 
   it('Runs tab filters schedule jobs by sourcePromptId and shows a job whose PRD file was archived', async () => {
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const otherSession = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Other Epic', 'feature')
-
     // No PRD file for '5-widget' — simulates an archived PRD file; the job
     // row alone must still surface it.
     installWindowApiMock([])
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const otherSession = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Other Epic', 'feature')
     const { useScheduleState } = await import('../../../state/scheduleState')
     const { EpicDetail } = await import('../EpicDetail')
 
@@ -280,7 +282,7 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     const { EpicDetail } = await import('../EpicDetail')
 
     useScheduleState.setState({ snapshot: { jobs: [] } as any, loaded: true })
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flush()

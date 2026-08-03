@@ -92,7 +92,7 @@ function useBuildAction(onSelect: (id: string) => void) {
    *  'build'-tagged Epic and approves it out of `proposed`. Callers decide
    *  what happens to `openingPrompt` next (auto-send vs. leave in the
    *  composer as a draft). */
-  const createBuildEpic = () => {
+  const createBuildEpic = async () => {
     if (!activeTabCwd || !target) return null
     const { goalText, openingPrompt } = composeEpicIntake({
       title: '',
@@ -102,8 +102,8 @@ function useBuildAction(onSelect: (id: string) => void) {
       agentDescription: builderPersona?.description ?? undefined,
     })
     const session = builderPersona
-      ? usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build', builderPersona.name)
-      : usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build')
+      ? await usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build', builderPersona.name)
+      : await usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build')
     usePromptSessions.getState().approveProposed(session.id, 'EpicQueue Run Build')
     return { session, openingPrompt }
   }
@@ -118,7 +118,7 @@ function useBuildAction(onSelect: (id: string) => void) {
     if (!target) return
     setCreating(true)
     try {
-      const created = createBuildEpic()
+      const created = await createBuildEpic()
       if (!created) return
       const { session, openingPrompt } = created
       useChat.getState().send({
@@ -441,23 +441,25 @@ function useRowMenuItems(
     items.push({
       label: 'Reopen',
       onSelect: () => {
-        try {
-          usePromptSessions.getState().resumeArchived(epic.id, 'EpicQueue row menu')
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : String(err))
-        }
+        usePromptSessions
+          .getState()
+          .resumeArchived(epic.id, 'EpicQueue row menu')
+          .catch((err: unknown) => {
+            toast.error(err instanceof Error ? err.message : String(err))
+          })
       },
     })
   }
   items.push({
     label: 'Duplicate as new Epic',
     onSelect: () => {
-      try {
-        const dup = usePromptSessions.getState().duplicateEpic(epic.id, 'EpicQueue row menu')
-        onSelect(dup.id)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err))
-      }
+      usePromptSessions
+        .getState()
+        .duplicateEpic(epic.id, 'EpicQueue row menu')
+        .then((dup) => onSelect(dup.id))
+        .catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
     },
   })
   items.push({

@@ -240,8 +240,8 @@ export function NewEpicCard({
     // that transition.
     // See prompt-sessions/README.md#lifecycle.
     const session = selectedAgent
-      ? createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name)
-      : createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard')
+      ? await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name)
+      : await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard')
     approveProposed(session.id, 'NewEpicCard')
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is
@@ -255,6 +255,8 @@ export function NewEpicCard({
     })
     resetForm()
     onCreated(session.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setCreating(false)
     }

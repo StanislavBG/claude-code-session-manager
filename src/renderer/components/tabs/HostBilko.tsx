@@ -170,7 +170,7 @@ export function HostBilko() {
     [cwd, reload],
   )
 
-  const handlePublish = useCallback(() => {
+  const handlePublish = useCallback(async () => {
     if (!cwd || !slug) return
     if (existingPublishEpic) {
       navigateToEpic(existingPublishEpic.id)
@@ -189,8 +189,8 @@ export function HostBilko() {
       agentDescription: publisherPersona?.description ?? undefined,
     })
     const session = publisherPersona
-      ? createPromptSession(cwd, goalText, PUBLISH_TAG, 'HostBilko', publisherPersona.name)
-      : createPromptSession(cwd, goalText, PUBLISH_TAG, 'HostBilko')
+      ? await createPromptSession(cwd, goalText, PUBLISH_TAG, 'HostBilko', publisherPersona.name)
+      : await createPromptSession(cwd, goalText, PUBLISH_TAG, 'HostBilko')
     approveProposed(session.id, 'HostBilko')
     useChat.getState().send({
       tabId: session.id,
@@ -275,7 +275,11 @@ export function HostBilko() {
               </button>
               <button
                 type="button"
-                onClick={handlePublish}
+                onClick={() => {
+                  handlePublish().catch((err: unknown) => {
+                    toast.error(err instanceof Error ? err.message : String(err))
+                  })
+                }}
                 disabled={!info.bundleManifest}
                 title={!info.bundleManifest ? 'Prepare a bundle first' : undefined}
                 className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-bg-hi hover:bg-accent-dark disabled:opacity-50"

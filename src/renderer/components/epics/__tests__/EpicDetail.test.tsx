@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { flushAsync } from '../../../testUtils/domFlush'
+import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 /**
  * EpicDetail (PRD 827-epic-detail-view) — the right-pane Epic detail shell +
@@ -46,6 +47,7 @@ function installWindowApiMock(opts: { branch?: string | null } = {}) {
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },
     schedule: { listPrds },
+    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, listPrds }
@@ -80,7 +82,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const proposed = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
     const session = usePromptSessions.getState().approveProposed(proposed.id)!
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
@@ -99,7 +101,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flushAsync(2)
@@ -114,7 +116,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flushAsync(2)
@@ -127,7 +129,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Fix the bug', 'bug')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Fix the bug', 'bug')
     usePromptSessions.setState({
       sessions: {
         ...usePromptSessions.getState().sessions,
@@ -148,7 +150,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
 
     useChat.setState({
@@ -201,7 +203,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
 
     useChat.setState({
@@ -245,7 +247,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -272,7 +274,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -294,7 +296,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -329,7 +331,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -370,7 +372,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -396,8 +398,8 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const sessionA = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
-    const sessionB = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
+    const sessionA = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
+    const sessionB = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: sessionA }))
     const prdsTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.startsWith('PRDs')) as HTMLButtonElement
@@ -419,7 +421,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -448,7 +450,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -495,7 +497,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -522,7 +524,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
       chats: {
         [session.id]: {
@@ -568,8 +570,8 @@ describe('EpicDetail (PRD 827)', () => {
     const { useChat } = await import('../../../state/chat')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const sessionA = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
-    const sessionB = usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
+    const sessionA = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
+    const sessionB = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
     useChat.setState({
       chats: {
         [sessionA.id]: {
@@ -600,7 +602,7 @@ describe('EpicDetail (PRD 827)', () => {
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
-    const session = usePromptSessions.getState().createPromptSession('/tmp/proj', 'A brand new Epic with no turns', 'discussion')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'A brand new Epic with no turns', 'discussion')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 

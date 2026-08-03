@@ -560,7 +560,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             {isCompleted ? (
               <button
                 type="button"
-                onClick={() => resumeArchived(epicId, 'EpicDetail')}
+                onClick={() => {
+                  resumeArchived(epicId, 'EpicDetail').catch((err: unknown) => {
+                    toast.error(err instanceof Error ? err.message : String(err))
+                  })
+                }}
                 data-testid="epic-resume"
                 className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90"
               >

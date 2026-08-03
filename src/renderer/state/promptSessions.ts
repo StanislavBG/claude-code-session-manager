@@ -14,13 +14,13 @@ import type { TicketTag } from '../lib/ticketDisplay'
  * sessionId. A PromptSession mints its own claudeSessionId, never derived
  * from or shared with any SessionTab.
  */
-/** Structured trace of which automated producer minted an Epic — replaces
- *  burying that info as markdown frontmatter text inside openingPrompt.
- *  Written by src/main/lib/epicMint.cjs for auto-minted Epics; absent for
- *  human-created ones (New Epic UI, /propose-epic approvals go through the
- *  same mint path but a human still pressed the button). */
+/** Structured trace of which surface minted an Epic — replaces burying that
+ *  info as markdown frontmatter text inside openingPrompt. An Epic is only
+ *  ever created by a human pressing New Epic ('new-epic-ui', epicMint.cjs's
+ *  SINGLE-CREATOR LAW); 'scheduler-dispatch' appears only on join-only calls
+ *  kept for audit symmetry. */
 export interface EpicSource {
-  producer: 'rca-hook' | 'feedback-sweep' | 'propose-epic' | 'scheduler-dispatch'
+  producer: 'new-epic-ui' | 'scheduler-dispatch'
   prdSlug?: string
   runId?: string
   sourceTabId?: string
@@ -56,9 +56,8 @@ export interface PromptSession {
    *  the RCA/analysis body). Sent verbatim on approval; falls back to
    *  goalText when absent. Written by src/main/lib/epicMint.cjs too. */
   openingPrompt?: string | null
-  /** Which automated producer minted this Epic, for tracing a rogue/unexpected
-   *  Epic back to its origin. Written by src/main/lib/epicMint.cjs; absent for
-   *  human-created Epics. */
+  /** Which surface minted this Epic, for tracing it back to its origin.
+   *  Written by src/main/lib/epicMint.cjs; absent on older Epics. */
   source?: EpicSource
   /** Name of the Agent Library persona (`~/.claude/agents/<name>.md`) chosen to
    *  run this Epic's session, distinct from `tag` (the Epic's mission —
@@ -177,14 +176,17 @@ interface PromptSessionsState {
   setFocusedEpicId: (promptSessionId: string | null) => void
   /** Every Epic is born 'proposed' — this is the ONLY place a PromptSession
    *  is minted, and it can never write any other status. Nothing runs until
-   *  approveProposed() flips it to 'active'. */
+   *  approveProposed() flips it to 'active'. Mints through main's own
+   *  ensureEpic() (window.api.promptSessions.create, PRD 954) rather than
+   *  hand-constructing id/claudeSessionId/status/createdAt itself — main is
+   *  now the only place either id is generated. */
   createPromptSession: (
     cwd: string,
     goalText: string,
     tag?: PromptSession['tag'],
     source?: string,
     agentType?: string,
-  ) => PromptSession
+  ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
    *  Starting its session is the caller's job (it owns the opening prompt). */
@@ -201,7 +203,7 @@ interface PromptSessionsState {
   /** Mints a brand-new independent PromptSession (fresh claudeSessionId —
    *  the archived one is dead) that carries a traceability link back to the
    *  archived session it follows on from. */
-  resumeArchived: (archivedId: string, source?: string) => PromptSession
+  resumeArchived: (archivedId: string, source?: string) => Promise<PromptSession>
   /** Cosmetic correction only (typo/clarity in the queue row menu) — not a
    *  re-purposing of the Epic's goal. Re-encodes goalText as `${title}\n\n${goal}`,
    *  the same encoding EpicDetail.tsx's splitTitleAndGoal reads, and persists
@@ -212,7 +214,7 @@ interface PromptSessionsState {
    *  existing createPromptSession — fresh id + claudeSessionId, no PRDs/
    *  thread history/scheduler jobs carried over. Mirrors a hand-created Epic
    *  whose opening prompt happens to match an existing one. */
-  duplicateEpic: (promptSessionId: string, source?: string) => PromptSession
+  duplicateEpic: (promptSessionId: string, source?: string) => Promise<PromptSession>
   /** Removes the Epic from in-memory sessions/events and persists the removal
    *  through the active-index write path. Throws (never silently no-ops) if
    *  the Epic has a running/queued scheduler job or a chat run in flight —
@@ -247,32 +249,6 @@ let seq = 0
 function mintId(prefix: string): string {
   seq += 1
   return `${prefix}-${Date.now().toString(36)}-${seq}`
-}
-
-/** Pure, side-effect-free construction of the PromptSession object literal
- *  createPromptSession persists — extracted so a plain node/vitest test can
- *  assert its output against the main-process canonical schema
- *  (src/main/lib/promptSessionSchema.cjs) without mocking window.api or the
- *  zustand store. Keep this the SOLE place createPromptSession builds the
- *  object literal — do not let a future edit reintroduce a second inline copy. */
-export function buildPromptSession(
-  cwd: string,
-  goalText: string,
-  tag?: PromptSession['tag'],
-  agentType?: string,
-): PromptSession {
-  const now = new Date().toISOString()
-  return {
-    id: mintId('psess'),
-    cwd,
-    goalText,
-    claudeSessionId: crypto.randomUUID(),
-    status: 'proposed',
-    createdAt: now,
-    completedAt: null,
-    ...(tag ? { tag } : {}),
-    ...(agentType ? { agentType } : {}),
-  }
 }
 
 type AuditEventKind =
@@ -375,8 +351,12 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: (cwd, goalText, tag, source, agentType) => {
-    const session: PromptSession = buildPromptSession(cwd, goalText, tag, agentType)
+  createPromptSession: async (cwd, goalText, tag, source, agentType) => {
+    const result = await window.api.promptSessions.create({ cwd, goalText, tag, agentType })
+    // ensureEpic's response is the byte-identical record just written to
+    // active-index.json (validated against promptSessionSchema.cjs main-side)
+    // — safe to trust as PromptSession without re-checking shape here.
+    const session = result.session as unknown as PromptSession
     const firstEvent: PromptSessionEvent = {
       id: mintId('pevt'),
       promptSessionId: session.id,
@@ -507,7 +487,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     }
     await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive, 'epics')
   },
-  resumeArchived: (archivedId, source) => {
+  resumeArchived: async (archivedId, source) => {
     const archived = get().sessions[archivedId]
     if (!archived) {
       throw new Error(`resumeArchived: no PromptSession with id "${archivedId}"`)
@@ -516,7 +496,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // direct user button click (explicit intent), so activation is correct,
     // but it must still go through the one proposed->active transition.
     const resolvedSource = source ?? 'unknown'
-    const proposed = get().createPromptSession(archived.cwd, archived.goalText, undefined, resolvedSource)
+    const proposed = await get().createPromptSession(archived.cwd, archived.goalText, undefined, resolvedSource)
     const linked: PromptSession = { ...proposed, resumedFromId: archivedId }
     const sessions = { ...get().sessions, [proposed.id]: linked }
     set({ sessions })
@@ -544,7 +524,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     set({ sessions })
     await persistActiveIndex(session.cwd, sessions, get().events)
   },
-  duplicateEpic: (promptSessionId, source) => {
+  duplicateEpic: async (promptSessionId, source) => {
     const sourceSession = get().sessions[promptSessionId]
     if (!sourceSession) {
       throw new Error(`duplicateEpic: no PromptSession with id "${promptSessionId}"`)
@@ -553,7 +533,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // direct user button click (explicit intent), so activation is correct,
     // but it must still go through the one proposed->active transition.
     const resolvedSource = source ?? 'unknown'
-    const proposed = get().createPromptSession(sourceSession.cwd, sourceSession.goalText, sourceSession.tag, resolvedSource)
+    const proposed = await get().createPromptSession(sourceSession.cwd, sourceSession.goalText, sourceSession.tag, resolvedSource)
     const approved = get().approveProposed(proposed.id, resolvedSource) ?? proposed
     emitAuditEvent('epic_duplicate', { cwd: sourceSession.cwd, epicId: approved.id, source: resolvedSource })
     return approved

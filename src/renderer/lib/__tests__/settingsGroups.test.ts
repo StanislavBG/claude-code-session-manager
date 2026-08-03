@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { SETTINGS_GROUPS, planGroupRail } from '../settingsGroups'
+import { SETTINGS_GROUPS, planGroupRail, planGroups } from '../settingsGroups'
+
+describe('Model & Reasoning group', () => {
+  it('is marked advanced — demoted out of the curated primary listing per agent-model-nav-consolidation', () => {
+    const modelGroup = SETTINGS_GROUPS.find((g) => g.id === 'model')!
+    expect(modelGroup.advanced).toBe(true)
+  })
+
+  it('flags the plan as advanced so EffectiveCards/EffectiveTree hide it from the default view', () => {
+    const allKeys = new Set(SETTINGS_GROUPS.flatMap((g) => g.keys))
+    const plans = planGroups(allKeys)
+    const modelPlan = plans.find((p) => p.id === 'model')!
+    expect(modelPlan.advanced).toBe(true)
+  })
+})
 
 describe('planGroupRail', () => {
   it('returns one rail entry per SETTINGS_GROUPS group with keys present in allKeys', () => {

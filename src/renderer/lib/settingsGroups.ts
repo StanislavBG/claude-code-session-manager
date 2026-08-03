@@ -48,7 +48,14 @@ export const SETTINGS_GROUPS: SettingGroup[] = [
   {
     id: 'model',
     title: 'Model & Reasoning',
-    summary: 'Which model runs, how hard it thinks, and fast-mode toggles.',
+    summary:
+      'Model allow/override lists, reasoning depth, and fast-mode toggles — machine-wide, with no per-Epic override yet. An Epic\'s Agent persona model (Agent Library) still wins over Essentials\' plain model default.',
+    // Demoted out of the curated primary groups (see 'agent-model-nav-consolidation'):
+    // an Epic's persona `model` field (edited in AgentLibrary.tsx) now wins over
+    // Essentials' plain `model` key whenever it's set, so this group's remaining
+    // keys — availableModels/modelOverrides/effortLevel/fastMode/etc — have no
+    // per-Epic mechanism yet and are demoted to advanced/raw-JSON only.
+    advanced: true,
     keys: [
       'availableModels',
       'modelOverrides',

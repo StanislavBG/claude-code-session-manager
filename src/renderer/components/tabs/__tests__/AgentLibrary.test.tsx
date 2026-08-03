@@ -101,6 +101,12 @@ describe('AgentLibrary', () => {
     expect(el.textContent).toContain('Read')
   })
 
+  it('surfaces the model field as this persona\'s per-Epic default model (agent-model-nav-consolidation)', async () => {
+    const el = await mount()
+    expect(el.textContent).toContain('default model')
+    expect(el.textContent).toContain("This persona's default model for its Epics")
+  })
+
   it('clicking another persona swaps the detail pane', async () => {
     const el = await mount()
     const debuggerRow = el.querySelector('[data-agent-row="debugger"]')

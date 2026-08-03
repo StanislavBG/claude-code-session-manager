@@ -350,7 +350,10 @@ function AgentPersonaEditor({
           />
         </Field>
 
-        <Field label="model" hint="Cheap models for read-only personas; opus for judgement calls.">
+        <Field
+          label="default model"
+          hint="This persona's default model for its Epics — sets the --model an Epic launches with (Terminal + Chat both honor it). 'inherit' falls back to each view's own default, not this Settings page. Cheap models for read-only personas; opus for judgement calls."
+        >
           <Choice options={MODELS as unknown as string[]} value={obj.model} onChange={(v) => set({ model: v })} mono />
         </Field>
 

@@ -258,13 +258,6 @@ contextBridge.exposeInMainWorld('api', {
   shell: {
     open: (opts) => ipcRenderer.invoke('shell:open', opts),
   },
-  search: {
-    files: (cwd, query, opts) => ipcRenderer.invoke('search:files', { cwd, query, opts }),
-    text: (cwd, query, opts) => ipcRenderer.invoke('search:text', { cwd, query, opts }),
-  },
-  repo: {
-    analyze: (cwd) => ipcRenderer.invoke('repo:analyze', { cwd }),
-  },
   schedule: {
     state: () => ipcRenderer.invoke('schedule:state'),
     sessionSlots: () => ipcRenderer.invoke('schedule:session-slots'),
@@ -493,5 +486,11 @@ contextBridge.exposeInMainWorld('api', {
      *  renderer-side read-merge-write. Payload carries only this renderer's
      *  own in-memory contribution for the cwd; disk stays main's truth. */
     mergeActiveIndex: (payload) => ipcRenderer.invoke('promptSessions:merge-active-index', payload),
+    /** Mints a brand-new 'proposed' Epic through main's own ensureEpic()
+     *  (lib/promptSessionsCreateEpic.cjs) instead of the renderer
+     *  hand-constructing the PromptSession record itself. Unused today —
+     *  additive step 1 of a two-PRD chain; a later PRD routes
+     *  createPromptSession through this. */
+    create: (payload) => ipcRenderer.invoke('promptSessions:create-epic', payload),
   },
 });

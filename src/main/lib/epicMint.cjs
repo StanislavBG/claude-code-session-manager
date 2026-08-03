@@ -185,7 +185,7 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, openingPrompt?, mintIfMissing?, source?, forceNewEpic? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { goalText, tag?, reuseByGoal?, status?, openingPrompt?, mintIfMissing?, source?, forceNewEpic?, agentType? }) → Promise<{ epicId, prdDir, created }>
  *
  * Before minting brand-new, the mint branch consults findJoinableEpic() —
  * minting is the LAST resort, not the default, for automated callers. Pass
@@ -218,7 +218,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null, forceNewEpic = false } = {}) {
+function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, mintIfMissing = true, source = null, forceNewEpic = false, agentType = null } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -331,6 +331,10 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       // Structured trace of which automated producer minted this Epic — see
       // EpicSource in state/promptSessions.ts.
       ...(source ? { source } : {}),
+      // Display-only "who is working" persona name (New Epic card's Agent
+      // picker) — mirrors the renderer's own buildPromptSession
+      // (state/promptSessions.ts). Never affects which claude CLI spawns.
+      ...(agentType ? { agentType } : {}),
     };
 
     // Validate the constructed record against the canonical PromptSession

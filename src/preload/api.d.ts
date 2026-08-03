@@ -699,47 +699,6 @@ export interface FilesDuplicateResult { ok: boolean; path?: string; error?: stri
 export interface DocEditResult { ok: boolean; after?: string; error?: string }
 export interface DocEditSessionResult { tabId: string; requestId: string; ok: boolean; after?: string; error?: string }
 
-export interface SearchFileEntry {
-  name: string;
-  path: string;
-  isDirectory: false;
-  isFile: true;
-}
-export interface SearchFilesResult {
-  ok: boolean;
-  files: SearchFileEntry[];
-  error: string | null;
-  usedRipgrep: boolean;
-}
-export interface SearchTextMatch {
-  path: string;
-  line: number;
-  column: number;
-  text: string;
-}
-export interface SearchTextResult {
-  ok: boolean;
-  matches: SearchTextMatch[];
-  error: string | null;
-  usedRipgrep: boolean;
-}
-
-export interface RepoLanguageStats { files: number; lines: number }
-export interface RepoTopDirectory { path: string; fileCount: number; totalLines: number }
-export interface RepoGitStatusSummary { uncommitted: number; branch: string | null }
-export interface RepoAnalyzeResult {
-  ok: true;
-  cwd: string;
-  totalFiles: number;
-  totalLines: number;
-  languageBreakdown: Record<string, RepoLanguageStats>;
-  topDirectories: RepoTopDirectory[];
-  gitStatus: RepoGitStatusSummary;
-  truncated: boolean;
-  durationMs: number;
-}
-export interface RepoAnalyzeError { ok: false; error: string }
-
 export interface WatcherInfo {
   watcherId: string;
   tabId: string;
@@ -1521,13 +1480,6 @@ export interface SessionManagerAPI {
         | { as: 'revealPath'; path: string }
     ) => Promise<{ ok: boolean; opener?: string; error?: string }>;
   };
-  search: {
-    files: (cwd: string, query?: string, opts?: { limit?: number }) => Promise<SearchFilesResult>;
-    text: (cwd: string, query: string, opts?: { limit?: number; caseSensitive?: boolean }) => Promise<SearchTextResult>;
-  };
-  repo: {
-    analyze: (cwd: string) => Promise<RepoAnalyzeResult | RepoAnalyzeError>;
-  };
   history: {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
     scanProjects: () => Promise<SessionScanResult>;
@@ -1765,6 +1717,12 @@ export interface SessionManagerAPI {
      *  in-memory contribution for the cwd; disk stays main's truth, merged
      *  inside the same lock epicMint.cjs's ensureEpic serializes through. */
     mergeActiveIndex: (payload: PromptSessionsMergeActiveIndexPayload) => Promise<PromptSessionsMergeActiveIndexResult>;
+    /** Mints a brand-new 'proposed' Epic through main's own ensureEpic()
+     *  (lib/promptSessionsCreateEpic.cjs) instead of the renderer
+     *  hand-constructing the PromptSession record itself. Unused today —
+     *  additive step 1 of a two-PRD chain; a later PRD routes
+     *  createPromptSession through this. */
+    create: (payload: PromptSessionsCreateEpicPayload) => Promise<PromptSessionsCreateEpicResult>;
   };
 }
 
@@ -1780,6 +1738,25 @@ export interface PromptSessionsMergeActiveIndexPayload {
 export interface PromptSessionsMergeActiveIndexResult {
   sessions: Record<string, unknown>;
   events: Record<string, unknown[]>;
+}
+
+// ─────────────────────────────────── PromptSessions create-epic (main-side ensureEpic)
+export interface PromptSessionsCreateEpicPayload {
+  cwd: string;
+  goalText: string;
+  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher';
+  agentType?: string;
+  source?: {
+    producer: 'rca-hook' | 'feedback-sweep' | 'propose-epic' | 'scheduler-dispatch';
+    prdSlug?: string;
+    runId?: string;
+    sourceTabId?: string;
+  };
+}
+
+export interface PromptSessionsCreateEpicResult {
+  epicId: string;
+  session: Record<string, unknown>;
 }
 
 // ─────────────────────────────────── PromptSession event-appended broadcast

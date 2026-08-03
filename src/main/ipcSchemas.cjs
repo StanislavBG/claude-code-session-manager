@@ -8,7 +8,7 @@
 const { z } = require('zod');
 const os = require('node:os');
 const path = require('node:path');
-const { PromptSessionSchema } = require('./lib/promptSessionSchema.cjs');
+const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema } = require('./lib/promptSessionSchema.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -246,6 +246,19 @@ const promptSessionsMergeActiveIndex = z.object({
   // lib/opsOwnership.cjs); requiring the literal here just means a
   // forged/malformed payload fails validation before it reaches the merge.
   source: z.literal('epics'),
+});
+
+// Renderer entry point for main's ensureEpic() (lib/promptSessionsCreateEpic.cjs)
+// — additive step 1 of a two-PRD chain; unused by the app until the next PRD
+// routes state/promptSessions.ts's createPromptSession through it. `tag`/
+// `source` reuse promptSessionSchema.cjs's own enums rather than retyping
+// the value lists a third time.
+const promptSessionsCreateEpic = z.object({
+  cwd: z.string().min(1).max(4096),
+  goalText: z.string().min(1).max(20000),
+  tag: EpicTagSchema.optional(),
+  agentType: z.string().min(1).max(256).optional(),
+  source: EpicSourceSchema.optional(),
 });
 
 // ──────────────────────────────────────────── Sessions
@@ -976,6 +989,7 @@ module.exports = {
     promptSessionTranscriptAppend,
     promptSessionTranscriptRead,
     promptSessionsMergeActiveIndex,
+    promptSessionsCreateEpic,
     auditLogAppend,
     agentMemoryList,
     agentMemoryGet,

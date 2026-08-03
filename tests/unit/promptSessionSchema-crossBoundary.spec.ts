@@ -5,8 +5,8 @@
  * Historically two independently hand-built PromptSession object literals
  * existed: the main-process mint path (epicMint.cjs's ensureEpic) and the
  * renderer's own construction path (createPromptSession's buildPromptSession,
- * state/promptSessions.ts). PRD 954 retired the renderer-side construction
- * entirely — createPromptSession now calls main's ensureEpic over IPC
+ * state/promptSessions.ts). PRD 955 (commit ba54269) retired the renderer-side
+ * construction entirely — createPromptSession now calls main's ensureEpic over IPC
  * (window.api.promptSessions.create) instead of hand-building the object, so
  * there is no second literal left to drift-check here. What remains load-
  * bearing is the IPC boundary itself: `promptSessionsMergeActiveIndex` must

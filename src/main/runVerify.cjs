@@ -135,8 +135,8 @@ function extractContent(item) {
  * Parse the run log into a flat sequence of extracted events.
  *
  * Event shapes:
- *   { kind:'tool_use',    seq, toolUseId, toolName, description, command }
- *   { kind:'tool_result', seq, toolUseId, content, isError }
+ *   { kind:'tool_use',    seq, toolUseId, toolName, description, command, parentToolUseId }
+ *   { kind:'tool_result', seq, toolUseId, content, isError, parentToolUseId }
  *   { kind:'result',      seq, subtype, resultText }
  *
  * Non-JSON lines (scheduler metadata "[scheduler] ...") are silently skipped.
@@ -190,6 +190,7 @@ function parseLog(logPath) {
             toolName: item.name ?? '',
             description: item.input?.description ?? '',
             command: item.input?.command ?? '',
+            parentToolUseId: obj.parent_tool_use_id ?? null,
           });
         }
       }
@@ -206,6 +207,7 @@ function parseLog(logPath) {
             toolUseId: item.tool_use_id ?? '',
             content: extractContent(item),
             isError: item.is_error === true,
+            parentToolUseId: obj.parent_tool_use_id ?? null,
           });
         }
       }
@@ -782,6 +784,19 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       // the is_error scan and the content pattern scan (false-positive class
       // seen in 58-web-remote-correctness-batch, 2026-06-10).
       if (isHarnessToolError(ev.content)) continue;
+
+      // A tool_result carrying a non-null parent_tool_use_id happened INSIDE a Task
+      // subagent's own execution, not in the main agent's. Subagents do ordinary
+      // exploratory work (greps that exit 1 on no-match, ls on a path that may not
+      // exist) whose failures say nothing about whether the parent run succeeded —
+      // the same false-positive class the Task exemption below already covers for the
+      // content-pattern scan, which sits after this branch and so never reached
+      // is_error. The subagent's OWN final Task tool_result has parentToolUseId ===
+      // null and is still scanned, so a genuinely failed subagent still surfaces.
+      // (Incident: 955-route-epic-create-through-ipc, 2026-08-03 — a fully green,
+      // committed run parked in needs_review over a code-reviewer subagent's
+      // no-match grep at event 450/499.)
+      if (ev.parentToolUseId) continue;
 
       // is_error:true in the final 20% of the transcript.
       if (ev.isError && i >= last20pctStart) {

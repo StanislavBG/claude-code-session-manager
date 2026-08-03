@@ -25,7 +25,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { verifyRun } = require('../runVerify.cjs');
+const { verifyRun, parseLog } = require('../runVerify.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -789,6 +789,109 @@ test('harness tool error (<tool_use_error>) in final 20% → clean', async () =>
     const prdPath = writePrd(tmp, slug, '# Correctness batch');
     const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
     assert.equal(verdict.verdict, 'clean', `harness tool error must not flag, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});
+
+// ─── subagent-internal tool errors (incident: 955-route-epic-create-through-ipc, 2026-08-03) ──
+
+test('subagent-internal is_error (parent_tool_use_id set) in final 20% → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '955-route-epic-create-through-ipc';
+    const events = [];
+    for (let k = 0; k < 8; k++) {
+      events.push({ type: 'assistant', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: `t${k}`, name: 'Read', input: { description: `read ${k}` } }] } });
+      events.push({ type: 'user', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: `t${k}`, content: 'ok', is_error: false }] } });
+    }
+    // A code-reviewer Task subagent runs its own exploratory grep, which exits
+    // 1 (no matches) — this happened INSIDE the subagent, not the main agent.
+    events.push({
+      type: 'assistant',
+      parent_tool_use_id: 'toolu_task_001',
+      message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'tgrep', name: 'Bash', input: { description: 'grep for buildPromptSession' } }] },
+    });
+    events.push({
+      type: 'user',
+      parent_tool_use_id: 'toolu_task_001',
+      message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'tgrep', content: '', is_error: true }] },
+    });
+    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' });
+
+    writeLog(tmp, slug, events);
+    const prdPath = writePrd(tmp, slug, '# Route Epic create through IPC');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
+    assert.equal(verdict.verdict, 'clean', `subagent-internal is_error must not flag, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});
+
+test('main-agent is_error (no parent_tool_use_id) in final 20% → still transcript_errors', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '955-main-agent-error-guard';
+    const events = [];
+    for (let k = 0; k < 8; k++) {
+      events.push({ type: 'assistant', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: `t${k}`, name: 'Read', input: { description: `read ${k}` } }] } });
+      events.push({ type: 'user', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: `t${k}`, content: 'ok', is_error: false }] } });
+    }
+    events.push({ type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'tool_use', id: 'tbad', name: 'Bash', input: { description: 'run tests' } }] } });
+    events.push({ type: 'user', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'tbad', content: 'FAILED: 1 test failed', is_error: true }] } });
+    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' });
+
+    writeLog(tmp, slug, events);
+    const prdPath = writePrd(tmp, slug, '# Guard: main-agent errors still flag');
+    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
+    assert.equal(verdict.verdict, 'transcript_errors', `main-agent is_error must still flag, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally { rmdir(tmp); }
+});
+
+test('parseLog populates parentToolUseId on tool_use and tool_result events, defaulting to null', () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '955-parselog-parent-id';
+    const events = [
+      {
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_parent_001',
+        message: { role: 'assistant', content: [
+          { type: 'tool_use', id: 'tchild', name: 'Bash', input: { description: 'grep in subagent' } }] },
+      },
+      {
+        type: 'user',
+        parent_tool_use_id: 'toolu_parent_001',
+        message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: 'tchild', content: '', is_error: true }] },
+      },
+      {
+        type: 'assistant',
+        message: { role: 'assistant', content: [
+          { type: 'tool_use', id: 'ttop', name: 'Bash', input: { description: 'run in main agent' } }] },
+      },
+      {
+        type: 'user',
+        message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: 'ttop', content: 'ok', is_error: false }] },
+      },
+    ];
+    writeLog(tmp, slug, events);
+    const { events: parsed } = parseLog(path.join(tmp, `${slug}.log`));
+
+    const childUse = parsed.find((ev) => ev.kind === 'tool_use' && ev.toolUseId === 'tchild');
+    const childResult = parsed.find((ev) => ev.kind === 'tool_result' && ev.toolUseId === 'tchild');
+    const topUse = parsed.find((ev) => ev.kind === 'tool_use' && ev.toolUseId === 'ttop');
+    const topResult = parsed.find((ev) => ev.kind === 'tool_result' && ev.toolUseId === 'ttop');
+
+    assert.equal(childUse.parentToolUseId, 'toolu_parent_001');
+    assert.equal(childResult.parentToolUseId, 'toolu_parent_001');
+    assert.equal(topUse.parentToolUseId, null);
+    assert.equal(topResult.parentToolUseId, null);
   } finally { rmdir(tmp); }
 });
 

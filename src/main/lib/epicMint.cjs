@@ -222,8 +222,10 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       // state/promptSessions.ts.
       ...(source ? { source } : {}),
       // Display-only "who is working" persona name (New Epic card's Agent
-      // picker) — mirrors the renderer's own buildPromptSession
-      // (state/promptSessions.ts). Never affects which claude CLI spawns.
+      // picker). The renderer no longer constructs a PromptSession itself —
+      // PRD 955 / commit ba54269 routed createPromptSession through this same
+      // ensureEpic IPC path (state/promptSessions.ts). Never affects which
+      // claude CLI spawns.
       ...(agentType ? { agentType } : {}),
     };
 

@@ -66,17 +66,6 @@
       "tag": "bug",
       "agentType": "architect"
     },
-    "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": {
-      "id": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Agent vs. Skill\n\nSo I want to understand how to design and separate reponsibility between the Skill like /develop vs the \"Agent\" who is Arhichtect using the develop skill or maybe Dev-Lead using the PRD and /develop skill? I'm struggling a bit to understand \"who is in charge\" and how to think about tehse two",
-      "claudeSessionId": "16a2d061-5387-4e37-b409-13f7a00fbb23",
-      "status": "active",
-      "createdAt": "2026-08-03T03:18:00.118Z",
-      "completedAt": null,
-      "tag": "discussion",
-      "agentType": "architect"
-    },
     "session-chat-conversion-into-simplified-chat-so--7cda6827": {
       "id": "session-chat-conversion-into-simplified-chat-so--7cda6827",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -86,17 +75,6 @@
       "createdAt": "2026-08-03T03:44:17.041Z",
       "completedAt": null,
       "tag": "discussion",
-      "agentType": "architect"
-    },
-    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": {
-      "id": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Delete the Keybindings Tab\n\nKeybindings tab is not good and should be deleted all relevant keys or features too, deep clean-up, the publish to git",
-      "claudeSessionId": "08f9feee-6163-468d-b6fd-95b9552caf32",
-      "status": "active",
-      "createdAt": "2026-08-03T04:56:58.340Z",
-      "completedAt": null,
-      "tag": "feature",
       "agentType": "architect"
     },
     "not-enough-paralell-processing-why-i-never-see-3-6a96029e": {
@@ -746,64 +724,38 @@
         "causedByEventId": "9d4151c5-18fa-4915-afec-11462f6e652c",
         "at": "2026-08-03T05:22:55.675Z",
         "prdSlug": "992-flat-prd-consolidation-respects-live-jobs"
-      }
-    ],
-    "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": [
-      {
-        "id": "pevt-mscnspfc-12",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T03:18:00.118Z",
-        "text": "Agent vs. Skill\n\nSo I want to understand how to design and separate reponsibility between the Skill like /develop vs the \"Agent\" who is Arhichtect using the develop skill or maybe Dev-Lead using the PRD and /develop skill? I'm struggling a bit to understand \"who is in charge\" and how to think about tehse two"
-      },
-      {
-        "id": "2429d69d-a911-4381-a648-943ea2d63993",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T03:18:00.118Z",
-        "text": "Agent vs. Skill\n\nSo I want to understand how to design and separate reponsibility between the Skill like /develop vs the \"Agent\" who is Arhichtect using the develop skill or maybe Dev-Lead using the PRD and /develop skill? I'm struggling a bit to understand \"who is in charge\" and how to think about tehse two"
       },
       {
         "kind": "response",
-        "causedByEventId": "2429d69d-a911-4381-a648-943ea2d63993",
-        "text": "## The one-line answer\n\n**Agent = who. Skill = a procedure the who reaches for. The agent is always in charge — a skill never is.**\n\nA skill is inert text on disk. It cannot decide to run, cannot decide when it's done, cannot decide to stop. Some agent reads it and follows it. So \"Architect using /develop\" is the right picture; \"/develop using dev-lead\" never happens.\n\n## The three axes you actually have\n\nYour repo already separates these cleanly — the confusion is that they *sound* like the same question:\n\n| Axis | Artifact | Question it answers | Lifetime |\n|---|---|---|---|\n| **Actor** | `~/.claude/agents/*.md` | *Who* is at the keyboard | Whole Epic conversation |\n| **Mission** | Tag (`feature`/`bug`/`discussion`) | *What kind* of work this is | Whole Epic, set at birth |\n| **Procedure** | Skill (`/develop`, `/builder`) | *How* one recurring task is done | One invocation |\n\n`architect.md` says this explicitly: \"Stay agnostic about what kind of work this is… Don't fork `/develop`'s PRD structure into this file.\" That's the axes staying orthogonal.\n\n## Why your two personas feel like they overlap (they don't)\n\nThey're not two agents sharing a skill. They're at **different points in the pipeline, in different processes**:\n\n```\nHuman ──talks to──> architect          (interactive, Opus, Epic-long)\n                       │\n                       │ invokes /develop  ← a procedure, not an agent\n                       ▼\n                    PRD files on disk     ← the handoff artifact\n                       │\n                    scheduler spawns claude -p   ← new process, no memory of the above\n                       ▼\n                    dev-lead              (headless, one PRD, then dies)\n                       │\n                    reads standards.md    ← executor rules, not a skill\n```\n\n`dev-lead` **never invokes `/develop`**. It can't — headless `claude -p` runs don't load skills, which is exactly why `/develop` inlines `standards.md` verbatim into every PRD body. de…",
-        "id": "pevt-mscntx1r-13",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "at": "2026-08-03T03:18:56.655Z"
+        "causedByEventId": "078507da-17b1-4aef-bdf2-5870bdffdf20",
+        "text": "Done — **PRD 985 is implemented, tested, committed and pushed** (`95b8a9a`). The original bug from this Epic is now actually fixed in `main`.\n\n## How I claimed it\n\nMoved the PRD source into `prds-archived/` **before** starting, so `executeJob`'s `archivedTwinExists` → `prdArchivedSkipResult` guard makes the scheduler skip the row cleanly instead of racing me mid-edit. That's the designed mechanism, not a hack around it.\n\n## What changed\n\nNew `resolveNotifyPrd(job, parsePrdRaw)` — live Epic-scoped dir via `findPrdDir`, then the archived twin via `archivedPrdPathForJob`. Both `notifyOriginatingTab` and `notifyNeedsReview` use it; `prdPathForJob` is gone from both. Both also fall back to the queue row's own `job.epicId`, so an unreadable PRD degrades to \"notified without frontmatter detail\" instead of silently dropped.\n\n**One thing I got wrong and caught.** My first pass folded `sourceTabId` into the Epic-id chain, which broke the pre-existing test `falls back to the tab-external-ticket path when the PRD has no sourcePromptId at all (pre-813 PRD)`. That test was right and I was wrong — a `sourceTabId` is a *Terminal tab* id, not an Epic id, and appending an Epic event chain onto one is a category error. Split into two values: the event append takes `sourcePromptId || job.epicId`; only the durable transcript accepts `sourceTabId`, as before. Documented in the code so it doesn't get re-broken.\n\n## Verification — actual output, not assertions\n\n- `scheduler-notify-originating-tab.test.cjs` + transcript + `promptSessionEvents`: **29 passed**\n- Full main-process suite: **62 files, 485 tests, all passed**\n- `npm run lint:selectors`: OK, 430 files\n\nMy two new tests deliberately use the **real** `parsePrdRaw` against a temp tree. Every pre-existing test in that file injects a stub — which is exactly why this bug shipped green twice.\n\n## Two caveats, stated plainly\n\n**`npm run typecheck` is currently RED** — 2 errors in `src/renderer/components/epics/__tests__/NewEpicCard.test.t…",
+        "id": "pevt-msctheda-44",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T05:57:10.270Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-mscntx1r-13",
-        "text": "## Part 1 — dev-lead's procedure\n\n**dev-lead follows no skill.** That's the whole point of its design, and it's a hard constraint, not a style choice: dev-lead runs inside a headless `claude -p` process spawned by the scheduler, and **headless runs don't load skills**. So its procedure has to arrive as plain text.\n\nIt comes from exactly three sources, layered:\n\n| Layer | Source | Who wrote it | Scope |\n|---|---|---|---|\n| 1. What to build | The PRD body | `/develop`, at authoring time | This one PRD |\n| 2. How to build | `standards.md` (read by absolute path) | Static file on disk | Every PRD, forever |\n| 3. How to finish | FINISH PROTOCOL, appended by the scheduler | `scheduler.cjs`, at dispatch | Every run |\n\n**Layer 1 — the PRD**, read in a fixed order (`dev-lead.md` step 1): Goal → Acceptance Criteria → Implementation notes → Out of scope. Implementation notes exist so it doesn't re-derive paths, but it's told to verify them against real code, since a PRD can drift between authoring and execution.\n\n**Layer 2 — `standards.md`**, 5 sections at `~/.claude/plugins/cache/session-manager/session-manager-dev/0.1.0/skills/develop/standards.md`: Performance · Debugging approach · API reuse and single source of truth · Test-driven development · **Execution discipline (headless runs)**.\n\nThat last section is the real dev-lead operating manual, and it's notable that it's derived from data — \"400+ scheduler runs\" — not from principle. Its rules are all shaped by one adversary: **the post-run verifier reads the transcript and downgrades to `needs_review` on error markers.** So:\n\n- Bound every command with `timeout` — long hangs are the dominant real failure\n- Run the AC gate **last**, let nothing error after it (the final ~20% is weighted heaviest)\n- Invert negative-assertion greps — bare `grep` exits 1 on no-match, so the *success* path looks like a failure\n- Annotate expected exit 124; never leave a bare `Traceback` unrecovered within ~10 lines\n- Stay inside the AC (this ru…",
-        "id": "pevt-msco1fyq-15",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "at": "2026-08-03T03:24:47.762Z"
+        "causedByEventId": "pevt-msctheda-44",
+        "text": "**PRD 983 implemented, tested, pushed** (`aa482d1`). Two PRDs off the queue this session.\n\n## The diagnosis — it was none of my three candidates\n\nI'd guessed the override came from the auto-fix block, `reverifyNeedsReview`, or a rescan. It was a fourth thing, and every part looked correct in isolation:\n\n1. Job 972 ran 34s, edited nothing, exited 0. `verifyRun` correctly raised `no_verdict_sentinel` → `needs_review`. **Working as designed.**\n2. `no_verdict_sentinel` is in `RESCANNABLE_VERDICTS`, so `reverifyNeedsReview` re-verified it a minute later. **Also as designed.**\n3. The rescan recomputes `committedDuringRun` via `committedInWindow` — which is `git log --all --since=<startedAt> --until=<finishedAt+60s>` with **no author, message, or slug filter**. It answers *\"did any commit land in this repo during that window\"*, not *\"did this job commit\"*.\n4. With up to 3 concurrent jobs plus interactive sessions on one repo, a sibling's commit lands in that window routinely. `committedDuringRun` flipped true → runVerify's `if (sentinel === null && !committedDuringRun)` never fired → empty issue list → verdict `clean` → `COMPLETED_EQUIVALENT`.\n5. Healed `needs_review` → `completed`.\n\n**Another job's commit was credited to a run that did nothing.** That's the false green, and it's a race that gets *more* likely the busier your queue is.\n\nFix: `healRefusalReason()` gates the self-heal. A run whose verdict was `no_verdict_sentinel` and which recorded no `landedCommit` of its own is refused — repo-wide time-window evidence is not attribution. `landedCommit` is per-job and survives `resetJobFields`, so it's the honest signal. `transcript_errors`/`verify_unavailable` and any job with its own commit heal exactly as before.\n\n## Verification\n\n- New `scheduler-heal-refusal.test.cjs`: **7 passed**, covering both directions (refuses the 972 shape, still heals legitimate cases including `pass_no_commit_already_shipped` and the other two verdict classes)\n- Full main-process + lib suites…",
+        "id": "pevt-msctozn8-47",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T06:03:04.436Z"
       },
       {
-        "kind": "response",
-        "causedByEventId": "pevt-msco1fyq-15",
-        "text": "Agreed — and that principle is already *mostly* honored, which makes the exceptions worth naming precisely. Here's the audit against \"library is SoT, everyone else references it.\"\n\n## Current state: two libraries, cleanly layered\n\nNot a violation — it's a real split of concerns, and `tagLibrary.ts` imports `agentTagDefs.ts`, so the dependency is one-way:\n\n| Library | Owns | Consumed by |\n|---|---|---|\n| `agentTagDefs.ts` → `AGENT_TAG_DEFS` | **Meaning** — `description`, `initialPromptTemplate` | `epicIntake.ts`, `NewEpicCard`, `Home`, `TagLibrary`, `tagLibrary.ts` |\n| `tagLibrary.ts` → `TAG_LIBRARY` | **Membership + routing** — `label`, `developsVia`, `developEagerness`, `EpicTag` union, `TAG_GROUP_ORDER` | `ticketDisplay`, `epicQueueControls`, `NewEpicCard`, `AgentLibrary`, `TagLibrary` |\n\nAnd `NewEpicCard.tsx` is the model citizen — it holds **zero** tag literals in its render path: `TAG_GROUP_ORDER` for the list, `tagLibraryEntry(t).label` for the pill, `agentTagDef(tag).description` for the mission blurb, `tagLibraryEntry(tag).developsVia`/`developEagerness` for the routing line. Exactly the strong coupling you're describing.\n\n## Violations — ranked\n\n**1. `prdFrontmatter.ts:195` silently drops `discussion` — this is a live bug, not just drift.**\n```ts\nif (v === 'feature' || v === 'bug' || v === 'build') fm.tag = v\n```\nThe declared type on line 37 is a 4-tag union *including* `discussion`, but the parser accepts 3. A PRD with `tag: discussion` in its frontmatter loses that field on every round-trip through SchedulerPrdsView. Both the type and the check should be `TAG_GROUP_ORDER.includes(v)`.\n\n**2. `AGENT_TAG_ORDER` (agentTagDefs.ts:97) is hardcoded and its own docblock is stale.**\n```ts\nexport const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder']\n```\nFour entries; missing `build` and `bilko-host-publisher`. Three separate problems in one line:\n- It contradicts `TAG_GROUP_ORDER` (6, derived) — two orderings for \"canonical o…",
-        "id": "pevt-msco6h56-16",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "at": "2026-08-03T03:28:42.570Z"
+        "id": "7f56c8a7-382d-4897-bcde-1d7f755c8e13",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msctozn8-47",
+        "at": "2026-08-03T06:05:27.947Z",
+        "prdSlug": "995-verifyrun-dead-prd-path"
       },
       {
-        "kind": "response",
-        "causedByEventId": "pevt-msco6h56-16",
-        "text": "Agreed — and the file already knows this rule; it just doesn't follow it. Line 23 literally ends *\"Don't restate any of this elsewhere; link there\"* — and is itself 211 words of restatement.\n\n## The measurement\n\n**5,432 words / 172 lines.** Loaded on every single turn of every session in this project.\n\n| Section | Words | % |\n|---|---:|---:|\n| **Domain model (TAB / EPIC)** | **2,841** | **52%** |\n| Architecture (load-bearing files) | 1,004 | 18% |\n| Avoid | 389 | 7% |\n| Marketing page + purchase flow | 250 | 5% |\n| everything else (9 sections) | 948 | 17% |\n\nTwo bullets alone — line 19 and line 21 — are **1,007 words, 18.5% of the entire always-loaded file.** Neither is a single line under 100 words; the median domain-model bullet is 130.\n\n## Three distinct failure modes\n\n**Mode 1 — restates a reference file that already exists.** Fixable now, pure deletion.\n\n| Line | Words | Already fully covered by | Should become |\n|---|---:|---|---|\n| 23 (lifecycle) | 211 | `prompt-sessions/README.md` §Lifecycle (lines 149–290, incl. §Transitions in detail, §Three entities, §Persisted-vs-derived) | ~25 w + link |\n| 32 (single-writer law) | 170 | `opsOwnership.cjs` header comment (30 lines: the *why*, fail-closed rationale, enforcement-point list) | ~30 w + link |\n| 27 (persistence) | 34 | `prompt-sessions/README.md` §Storage layout | fold into 23's link |\n| 29 (Scheduler browser) | 130 | `scheduler/README.md` §Storage layout + §What lives OUTSIDE | ~30 w + link |\n\n**Mode 2 — states real rules with no reference file to point at.** These are the expensive ones and need a doc *created* before the text can leave.\n\n| Line | Words | Content with no home |\n|---|---:|---|\n| 19 | **549** | Agent+Tag two-axis model, AgentLibrary CRUD, `tags:` frontmatter many-to-many, `agentType` naming rationale (4 call-sites), NewEpicCard column layout, grounding-board inspector-not-control rule, `--model` resolution across two views |\n| 21 | **458** | Settings-is-substrate law, the `model` carve-out, t…",
-        "id": "pevt-msco8ba0-17",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "at": "2026-08-03T03:30:08.280Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msco8ba0-17",
-        "text": "Committed — two commits, split along this repo's existing convention (code vs. `chore(ops)` runtime-state sync, matching `e14bbb5`/`a42fff0`).\n\n**Gates run before committing, all green:**\n\n| Gate | Result |\n|---|---|\n| `npm run typecheck` | clean, exit 0 |\n| `vitest src/main/__tests__/projectPages.test.cjs` | 8 passed |\n| `vitest .../ProjectPagesSection.test.tsx` | 7 passed |\n| `npm run lint:selectors` | OK, 415 files scanned |\n\n**`2402369` — `feat(project-pages): ship a default home.html instead of an empty state`** (5 files, +165/−34, plus the new `src/main/templates/project-pages-default-home.html`). A never-generated project returned `{ output: null }` and rendered blank; `get()` now falls back to a shipped build-time default with `isDefault: true` / `generatedAt: null`. `marketing`/`feature`/`architecture` became optional in `ProjectPagesOutput` since the default only covers the home lens.\n\n**`dd66511` — `chore(ops): sync runtime state`** (35 files). PRDs 963–965 and 968–969 archived into their Epics' `prds-archived/`, new Epic records + transcripts + attachments, reserved numbers 965–972, `queue.json`/`history.jsonl` advanced.\n\nWorking tree is clean. Not pushed — per your release convention, push/publish waits for an explicit trigger.\n\nTwo notes:\n\nThe `src/` changes were **not authored in this session** — they were already in the working tree when it started, from a prior scheduler run of the `project-home-hosted-html-spec` PRD. I read the full diff and verified it against its gates before committing, but I didn't write it, and the commit message is reconstructed from the diff rather than from having done the work.\n\n`node --test src/main/__tests__/projectPages.test.cjs` fails, but that's expected and not a real failure — CLAUDE.md documents that this repo doesn't use `node --test` (it can't resolve the TypeScript renderer imports). The same file passes 8/8 under vitest. I ran it the wrong way first; only the vitest result is meaningful.\n\nNothing from the four …",
-        "id": "pevt-mscod5nm-19",
-        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
-        "at": "2026-08-03T03:33:54.274Z"
+        "id": "224a7ca0-d7dc-4b3d-8afb-f5baa2a12415",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "7f56c8a7-382d-4897-bcde-1d7f755c8e13",
+        "at": "2026-08-03T06:05:59.277Z",
+        "prdSlug": "996-commit-guard-covers-zero-edit-runs"
       }
     ],
     "session-chat-conversion-into-simplified-chat-so--7cda6827": [
@@ -926,32 +878,22 @@
         "id": "pevt-mscs3v4p-37",
         "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
         "at": "2026-08-03T05:18:39.193Z"
-      }
-    ],
-    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": [
-      {
-        "id": "pevt-mscrbzdz-33",
-        "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T04:56:58.340Z",
-        "text": "Delete the Keybindings Tab\n\nKeybindings tab is not good and should be deleted all relevant keys or features too, deep clean-up, the publish to git"
-      },
-      {
-        "id": "95d0e8fb-4d13-4ea3-a173-22a59c73a975",
-        "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T04:56:58.340Z",
-        "text": "Delete the Keybindings Tab\n\nKeybindings tab is not good and should be deleted all relevant keys or features too, deep clean-up, the publish to git"
       },
       {
         "kind": "response",
-        "causedByEventId": "95d0e8fb-4d13-4ea3-a173-22a59c73a975",
-        "text": "Pushed as `e0f779a`.\n\n## What was removed\n\n| Surface | File |\n|---|---|\n| The tab component | `src/renderer/components/tabs/Keybindings.tsx` (464 lines) |\n| Model/catalog/presets/key-capture | `src/renderer/lib/keybindings.ts` (309 lines) |\n| Unit tests | `tests/unit/keybindings.spec.ts` (196 lines) |\n| `NavKey` union member | `LeftNav.tsx` |\n| Nav row + `keys` icon binding | `lib/navGroups.ts` |\n| Screen registry entry + render case | `lib/screenKeys.ts`, `screenComponents.tsx` |\n| `/keybindings` slash-nav shortcut | `lib/slashCommand.ts` |\n| `nav:keybindings` Cmd-K entry | `CommandPalette.tsx` |\n| `KEYBINDINGS_SCOPES` | `lib/scopes.ts` |\n| Monaco `claude-code-keybindings.json` schema | `App.tsx` (+ stale comment in `main/index.cjs`) |\n| Learning-panel content block | `learningContent.ts` |\n| Nav-face tests, e2e tab list (14→13) | `navGroupsHome.test.ts`, `tabs-smoke.spec.ts` |\n| Docs | `README.md` |\n\n**Deliberately kept:** F1 push-to-talk (`voiceHotkey.cjs`, `voiceSettings.cjs`, `VoiceModal.tsx`) — a separate feature configured from the Voice tab, not this tab. README line 86 previously said \"configurable in Keybindings\"; corrected to \"the Voice tab\". The `keys` AlmanacIcon stays — still used by `EffectiveCards.tsx` for env vars.\n\n**Verified:** `npm run typecheck` clean · `lint:selectors` OK (423 files) · zero residual `keybinding` matches under `src/`, `tests/`, `README.md`.\n\n## Two things I did not do\n\n1. **`npm run test:e2e` was not run.** A scheduler job (PRD 978) is running right now; launching a second Electron SIGTERMs live jobs and clobbers `admin-api.json`. `tabs-smoke.spec.ts` is the affected suite and needs a run once the queue is idle.\n2. **No npm publish.** You said \"publish to git\" and that's what landed — commit + push to `origin/main`. Version is still 0.58.0.\n\n**Pre-existing red tests, untouched by this change:** 49 failures across 5 Epic/chat files, all `TypeError: window.api.transcripts.onEvent is not a function` at `state/chat.ts:1100`. I confi…",
-        "id": "pevt-mscrhi4c-34",
-        "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
-        "at": "2026-08-03T05:01:15.900Z"
+        "causedByEventId": "pevt-mscs3v4p-37",
+        "text": "**Both PRDs queued and committed as `6c5ef19`.**\n\n| NN | Slug | Est | What it fixes |\n|---|---|---|---|\n| 991 | `scheduler-auto-retry-no-verdict-runs` | 26m | The missing auto-recovery you flagged |\n| 992 | `flat-prd-consolidation-respects-live-jobs` | 18m | Boot race that strands a live job's source file |\n\nFiled under `prd-to-epic-communication…dd52dacb`, not the Simplified Chat Epic — these are scheduler defects and belong with the other PRD/Epic-communication work (983–987).\n\n**On (2) — you're right, and here's specifically what's missing.** The scheduler has three recovery mechanisms and none of them covers this case:\n\n- boot reconciliation → only reaps orphaned **PIDs**\n- dead-process reaper → only classifies runs that actually **died**\n- rate-limit auto-pause → only handles `rateLimited` exit 1\n\nA run that exits **0** having done nothing falls through all three. It looks like a clean success to every existing check, so it parks in `needs_review` and waits for a human. That's why recovery has been manual both times.\n\n991's detector deliberately requires **all three** signals together — exit 0 **and** no verdict sentinel **and** no new commit in the PRD's cwd. Keying on any one alone would be dangerous: a run that legitimately finished but forgot to print the sentinel would get re-run and double-apply its own diff. It retries **once only**; a second failure still parks for you. `rateLimited` is explicitly carved out so the designed auto-pause never burns the retry budget.\n\n**One correction to carry forward from my last turn:** I said flat-dir PRDs never execute. That was wrong — `980-fix-chat-typed-event-renderers` is `running` from that dir right now, because `prdLocations.cjs:133` still scans it as a source. The actual defect is the narrower race 992 describes. I'd rather flag that than let the wrong version stand.\n\n**Still true and unchanged:** `980-chat-typed-event-renderers` remains parked in `needs_review`. 991 will prevent the *next* one, but it won't re…",
+        "id": "pevt-mscs9zhz-39",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T05:23:24.791Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscs9zhz-39",
+        "text": "**Claimed and implemented PRD 992 — committed `214de45`.** 14 new tests, `prdMigration` suite 22/22 green.\n\n## Queue state\n\n| status | slug |\n|---|---|\n| running | `982-epic-intake-structured-sections` |\n| pending | `983`, `984`, `986`, `987`, `991` |\n| ~~pending~~ **done** | `992-flat-prd-consolidation-respects-live-jobs` |\n\nThe Simplified Chat chain landed while we talked — `295c875` (980, typed renderers + router-never-filter) and `86df0aa` (981, three-zone frame with attribution chips). 982 is the last one and it's running now.\n\n## What I did\n\n`consolidateFlatPrds` now reads the project's queue shard and skips any file whose slug has a live job (`pending`/`running`/`needs_review`/`investigating`), reporting it as `skipped` instead of dropping it — the same never-silently-dropped shape `migratePrds` already uses for `unresolved`. It **fails closed** on an unreadable `queue.json`: liveness unknown means nothing is provably safe to move. An *absent* `queue.json` stays a normal no-jobs case, so fresh projects still consolidate.\n\n`needs_review` counts as live on purpose — it's awaiting you, and its source has to survive.\n\n## Two things you need to know\n\n**1. `npm run typecheck` is currently RED — but not from my change.** Two errors, both in `src/renderer/components/epics/__tests__/NewEpicCard.test.tsx`:\n\n```\nTS18048: 'persistedSections' is possibly 'undefined'   (lines 315, 316)\n```\n\nThat's **PRD 982's in-flight work**, mid-run right now. `persistedSections` is exactly the field 982 was specified to add. My files are `.cjs` and aren't typechecked at all. I left it alone — touching a live executor's files would corrupt its run. If 982 finishes and this error is still there, it shipped red and needs a follow-up.\n\n**2. I did not commit `src/main/scheduler.cjs`.** My caller-side logging hunk (surfacing `skipped` files at boot) is written and sitting **uncommitted** in the working tree, because that file also holds another executor's unfinished PRD 985 work (`resolveNoti…",
+        "id": "pevt-msctjjnd-45",
+        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
+        "at": "2026-08-03T05:58:50.425Z"
       }
     ],
     "not-enough-paralell-processing-why-i-never-see-3-6a96029e": [
@@ -1010,6 +952,46 @@
         "id": "pevt-mscs79ol-38",
         "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
         "at": "2026-08-03T05:21:18.021Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscs79ol-38",
+        "text": "Fixed and committed as `6cffe7f`. Your queue goes from 1 concurrent to filling every free slot.\n\n## What was actually wrong — two independent bugs stacked\n\n**1. The batch picker was gating on a number that stopped meaning anything.**\n\n`schedulerBatch.cjs` treated `parallelGroup` as a *wave* number: fire one wave per tick, hold every higher wave while a lower one is in flight. PRD 832 had already made that number **unique per PRD** and moved ordering to `dependsOn` — `prdCreate.cjs` even warns an explicit group is \"deprecated and ignored\" — but the picker was never updated. Unique numbers ⇒ every wave is a singleton ⇒ **batch size always exactly 1**. And since numbers are allocated monotonically upward, every newly queued PRD sorted above the running one and got held behind it.\n\nThat's why the fix PRDs were themselves stuck behind the bug — which is why I implemented them inline instead of queuing and waiting.\n\n**2. A private cap of 3 that shouldn't exist.**\n\nYou were right that it's 5 — that's the pool. But `scheduler.cjs` carried its own `concurrencyCap: 3`, which is precisely the per-consumer cap `sessionSlots.cjs` was written to eliminate (its header names the scheduler's 3 and chatRunner's 2 as the problem). chatRunner's was retired; the scheduler's wasn't. So the Home tab said 5 and the scheduler quietly meant 3.\n\n## Changes\n\n- `schedulerBatch.cjs` — wave logic deleted. Eligible = pending + deps satisfied; fire all of them up to free slots, ordered by PRD number as a hint. The cross-group failure gate is replaced by dependsOn-scoped holds, so a failed PRD stops its transitive dependents rather than every higher-numbered job in the project.\n- `scheduler.cjs` — `tickQueue` passes `sessionSlots.available()` to the picker; `concurrencyCap`, `getEnvCap()` and `SM_SCHEDULER_MAX_CONCURRENCY` are gone. `effectiveConcurrency` now reports `{cap, free, source}` off the pool.\n- `SchedulePanel.tsx` — the \"Up to N at once\" control now writes `setSessionSlots` (range [0,10]) …",
+        "id": "pevt-mscstr67-40",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T05:38:47.119Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscstr67-40",
+        "text": "**Yes — claimed, implemented, committed as `0dc4e40`.**\n\n## On your question: claim first, and here's why it mattered\n\nThe app **is** running (v0.53.0) with a live job. Two ways to claim:\n\n- **Editing `queue.json` status** — bad. That file is scheduler-owned under the single-writer law, and the live app's `mutate()` would race my write.\n- **Moving the PRD `.md` out of `prds/`** — clean. `reconcile` drops a non-terminal row whose source file vanished, and it's a filesystem op the app won't fight over. That's what I did.\n\nThere's no `reserved` status in the codebase — the statuses are `pending / running / investigating / needs_review / completed / failed` — so the file move *is* the claim mechanism here.\n\n## What 990 does\n\n`tickQueue` already computed a precise reason for every empty batch and threw all of it into `console.log`. That's the whole reason you had to ask me instead of reading it off the screen. Now it's data:\n\n- **`schedulerBatch.cjs`** — `pickForProject`/`pickNextBatch` return `holds`: one `{slug, dep, depStatus}` per pending row blocked by a dependency. The info existed; only the *failed*-dep subset ever escaped.\n- **`scheduler.cjs`** — `recordTick()` captures each outcome (reason, detail, deferred count, memory numbers, holds) into `lastTick`, broadcast with the schedule state.\n- **Home** — the Active-sessions widget shows the binding constraint beside the slot count: `memory gate: 4200 MB free, need 5500`, `all 5 slots busy — 3 pending`, or `2 pending held behind dependencies`. Silent when there are no pending jobs, so an idle queue can't read as a blocked one.\n- **SchedulePanel** — a held row now reads `held · waiting on 985-notify-epic-prd-path-fix-redo (pending)` instead of looking identical to a merely-queued row.\n\nLive check against your queue: **4 jobs would fire, 1 hold surfaced** — and the hold names its blocking dep.\n\n## Two deviations, both deliberate\n\n**No outbound zod schema.** The PRD's AC asked for one, but `ipcSchemas.cjs` validates *in…",
+        "id": "pevt-msctejrr-43",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T05:54:57.303Z"
+      },
+      {
+        "id": "861b9a48-ccbf-423f-9f77-46cce95a89cd",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msctejrr-43",
+        "at": "2026-08-03T06:00:42.740Z",
+        "prdSlug": "993-per-job-commit-attribution"
+      },
+      {
+        "id": "f0f93f30-c776-49c9-a070-da1d7f71d12a",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "prd_created",
+        "causedByEventId": "861b9a48-ccbf-423f-9f77-46cce95a89cd",
+        "at": "2026-08-03T06:01:15.582Z",
+        "prdSlug": "994-scheduler-job-worktree-isolation"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "f0f93f30-c776-49c9-a070-da1d7f71d12a",
+        "text": "**Decision: yes to worktrees — but 993 first, because parallelism broke something worse than file collisions.**\n\n## The finding that changed my priority\n\nRaising concurrency silently **disabled the commit guard**. All three of its signals are cwd-global and were written assuming one job per project:\n\n| Signal | Site | What it does at 4-wide |\n|---|---|---|\n| `committedInWindow` | `scheduler.cjs:291` | `git log --all --since --until` on the shared cwd — **any sibling's commit** counts as this job's |\n| `jobSelfCommitted` | `:2967` | `guardHeadAfter !== guardHeadBefore` — a sibling's commit moves HEAD too |\n| `siblingRunning` | `:2963` | Suppresses the uncommitted-changes downgrade whenever *any* other job runs in that cwd — at 4-wide that's ~always true, so `commitGuardVerdict` returns `null` and the guard is **off while the queue is busy** |\n\nNet: **a job that ships zero code can be certified by a sibling's commit.** That is exactly the PRD 972 failure you already have 985/986/987 open about — parallelism turns it from a rare race into the default case. I'd rather flag that I widened this hole than let it sit.\n\n## Queued\n\n- **993 · `per-job-commit-attribution`** (55m, no deps) — commits carry a `Scheduler-Job: <slug>` trailer; the guard greps for it instead of timing. `jobSelfCommitted` stops keying on a bare HEAD move. `siblingRunning` stops being a blanket suppressor — scoped to the dirty *files*, so a job leaving its own work dirty is still caught. **`git add -A` comes out of the finish protocol** — with N jobs in one tree it sweeps siblings' in-flight edits, which is exactly what forced me to hand-stage 6 files this turn.\n- **994 · `scheduler-job-worktree-isolation`** (90m, deps: 993) — worktree per job, with the fallback preserved.\n\nTrailer-based attribution composes with worktrees (the trailer travels with the commit object regardless of which checkout authored it), which is why 993 goes first rather than being subsumed.\n\n## The trap I flagged in 994\n\n`session…",
+        "id": "pevt-msctn4hl-46",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T06:01:37.401Z"
       }
     ]
   },
@@ -1028,6 +1010,8 @@
     "psess-msc6lz8u-2": "2026-08-02T22:36:57.689Z",
     "psess-msc06fh7-6": "2026-08-02T22:37:04.555Z",
     "psess-msc7vrsg-15": "2026-08-02T22:37:08.609Z",
-    "psess-msch2lho-11": "2026-08-03T02:15:47.958Z"
+    "psess-msch2lho-11": "2026-08-03T02:15:47.958Z",
+    "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": "2026-08-03T05:41:08.442Z",
+    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": "2026-08-03T05:42:04.173Z"
   }
 }

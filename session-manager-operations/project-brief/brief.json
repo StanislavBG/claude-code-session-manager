@@ -1,99 +1,104 @@
 {
   "version": 1,
-  "synthesizedAt": "2026-08-02T22:35:03.497Z",
+  "synthesizedAt": "2026-08-03T05:36:06.962Z",
   "editedAt": null,
   "model": "sonnet",
-  "purpose": "Electron desktop cockpit for driving Claude Code CLI sessions — Terminal + config/observability/scheduling tabs, organized around a TAB→operations-root→EPIC→session hierarchy, with a mobile web mirror at bilko.run.",
+  "purpose": "A local Electron cockpit for orchestrating Claude Code CLI sessions across projects, organizing work into Agent+Tag-grounded Epics that decompose into scheduler-run PRDs.",
   "what": [
-    "The app's core domain model is **TAB** (a project cwd) containing **EPIC**s (`PromptSession`s, each a 1:1 tagged `claude` session with `agentType`/`tag` axes) which author **PRD**s run by the `scheduler`. Recent work landed the **Agent + Mission** two-axis grounding for New Epic creation (`NewEpicCard.tsx`, `lib/epicIntake.ts`, `lib/groundingBoard.ts`), made `AgentLibrary.tsx`/`TagLibrary.tsx` full CRUD editors, and retired the `feedback/` folder in favor of `status: 'proposed'` Epics filed via `/propose-epic`.",
-    "Persistence lives under `<cwd>/session-manager-operations/` governed by a **single-writer law** (`opsOwnership.cjs`) — each namespace (`prompt-sessions`, `scheduler`, `project-brief`, `browser`, `bilko-host`) has exactly one owning writer, fail-closed. The `scheduler.cjs` runs PRDs as `claude -p` jobs capped at 3 concurrent (session slot pool), with boot-reconciliation, a dead-process reaper, and a definition-of-done gate at queue-drain.",
-    "Four **active Epics** are in flight: `Project Home Redesign` (bug — wiring the Component Library into the generate pipeline), `Design Agents, Missions and the Develop Skill` (discussion — how `/develop` relates to the new Agent+Mission grounding), `Bilko.run Integration` (feature — a new left-nav tab to publish projects like the Marketing Page to bilko.run via an agent), and `Session Manager Operations - Maintain` (feature — a sweep protocol, now landed as the `ops-sweep` skill, to clean redundant content across projects' `session-manager-operations/` folders).",
-    "Git history shows heavy recent churn on Epic/Agent/Scheduler UX: two-axis picker, grounding board, agent title/department grouping, `bilko-host` publishing wiring, `/develop-eagerness` skill routing surfaced in Epics, and `ops-maintenance-protocol` doc contradictions resolved. Version is at v0.57.0 (frequent `/builder` release cycles)."
+    "The **TAB→EPIC→PRD** hierarchy is the whole app's spine: a Terminal tab pins a project cwd, each **Epic** is a `PromptSession` combining an **Agent** persona (who) and a **Tag** mission (what), and Epics author `session-manager-operations/scheduler/` PRDs that headless `claude -p` jobs execute under a 3-slot concurrency cap.",
+    "Recent work (`295c875`, `8bac5b0`, `f5d3878`) rebuilt the **Chat view** to read directly from the `~/.claude/projects/.../*.jsonl` transcript feed via typed per-event-family renderers, demoting `chatRunner.cjs` to a live tap rather than the source of truth — this replaced a 500-entry ring buffer with an indexed, paged read.",
+    "The **Agent + Tag** vocabulary was formalized as the per-Epic customization layer (`d7c5d47`, `6b6a092`, `0c294fe`): Settings.json stays substrate-only (identical for every Epic in a project), while `model`/behavior differences belong to a custom Agent persona or Tag, not a Settings edit.",
+    "**Project Home** (`ca3d82a`, `a34da4b`, `2402369`) shifted to hosting a generated `home.html` document with a single \"generate\" action pulling from a saved component library, rather than juggling separate pages.",
+    "The **Keybindings tab was fully deleted** (`e0f779a`) as dead-clean-up work, and several open discussion Epics (parallelism gaps, PRD↔Epic communication, Agent vs Skill responsibility) remain unresolved design questions rather than shipped features."
   ],
   "areas": [
     {
-      "name": "Epics / PromptSessions",
-      "files": 8,
-      "note": "New Epic card two-axis Agent+Mission picker, grounding board, lifecycle guards against minting 'active' directly",
-      "epic": "Design Agents, Missions and the Develop Skill",
+      "name": "src/main/scheduler.cjs + lib/",
+      "files": 15,
+      "note": "PRD execution engine: queue, boot reconciliation, DoD gate, RCA reporting back to authoring Epic",
+      "epic": "PRD to EPIC Communication",
+      "heat": 0.8
+    },
+    {
+      "name": "src/renderer/state/chat.ts + components/ChatTranscriptTurn.tsx",
+      "files": 3,
+      "note": "Typed chat renderers sourced from JSONL feed, replacing chatRunner-driven ring buffer",
+      "epic": "Session Chat conversion into Simplified Chat",
       "heat": 0.9
     },
     {
-      "name": "Agent Library / Tag Library",
-      "files": 4,
-      "note": "Full CRUD editor writing ~/.claude/agents/*.md, many-to-many tag membership, title/department grouping",
-      "epic": "Redesign Agent and Tag Library",
-      "heat": 0.7
-    },
-    {
-      "name": "Scheduler",
-      "files": 6,
-      "note": "Queue/PRDs/History via SchedulePanel, boot reconciliation, dead-process reaper, dod-drain gate",
+      "name": "src/main/chatRunner.cjs + transcripts.cjs",
+      "files": 2,
+      "note": "Headless claude -p runner demoted to live tap; indexed paged transcript reads",
       "epic": null,
-      "heat": 0.5
-    },
-    {
-      "name": "Project Pages / Home",
-      "files": 5,
-      "note": "Generate pipeline for 4 static Project Page HTML files; not yet wired to Component Library",
-      "epic": "Project Home Redesign",
       "heat": 0.6
     },
     {
-      "name": "Ops folder maintenance",
+      "name": "src/renderer/components/tabs/EpicDetail.tsx + SchedulePanel.tsx",
       "files": 2,
-      "note": "ops-maintenance-protocol.md + new ops-sweep skill for cross-project cleanup audits",
-      "epic": "Session Manager Operations - Maintain",
-      "heat": 0.4
+      "note": "Epic detail view, PRD dispatch chip status rollup",
+      "epic": "PRD to EPIC Communication",
+      "heat": 0.5
     },
     {
-      "name": "bilko-host / Bilko.run publishing",
-      "files": 3,
-      "note": "bilkoHost.cjs, bilkoHostCore.cjs; publishing wiring landed, Integration tab UX still to design",
-      "epic": "Bilko.run Integration",
+      "name": "src/main/agentLibrary.cjs + AgentLibrary/TagLibrary UI",
+      "files": 4,
+      "note": "CRUD editor for personas, many-to-many tag membership, model default per persona",
+      "epic": "Explore the Agent Context and SubAgents",
       "heat": 0.3
+    },
+    {
+      "name": "src/main/scheduler/ (dir) + schedulerBatch.cjs, schedulerConfig.cjs",
+      "files": 6,
+      "note": "Batch depends/concurrency logic, currently under active edit per git status",
+      "epic": "Not enough paralell processing",
+      "heat": 0.7
     }
   ],
   "scope": [
     {
       "when": "2026-08-02",
       "kind": "decided",
-      "text": "session-manager-operations/feedback/ fully retired; proposed Epics (status: 'proposed') replace the feedback-file intake pipeline entirely",
-      "src": "CLAUDE.md, commit aa11541"
+      "text": "Agent-facing Epic-proposal channels (/propose-epic, RCA auto-filed Epics, feedback sweep) are removed; only a human pressing New Epic can mint one — SINGLE-CREATOR LAW enforced fail-closed in epicMint.cjs",
+      "src": "claude_md"
     },
     {
       "when": "2026-07-31",
       "kind": "decided",
-      "text": "No general OWNERS namespace under session-manager-operations/ — skill-authored docs folders (architecture/, HUMAN_LEARN/, etc.) stay outside the fail-closed write-ownership check by design",
-      "src": "CLAUDE.md"
+      "text": "Scheduler reframed as a browser over TAB→EPIC→PRD; flat scheduler/prds/ retired in favor of per-Epic scheduler/epics/<epic-id>/prds/",
+      "src": "claude_md"
     },
     {
-      "when": "recent",
+      "when": "recent (git log)",
       "kind": "added",
-      "text": "Agent (persona, who) + Tag (mission, what) two-axis grounding for Epic creation, with a read-only grounding-board inspector (AIM framework: Actor/Input/Mission)",
-      "src": "commit 1c8f5ed, 009d69f"
+      "text": "Keybindings tab and all its surfaces deleted entirely",
+      "src": "git_log e0f779a"
     },
     {
-      "when": "recent",
+      "when": "recent (git log)",
+      "kind": "added",
+      "text": "Chat now sources its transcript from the JSONL feed with typed per-event renderers instead of chatRunner as source of truth",
+      "src": "git_log 8bac5b0, 295c875"
+    },
+    {
+      "when": "recent (git log)",
       "kind": "narrowed",
-      "text": "AgentLibrary.tsx / TagLibrary.tsx are no longer read-only directories — full CRUD editors with live-refresh on cross-edits",
-      "src": "commit 50b864e, 80bb5cc"
+      "text": "classifyLine now emits an array of events per line instead of one, fixing dropped transcript events",
+      "src": "git_log 07202b4"
     },
     {
-      "when": "recent",
-      "kind": "added",
-      "text": "ops-sweep skill added as the portable implementation of the ops-maintenance-protocol audit",
-      "src": "commit c9814cc"
+      "when": "open Epic",
+      "kind": "decided",
+      "text": "Settings (System/Project/Local) is substrate only; per-Epic behavior differences must be a Tag, an Agent persona, or a future effort/reasoning PRD — never a Settings edit",
+      "src": "claude_md"
     }
   ],
   "conventions": [
-    "Single-writer law over session-manager-operations/<namespace>/ — fail-closed, exceptions only via a declared delegation table",
-    "Zustand stores never cross-subscribe; compose via component selectors",
-    "Never return a freshly-built value from a zustand selector (React #185 blank-app risk) — three prior incidents",
-    "Cap concurrent claude -p jobs at 3 machine-wide (OOM incident 2026-06-10)",
-    "No CommonJS in renderer, no ES modules in main process .cjs files",
-    "Epic title/goalText fixed for session lifetime — never repurpose, start a new Epic instead",
-    "Every Epic is born 'proposed'; nothing is created directly as 'active'"
+    "Zustand stores are isolated islands (config.ts, live.ts, voice.ts, scheduleState.ts, toast.ts) — never cross-subscribe; compose in components.",
+    "Never return a freshly-built value (`?? []`, `.filter()`, `.map()`) from a zustand selector — causes React #185 blank-app; select raw slice and derive after.",
+    "All fs writes go through config.cjs's atomic writeJson/writeTextAtomic with a declared `writer` per the single-writer law over session-manager-operations/ namespaces.",
+    "Cap at 3 concurrent `claude -p` processes machine-wide (scheduler + chat runs share one session-slot pool) — exceeding this OOM-killed Electron once already.",
+    "No CommonJS in renderer, no ES modules in main; `.cjs` files bypass the package's `type: module`."
   ],
   "pins": {
     "what": false,

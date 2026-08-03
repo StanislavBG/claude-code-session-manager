@@ -512,7 +512,22 @@ function prdDirForCwd(cwd) {
   return resolvePrdWriteDir(cwd || DEFAULT_PROJECT_CWD);
 }
 
-/** Absolute path to `<job's project PRDs dir>/<job.slug>.md`. */
+/**
+ * Absolute path to `<job's project PRDs dir>/<job.slug>.md`. Resolves to
+ * `resolvePrdWriteDir(cwd)` — the RETIRED flat
+ * `<cwd>/session-manager-operations/scheduler/prds/` dir, which holds only
+ * zero-byte `.reserved-NNN` stubs and no PRD source for any Epic-scoped PRD
+ * (see resolveNotifyPrd's and resolveVerifyPrdPath's doc comments, PRD 985
+ * and 991). Do NOT reach for this in new code — use `findPrdDir(slug)` (via
+ * `resolveVerifyPrdPath`/`resolveNotifyPrd`, or directly for a fresh path)
+ * instead. The one legitimate remaining caller is executeJob's `prdPath`
+ * (~line 2235), which only falls back to this AFTER `findPrdDir` already
+ * came up empty — a real miss, not a resolution shortcut — matching this
+ * function's genuinely-legacy semantics rather than a bug. (PRD 991 also
+ * removed the two verify call sites and buildInvestigationPrompt's
+ * originalBody read from this list — all three now go through
+ * resolveVerifyPrdPath instead.)
+ */
 function prdPathForJob(job) {
   return path.join(prdDirForCwd(job && job.cwd), `${job && job.slug}.md`);
 }
@@ -1845,8 +1860,7 @@ function extractResultTextFromLog(logPath) {
  */
 async function resolveNotifyPrd(job, parsePrdRaw) {
   if (!job || !job.slug) return null;
-  const liveDir = await findPrdDir(job.slug).catch(() => null);
-  const livePath = liveDir ? safeSlugPathIn(liveDir, job.slug) : null;
+  const livePath = await resolveVerifyPrdPath(job);
   if (livePath) {
     const parsed = await parsePrdRaw(livePath).catch(() => null);
     if (parsed) return parsed;
@@ -1854,6 +1868,26 @@ async function resolveNotifyPrd(job, parsePrdRaw) {
   const archivedPath = archivedPrdPathForJob(job);
   if (!archivedPath) return null;
   return await parsePrdRaw(archivedPath).catch(() => null);
+}
+
+/**
+ * resolveVerifyPrdPath(job) → Promise<string|null>
+ *
+ * Path-only sibling of resolveNotifyPrd's live-dir lookup (PRD 985/991):
+ * find `<slug>.md` via findPrdDir's full candidate search (legacy flat dir +
+ * every project's Epic-scoped dirs) and return its safe, containment-checked
+ * path. Used by verifyRun call sites, which need a path string to read the
+ * PRD body from — not a parsed object — so it stops short of the
+ * parse-then-fall-back-to-archived step resolveNotifyPrd layers on top.
+ * Deliberately does NOT fall back to `prdPathForJob` (the retired flat dir,
+ * see that function's own doc comment) — a null here means the caller
+ * should treat the PRD as unresolved, not read a path that is known to
+ * never contain the file.
+ */
+async function resolveVerifyPrdPath(job) {
+  if (!job || !job.slug) return null;
+  const liveDir = await findPrdDir(job.slug).catch(() => null);
+  return liveDir ? safeSlugPathIn(liveDir, job.slug) : null;
 }
 
 /**
@@ -2688,7 +2722,8 @@ async function spawnInvestigation(failedJob, runDir) {
 
   let originalBody = '';
   try {
-    originalBody = (await parsePrd(prdPathForJob(failedJob))).body;
+    const originalPath = (await resolveVerifyPrdPath(failedJob)) ?? archivedPrdPathForJob(failedJob);
+    originalBody = (await parsePrd(originalPath)).body;
   } catch {
     originalBody = failedJob.bodyPreview || '(original PRD missing from disk)';
   }
@@ -2934,7 +2969,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         jobLandedCommitThisRun = headAtExit;
       }
 
-      const prdPath = prdPathForJob(job);
+      const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
       const stateForDeps = await readQueue();
       // priorLandedCommit: the commit a PREVIOUS run of this same slug landed,
       // if any — prefer the live jobs[] row (survives a resetJob, see
@@ -3886,7 +3921,7 @@ async function reverifyNeedsReview() {
   const leftForReview = [];
   for (const job of candidates) {
     const runDir = path.join(RUNS_DIR, job.runId || resolveRunId(job));
-    const prdPath = prdPathForJob(job);
+    const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
     // Derive committedDuringRun from the recorded run window. The live
     // commit-guard uses gitHead() (before/after HEAD diff); here the run is
     // already over so we query git log filtered to [startedAt, finishedAt+60s].
@@ -4779,4 +4814,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };

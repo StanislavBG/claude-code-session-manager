@@ -82,6 +82,7 @@ export default defineConfig({
       'src/main/__tests__/promptSessionsCreateEpicHandler.test.cjs',
       'src/main/__tests__/agentModelResolve.test.cjs',
       'src/main/__tests__/projectPages.test.cjs',
+      'src/main/__tests__/scheduler-verify-prd-path.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',
       'scripts/__tests__/active-sessions.test.cjs',

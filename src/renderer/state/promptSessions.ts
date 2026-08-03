@@ -157,6 +157,14 @@ export interface PromptSessionEvent {
    *  on-disk events (and 'response' events from other sources, e.g. chat's
    *  onComplete) stay valid with no outcome tone. */
   outcome?: 'completed' | 'failed' | 'needs_review'
+  /** PRD 986 — a scheduler PRD check-in is a REQUEST TO VALIDATE, not an
+   *  assertion of done. Events the scheduler appends for a check-in are born
+   *  'unvalidated' (never 'verified'), regardless of the job's self-reported
+   *  outcome; the authoring Epic's own validation pass moves it to
+   *  'verified'/'refuted'. Absent on pre-existing events (and on non-check-in
+   *  events), which render exactly as before — renderer surfacing of this
+   *  state is the sibling PRD, deliberately not this one. */
+  validation?: 'unvalidated' | 'validating' | 'verified' | 'refuted'
 }
 
 /**

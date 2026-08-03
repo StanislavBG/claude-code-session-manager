@@ -63,6 +63,7 @@ const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
+const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
@@ -1893,6 +1894,7 @@ async function notifyOriginatingTab(job, {
   appendResponseEvent = appendResponseEventIfKnown,
   appendTranscriptTurn = promptSessionTranscript.appendTurn,
   readResultFromLog = extractResultTextFromLog,
+  enqueueValidation = maybeEnqueueValidationPrompt,
 } = {}) {
   try {
     const prd = await resolveNotifyPrd(job, parsePrdRaw);
@@ -1938,14 +1940,45 @@ async function notifyOriginatingTab(job, {
     }
 
     if (epicId) {
+      // PRD 986: the check-in event is born validation:'unvalidated' — never
+      // 'verified' — regardless of the job's self-reported outcome. The
+      // check-in is a request to validate, not an assertion of done.
       const routed = await appendResponseEvent(job.cwd || null, epicId, message, {
         prdSlug: job.slug,
         outcome: job.status,
+        validation: 'unvalidated',
       }).catch((e) => {
         console.error('[scheduler] notifyOriginatingTab appendResponseEvent error', job?.slug, e);
         return false;
       });
-      if (routed) return;
+      if (routed) {
+        // PRD 986: a successful check-in append triggers ONE validation
+        // prompt into the authoring Epic's own session, asking it to verify
+        // every acceptance criterion against the real working tree and reply
+        // VERIFIED or REFUTED. Fire-and-forget, same convention as this
+        // function's own call site in tickQueue: a failure to enqueue is
+        // logged inside the hook, never thrown, and never blocks the job's
+        // status transition or the response-event append (which already
+        // happened above). All gating (kill-switch SM_EPIC_VALIDATION_DISABLE,
+        // active-Epic check, once-per-(epicId, prdSlug), loop guard, slot-pool
+        // routing) lives in lib/epicValidationHook.cjs.
+        try {
+          enqueueValidation(
+            {
+              cwd: job.cwd || null,
+              epicId,
+              prdSlug: job.slug,
+              prdPath: prd?.path || archivedPrdPathForJob(job) || null,
+              outcome: job.status,
+              eventValidation: 'unvalidated',
+            },
+            { sendPrompt },
+          );
+        } catch (e) {
+          console.error('[scheduler] notifyOriginatingTab enqueueValidation error', job?.slug, e);
+        }
+        return;
+      }
     }
 
     // appendResponseEvent already refused above (unknown id, completed
@@ -2003,7 +2036,16 @@ async function notifyNeedsReview(job, report, {
       return false;
     }
     const message = `${report.summary}. Root-cause report: ${report.path}`;
-    return await appendResponseEvent(job.cwd, epicId, message, { prdSlug: job.slug, outcome: 'needs_review' });
+    // PRD 986: like every scheduler check-in, born 'unvalidated' — the RCA
+    // report is itself a question, not a verified outcome. No validation
+    // prompt is enqueued here: that fires only for the terminal
+    // completed/failed path (notifyOriginatingTab); needs_review already
+    // routes its own question via this very report.
+    return await appendResponseEvent(job.cwd, epicId, message, {
+      prdSlug: job.slug,
+      outcome: 'needs_review',
+      validation: 'unvalidated',
+    });
   } catch (e) {
     console.error('[scheduler] notifyNeedsReview error', job?.slug, e);
     return false;

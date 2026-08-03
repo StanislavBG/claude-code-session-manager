@@ -55,9 +55,14 @@ function mintEventId() {
  * The optional 4th argument stamps `prdSlug`/`outcome` onto the appended
  * event (PRD 976) — which PRD checked in and whether it completed, failed,
  * or needs review — so the Epic's own event chain keeps that signal even
- * after the job is archived out of queue.json. Both keys are added to the
- * event object only when present in `meta`, never as `undefined`-valued
- * keys, so events appended without them serialize identically to before.
+ * after the job is archived out of queue.json. PRD 986 extends the same
+ * meta arg (not a fifth positional parameter) with `validation`: a
+ * scheduler check-in is born `'unvalidated'` — never `'verified'` —
+ * regardless of the job's self-reported outcome; the authoring Epic's own
+ * validation pass is what may later move it to 'verified'/'refuted'. All
+ * keys are added to the event object only when present in `meta`, never as
+ * `undefined`-valued keys, so events appended without them serialize
+ * identically to before.
  */
 async function appendResponseEventIfKnown(cwd, sourcePromptId, text, meta = {}) {
   if (!cwd || !sourcePromptId) return false;
@@ -82,6 +87,7 @@ async function appendResponseEventIfKnown(cwd, sourcePromptId, text, meta = {}) 
       };
       if (meta && meta.prdSlug) event.prdSlug = meta.prdSlug;
       if (meta && meta.outcome) event.outcome = meta.outcome;
+      if (meta && meta.validation) event.validation = meta.validation;
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });

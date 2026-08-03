@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import type { PromptSession } from '../state/promptSessions'
+import type { EpicIntakeSection } from '../lib/epicIntake'
 
 /** Mirrors main's ensureEpic()/epicMint.cjs id-minting shape (`<slug>-<uuid8>`)
  *  closely enough for tests to assert against — the real mint is a main-
@@ -24,11 +25,15 @@ export function fakePromptSessionsCreate() {
       goalText,
       tag,
       agentType,
+      openingPrompt,
+      sections,
     }: {
       cwd: string
       goalText: string
       tag?: PromptSession['tag']
       agentType?: string
+      openingPrompt?: string
+      sections?: EpicIntakeSection[]
     }) => {
       const epicId = `${slugifyForTest(goalText)}-${crypto.randomUUID().slice(0, 8)}`
       const now = new Date().toISOString()
@@ -42,6 +47,8 @@ export function fakePromptSessionsCreate() {
         completedAt: null,
         ...(tag ? { tag } : {}),
         ...(agentType ? { agentType } : {}),
+        ...(openingPrompt ? { openingPrompt } : {}),
+        ...(sections && sections.length ? { sections } : {}),
       }
       return { epicId, session }
     },

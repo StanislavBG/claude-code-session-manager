@@ -179,7 +179,10 @@ describe('EpicsWorkspace', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'a brand new goal', 'feature', 'NewEpicCard')
+    // Sliced to the first 4 args — openingPrompt/sections (trailing args,
+    // PRD session-chat-conversion-into-simplified-chat) are covered by
+    // NewEpicCard.test.tsx's own dedicated tests.
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual(['/home/bilko/Projects/beta', 'a brand new goal', 'feature', 'NewEpicCard'])
     expect(el.querySelector('[data-testid="new-epic-card"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })

@@ -9,6 +9,7 @@ import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
+import { EpicIntakeCard } from './EpicIntakeCard'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { prettyModel } from '../../lib/prettyModel'
 import { ViewTabs } from '../ui/ViewTabs'
@@ -758,6 +759,24 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 const t = item.turn
                 const i = visibleTurns.indexOf(t)
                 const precedingUserPrompt = nearestPrecedingUserPrompt(visibleTurns, i)
+                // The Epic's very first turn IS its opening prompt — when
+                // this Epic carries composeEpicIntake's structured sections
+                // (absent on Epics minted before this field existed, or on
+                // ones whose opening prompt carried none), render it as the
+                // AIM briefing card instead of the ordinary flat-text bubble.
+                // Renders from `sections` data only, never by re-parsing
+                // `t.text`.
+                if (i === 0 && t.role === 'user' && promptSession.sections && promptSession.sections.length > 0) {
+                  return (
+                    <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
+                      <EpicIntakeCard
+                        sections={promptSession.sections}
+                        at={t.at}
+                        openingPrompt={promptSession.openingPrompt ?? t.text}
+                      />
+                    </div>
+                  )
+                }
                 return (
                   <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
                     <Turn

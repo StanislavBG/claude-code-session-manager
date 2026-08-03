@@ -141,7 +141,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, source = null, agentType = null, mintAuthority = null } = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, mintAuthority = null } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -218,6 +218,11 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       // Full body for a proposal whose goalText is only a one-line title;
       // sent verbatim as the first prompt when a human approves it.
       ...(openingPrompt ? { openingPrompt: String(openingPrompt) } : {}),
+      // Structured slices of the same openingPrompt (composeEpicIntake's
+      // EpicIntakeSection[]) — carried alongside it so the Epic's first turn
+      // can render an AIM briefing card instead of re-parsing the flat
+      // string. Absent whenever openingPrompt is absent too.
+      ...(Array.isArray(sections) && sections.length ? { sections } : {}),
       // Structured trace of which surface minted this Epic — see EpicSource in
       // state/promptSessions.ts.
       ...(source ? { source } : {}),

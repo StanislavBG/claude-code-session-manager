@@ -8,7 +8,7 @@
 const { z } = require('zod');
 const os = require('node:os');
 const path = require('node:path');
-const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema } = require('./lib/promptSessionSchema.cjs');
+const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -302,6 +302,11 @@ const promptSessionsCreateEpic = z.object({
   tag: EpicTagSchema.optional(),
   agentType: z.string().min(1).max(256).optional(),
   source: EpicSourceSchema.optional(),
+  // The full first-prompt body + its labeled sections (epicIntake.ts's
+  // composeEpicIntake) — both optional, since not every mint caller (e.g. a
+  // future scripted Epic) composes a full opening prompt.
+  openingPrompt: z.string().max(200000).optional(),
+  sections: z.array(EpicIntakeSectionSchema).max(200).optional(),
 });
 
 // ──────────────────────────────────────────── Sessions

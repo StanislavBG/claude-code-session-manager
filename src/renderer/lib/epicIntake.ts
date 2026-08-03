@@ -62,9 +62,30 @@ export interface EpicIntakeFields {
   contextInjections?: Partial<Record<keyof typeof CONTEXT_INJECTIONS, boolean>>
 }
 
+/**
+ * One labeled slice of the opening prompt, in emission order — the same data
+ * composeEpicIntake already has in hand while concatenating, kept around
+ * instead of discarded so callers can render a structured AIM briefing card
+ * instead of re-parsing the flat `openingPrompt` string. `source` names the
+ * thing that produced this section's text (persona name / injection key /
+ * tag / reference path) where one exists, for a card subtitle.
+ */
+export interface EpicIntakeSection {
+  kind: 'actor' | 'injection' | 'input' | 'mission' | 'goal' | 'reference'
+  label: string
+  text: string
+  source?: string
+}
+
 export interface EpicIntake {
   goalText: string
   openingPrompt: string
+  /** Same six kinds composeEpicIntake already concatenates, emitted in that
+   *  same order: actor, injection(s), input, mission, goal, reference(s).
+   *  Each input is independently optional, so a caller supplying none of
+   *  agentName/agentDescription/inputSummary/tag/contextInjections still
+   *  gets a valid (shorter) array — never an error. */
+  sections: EpicIntakeSection[]
 }
 
 /** File names are user/filesystem controlled and can contain newlines — strip
@@ -76,6 +97,25 @@ function singleLine(s: string): string {
 function withReferences(body: string, referencePaths: string[]): string {
   const lines = referencePaths.map((p) => `Reference: ${singleLine(p)}`)
   return lines.length ? `${body}\n\n${lines.join('\n')}` : body
+}
+
+/**
+ * Re-joins the emitted sections back into the exact flat string
+ * composeEpicIntake produced before sections existed. Every boundary is a
+ * blank line ('\n\n') EXCEPT between two consecutive `reference` sections,
+ * which join with a single '\n' — reference lines were always one visual
+ * block (`withReferences`' `lines.join('\n')`), never separated. This is the
+ * only special case; recovering it here (rather than a generic '\n\n' join)
+ * is what makes byte-identity with the pre-sections output structural
+ * instead of merely tested.
+ */
+function joinSections(sections: EpicIntakeSection[]): string {
+  return sections.reduce((out, s, i) => {
+    if (i === 0) return s.text
+    const prev = sections[i - 1]
+    const sep = s.kind === 'reference' && prev.kind === 'reference' ? '\n' : '\n\n'
+    return out + sep + s.text
+  }, '')
 }
 
 /**
@@ -100,28 +140,49 @@ export function composeEpicIntake({
   // The opening prompt names the title as the goal explicitly, so the agent
   // reads it as the objective rather than as the first line of the request.
   const promptBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
-  // The tag's grounding template comes first — it's the agent's framing
-  // instruction, read before the human's own goal.
-  const taggedPromptBody = tag ? `${agentTagDef(tag).initialPromptTemplate}\n\n${promptBody}` : promptBody
-  // AIM order: Actor, then Input, then Mission, then the human's own goal —
-  // who is running this Epic, what it's standing on, what it's here to do.
-  const inputPromptBody = inputSummary ? `${singleLine(inputSummary)}\n\n${taggedPromptBody}` : taggedPromptBody
-  // Context Injections come right after Actor (extending "who's acting" with
-  // "how they generally behave") and before Input — each one is independent,
-  // so order among enabled injections follows CONTEXT_INJECTIONS' own key
-  // order, not the order the caller happened to list them.
-  const injectedText = Object.keys(CONTEXT_INJECTIONS)
-    .filter((key) => contextInjections?.[key as keyof typeof CONTEXT_INJECTIONS])
-    .map((key) => CONTEXT_INJECTIONS[key as keyof typeof CONTEXT_INJECTIONS].text)
-    .join('\n\n')
-  const injectedPromptBody = injectedText ? `${injectedText}\n\n${inputPromptBody}` : inputPromptBody
-  const groundedPromptBody =
-    agentName && agentDescription
-      ? `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}\n\n${injectedPromptBody}`
-      : injectedPromptBody
+
+  // AIM order: Actor, then Context Injections (extending "who's acting" with
+  // "how they generally behave"), then Input, then Mission, then the human's
+  // own goal, then any attached references — who is running this Epic, what
+  // it's standing on, what it's here to do, what it opened with.
+  const sections: EpicIntakeSection[] = []
+
+  if (agentName && agentDescription) {
+    sections.push({
+      kind: 'actor',
+      label: 'Actor',
+      text: `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}`,
+      source: agentName,
+    })
+  }
+
+  // Each enabled injection is its own section, in CONTEXT_INJECTIONS' own key
+  // order — not the order the caller happened to list them in.
+  for (const key of Object.keys(CONTEXT_INJECTIONS) as (keyof typeof CONTEXT_INJECTIONS)[]) {
+    if (!contextInjections?.[key]) continue
+    const def = CONTEXT_INJECTIONS[key]
+    sections.push({ kind: 'injection', label: def.label, text: def.text, source: key })
+  }
+
+  if (inputSummary) {
+    sections.push({ kind: 'input', label: 'Input', text: singleLine(inputSummary) })
+  }
+
+  if (tag) {
+    sections.push({ kind: 'mission', label: 'Mission', text: agentTagDef(tag).initialPromptTemplate, source: tag })
+  }
+
+  // Always present — goalText/openingPrompt's pure-objective floor, same as
+  // pre-sections composeEpicIntake always contributing `promptBody`.
+  sections.push({ kind: 'goal', label: 'Goal', text: promptBody })
+
+  for (const p of referencePaths) {
+    sections.push({ kind: 'reference', label: 'Reference', text: `Reference: ${singleLine(p)}`, source: p })
+  }
 
   return {
     goalText: withReferences(body, referencePaths),
-    openingPrompt: withReferences(groundedPromptBody, referencePaths),
+    openingPrompt: joinSections(sections),
+    sections,
   }
 }

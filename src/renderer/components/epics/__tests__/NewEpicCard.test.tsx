@@ -105,7 +105,10 @@ describe('NewEpicCard', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta', 'Fix the flaky test', 'feature', 'NewEpicCard')
+    // Sliced to the first 4 args (cwd/goalText/tag/source) — openingPrompt/
+    // sections (trailing args, PRD session-chat-conversion-into-simplified-chat)
+    // are covered by their own dedicated tests below, not re-asserted here.
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual(['/home/bilko/Projects/beta', 'Fix the flaky test', 'feature', 'NewEpicCard'])
     const created = Object.values(usePromptSessions.getState().sessions)[0]
     expect(onCreated).toHaveBeenCalledWith(created.id)
   })
@@ -126,12 +129,12 @@ describe('NewEpicCard', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual([
       '/home/bilko/Projects/alpha',
       'Flaky test\n\nMake CI stop flaking',
       'bug',
       'NewEpicCard',
-    )
+    ])
   })
 
   it('folds attached reference paths into goalText as trailing "Reference:" lines', async () => {
@@ -152,12 +155,12 @@ describe('NewEpicCard', () => {
     // handleCreate awaits attachment resolution (PRD 865) — flush it.
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual([
       '/home/bilko/Projects/alpha',
       'Investigate the crash\n\nReference: /home/bilko/Downloads/crash.log',
       'feature',
       'NewEpicCard',
-    )
+    ])
   })
 
   it('resets form state after a successful create and on Cancel', async () => {
@@ -265,13 +268,13 @@ describe('NewEpicCard', () => {
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 5)).toEqual([
       '/home/bilko/Projects/alpha',
       'Plan the next phase',
       'feature',
       'NewEpicCard',
       'architect',
-    )
+    ])
   })
 
   it('threads the selected agent into createPromptSession and grounds the opening prompt with its description', async () => {
@@ -291,18 +294,30 @@ describe('NewEpicCard', () => {
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 5)).toEqual([
       '/home/bilko/Projects/alpha',
       'Cut the next release',
       'feature',
       'NewEpicCard',
       'builder',
-    )
+    ])
     const args = sendSpy.mock.calls[0][0]
     expect(args.prompt.startsWith('You are acting as the "builder" agent: Ships releases end to end.')).toBe(true)
+
+    // INTERACTION EFFECT (session-chat-conversion-into-simplified-chat): the
+    // opening prompt sent into chat (args.prompt) and the openingPrompt/
+    // sections persisted on the Epic via createPromptSession's 6th/7th args
+    // must be the exact same composeEpicIntake output, computed once — never
+    // a second, independently re-derived copy.
+    const [, , , , , persistedOpeningPrompt, persistedSections] = createPromptSessionSpy.mock.calls[0]
+    expect(persistedOpeningPrompt).toBe(args.prompt)
+    expect(Array.isArray(persistedSections)).toBe(true)
+    const sections = persistedSections as Array<{ kind: string; source?: string }>
+    expect(sections[0]).toMatchObject({ kind: 'actor', source: 'builder' })
+    expect(sections.some((s) => s.kind === 'goal')).toBe(true)
   })
 
-  it('leaves createPromptSession at 4 args and the prompt un-grounded when the Agent Library is empty', async () => {
+  it('leaves the agentType arg undefined and the prompt un-grounded (no actor section) when the Agent Library is empty', async () => {
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
@@ -311,7 +326,10 @@ describe('NewEpicCard', () => {
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith('/home/bilko/Projects/alpha', 'Ship it', 'feature', 'NewEpicCard')
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual(['/home/bilko/Projects/alpha', 'Ship it', 'feature', 'NewEpicCard'])
+    const [, , , , agentType, , sections] = createPromptSessionSpy.mock.calls[0]
+    expect(agentType).toBeUndefined()
+    expect((sections as Array<{ kind: string }>).some((s) => s.kind === 'actor')).toBe(false)
   })
 
   it('derives the Mission pills from the selected persona\'s own tags, and re-derives them when the agent changes', async () => {
@@ -352,9 +370,9 @@ describe('NewEpicCard', () => {
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await act(async () => {})
 
-    expect(createPromptSessionSpy).toHaveBeenCalledWith(
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 5)).toEqual([
       '/home/bilko/Projects/alpha', 'Cut v1', 'build', 'NewEpicCard', 'builder',
-    )
+    ])
   })
 
   it('shows the Mission blurb from the single global agentTagDef source, never a local copy', async () => {
@@ -389,6 +407,35 @@ describe('NewEpicCard', () => {
     const back = el.querySelector('[data-testid="new-epic-flip-to-goal"]') as HTMLButtonElement
     act(() => back.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('Investigate the leak')
+  })
+
+  it('INTERACTION EFFECT: populates sections on the board-already-computed path (advanced opened before submit), same as the fresh-computed path', async () => {
+    // CLAUDE.md requires exactly one grounding-board fetch path — this proves
+    // the cached `board` (from opening "advanced") is what composeEpicIntake
+    // reads, not a second independent computeGroundingBoard call at submit.
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+    act(() => setNativeValue(goal, 'Investigate the leak'))
+
+    const toggle = el.querySelector('[data-testid="new-epic-advanced-toggle"]') as HTMLButtonElement
+    act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+    const readTextCallsBeforeSubmit = (window.api.config.readText as ReturnType<typeof vi.fn>).mock.calls.length
+
+    const back = el.querySelector('[data-testid="new-epic-flip-to-goal"]') as HTMLButtonElement
+    act(() => back.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+    act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+
+    // No second fs/IPC read fired at submit — the cached board was reused.
+    expect((window.api.config.readText as ReturnType<typeof vi.fn>).mock.calls.length).toBe(readTextCallsBeforeSubmit)
+
+    const [, , , , , persistedOpeningPrompt, persistedSections] = createPromptSessionSpy.mock.calls[0]
+    const inputSection = (persistedSections as Array<{ kind: string; text: string }>).find((s) => s.kind === 'input')
+    expect(inputSection).toBeTruthy()
+    expect(persistedOpeningPrompt).toContain(inputSection!.text)
   })
 
   it('truncates a long real persona description instead of forcing the row to overflow', async () => {

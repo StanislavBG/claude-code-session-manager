@@ -830,4 +830,110 @@ describe('EpicDetail (PRD 827)', () => {
     expect(seed).not.toBeNull()
     expect(seed!.textContent).toContain('A brand new Epic with no turns')
   })
+
+  describe('Epic-intake AIM card (PRD session-chat-conversion-into-simplified-chat)', () => {
+    it('CORE: renders the first turn as the AIM briefing card when the Epic carries composeEpicIntake sections', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { useChat } = await import('../../../state/chat')
+      const { EpicDetail } = await import('../EpicDetail')
+
+      const openingPrompt = 'You are acting as the "debugger" agent: desc.\n\nGoal: Fix it\n\nDetails.'
+      const session = await usePromptSessions.getState().createPromptSession(
+        '/tmp/proj',
+        'Fix it',
+        'bug',
+        undefined,
+        undefined,
+        openingPrompt,
+        [
+          { kind: 'actor', label: 'Actor', text: 'You are acting as the "debugger" agent: desc.', source: 'debugger' },
+          { kind: 'goal', label: 'Goal', text: 'Goal: Fix it\n\nDetails.' },
+        ],
+      )
+      useChat.setState({
+        chats: {
+          [session.id]: {
+            turns: [{ id: 't-first', role: 'user', text: openingPrompt, at: 1000 }],
+            running: false,
+            stream: '',
+            queuedPosition: 0,
+          } as any,
+        },
+      })
+
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+      expect(el.querySelector('[data-testid="epic-intake-card"]')).not.toBeNull()
+      // The flat fallback bubble's own footer marker must NOT also render —
+      // this turn is replaced by the card, not wrapped by both.
+      expect(el.querySelector('[data-testid="chat-turn-user-footer"]')).toBeNull()
+    })
+
+    it('EDGE: falls back to the flat-text Turn bubble when the Epic has no `sections` field (a pre-existing Epic)', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { useChat } = await import('../../../state/chat')
+      const { EpicDetail } = await import('../EpicDetail')
+
+      // createPromptSession with no openingPrompt/sections args mirrors every
+      // Epic minted before this PRD — the field is simply absent on the
+      // record, not present-but-empty.
+      const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Fix it', 'bug')
+      expect(session.sections).toBeUndefined()
+
+      useChat.setState({
+        chats: {
+          [session.id]: {
+            turns: [{ id: 't-first', role: 'user', text: 'Fix it', at: 1000 }],
+            running: false,
+            stream: '',
+            queuedPosition: 0,
+          } as any,
+        },
+      })
+
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+      expect(el.querySelector('[data-testid="epic-intake-card"]')).toBeNull()
+      expect(el.querySelector('[data-testid="chat-turn-user-footer"]')).not.toBeNull()
+      expect(el.textContent).toContain('Fix it')
+    })
+
+    it('EDGE: a non-first user turn never renders as the AIM card even when the Epic carries sections', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { useChat } = await import('../../../state/chat')
+      const { EpicDetail } = await import('../EpicDetail')
+
+      const session = await usePromptSessions.getState().createPromptSession(
+        '/tmp/proj',
+        'Fix it',
+        'bug',
+        undefined,
+        undefined,
+        'Goal: Fix it',
+        [{ kind: 'goal', label: 'Goal', text: 'Goal: Fix it' }],
+      )
+      useChat.setState({
+        chats: {
+          [session.id]: {
+            turns: [
+              { id: 't-first', role: 'user', text: 'Goal: Fix it', at: 1000 },
+              { id: 't-second', role: 'user', text: 'A follow-up message', at: 2000 },
+            ],
+            running: false,
+            stream: '',
+            queuedPosition: 0,
+          } as any,
+        },
+      })
+
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+      const cards = el.querySelectorAll('[data-testid="epic-intake-card"]')
+      expect(cards).toHaveLength(1)
+      expect(el.textContent).toContain('A follow-up message')
+    })
+  })
 })

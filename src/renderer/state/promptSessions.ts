@@ -6,6 +6,7 @@ import { epicIdCandidates } from '../lib/epicProvenance'
 import { splitTitleAndGoal } from '../lib/epicDerive'
 import { toast } from './toast'
 import type { TicketTag } from '../lib/ticketDisplay'
+import type { EpicIntakeSection } from '../lib/epicIntake'
 
 /**
  * A top-level goal-oriented prompt, promoted to its own independent Claude
@@ -76,6 +77,15 @@ export interface PromptSession {
    *  persona's framing is folded into `openingPrompt` once, at creation, by
    *  composeEpicIntake (epicIntake.ts). */
   agentType?: string
+  /** Labeled slices of `openingPrompt`, in the same order composeEpicIntake
+   *  (epicIntake.ts) concatenates them: actor, injection(s), input, mission,
+   *  goal, reference(s). Lets the Epic's first turn render a structured AIM
+   *  briefing card instead of regex-parsing the flat string back apart.
+   *  Absent on Epics minted before this field existed, and on any Epic whose
+   *  opening prompt carried no sections (e.g. EpicQueue's scripted 'build'
+   *  Epic) — those fall back to rendering `openingPrompt`/`goalText` as a
+   *  single block. */
+  sections?: EpicIntakeSection[]
 }
 
 /** On-disk archive shape written by markCompleted and read back by any
@@ -202,6 +212,13 @@ interface PromptSessionsState {
     tag?: PromptSession['tag'],
     source?: string,
     agentType?: string,
+    /** Full opening-prompt body + its labeled sections (epicIntake.ts's
+     *  composeEpicIntake) — persisted on the minted Epic alongside goalText
+     *  so its first turn can render the AIM briefing card. Omitted by
+     *  callers that never composed a full opening prompt (resumeArchived,
+     *  EpicQueue's scripted 'build' Epic). */
+    openingPrompt?: string,
+    sections?: EpicIntakeSection[],
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -367,8 +384,8 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: async (cwd, goalText, tag, source, agentType) => {
-    const result = await window.api.promptSessions.create({ cwd, goalText, tag, agentType })
+  createPromptSession: async (cwd, goalText, tag, source, agentType, openingPrompt, sections) => {
+    const result = await window.api.promptSessions.create({ cwd, goalText, tag, agentType, openingPrompt, sections })
     // ensureEpic's response is the byte-identical record just written to
     // active-index.json (validated against promptSessionSchema.cjs main-side)
     // — safe to trust as PromptSession without re-checking shape here.

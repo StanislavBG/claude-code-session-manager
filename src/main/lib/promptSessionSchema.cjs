@@ -38,6 +38,17 @@ const EpicSourceSchema = z.object({
   sourceTabId: z.string().optional(),
 });
 
+// Mirrors EpicIntakeSection (src/renderer/lib/epicIntake.ts) — the labeled
+// slices composeEpicIntake emits alongside the flat `openingPrompt`, kept as
+// data so the Epic's first turn can render a structured AIM briefing card
+// instead of regex-parsing the flat string back apart.
+const EpicIntakeSectionSchema = z.object({
+  kind: z.enum(['actor', 'injection', 'input', 'mission', 'goal', 'reference']),
+  label: z.string(),
+  text: z.string(),
+  source: z.string().optional(),
+});
+
 // Mirrors PromptSession (src/renderer/state/promptSessions.ts:29-76).
 const PromptSessionSchema = z.object({
   id: z.string(),
@@ -52,6 +63,10 @@ const PromptSessionSchema = z.object({
   openingPrompt: z.string().nullable().optional(),
   source: EpicSourceSchema.optional(),
   agentType: z.string().optional(),
+  // Absent on Epics minted before this field existed — those fall back to
+  // rendering the flat `openingPrompt` as a single block (see
+  // ChatTranscriptTurn.tsx's EpicIntakeCard).
+  sections: z.array(EpicIntakeSectionSchema).optional(),
 });
 
 /**
@@ -75,5 +90,6 @@ module.exports = {
   PromptSessionSchema,
   EpicSourceSchema,
   EpicTagSchema,
+  EpicIntakeSectionSchema,
   assertValidPromptSession,
 };

@@ -278,7 +278,7 @@ export function NewEpicCard({
             otherEpicsInProject: Object.values(allEpics).filter((e) => e.cwd === effectiveCwd).length,
           }).catch(() => null)
         : null)
-    const { goalText, openingPrompt } = composeEpicIntake({
+    const { goalText, openingPrompt, sections } = composeEpicIntake({
       title,
       goal,
       referencePaths,
@@ -295,9 +295,12 @@ export function NewEpicCard({
     // 'proposed', so this call and the approveProposed below are what perform
     // that transition.
     // See prompt-sessions/README.md#lifecycle.
+    // openingPrompt/sections are persisted on the Epic (not just sent into
+    // chat below) so its first turn can render as a structured AIM briefing
+    // card rather than only a flat prose bubble — see EpicIntakeCard.
     const session = selectedAgent
-      ? await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name)
-      : await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard')
+      ? await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name, openingPrompt, sections)
+      : await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', undefined, openingPrompt, sections)
     approveProposed(session.id, 'NewEpicCard')
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is

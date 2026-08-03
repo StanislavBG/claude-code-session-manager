@@ -18,6 +18,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
+const { projectQueuePath } = require('./queueStore.cjs');
 const { expandHome } = require('./expandHome.cjs');
 
 /**
@@ -95,22 +96,92 @@ async function migratePrds(legacyPrdsDir) {
  * Name collisions in prds-archived/ get a `-legacy-<n>` suffix, never an
  * overwrite. Idempotent: an emptied flat dir is a no-op readdir.
  *
- * Returns { moved, failed: [{ file, reason }] }.
+ * LIVE JOBS ARE NEVER ARCHIVED (PRD 992). The scheduler still scans this flat
+ * dir as a PRD *source* (prdLocations.cjs's resolvePrdsDirs, "scan sources
+ * alongside the legacy flat dir"), so a file sitting here can legitimately
+ * have a pending/running job. Archiving it out from under that job strands the
+ * queue row with no resolvable source. Observed live 2026-08-02:
+ * `980-fix-chat-typed-event-renderers.md` sat in this dir with status
+ * `running` — a restart in that window would have moved its source mid-run.
+ * Such files are left in place and reported as `skipped`, mirroring how the
+ * sibling migratePrds() reports `unresolved` rather than dropping anything.
+ *
+ * Returns { moved, failed: [{ file, reason }], skipped: [{ file, reason }] }.
  */
-async function consolidateFlatPrds(cwd) {
+
+/** Job statuses that mean "this PRD's source must survive". `needs_review` is
+ *  live on purpose: it is awaiting human action and will be re-read. */
+const LIVE_JOB_STATUSES = new Set(['pending', 'running', 'needs_review', 'investigating']);
+
+/**
+ * Slugs with a live job in this project's own queue shard.
+ *
+ * Returns null when liveness cannot be determined (unreadable/unparseable
+ * queue.json) — the caller then FAILS CLOSED and archives nothing, since it
+ * cannot prove a file is safe to move. A merely ABSENT queue.json is not an
+ * error: a project with no scheduler state has no jobs, so an empty set is
+ * the correct answer and consolidation proceeds normally.
+ */
+async function liveSlugsForCwd(cwd) {
+  let raw;
+  try {
+    raw = await fsp.readFile(projectQueuePath(cwd), 'utf8');
+  } catch (e) {
+    if (e?.code === 'ENOENT') return new Set(); // fresh project — nothing queued
+    return null; // unreadable — caller fails closed
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null; // corrupt — caller fails closed
+  }
+  const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+  const live = new Set();
+  for (const job of jobs) {
+    if (job && typeof job.slug === 'string' && LIVE_JOB_STATUSES.has(job.status)) {
+      live.add(job.slug);
+    }
+  }
+  return live;
+}
+
+/** A queue job's slug is its PRD filename minus the `.md` suffix. */
+function slugForPrdFile(name) {
+  return name.slice(0, -3);
+}
+
+async function consolidateFlatPrds(cwd, opts = {}) {
   const flatDir = resolvePrdWriteDir(cwd);
   const archiveDir = path.join(path.dirname(flatDir), 'prds-archived');
   let entries;
   try {
     entries = await fsp.readdir(flatDir);
   } catch {
-    return { moved: 0, failed: [] };
+    return { moved: 0, failed: [], skipped: [] };
   }
+
+  const liveSlugs = opts.liveSlugs !== undefined ? opts.liveSlugs : await liveSlugsForCwd(cwd);
 
   let moved = 0;
   const failed = [];
+  const skipped = [];
+
+  // Fail closed: liveness unknown means every file might belong to a live job.
+  if (liveSlugs === null) {
+    for (const name of entries) {
+      if (!name.endsWith('.md') || name.startsWith('.')) continue;
+      skipped.push({ file: name, reason: 'queue state unreadable — cannot prove no live job' });
+    }
+    return { moved: 0, failed, skipped };
+  }
+
   for (const name of entries) {
     if (!name.endsWith('.md') || name.startsWith('.')) continue;
+    if (liveSlugs.has(slugForPrdFile(name))) {
+      skipped.push({ file: name, reason: 'live queue job — source must survive' });
+      continue;
+    }
     const src = path.join(flatDir, name);
     try {
       await fsp.mkdir(archiveDir, { recursive: true });
@@ -125,7 +196,7 @@ async function consolidateFlatPrds(cwd) {
       failed.push({ file: name, reason: e?.message ?? 'move failed' });
     }
   }
-  return { moved, failed };
+  return { moved, failed, skipped };
 }
 
-module.exports = { migratePrds, consolidateFlatPrds };
+module.exports = { migratePrds, consolidateFlatPrds, LIVE_JOB_STATUSES };

@@ -448,6 +448,14 @@
         "id": "pevt-msdbatms-1",
         "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
         "at": "2026-08-03T14:15:56.548Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msdbatms-1",
+        "text": "Cleaned up and everything is pushed. Repo is in a good state to leave for the week.\n\n## Final state — verified, not assumed\n\n| Check | Result |\n|---|---|\n| `main` vs `origin/main` | **in sync**, HEAD `a6f3c2d` |\n| Working tree | **clean** (0 changes) |\n| npm `latest` / local | **0.60.0 / 0.60.0** — matched |\n| Typecheck | **PASS** |\n| `lint:selectors` | **OK**, 430 files |\n| Unit tests | **246 files / 2351 tests, all pass** |\n| Stray worktrees | none |\n| Live scheduler jobs | none |\n\nThe test suite ran fully green with no flakes this time — which supports the earlier diagnosis that the 21-failure gate was `/tmp` fixture contention from concurrent jobs, not a real regression.\n\n## Cleanup done\n\n- **Committed + pushed** `a6f3c2d` — the `render-project-pages.cjs` 5th \"brief\" lens (complete and coherent, matching its new `brief.html` output) plus all scheduler/Epic runtime state.\n- **Reverted** my `scheduler-machine.json` pause edit — it's back to `when-available` / `enabled: true`, so the app won't come up mysteriously paused. That was a trap I introduced.\n- **Removed** the `/tmp/sm-publish-0590` publish worktree (~1GB) and the backup file.\n\nThe scheduler also landed real work while we went: `997` (finish protocol now stages explicit paths instead of `git add -A` — the concurrent-job clobbering I hit manually twice today) and `614c786` (routing `verifyRun`'s `prdPath` through live-then-archived resolution, which was PRD 995's content).\n\n## Three things left for next week\n\n**Two orphaned queue rows.** `996` and `997` still read `running` with no process behind them and no `meta.json`. They need an app restart so boot reconciliation (`partitionBootOrphans`) reaps them. I didn't hand-edit `queue.json` under a live writer.\n\n**996's work did not land.** I checked: there's no commit-guard commit, and `scheduler.cjs:3047` still has `if (after && after.length > 0)` gating the guard. So the zero-edit-run hole is still open — that job died before delivering. Its PRD was archived …",
+        "id": "pevt-msdbi3al-2",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T14:21:35.661Z"
       }
     ],
     "not-enough-paralell-processing-why-i-never-see-3-6a96029e": [

@@ -33,7 +33,7 @@ export interface SessionPreset {
   description: string
   category: 'build' | 'engage'
   cwd: 'app-cwd' | 'home' | 'pick' | string
-  command: ((ctx: { sessionId: string; cwd: string }) => string) | null
+  command: ((ctx: { sessionId: string; cwd: string; model?: string }) => string) | null
   /** Platform identifier for engage presets (x, reddit, linkedin, facebook). */
   platform?: string
   /** Pipeline name in local-browser's orchestrator registry. */
@@ -49,10 +49,20 @@ export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
 }
 
-const claudeDangerous = ({ sessionId }: { sessionId: string }) =>
-  `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)}`
-const claudeSafe = ({ sessionId }: { sessionId: string }) =>
-  `claude --session-id ${shellQuote(sessionId)}`
+/**
+ * Renders the `--model <value>` suffix for a persona-sourced model override.
+ * Absent/unset/'inherit' all mean "use whatever claude would pick on its
+ * own" — no flag at all, byte-identical to a command with no model chosen.
+ */
+export function modelFlag(model?: string): string {
+  if (!model || model === 'inherit') return ''
+  return ` --model ${shellQuote(model)}`
+}
+
+const claudeDangerous = ({ sessionId, model }: { sessionId: string; cwd: string; model?: string }) =>
+  `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)}${modelFlag(model)}`
+const claudeSafe = ({ sessionId, model }: { sessionId: string; cwd: string; model?: string }) =>
+  `claude --session-id ${shellQuote(sessionId)}${modelFlag(model)}`
 const claudeResume = () => `claude --resume`
 
 export const DEFAULT_PRESETS: SessionPreset[] = [
@@ -205,7 +215,7 @@ export async function resolvePresetCwd(
 
 export function renderCommand(
   preset: SessionPreset,
-  ctx: { sessionId: string; cwd: string },
+  ctx: { sessionId: string; cwd: string; model?: string },
 ): string | null {
   return preset.command ? preset.command(ctx) : null
 }

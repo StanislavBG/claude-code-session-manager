@@ -5,11 +5,34 @@ import '@xterm/xterm/css/xterm.css'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from '../TerminalControls'
 import { writeInChunks } from '../Terminal'
 import { getRawSessionModel } from '../../lib/rawSessionModel'
-import { shellQuote } from '../../lib/presets'
+import { shellQuote, modelFlag } from '../../lib/presets'
 import { canFit } from '../../lib/terminalFit'
 import { transcriptExists } from '../../lib/transcriptExists'
 import { useEpicTerminal } from '../../state/epicTerminal'
+import { usePromptSessions } from '../../state/promptSessions'
 import { toast } from '../../state/toast'
+
+/**
+ * Resolves the `--model` this Epic's Terminal launch should use: the
+ * agentType persona's own `model` field (Agent Library) when the Epic has
+ * one set and it isn't 'inherit', else the global raw-session-model toggle —
+ * the exact fallback this pane always used before per-Epic model defaults
+ * existed. agentType is display-only everywhere else (CLAUDE.md); this is
+ * the first concrete exception, scoped to just this one launch string.
+ */
+async function resolveEpicModel(epicId: string): Promise<string> {
+  const epic = usePromptSessions.getState().sessions[epicId]
+  const agentType = epic?.agentType
+  if (!agentType) return getRawSessionModel()
+  try {
+    const personas = await window.api.agents.listPersonas()
+    const persona = personas.find((p) => p.name === agentType)
+    if (persona?.model && persona.model !== 'inherit') return persona.model
+  } catch {
+    /* fall through to the raw-session-model toggle */
+  }
+  return getRawSessionModel()
+}
 
 interface Props {
   epicId: string
@@ -102,9 +125,9 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
         // `--resume` of a nonexistent session errors out. Same durable
         // resume-vs-create decision chat.ts's send() makes (PRD 833 I2).
         const resume = await transcriptExists(cwd, sessionId).catch(() => true)
-        const model = getRawSessionModel()
+        const model = await resolveEpicModel(epicId)
         const flag = resume ? `--resume ${shellQuote(sessionId)}` : `--session-id ${shellQuote(sessionId)}`
-        const cmd = `claude --dangerously-skip-permissions ${flag} --model ${model}\r`
+        const cmd = `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}\r`
         setTimeout(() => writeInChunks(sessionId, cmd), 1500)
       })
       .catch((err) => {

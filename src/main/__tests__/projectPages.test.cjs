@@ -2,7 +2,10 @@
  * projectPages.test.cjs — unit tests for projectPages.cjs's read-only get(),
  * including the regression this PRD's AC calls out explicitly: adding the
  * 5th 'brief' lens must not make every pre-existing 4-lens project suddenly
- * read as having no output at all.
+ * read as having no output at all — and the shipped-default fallback added
+ * by the "project-home-hosted-html-spec" PRD: a project with no generated
+ * output gets the build-time default home.html (isDefault: true) instead of
+ * the bare `{ output: null }` empty-state signal.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/projectPages.test.cjs
  */
@@ -15,7 +18,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { get } = require('../projectPages.cjs');
+const { get, DEFAULT_HOME_PATH, readDefaultHomeHtml } = require('../projectPages.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -45,13 +48,12 @@ function writeOutput(cwd, lenses, manifest = { generatedAt: '2026-08-02T00:00:00
   }
 }
 
-test('returns output: null when no manifest exists', async () => {
-  const cwd = await mkTmpCwd();
-  const result = await get({ cwd });
-  expect(result.output).toBeNull();
+test('the shipped default asset exists on disk at a fixed app-relative path', () => {
+  expect(fs.existsSync(DEFAULT_HOME_PATH)).toBe(true);
+  expect(path.isAbsolute(DEFAULT_HOME_PATH)).toBe(true);
 });
 
-test('returns all 5 lenses when all 5 html files are present', async () => {
+test('(a) generated output present: get() returns it with isDefault false', async () => {
   const cwd = await mkTmpCwd();
   writeOutput(cwd, {
     home: 'HOME',
@@ -65,13 +67,14 @@ test('returns all 5 lenses when all 5 html files are present', async () => {
   expect(result.output.home).toBe('HOME');
   expect(result.output.brief).toBe('BRIEF');
   expect(result.output.generatedAt).toBe('2026-08-02T00:00:00.000Z');
+  expect(result.output.isDefault).toBe(false);
 });
 
 // The regression this PRD's AC explicitly guards against: a project that
 // generated its output BEFORE the 'brief' lens existed has the original 4
 // files but no brief.html — that must still read as "has output", not the
-// null empty-state signal, and `brief` must simply be absent from the payload.
-test('4 original lenses present but brief.html missing still returns output, with brief omitted', async () => {
+// shipped-default fallback, and `brief` must simply be absent from the payload.
+test('4 original lenses present but brief.html missing still returns generated output, with brief omitted', async () => {
   const cwd = await mkTmpCwd();
   writeOutput(cwd, {
     home: 'HOME',
@@ -86,9 +89,23 @@ test('4 original lenses present but brief.html missing still returns output, wit
   expect(result.output.feature).toBe('FEATURE');
   expect(result.output.architecture).toBe('ARCHITECTURE');
   expect(result.output.brief).toBeUndefined();
+  expect(result.output.isDefault).toBe(false);
 });
 
-test('returns output: null when one of the required 4 lenses is missing, even if brief.html exists', async () => {
+// (b) output absent → returns the shipped default with isDefault true.
+test('(b) no manifest at all: get() returns the shipped default with isDefault true', async () => {
+  const cwd = await mkTmpCwd();
+  const result = await get({ cwd });
+  expect(result.output).not.toBeNull();
+  expect(result.output.isDefault).toBe(true);
+  expect(result.output.generatedAt).toBeNull();
+  expect(result.output.home).toBe(readDefaultHomeHtml());
+  expect(result.output.marketing).toBeUndefined();
+  expect(result.output.feature).toBeUndefined();
+  expect(result.output.architecture).toBeUndefined();
+});
+
+test('one of the required 4 lenses missing falls back to the shipped default, even if brief.html exists', async () => {
   const cwd = await mkTmpCwd();
   writeOutput(cwd, {
     home: 'HOME',
@@ -98,10 +115,12 @@ test('returns output: null when one of the required 4 lenses is missing, even if
     brief: 'BRIEF',
   });
   const result = await get({ cwd });
-  expect(result.output).toBeNull();
+  expect(result.output).not.toBeNull();
+  expect(result.output.isDefault).toBe(true);
+  expect(result.output.home).toBe(readDefaultHomeHtml());
 });
 
-test('returns output: null when manifest has no generatedAt string', async () => {
+test('manifest with no generatedAt string falls back to the shipped default', async () => {
   const cwd = await mkTmpCwd();
   writeOutput(
     cwd,
@@ -109,5 +128,24 @@ test('returns output: null when manifest has no generatedAt string', async () =>
     {},
   );
   const result = await get({ cwd });
-  expect(result.output).toBeNull();
+  expect(result.output).not.toBeNull();
+  expect(result.output.isDefault).toBe(true);
+});
+
+// (c) the default path resolution does not depend on cwd.
+test('(c) default fallback content is identical regardless of which project cwd requests it', async () => {
+  const cwdA = await mkTmpCwd();
+  const cwdB = await mkTmpCwd();
+  const resultA = await get({ cwd: cwdA });
+  const resultB = await get({ cwd: cwdB });
+  expect(resultA.output.isDefault).toBe(true);
+  expect(resultB.output.isDefault).toBe(true);
+  expect(resultA.output.home).toBe(resultB.output.home);
+  expect(resultA.output.home).toBe(readDefaultHomeHtml());
+});
+
+test('the shipped default is honest: no fabricated project-specific content, and prompts Generate My Project Home', () => {
+  const html = readDefaultHomeHtml();
+  expect(html).toContain('Generate My Project Home');
+  expect(html.toLowerCase()).not.toContain('lorem ipsum');
 });

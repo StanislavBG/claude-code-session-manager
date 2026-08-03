@@ -11,9 +11,19 @@
  * session-manager-operations/project-pages/README.md. Structure mirrors
  * projectBrief.cjs's `get()`: validatePath first, config.cjs read helpers,
  * one ipcMain.handle registered from index.cjs's registerXHandlers() pattern.
+ *
+ * Shipped default (PRD "project-home-hosted-html-spec"): when a project has
+ * never generated its own output, `get()` no longer returns the bare
+ * `{ output: null }` empty-state signal — it falls back to a build-time
+ * default `home.html` shipped with the app (`templates/`), returned with
+ * `isDefault: true` and `generatedAt: null` so the renderer can label
+ * provenance. That default is read from a fixed app-relative path, never
+ * written into any project's own `session-manager-operations/` tree — this
+ * module stays read-only.
  */
 
 const { ipcMain } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config.cjs');
 
@@ -21,9 +31,29 @@ function outputDir(cwd) {
   return path.join(cwd, 'session-manager-operations', 'project-pages', 'output');
 }
 
+// Shipped build-time asset (see PRD "project-home-hosted-html-spec"'s
+// default-document requirement) — a fixed app-relative path with no
+// user-controlled segment, so it deliberately does NOT go through
+// config.cjs's validatePath (whose allowedRoots is the user's home dir and
+// would reject/mis-resolve a path under the app's own install directory,
+// e.g. when installed via npx/global npm outside $HOME). Read once and
+// cached in-process; this file never changes at runtime.
+const DEFAULT_HOME_PATH = path.join(__dirname, 'templates', 'project-pages-default-home.html');
+let cachedDefaultHomeHtml = null;
+function readDefaultHomeHtml() {
+  if (cachedDefaultHomeHtml === null) {
+    cachedDefaultHomeHtml = fs.readFileSync(DEFAULT_HOME_PATH, 'utf8');
+  }
+  return cachedDefaultHomeHtml;
+}
+function defaultOutput() {
+  return { home: readDefaultHomeHtml(), generatedAt: null, isDefault: true };
+}
+
 // The original 4 lenses stay required — their absence still means "no
-// Project Pages generated yet" (the null empty-state signal). 'brief' was
-// added later (5th lens): a project that generated its output BEFORE 'brief'
+// Project Pages generated yet" (now the shipped-default fallback rather
+// than a bare null). 'brief' was added later (5th lens): a project that
+// generated its output BEFORE 'brief'
 // existed has home/marketing/feature/architecture.html but no brief.html, and
 // that must keep reading as "has output" rather than suddenly regressing to
 // the empty state for every pre-existing project. So brief.html is read
@@ -38,7 +68,7 @@ async function get({ cwd }) {
   const dir = outputDir(realCwd);
   const manifestResult = await config.readJson(path.join(dir, 'manifest.json'));
   if (!manifestResult.exists || !manifestResult.data || manifestResult.parseError) {
-    return { output: null };
+    return { output: defaultOutput() };
   }
 
   const htmlResults = await Promise.all(
@@ -46,12 +76,12 @@ async function get({ cwd }) {
   );
   const byLens = Object.fromEntries(LENSES.map((lens, i) => [lens, htmlResults[i]]));
   if (REQUIRED_LENSES.some((lens) => !byLens[lens].exists)) {
-    return { output: null };
+    return { output: defaultOutput() };
   }
 
   const generatedAt = typeof manifestResult.data.generatedAt === 'string' ? manifestResult.data.generatedAt : null;
   if (!generatedAt) {
-    return { output: null };
+    return { output: defaultOutput() };
   }
 
   const output = {
@@ -60,6 +90,7 @@ async function get({ cwd }) {
     feature: byLens.feature.text,
     architecture: byLens.architecture.text,
     generatedAt,
+    isDefault: false,
   };
   if (byLens.brief.exists) {
     output.brief = byLens.brief.text;
@@ -76,4 +107,6 @@ function registerProjectPagesIpc() {
 module.exports = {
   registerProjectPagesIpc,
   get,
+  DEFAULT_HOME_PATH,
+  readDefaultHomeHtml,
 };

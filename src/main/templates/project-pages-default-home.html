@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Project Home</title>
+<meta name="description" content="Project Home — a hosted document generated from this project's own repo, not yet generated for this project." />
+<style>
+  /* Design tokens copied from src/renderer/lib/projectPages/library/kit.tsx's
+     PK palette/fonts — no font files are embedded here (unlike the
+     generated lenses), so the font-family stacks fall back to their system
+     alternatives (Georgia / system-ui / ui-monospace). This keeps the
+     document a zero-network, zero-JS static file while still reading as
+     the same visual system: same colors, same type scale, same shapes. */
+  :root {
+    --pk-paper: #f6efe1;
+    --pk-panel: #efe6d3;
+    --pk-card: #fbf6ec;
+    --pk-deep: #2a221a;
+    --pk-edge: #e0d3b8;
+    --pk-rule: #d9c9a8;
+    --pk-ink: #2a221a;
+    --pk-ink-soft: #5b4a36;
+    --pk-ink-mute: #8a7a60;
+    --pk-accent: #b85c34;
+    --pk-accent-deep: #9c4a26;
+    --pk-sage: #6f7d52;
+    --pk-butter: #e4b85a;
+    --pk-serif: 'Newsreader', Georgia, serif;
+    --pk-sans: 'Geist', system-ui, sans-serif;
+    --pk-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--pk-paper); color: var(--pk-ink); }
+  body { font-family: var(--pk-sans); }
+  .eyebrow {
+    font-family: var(--pk-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--pk-accent); font-weight: 500;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; font-family: var(--pk-mono); font-size: 11px;
+    color: var(--pk-ink-soft); background: transparent; border: 1px solid var(--pk-rule); border-radius: 999px;
+    padding: 3px 9px; white-space: nowrap;
+  }
+  h1 {
+    margin: 0; font-family: var(--pk-serif); font-weight: 500; font-size: clamp(30px, 5vw, 44px);
+    line-height: 1.1; letter-spacing: -0.015em; color: var(--pk-ink);
+  }
+  h2 {
+    margin: 0; font-family: var(--pk-serif); font-weight: 500; font-size: 24px; line-height: 1.15;
+    letter-spacing: -0.01em; color: var(--pk-ink);
+  }
+  p { margin: 0; font-family: var(--pk-sans); font-size: 16px; line-height: 1.62; color: var(--pk-ink-soft); }
+  section { padding: clamp(28px, 6vw, 72px); }
+  .hero { border-bottom: 1px solid var(--pk-rule); background: var(--pk-panel); }
+  .hero-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .cta {
+    display: inline-flex; width: fit-content; align-items: center; gap: 8px; font-family: var(--pk-sans);
+    font-size: 14px; font-weight: 600; padding: 11px 20px; border-radius: 9px; border: 1px solid transparent;
+    background: var(--pk-accent); color: #fff;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; max-width: 960px; margin: 0 auto; }
+  .card {
+    background: var(--pk-card); border: 1px solid var(--pk-edge); border-radius: 12px; padding: 20px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .card .k { font-family: var(--pk-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pk-ink-mute); }
+  .card .t { font-family: var(--pk-serif); font-size: 18px; color: var(--pk-ink); }
+  .card .d { font-size: 13.5px; line-height: 1.55; color: var(--pk-ink-soft); }
+  .footnote { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 6px; }
+  .footnote .label { font-family: var(--pk-mono); font-size: 11px; color: var(--pk-ink-mute); }
+</style>
+</head>
+<body>
+  <section class="hero">
+    <div class="hero-inner">
+      <span class="pill">Shipped default — not yet generated for this project</span>
+      <div class="eyebrow">Project Home</div>
+      <h1>This is Project Home's shipped default page.</h1>
+      <p>
+        Project Home is a hosted document — a self-contained page describing this specific
+        project: what it is, its main areas, and what it's for. Session-manager ships this
+        default so the page is never empty, but it does not describe your project yet.
+        Nothing shown on this page is specific to any real project.
+      </p>
+      <a class="cta" href="#" onclick="return false;">Generate My Project Home</a>
+      <p style="font-size: 13px; color: var(--pk-ink-mute);">
+        Press "Generate My Project Home" in the app (this link is inert inside this static
+        preview) to replace this page with one generated from your project's own repo.
+      </p>
+    </div>
+  </section>
+  <section>
+    <div class="grid">
+      <div class="card">
+        <div class="k">What it reads</div>
+        <div class="t">Your repo, live</div>
+        <div class="d">Generation reads this project's own files, git history, and CLAUDE.md conventions — never invented content.</div>
+      </div>
+      <div class="card">
+        <div class="k">What it produces</div>
+        <div class="t">A static document</div>
+        <div class="d">A self-contained HTML page — inline styling, no network calls, no live app state — that replaces this default at a fixed path.</div>
+      </div>
+      <div class="card">
+        <div class="k">How it stays fresh</div>
+        <div class="t">On demand</div>
+        <div class="d">Regenerate any time from Project Home; this default only ever shows before the first generation.</div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <div class="footnote">
+      <div class="label">About this page</div>
+      <p style="font-size: 13.5px;">
+        Shipped with Session Manager as a build-time asset — the same design system as a
+        generated Project Home page, but honest, generic copy instead of project-specific
+        content. See "About these templates" for how a generated page is built.
+      </p>
+    </div>
+  </section>
+</body>
+</html>

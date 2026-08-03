@@ -83,6 +83,7 @@ describe('ProjectPagesSection', () => {
             feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
             architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
             generatedAt: '2026-08-02T00:00:00.000Z',
+            isDefault: false,
           },
         }),
       },
@@ -118,6 +119,7 @@ describe('ProjectPagesSection', () => {
             architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
             brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
             generatedAt: '2026-08-02T00:00:00.000Z',
+            isDefault: false,
           },
         }),
       },
@@ -142,6 +144,7 @@ describe('ProjectPagesSection', () => {
             feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
             architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
             generatedAt: '2026-08-02T00:00:00.000Z',
+            isDefault: false,
           },
         }),
       },
@@ -153,6 +156,29 @@ describe('ProjectPagesSection', () => {
     act(() => briefTab.click())
     expect(el.querySelector('iframe')).toBeNull()
     expect(el.textContent).toContain('Brief page not generated yet')
+  })
+
+  it('renders the shipped default home document with a provenance chip when the project has no generated output', async () => {
+    ;(globalThis as any).window.api = {
+      projectPages: {
+        get: vi.fn().mockResolvedValue({
+          output: {
+            home: '<!DOCTYPE html><html><body>SHIPPED DEFAULT</body></html>',
+            generatedAt: null,
+            isDefault: true,
+          },
+        }),
+      },
+      agents: { listPersonas: listPersonasMock },
+    }
+    const el = mount(<ProjectPagesSection cwd={CWD} />)
+    await flush()
+    const iframe = el.querySelector('iframe') as HTMLIFrameElement
+    expect(iframe).toBeTruthy()
+    expect(iframe.getAttribute('srcdoc')).toContain('SHIPPED DEFAULT')
+    expect(el.textContent).toContain('Shipped default')
+    expect(el.textContent).toContain('Generate Now')
+    expect(el.textContent).not.toContain('Regenerate')
   })
 
   it('clicking Generate Now with no existing project-home-builder Epic calls createPromptSession with tag project-home-builder', async () => {

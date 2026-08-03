@@ -948,20 +948,28 @@ export type ProjectBriefUpdateResult =
   | { ok: true; brief: ProjectBrief }
   | { ok: false; error: string };
 
-// ────────────────────────────────────────────── Project Pages (PRD 929-932, 969)
+// ────────────────────────────────────────────── Project Pages (PRD 929-932, 969, project-home-hosted-html-spec)
 export interface ProjectPagesOutput {
   home: string;
-  marketing: string;
-  feature: string;
-  architecture: string;
-  /** Absent for output generated before the 'brief' lens existed (PRD 969) — a
-   *  project must regenerate to pick it up; its absence does not blank the rest. */
+  /** Absent when `isDefault` is true — the shipped default only covers the home lens. */
+  marketing?: string;
+  /** Absent when `isDefault` is true — the shipped default only covers the home lens. */
+  feature?: string;
+  /** Absent when `isDefault` is true — the shipped default only covers the home lens. */
+  architecture?: string;
+  /** Absent for output generated before the 'brief' lens existed (PRD 969), or
+   *  when `isDefault` is true — a project must regenerate to pick it up. */
   brief?: string;
-  generatedAt: string;
+  /** null for the shipped default (never generated). */
+  generatedAt: string | null;
+  /** True when `home` is the build-time shipped default, not this project's own
+   *  generated output — the renderer must label provenance rather than infer it. */
+  isDefault: boolean;
 }
 
 export interface ProjectPagesGetResult {
-  /** null when no manifest/output files exist yet — the empty-state signal. */
+  /** Never null in practice — a project with no generated output still gets the
+   *  shipped default (isDefault: true). The type stays nullable defensively. */
   output: ProjectPagesOutput | null;
 }
 

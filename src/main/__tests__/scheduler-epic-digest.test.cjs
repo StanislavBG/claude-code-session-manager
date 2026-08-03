@@ -107,14 +107,20 @@ test('prepends the Epic context digest when job.epicId resolves to a known Epic'
 
     const digestText = await buildContextDigest({ cwd: projectCwd, epicId });
     expect(digestText.length).toBeGreaterThan(0);
-    // The PRD body (plus FINISH_PROTOCOL) comes first; the digest is fenced
-    // as background afterward, and the prompt ends with the task restatement
-    // rather than the digest itself (composeExecutorPrompt, PRD 987 Part A).
-    expect(capturedPrompt.startsWith(bodyText + FINISH_PROTOCOL)).toBe(true);
+    // Section order: PRD body -> fenced Epic-context digest -> finish
+    // protocol -> task restatement (PRD 992). The finish protocol must NOT
+    // be buried ahead of the digest — that was the defect this PRD fixes.
+    expect(capturedPrompt.startsWith(bodyText)).toBe(true);
     const bodyIndex = capturedPrompt.indexOf(bodyText);
     const digestIndex = capturedPrompt.indexOf(digestText);
+    const fenceEndIndex = capturedPrompt.indexOf('--- END EPIC CONTEXT ---');
+    const finishProtocolIndex = capturedPrompt.indexOf('SCHEDULER FINISH PROTOCOL');
+    const restatementIndex = capturedPrompt.indexOf('Your task is the PRD at the top of this prompt. Implement it now.');
     expect(digestIndex).toBeGreaterThan(bodyIndex);
     expect(capturedPrompt).toContain('BEGIN EPIC CONTEXT (background only');
+    expect(fenceEndIndex).toBeGreaterThan(digestIndex);
+    expect(finishProtocolIndex).toBeGreaterThan(fenceEndIndex);
+    expect(restatementIndex).toBeGreaterThan(finishProtocolIndex);
     expect(capturedPrompt.trim().endsWith('Your task is the PRD at the top of this prompt. Implement it now.')).toBe(true);
 
     // The PRD source on disk must never be rewritten with the digest merged in.
@@ -180,6 +186,7 @@ test('a digest build failure is caught and never blocks dispatch', async () => {
     // is cleared, not its whole dependency tree.
     const digestPath = require.resolve('../lib/epicContextDigest.cjs');
     const realDigestModule = require.cache[digestPath];
+    const { composeExecutorPrompt: realComposeExecutorPrompt } = require('../lib/epicContextDigest.cjs');
     require.cache[digestPath] = {
       id: digestPath,
       filename: digestPath,
@@ -188,6 +195,7 @@ test('a digest build failure is caught and never blocks dispatch', async () => {
         buildContextDigest: async () => {
           throw new Error('boom: digest build exploded');
         },
+        composeExecutorPrompt: realComposeExecutorPrompt,
       },
     };
     const schedulerPath = require.resolve('../scheduler.cjs');

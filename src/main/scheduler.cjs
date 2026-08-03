@@ -2216,9 +2216,11 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   let prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
-    // Centrally enforce the review → security-review → verify → commit finish
-    // sequence on every job, regardless of what the PRD body says.
-    prompt = parsed.body + FINISH_PROTOCOL;
+    // The review → security-review → verify → commit finish sequence is
+    // folded in below via composeExecutorPrompt, after the Epic digest is
+    // resolved — never concatenated here, so it can't end up ahead of the
+    // digest in the composed prompt (PRD 992).
+    prompt = parsed.body;
   } catch (e) {
     // The project-scoped dir isn't the only place a PRD source can live — a
     // writer that hasn't migrated to prdLocations.cjs yet (or a not-yet-run
@@ -2230,7 +2232,7 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
       safeLog(`[scheduler] PRD not in project dir; found ${job.slug}.md in ${fallbackDir}\n`);
       try {
         const parsed = await parsePrd(fallbackPath);
-        prompt = parsed.body + FINISH_PROTOCOL;
+        prompt = parsed.body;
         prdPath = fallbackPath;
       } catch (e2) {
         // Found the dir a moment ago but the read still failed. Case A: the
@@ -2275,17 +2277,20 @@ async function executeJob(job, runDir, defaultCwd, onPid) {
   const digestEpicId = job.epicId ?? job.sourcePromptId ?? null;
   const originSessionId = resolveOriginSessionId(cwd, digestEpicId);
   let contextDigestApplied = false;
+  let digestText = '';
   if (originSessionId) {
     try {
-      const digestText = await buildContextDigest({ cwd, epicId: digestEpicId });
-      if (digestText) {
-        prompt = composeExecutorPrompt({ prdBody: prompt, digestText });
-        contextDigestApplied = true;
-      }
+      digestText = await buildContextDigest({ cwd, epicId: digestEpicId });
+      if (digestText) contextDigestApplied = true;
     } catch (e) {
       safeLog(`[scheduler] context digest build failed (job still dispatches without it): ${e?.message ?? e}\n`);
+      digestText = '';
     }
   }
+  // Always route through composeExecutorPrompt (even with an empty digest)
+  // so the finish protocol is appended in the prompt's tail exactly once,
+  // after any digest fence rather than concatenated ahead of it.
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: FINISH_PROTOCOL });
 
   const promptCheck = validatePromptForSpawn(prompt, prdPath);
   if (!promptCheck.ok) {

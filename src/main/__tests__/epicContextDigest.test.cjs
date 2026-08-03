@@ -138,3 +138,37 @@ test('composeExecutorPrompt: empty/absent digest returns PRD body unchanged plus
     expect(prompt).not.toContain('BEGIN EPIC CONTEXT');
   }
 });
+
+test('composeExecutorPrompt: finishProtocol is ordered PRD body -> digest fence -> finish protocol -> task restatement', () => {
+  const prdBody = '# Goal\nImplement the traffic light fix.';
+  const digestText = '[user] is this broken?\n[assistant] investigating';
+  const finishProtocol = '\n\n---\n# SCHEDULER FINISH PROTOCOL\nCommit your work and print SCHEDULER_VERDICT: PASS.';
+
+  const prompt = composeExecutorPrompt({ prdBody, digestText, finishProtocol });
+
+  const bodyIndex = prompt.indexOf(prdBody);
+  const digestIndex = prompt.indexOf(digestText);
+  const fenceEndIndex = prompt.indexOf('--- END EPIC CONTEXT ---');
+  const finishIndex = prompt.indexOf('SCHEDULER FINISH PROTOCOL');
+  const restatementIndex = prompt.indexOf('Your task is the PRD at the top of this prompt. Implement it now.');
+
+  expect(bodyIndex).toBe(0);
+  expect(digestIndex).toBeGreaterThan(bodyIndex);
+  expect(fenceEndIndex).toBeGreaterThan(digestIndex);
+  expect(finishIndex).toBeGreaterThan(fenceEndIndex);
+  expect(restatementIndex).toBeGreaterThan(finishIndex);
+  expect(prompt.trim().endsWith('Your task is the PRD at the top of this prompt. Implement it now.')).toBe(true);
+});
+
+test('composeExecutorPrompt: finishProtocol with no digest is byte-identical to prdBody + finishProtocol', () => {
+  const prdBody = '# Goal\nSome PRD body text.';
+  const finishProtocol = '\n\n---\n# SCHEDULER FINISH PROTOCOL\nCommit your work and print SCHEDULER_VERDICT: PASS.';
+
+  const withEmptyDigest = composeExecutorPrompt({ prdBody, digestText: '', finishProtocol });
+  const withNoDigestKey = composeExecutorPrompt({ prdBody, finishProtocol });
+
+  for (const prompt of [withEmptyDigest, withNoDigestKey]) {
+    expect(prompt).toBe(prdBody + finishProtocol);
+    expect(prompt).not.toContain('BEGIN EPIC CONTEXT');
+  }
+});

@@ -15,8 +15,8 @@
 // option from the PRD's two documented choices (the alternative — omitting
 // generatedAt from manifest.json entirely — was not taken).
 //
-// Writes <output dir>/marketing.html, feature.html, architecture.html, and
-// manifest.json ({ generatedAt }).
+// Writes <output dir>/home.html, marketing.html, feature.html,
+// architecture.html, brief.html, and manifest.json ({ generatedAt }).
 //
 // Path arguments are used as-is (no allowedRoots validation like
 // config.cjs's validatePath) — this is a standalone local dev/ops script run
@@ -59,12 +59,12 @@ function main() {
   const pages = renderProjectPages(summary, picks);
 
   fs.mkdirSync(outDir, { recursive: true });
-  for (const lens of ['home', 'marketing', 'feature', 'architecture']) {
+  for (const lens of ['home', 'marketing', 'feature', 'architecture', 'brief']) {
     fs.writeFileSync(path.join(outDir, `${lens}.html`), pages[lens]);
   }
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({ generatedAt }, null, 2));
 
-  console.log(`Wrote home.html, marketing.html, feature.html, architecture.html, manifest.json to ${outDir}`);
+  console.log(`Wrote home.html, marketing.html, feature.html, architecture.html, brief.html, manifest.json to ${outDir}`);
 }
 
 main();

@@ -2,7 +2,7 @@
   "identity": {
     "name": "Session Manager",
     "tag": "session-manager",
-    "version": "v0.54.0",
+    "version": "v0.60.0",
     "oneLine": "Electron desktop cockpit for driving Claude Code CLI sessions across projects via a TAB→Epic→PRD hierarchy, with scheduling, chat/terminal views, and mobile relay.",
     "claim": "A local cockpit for Claude Code.",
     "sub": "Terminal + 25+ config/observability/scheduling tabs (Settings, Skills, Hooks, MCP Servers, Tasks, Plans, History, Scheduler, Memory, Permissions, etc.), plus a mobile web cockpit at bilko.run. Runs on your machine — the fs layer never writes outside the home directory, and Project Pages ship with zero network egress.",
@@ -10,10 +10,10 @@
     "install": "npx claude-code-session-manager@latest"
   },
   "stats": [
-    { "v": "730", "k": "commits", "n": "full git history, this checkout" },
+    { "v": "827", "k": "commits", "n": "full git history, this checkout" },
     { "v": "42", "k": "archived Epics", "n": "each independently resumable" },
     { "v": "3", "k": "concurrent claude -p sessions", "n": "machine-wide session slot pool" },
-    { "v": "189", "k": "test files", "n": "unit (vitest) + e2e (Playwright) combined" }
+    { "v": "118", "k": "test files", "n": "unit (vitest) + e2e (Playwright) combined" }
   ],
   "pillars": [
     { "t": "One tab, one project", "d": "A Terminal tab is anchored to one cwd; that cwd IS the project identity, and every skill, hook and permission scopes itself to it automatically.", "k": "Workspace" },
@@ -23,42 +23,43 @@
   ],
   "quotes": [],
   "feature": {
-    "name": "Scheduler Redesign (Almanac / Canvas-2)",
+    "name": "PRD ↔ Epic Communication (Verdict Routing)",
     "kicker": "Feature",
-    "status": "Shipped · v0.52–v0.54",
+    "status": "In progress · v0.59–v0.60",
     "owner": "Solo maintainer",
-    "oneLine": "The Scheduler tab's Canvas-2 restyle, paired with structural fixes that make an Epic's proposed→active transition and its on-disk index un-corruptible.",
-    "problem": "Scheduler/Plans/Background-Agents had grown into three overlapping nav destinations, and nothing stopped an Epic from being minted directly into 'active' or a concurrent write from clobbering active-index.json.",
-    "solution": "Scheduler/Plans/Background-Agents were merged into one Scheduler destination (2026-06-03), then restyled around the Almanac/Canvas-2 design system. ensureEpic and createPromptSession were made structurally unable to mint an Epic as anything but 'proposed', and persistActiveIndex became a read-merge-write instead of a blind overwrite.",
+    "oneLine": "Closes the loop between a scheduler job and the Epic that authored its PRD — the Epic's own validation verdict, not the job's self-report, is what the traffic light and retry logic trust.",
+    "problem": "A PRD check-in used to let the executor assert its own 'done' status, and the Scheduler's traffic light had no reliable way to reflect what the authoring Epic actually thought of that outcome — jobs could look green while the Epic that requested them was still unresolved, and a retry could re-run against a stale or archived PRD path.",
+    "solution": "A PRD check-in now triggers Epic validation instead of asserting done (PRD 986); the traffic light reads that validation verdict directly off the Epic (PRD 987); verifyRun resolves a PRD's path through a live-then-archived fallback so a retry can't target a dead path (PRD 991); and the executor prompt now frames the context digest so the PRD stays the task while the finish protocol stays last.",
     "steps": [
-      { "t": "Nav consolidation", "d": "Scheduler/Plans/Background-Agents merged into one Scheduler destination; Home-tab vs Project-tab left-nav split out." },
-      { "t": "Canvas-2 restyle", "d": "f559d59 — Scheduler rebuilt around the Canvas-2 design: Machine destination, first-run guide, merged diagnostics." },
-      { "t": "Epic-creation lockdown", "d": "b2b1b82 / 92280db / 3d12e19 — ensureEpic and persistActiveIndex made structurally unable to mint or overwrite an Epic into 'active'." },
-      { "t": "Epic Queue UX", "d": "Actions dropdown menu, Build toolbar button and a discuss-first path replaced the prior scattered row controls." },
-      { "t": "Two-axis Agent/Mission picker", "d": "1c8f5ed — New Epic card now separates agentType (who runs the session) from tag/mission (what it's for), with a flip-layout grounding board inspector." }
+      { "t": "Context digest framing", "d": "PRD 984 — composeExecutorPrompt frames the context digest for the executor before the task itself." },
+      { "t": "Check-in triggers validation", "d": "PRD 986 — a PRD check-in triggers Epic validation and never asserts 'done' on its own." },
+      { "t": "Traffic light reads the verdict", "d": "PRD 987 — the Scheduler's traffic light reads the Epic's own validation verdict rather than the job's self-report." },
+      { "t": "verifyRun path fix", "d": "PRD 991 — verifyRun's prdPath now resolves through live-then-archived, so a retry can't chase a path that's already been archived." },
+      { "t": "Executor prompt ordering", "d": "The executor prompt was reordered so the PRD is the task and the finish protocol stays last, not interleaved." }
     ],
     "rules": [
-      { "t": "Exactly 3 Epic states", "d": "proposed / active / completed — no draft state; a half-typed Epic is proposed." },
-      { "t": "Never mint directly into active", "d": "Enforced structurally in ensureEpic and createPromptSession, not just by convention." },
-      { "t": "Read-merge-write only", "d": "active-index.json writes never blind-overwrite; a race can no longer drop another writer's session." },
-      { "t": "Selectors return stable references", "d": "A zustand selector must never build a fresh array/object per call — three prior blank-app incidents, guarded by npm run lint:selectors." }
+      { "t": "A check-in triggers validation, never asserts done", "d": "PRD 986 — the executor reporting completion is a request for review, not a verdict." },
+      { "t": "The traffic light shows the Epic's verdict, not the job's claim", "d": "PRD 987 — Scheduler UI state is sourced from the authoring Epic's own validation outcome." },
+      { "t": "prdPath resolves live-then-archived", "d": "PRD 991 — verifyRun never targets a PRD path that's already moved to prds-archived/." },
+      { "t": "Never credit a sibling job's commit to a no-op run", "d": "PRD 983 — commit-guard checks stop a no-op run from inheriting another job's real work." }
     ],
     "specs": [
-      ["Epic states", "proposed / active / completed", "no draft state"],
-      ["Session pool", "≤3 concurrent claude -p", "machine-wide, not per project"],
-      ["Active-index writes", "read-merge-write", "never a blind overwrite (3d12e19)"],
-      ["Nav surface", "1 Scheduler destination", "merged from Scheduler/Plans/Background-Agents, 2026-06-03"]
+      ["Check-in outcome", "triggers validation", "never a self-asserted 'done' (PRD 986)"],
+      ["Traffic light source", "Epic's own verdict", "not the job's self-report (PRD 987)"],
+      ["prdPath resolution", "live-then-archived fallback", "retry-safe against archived PRDs (PRD 991)"],
+      ["Executor prompt order", "PRD first, finish protocol last", "context digest framed ahead of the task"]
     ],
     "faq": [
-      { "q": "Can an Epic be created directly as active?", "a": "No — ensureEpic and createPromptSession are structurally unable to do that; every Epic is born proposed (b2b1b82, 92280db)." },
-      { "q": "What happens if active-index.json is written by two processes at once?", "a": "persistActiveIndex has been a read-merge-write since 3d12e19, so a race no longer drops the other writer's session." },
-      { "q": "Where did the feedback folder go?", "a": "It's retired — status: 'proposed' Epics are the human-approval gate now; nothing runs until Approve & start is pressed." }
+      { "q": "How does a PRD check back in with the Epic that started it?", "a": "The check-in triggers Epic validation (PRD 986); the Scheduler's traffic light then reflects that Epic's verdict (PRD 987) rather than the job asserting its own success." },
+      { "q": "What stopped a retry from targeting a dead PRD path?", "a": "verifyRun now resolves prdPath through a live-then-archived fallback (PRD 991), so an already-archived PRD is still found correctly." },
+      { "q": "Is this Epic finished?", "a": "No — it's an active bug-tagged Epic; open PRDs (972, 996) are still in the live queue as of this generation." }
     ],
     "timeline": [
-      { "w": "v0.52.0", "t": "Canvas-2 Scheduler redesign", "s": "done" },
-      { "w": "v0.53.0", "t": "Epic-creation lockdown + v51 perf work", "s": "done" },
-      { "w": "v0.54.0", "t": "Two-axis Agent/Mission picker + grounding board inspector", "s": "done" },
-      { "w": "next", "t": "New Epic card modal integration polish (open Epic psess-msby9bx8-4)", "s": "next" }
+      { "w": "PRD 984", "t": "Executor prompt frames the context digest", "s": "done" },
+      { "w": "PRD 986", "t": "Check-in triggers Epic validation, never asserts done", "s": "done" },
+      { "w": "PRD 987", "t": "Traffic light reads the Epic's validation verdict", "s": "done" },
+      { "w": "PRD 991", "t": "verifyRun's prdPath: live-then-archived resolution", "s": "done" },
+      { "w": "next", "t": "PRD 972 (notify epicId fallback) and PRD 996 (commit-guard on zero-edit runs) still queued", "s": "next" }
     ]
   },
   "architecture": {
@@ -76,13 +77,13 @@
       { "n": "Disk + CLI", "d": "claude binary, project cwds, session-manager-operations/, ~/.claude config tree", "f": "external", "tone": "mute" }
     ],
     "modules": [
-      { "n": "promptSessions.ts", "d": "Epic lifecycle state — status transitions, rename/delete guards", "f": 1, "dep": ["epicMint"], "heat": 0.9 },
-      { "n": "epicMint.cjs / activeIndexMerge.cjs", "d": "Epic minting + read-merge-write index invariants", "f": 2, "dep": [], "heat": 0.85 },
-      { "n": "scheduler.cjs", "d": "runs PRDs as claude -p jobs; boot reconciliation, dead-process reaper, feedback sweep", "f": 1, "dep": ["queueStore", "sessionSlots"], "heat": 0.8 },
-      { "n": "index.cjs / ipcSchemas.cjs / promptSessionEvents.cjs", "d": "Main-process IPC surface for Epic lifecycle", "f": 3, "dep": ["epicMint"], "heat": 0.7 },
-      { "n": "scheduler/tabs primitives", "d": "Almanac design primitives, Canvas-2 restyle", "f": 1, "dep": ["scheduler.cjs"], "heat": 0.6 },
-      { "n": "projectPages.cjs / projectBrief.cjs", "d": "Static Project Page generation pipeline (Stage 2-4)", "f": 2, "dep": ["config"], "heat": 0.5 },
-      { "n": "browserAgentServer.cjs / browserView.cjs", "d": "Embedded browser for Claude.ai login", "f": 2, "dep": [], "heat": 0.3 }
+      { "n": "scheduler.cjs + lib/", "d": "PRD execution engine: queue, boot reconciliation, DoD gate, RCA reporting back to the authoring Epic", "f": 15, "dep": ["queueStore", "sessionSlots"], "heat": 0.8 },
+      { "n": "state/chat.ts + ChatTranscriptTurn.tsx", "d": "Typed chat renderers sourced from the JSONL transcript feed, replacing chatRunner-driven ring buffer", "f": 3, "dep": [], "heat": 0.9 },
+      { "n": "chatRunner.cjs + transcripts.cjs", "d": "Headless claude -p runner demoted to a live tap; indexed, paged transcript reads", "f": 2, "dep": [], "heat": 0.6 },
+      { "n": "EpicDetail.tsx + SchedulePanel.tsx", "d": "Epic detail view, PRD dispatch chip status rollup, traffic light reading the Epic's own verdict", "f": 2, "dep": ["scheduler.cjs"], "heat": 0.5 },
+      { "n": "agentLibrary.cjs + AgentLibrary/TagLibrary UI", "d": "CRUD editor for personas, many-to-many tag membership, model default per persona", "f": 4, "dep": [], "heat": 0.3 },
+      { "n": "scheduler/ (dir): schedulerBatch.cjs, schedulerConfig.cjs", "d": "Batch depends/concurrency logic, currently under active edit — 'Not enough parallel processing' Epic", "f": 6, "dep": ["scheduler.cjs"], "heat": 0.7 },
+      { "n": "epicMint.cjs / activeIndexMerge.cjs", "d": "Epic minting + read-merge-write index invariants", "f": 2, "dep": [], "heat": 0.85 }
     ],
     "flow": [
       { "a": "Main process", "b": "IPC broadcast", "t": "config:changed / transcript:event:<tabId> / schedule:snapshot-changed", "n": "events published after every state change" },
@@ -92,12 +93,111 @@
     "decisions": [
       { "id": "DEC-1", "t": "No 'general' OWNERS namespace", "w": "architecture/, design-mocks/, HUMAN_LEARN/, reviews/ stay outside the single-writer law as skill-authored documentation, not app-owned runtime state (decided 2026-07-31).", "s": "accepted" },
       { "id": "DEC-2", "t": "project-pages/ is not an OWNERS namespace either", "w": "Written directly by a project-home-builder Epic's own Write tool calls, never through config.cjs — no app-enforceable concurrent-write hazard to guard.", "s": "accepted" },
-      { "id": "DEC-3", "t": "Epic status has exactly 3 states", "w": "No draft state; a half-typed Epic is proposed. Enforced structurally in ensureEpic/createPromptSession rather than left to convention.", "s": "accepted" }
+      { "id": "DEC-3", "t": "A PRD check-in triggers validation, never asserts done", "w": "PRD 986 made this structural: the executor's own claim of completion is a request for Epic review, not a verdict — the Scheduler's traffic light (PRD 987) reads that verdict, not the job's self-report.", "s": "accepted" }
     ],
     "risks": [
-      { "t": "Browser Broken", "d": "Embedded browser for Claude.ai login is flagged broken for the Google OAuth flow (brief.json area heat 0.3).", "s": "open" },
-      { "t": "New Epic card / Agent Library integration", "d": "Open Epic psess-msby9bx8-4 reports the New Epic modal's Type picker doesn't yet read clearly as Agent vs Mission.", "s": "watching" },
+      { "t": "PRD↔Epic communication loop still being hardened", "d": "The 'PRD to EPIC Communication' Epic is still active with PRDs 972 and 996 open in the live queue — verdict routing has landed but the loop isn't fully closed yet.", "s": "open" },
+      { "t": "Browser broken", "d": "Embedded browser for Claude.ai login is flagged broken for the Google OAuth flow (brief.json area heat 0.3).", "s": "open" },
       { "t": "CLI version drift", "d": "The shell assumes claude CLI flags/behavior that may change between releases.", "s": "watching" }
+    ]
+  },
+  "brief": {
+    "purpose": "A local Electron cockpit for orchestrating Claude Code CLI sessions across projects, organizing work into Agent+Tag-grounded Epics that decompose into scheduler-run PRDs.",
+    "what": [
+      "The **TAB→EPIC→PRD** hierarchy is the whole app's spine: a Terminal tab pins a project cwd, each **Epic** is a `PromptSession` combining an **Agent** persona (who) and a **Tag** mission (what), and Epics author `session-manager-operations/scheduler/` PRDs that headless `claude -p` jobs execute under a 3-slot concurrency cap.",
+      "Recent work (`295c875`, `8bac5b0`, `f5d3878`) rebuilt the **Chat view** to read directly from the `~/.claude/projects/.../*.jsonl` transcript feed via typed per-event-family renderers, demoting `chatRunner.cjs` to a live tap rather than the source of truth — this replaced a 500-entry ring buffer with an indexed, paged read.",
+      "The **Agent + Tag** vocabulary was formalized as the per-Epic customization layer (`d7c5d47`, `6b6a092`, `0c294fe`): Settings.json stays substrate-only (identical for every Epic in a project), while `model`/behavior differences belong to a custom Agent persona or Tag, not a Settings edit.",
+      "**Project Home** (`ca3d82a`, `a34da4b`, `2402369`) shifted to hosting a generated `home.html` document with a single \"generate\" action pulling from a saved component library, rather than juggling separate pages.",
+      "The **Keybindings tab was fully deleted** (`e0f779a`) as dead-clean-up work, and several open discussion Epics (parallelism gaps, PRD↔Epic communication, Agent vs Skill responsibility) remain unresolved design questions rather than shipped features."
+    ],
+    "areas": [
+      {
+        "name": "src/main/scheduler.cjs + lib/",
+        "files": 15,
+        "note": "PRD execution engine: queue, boot reconciliation, DoD gate, RCA reporting back to authoring Epic",
+        "epic": "PRD to EPIC Communication",
+        "heat": 0.8
+      },
+      {
+        "name": "src/renderer/state/chat.ts + components/ChatTranscriptTurn.tsx",
+        "files": 3,
+        "note": "Typed chat renderers sourced from JSONL feed, replacing chatRunner-driven ring buffer",
+        "epic": "Session Chat conversion into Simplified Chat",
+        "heat": 0.9
+      },
+      {
+        "name": "src/main/chatRunner.cjs + transcripts.cjs",
+        "files": 2,
+        "note": "Headless claude -p runner demoted to live tap; indexed paged transcript reads",
+        "epic": null,
+        "heat": 0.6
+      },
+      {
+        "name": "src/renderer/components/tabs/EpicDetail.tsx + SchedulePanel.tsx",
+        "files": 2,
+        "note": "Epic detail view, PRD dispatch chip status rollup",
+        "epic": "PRD to EPIC Communication",
+        "heat": 0.5
+      },
+      {
+        "name": "src/main/agentLibrary.cjs + AgentLibrary/TagLibrary UI",
+        "files": 4,
+        "note": "CRUD editor for personas, many-to-many tag membership, model default per persona",
+        "epic": "Explore the Agent Context and SubAgents",
+        "heat": 0.3
+      },
+      {
+        "name": "src/main/scheduler/ (dir) + schedulerBatch.cjs, schedulerConfig.cjs",
+        "files": 6,
+        "note": "Batch depends/concurrency logic, currently under active edit per git status",
+        "epic": "Not enough paralell processing",
+        "heat": 0.7
+      }
+    ],
+    "scope": [
+      {
+        "when": "2026-08-02",
+        "kind": "decided",
+        "text": "Agent-facing Epic-proposal channels (/propose-epic, RCA auto-filed Epics, feedback sweep) are removed; only a human pressing New Epic can mint one — SINGLE-CREATOR LAW enforced fail-closed in epicMint.cjs",
+        "src": "claude_md"
+      },
+      {
+        "when": "2026-07-31",
+        "kind": "decided",
+        "text": "Scheduler reframed as a browser over TAB→EPIC→PRD; flat scheduler/prds/ retired in favor of per-Epic scheduler/epics/<epic-id>/prds/",
+        "src": "claude_md"
+      },
+      {
+        "when": "recent (git log)",
+        "kind": "added",
+        "text": "Keybindings tab and all its surfaces deleted entirely",
+        "src": "git_log e0f779a"
+      },
+      {
+        "when": "recent (git log)",
+        "kind": "added",
+        "text": "Chat now sources its transcript from the JSONL feed with typed per-event renderers instead of chatRunner as source of truth",
+        "src": "git_log 8bac5b0, 295c875"
+      },
+      {
+        "when": "recent (git log)",
+        "kind": "narrowed",
+        "text": "classifyLine now emits an array of events per line instead of one, fixing dropped transcript events",
+        "src": "git_log 07202b4"
+      },
+      {
+        "when": "open Epic",
+        "kind": "decided",
+        "text": "Settings (System/Project/Local) is substrate only; per-Epic behavior differences must be a Tag, an Agent persona, or a future effort/reasoning PRD — never a Settings edit",
+        "src": "claude_md"
+      }
+    ],
+    "conventions": [
+      "Zustand stores are isolated islands (config.ts, live.ts, voice.ts, scheduleState.ts, toast.ts) — never cross-subscribe; compose in components.",
+      "Never return a freshly-built value (`?? []`, `.filter()`, `.map()`) from a zustand selector — causes React #185 blank-app; select raw slice and derive after.",
+      "All fs writes go through config.cjs's atomic writeJson/writeTextAtomic with a declared `writer` per the single-writer law over session-manager-operations/ namespaces.",
+      "Cap at 3 concurrent `claude -p` processes machine-wide (scheduler + chat runs share one session-slot pool) — exceeding this OOM-killed Electron once already.",
+      "No CommonJS in renderer, no ES modules in main; `.cjs` files bypass the package's `type: module`."
     ]
   }
 }

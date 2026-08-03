@@ -22,39 +22,6 @@
       "tag": "discussion",
       "agentType": "architect"
     },
-    "psess-mscgxoqw-7": {
-      "id": "psess-mscgxoqw-7",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Project Home Layout\n\nDescribe the currely layout for Project Home, it looks really bad. It feels like multiple pages one after the other we need to drive some consistency and fixed workflow",
-      "claudeSessionId": "cd9f3871-5a84-4742-9d79-1f3ee75bf2ed",
-      "status": "active",
-      "createdAt": "2026-08-03T00:05:55.208Z",
-      "completedAt": null,
-      "tag": "discussion",
-      "agentType": "architect"
-    },
-    "psess-msch6x36-16": {
-      "id": "psess-msch6x36-16",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Home Page\n\nLets implement a new Home Page for Home-Tab in Session Manager \n\nUse the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Home+Screen+A.html\n\nFocus on these files (the whole project is readable):\n- `Home Screen A.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/home-a.jsx`\n\nImplement: `Home Screen A.html`",
-      "claudeSessionId": "a5f7dae5-da46-4b62-9392-0da197fca690",
-      "status": "active",
-      "createdAt": "2026-08-03T00:13:05.922Z",
-      "completedAt": null,
-      "tag": "feature",
-      "agentType": "dev-lead"
-    },
-    "psess-msckxplj-24": {
-      "id": "psess-msckxplj-24",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Settings Left-Nav\n\nClarify role of setting in the application. Settings was suppose to effect one session at at time, however the session is now an EPIC therefolre the scope of Settings left nav is not clear to me. We need to establish a rule that I must be clear about \n\nAgent + Tag should be equivalent to hand curating Context (who is working, how to wrok, skills etc) and Tag/Mission or general objective routine to apply for this type of takss; Therefole the combination of Tagent and Tag controlls the settings for initialization fo the session. The settings if changes will be a different custom-tag or custom-agetnt option. Make sure this progression of logic is followed. Its is extremely key since there is no changeing claude, cladue will readon the context (which is empty, we ingect it) and will need a missing or tag",
-      "claudeSessionId": "473a7285-6dc5-4ade-a2a6-6ce1a9513747",
-      "status": "active",
-      "createdAt": "2026-08-03T01:57:54.775Z",
-      "completedAt": null,
-      "tag": "feature",
-      "agentType": "architect"
-    },
     "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb": {
       "id": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -64,17 +31,6 @@
       "createdAt": "2026-08-03T03:16:53.067Z",
       "completedAt": null,
       "tag": "bug",
-      "agentType": "architect"
-    },
-    "session-chat-conversion-into-simplified-chat-so--7cda6827": {
-      "id": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Session Chat conversion into Simplified Chat\n\nSo the Claude sessions that run for the Epics are very important and I want to make sure that all information is surfaced back however trivial and redundant,. What the simlified chat does is translates and organized the information better does not attempt to hide or mask it. I'm specifcally even interestted on things like \"TIPs\" and other unknown stuff that Anthoic might relase in future that show up, I want to see in the Simplifed Chat as well in designated visually pleasant area",
-      "claudeSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
-      "status": "active",
-      "createdAt": "2026-08-03T03:44:17.041Z",
-      "completedAt": null,
-      "tag": "discussion",
       "agentType": "architect"
     },
     "not-enough-paralell-processing-why-i-never-see-3-6a96029e": {
@@ -98,6 +54,17 @@
       "completedAt": null,
       "tag": "build",
       "agentType": "builder"
+    },
+    "generate-this-project-s-project-pages-home-marke-bffae0c6": {
+      "id": "generate-this-project-s-project-pages-home-marke-bffae0c6",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Generate this project's Project Pages (Home/Marketing/Feature/Architecture/Brief).",
+      "claudeSessionId": "c26fa583-5685-4335-93f4-e2fd29e4f1d4",
+      "status": "active",
+      "createdAt": "2026-08-03T06:48:00.304Z",
+      "completedAt": null,
+      "tag": "project-home-builder",
+      "agentType": "project-home-builder"
     }
   },
   "events": {
@@ -247,348 +214,6 @@
         "id": "pevt-mscln22u-31",
         "promptSessionId": "psess-mscg8i3u-2",
         "at": "2026-08-03T02:17:37.350Z"
-      }
-    ],
-    "psess-mscgxoqw-7": [
-      {
-        "id": "pevt-mscgxoqw-8",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T00:05:55.208Z",
-        "text": "Project Home Layout\n\nDescribe the currely layout for Project Home, it looks really bad. It feels like multiple pages one after the other we need to drive some consistency and fixed workflow"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscgxoqw-8",
-        "text": "## Current layout (top-to-bottom, one scrolling column, `max-w-1080px`)\n\n`ProjectHome.tsx` renders these as independent, self-contained blocks, one after another, each with its own header (mono kicker + serif `h2` + faint note) and its own card style:\n\n1. **`PhHeader`** — purpose title, Refresh button, provenance chips (\"read from…\")\n2. *(conditional)* refreshing banner\n3. **`PhNow`** — \"What is in flight\" — 3-col grid of Epic cards\n4. **`PhWhat`** — \"What this is\" — paragraph card, editable/pinnable\n5. **`PhAreas`** — \"How it is put together\" — a table\n6. **`PhScope`** — \"How the goal has moved\" — a timeline list\n7. Two-column row: **`PhConventions`** (checklist) + **`PhOpenQuestions`** (question cards)\n8. *(else, if no brief)* — its own separate empty state with a Generate button\n9. Footer caption paragraph\n10. **`ProjectPagesSection`** — a structurally unrelated sub-app bolted onto the bottom: its own tab bar (Home/Marketing/Feature/Architecture/About), its own iframe preview, its own fullscreen mode, its own Generate/Regenerate CTA and empty state\n\n## Why it reads as \"pages stitched together\"\n\n- **Six-plus independent section headers**, each re-declaring the same kicker/title/note chrome (`PhBlock`), but each body uses a *different* content shape: card-grid, prose card, table, timeline, checklist, question-cards, iframe-viewer. Nothing tells the eye these are facets of one thing rather than six unrelated widgets.\n- **No persistent navigation or section anchor** — it's a pure vertical scroll with hard `mb-7` breaks. There's no way to jump to \"Conventions\" or \"Project Pages\" without scrolling past everything above.\n- **Two unrelated CTA/empty-state patterns**: the brief has its own \"Generate the brief\" empty state (§8), and `ProjectPagesSection` has a *second*, differently-styled \"Generate Now\" empty state further down. A user hits \"generate\" twice, for two different subsystems, with no shared visual language between them.\n- **`ProjectPagesSection` is the biggest …",
-        "id": "pevt-mscgyklb-10",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T00:06:36.479Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscgyklb-10",
-        "text": "This confirms and broadens the finding. Answer below.\n\n## Does the current workflow support dynamic assembly? Not really — for `home` specifically, no.\n\nI checked the actual selection pipeline (`select.ts`'s `scoreVariants` + `selectionPredicates.ts`), not just the library structure.\n\n**How selection actually works:** `scoreVariants` walks a lens's presets in order (v1, v2, …) and picks the first preset whose per-slot choice is \"eligible.\" A variant is only *conditionally* eligible if it has an entry in `VARIANT_REQUIREMENTS` (`selectionPredicates.ts`) — a `requires`/`avoidIf` predicate checked against the project's real `ProjectPageSummary`. **If a variant has no entry there, it's unconditionally eligible, which means preset `v1`'s pick always wins the tie-break, on every run, for every project.**\n\n**`VARIANT_REQUIREMENTS` has exactly two entries in the whole codebase, both in `marketing`:**\n```\n'marketing.proof.quote': { requires: ['quotes.length > 0'] }\n'marketing.proof.stats': { requires: ['stats.length > 0'] }\n```\n\nNothing else — not `home.overview`, not `home.pillars`, not anything in `feature` or `architecture` — has a predicate. So:\n\n- **`home` lens (the one you're asking about): `overview` always resolves to `dashboard`, `pillars` always resolves to `grid` — for every project, every regenerate.** The `ledger`/`rows` alternates exist in the library but the deterministic selector can never reach them; they're only reachable if a human hand-edits `picks.json` directly (which `mergePicks` then preserves).\n- Same is true for `feature` (always `v1`'s picks) and `architecture` (always `v1`'s picks) — `marketing` is the *only* lens with any real content-driven variation, and even there only 2 of its 8 slots actually branch.\n\nSo today, \"assembled dynamically\" is true only in the mechanical sense (there's a selection *pass*, and hand-picks are respected across regenerates) — it is not true in the sense that layout responds to what's actually in the project. A tiny CL…",
-        "id": "pevt-msch6qe0-15",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T00:12:57.240Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msch6qe0-15",
-        "text": "Good — confirms my read. Here's the landed decision and what it changes concretely.\n\n## Confirmed: your 4-piece model replaces the current 5-stage pipeline\n\n| Your term | Maps to (unchanged) |\n|---|---|\n| **The Project** | `project-pages/summary.json` (Stage 1 — agent reads brief.json + repo, writes summary) |\n| **The Component Library** | `src/renderer/lib/projectPages/library/*.tsx` (Stage 0 — fixed slots/variants, still the only building blocks; the agent picks *among* these, doesn't invent new markup) |\n| **Home Builder Agent** | `project-home-builder` (Epic tag + `.claude/agents/project-home-builder.md`) — now owns selection too, not just summary+render |\n| **Place to host output** | `project-pages/picks.json` + `output/*.html` + `manifest.json` (Stage 3, unchanged) |\n\n**What's actually being cut is Stage 2 only** — the deterministic, non-LLM `scoreVariants` scorer and its `requires`/`avoidIf` predicate language. That's exactly the piece I flagged last turn as producing a fixed layout (`home` always gets `dashboard`+`grid`, `feature`/`architecture` always get `v1`, because almost nothing has a predicate). Removing it and having the agent choose directly — reading the library's variant notes + `summary.json` itself, the same way it already writes `summary.json` — is the fix: variant fit becomes real per-project judgment instead of \"whichever preset comes first in a list that's usually untriggered anyway.\"\n\nStage 3 (render) stays a deterministic pure function (`renderProjectPages(summary, picks)`) — that part was never the problem, it's just template instantiation from whatever `picks.json` says.\n\n## Concrete deltas this implies (for /develop, once you confirm)\n\n**Docs (spec is source of truth, per CLAUDE.md):**\n- `session-manager-operations/architecture/project-pages-pipeline.md` — rewrite \"Stage 2\" section: delete the scorer/predicate description, replace with \"the Home Builder Agent selects one variant per slot per lens itself, reasoning over `summary.json` ag…",
-        "id": "pevt-mschguv5-19",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T00:20:49.601Z"
-      },
-      {
-        "id": "2e2912dc-6db9-4f23-ab16-3b6fb377b332",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mschguv5-19",
-        "at": "2026-08-03T00:26:40.229Z",
-        "prdSlug": "957-project-pages-pipeline-retire-deterministic-stage-2-selectio"
-      },
-      {
-        "id": "58f222e8-bbe0-453f-a20a-3de9d9eb9840",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prd_created",
-        "causedByEventId": "2e2912dc-6db9-4f23-ab16-3b6fb377b332",
-        "at": "2026-08-03T00:27:02.175Z",
-        "prdSlug": "958-delete-deterministic-project-pages-variant-selector-select-t"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "58f222e8-bbe0-453f-a20a-3de9d9eb9840",
-        "text": "Both PRDs are queued and will run via the scheduler's own polling (independent of this turn):\n\n| NN | File | ETA | Depends on |\n|---|---|---|---|\n| **957** | `957-project-pages-pipeline-retire-deterministic-stage-2-selectio.md` | ~12 min | none |\n| **958** | `958-delete-deterministic-project-pages-variant-selector-select-t.md` | ~18 min | none |\n\nBoth live under `session-manager-operations/scheduler/epics/psess-mscgxoqw-7/prds/`, `cwd` = `/home/bilko/Projects/session-manager`. They're an independent pair (docs vs. code, disjoint files) rather than a chain, so they can run in parallel:\n\n- **957** rewrites `project-pages-pipeline.md`'s Stage 2 section and `.claude/agents/project-home-builder.md`'s protocol step 4 to describe agent-owned selection, drops the \"No LLM-driven variant selection\" non-goal, and cleans up the stale `mergePicks` reference — docs only, no code touched.\n- **958** deletes `select.ts`, `selectionPredicates.ts`, `select.test.ts`, `scripts/select-project-pages-picks.cjs`, drops the dead export from `logicBundle.ts`, fixes the stale comment in `ProjectPagesSection.tsx`, and gates on `typecheck` + `test:unit` + `lint:selectors` staying green.\n\nToken cost ballpark: small/cheap — 957 is pure prose editing over two files, 958 is deletion + a grep sweep + three bounded test commands; neither should approach the ~30 min ceiling.\n\n**This turn ends here** — this is a one-shot session, so I can't watch the scheduler run in the background or report back later myself. The jobs will execute on their own per the scheduler's `when-available` polling (or you can hit \"Run now\" in the SchedulePanel). Next time you're in this Epic, ask me to check status and I'll verify both against their acceptance criteria and route 958 to `code-reviewer` before calling it done, per `/develop`'s Phase 2 gate.",
-        "id": "pevt-mschp5t0-22",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T00:27:17.028Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mschp5t0-22",
-        "text": "Two different things are getting conflated here — let me separate them.\n\n**The \"4\" that already exists (unaffected by 957/958):** `project-home-builder`'s Stage 3/4 already pre-generates 4 static HTML pages per \"Generate Now\"/\"Regenerate\" click — `home`, `marketing`, `feature`, `architecture` (confirmed in `render.tsx:96`: `renderProjectPages` returns `{ home, marketing, feature, architecture }`, all written to `project-pages/output/*.html` in one pass). `ProjectPagesSection.tsx` displays them behind a lens-toggle. This part of the pipeline is untouched by what I just queued.\n\n**But these 4 are not \"4 target-audience versions of the same Home page.\"** They're 4 different *content types*, not 4 audiences viewing one page:\n- `home` — an internal dashboard view (for someone who already has the project open)\n- `marketing` — an outward pitch (the one genuinely audience-facing lens)\n- `feature` — a single feature deep-dive\n- `architecture` — an engineering/review-oriented page\n\nOnly `home` itself has 2 slots (`overview`, `pillars`), each with 2 layout variants — that's a style choice within one page, not 4 audience cuts.\n\n**What 957/958 actually change:** today, the `home` lens's variant picks (`overview: dashboard`, `pillars: grid`) are hardcoded — every project gets the identical layout because the old deterministic scorer had no real predicate for them. Once those PRDs land, the `project-home-builder` agent picks those variants itself per project, so the *style* of the generated Home page will actually reflect the project instead of being frozen. That's a real-content-per-project win, but it's still **one** generated Home page per project, not 4 audience-targeted variants of it.\n\nIf what you actually want is: the Home lens itself pre-generates *multiple audience-targeted versions* (e.g. new-contributor / decision-maker / investor / casual-visitor cuts of the same underlying project) — that's a genuinely new feature, not something 957/958 or the existing pipeline does t…",
-        "id": "pevt-mscm7zdn-34",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T02:33:53.627Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscm7zdn-34",
-        "text": "Good — that's exactly what's already covered. To be precise about what you'll have once 957/958 land:\n\n- All 4 lenses (Home / Marketing / Feature / Architecture) already pre-generate together in one \"Generate Now\"/\"Regenerate\" pass today (Stage 3/4, unaffected by our changes) — that capability isn't new.\n- What 957/958 fix is that **all 4** lenses' internal variant selection stops being hardcoded to preset `v1` and becomes real per-project judgment by the `project-home-builder` agent — today only `marketing` has any content-driven variation (2 of 8 slots), while `home`, `feature`, and `architecture` are frozen to their first preset for every project. After these land, all 4 will vary by what's actually in the project's `summary.json`, not just `marketing`.\n\nNo new PRD needed — 957 (docs) and 958 (code deletion) already cover exactly this, scoped to the full pipeline (all 4 lenses use the same `select.ts`/`selectionPredicates.ts` mechanism being retired), not just `home`. Nothing further to queue on this thread; 957/958 remain queued and will run per the scheduler as reported last turn.",
-        "id": "pevt-mscmc2yr-35",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T02:37:04.899Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscmc2yr-35",
-        "text": "**Already committed** — nothing left for me to do here. Both PRDs ran and self-committed while we were talking:\n\n- `308e744` `docs(project-pages): reverse Stage 2 to agent-owned variant selection`\n- `beda48f` `refactor(project-pages): delete retired Stage 2 variant scorer`\n\n`npm run typecheck` is clean against the current tree. I restored the two unrelated `homeNeedsYou.*` files (belonging to a different in-flight Epic) back to unstaged rather than sweeping them into this commit.\n\nReady for your reboot test — on next launch, \"Generate\"/\"Regenerate\" on any project's Project Pages should have all 4 lenses (Home/Marketing/Feature/Architecture) picked by the `project-home-builder` agent's own judgment instead of always defaulting to preset `v1`.",
-        "id": "pevt-mscmf18f-38",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T02:39:22.623Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscmf18f-38",
-        "text": "Two separate things here, and the second one is a real trap I should flag.\n\n## 1. The screenshot isn't showing what we changed\n\nWhat's on screen — \"THE BRIEF\" header, \"What is in flight\", \"What this is\" — is `ProjectHome.tsx`'s **live React Brief dashboard**. That's the hand-built React view I described in my first answer (the 6-stacked-blocks layout you called \"multiple pages one after the other\"). **PRDs 957/958 never touched it.** They changed the *Project Pages* static-HTML generator, which lives further down that same scroll, below \"What this is\" — the section with the Home/Marketing/Feature/Architecture tab bar and the iframe. You'd have to scroll to the bottom to see it, and even then 957/958 only change *how variants get picked at generation time*, not the live dashboard's layout at all.\n\nSo \"the layout still seems the same\" is correct and expected — we fixed the generator's selection logic, not the Project Home page's own layout. Your original complaint (turn 1: inconsistent stacked blocks, no nav, two different Generate CTAs) is **still entirely unaddressed** — that conversation pivoted to the dynamic-assembly question and never came back to the layout itself.\n\n## 2. Stale `picks.json` will silently defeat the fix\n\n`session-manager-operations/project-pages/picks.json` was written at 12:28 today by the **old deterministic scorer**, and every single value is exactly preset `v1`:\n\n```\nhome:         overview=dashboard, pillars=grid          ← v1\nmarketing:    hero=editorial, proof=stats, ...          ← v1\nfeature:      header=spec, mech=steps, ...              ← v1\narchitecture: summary=layers, map=boxes, ...            ← v1\n```\n\nThe new agent-owned protocol says *\"preserve any existing entries unless the request is explicitly 'start over'\"* — which means **a plain \"Regenerate\" will keep these v1 picks forever** and you'll never see the agent's own judgment. The scorer's output got grandfathered in as if it were a deliberate human hand-pick.\n\nTo actually test …",
-        "id": "pevt-mscn7b7b-4",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T03:01:21.911Z"
-      },
-      {
-        "id": "aa49af33-8870-4471-b8f9-26c03a70b7b6",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscn7b7b-4",
-        "at": "2026-08-03T03:06:21.376Z",
-        "prdSlug": "968-project-home-hosted-html-spec"
-      },
-      {
-        "id": "31b19a2f-5d04-4118-a15d-e6bafdfd69f6",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prd_created",
-        "causedByEventId": "aa49af33-8870-4471-b8f9-26c03a70b7b6",
-        "at": "2026-08-03T03:07:01.676Z",
-        "prdSlug": "969-project-pages-brief-lens"
-      },
-      {
-        "id": "eea23877-5b6d-41b0-a5c1-3124aa602879",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prd_created",
-        "causedByEventId": "31b19a2f-5d04-4118-a15d-e6bafdfd69f6",
-        "at": "2026-08-03T03:07:39.110Z",
-        "prdSlug": "970-project-home-shipped-default-html"
-      },
-      {
-        "id": "1b746b9b-a306-4d09-ab6b-83e702ece63f",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "kind": "prd_created",
-        "causedByEventId": "eea23877-5b6d-41b0-a5c1-3124aa602879",
-        "at": "2026-08-03T03:08:23.691Z",
-        "prdSlug": "971-project-home-host-generated-doc"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "1b746b9b-a306-4d09-ab6b-83e702ece63f",
-        "text": "Queued a 4-PRD chain implementing the refactor you described:\n\n| NN | Slug | ETA | Depends on |\n|---|---|---|---|\n| **968** | `project-home-hosted-html-spec` | 15m | — |\n| **969** | `project-pages-brief-lens` | 25m | 968 |\n| **970** | `project-home-shipped-default-html` | 20m | 968 |\n| **971** | `project-home-host-generated-doc` | 28m | 969, 970 |\n\n969 and 970 run in parallel after 968; 971 lands last. All under `session-manager-operations/scheduler/epics/psess-mscgxoqw-7/prds/`, `cwd` = this repo.\n\n**968 (spec first)** — rewrites the pipeline architecture doc: Project Home's main content IS a hosted static HTML at the fixed path `project-pages/output/home.html`; app ships a default; 5 lenses not 4; the two competing CTAs (`Refresh brief` + `Generate Now`) consolidate into one **Generate My Project Home**; and it must resolve the stale-`picks.json` hazard I found earlier (scorer-era v1 picks would otherwise be grandfathered in forever by the preserve-hand-picks rule).\n\n**969** — adds the `brief` lens end to end: summary fields, `briefSlots.tsx` (built from the existing `kit.tsx` primitives), `render.tsx`, `projectPages.cjs`'s `LENSES`, preload types. Flagged a real trap in its AC: `get()` currently returns `null` if *any* lens file is missing, so adding a 5th lens would make every existing 4-lens project read as having no output at all — it has to handle that explicitly with a test.\n\n**970** — the shipped default: build-time asset, honest content (says it's the default, zero fabricated project data), same `kit.tsx` design tokens so default and generated read as one system, plus an `isDefault` provenance field on the IPC payload. Called out that the default asset must *not* go through `config.cjs`'s `validatePath` (home-dir `allowedRoots` would reject an npx/global install path).\n\n**971** — the actual layout fix: hosted document as primary content, one Generate action, provenance line, live `PhNow`/`PhOpenQuestions` as a thin strip above, and deletion of `PhWhat`/`Ph…",
-        "id": "pevt-mscngq0f-7",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T03:08:41.007Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscngq0f-7",
-        "text": "**Pushed to `origin/main` (`ea89b99..b43c6f9`).**\n\nAll four PRDs from the refactor chain completed and self-committed while we talked — 968 at 03:19, 969 at 03:27, 970 at 03:34, 971 at 03:44 UTC. Verified before pushing:\n\n- `npm run typecheck` — clean\n- `npm run test:unit` — **237 files / 2230 tests passed**\n- `npm run lint:selectors` — OK (424 files scanned)\n\nPushed 5 commits total: the four feature commits already on `main` from other in-flight Epics (`a34da4b`, `e62bd4f`, `870ac00`, `5ff20ea`) plus my `b43c6f9` syncing this Epic's runtime state (archived PRDs 968–971, queue/history, transcripts).\n\n**One thing I found and deliberately did not commit:** there's a stray nested directory at\n```\nsession-manager-operations/scheduler/epics/prd-to-epic-communication-.../prds/session-manager-operations/scheduler/state/queue.json\n```\ncontaining `{\"jobs\": []}` — a PRD executor from a *different* Epic (`prd-to-epic-communication...`, PRD 972) wrote a queue file to a path-joined-twice location instead of the real `scheduler/state/queue.json`. It's an empty-jobs artifact of a relative-vs-absolute path bug, not real state. I left it untracked rather than committing the corruption or deleting someone else's Epic's output — it belongs to that Epic's thread to diagnose, and PRD 972's own title (`notify-epic-prd-path-and-epicid-fallback`) suggests it's already in the neighborhood of that bug.",
-        "id": "pevt-mscqcjhy-29",
-        "promptSessionId": "psess-mscgxoqw-7",
-        "at": "2026-08-03T04:29:24.790Z"
-      }
-    ],
-    "psess-msch6x36-16": [
-      {
-        "id": "pevt-msch6x36-17",
-        "promptSessionId": "psess-msch6x36-16",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T00:13:05.922Z",
-        "text": "Home Page\n\nLets implement a new Home Page for Home-Tab in Session Manager \n\nUse the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:\nhttps://claude.ai/design/p/0ca33cd3-c2fa-4644-b728-bde42292abbd?file=Home+Screen+A.html\n\nFocus on these files (the whole project is readable):\n- `Home Screen A.html`\n\nAlso read these files the selection imports:\n- `variants/almanac.jsx`\n- `variants/home-a.jsx`\n\nImplement: `Home Screen A.html`"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msch6x36-17",
-        "text": "Implemented the \"Home Screen A\" control-room redesign for the session-manager Home tab, adapted from the design mock to use only real, wired data (no fabricated charts/breakdowns):\n\n**Changed:** `src/renderer/components/tabs/Home.tsx`\n- **Hero**: `This machine · N projects` kicker, headline shows real session-slot usage plus a clickable \"needs you\" count that jumps to the new section; added `All history` / `New epic` header actions.\n- **New \"Needs you\" section**: surfaces three real, already-existing human-gate signals — `proposed` Epics (Approve & start / Discard, reusing `EpicApprovalBar`'s logic), chat tickets stuck on `needs-input` (Open session), and scheduler jobs in `failed`/`needs_review` (Retry now / View in Scheduler). Rows expand inline, matching the design's interaction pattern.\n- **New `QueuedCard`**: shows real pending scheduler jobs (title, project, estimate) as the third column alongside the existing Usage and Projects cards.\n- Left the Active/Recent sessions cards and Agents card as-is (already real-data and functionally aligned with the design).\n\n**New:** `src/renderer/lib/homeNeedsYou.ts` — pure, dependency-free join helper (`buildNeedsYouRows`) plus `src/renderer/lib/__tests__/homeNeedsYou.test.ts` (5 tests, all passing).\n\nDeliberately **not** implemented from the mock: the fabricated 14-day pace sparkline and per-project token-% breakdown — no real data source backs either, and the project's grounding-board rule (\"never fabricated placeholder numbers\") rules that out.\n\nVerified: `npm run typecheck` clean, `npm run lint:selectors` clean, full `vitest run` — 2107/2107 passing.",
-        "id": "pevt-msche54m-18",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T00:18:42.934Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msche54m-18",
-        "text": "## Summary\n\nRemoved **Repo Viz** and **Search** from the Tools section of the Left Navigation (Project tab), and deleted all related code end-to-end:\n\n**Nav/routing:**\n- `LeftNav.tsx` — removed `'repoviz'`/`'search'` from the `NavKey` union\n- `navGroups.ts` — removed both entries from `NAV_ITEMS` (Voice remains, home-face only)\n- `screenKeys.ts`, `screenComponents.tsx` — removed from `SCREEN_KEYS`, page-meta, and the render switch\n- `AlmanacSidebar.tsx` — trimmed `ToolKey`; the \"Tools\" group header/rows now only render when non-empty (previously it would've shown an empty \"Tools\" header on the Project face, since Voice is home-only)\n- `AlmanacIcon.tsx` — removed the now-dead `'repoviz'` and `'global-search'` icon variants (kept `'search'`, still used by AddressBar/FindBar/SchedulePanel)\n- `CommandPalette.tsx`, `slashCommand.ts`, `learningContent.ts` — removed the corresponding palette entries, `/repoviz` `/repo` `/search` slash routes, and Learn-panel content blocks\n\n**Behavior:**\n- `App.tsx` — removed the `⌘P`/`⌘⇧F` global shortcuts, `searchMode` state, and the now-unneeded search-input carve-out in the key-skip logic\n- `Workbench.tsx` — dropped the `ctx.searchMode` re-mount dependency\n\n**Deleted files:** `RepoVisualizationModal.tsx`, `SearchModal.tsx`, `GlobalSearchModal.tsx`, `QuickOpenModal.tsx`, `main/repoAnalyzer.cjs`, `main/search.cjs`, `tests/e2e/search-mode-toggle.spec.ts`\n\n**Backend:** `main/index.cjs` (dropped requires + IPC registration), `preload/index.cjs` and `preload/api.d.ts` (dropped the `search`/`repo` API namespaces and their now-orphaned types: `SearchFileEntry`, `SearchFilesResult`, `SearchTextMatch`, `SearchTextResult`, `RepoLanguageStats`, `RepoTopDirectory`, `RepoGitStatusSummary`, `RepoAnalyzeResult`, `RepoAnalyzeError`)\n\n**Tests updated** (not just deleted where behavior changed): `AlmanacSidebar.test.ts` (added a test proving Tools is hidden on the project face and still shows Voice on home), `navGroupsHome.test.ts`, `slashCommand.test.ts…",
-        "id": "pevt-mschrj0f-23",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T00:29:07.455Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mschrj0f-23",
-        "text": "Committed as `1d87b3a` on `main`: 24 files changed (546 insertions, 2068 deletions). This covers both the Home page control-room redesign and the Repo Viz/Search removal — the two pieces of work from this session.\n\nLeft unstaged/uncommitted: the `session-manager-operations/` state files and the `Hooks/McpServers/Permissions/Settings/Skills/SystemPrompt` tab + `layout.ts` changes, since those belong to a different, concurrently-running agent's in-progress work on this repo — not something I touched or should sweep into this commit. Not pushed, per standing instructions (push/publish needs its own trigger).",
-        "id": "pevt-mscmeqja-37",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T02:39:08.758Z"
-      },
-      {
-        "id": "fa3a7560-7912-4a43-9780-23e46b062920",
-        "promptSessionId": "psess-msch6x36-16",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscmeqja-37",
-        "at": "2026-08-03T03:04:28.613Z",
-        "prdSlug": "966-home-dashboard-fix-blank-queued-card-add-interactions-legend"
-      },
-      {
-        "id": "178cf5f0-2409-4ee5-bca6-1657bf2c4ac4",
-        "promptSessionId": "psess-msch6x36-16",
-        "kind": "prd_created",
-        "causedByEventId": "fa3a7560-7912-4a43-9780-23e46b062920",
-        "at": "2026-08-03T03:05:11.029Z",
-        "prdSlug": "967-home-session-detail-drawer"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "178cf5f0-2409-4ee5-bca6-1657bf2c4ac4",
-        "text": "Both PRDs are correctly written and filed. Here's the summary of this turn's work.\n\n## Diagnosis\n\nI compared your screenshot against the real committed code (v0.58.0, confirmed as the actual bundled build the running Electron process — PID 2908481, launched 19:55 today — is serving; `dist/assets/*.js` does contain the \"Needs you\"/\"This machine\" strings, so the code is genuinely deployed). Two real gaps explain the mismatch:\n\n1. **The \"Queued\" card region rendered blank** in your screenshot — third column, no header/border visible at all. That's either a real bug (store snapshot not yet arrived when the card first mounts) or a rendering quirk — worth a proper regression test either way.\n2. **I never built the mock's richer interaction layer** — the \"Interactions\" legend toggle, and the Active/Recent session rows opening a slide-in detail drawer (the mock's `ADrawer`) instead of just firing a flat action. Those are the parts that make the mock *feel* like a distinct \"control room\" rather than a plain card list, so their absence is likely the biggest reason it reads as \"doesn't look at all like the design.\"\n\nI deliberately did **not** rebuild the mock's \"Pace\" sparkline or per-project token-% breakdown — both use entirely fabricated numbers in the mock (a hardcoded 14-day array, \"3.19M tokens\", \"87% by Thursday\"), and this app has no real per-project token-attribution data source to back that honestly.\n\n## Action taken\n\nRather than hand-patch this again inline, I decomposed the remaining gap into two PRDs and queued them to the existing Epic (`psess-msch6x36-16`, this same \"Home Page\" Epic), per your \"Execute the PRD decomposition\" instruction:\n\n- **PRD 966** — diagnose+fix the blank Queued card with a permanent jsdom regression test, add the real (non-fabricated) Interactions legend toggle.\n- **PRD 967** — build the real slide-in `HomeSessionDrawer` for Active/Recent session rows (depends on 966), backed only by data this app actually has; Fork/Export buttons only wir…",
-        "id": "pevt-mscnd9i3-6",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T03:05:59.643Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscnd9i3-6",
-        "text": "Done. Set `model: fable` on the `dev-lead` persona (`~/.claude/agents/dev-lead.md`) — since this Epic's `agentType` is `dev-lead`, resuming this Epic's Chat/Terminal session will now launch with `--model fable` per `resolveEpicModel`.\n\nTwo things worth flagging so this does what you expect:\n\n1. **This is global, not scoped to just this Epic.** `dev-lead.md` is the one shared persona definition — every Epic anywhere on this machine that uses `agentType: dev-lead` will now launch on Fable too, not just this \"Home Page\" Epic. There's no per-Epic model override separate from the persona it points at.\n2. **It does not touch PRD 966/967 execution.** I need to correct something from my last summary — I'd said PRD execution model comes from the Epic's persona, but that's wrong: `scheduler.cjs` hardcodes `--model sonnet` for every scheduled PRD job regardless of any persona's `model` field (`resolveEpicModel` only governs the Epic's own live Chat/Terminal session, not scheduler jobs). So the queued PRDs will still run on Sonnet no matter what — which matches what you said (\"scheduler dev-lead is good\"), just wanted to be precise about *why* that's unaffected rather than let the earlier wrong claim stand.\n\nTakes effect on the next resume of this Epic's session (this turn is already running under whatever model launched it).",
-        "id": "pevt-mscob67b-18",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T03:32:21.671Z"
-      },
-      {
-        "id": "418e2d26-6d46-43bb-9833-6dc944485f2c",
-        "promptSessionId": "psess-msch6x36-16",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscob67b-18",
-        "at": "2026-08-03T03:34:23.374Z",
-        "prdSlug": "973-home-queued-popover-new-epic-picker"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "418e2d26-6d46-43bb-9833-6dc944485f2c",
-        "text": "Yes — decomposition is now complete, and most of it has already shipped. Status of the full Home Screen A design against the codebase:\n\n**Already landed (committed):**\n- Hero (kicker, slots-busy greeting, \"N things need you\" jump link, All history / New epic buttons), Needs-you section, Usage meters, Projects card, Active/Recent sessions — `1d87b3a` (this session's first pass)\n- PRD 966 → `8a3e979`: QueuedCard empty-state fix + Interactions legend toggle\n- PRD 967 → `fcb4180`: real slide-in session detail drawer for Active/Recent rows (the mock's ADrawer pattern)\n\n**Just queued (final piece):**\n- PRD 973 `home-queued-popover-new-epic-picker` — the last two real-data-backed mock interactions: the Queued card's per-job popover, and the New-epic project-picker drawer (reusing 967's drawer primitive). Pending in the queue now; dev-lead persona carries `model: fable` as you set up, though note scheduler PRD jobs themselves still pin `--model sonnet` in `scheduler.cjs`.\n\n**Deliberately excluded, never to be decomposed** (documented in Home.tsx's header): the mock's Pace sparkline and Usage per-project breakdown — both run on fabricated numbers (hardcoded 14-day array, invented token splits) with no real data source in this app, and the project rule is real-data-only. \"Skip next\" on queued jobs is likewise excluded — no per-job skip API exists to back it.\n\nOnce 973 completes, every element of Home Screen A that can be honestly backed by real app data will be implemented.",
-        "id": "pevt-mscoe4bx-20",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T03:34:39.213Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscoe4bx-20",
-        "text": "Verified — audited every visual on the Home dashboard against its data source. **Everything currently shipped is built on existing APIs/stores; zero fabricated values.** Here's the full accounting:\n\n| Visual | Data source (existing API/store) |\n|---|---|\n| Hero slot count (\"N of M slots busy\") | `window.api.schedule.sessionSlots()` — live slot pool, polled 5s |\n| Hero \"N things need you\" | Derived from the three real stores below via `homeNeedsYou.ts` |\n| Usage meters (Session 5h / Weekly / Opus / Sonnet / extra usage) | `useBilling` → the real `/api/oauth/usage` billing endpoint |\n| Projects card (names, live counts, last activity) | `useKnownProjects` (real `~/.claude/projects` scan) + running chats join |\n| Queued card | `useScheduleState` snapshot — real scheduler queue.json jobs |\n| Needs-you rows | `usePromptSessions` (proposed Epics), `useChat` ticketHistory (needs-input), scheduler jobs (failed/needs_review); actions wired to real `approveProposed`/`markCompleted`/`send`/`resetJob` |\n| Active sessions + drawer | `sessionSlots()` holders joined to real jobs/chats; drawer KeyVals (owner/kind/Epic/project/started) all from store state; live tail = **real** last 4 chat turns from `useChat` — shown only for running chat runs, omitted otherwise (no placeholder) |\n| Recent sessions + drawer | Real transcript scan via `window.api.config.listDir` (same source as History tab); Resume = real `claude --resume`; drawer shows only real id/project/mtime/size — the mock's invented \"$4.10 est.\" and turn counts were **not** carried over |\n| Interactions legend | Static reference copy describing only interactions that actually exist |\n| Slot cap slider | `window.api.schedule.setSessionSlots()` |\n\nMock elements with **no backing API were excluded, not faked**: Pace sparkline, per-project token split, \"Skip next\", Fork/Export (no backend actions exist) — all documented in Home.tsx's header comment. Grep for fabricated literals (`$`, \"est. cost\", \"3.19M\", spark arrays, placeholde…",
-        "id": "pevt-mscofl5v-21",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T03:35:47.683Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscofl5v-21",
-        "text": "Pushed. `main` is now synced with origin (`591428b..ca3d82a`, 8 commits, 0 ahead/0 behind).\n\nWhat went up includes all the completed Home Screen A work — the control-room dashboard (`1d87b3a`, pushed earlier in that range's history), PRD 966's QueuedCard fix + Interactions legend (`8a3e979`), PRD 967's session detail drawer (`fcb4180`) — plus concurrent work from other Epics on this machine (Epics agent/mission changes, project-pages \"brief\" lens, ops state syncs).\n\nOne thing is deliberately *not* \"all done\": **PRD 973** (Queued-job popover + New-epic project picker, the final fidelity piece) is still `pending` in the scheduler queue — it hasn't executed yet. When it completes it will commit locally per the scheduler's flow, but that future commit won't push itself; it'll be included next time you push or publish.",
-        "id": "pevt-mscoryfq-24",
-        "promptSessionId": "psess-msch6x36-16",
-        "at": "2026-08-03T03:45:24.758Z"
-      }
-    ],
-    "psess-msckxplj-24": [
-      {
-        "id": "pevt-msckxplj-25",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T01:57:54.775Z",
-        "text": "Settings Left-Nav\n\nClarify role of setting in the application. Settings was suppose to effect one session at at time, however the session is now an EPIC therefolre the scope of Settings left nav is not clear to me. We need to establish a rule that I must be clear about \n\nAgent + Tag should be equivalent to hand curating Context (who is working, how to wrok, skills etc) and Tag/Mission or general objective routine to apply for this type of takss; Therefole the combination of Tagent and Tag controlls the settings for initialization fo the session. The settings if changes will be a different custom-tag or custom-agetnt option. Make sure this progression of logic is followed. Its is extremely key since there is no changeing claude, cladue will readon the context (which is empty, we ingect it) and will need a missing or tag"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msckxplj-25",
-        "text": "That inventory doc covers app-chrome/localStorage scoping, not the `settings.json`↔Agent/Tag question — it's a separate, still-relevant open list. No overlap to reconcile.\n\n**The rule, established and written into `CLAUDE.md` (session-manager-operations/../CLAUDE.md, new bullet after the AIM-framework paragraph):**\n\n- **Settings (System/Project/Local) is substrate, not per-Epic curation.** It edits the actual `settings.json`/`.claude/` files the `claude` CLI reads from disk on every invocation, identically, regardless of which Epic is running. It was never really \"one session\" scoped — the old TAB=session model just hid this because a tab's one session and its one project settings.json had the same lifetime. Now that a TAB hosts many Epics, a Project-scope Settings edit changes the substrate for *every* Epic in that project (User-scope: every Epic machine-wide). There's no per-Epic override, and `groundingBoard.ts` only reports these files exist — it never injects their content into a prompt.\n- **Agent + Tag is the per-Epic curation layer.** `agentType` (Actor) and `tag` (Mission) are folded fresh into each Epic's `openingPrompt` at creation via `composeEpicIntake` — that's the only place \"how this specific Epic should work\" belongs.\n- **The rule to apply going forward:** if a behavior should differ per Epic or per task, it's a new/edited **Tag** (`TagLibrary.tsx`'s `initialPromptTemplate`) or a new/edited **Agent** persona (`AgentLibrary.tsx`'s persona `.md`, which literally is a system-prompt body) — never a Settings edit. Settings only holds what's legitimately identical for that scope regardless of task (permissions, hooks, MCP servers, env vars, default model, output style).\n\nVerified via direct read of `Settings.tsx`, `scopes.ts`, `epicIntake.ts`, `groundingBoard.ts`, and confirmed by a parallel research agent — no code drift exists (Settings.tsx was already correctly file-scoped, never per-Epic); this was purely an undocumented mental-model gap, now closed wi…",
-        "id": "pevt-msckzjfo-26",
-        "promptSessionId": "psess-msckxplj-24",
-        "at": "2026-08-03T01:59:20.100Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msckzjfo-26",
-        "text": "`Model & Reasoning` (`src/renderer/lib/settingsGroups.ts:48-60`) is a curated grouping over six literal top-level `settings.json` keys: `model`, `availableModels`, `modelOverrides`, `effortLevel`, `fastMode`, `fastModePerSessionOptIn`, `alwaysThinkingEnabled`. It's not app logic — Settings.tsx just renders/edits these keys via the same ScopeSwitcher (user/project/local) as everything else in the JSON editor; the `claude` CLI itself reads them from whichever settings.json it loads.\n\nSo it falls under exactly the rule just written into `CLAUDE.md`: it's **substrate, not per-Epic curation**.\n\n- Editing it at **User scope** (`~/.claude/settings.json`) sets the default model/effort/fast-mode for every `claude` process this machine launches — every Epic, every project, forever, until changed again.\n- Editing it at **Project scope** (`<cwd>/.claude/settings.json`) overrides that for every Epic under this one project.\n- There is **no per-Epic model/effort override** — an Epic doesn't carry its own `effortLevel`; it inherits whatever the substrate says at the moment its `claude --resume`/`claude -p` process spawns. Two Epics in the same project today literally cannot run on different models via this screen — only by hand-editing Local scope between them, which is exactly the kind of session-scoped mental model you're trying to retire.\n\nGiven the rule you just had me write (\"if a behavior should differ per Epic/task, it's a Tag or Agent, never a Settings edit\"), Model & Reasoning is a case where that rule currently has **no escape hatch** — Tag and Agent personas are *prompt text*, they cannot select a model or effort level (that's a `claude` CLI process-launch parameter, not something injectable into `openingPrompt`). So right now:\n\n- If you want \"this Epic always runs on Opus at high effort\" as a *repeatable, curated* choice, the only real lever is Project/Local-scope `settings.json` — which is global to the project, not the Epic — or a `--model`/effort flag baked into how …",
-        "id": "pevt-mscl1w8t-27",
-        "promptSessionId": "psess-msckxplj-24",
-        "at": "2026-08-03T02:01:10.013Z"
-      },
-      {
-        "id": "20261de5-54f9-4eee-b7ec-06d45bafe986",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscl1w8t-27",
-        "at": "2026-08-03T02:03:45.123Z",
-        "prdSlug": "959-agent-model-default-terminal"
-      },
-      {
-        "id": "2c7273a1-2d61-4d83-a450-ebcbb5f4dc7f",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prd_created",
-        "causedByEventId": "20261de5-54f9-4eee-b7ec-06d45bafe986",
-        "at": "2026-08-03T02:03:58.166Z",
-        "prdSlug": "960-agent-model-default-chat"
-      },
-      {
-        "id": "38e06f2b-5920-4f47-8994-fce2a626bdef",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prd_created",
-        "causedByEventId": "2c7273a1-2d61-4d83-a450-ebcbb5f4dc7f",
-        "at": "2026-08-03T02:04:08.927Z",
-        "prdSlug": "961-agent-model-docs-and-scope"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "38e06f2b-5920-4f47-8994-fce2a626bdef",
-        "text": "**Decision locked in and queued.**\n\nConfirmed the mechanism exists but is inert: `AgentPersona` already carries a `model` frontmatter field (`src/main/agentLibrary.cjs`), and `chatRunner.cjs` already proves `--model` is a real, working CLI flag (it hardcodes `--model sonnet` today) — but nothing currently reads the persona's `model` at Epic-launch time. `agentType` is genuinely display-only right now, exactly as the current CLAUDE.md says.\n\nQueued a 3-PRD chain on this Epic (`psess-msckxplj-24`) to close that gap:\n\n- **959 `agent-model-default-terminal`** — Agent persona's `model` field becomes the `--model` flag on the Terminal-view `claude` launch command for that one Epic.\n- **960 `agent-model-default-chat`** (depends on 959) — same resolution reused so chatRunner's headless Chat-view run agrees with Terminal (extracted into a shared resolver, `sonnet` fallback kept explicit per your global \"pin `--model`\" rule).\n- **961 `agent-model-docs-and-scope`** (depends on 960) — corrects CLAUDE.md's now-stale \"agentType is display-only\" line and adds the carve-out to the Settings-substrate rule I wrote earlier this Epic.\n\nDeliberately scoped to **`model` only**, not \"all session settings\": `effortLevel`/`fastMode`/`alwaysThinkingEnabled` (the rest of Settings' \"Model & Reasoning\" group) have no confirmed `claude` CLI flag anywhere in this codebase today — inventing one would be a guess, not a fact. PRD 961 documents that as an explicit known gap rather than letting the docs overclaim. If you want effort-level control added too, that needs the CLI mechanism confirmed first (worth a quick check against `claude --help` / the claude-api reference) — say the word and I'll queue a follow-up PRD once that's verified.",
-        "id": "pevt-mscl5x9e-28",
-        "promptSessionId": "psess-msckxplj-24",
-        "at": "2026-08-03T02:04:17.954Z"
-      },
-      {
-        "id": "86109b1b-15f7-4962-b20d-d84be9ceb8c1",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscl5x9e-28",
-        "at": "2026-08-03T02:10:37.406Z",
-        "prdSlug": "962-agent-model-nav-consolidation"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "86109b1b-15f7-4962-b20d-d84be9ceb8c1",
-        "text": "Queued **962 `agent-model-nav-consolidation`**, chained after 961 (dependsOn), completing the 4-PRD sequence for this Epic:\n\n959 → 960 → 961 → 962: wire the model resolver (Terminal) → wire it (Chat) → correct the docs → relocate the UI so Agent Library owns curated model editing and Settings narrows to non-Agent substrate.\n\n**Net answer to your question:** keep Settings as its own left-nav tab — it's not redundant, it's the home for everything that's legitimately machine/project-wide (permissions, hooks, MCP servers, git behavior, interface, memory/plans, updates) regardless of which Agent is running. Only the \"Model & Reasoning\" slice moves into Agent Library, because that's the one slice that's actually per-Agent now. Tags never get a settings surface, per your instruction — nothing in this chain gives them one.",
-        "id": "pevt-mscle5x3-29",
-        "promptSessionId": "psess-msckxplj-24",
-        "at": "2026-08-03T02:10:42.423Z"
-      },
-      {
-        "id": "91b04959-2baf-4078-bb07-77b63a2e22c0",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscle5x3-29",
-        "at": "2026-08-03T02:18:57.702Z",
-        "prdSlug": "963-nav-consolidate-home-scoped-config"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscle5x3-29",
-        "text": "**Queued 963 `nav-consolidate-home-scoped-config`**, completing a 5-PRD chain (959→960→961→962→963) for this Epic:\n\n959/960 wire Agent persona `model` into an Epic's actual launch (Terminal + Chat) → 961 corrects the docs → 962 moves the \"Model & Reasoning\" editing UI into Agent Library → 963 pulls System Prompt / Skills / MCP Servers / Hooks / Permissions / Settings off the Project face's left-nav entirely, leaving them Home-only — matching the precedent already set by Plugins/Keybindings/Agent Library/Tag Library, and validated against `lib/navFace.ts`'s documented split between `navFace` and `activeTabId` (Project-scope editing still works from Home, since scope resolution depends on the active tab's `cwd`, not which face you're viewing).\n\n`memory` and `bilko-host` deliberately stay on the Project face — they aren't `settings.json`-scope editors (workspace memory store, and a project-specific publish action), so they don't belong in this consolidation.\n\nEnd state after all 5 land: Project face's left-nav holds only per-project/per-Epic things (Project Home, Epics, File Explorer, Scheduler, History, Memory, Host on Bilko.run); every machine/project-substrate config tab lives under Home, with zero duplication.",
-        "id": "pevt-mscloxkd-32",
-        "promptSessionId": "psess-msckxplj-24",
-        "at": "2026-08-03T02:19:04.813Z"
-      },
-      {
-        "id": "11aa5b24-0f38-43a8-983d-3df081fbcf81",
-        "promptSessionId": "psess-msckxplj-24",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscloxkd-32",
-        "at": "2026-08-03T02:20:11.642Z",
-        "prdSlug": "964-epic-detail-agent-readout"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscloxkd-32",
-        "text": "**Rule affirmed and closed with PRD 964.** Chain is now 6 deep (959→960→961→962→963, plus 964 branching off 959):\n\n- **959/960** — Agent persona's `model` field becomes the real default for an Epic's launch (Terminal + Chat).\n- **961** — docs correction.\n- **962** — *editing* the model default moves into Agent Library (a catalog/definition, not session state — correctly stays off EPICS).\n- **963** — substrate config tabs (System Prompt/Skills/MCP/Hooks/Permissions/Settings) consolidate onto Home only, out of the Project face.\n- **964** (new) — *reading* which Agent/model a specific Epic is actually running with moves into EpicDetail — closing the gap you just flagged: nothing session-specific should require leaving EPICS to see.\n\nThe distinction locked in: **catalogs (Agent Library, Tag Library) define reusable defaults and belong in Home; EPICS is where a specific session's resolved state — which agent, which model, which tag — must be readable.** Editing always happens in the catalog; the Epic only ever displays a read-only readout of what it resolved to, since an Epic's agent/tag are fixed for its session lifetime per the existing lifecycle rule.\n\nNo other Home/Project nav item currently leaks session-specific state — Memory (workspace-wide) and History (cross-session aggregate) aren't single-Epic state, so they're unaffected.",
-        "id": "pevt-msclqiwv-33",
-        "promptSessionId": "psess-msckxplj-24",
-        "at": "2026-08-03T02:20:19.135Z"
       }
     ],
     "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb": [
@@ -807,144 +432,22 @@
         "id": "pevt-mscujuaw-52",
         "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
         "at": "2026-08-03T06:27:03.848Z"
-      }
-    ],
-    "session-chat-conversion-into-simplified-chat-so--7cda6827": [
-      {
-        "id": "pevt-mscoqi6r-22",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T03:44:17.041Z",
-        "text": "Session Chat conversion into Simplified Chat\n\nSo the Claude sessions that run for the Epics are very important and I want to make sure that all information is surfaced back however trivial and redundant,. What the simlified chat does is translates and organized the information better does not attempt to hide or mask it. I'm specifcally even interestted on things like \"TIPs\" and other unknown stuff that Anthoic might relase in future that show up, I want to see in the Simplifed Chat as well in designated visually pleasant area"
-      },
-      {
-        "id": "273b9019-1950-43a0-b420-d75077e03c99",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-03T03:44:17.041Z",
-        "text": "Session Chat conversion into Simplified Chat\n\nSo the Claude sessions that run for the Epics are very important and I want to make sure that all information is surfaced back however trivial and redundant,. What the simlified chat does is translates and organized the information better does not attempt to hide or mask it. I'm specifcally even interestted on things like \"TIPs\" and other unknown stuff that Anthoic might relase in future that show up, I want to see in the Simplifed Chat as well in designated visually pleasant area"
       },
       {
         "kind": "response",
-        "causedByEventId": "273b9019-1950-43a0-b420-d75077e03c99",
-        "text": "## Where I landed\n\nThe goal — *\"translate and organize, never hide\"* — is achievable, but the current pipeline is **structurally lossy before the renderer ever sees the data**. So Simplified Chat can't be a rendering change; it has to be a change to the classifier's contract. The one-line rule I'd adopt:\n\n> **The classifier is a router, never a filter. Every JSONL line reaches the UI. Known kinds get a designed card; unknown kinds get a generic card. A code change upgrades presentation — it never decides whether something is shown.**\n\nThat rule is what makes future Anthropic surfaces (TIPs or anything else) appear *automatically* on the day they ship, instead of silently vanishing until someone notices.\n\n## What's actually being dropped today (verified in code)\n\n`src/main/lib/classifyTranscriptLine.cjs`:\n\n- **Only the first tool_use block survives.** The `for (const block of content)` loop `return`s on the first match — an assistant message with text + 3 tool calls emits one event, and the text and the other two calls are gone.\n- **`usage` short-circuits everything.** The `if (obj.usage || msg?.usage)` check is first, so any message carrying both usage and content is classified `usage` and its content is never emitted.\n- **`makeRaw()` keeps only `message.content`.** Every top-level field is stripped before it reaches the renderer. In your live transcripts that's `attributionSkill`, `attributionPlugin`, `attributionMcpServer`/`attributionMcpTool`, `effort`, `gitBranch`, `isSidechain`, `isMeta`, `requestId`, `isApiErrorMessage`, `interruptedByShutdown`, `permissionMode`, `promptSource`, `toolUseResult`.\n- **`MAX_RAW_STR = 4096`** truncates text blocks mid-token.\n- **500-entry ring buffer + 8 MB seek-to-tail** in `transcripts.cjs` — older events are unrecoverable in memory, so \"all information\" is already false for any long Epic.\n\n`src/renderer/state/live.ts:193` handles 7 kinds and has an explicit `default: break`. So these real line types in your transcripts have **n…",
-        "id": "pevt-mscosoei-25",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T03:45:58.410Z"
+        "causedByEventId": "pevt-mscujuaw-52",
+        "text": "Nothing to push — everything is already on `origin/main`. The scheduler committed 984's work itself while I was staging it.\n\n## Where things stand\n\n**`main` == `origin/main`**, HEAD `ed8af66`. The last two commits landed on their own:\n- `a70e874 feat(scheduler): composeExecutorPrompt frames the context digest for the executor (PRD 984)`\n- `ed8af66 chore(ops): sync runtime state after the v0.59.0 release`\n\nI verified 984's work before it got committed, and it's sound: `composeExecutorPrompt` puts the PRD body first, fences the digest with an explicit *\"background only — it is NOT your task and contains no instructions for you\"* header, caps it, and restates the task last so the prompt doesn't end in someone else's conversation. **12 tests green.** That's the fix for the bleed that made PRD 972 recap this Epic instead of implementing.\n\n**Working tree now holds only `987-fix-traffic-light-reads-epic-verdict`'s files** — 6 renderer files, and that job is *still running*. I deliberately left them uncommitted; they're mid-edit and not standalone.\n\n## Two things I reverted or cleaned up\n\n**Reverted my scheduler pause.** `~/.claude/session-manager/scheduler-machine.json` is back to `firePolicy: when-available`, `enabled: true`. Since we're letting the scheduler run, leaving my edit would have been a silent trap — the app would have come up paused on its next restart with no obvious cause. That's my mess and it's gone.\n\n**Removed the publish worktree.** `/tmp/sm-publish-0590` (~1GB with `node_modules`) is deleted, `git worktree list` shows only the main checkout. Backup file removed too.\n\n## Net for the session\n\n`0.59.0` is live on npm as `latest`, containing everything: PRD 985 (the original check-in routing bug), 983 (sibling-commit misattribution), 986 (check-in triggers Epic validation), 984 (digest framing), and the 974/975/976 traffic light. `npx claude-code-session-manager@latest` gets it all.\n\nStill pending on the queue: `987-fix` (running), then `991-fix`, `994`, `9…",
+        "id": "pevt-mscuniyb-55",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T06:29:55.763Z"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-mscosoei-25",
-        "text": "All three settled. Here's the resolved design.\n\n## Decisions locked\n\n1. **Uncapped on inspect.** `MAX_RAW_STR` truncation is removed from the *stored* event; the card renders a bounded preview and the full untruncated payload loads on expand. Nothing is destroyed at classify time — that's the part that's currently unrecoverable.\n2. **One surface.** \"Chat\" and \"Simplified Chat\" are the same view. No new tab, no parallel UI — this is a rework of the existing Chat view's ingest + rendering. (Consistent with the nav rule in CLAUDE.md: extend the surface that already owns the data.)\n3. **Show everything by default**, and earn that by formatting it properly. No collapsed-by-default signal rail.\n\n## The formatting principle\n\nThe reason \"show everything\" normally fails is that everything gets rendered as *one shape* — a paragraph of text or a JSON blob. So the rule is:\n\n> **Every event family gets a typed renderer. The generic JSON card is the fallback of last resort, not the default path.**\n\nConcretely, ~90% of what's currently dropped is highly structured (deltas, listings, mode switches, snapshots) and renders far better as a chip, a table, or a two-line strip than as prose. You already have the primitive vocabulary for this in `ChatTranscriptTurn.tsx` — `TOOL_USE_TONE`/`TOOL_USE_ICON`, `collapseToolUseRuns`, `CollapsibleToolStrip`, `DiffCard`, the tint constants. Extend that set; don't fork it (the file header already says so).\n\n## Renderer per event family\n\n**Conversation lane** — full-width, the reading column:\n\n| Family | Compact render | Expanded |\n|---|---|---|\n| assistant text | markdown via `renderChatMarkdown` (as today) | — |\n| thinking blocks | italic dimmed block, distinct left-border tint, rendered *inline in order* rather than suppressed | full text |\n| tool_use | existing icon + one-line label strip, runs collapsed via `collapseToolUseRuns` | full input JSON, syntax-highlighted |\n| tool_result | outcome chip (ok/error) + first line + byte count | **uncappe…",
-        "id": "pevt-mscq84ca-26",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T04:25:58.522Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscq84ca-26",
-        "text": "Right — and the structure already exists in code; it's just discarded at the moment of composition.\n\n## The problem, precisely\n\n`composeEpicIntake` (`src/renderer/lib/epicIntake.ts:87`) builds `openingPrompt` by string-concatenating **six known sections** in a fixed order, then returns a single flat string. The section boundaries are known at compose time and unrecoverable afterwards — so the chat renderer receives a ~2 KB prose blob and has no way to know it's structured. That's exactly the \"dumping text in a paragraph\" complaint, and it lands on the *first and most important* turn of every Epic.\n\nThe emitted order, from the code:\n\n| # | Section | Source |\n|---|---|---|\n| 1 | **Actor** | `You are acting as the \"<name>\" agent: <description>` |\n| 2 | **Context Injections** | `CONTEXT_INJECTIONS[key].text`, in key order, only enabled ones |\n| 3 | **Input** | `inputSummary` — `summarizeGroundingBoard()`, forced to one line |\n| 4 | **Mission** | `agentTagDef(tag).initialPromptTemplate` |\n| 5 | **Goal** | `Goal: <title>` + the human's objective |\n| 6 | **References** | `Reference: <path>` lines |\n\n## Fix: carry the structure, don't re-parse it\n\n`composeEpicIntake` returns a third field alongside `goalText`/`openingPrompt`:\n\n```\nsections: Array<{ kind: 'actor'|'injection'|'input'|'mission'|'goal'|'reference',\n                  label: string, text: string, source?: string }>\n```\n\n`openingPrompt` stays byte-identical (it's what goes on the wire to the CLI — don't touch it). `sections` is persisted on the `PromptSession` next to `openingPrompt` and is what the first turn renders from. Regex-parsing the prose back apart would work today and break the first time anyone edits a template — data, not re-derivation.\n\n## The predefined turn template\n\nEvery turn — grounding, user, assistant, signal — renders into the same three-zone frame. Zones are always present; empty zones collapse to nothing:\n\n- **Header** — role/kind badge, timestamp, attribution chips (skill / plugin / MCP to…",
-        "id": "pevt-mscq9eus-27",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T04:26:58.804Z"
-      },
-      {
-        "id": "5169a6d1-82cb-4238-832b-747f5876dbec",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscq9eus-27",
-        "at": "2026-08-03T04:31:21.152Z",
-        "prdSlug": "977-transcript-classifier-multi-emit"
-      },
-      {
-        "id": "46ca2584-0f11-48e6-917e-ae07c4692ba3",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prd_created",
-        "causedByEventId": "5169a6d1-82cb-4238-832b-747f5876dbec",
-        "at": "2026-08-03T04:31:55.232Z",
-        "prdSlug": "978-chat-feed-from-jsonl"
-      },
-      {
-        "id": "cf7891cb-5f42-4b64-bbd0-a86e436c852a",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prd_created",
-        "causedByEventId": "46ca2584-0f11-48e6-917e-ae07c4692ba3",
-        "at": "2026-08-03T04:32:27.109Z",
-        "prdSlug": "979-transcript-paged-reads"
-      },
-      {
-        "id": "ec4b4aa8-00c6-4c9b-b689-3665a1166a65",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prd_created",
-        "causedByEventId": "cf7891cb-5f42-4b64-bbd0-a86e436c852a",
-        "at": "2026-08-03T04:33:06.791Z",
-        "prdSlug": "980-chat-typed-event-renderers"
-      },
-      {
-        "id": "f74f6fd4-f131-4ce6-a382-756a54f9b409",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prd_created",
-        "causedByEventId": "ec4b4aa8-00c6-4c9b-b689-3665a1166a65",
-        "at": "2026-08-03T04:33:37.957Z",
-        "prdSlug": "981-chat-turn-three-zone-frame"
-      },
-      {
-        "id": "b6fe97c8-f15d-4930-88dd-20038f3cb6a1",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "prd_created",
-        "causedByEventId": "f74f6fd4-f131-4ce6-a382-756a54f9b409",
-        "at": "2026-08-03T04:34:14.178Z",
-        "prdSlug": "982-epic-intake-structured-sections"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "b6fe97c8-f15d-4930-88dd-20038f3cb6a1",
-        "text": "**Queued and committed as `5fb16f0`.** Six PRDs, verified on disk with correct frontmatter, `sourcePromptId`, and dependency edges:\n\n| NN | Slug | Est | dependsOn |\n|---|---|---|---|\n| 977 | `transcript-classifier-multi-emit` | 22m | — (gates all) |\n| 978 | `chat-feed-from-jsonl` | 24m | 977 |\n| 979 | `transcript-paged-reads` | 26m | 977 |\n| 980 | `chat-typed-event-renderers` | 28m | 978 |\n| 981 | `chat-turn-three-zone-frame` | 22m | 980 |\n| 982 | `epic-intake-structured-sections` | 20m | 981 |\n\n979 branches off 977 and runs parallel to the 978→980→981→982 line. Total ~2h20m of executor wall-clock, ballpark $8–15. `when-available` polling will pick them up; \"Run now\" in SchedulePanel forces it.\n\n**Three deviations from the plain design, all deliberate:**\n- 977 stores a bounded preview + byte reference rather than deleting truncation, because uncapped text in a 500-entry buffer is a memory cliff. Expand re-reads from disk — same behavior you asked for.\n- 977 carries explicit AC for the `live.ts` double-count risk and the `race.ts`/`orchestrator.ts` `raw` consumers. Neither was in the design discussion; both would have bitten during execution.\n- 980/981 are written to *extend* PRDs 845/914/915/916, which already landed the caption layer, outcome label and `DiffCard` in `ChatTranscriptTurn.tsx`. Without that note the executor would have rebuilt them.\n\n**Two things I did not do, stated plainly:**\n\n1. **No npm release.** There was nothing to publish — no `src/` changes, nothing unpushed, `package.json` and npm both at 0.58.0. If you meant a literal release, it needs the PRDs to land first.\n2. **No Phase-2 tracking.** `/develop` normally ends with a 30-minute loop watching the jobs to completion, then a verification gate. This is a one-shot headless run — it terminates when I stop, so I cannot watch them. **You'll need to check the Scheduler tab yourself, or re-run `/develop`'s tracking phase from an interactive session.** Watch for: a job parked in `needs_review` (that's…",
-        "id": "pevt-mscqjj77-30",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T04:34:50.995Z"
-      },
-      {
-        "id": "pevt-mscrjxf9-1",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "response",
-        "causedByEventId": "pevt-mscqjj77-30",
-        "at": "2026-08-03T05:03:09.045Z",
-        "text": "PRD 979-transcript-paged-reads needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T05-02-12-093Z/root-cause-979-transcript-paged-reads.md"
-      },
-      {
-        "id": "pevt-mscryat2-2",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "kind": "response",
-        "causedByEventId": "pevt-mscrjxf9-1",
-        "at": "2026-08-03T05:14:19.574Z",
-        "text": "PRD 980-chat-typed-event-renderers needs review: no commit or verdict sentinel. Root-cause report: /home/bilko/.claude/session-manager/scheduled-plans/runs/2026-08-03T05-03-12-912Z/root-cause-980-chat-typed-event-renderers.md"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscryat2-2",
-        "text": "**Committed `41a57d9`.** Here's what actually happened — the picture changed substantially while I was working.\n\n## The chain is half-built already\n\nThe scheduler ran ahead of me. Three of the six PRDs landed during this conversation:\n\n| PRD | State | Evidence |\n|---|---|---|\n| 977 classifier multi-emit | ✅ **landed** | `07202b4`; `classifyTranscriptLine.cjs` now has `events.push`/`return events`, `previewText` + `ref` |\n| 978 Chat feed from JSONL | ✅ **landed** | `8bac5b0` |\n| 979 paged reads | ✅ **landed** | `sub.lineIndex`, `readPage()`, index invalidated on inode-change + truncation, OTEL emit-once guard, 500-ring gone |\n| 980 typed renderers | ❌ **failed, requeued** | first run self-delegated, exited 0 with nothing done |\n| 981, 982 | queued | — |\n\n**Verified, not assumed:** `npx tsc --noEmit` exit 0, and `npx vitest run` → **239 files / 2232 tests, all passing**. So 977–979 are genuinely green, not false-green.\n\nI also checked 979's hardest AC — that paging never materializes the whole file. The one `fsp.readFile` in `transcripts.cjs:440` is `usageForOne`, a pre-existing function guarded by `MAX_USAGE_FILE_BYTES` with skip-and-warn. Not the paging path. AC genuinely satisfied.\n\n## The real bug I found, and fixed\n\nPRD 980's first run **delegated to a subagent and exited 0 having done nothing** — the documented self-delegation failure class. Its retry PRD was then written to `session-manager-operations/scheduler/prds/`, the **retired flat dir**, which the app auto-consolidates into `prds-archived/` at boot *without executing*.\n\nThat's a silent-loss trap, and it has already fired once: `979-fix-transcript-paged-reads.md` is sitting in `prds-archived/` having never run. 979 only landed because a separate attempt succeeded. A 55-minute retry PRD was queued into a dir where it would evaporate.\n\nRather than add a duplicate 988 alongside the still-queued 980, I folded the executor guard directly into `980-chat-typed-event-renderers.md` — the file that will actually be…",
-        "id": "pevt-mscs3v4p-37",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T05:18:39.193Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscs3v4p-37",
-        "text": "**Both PRDs queued and committed as `6c5ef19`.**\n\n| NN | Slug | Est | What it fixes |\n|---|---|---|---|\n| 991 | `scheduler-auto-retry-no-verdict-runs` | 26m | The missing auto-recovery you flagged |\n| 992 | `flat-prd-consolidation-respects-live-jobs` | 18m | Boot race that strands a live job's source file |\n\nFiled under `prd-to-epic-communication…dd52dacb`, not the Simplified Chat Epic — these are scheduler defects and belong with the other PRD/Epic-communication work (983–987).\n\n**On (2) — you're right, and here's specifically what's missing.** The scheduler has three recovery mechanisms and none of them covers this case:\n\n- boot reconciliation → only reaps orphaned **PIDs**\n- dead-process reaper → only classifies runs that actually **died**\n- rate-limit auto-pause → only handles `rateLimited` exit 1\n\nA run that exits **0** having done nothing falls through all three. It looks like a clean success to every existing check, so it parks in `needs_review` and waits for a human. That's why recovery has been manual both times.\n\n991's detector deliberately requires **all three** signals together — exit 0 **and** no verdict sentinel **and** no new commit in the PRD's cwd. Keying on any one alone would be dangerous: a run that legitimately finished but forgot to print the sentinel would get re-run and double-apply its own diff. It retries **once only**; a second failure still parks for you. `rateLimited` is explicitly carved out so the designed auto-pause never burns the retry budget.\n\n**One correction to carry forward from my last turn:** I said flat-dir PRDs never execute. That was wrong — `980-fix-chat-typed-event-renderers` is `running` from that dir right now, because `prdLocations.cjs:133` still scans it as a source. The actual defect is the narrower race 992 describes. I'd rather flag that than let the wrong version stand.\n\n**Still true and unchanged:** `980-chat-typed-event-renderers` remains parked in `needs_review`. 991 will prevent the *next* one, but it won't re…",
-        "id": "pevt-mscs9zhz-39",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T05:23:24.791Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscs9zhz-39",
-        "text": "**Claimed and implemented PRD 992 — committed `214de45`.** 14 new tests, `prdMigration` suite 22/22 green.\n\n## Queue state\n\n| status | slug |\n|---|---|\n| running | `982-epic-intake-structured-sections` |\n| pending | `983`, `984`, `986`, `987`, `991` |\n| ~~pending~~ **done** | `992-flat-prd-consolidation-respects-live-jobs` |\n\nThe Simplified Chat chain landed while we talked — `295c875` (980, typed renderers + router-never-filter) and `86df0aa` (981, three-zone frame with attribution chips). 982 is the last one and it's running now.\n\n## What I did\n\n`consolidateFlatPrds` now reads the project's queue shard and skips any file whose slug has a live job (`pending`/`running`/`needs_review`/`investigating`), reporting it as `skipped` instead of dropping it — the same never-silently-dropped shape `migratePrds` already uses for `unresolved`. It **fails closed** on an unreadable `queue.json`: liveness unknown means nothing is provably safe to move. An *absent* `queue.json` stays a normal no-jobs case, so fresh projects still consolidate.\n\n`needs_review` counts as live on purpose — it's awaiting you, and its source has to survive.\n\n## Two things you need to know\n\n**1. `npm run typecheck` is currently RED — but not from my change.** Two errors, both in `src/renderer/components/epics/__tests__/NewEpicCard.test.tsx`:\n\n```\nTS18048: 'persistedSections' is possibly 'undefined'   (lines 315, 316)\n```\n\nThat's **PRD 982's in-flight work**, mid-run right now. `persistedSections` is exactly the field 982 was specified to add. My files are `.cjs` and aren't typechecked at all. I left it alone — touching a live executor's files would corrupt its run. If 982 finishes and this error is still there, it shipped red and needs a follow-up.\n\n**2. I did not commit `src/main/scheduler.cjs`.** My caller-side logging hunk (surfacing `skipped` files at boot) is written and sitting **uncommitted** in the working tree, because that file also holds another executor's unfinished PRD 985 work (`resolveNoti…",
-        "id": "pevt-msctjjnd-45",
-        "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-        "at": "2026-08-03T05:58:50.425Z"
+        "causedByEventId": "pevt-mscuniyb-55",
+        "text": "**There are no scheduler sessions to kill — they're already dead.** Killing them would have been a no-op, so here's what I actually found instead.\n\n## Live `claude` processes: exactly two, neither is a scheduler job\n\n| PID | What it is |\n|---|---|\n| `3627709` | **Me** — this headless run, a child of the Electron app |\n| `2117635` | `claude --dangerously-skip-permissions` — an interactive Terminal tab, 3 days old |\n\n`ps --ppid 3285816` (the Electron app, which parents every scheduler job) shows **no job processes at all** — only me and Electron's own internals.\n\n## But the queue thinks two jobs are still running\n\n`996-commit-guard-covers-zero-edit-runs` and `997-finish-protocol-explicit-staging` are both marked `running`, started 11:46 and 11:48 PM. It's now **12:15 AM PDT** — so they've been \"running\" for ~27 minutes with no process behind them.\n\nBoth run directories contain **only a `.log` file and no `.meta.json`**. `meta.json` is written when a run completes, so these died mid-flight without ever finishing — they were killed or crashed, not completed. Their queue rows are orphans.\n\nI did **not** reap them. That's a state mutation on `queue.json`, which the running app owns and would likely overwrite — the same reason my `scheduler-machine.json` pause never took. The scheduler's own boot reconciliation (`partitionBootOrphans` / `reapDeadRunningJobs`) is built to clear exactly this on next restart, and doing it by hand risks a torn write against a live writer.\n\n## Worth knowing: 997 did real work before it died\n\nIts log shows it editing `src/main/scheduler.cjs`'s `FINISH_PROTOCOL` — replacing `git add -A` with explicit staging, with this reasoning:\n\n> the queue can run several jobs against this SAME working tree at once. Do NOT run `git add -A` — that sweeps up whatever a concurrent sibling job is mid-writing and mis-attributes its work to this commit\n\nThat's the same class of bug I hit twice today: I had to manually exclude job 982's and 991's in-flight files from…",
+        "id": "pevt-msdbatms-1",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T14:15:56.548Z"
       }
     ],
     "not-enough-paralell-processing-why-i-never-see-3-6a96029e": [
@@ -1067,6 +570,22 @@
         "id": "pevt-mscubyr8-51",
         "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
         "at": "2026-08-03T06:20:56.372Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscubyr8-51",
+        "text": "Pushed to git — `main` is in sync with `origin/main`, and both `v0.58.0` and `v0.59.0` tags are on the remote.\n\n## What went out\n\n| Commit | |\n|---|---|\n| `ed8af66` | ops runtime state (queue/history/transcripts, 984's PRD archived, fix-plan PRDs) |\n| `a70e874` | **PRD 984's rescued implementation** |\n| `97136b2` | v0.59.0 release (already pushed last turn) |\n\n## Another job's work was sitting uncommitted — again\n\nPRD 984 finished and was archived `completed`, but its implementation was still loose in the tree: `composeExecutorPrompt` in `epicContextDigest.cjs` plus the `executeJob` call site. Same shape as PRD 986 earlier today. Verified before committing — typecheck clean, 12 tests green — then committed under 984's own name.\n\nThat's **two rescued false-greens in one session**, which is the strongest evidence yet for PRDs 996 and 997.\n\n## What I deliberately did NOT commit\n\nSix renderer files are still uncommitted:\n\n```\nEpicDetail.tsx · EpicDetail.test.tsx · epic-primitives.tsx\nsched-primitives.tsx · sched-primitives.test.ts · epicDerive.ts\n```\n\nJob **`987-fix-traffic-light-reads-epic-verdict` is running right now** and actively writing them (mtimes 23:27+ against my 23:28 check). Committing mid-write risks capturing a half-finished state, and staging them would mis-attribute that job's work to me. I split the commit by explicit path and left them for 987-fix to land itself.\n\n## The pause is broken — and that's why work restarted\n\nYou asked me to pause, and I did. It didn't hold, and I found exactly why:\n\n> `src/main/lib/__tests__/sessionSlots.test.cjs:12` calls `fs.unlinkSync` on the **real** `~/.claude/session-manager/session-slots-config.json`.\n\nEvery PRD's finish protocol runs the unit suite. So **any job that runs tests deletes the slot-cap file**, silently resetting the pool to the default 5 and un-pausing the scheduler. Sequence:\n\n1. 23:16 — I paused (cap 0)\n2. 23:16 — my gate run wiped it → pool back to 5 → jobs 987 and 991 fired\n3. 23:19 — I re-paused bef…",
+        "id": "pevt-mscun875-54",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T06:29:41.825Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscun875-54",
+        "text": "**Yes — one scheduler job is running, and the pause was wiped again.**\n\n## Running now\n\n| | |\n|---|---|\n| **997** `finish-protocol-explicit-staging` | **running**, started 23:46:11 (~1 min ago) |\n| 996 `commit-guard-covers-zero-edit-runs` | **failed** at 23:43:45 |\n| 994 `scheduler-job-worktree-isolation` | pending (correctly held — its dep 997 is in flight) |\n\nLive `claude -p` processes: **2 real ones** — PID `3280565` is job 997 (its prompt starts with 997's Goal text, *\"The scheduler finish protocol instructs every job to run `git add -A && git commit`\"*), and PID `3281516` is this session. The other two entries are the systemd sleep-inhibitor and my own bash call, not agents.\n\n## The pause is gone again\n\n`~/.claude/session-manager/session-slots-config.json` is **deleted**, pool back to **5**. That's the fourth time — exactly the `sessionSlots.test.cjs:12` `fs.unlinkSync` mechanism I described last turn. Jobs 995, 996 and 997 all ran through the \"pause\" since then.\n\nRe-writing the file now would be pointless theatre: 997 will run the unit suite as part of its own finish protocol and delete it again within minutes. **The file-based pause cannot hold while jobs run tests.** The only reliable stops are quitting the app, or relaunching it with `SM_SESSION_SLOTS=0` in its environment — an env override beats the file and no test can unlink it.\n\n## Also worth flagging\n\n**996 failed.** That's the commit-guard PRD — one of the two that make concurrent execution safe. And 995 is no longer in the queue at all (it ran while we were talking). So the queue is working through the safety PRDs *using* the unsafe concurrency they're meant to fix, against the old in-memory scheduler, since the app still hasn't been relaunched onto 0.59.0.\n\nThere's a mild irony worth noting: 997 — the PRD whose entire job is to remove `git add -A` from the finish protocol — is right now running under a finish protocol that tells it to use `git add -A`, in a tree that still holds another job's six un…",
+        "id": "pevt-mscva8qh-8",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T06:47:35.609Z"
       }
     ],
     "builder-check-git-vs-the-published-package-for-t-aa68de15": [
@@ -1085,6 +604,32 @@
         "causedByEventId": null,
         "at": "2026-08-03T06:28:51.666Z",
         "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "83397503-51a2-4920-8e39-7f6fbeee5735",
+        "text": "Published and verified. Summary:\n\n**v0.59.0 → v0.60.0** (minor bump — one `feat:` commit)\n\n- **Diff**: 1 unreleased commit — `feat(scheduler): composeExecutorPrompt frames the context digest for the executor (PRD 984)`\n- **Build target**: verified via `session-manager-operations/architecture/build-target.json` — registry `npm`, package `claude-code-session-manager`, gates `[typecheck, test:unit]`\n- **Gate**: typecheck PASS; test:unit initially showed 21 failures in `chatRunner.spec.ts`/`healthTickLiveness.spec.ts` — traced to the known `SM_CHAT_CONCURRENCY=3` shell env gotcha (already in memory); re-ran with it unset → 2346/2346 tests pass\n- **Publish**: bumped `package.json`/`package-lock.json`, committed (`329d4f3`), tagged `v0.60.0`, built + published from an isolated worktree (`/tmp/sm-publish-v0.60.0`, now removed), pushed `main` and the tag to `origin`\n- **Registry verified**: `npm view` confirms version `0.60.0`, `dist-tags.latest` → `0.60.0`\n\nNote: the working tree has substantial unrelated in-progress changes (PRD 984 context-digest work, scheduler files, epic UI files) that were left untouched — only the two version files were staged/committed for this release.",
+        "id": "pevt-mscut0s8-56",
+        "promptSessionId": "builder-check-git-vs-the-published-package-for-t-aa68de15",
+        "at": "2026-08-03T06:34:12.152Z"
+      }
+    ],
+    "generate-this-project-s-project-pages-home-marke-bffae0c6": [
+      {
+        "id": "pevt-mscvarsl-9",
+        "promptSessionId": "generate-this-project-s-project-pages-home-marke-bffae0c6",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T06:48:00.304Z",
+        "text": "Generate this project's Project Pages (Home/Marketing/Feature/Architecture/Brief)."
+      },
+      {
+        "id": "008c6038-e15d-46fc-91ec-84a4d69e2a8e",
+        "promptSessionId": "generate-this-project-s-project-pages-home-marke-bffae0c6",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T06:48:00.304Z",
+        "text": "Generate this project's Project Pages (Home/Marketing/Feature/Architecture/Brief)."
       }
     ]
   },
@@ -1105,6 +650,10 @@
     "psess-msc7vrsg-15": "2026-08-02T22:37:08.609Z",
     "psess-msch2lho-11": "2026-08-03T02:15:47.958Z",
     "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": "2026-08-03T05:41:08.442Z",
-    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": "2026-08-03T05:42:04.173Z"
+    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": "2026-08-03T05:42:04.173Z",
+    "psess-msckxplj-24": "2026-08-03T06:46:18.660Z",
+    "psess-msch6x36-16": "2026-08-03T06:46:24.727Z",
+    "psess-mscgxoqw-7": "2026-08-03T06:46:27.300Z",
+    "session-chat-conversion-into-simplified-chat-so--7cda6827": "2026-08-03T06:46:29.986Z"
   }
 }

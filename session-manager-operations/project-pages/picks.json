@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 2,
   "home": {
     "overview": "dashboard",
     "pillars": "grid"
@@ -6,7 +7,7 @@
   "marketing": {
     "hero": "editorial",
     "proof": "stats",
-    "pillars": "cards",
+    "pillars": "list",
     "tour": "tabs",
     "workflow": "rail",
     "depth": "compare",
@@ -14,7 +15,7 @@
     "close": "install"
   },
   "feature": {
-    "header": "spec",
+    "header": "problem",
     "mech": "steps",
     "walk": "hotspots",
     "states": "grid",
@@ -22,9 +23,15 @@
     "status": "timeline"
   },
   "architecture": {
-    "summary": "layers",
+    "summary": "principles",
     "map": "boxes",
     "flow": "rail",
     "dec": "adr"
+  },
+  "brief": {
+    "purpose": "prose",
+    "areas": "table",
+    "scope": "timeline",
+    "conventions": "checklist"
   }
 }

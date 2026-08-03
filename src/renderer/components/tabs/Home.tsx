@@ -32,13 +32,16 @@ import { useChatSignals } from '../../lib/useChatSignals'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
-import { buildHomeProjectRows } from '../../lib/homeProjectRows'
+import { buildHomeProjectRows, type HomeProjectRow } from '../../lib/homeProjectRows'
 import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
 import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { projectColorFor } from '../../lib/projectColor'
+import { openProjectTab } from '../../lib/homeOpenProject'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
+import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
+import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopover'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
 import { ticketTagTone } from '../../lib/ticketDisplay'
@@ -67,6 +70,16 @@ export function Home({ onNavigate }: HomeProps) {
   useHydrateKnownEpics()
   const { rows: knownProjectRows } = useKnownProjects()
   const needsRows = useNeedsYouRows()
+  const projectRows = useHomeProjectRows()
+  const tabs = useSessions((s) => s.tabs)
+  const addTab = useSessions((s) => s.addTab)
+  const setActive = useSessions((s) => s.setActive)
+  const [newEpicOpen, setNewEpicOpen] = useState(false)
+
+  const confirmNewEpicProject = (cwd: string) => {
+    openProjectTab(cwd, tabs, addTab, setActive)
+    onNavigate?.('terminal')
+  }
 
   return (
     <div className="h-full overflow-auto">
@@ -76,10 +89,11 @@ export function Home({ onNavigate }: HomeProps) {
           projectCount={knownProjectRows.length}
           needsCount={needsRows.length}
           onNavigate={onNavigate}
+          onOpenNewEpic={() => setNewEpicOpen(true)}
         />
         <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 220px' }}>
           <BillingCard />
-          <ProjectsCard />
+          <ProjectsCard projectRows={projectRows} />
           <QueuedCard onNavigate={onNavigate} />
         </div>
         <NeedsYouSection rows={needsRows} onNavigate={onNavigate} />
@@ -87,7 +101,29 @@ export function Home({ onNavigate }: HomeProps) {
         <RecentSessionsCard onNavigate={onNavigate} />
         <AgentsCard />
       </div>
+      <NewEpicProjectDrawer
+        open={newEpicOpen}
+        onClose={() => setNewEpicOpen(false)}
+        projects={projectRows}
+        onConfirm={confirmNewEpicProject}
+      />
     </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Home project rows — single source for both ProjectsCard and the New-epic
+// project picker drawer, so "known projects" is computed once (useKnownProjects
+// + running chats + Epic sessions, via buildHomeProjectRows) rather than the
+// picker growing its own divergent copy.
+// ────────────────────────────────────────────────────────────────────
+function useHomeProjectRows(): HomeProjectRow[] {
+  const { rows, enriched } = useKnownProjects()
+  const chats = useChatSignals()
+  const sessions = usePromptSessions((s) => s.sessions)
+  return useMemo(
+    () => buildHomeProjectRows(rows, enriched, chats, sessions),
+    [rows, enriched, chats, sessions],
   )
 }
 
@@ -160,11 +196,13 @@ export function HomeHeaderWithLegend({
   projectCount,
   needsCount,
   onNavigate,
+  onOpenNewEpic,
 }: {
   greeting: string
   projectCount: number
   needsCount: number
   onNavigate?: (k: NavKey) => void
+  onOpenNewEpic: () => void
 }) {
   const [legendOpen, setLegendOpen] = useState(false)
   return (
@@ -174,6 +212,7 @@ export function HomeHeaderWithLegend({
         projectCount={projectCount}
         needsCount={needsCount}
         onNavigate={onNavigate}
+        onOpenNewEpic={onOpenNewEpic}
         legendOpen={legendOpen}
         onToggleLegend={() => setLegendOpen((v) => !v)}
       />
@@ -190,6 +229,7 @@ function Hero({
   projectCount,
   needsCount,
   onNavigate,
+  onOpenNewEpic,
   legendOpen,
   onToggleLegend,
 }: {
@@ -197,6 +237,7 @@ function Hero({
   projectCount: number
   needsCount: number
   onNavigate?: (k: NavKey) => void
+  onOpenNewEpic: () => void
   legendOpen: boolean
   onToggleLegend: () => void
 }) {
@@ -245,7 +286,7 @@ function Hero({
       <div className="ml-auto flex gap-2 shrink-0">
         <HeroButton onClick={onToggleLegend}>{legendOpen ? 'Hide interactions' : 'Interactions'}</HeroButton>
         <HeroButton onClick={() => onNavigate?.('history')}>All history</HeroButton>
-        <HeroButton primary onClick={() => onNavigate?.('terminal')}>New epic</HeroButton>
+        <HeroButton primary onClick={onOpenNewEpic}>New epic</HeroButton>
       </div>
     </header>
   )
@@ -260,12 +301,12 @@ function Hero({
 // ────────────────────────────────────────────────────────────────────
 const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
   { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
-  { term: 'Queued job', description: 'Click the Queued card to open the Scheduler tab.' },
+  { term: 'Queued job', description: 'Click a job row to open a popover with its real details (project, estimate, status) and actions — Open in Scheduler, plus Nudge scheduler now while it\'s pending. Use "Open Scheduler →" in the card header to jump straight to the Scheduler tab.' },
   { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed Epic, Open a session waiting on input, or Retry / view a failed job.' },
   { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view (Epic).' },
   { term: 'Recent row', description: 'Click resume to open a new Terminal tab that resumes that transcript session.' },
   { term: 'Project row', description: 'Click a project to activate its open Terminal tab, or open a new dormant one.' },
-  { term: 'New epic', description: 'Opens the Terminal tab to start a new Epic.' },
+  { term: 'New epic', description: 'Opens a project picker; confirming activates-or-opens that project\'s tab and lands you in its Epics workspace to start the Epic.' },
 ]
 
 function InteractionsLegend() {
@@ -456,30 +497,56 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
     () => jobs.filter((j) => j.status === 'pending').slice(0, 4),
     [jobs],
   )
+  const [openSlug, setOpenSlug] = useState<string | null>(null)
+
+  const runNow = () => {
+    window.api.schedule.runNow()
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+    setOpenSlug(null)
+  }
+
   return (
-    <button
-      onClick={() => onNavigate?.('scheduler')}
-      className="text-left bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]"
-    >
-      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2.5">
-        Queued
+    <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]">
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint">
+          Queued
+        </div>
+        <button
+          onClick={() => onNavigate?.('scheduler')}
+          className="font-mono text-[10.5px] text-accent hover:underline"
+        >
+          Open Scheduler →
+        </button>
       </div>
       {pending.length === 0 ? (
         <div className="text-[13px] text-fg-faint py-1">Nothing pending.</div>
       ) : (
         <div className="space-y-2.5">
           {pending.map((q) => (
-            <div key={q.slug}>
-              <div className="font-mono text-[11.5px] font-semibold text-fg truncate">{q.title || q.slug}</div>
-              <div className="text-[11px] text-fg-faint truncate">
-                {q.cwd ? projectNameFromCwdLocal(q.cwd) : '—'}
-                {q.estimateMinutes != null ? ` · ~${q.estimateMinutes}m` : ''}
-              </div>
+            <div key={q.slug} className="relative">
+              <button
+                onClick={() => setOpenSlug(openSlug === q.slug ? null : q.slug)}
+                className="w-full text-left hover:bg-bg/40 rounded-md -mx-1 px-1 py-0.5 transition-colors"
+              >
+                <div className="font-mono text-[11.5px] font-semibold text-fg truncate">{q.title || q.slug}</div>
+                <div className="text-[11px] text-fg-faint truncate">
+                  {q.cwd ? projectNameFromCwdLocal(q.cwd) : '—'}
+                  {q.estimateMinutes != null ? ` · ~${q.estimateMinutes}m` : ''}
+                </div>
+              </button>
+              {openSlug === q.slug && (
+                <QueuedJobPopover
+                  job={q as QueuedJobPopoverJob}
+                  onClose={() => setOpenSlug(null)}
+                  onOpenScheduler={() => { setOpenSlug(null); onNavigate?.('scheduler') }}
+                  onRunNow={q.status === 'pending' ? runNow : undefined}
+                />
+              )}
             </div>
           ))}
         </div>
       )}
-    </button>
+    </div>
   )
 }
 
@@ -550,26 +617,13 @@ function BillingCard() {
 // Projects — compact list of known projects with live/activity chips.
 // Clicking a row activates the matching SessionTab, or opens one.
 // ────────────────────────────────────────────────────────────────────
-function ProjectsCard() {
-  const { rows, enriched } = useKnownProjects()
-  const chats = useChatSignals()
-  const sessions = usePromptSessions((s) => s.sessions)
+function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
   const tabs = useSessions((s) => s.tabs)
   const addTab = useSessions((s) => s.addTab)
   const setActive = useSessions((s) => s.setActive)
 
-  const projectRows = useMemo(
-    () => buildHomeProjectRows(rows, enriched, chats, sessions),
-    [rows, enriched, chats, sessions],
-  )
-
   const openProject = (cwd: string) => {
-    const existing = tabs.find((t) => t.cwd === cwd)
-    if (existing) {
-      setActive(existing.id)
-    } else {
-      addTab({ cwd, startupCommand: null, dormant: true })
-    }
+    openProjectTab(cwd, tabs, addTab, setActive)
     // Opening a project from Home means "show me it" — lift the Epics
     // workspace overlay so the selected tab isn't masked (see layout.ts).
     useLayout.getState().setEpicsWorkspaceOpen(false)

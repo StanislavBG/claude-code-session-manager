@@ -30,7 +30,7 @@ async function mount() {
   document.body.appendChild(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(createElement(HomeHeaderWithLegend, { greeting: 'Good morning', projectCount: 2, needsCount: 0 }))
+    root!.render(createElement(HomeHeaderWithLegend, { greeting: 'Good morning', projectCount: 2, needsCount: 0, onOpenNewEpic: () => {} }))
     await Promise.resolve()
     await Promise.resolve()
   })
@@ -83,5 +83,24 @@ describe('HomeHeaderWithLegend (Interactions toggle)', () => {
       await Promise.resolve()
     })
     expect(el.textContent).not.toContain('Queued job')
+  })
+
+  it('New epic calls onOpenNewEpic rather than navigating directly', async () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    const onNavigate = vi.fn()
+    const onOpenNewEpic = vi.fn()
+    await act(async () => {
+      root!.render(createElement(HomeHeaderWithLegend, { greeting: 'Good morning', projectCount: 2, needsCount: 0, onNavigate, onOpenNewEpic }))
+      await Promise.resolve()
+    })
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'New epic')!
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(onOpenNewEpic).toHaveBeenCalledTimes(1)
+    expect(onNavigate).not.toHaveBeenCalled()
   })
 })

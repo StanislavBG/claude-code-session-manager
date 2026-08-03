@@ -29,9 +29,13 @@ export interface HomeSessionDrawerProps {
   keyVals: DrawerKeyVal[]
   tail?: DrawerTailLine[]
   footer?: ReactNode
+  /** Arbitrary body content rendered above keyVals — e.g. the New-epic
+   *  project picker's radio list. Callers with no keyVals (an empty array)
+   *  simply render nothing from the `<dl>` below. */
+  children?: ReactNode
 }
 
-export function HomeSessionDrawer({ open, onClose, title, sub, keyVals, tail, footer }: HomeSessionDrawerProps) {
+export function HomeSessionDrawer({ open, onClose, title, sub, keyVals, tail, footer, children }: HomeSessionDrawerProps) {
   const [entered, setEntered] = useState(false)
 
   useEffect(() => {
@@ -92,14 +96,17 @@ export function HomeSessionDrawer({ open, onClose, title, sub, keyVals, tail, fo
           </button>
         </header>
         <div className="flex-1 min-h-0 overflow-auto px-5 py-4 grid gap-4 content-start">
-          <dl className="m-0 grid gap-2" style={{ gridTemplateColumns: 'minmax(0,100px) minmax(0,1fr)' }}>
-            {keyVals.map((kv) => (
-              <div key={kv.label} className="contents">
-                <dt className="m-0 font-mono text-[11px] uppercase tracking-[0.05em] text-fg-faint">{kv.label}</dt>
-                <dd className="m-0 text-[12.5px] text-fg break-words">{kv.value}</dd>
-              </div>
-            ))}
-          </dl>
+          {children}
+          {keyVals.length > 0 && (
+            <dl className="m-0 grid gap-2" style={{ gridTemplateColumns: 'minmax(0,100px) minmax(0,1fr)' }}>
+              {keyVals.map((kv) => (
+                <div key={kv.label} className="contents">
+                  <dt className="m-0 font-mono text-[11px] uppercase tracking-[0.05em] text-fg-faint">{kv.label}</dt>
+                  <dd className="m-0 text-[12.5px] text-fg break-words">{kv.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {tail && tail.length > 0 && (
             <div>
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2">Live tail</div>

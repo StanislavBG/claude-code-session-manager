@@ -47,17 +47,21 @@ export interface PromptSession {
    *  completed/archived PromptSession this one follows on from. The
    *  archived session's claudeSessionId is dead and never reused. */
   resumedFromId?: string | null
-  /** Epic-level intent tag. Also written by src/main/lib/epicMint.cjs for
-   *  Epics auto-minted from a headless PRD dispatch — stay shape-compatible
-   *  so hydrate() reading a main-written active-index.json round-trips it. */
+  /** Epic-level intent tag. Every Epic — human-created via New Epic or
+   *  automated — is constructed by src/main/lib/epicMint.cjs's ensureEpic();
+   *  the renderer never builds this field itself, only receives and stores
+   *  the record ensureEpic returns (createPromptSession's
+   *  window.api.promptSessions.create call). */
   tag?: TicketTag
   /** Full first-prompt body, when it differs from the display `goalText`
    *  (a proposal filed by automation: goalText is a one-line title, this is
    *  the RCA/analysis body). Sent verbatim on approval; falls back to
-   *  goalText when absent. Written by src/main/lib/epicMint.cjs too. */
+   *  goalText when absent. Constructed by src/main/lib/epicMint.cjs's
+   *  ensureEpic() for every Epic, same as `tag` above. */
   openingPrompt?: string | null
   /** Which surface minted this Epic, for tracing it back to its origin.
-   *  Written by src/main/lib/epicMint.cjs; absent on older Epics. */
+   *  Constructed by src/main/lib/epicMint.cjs's ensureEpic() for every Epic;
+   *  absent on older Epics predating this field. */
   source?: EpicSource
   /** Name of the Agent Library persona (`~/.claude/agents/<name>.md`) chosen to
    *  run this Epic's session, distinct from `tag` (the Epic's mission —

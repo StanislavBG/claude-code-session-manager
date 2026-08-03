@@ -14,12 +14,18 @@
  * mutation (event append, approveProposed, etc.), not just the envelope — and
  * it must do so per-ROW: persistActiveIndex sends every open Epic for a cwd in
  * one call, so a malformed row is dropped while its valid siblings still
- * persist, never failing the whole batch.
+ * persist, never failing the whole batch. The second describe block below is
+ * the actual "exactly one construction path" regression guard (PRD after
+ * 955's cleanup pass) — a structural check against createPromptSession's own
+ * source rather than a second-literal drift comparison, since there is no
+ * longer a second literal to compare against.
  *
  * Run: timeout 300 npx vitest run tests/unit/promptSessionSchema-crossBoundary.spec.ts
  */
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const { schemas } = require('../../src/main/ipcSchemas.cjs') as {
@@ -29,6 +35,11 @@ const { schemas } = require('../../src/main/ipcSchemas.cjs') as {
     }
   }
 }
+
+const promptSessionsStateSrc = readFileSync(
+  fileURLToPath(new URL('../../src/renderer/state/promptSessions.ts', import.meta.url)),
+  'utf8',
+)
 
 function validEnvelope(sessions: Record<string, unknown>) {
   return { cwd: '/home/user/project', sessions, events: {}, source: 'epics' as const }
@@ -119,5 +130,22 @@ describe('promptSessionsMergeActiveIndex IPC boundary validates session content'
 
     expect(result.success).toBe(true)
     expect(Object.keys(result.data?.sessions ?? {})).toEqual(['psess-ok3'])
+  })
+})
+
+// Structural guard for the actual PRD 953/955 claim: there is exactly ONE
+// place a PromptSession's id/claudeSessionId is minted (main's ensureEpic,
+// epicMint.cjs). Asserts against the renderer source text itself rather than
+// runtime behavior, so a regression that reintroduces a local hand-built
+// object literal (e.g. `mintId('psess', ...)` or `crypto.randomUUID()` for
+// the Epic id) fails this test even before any other test would catch it.
+describe('createPromptSession has exactly one construction path', () => {
+  it('never mints an Epic id/claudeSessionId locally', () => {
+    expect(promptSessionsStateSrc).not.toMatch(/mintId\(\s*['"]psess['"]/)
+    expect(promptSessionsStateSrc).not.toContain('crypto.randomUUID')
+  })
+
+  it('always constructs the Epic via window.api.promptSessions.create', () => {
+    expect(promptSessionsStateSrc).toContain('window.api.promptSessions.create(')
   })
 })

@@ -87,6 +87,17 @@
       "completedAt": null,
       "tag": "discussion",
       "agentType": "architect"
+    },
+    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": {
+      "id": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Delete the Keybindings Tab\n\nKeybindings tab is not good and should be deleted all relevant keys or features too, deep clean-up, the publish to git",
+      "claudeSessionId": "08f9feee-6163-468d-b6fd-95b9552caf32",
+      "status": "active",
+      "createdAt": "2026-08-03T04:56:58.340Z",
+      "completedAt": null,
+      "tag": "feature",
+      "agentType": "architect"
     }
   },
   "events": {
@@ -700,6 +711,14 @@
         "causedByEventId": "c8b34d3e-4e69-4f36-81ae-3841cdaffa6a",
         "at": "2026-08-03T04:44:26.720Z",
         "prdSlug": "987-traffic-light-reads-epic-verdict"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "5d492536-9065-43c9-8a94-05af50ecc846",
+        "text": "Agreed — and this is the correction that makes the rest of the chain worth having. Queued and pushed `bae4fd2..c466bf6`.\n\n## The contract, inverted\n\nA check-in currently *asserts* an outcome. It now *requests* one:\n\n> PRD `<slug>` reports `completed`. **This is an unverified claim.** Read `<abs path>`, check each acceptance criterion against the actual working tree, reply VERIFIED or REFUTED with per-criterion evidence.\n\nThe job's status becomes an input to the Epic's judgment, never a substitute for it.\n\n**986 `checkin-triggers-epic-validation`** — on a successful check-in, the scheduler enqueues exactly one validation prompt into the authoring Epic's session via `enqueueExternalPrompt(epicId, prompt)` (`chatRunner.cjs:821`, already routes to Epic ids). The event is born `validation: 'unvalidated'` — never `'verified'` — regardless of what the job claims.\n\nThe prompt names the exact trap that produced this: exit code 0, a green queue row, and a confident completion report are **not evidence** — only the working tree is. It's instructed to run `git diff --stat` for the run window and treat an empty diff on an implementation PRD as REFUTED. That single rule would have caught 972 in seconds.\n\nFour gates, all mandatory: active Epics only, once per `(epicId, prdSlug)`, inside the ≤3 session-slot pool, and a kill-switch env var. Plus a loop guard with its own test so a validation reply can't trigger another validation. The slot-pool gate isn't ceremony — a prompt per check-in is exactly the fan-out shape that OOM-killed Electron on 2026-06-10.\n\n**987 `traffic-light-reads-epic-verdict`** — retargets all three indicators (974's chip, 975's row rollup, 976's response line) off the job's claim and onto the Epic's verdict. New neutral **claimed** tone for `unvalidated`. The load-bearing line, which I made its own named test: *a job with `outcome: completed` and `validation: unvalidated` renders claimed, never green.* And `refuted` ranks **above** `failed` in the Epic-row prec…",
+        "id": "pevt-mscqwky9-32",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T04:44:59.793Z"
       }
     ],
     "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": [
@@ -856,6 +875,32 @@
         "id": "pevt-mscqjj77-30",
         "promptSessionId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
         "at": "2026-08-03T04:34:50.995Z"
+      }
+    ],
+    "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8": [
+      {
+        "id": "pevt-mscrbzdz-33",
+        "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T04:56:58.340Z",
+        "text": "Delete the Keybindings Tab\n\nKeybindings tab is not good and should be deleted all relevant keys or features too, deep clean-up, the publish to git"
+      },
+      {
+        "id": "95d0e8fb-4d13-4ea3-a173-22a59c73a975",
+        "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T04:56:58.340Z",
+        "text": "Delete the Keybindings Tab\n\nKeybindings tab is not good and should be deleted all relevant keys or features too, deep clean-up, the publish to git"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "95d0e8fb-4d13-4ea3-a173-22a59c73a975",
+        "text": "Pushed as `e0f779a`.\n\n## What was removed\n\n| Surface | File |\n|---|---|\n| The tab component | `src/renderer/components/tabs/Keybindings.tsx` (464 lines) |\n| Model/catalog/presets/key-capture | `src/renderer/lib/keybindings.ts` (309 lines) |\n| Unit tests | `tests/unit/keybindings.spec.ts` (196 lines) |\n| `NavKey` union member | `LeftNav.tsx` |\n| Nav row + `keys` icon binding | `lib/navGroups.ts` |\n| Screen registry entry + render case | `lib/screenKeys.ts`, `screenComponents.tsx` |\n| `/keybindings` slash-nav shortcut | `lib/slashCommand.ts` |\n| `nav:keybindings` Cmd-K entry | `CommandPalette.tsx` |\n| `KEYBINDINGS_SCOPES` | `lib/scopes.ts` |\n| Monaco `claude-code-keybindings.json` schema | `App.tsx` (+ stale comment in `main/index.cjs`) |\n| Learning-panel content block | `learningContent.ts` |\n| Nav-face tests, e2e tab list (14→13) | `navGroupsHome.test.ts`, `tabs-smoke.spec.ts` |\n| Docs | `README.md` |\n\n**Deliberately kept:** F1 push-to-talk (`voiceHotkey.cjs`, `voiceSettings.cjs`, `VoiceModal.tsx`) — a separate feature configured from the Voice tab, not this tab. README line 86 previously said \"configurable in Keybindings\"; corrected to \"the Voice tab\". The `keys` AlmanacIcon stays — still used by `EffectiveCards.tsx` for env vars.\n\n**Verified:** `npm run typecheck` clean · `lint:selectors` OK (423 files) · zero residual `keybinding` matches under `src/`, `tests/`, `README.md`.\n\n## Two things I did not do\n\n1. **`npm run test:e2e` was not run.** A scheduler job (PRD 978) is running right now; launching a second Electron SIGTERMs live jobs and clobbers `admin-api.json`. `tabs-smoke.spec.ts` is the affected suite and needs a run once the queue is idle.\n2. **No npm publish.** You said \"publish to git\" and that's what landed — commit + push to `origin/main`. Version is still 0.58.0.\n\n**Pre-existing red tests, untouched by this change:** 49 failures across 5 Epic/chat files, all `TypeError: window.api.transcripts.onEvent is not a function` at `state/chat.ts:1100`. I confi…",
+        "id": "pevt-mscrhi4c-34",
+        "promptSessionId": "delete-the-keybindings-tab-keybindings-tab-is-no-3bc39ec8",
+        "at": "2026-08-03T05:01:15.900Z"
       }
     ]
   },

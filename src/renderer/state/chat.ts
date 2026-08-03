@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { TranscriptEvent, TranscriptEventRef } from '../../preload/api'
 import { toast } from './toast'
 import { transcriptExists } from '../lib/transcriptExists'
 import { classifyPromptTicket } from '../lib/promptClassifier'
@@ -24,7 +25,11 @@ import { useEpicTerminal } from './epicTerminal'
  * later commands resume it (resume:true → --resume) so context carries forward.
  */
 
-export type ChatTurnRole = 'user' | 'assistant' | 'question' | 'error' | 'notice'
+/** 'event' (PRD chat-feed-from-jsonl) = a JSONL transcript event of a kind
+ *  with no dedicated turn role yet (mode, queue-operation, attachment,
+ *  tool_use, usage, …) — reachable in the store for the downstream typed-
+ *  renderer PRD; the Discussion timeline does not render it yet. */
+export type ChatTurnRole = 'user' | 'assistant' | 'question' | 'error' | 'notice' | 'event'
 
 export interface ToolUseTrace {
   id: string
@@ -50,6 +55,13 @@ export interface ChatTurn {
    *  turn (e.g. the answerBody half of a needs-input round) or an errored run, since
    *  neither is a real "landed" signal. */
   outcome?: string
+  /** JSONL TranscriptEvent kind for a transcript-feed-derived turn (set for
+   *  every ingested event, including 'user'/'assistant' text turns). Absent
+   *  on turns pushed by chatRunner's own IPC events. */
+  kind?: string
+  /** Byte range of the source JSONL line on disk (transcript-feed turns only)
+   *  — the full untruncated line stays recoverable without holding it here. */
+  ref?: TranscriptEventRef | null
 }
 
 /**
@@ -337,6 +349,10 @@ export const useChat = create<ChatState>((set, get) => ({
     dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag, chainRootId })
   },
   resetThread: (tabId) => {
+    // A reset pairs with a NEW session (sessions.newSession) — its transcript
+    // starts over at byte 0, so the feed's replay-dedup state must reset too
+    // or the fresh file's offsets would collide with the old seen-set.
+    feedIngest.delete(tabId)
     set({
       chats: {
         ...get().chats,
@@ -355,6 +371,7 @@ export const useChat = create<ChatState>((set, get) => ({
   },
   dropTab: (tabId) => {
     if (!(tabId in get().chats) && !(tabId in get().hydratedTabs)) return
+    feedIngest.delete(tabId)
     const chats = { ...get().chats }
     delete chats[tabId]
     const hydratedTabs = { ...get().hydratedTabs }
@@ -386,9 +403,32 @@ function pushTurn(
           ...ticketExtra,
         })
       : (c.ticketHistory ?? [])
+    // Reconciliation with the JSONL transcript feed (see the feed section at
+    // the bottom of this file): when this tab renders from the feed, the JSONL
+    // is authoritative once its line lands — a chatRunner completion whose
+    // text already arrived as a feed turn MERGES into that turn (attaching
+    // outcome/toolUses) instead of appending a duplicate. Never applied to a
+    // tab without a feed: two genuinely separate runs may legitimately answer
+    // with identical text ("Done.") and must both render.
+    const dupIdx =
+      hasTranscriptFeed(tabId) && (turn.role === 'assistant' || turn.role === 'user')
+        ? findRecentDuplicateTurn(c.turns, turn.role, turn.text)
+        : -1
+    const turns =
+      dupIdx !== -1
+        ? c.turns.map((t, i) =>
+            i === dupIdx
+              ? {
+                  ...t,
+                  outcome: turn.outcome ?? t.outcome,
+                  toolUses: t.toolUses?.length ? t.toolUses : c.liveToolUses,
+                }
+              : t,
+          )
+        : [...c.turns, { ...turn, toolUses: c.liveToolUses }]
     return {
       ...c,
-      turns: [...c.turns, { ...turn, toolUses: c.liveToolUses }],
+      turns,
       running: false,
       queuedPosition: 0,
       stream: '',
@@ -889,6 +929,224 @@ function applyNotice(tabId: string, _sessionId: string, message: string): void {
   }))
 }
 
+// ─── JSONL transcript feed (PRD chat-feed-from-jsonl) ──────────────────────
+// The Epic Chat view's transcript is sourced from the JSONL events
+// transcripts.cjs emits for the Epic's claudeSessionId (transcript:event:
+// <tabId>, tabId = the Epic's id here) — the on-disk transcript is a strict
+// superset of chatRunner's stream-json (mode/queue-operation/attachment/
+// ai-title/… exist ONLY in the JSONL). chatRunner's stream stays wired as a
+// low-latency live tap for in-flight text (`stream`), demoted from source of
+// truth.
+//
+// RECONCILIATION / DE-DUPLICATION RULE (streamed-then-persisted turns):
+// in-flight assistant text streams token-by-token into `stream` via
+// chat:run:output (no added latency). The JSONL is authoritative once the
+// line lands: an ingested assistant/user text event appends the turn and
+// excises its own text from `stream` (so the same text never shows twice as
+// turn + live tap), and whichever source arrives SECOND with identical
+// (role, trimmed text) within the last DEDUP_WINDOW turns is folded into the
+// first — ingestTranscriptEvent skips a text event already pushed by
+// chatRunner's complete/needs-input handlers, and pushTurn merges a
+// completion into an already-landed feed turn (attaching outcome/toolUses)
+// instead of appending. Either arrival order renders the text exactly once.
+//
+// This feed NEVER writes the durable per-Epic stores: capturePromptSessionTurn
+// / appendResponseEvent stay driven exclusively by chatRunner's own IPC
+// events (dispatchSend/onComplete/onNeedsInput), so persisted Epic turns are
+// neither double-written nor dropped by the feed.
+//
+// CAP BEHAVIOR (transcripts.cjs MAX_TRANSCRIPT_SUBS=20, LRU_CAP=6): an
+// ATTACHED Chat feed's subscription is never evicted — only release()d subs
+// enter the main-side LRU pool, and eviction touches that pool alone (an
+// evicted idle sub just re-reads from byte 0 on its next attach). Opening
+// many Epics therefore cannot silently kill a live Chat view's feed; the
+// worst case is >20 SIMULTANEOUSLY-ATTACHED subscribers (Chat feeds + open
+// Terminal-tab live views combined), where a new subscribe is rejected —
+// surfaced via toast here, and the view renders empty-but-valid.
+
+/** Dedup window: how many trailing turns are scanned for a same-(role, text)
+ *  twin. Small on purpose — the two sources land within one run of each
+ *  other, never hundreds of turns apart. */
+const DEDUP_WINDOW = 20
+
+/** Bound on `turns` growth for a feed-backed tab — the main-side ring buffer
+ *  already caps replay at 500 events; this caps live accumulation over a
+ *  long session (paged reads are a separate PRD). */
+const FEED_TURNS_CAP = 1000
+
+/** Renderer-side refcounts + IPC listener disposers, keyed by tabId. Module-
+ *  level (not zustand state): components never render these, and live.ts's
+ *  equivalents (refs/unsubs) are store-internal bookkeeping too. */
+const feedRefs = new Map<string, number>()
+const feedUnsubs = new Map<string, () => void>()
+
+/** Per-tab replay/rotation guard: `${byteOffset}:${indexWithinLine}` keys of
+ *  every ingested event. A re-attach's buffer replay (the main-side LRU cache
+ *  keeps the full ring) and a rotation's re-read from byte 0 re-emit lines we
+ *  already ingested — identical keys, skipped — so switching views mid-Epic
+ *  neither duplicates nor reorders history, and a rotated transcript only
+ *  ingests genuinely new lines instead of wedging or doubling the view.
+ *  Events within one line share a byteOffset and arrive in classifyLine's
+ *  deterministic order, so the occurrence index disambiguates siblings. */
+interface FeedIngestState {
+  seen: Set<string>
+  lastOffset: number
+  lineIndex: number
+}
+const feedIngest = new Map<string, FeedIngestState>()
+
+function findRecentDuplicateTurn(turns: ChatTurn[], role: ChatTurnRole, text: string): number {
+  const needle = text.trim()
+  const from = Math.max(0, turns.length - DEDUP_WINDOW)
+  for (let i = turns.length - 1; i >= from; i--) {
+    if (turns[i].role === role && turns[i].text.trim() === needle) return i
+  }
+  return -1
+}
+
+function capTurns(turns: ChatTurn[]): ChatTurn[] {
+  return turns.length > FEED_TURNS_CAP ? turns.slice(turns.length - FEED_TURNS_CAP) : turns
+}
+
+export function hasTranscriptFeed(tabId: string): boolean {
+  return feedRefs.has(tabId)
+}
+
+/**
+ * Fold one transcripts.cjs event into the tab's chat slice. Text events of
+ * kind 'user'/'assistant' become real turns (deduped against chatRunner-
+ * pushed twins — see the reconciliation rule above); every other kind —
+ * including JSONL-only kinds unreachable via chatRunner (mode,
+ * queue-operation, attachment, ai-title, …) — lands as a role:'event' turn
+ * carrying `kind` + bounded previewText + `ref` (never the full data body:
+ * a tool_use input can be hundreds of KB, and holding it per-turn is the
+ * exact memory cliff the classifier's ref design exists to avoid).
+ * Exported for unit tests; production callers go through attachTranscriptFeed.
+ */
+export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void {
+  if (ev.ref) {
+    const st = feedIngest.get(tabId) ?? { seen: new Set<string>(), lastOffset: -1, lineIndex: -1 }
+    if (ev.ref.byteOffset === st.lastOffset) st.lineIndex += 1
+    else {
+      st.lastOffset = ev.ref.byteOffset
+      st.lineIndex = 0
+    }
+    feedIngest.set(tabId, st)
+    const key = `${ev.ref.byteOffset}:${st.lineIndex}`
+    if (st.seen.has(key)) return
+    st.seen.add(key)
+  }
+  const raw = (ev.raw ?? {}) as Record<string, unknown>
+  const at = typeof raw.timestamp === 'string' ? Date.parse(raw.timestamp) || Date.now() : Date.now()
+  // Meta/sidechain lines (caveat banners, subagent traffic) are not the
+  // user's own conversation — keep them reachable as 'event' turns, never
+  // as user/assistant bubbles.
+  const isMeta = raw.isMeta === true || raw.isSidechain === true
+  const data = ev.data as { message?: { content?: unknown } } | string | null | undefined
+  const textData =
+    typeof data === 'string'
+      ? data
+      : typeof (data as { message?: { content?: unknown } } | null | undefined)?.message?.content === 'string'
+        ? ((data as { message: { content: string } }).message.content)
+        : null
+  if ((ev.kind === 'assistant' || ev.kind === 'user') && textData !== null && !isMeta) {
+    const role = ev.kind
+    patch(tabId, (c) => {
+      if (findRecentDuplicateTurn(c.turns, role, textData) !== -1) return c
+      let stream = c.stream
+      if (c.running && role === 'assistant' && stream) {
+        // The live tap already streamed this text — excise it so the turn
+        // and the in-flight stream never show the same text simultaneously.
+        const idx = stream.indexOf(textData)
+        if (idx !== -1) stream = stream.slice(0, idx) + stream.slice(idx + textData.length)
+      }
+      return {
+        ...c,
+        stream,
+        turns: capTurns([...c.turns, { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref }]),
+      }
+    })
+    return
+  }
+  patch(tabId, (c) => ({
+    ...c,
+    turns: capTurns([
+      ...c.turns,
+      { id: turnId(), role: 'event', text: ev.previewText ?? '', at, kind: ev.kind, ref: ev.ref },
+    ]),
+  }))
+}
+
+/**
+ * Attach the JSONL transcript feed for a tab (refcounted — mirrors live.ts's
+ * subscribe). First attach registers the transcript:event listener BEFORE
+ * awaiting transcript:subscribe (no live append missed), then drains the
+ * main-side ring buffer as replay. Marks the tab hydrated SYNCHRONOUSLY so
+ * the exchange-based hydrate() no-ops for feed-backed tabs — the JSONL replay
+ * is a strict superset of the exchange store, and letting both run would
+ * prepend duplicate history. Rolled back on subscribe failure so a later
+ * mount can still fall back to exchange hydration.
+ *
+ * A brand-new session whose transcript file doesn't exist yet subscribes
+ * cleanly (transcripts.cjs watches the path and mkdirs the dir) with an empty
+ * replay — the view renders empty-but-valid and fills in live.
+ */
+export function attachTranscriptFeed(args: { tabId: string; cwd: string; sessionUuid: string }): void {
+  const { tabId, cwd, sessionUuid } = args
+  // No transcripts IPC surface (non-renderer import, component tests with a
+  // partial window.api mock) → no feed; the tab falls back to exchange
+  // hydration exactly as before this PRD.
+  const transcripts = typeof window !== 'undefined' ? window.api?.transcripts : undefined
+  if (!transcripts?.onEvent || !transcripts.subscribe || !transcripts.buffer) return
+  const next = (feedRefs.get(tabId) ?? 0) + 1
+  feedRefs.set(tabId, next)
+  if (next > 1) return
+  useChat.setState({ hydratedTabs: { ...useChat.getState().hydratedTabs, [tabId]: true } })
+  const off = window.api.transcripts.onEvent(tabId, (ev) => ingestTranscriptEvent(tabId, ev))
+  feedUnsubs.set(tabId, off)
+  window.api.transcripts
+    .subscribe({ tabId, cwd, sessionUuid })
+    .then(async (r) => {
+      if (!feedRefs.has(tabId)) return // detached while the subscribe was in flight
+      if (!r.ok) {
+        toast.error(`Chat transcript feed unavailable: ${r.error ?? 'subscribe failed'}`)
+        off()
+        feedUnsubs.delete(tabId)
+        feedRefs.delete(tabId)
+        const hydratedTabs = { ...useChat.getState().hydratedTabs }
+        delete hydratedTabs[tabId]
+        useChat.setState({ hydratedTabs })
+        return
+      }
+      const events = await window.api.transcripts.buffer(tabId)
+      for (const ev of events) ingestTranscriptEvent(tabId, ev)
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      window.api?.logs?.write('chat', 'warn', `transcript feed attach failed for ${tabId}: ${msg}`)
+    })
+}
+
+/**
+ * Detach one consumer. At refcount 0 the IPC listener is removed and the
+ * main-side sub is release()d (transcript:unsubscribe) — NOT closed — so it
+ * parks in the LRU cache and a revisit resumes from the persisted offset.
+ * feedIngest's seen-set is kept: the replay served on re-attach is deduped
+ * against it (see FeedIngestState).
+ */
+export function detachTranscriptFeed(tabId: string): void {
+  const cur = feedRefs.get(tabId)
+  if (!cur) return
+  if (cur > 1) {
+    feedRefs.set(tabId, cur - 1)
+    return
+  }
+  feedRefs.delete(tabId)
+  feedUnsubs.get(tabId)?.()
+  feedUnsubs.delete(tabId)
+  void window.api?.transcripts?.unsubscribe(tabId)
+}
+
 // ─── one-time global IPC subscription ──────────────────────────────────────
 // Wired at module load (like live.ts subscribes to transcript events). Guarded
 // so a non-renderer import (tests) doesn't throw on a missing window.api.
@@ -918,15 +1176,19 @@ if (typeof window !== 'undefined' && window.api?.chat) {
       appendResponseEvent(tabId, answerBody)
       // Two turns: the answer body renders as a normal assistant bubble
       // (with the run's accumulated tool-use trace), the question card
-      // beneath it carries no tool-use trace of its own.
-      patch(tabId, (c) => ({
-        ...c,
-        turns: [
-          ...c.turns,
-          { id: turnId(), role: 'assistant', text: answerBody, at: Date.now(), toolUses: c.liveToolUses },
-        ],
-        liveToolUses: [],
-      }))
+      // beneath it carries no tool-use trace of its own. Same feed
+      // reconciliation as pushTurn: if the JSONL already landed this text
+      // as a feed turn, don't append a duplicate.
+      patch(tabId, (c) => {
+        const dup = hasTranscriptFeed(tabId) && findRecentDuplicateTurn(c.turns, 'assistant', answerBody) !== -1
+        return {
+          ...c,
+          turns: dup
+            ? c.turns
+            : [...c.turns, { id: turnId(), role: 'assistant', text: answerBody, at: Date.now(), toolUses: c.liveToolUses }],
+          liveToolUses: [],
+        }
+      })
       pushTurn(
         tabId,
         {

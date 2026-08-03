@@ -1,6 +1,27 @@
 {
   "jobs": [
     {
+      "slug": "987-traffic-light-reads-epic-verdict",
+      "title": "Green means the Epic verified it — retarget the traffic light from the job's claim to the Epic's verdict",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "parallelGroup": 987,
+      "estimateMinutes": 50,
+      "sourcePromptId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "sourceTabId": null,
+      "epicId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "dependsOn": [
+        "986-checkin-triggers-epic-validation"
+      ],
+      "originSessionId": "4d5ad773-6991-49be-9549-322afea56aa7",
+      "bodyPreview": "# Goal\n\nPRDs 974/975/976 shipped a green/yellow/red traffic light across the Epic timeline chip, the Epic-row rollup and the response event — but all three derive their colour from the JOB's self-reported status, which is exactly the value that lied for PRD 972 (reported completed, shipped nothing). Retarget every one of those surfaces onto the Epic's own validation verdict from PRD 986, and introduce a distinct not-yet-validated tone so a PRD that merely CLAIMS success can never render green. Green must mean \"the authoring Epic checked the acceptance criteria and confirmed them\", nothing weaker.\n\n# Acceptance criteria\n",
+      "status": "pending",
+      "runId": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "exitCode": null,
+      "error": null
+    },
+    {
       "slug": "986-checkin-triggers-epic-validation",
       "title": "A PRD check-in triggers validation in the authoring Epic — it never asserts the PRD is done",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -176,37 +197,18 @@
       ],
       "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
       "bodyPreview": "# Goal\n\nThe Epic Chat view currently renders from chatRunner.cjs's stream-json output, which is a strictly thinner feed than the on-disk JSONL transcript. Whole classes of real session events exist ONLY in the JSONL and are therefore unreachable by Chat today — verified counts across the last 20 real sessions: attachment 317, last-prompt 252, ai-title 217, queue-operation 122, mode 94, permissionMode 24, file-history-snapshot 5. Make the JSONL tail the source of truth for the Chat view's transcript, demoting chatRunner's stream to a low-latency live tap for in-flight text only. Without this, the typed-renderer PRD downstream has no data to render.\n\n# Acceptance criteria\n",
-      "status": "pending",
-      "runId": null,
-      "startedAt": null,
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null
-    },
-    {
-      "slug": "977-transcript-classifier-multi-emit",
-      "title": "classifyLine becomes multi-emit and stops destroying data at classify time",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 977,
-      "estimateMinutes": 22,
-      "sourcePromptId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "sourceTabId": null,
-      "epicId": "session-chat-conversion-into-simplified-chat-so--7cda6827",
-      "dependsOn": [],
-      "originSessionId": "9bfc22a7-78ec-456a-ad4b-4ace64d4de84",
-      "bodyPreview": "# Goal\n\nsrc/main/lib/classifyTranscriptLine.cjs is lossy at three verified points, and every downstream Chat/Terminal rendering improvement is blocked on fixing them. (a) The `for (const block of content)` loop `return`s on the FIRST tool_use block, so an assistant message containing text plus 3 tool calls emits ONE event and the text plus 2 calls are silently discarded. (b) The `if (obj.usage || msg?.usage)` check runs first, so any message carrying both usage and content is classified 'usage' and its content is never emitted at all. (c) `makeRaw()` keeps only `message.content`, discarding every top-level field on the line. Make classifyLine return an ARRAY of events per line, preserve the whole line, and replace classify-time string truncation with a byte-offset reference so full payloads stay recoverable without holding them in memory.\n\n# Acceptance criteria\n",
       "status": "running",
-      "runId": "2026-08-03T04-32-59-390Z",
-      "startedAt": "2026-08-03T04:32:59.526Z",
+      "runId": "2026-08-03T04-48-46-476Z",
+      "startedAt": "2026-08-03T04:48:46.641Z",
       "finishedAt": null,
       "exitCode": null,
       "error": null,
-      "sessionId": "12b9eca1-4f04-4182-8eab-c7ff23133583",
+      "sessionId": "2ebcdb36-7215-4855-9623-6db89aa5bab0",
       "runtime": {
-        "pid": 3044569,
-        "runId": "2026-08-03T04-32-59-390Z",
-        "startedAt": "2026-08-03T04:32:59.526Z",
-        "sessionId": "12b9eca1-4f04-4182-8eab-c7ff23133583",
+        "pid": 3063369,
+        "runId": "2026-08-03T04-48-46-476Z",
+        "startedAt": "2026-08-03T04:48:46.641Z",
+        "sessionId": "2ebcdb36-7215-4855-9623-6db89aa5bab0",
         "cwd": "/home/bilko/Projects/session-manager"
       }
     },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useChat } from '../../state/chat'
+import { useChat, attachTranscriptFeed, detachTranscriptFeed } from '../../state/chat'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
@@ -366,7 +366,18 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    // JSONL transcript feed = the Chat view's source of truth (PRD
+    // chat-feed-from-jsonl). Attach synchronously marks the tab hydrated so
+    // the exchange-based hydrate() below no-ops (the JSONL replay is a strict
+    // superset of the exchange store); hydrate() stays as the fallback for a
+    // rejected subscription (attach rolls the marker back on failure, so the
+    // NEXT mount hydrates from exchanges instead). The feed stays attached
+    // across Chat↔Terminal mode switches (this component stays mounted), so
+    // a Terminal stint's turns flow into the same feed with no duplication,
+    // drop, or reorder — both views are the same claude session.
+    attachTranscriptFeed({ tabId: epicId, cwd, sessionUuid: sessionId })
     void hydrate({ tabId: epicId, cwd, sessionId })
+    return () => detachTranscriptFeed(epicId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epicId])
 
@@ -406,6 +417,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
+  // role:'event' turns are JSONL transcript-feed events (mode, attachment,
+  // queue-operation, tool_use, usage, …) that have no typed renderer yet —
+  // that is a separate downstream PRD. They stay reachable in the store
+  // (chat.ts's ingestTranscriptEvent) but are not rendered here yet.
+  const visibleTurns = turns.filter((t) => t.role !== 'event')
 
   // A 'response' PromptSessionEvent is appended by chat.ts for EVERY completed
   // turn (onComplete/onNeedsInput), not only for out-of-band ones (PRD-finished
@@ -435,7 +451,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // 'response' (Terminal-stint marker, PRD 831) audit events, ordered by
   // time — the same timeline construction the retired PromptSessionConversation.tsx used.
   const timeline = [
-    ...turns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
+    ...visibleTurns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
     ...sessionEvents
       .filter((e): e is PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' } =>
         e.kind === 'prd_created' || e.kind === 'closed' || (e.kind === 'response' && !isDuplicateResponseEvent(e)),
@@ -701,8 +717,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             {timeline.map((item) => {
               if (item.kind === 'turn') {
                 const t = item.turn
-                const i = turns.indexOf(t)
-                const prevTurn = i > 0 ? turns[i - 1] : undefined
+                const i = visibleTurns.indexOf(t)
+                const prevTurn = i > 0 ? visibleTurns[i - 1] : undefined
                 const precedingUserPrompt = prevTurn?.role === 'user' ? prevTurn.text : undefined
                 return (
                   <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
@@ -711,7 +727,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       cwd={cwd}
                       tabId={epicId}
                       sessionId={sessionId}
-                      runActive={running && t.role === 'assistant' && i === turns.length - 1}
+                      runActive={running && t.role === 'assistant' && i === visibleTurns.length - 1}
                       consentActionDisabled={running}
                       enableRawSessionActions={false}
                       linkTarget="browser"

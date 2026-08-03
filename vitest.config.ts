@@ -30,6 +30,7 @@ export default defineConfig({
       'src/main/__tests__/exchangesPromptId.test.cjs',
       'src/main/__tests__/prdParserSourcePromptId.test.cjs',
       'src/main/__tests__/scheduler-notify-originating-tab.test.cjs',
+      'src/main/__tests__/scheduler-heal-refusal.test.cjs',
       'src/main/__tests__/chat-dead-channels.test.cjs',
       'src/main/__tests__/promptSessionEvents.test.cjs',
       'src/main/__tests__/scheduler-sigterm-commit.test.cjs',

@@ -3718,6 +3718,50 @@ function isUnresolvableNeedsReview(job, { hasRunDir }) {
  * commit-guard) — verifyRun can't see git, so re-scanning it would falsely
  * heal an unfinished job. Exported for tests.
  */
+/**
+ * healRefusalReason(job, verdict, committedDuringRun) → string | null
+ *
+ * Guards reverifyNeedsReview's needs_review → completed self-heal. Returns a
+ * refusal reason when the heal must NOT happen, or null to allow it.
+ *
+ * THE INCIDENT (PRD 983, 2026-08-03). Job 972 ran 34 s, edited zero files and
+ * exited 0. verifyRun correctly raised `no_verdict_sentinel` (no commit AND no
+ * SCHEDULER_VERDICT sentinel) with downgradeTo 'needs_review', and the job was
+ * parked. One minute later this self-heal pass promoted it to `completed`, and
+ * that false green shipped to the user.
+ *
+ * The mechanism is subtle and worth spelling out, because the individual parts
+ * all look correct: `no_verdict_sentinel` is in RESCANNABLE_VERDICTS, so the
+ * job was re-verified. The rescan recomputes `committedDuringRun` via
+ * `committedInWindow`, which runs `git log --all --since=<startedAt>
+ * --until=<finishedAt+60s>` with NO author, message, or slug filter — it
+ * answers "did ANY commit land in this repo during that window", not "did THIS
+ * job commit". With up to 3 concurrent scheduler jobs plus interactive
+ * sessions sharing one repo, a sibling job's commit lands inside the window
+ * routinely. `committedDuringRun` therefore flipped to true on the rescan,
+ * runVerify's `if (sentinel === null && !committedDuringRun)` no longer fired,
+ * `no_verdict_sentinel` was never re-raised, the issue list came back empty,
+ * and the verdict concluded `clean` — a COMPLETED_EQUIVALENT verdict, so the
+ * job healed. Another job's commit was silently credited to this one.
+ *
+ * The rule: a run that emitted no sentinel and landed no commit ATTRIBUTABLE
+ * TO ITSELF has produced no evidence it did anything, and repo-wide
+ * time-window evidence is not attribution. `landedCommit` is per-job and
+ * survives a resetJob (resetJobFields), so it is the honest signal here.
+ * Bias to needs_review: a false yellow costs a human glance, a false green
+ * costs a silently-unfixed bug — which is exactly what happened.
+ */
+function healRefusalReason(job, verdict, committedDuringRun) {
+  if (!job || !verdict) return null;
+  if (!COMPLETED_EQUIVALENT_VERDICTS.has(verdict.verdict)) return null;
+  if (job.verifierVerdict !== 'no_verdict_sentinel') return null;
+  // A commit this job actually recorded as its own is real evidence; the
+  // repo-wide window scan is not.
+  if (job.landedCommit) return null;
+  return 'no_verdict_sentinel with no job-attributable commit — refusing to heal'
+    + ` (committedInWindow=${committedDuringRun === true} is repo-wide, not proof this job delivered)`;
+}
+
 function isRescanCandidate(job) {
   return !!job
     && job.status === 'needs_review'
@@ -3819,7 +3863,10 @@ async function reverifyNeedsReview() {
         priorLandedCommit,
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
-    if (v && COMPLETED_EQUIVALENT_VERDICTS.has(v.verdict)) {
+    const refusal = healRefusalReason(job, v, committedDuringRun);
+    if (refusal) {
+      leftForReview.push({ slug: job.slug, reason: refusal });
+    } else if (v && COMPLETED_EQUIVALENT_VERDICTS.has(v.verdict)) {
       healed.push(job.slug);
     } else {
       leftForReview.push({ slug: job.slug, reason: v ? `${v.verdict}: ${v.reason}` : 'null verdict' });
@@ -4685,4 +4732,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult };

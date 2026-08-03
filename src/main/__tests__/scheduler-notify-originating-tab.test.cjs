@@ -187,3 +187,76 @@ test('falls back to the tab-external-ticket path when appendResponseEvent itself
 
   expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
 });
+
+// ─── PRD 985: real path resolution ───────────────────────────────────────────
+// Every test above injects a stubbed `parsePrdRaw`, which is exactly why the
+// bug PRD 985 fixes shipped green: notifyOriginatingTab resolved its PRD via
+// prdPathForJob → the RETIRED flat `scheduler/prds/` dir (today only
+// `.reserved-NNN` stubs, no PRDs), and archiveCompletedPrd renames the file
+// into `prds-archived/` immediately BEFORE notify runs anyway. `prd` was
+// therefore always null on the completed path and no response event was ever
+// appended. These two tests use the REAL parsePrdRaw against a temp tree so
+// the resolution logic itself is covered, not mocked away.
+
+const fs = require('node:fs');
+const os = require('node:os');
+const nodePath = require('node:path');
+
+function makeEpicTree({ epicId, slug, archived }) {
+  const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-notify-985-'));
+  const dir = nodePath.join(
+    cwd, 'session-manager-operations', 'scheduler', 'epics', epicId,
+    archived ? 'prds-archived' : 'prds',
+  );
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    nodePath.join(dir, `${slug}.md`),
+    `---\ntitle: notify 985\ncwd: ${cwd}\nsourcePromptId: ${epicId}\n---\n\nbody\n`,
+    'utf8',
+  );
+  return cwd;
+}
+
+test('PRD 985: an ARCHIVED-only PRD still routes its check-in to the authoring Epic', async () => {
+  const epicId = 'psess-985-archived';
+  const slug = '985-archived-twin';
+  const cwd = makeEpicTree({ epicId, slug, archived: true });
+
+  const appendResponseEvent = vi.fn(async () => true);
+  const appendTranscriptTurn = vi.fn(async () => {});
+  const sendPrompt = vi.fn();
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  // NOTE: no parsePrdRaw override — the real one runs against the temp tree.
+  await notifyOriginatingTab(
+    { slug, status: 'completed', cwd, epicId: null },
+    { loadSessions, sendPrompt, appendResponseEvent, appendTranscriptTurn, readResultFromLog: () => null },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+  expect(appendResponseEvent).toHaveBeenCalledWith(
+    cwd, epicId, expect.stringContaining(slug),
+    expect.objectContaining({ prdSlug: slug, outcome: 'completed' }),
+  );
+  expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, epicId, expect.anything());
+  expect(sendPrompt).not.toHaveBeenCalled();
+});
+
+test('PRD 985: a PRD missing entirely still routes via the job row\'s own epicId', async () => {
+  const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-notify-985-none-'));
+  const appendResponseEvent = vi.fn(async () => true);
+  const appendTranscriptTurn = vi.fn(async () => {});
+  const sendPrompt = vi.fn();
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+  await notifyOriginatingTab(
+    { slug: '985-no-prd-on-disk', status: 'failed', cwd, epicId: 'psess-985-from-queue-row' },
+    { loadSessions, sendPrompt, appendResponseEvent, appendTranscriptTurn, readResultFromLog: () => null },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalledWith(
+    cwd, 'psess-985-from-queue-row', expect.stringContaining('985-no-prd-on-disk'),
+    expect.objectContaining({ prdSlug: '985-no-prd-on-disk', outcome: 'failed' }),
+  );
+  expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, 'psess-985-from-queue-row', expect.anything());
+});

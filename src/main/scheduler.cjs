@@ -747,6 +747,16 @@ async function runPrdMigration() {
           meta: { cwd, reason: f.reason },
         });
       }
+      // Deliberately left behind because a live job still points at them
+      // (PRD 992). Logged so a permanently-stuck flat PRD is visible rather
+      // than looking like a clean consolidation.
+      for (const s of c.skipped ?? []) {
+        logs.writeLine({
+          level: 'info', scope: 'scheduler',
+          message: `flat-PRD consolidation: left ${s.file} in place`,
+          meta: { cwd, reason: s.reason },
+        });
+      }
     } catch (e) {
       logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'flat-PRD consolidation failed', meta: { cwd, error: e?.message } });
     }
@@ -1885,16 +1895,35 @@ async function notifyOriginatingTab(job, {
   readResultFromLog = extractResultTextFromLog,
 } = {}) {
   try {
-    const prdPath = prdPathForJob(job);
-    const prd = await parsePrdRaw(prdPath).catch(() => null);
+    const prd = await resolveNotifyPrd(job, parsePrdRaw);
     const message = `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`;
+
+    // The EPIC this check-in belongs to. Deliberately does NOT consider
+    // `sourceTabId` — that is a Terminal tab id, not an Epic id, and
+    // appending an Epic event chain onto one would be a category error (a
+    // pre-813 PRD carrying only sourceTabId must still take the
+    // chat:external-send path below; covered by the 'no sourcePromptId at
+    // all (pre-813 PRD)' test).
+    //
+    // `job.epicId` is the last resort and is what makes the notification
+    // survive an entirely unreadable PRD: the queue row carries the Epic FK
+    // independently of the .md on disk (20 of 21 history rows had it when
+    // PRD 985 was written), so a parse failure degrades to "notified without
+    // frontmatter detail" instead of "silently dropped". Mirrors
+    // notifyNeedsReview, which has had this fallback since PRD 854 — which
+    // is precisely why needs_review routing kept working while
+    // completed/failed routing did not.
+    const epicId = prd?.sourcePromptId || job.epicId || null;
 
     // Persist the job's real result text (not just the short status chip
     // above) to the durable per-Epic transcript, keyed off whichever id
-    // notifyOriginatingTab would otherwise notify. Best-effort: a missing
-    // cwd/epic id, an unreadable run log, or an IPC error here must never
-    // block the notification below.
-    const epicIdForTranscript = prd?.sourcePromptId || prd?.sourceTabId || null;
+    // notifyOriginatingTab would otherwise notify. Unlike the event append
+    // above, this one DOES accept sourceTabId — the durable transcript is
+    // keyed by whatever id the run is associated with, not strictly by Epic
+    // (pre-existing behaviour, unchanged by PRD 985 apart from the epicId
+    // fallback). Best-effort: a missing cwd/epic id, an unreadable run log,
+    // or an IPC error here must never block the notification below.
+    const epicIdForTranscript = prd?.sourcePromptId || prd?.sourceTabId || job.epicId || null;
     if (epicIdForTranscript && job.cwd) {
       try {
         const logPath = job.runId ? path.join(RUNS_DIR, job.runId, `${job.slug}.log`) : null;
@@ -1908,8 +1937,8 @@ async function notifyOriginatingTab(job, {
       }
     }
 
-    if (prd?.sourcePromptId) {
-      const routed = await appendResponseEvent(job.cwd || null, prd.sourcePromptId, message, {
+    if (epicId) {
+      const routed = await appendResponseEvent(job.cwd || null, epicId, message, {
         prdSlug: job.slug,
         outcome: job.status,
       }).catch((e) => {
@@ -1925,7 +1954,7 @@ async function notifyOriginatingTab(job, {
     // re-checks against its own live PromptSession store. Deliberate
     // defense-in-depth (main's disk-backed check vs. the renderer's
     // in-memory one can disagree/race), not a redundant duplicate to prune.
-    let targetTabId = prd?.sourceTabId || prd?.sourcePromptId || null;
+    let targetTabId = prd?.sourceTabId || prd?.sourcePromptId || job.epicId || null;
     if (!targetTabId) {
       const jobCwd = job.cwd || null;
       if (jobCwd) {
@@ -1967,7 +1996,7 @@ async function notifyNeedsReview(job, report, {
 } = {}) {
   try {
     if (!job || !report || !report.filed) return false;
-    const prd = await parsePrdRaw(prdPathForJob(job)).catch(() => null);
+    const prd = await resolveNotifyPrd(job, parsePrdRaw);
     const epicId = prd?.sourcePromptId || job.epicId || null;
     if (!epicId || !job.cwd) {
       console.log(`[scheduler] notifyNeedsReview: no authoring Epic for ${job.slug}, report only`);

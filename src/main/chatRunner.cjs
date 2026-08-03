@@ -52,6 +52,7 @@ const { extractJson } = require('./lib/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
+const agentModelResolve = require('./lib/agentModelResolve.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -522,10 +523,18 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // instruction to every prompt
     const fullPrompt = STOP_SIGNAL_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + prompt;
 
+    // sessionId is the Epic's claudeSessionId for an Epic-backed tab (see
+    // comment above childEnv) — resolve that Epic's agentType persona model
+    // so Chat and Terminal views of the same Epic launch with the same
+    // model. Never throws; falls back to the hardcoded 'sonnet' literal when
+    // there's no Epic, no agentType, or the persona has no model/'inherit' —
+    // --model must never be left unpinned (CLAUDE.md model-pinning rule).
+    const model = agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
+
     // Build argv as an array — no shell: true, no string interpolation
     const args = [
       '-p', fullPrompt,
-      '--model', 'sonnet',           // pinned per "claude -p model pinning" rule
+      '--model', model,
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
       '--verbose',

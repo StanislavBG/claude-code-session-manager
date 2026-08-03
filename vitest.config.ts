@@ -76,6 +76,7 @@ export default defineConfig({
       'src/main/__tests__/epicContextDigest.test.cjs',
       'src/main/__tests__/scheduler-epic-digest.test.cjs',
       'src/main/__tests__/promptSessionsCreateEpicHandler.test.cjs',
+      'src/main/__tests__/agentModelResolve.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',
       'scripts/__tests__/active-sessions.test.cjs',

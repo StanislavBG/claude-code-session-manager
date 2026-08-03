@@ -61,6 +61,11 @@ exchanges.recordExchange = (...args: unknown[]) => {
   return Promise.resolve()
 }
 
+const agentModelResolve = require('../../src/main/lib/agentModelResolve.cjs') as {
+  resolveEpicModel: (opts: { cwd: string; claudeSessionId: string; fallbackModel?: string; deps?: unknown }) => string
+}
+const originalResolveEpicModel = agentModelResolve.resolveEpicModel
+
 const chatRunner = require('../../src/main/chatRunner.cjs') as {
   run: (opts: Record<string, unknown>) => { accepted: boolean; queued?: boolean; reason?: string }
   attachWindow: (win: unknown) => void
@@ -413,6 +418,42 @@ describe('prompt-prepended instructions (real executeRun path via a faked child 
     expect(fullPrompt.indexOf(chatRunner.CHAT_MODE_TRUTH_INSTRUCTION)).toBeLessThan(fullPrompt.indexOf('hello'))
     expect(fullPrompt).toMatch(/one-shot|no process (survives|resumes)/i)
     expect(fullPrompt.endsWith('hello')).toBe(true)
+  })
+})
+
+describe('per-Epic model resolution (real executeRun path via a faked child process)', () => {
+  beforeEach(() => {
+    chatRunner.__setExecutor(null) // restore the real executeRun
+    nextChild = null
+    lastSpawnArgs = null
+  })
+
+  afterEach(() => {
+    agentModelResolve.resolveEpicModel = originalResolveEpicModel
+  })
+
+  it("uses the Epic's persona-derived model (e.g. opus) instead of the hardcoded 'sonnet'", async () => {
+    agentModelResolve.resolveEpicModel = (opts) => (opts.claudeSessionId === 'sess-opus-persona' ? 'opus' : 'sonnet')
+
+    chatRunner.run({ tabId: 'tab-opus-persona', sessionId: 'sess-opus-persona', prompt: 'hello', cwd: '/tmp', resume: false })
+    await flush()
+
+    expect(lastSpawnArgs).not.toBeNull()
+    const mIndex = lastSpawnArgs!.indexOf('--model')
+    expect(mIndex).toBeGreaterThanOrEqual(0)
+    expect(lastSpawnArgs![mIndex + 1]).toBe('opus')
+  })
+
+  it("passes the resolver's fallback value straight through to --model (resolver's own no-agentType/'inherit' fallback logic is unit-tested in agentModelResolve.test.cjs)", async () => {
+    agentModelResolve.resolveEpicModel = () => 'sonnet' // resolver's own fallback behavior
+
+    chatRunner.run({ tabId: 'tab-no-agent-type', sessionId: 'sess-no-agent-type', prompt: 'hello', cwd: '/tmp', resume: false })
+    await flush()
+
+    expect(lastSpawnArgs).not.toBeNull()
+    const mIndex = lastSpawnArgs!.indexOf('--model')
+    expect(mIndex).toBeGreaterThanOrEqual(0)
+    expect(lastSpawnArgs![mIndex + 1]).toBe('sonnet')
   })
 })
 

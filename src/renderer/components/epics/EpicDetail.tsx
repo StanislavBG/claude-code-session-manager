@@ -8,7 +8,7 @@ import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSna
 import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
-import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt } from '../ChatTranscriptTurn'
+import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { prettyModel } from '../../lib/prettyModel'
 import { ViewTabs } from '../ui/ViewTabs'
@@ -133,15 +133,42 @@ function ResponseEvent({
   }
 
   const displayText = expanded && fullText ? fullText : (event.text ?? '')
-  const tone = event.outcome ? STATUS_TONE[event.outcome] : null
-  const accessibleLabel = event.prdSlug && tone ? `PRD ${event.prdSlug} — ${tone.label}` : undefined
+  // A 'response' event with outcome 'needs_review' is written exclusively by
+  // scheduler.cjs's notifyNeedsReview for a root-cause report rcaReport.cjs
+  // filed (see that function's own doc comment) — it is a question routed
+  // back to THIS Epic, not a status update, so it gets its own amber
+  // treatment + an explicit marker rather than blending into ordinary
+  // assistant prose or the neutral STATUS_TONE.needs_review pill used
+  // elsewhere for PRD status chips.
+  const isQuestionForHuman = event.outcome === 'needs_review'
+  const tone = event.outcome && !isQuestionForHuman ? STATUS_TONE[event.outcome] : null
+  const accessibleLabel = isQuestionForHuman
+    ? `Question routed back from a scheduler run${event.prdSlug ? ` (PRD ${event.prdSlug})` : ''}: ${event.text ?? ''}`
+    : event.prdSlug && tone
+      ? `PRD ${event.prdSlug} — ${tone.label}`
+      : undefined
 
   return (
     <div
       data-testid="epic-response-event"
       aria-label={accessibleLabel}
-      className={`break-words text-center text-[11px] ${tone ? `${tone.bg} ${tone.text} rounded-lg px-2 py-1` : 'text-fg-faint'}`}
+      className={`break-words text-center text-[11px] ${
+        isQuestionForHuman
+          ? `border ${AMBER_TINT} ${AMBER_TEXT} rounded-lg px-2.5 py-1.5`
+          : tone
+            ? `${tone.bg} ${tone.text} rounded-lg px-2 py-1`
+            : 'text-fg-faint'
+      }`}
     >
+      {isQuestionForHuman && (
+        <div
+          className={`mb-1 flex items-center justify-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide ${AMBER_TEXT}`}
+          data-testid="epic-response-question-marker"
+        >
+          <span aria-hidden="true">❓</span>
+          Question aimed at you
+        </div>
+      )}
       <span aria-hidden="true">— </span>
       {/* Reuses the same renderChatMarkdown() the Discussion timeline's chat
        *  Turn bubbles render through (ChatTranscriptTurn.tsx) so a PRD result
@@ -775,8 +802,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 return <ResponseEvent key={e.id} event={e} cwd={cwd} epicId={epicId} />
               }
               return (
-                <div key={e.id} data-testid="epic-closed-event" className="text-center text-[11px] text-fg-faint">
-                  — Epic marked completed —
+                <div key={e.id} data-testid="epic-closed-event">
+                  <EventDivider label="epic" value="closed" />
                 </div>
               )
             })}

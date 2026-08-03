@@ -321,6 +321,54 @@ describe('EpicDetail (PRD 827)', () => {
     expect(responseEvents[1].getAttribute('aria-label')).toBeNull()
   })
 
+  it('CORE: a response event with outcome "needs_review" (rcaReport.cjs\'s routed question) renders amber-tinted and marked as a question aimed at the human, distinct from an ordinary completed/failed outcome', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: initialEvent.id,
+      text: 'Root-cause report: runs/123/root-cause-980-fix.md',
+      prdSlug: '980-fix',
+      outcome: 'needs_review',
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const responseEvent = el.querySelector('[data-testid="epic-response-event"]')!
+    expect(responseEvent).toBeTruthy()
+    expect(responseEvent.querySelector('[data-testid="epic-response-question-marker"]')?.textContent).toContain(
+      'Question aimed at you',
+    )
+    // AMBER_TEXT/AMBER_TINT (not STATUS_TONE.needs_review's neutral butter pill).
+    expect(responseEvent.className).toMatch(/#8e641a/)
+    expect(responseEvent.getAttribute('aria-label')).toContain('Question routed back from a scheduler run')
+  })
+
+  it('renders the "closed" event as a terminator rule (EventDivider), not plain centered text', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'closed',
+      causedByEventId: initialEvent.id,
+      text: 'done',
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const closedEvent = el.querySelector('[data-testid="epic-closed-event"]')!
+    expect(closedEvent).toBeTruthy()
+    expect(closedEvent.querySelector('[data-testid="event-divider"]')).toBeTruthy()
+  })
+
   it('wires onQuote into the Discussion timeline\'s Turn so its hover Quote button reports the turn text', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

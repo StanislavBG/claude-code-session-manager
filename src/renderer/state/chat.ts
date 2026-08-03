@@ -8,6 +8,7 @@ import { useSessions } from './sessions'
 import { usePromptSessions } from './promptSessions'
 import { useEpicTerminal } from './epicTerminal'
 import { summarizeSignal, type ChatSignal } from '../lib/chatSignals'
+import { extractAttribution, type Attribution } from '../lib/chatAttribution'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -68,6 +69,12 @@ export interface ChatTurn {
    *  renderers (ChatTranscriptTurn.tsx) read this instead of re-parsing the
    *  280-char previewText; expanding a card re-reads the full line via `ref`. */
   signal?: ChatSignal
+  /** Attribution fields lifted from the transcript-feed event's `raw`
+   *  projection (see chatAttribution.ts) — undefined when the turn has none
+   *  (chatRunner-pushed turns carry no `raw` at all). The header's chip row
+   *  reads this instead of re-deriving it from a full payload the store
+   *  never keeps. */
+  attribution?: Attribution
 }
 
 /**
@@ -1048,6 +1055,7 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
   // user's own conversation — keep them reachable as 'event' turns, never
   // as user/assistant bubbles.
   const isMeta = raw.isMeta === true || raw.isSidechain === true
+  const attribution = extractAttribution(raw)
   const data = ev.data as { message?: { content?: unknown } } | string | null | undefined
   const textData =
     typeof data === 'string'
@@ -1069,7 +1077,10 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
       return {
         ...c,
         stream,
-        turns: capTurns([...c.turns, { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref }]),
+        turns: capTurns([
+          ...c.turns,
+          { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref, attribution },
+        ]),
       }
     })
     return
@@ -1088,7 +1099,7 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
     ...c,
     turns: capTurns([
       ...c.turns,
-      { id: turnId(), role: 'event', text: ev.previewText ?? '', at, kind: ev.kind, ref: ev.ref, signal },
+      { id: turnId(), role: 'event', text: ev.previewText ?? '', at, kind: ev.kind, ref: ev.ref, signal, attribution },
     ]),
   }))
 }

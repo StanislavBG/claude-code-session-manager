@@ -12,6 +12,8 @@ import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { formatAgo } from '../lib/formatTime'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 import { InlineConsentTerminal } from './InlineConsentTerminal'
+import { type Attribution } from '../lib/chatAttribution'
+import type { TranscriptEventRef } from '../../preload/api'
 
 /**
  * Turn rendering — extracted from TerminalChat.tsx (PRD 319+) so it can be
@@ -369,6 +371,203 @@ function DiffCards({ items }: { items: ToolUseTrace[] | undefined }) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared turn frame (PRD chat-simplified-conversion-frame). Every turn kind —
+// conversation bubbles, signal cards, event-chain cards — reads the SAME
+// attribution data through AttributionChips; TurnFrame additionally supplies
+// the Header/Body/Footer zone layout for kinds that had no header/footer of
+// their own (the generic Signal card and every renderEventTurn kind below).
+// Conversation bubbles (user/assistant/question/notice) already have their
+// own header row from PRD 845/914 — those fold AttributionChips into that
+// EXISTING row (see the `claude · <age>` caption spans further down) rather
+// than wrapping in a second TurnFrame, per this PRD's explicit "don't
+// duplicate the caption layer" requirement.
+// ---------------------------------------------------------------------------
+
+const ATTRIBUTION_CHIP_BASE =
+  'inline-flex max-w-[160px] items-center gap-1 truncate rounded border px-1.5 py-0.5 font-mono text-[10px]'
+const ATTRIBUTION_CHIP_NEUTRAL = 'border-line bg-elev text-fg-dim'
+
+/** Header chip row for the attribution fields classifyTranscriptLine.cjs's
+ *  makeRaw() preserves on every transcript-feed event (attributionSkill/
+ *  Plugin/McpServer/McpTool, effort, gitBranch, isSidechain, isMeta,
+ *  isApiErrorMessage, interruptedByShutdown) — see chatAttribution.ts. Renders
+ *  nothing (not even an empty row) when the turn carries no attribution at
+ *  all, or when every field on it is absent. */
+export function AttributionChips({ attribution }: { attribution?: Attribution }) {
+  if (!attribution) return null
+  const chips: { key: string; label: string; tint?: string }[] = []
+  if (attribution.attributionSkill) chips.push({ key: 'skill', label: `🧩 ${attribution.attributionSkill}` })
+  if (attribution.attributionPlugin) chips.push({ key: 'plugin', label: `🔌 ${attribution.attributionPlugin}` })
+  if (attribution.attributionMcpServer) chips.push({ key: 'mcp-server', label: `🔌 ${attribution.attributionMcpServer}` })
+  if (attribution.attributionMcpTool) chips.push({ key: 'mcp-tool', label: `⚙ ${attribution.attributionMcpTool}` })
+  if (attribution.effort) chips.push({ key: 'effort', label: `effort:${attribution.effort}` })
+  if (attribution.gitBranch) chips.push({ key: 'branch', label: `⎇ ${attribution.gitBranch}` })
+  if (attribution.isSidechain) chips.push({ key: 'sidechain', label: 'sidechain' })
+  if (attribution.isMeta) chips.push({ key: 'meta', label: 'meta' })
+  if (attribution.isApiErrorMessage) {
+    chips.push({ key: 'api-error', label: 'API error', tint: `${ERROR_TINT} ${ERROR_TEXT}` })
+  }
+  if (attribution.interruptedByShutdown) {
+    chips.push({ key: 'interrupted', label: 'interrupted', tint: `${ERROR_TINT} ${ERROR_TEXT}` })
+  }
+  if (!chips.length) return null
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1" data-testid="attribution-chips">
+      {chips.map((c) => (
+        <span
+          key={c.key}
+          title={c.label}
+          data-testid={`attribution-chip-${c.key}`}
+          className={`${ATTRIBUTION_CHIP_BASE} ${c.tint ?? ATTRIBUTION_CHIP_NEUTRAL}`}
+        >
+          {c.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Footer affordances shared by every turn kind: 'Show raw' re-reads the
+ * EXACT untruncated JSONL line for this turn via the byte-reference/paging
+ * path (window.api.transcripts.readRef) — never a re-serialized
+ * approximation of the parsed turn/signal — and 'Copy' copies whatever is
+ * currently on screen (the raw line once loaded, else the given fallback
+ * text). Both are omitted when this turn has no ref and no fallback text to
+ * offer, so the footer zone collapses to nothing rather than two dead
+ * buttons.
+ */
+export function TurnRawFooter({
+  turnRef,
+  copyText,
+  testId,
+}: {
+  turnRef?: TranscriptEventRef | null
+  copyText?: string
+  testId?: string
+}) {
+  const [rawOpen, setRawOpen] = useState(false)
+  const [rawText, setRawText] = useState<string | null>(null)
+  const [rawLoading, setRawLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  if (!turnRef && !copyText) return null
+
+  const onToggleRaw = async () => {
+    if (rawOpen) {
+      setRawOpen(false)
+      return
+    }
+    setRawOpen(true)
+    if (rawText === null && turnRef && !rawLoading) {
+      setRawLoading(true)
+      try {
+        const res = await window.api.transcripts.readRef(turnRef)
+        setRawText(res.ok && res.text !== undefined ? res.text : '(raw line unavailable)')
+      } catch {
+        setRawText('(raw line unavailable)')
+      } finally {
+        setRawLoading(false)
+      }
+    }
+  }
+
+  const onCopy = () => {
+    const text = rawOpen && rawText ? rawText : (copyText ?? '')
+    if (!text) return
+    copyToClipboard(text, (ok) => {
+      if (ok) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1100)
+      } else {
+        toast.error('Copy failed')
+      }
+    })
+  }
+
+  return (
+    <div>
+      <div
+        className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-fg-faint"
+        data-testid={testId ?? 'turn-raw-footer'}
+      >
+        {turnRef && (
+          <button
+            type="button"
+            onClick={() => { void onToggleRaw() }}
+            data-testid="turn-raw-footer-show-raw"
+            className="rounded border border-line px-1.5 py-0.5 hover:bg-hi hover:text-fg"
+          >
+            {rawOpen ? 'Hide raw' : 'Show raw'}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onCopy}
+          data-testid="turn-raw-footer-copy"
+          className="rounded border border-line px-1.5 py-0.5 hover:bg-hi hover:text-fg"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      {rawOpen && (
+        <pre
+          data-testid="turn-raw-footer-raw"
+          className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded border border-line bg-bg px-2 py-1.5 font-mono text-[11px] text-fg-dim"
+        >
+          {rawLoading ? 'Loading…' : (rawText ?? '')}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The three-zone frame (Header / Body / Footer) — used directly by
+ * renderEventTurn's dispatch (below) to wrap every event-kind renderer with
+ * a consistent badge/timestamp/attribution header and a Show-raw/Copy
+ * footer, without touching each kind's own body markup or test ids. Zones
+ * are always structurally present in this JSX but an empty one renders
+ * nothing: no badge+no timestamp+no attribution means no header row at all
+ * (not an empty bordered strip), and no ref+no copy text means no footer row.
+ */
+export function TurnFrame({
+  badge,
+  timestamp,
+  attribution,
+  turnRef,
+  copyText,
+  testId,
+  children,
+}: {
+  badge?: ReactNode
+  timestamp?: number
+  attribution?: Attribution
+  turnRef?: TranscriptEventRef | null
+  copyText?: string
+  testId?: string
+  children: ReactNode
+}) {
+  const hasHeader = !!badge || timestamp !== undefined || !!attribution
+  return (
+    <div className="mb-1.5" data-testid={testId ?? 'turn-frame'}>
+      {hasHeader && (
+        <div
+          className="mb-1 flex flex-wrap items-center gap-2 font-mono text-[10.5px] text-fg-faint"
+          data-testid="turn-frame-header"
+        >
+          {badge}
+          {timestamp !== undefined && <span>{formatAgo(timestamp, Date.now())}</span>}
+          <AttributionChips attribution={attribution} />
+        </div>
+      )}
+      <div data-testid="turn-frame-body">{children}</div>
+      <TurnRawFooter turnRef={turnRef} copyText={copyText} testId="turn-frame-footer" />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // role:'event' typed renderers (PRD chat-typed-event-renderers). chat.ts's
 // ingestTranscriptEvent lands every JSONL transcript-feed event with no
 // dedicated turn role (mode, queue-operation, attachment/*, tool_use, usage,
@@ -455,7 +654,7 @@ function GenericSignalCard({ turn }: { turn: ChatTurn }) {
 // mode/permissionMode: a state transition is a line, not a card.
 const EVENT_DIVIDER_LABEL: Record<string, string> = { mode: 'mode', permissionMode: 'permission' }
 
-function EventDivider({ label, value }: { label: string; value?: string }) {
+export function EventDivider({ label, value }: { label: string; value?: string }) {
   return (
     <div className="my-1 flex items-center gap-2" data-testid="event-divider">
       <span className="h-px flex-1 bg-line" aria-hidden="true" />
@@ -856,7 +1055,10 @@ export function Turn({
   if (turn.role === 'user') {
     return (
       <div className="group grid justify-items-end gap-1">
-        <span className="font-mono text-[10.5px] text-fg-faint">you · {formatAgo(turn.at, Date.now())}</span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10.5px] text-fg-faint">you · {formatAgo(turn.at, Date.now())}</span>
+          <AttributionChips attribution={turn.attribution} />
+        </div>
         <div className="max-w-[80%] break-words rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
           {turn.text}
         </div>
@@ -872,6 +1074,7 @@ export function Turn({
             Quote
           </button>
         )}
+        <TurnRawFooter turnRef={turn.ref} copyText={turn.text} testId="chat-turn-user-footer" />
       </div>
     )
   }
@@ -898,6 +1101,7 @@ export function Turn({
         <div className="min-w-0 flex-1">
           <div className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] text-fg-faint">
             <span>claude · {formatAgo(turn.at, Date.now())}</span>
+            <AttributionChips attribution={turn.attribution} />
           </div>
           {toolStripVariant === 'collapsible' ? (
             <CollapsibleToolStrip items={turn.toolUses} />
@@ -999,7 +1203,26 @@ export function Turn({
     )
   }
   if (turn.role === 'event') {
-    return <div data-testid="chat-turn-event">{renderEventTurn(turn)}</div>
+    return (
+      <div data-testid="chat-turn-event">
+        <TurnFrame
+          badge={
+            <span
+              data-testid="turn-kind-badge"
+              className="rounded border border-line bg-elev px-1.5 py-0.5 text-[10px] font-semibold text-fg-dim"
+            >
+              {turn.kind ?? 'event'}
+            </span>
+          }
+          timestamp={turn.at}
+          attribution={turn.attribution}
+          turnRef={turn.ref}
+          copyText={turn.signal?.text ?? turn.text}
+        >
+          {renderEventTurn(turn)}
+        </TurnFrame>
+      </div>
+    )
   }
   // assistant — render the run's final message verbatim (markdown), guarded
   // against empty text (e.g. a resumed turn that opens with a non-rendered
@@ -1011,7 +1234,14 @@ export function Turn({
   const filePaths = extractFilePaths(turn.text)
   const isPlan = hasMarkdownList(turn.text)
   const isRunning = presentation === 'working'
+  // isApiErrorMessage/interruptedByShutdown both mean this turn is
+  // incomplete (a dropped API response, a shutdown mid-stream) — reuse the
+  // same ERROR_TINT/ERROR_TEXT the 'error' role and the two attribution
+  // chips already use, so an incomplete turn reads as visually distinct from
+  // a normal completed one rather than only being flagged via a small chip.
+  const isIncomplete = !!(turn.attribution?.isApiErrorMessage || turn.attribution?.interruptedByShutdown)
   const bubbleCorners = 'rounded-tl-sm rounded-tr-lg rounded-br-lg rounded-bl-lg'
+  const bubbleTone = isIncomplete ? `${ERROR_TINT} ${ERROR_TEXT}` : 'border-line bg-elev text-fg'
   return (
     <div className="group flex max-w-[90%] items-start gap-2">
       <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
@@ -1020,6 +1250,7 @@ export function Turn({
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] text-fg-faint">
           <span>claude · {formatAgo(turn.at, Date.now())}</span>
+          <AttributionChips attribution={turn.attribution} />
           {isRunning && (
             <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] font-semibold text-accent">
               <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
@@ -1061,7 +1292,7 @@ export function Turn({
           <>
             <div
               ref={bodyRef}
-              className={`prose-chat border border-line bg-elev px-3 py-2 text-sm leading-relaxed text-fg ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
+              className={`prose-chat border px-3 py-2 text-sm leading-relaxed ${bubbleTone} ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd, linkTarget) }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
@@ -1074,6 +1305,7 @@ export function Turn({
             ))}
           </>
         )}
+        {presentation === 'text' && <TurnRawFooter turnRef={turn.ref} copyText={turn.text} testId="chat-turn-assistant-footer" />}
       </div>
     </div>
   )

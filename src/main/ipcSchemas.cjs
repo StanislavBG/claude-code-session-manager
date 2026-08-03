@@ -456,7 +456,6 @@ const home = os.homedir();
 const setConfigSchema = z.object({
   enabled: z.boolean().optional(),
   offsetMinutes: z.number().int().min(0).max(180).optional(),
-  concurrencyCap: z.number().int().min(1).max(20).optional(),
   defaultCwd: z.string().max(4096).refine(
     (s) => s === home || s.startsWith(home + path.sep),
     'defaultCwd must be inside home directory'
@@ -474,7 +473,7 @@ const setConfigSchema = z.object({
 // Machine-wide claude -p slot pool cap (sessionSlots.cjs) — deliberately its own
 // schema/channel rather than folded into setConfigSchema: it governs the shared
 // process pool, not any one project's scheduler config, and its range (0-10, 0
-// pauses new launches) differs from concurrencyCap's (1-20).
+// pauses new launches) is the single concurrency control.
 const setSessionSlotsSchema = z.object({
   cap: z.number().int().min(0).max(10),
 }).strict();

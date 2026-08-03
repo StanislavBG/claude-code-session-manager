@@ -46,7 +46,6 @@ function emptySnapshot(): ScheduleStateSnapshot {
     config: {
       enabled: true,
       offsetMinutes: 0,
-      concurrencyCap: 3,
       defaultCwd: '/home/bilko',
       firePolicy: 'when-available',
       utilizationThreshold: 90,
@@ -59,7 +58,7 @@ function emptySnapshot(): ScheduleStateSnapshot {
     paused: null,
     utilization: null,
     pollHealth: undefined,
-    effectiveConcurrency: { cap: 3, source: 'config' },
+    effectiveConcurrency: { cap: 5, free: 5, source: 'pool' as const },
   } as ScheduleStateSnapshot
 }
 

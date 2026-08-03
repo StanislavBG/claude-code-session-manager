@@ -406,7 +406,6 @@ export interface ScheduleConfig {
   /** Minutes to wait after the 5h reset before firing pending jobs.
    *  Used by 'on-reset'. Ignored by 'when-available' and 'manual'. */
   offsetMinutes: number;
-  concurrencyCap: number;
   defaultCwd: string;
   /** Auto-fire policy. Default 'when-available'. */
   firePolicy: ScheduleFirePolicy;
@@ -558,9 +557,14 @@ export interface SchedulePollHealth {
 }
 
 export interface ScheduleEffectiveConcurrency {
+  /** Total slots in the machine-wide sessionSlots pool — the ONLY concurrency
+   *  limit. The scheduler no longer carries a private concurrencyCap. */
   cap: number;
-  /** 'env' when SM_SCHEDULER_MAX_CONCURRENCY pins the cap; 'config' when concurrencyCap governs. */
-  source: 'env' | 'config';
+  /** Slots free right now (pool total minus held, incl. chat runs). */
+  free: number;
+  /** 'env' when SM_SESSION_SLOTS pins the pool; 'pool' when the persisted
+   *  Home-tab value governs. */
+  source: 'env' | 'pool';
 }
 
 export interface ScheduleStateSnapshot {

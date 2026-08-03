@@ -260,7 +260,7 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
             </div>
           </div>
           <span className="ml-auto font-mono text-[11.5px] text-fg-faint whitespace-nowrap">
-            {config.concurrencyCap ?? 4} slot{(config.concurrencyCap ?? 4) !== 1 ? 's' : ''} · last batch {formatAgo(lastRunAt ? Date.parse(lastRunAt) : null, now)}
+            {effectiveConcurrency?.cap ?? 5} slot{(effectiveConcurrency?.cap ?? 5) !== 1 ? 's' : ''} · last batch {formatAgo(lastRunAt ? Date.parse(lastRunAt) : null, now)}
           </span>
           {status.action && (
             <button
@@ -316,23 +316,23 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
             {effectiveConcurrency?.source === 'env' && (
               <span
                 className="text-[10px] font-semibold uppercase tracking-wide text-amber-400/90 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5"
-                title="Pinned by SM_SCHEDULER_MAX_CONCURRENCY — unset the env var to edit"
+                title="Pinned by SM_SESSION_SLOTS — unset the env var to edit"
               >
                 env
               </span>
             )}
             <input
               type="number"
-              min={1}
-              max={20}
-              value={effectiveConcurrency?.source === 'env' ? effectiveConcurrency.cap : config.concurrencyCap}
+              min={0}
+              max={10}
+              value={effectiveConcurrency?.cap ?? 5}
               disabled={effectiveConcurrency?.source === 'env'}
-              onChange={(e) => window.api.schedule.setConfig({ concurrencyCap: Number(e.target.value) })}
+              onChange={(e) => { void window.api.schedule.setSessionSlots(Number(e.target.value)) }}
               className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg disabled:opacity-50 disabled:cursor-not-allowed"
               title={
                 effectiveConcurrency?.source === 'env'
-                  ? 'pinned by SM_SCHEDULER_MAX_CONCURRENCY — unset the env var to edit'
-                  : 'Max simultaneous jobs within a parallel group'
+                  ? 'pinned by SM_SESSION_SLOTS — unset the env var to edit'
+                  : 'Machine-wide claude -p session slots, shared with chat runs'
               }
             />
             <span className="text-[13px] text-fg-dim">at once</span>
@@ -379,11 +379,8 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
 
         {/* Running concurrency badge */}
         {runningJobs.length > 0 && (() => {
-          const cap = config.concurrencyCap ?? 4
-          const currentGroup = runningJobs[0]?.parallelGroup
-          const groupPending = jobs.filter(
-            (j) => j.status === 'pending' && j.parallelGroup === currentGroup
-          ).length
+          const cap = effectiveConcurrency?.cap ?? 5
+          const groupPending = jobs.filter((j) => j.status === 'pending').length
           return (
             <div className="flex items-center gap-2 text-[12px] font-mono">
               <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-400 shrink-0">
@@ -635,7 +632,7 @@ interface StatusInfo {
 function computeStatus({
   snap, now, avgDurationMs, runningJobs,
 }: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number; runningJobs: ScheduleJob[] }): StatusInfo {
-  const { config, jobs, paused, nextReset, utilization } = snap
+  const { config, jobs, paused, nextReset, utilization, effectiveConcurrency } = snap
   let pendingCount = 0
   let completedCount = 0
   for (const j of jobs) {
@@ -644,7 +641,7 @@ function computeStatus({
   }
   const runningCount = runningJobs.length
   const totalActive = pendingCount + runningCount
-  const cap = config.concurrencyCap ?? 4
+  const cap = effectiveConcurrency?.cap ?? 5
 
   if (runningCount > 0) {
     const oldest = runningJobs.reduce((a, b) =>

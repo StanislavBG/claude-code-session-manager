@@ -244,15 +244,18 @@ describe('cmd:schedule:set-config payload schema', () => {
   })
 
   it('accepts partial config', () => {
-    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 4 }).success).toBe(true)
+    expect(schemas.setConfigSchema.safeParse({ offsetMinutes: 4 }).success).toBe(true)
   })
 
   it('rejects unknown keys (strict mode)', () => {
-    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 4, hacked: true }).success).toBe(false)
+    expect(schemas.setConfigSchema.safeParse({ offsetMinutes: 4, hacked: true }).success).toBe(false)
   })
 
-  it('rejects concurrencyCap above 20', () => {
-    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 21 }).success).toBe(false)
+  // concurrencyCap is retired — the machine-wide sessionSlots pool is the only
+  // concurrency control, set via schedule:set-session-slots, so the scheduler
+  // config must no longer accept a cap of its own.
+  it('rejects the retired concurrencyCap key', () => {
+    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 4 }).success).toBe(false)
   })
 })
 

@@ -26,9 +26,11 @@ describe('setConfigSchema', () => {
     expect(schemas.setConfigSchema.safeParse({ firePolicy: 'always' }).success).toBe(false)
   })
 
-  it('accepts valid concurrencyCap (1–20)', () => {
-    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 1 }).success).toBe(true)
-    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 20 }).success).toBe(true)
+  // concurrencyCap is retired — the machine-wide sessionSlots pool (set via
+  // schedule:set-session-slots, range [0,10]) is the only concurrency control.
+  it('rejects the retired concurrencyCap key at any value', () => {
+    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 1 }).success).toBe(false)
+    expect(schemas.setConfigSchema.safeParse({ concurrencyCap: 20 }).success).toBe(false)
   })
 
   it('rejects concurrencyCap above 20', () => {

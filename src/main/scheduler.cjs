@@ -359,15 +359,6 @@ const HEARTBEAT_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'sc
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 // DEFAULT_PROJECT_CWD imported from lib/schedulerBatch.cjs (single source of truth).
 
-// Read lazily (not captured at module-load time) so tests can stub the env
-// per-case without vi.resetModules(); production behavior is unaffected
-// since the env var never changes mid-process.
-function getEnvCap() {
-  return process.env.SM_SCHEDULER_MAX_CONCURRENCY
-    ? Math.max(1, Math.min(20, parseInt(process.env.SM_SCHEDULER_MAX_CONCURRENCY, 10) || 3))
-    : null;
-}
-
 // Each headless claude -p job can shell out to tsc/vite/pytest and grow well
 // past 1 GB at peak; reserve 2.5 GB per running+pending slot. Raised from 1.5 GB
 // after the 2026-06-16 OOM: 3 concurrent cross-project jobs + their build
@@ -392,7 +383,6 @@ const OOM_SCORE_ADJ_JOB = 500;
 
 const DEFAULT_CONFIG = {
   offsetMinutes: 15,
-  concurrencyCap: getEnvCap() ?? 3,
   defaultCwd: DEFAULT_PROJECT_CWD,
   // 'when-available' = poll usage and fire whenever utilization < threshold.
   // 'on-reset'        = fire offsetMinutes after the next 5h reset (legacy).
@@ -1505,10 +1495,18 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
       lastFailureKind,
     },
     memGate: lastMemGate,
-    effectiveConcurrency: {
-      cap: getEnvCap() ?? state.config.concurrencyCap,
-      source: getEnvCap() != null ? 'env' : 'config',
-    },
+    // The machine-wide slot pool IS the concurrency limit — there is no
+    // separate scheduler cap any more. `source` distinguishes the
+    // SM_SESSION_SLOTS env override from the persisted Home-tab value so the
+    // UI can disable its own control when the env has taken over.
+    effectiveConcurrency: (() => {
+      const snap = sessionSlots.snapshot();
+      return {
+        cap: snap.total,
+        free: Math.max(0, snap.total - snap.inUse),
+        source: snap.envOverride ? 'env' : 'pool',
+      };
+    })(),
   };
   if (withPaths) {
     payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: queueStore.MACHINE_STATE_PATH };
@@ -3192,8 +3190,19 @@ function tickQueue() {
     if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
     await reconcile(state);
-    const cap = getEnvCap() ?? state.config.concurrencyCap;
-    const { batch, reason: holdReason } = pickNextBatch(state.jobs, runningSet, cap);
+    // Session-Manager's machine-wide slot pool is the ONLY concurrency limit
+    // the picker answers to (plus the memory gate below). The scheduler used
+    // to also carry a private `concurrencyCap` of 3 — the exact per-consumer
+    // cap that sessionSlots.cjs was written to replace — which silently
+    // ceilinged the queue at 3 while the pool the user configured said 5.
+    const freeSlots = sessionSlots.available();
+    const { batch, reason: holdReason } = pickNextBatch(state.jobs, runningSet, freeSlots);
+    if (batch.length === 0 && freeSlots === 0) {
+      const snap = sessionSlots.snapshot();
+      const pendingCount = state.jobs.filter((j) => j.status === 'pending').length;
+      console.log(`[scheduler] slot gate: 0 of ${snap.total} session slots free (${snap.holders.map((h) => h.owner).join(', ')}) — deferring ${pendingCount} pending job(s)`);
+      return { fired: false, reason: 'slots-exhausted', deferredCount: pendingCount, holders: snap.holders };
+    }
     if (batch.length === 0) {
       // Queue drained — run the definition-of-done gate fire-and-forget.
       // Non-blocking: does not hold the mutate lock; errors are logged, not thrown.
@@ -3223,17 +3232,10 @@ function tickQueue() {
     // job is never started into the host's own headroom (that path OOM-kills
     // Electron and SIGHUPs every pty — 2026-06-16 incident).
     const jobBudgetMb = availableForJobs(availableMb, RESERVED_HOST_MB);
-    // Session-Manager's machine-wide slot pool is the outer bound: chat runs
-    // and scheduler jobs share it, so a busy chat lane shrinks this batch.
-    const slotAllowed = sessionSlots.available();
-    if (slotAllowed === 0) {
-      const snap = sessionSlots.snapshot();
-      console.log(`[scheduler] slot gate: 0 of ${snap.total} session slots free (${snap.holders.map((h) => h.owner).join(', ')}) — deferring ${batch.length} job(s)`);
-      return { fired: false, reason: 'slots-exhausted', deferredCount: batch.length, holders: snap.holders };
-    }
-    const allowed = Math.min(
-      slotAllowed,
-      memoryLimitedBatchSize(jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length),
+    // The slot pool already bounded `batch` (it was passed as freeSlots to
+    // pickNextBatch above), so only the memory gate can narrow it further.
+    const allowed = memoryLimitedBatchSize(
+      jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length,
     );
     if (allowed === 0) {
       const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1);

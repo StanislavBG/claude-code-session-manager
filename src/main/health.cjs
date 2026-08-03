@@ -78,7 +78,11 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
   const pending = jobs.filter((j) => j.status === 'pending');
   const running = runningCount ?? jobs.filter((j) => j.status === 'running').length;
   const config = queueState.config || {};
-  const concurrencyCap = config.concurrencyCap ?? Infinity;
+  // The scheduler's private concurrencyCap is retired — the machine-wide
+  // sessionSlots pool is the only limit. Read it lazily so this stays a pure
+  // function of its args when a caller supplies slotCap explicitly.
+  const concurrencyCap = queueState.slotCap
+    ?? (() => { try { return require('./lib/sessionSlots.cjs').totalSlots(); } catch { return Infinity; } })();
 
   if (pending.length === 0) return { stalled: false, reason: 'no-pending-jobs' };
   if (queueState.paused) return { stalled: false, reason: 'paused' };

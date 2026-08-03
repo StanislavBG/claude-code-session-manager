@@ -95,12 +95,17 @@ describe('pickForProject dependsOn eligibility (PRD 832)', () => {
     expect(res.reason).toContain('854-base');
   });
 
-  it('legacy same-NN pending jobs keep their wave order untouched', () => {
+  // Contract change: parallelGroup no longer gates batch membership at all
+  // (it was a wave number; PRD 832 made it unique per PRD, which silently
+  // reduced every batch to one job). Legacy same-NN rows are simply eligible
+  // like anything else with no blocking dependsOn — the 828 row is no longer
+  // held back merely for carrying a higher number.
+  it('legacy same-NN pending jobs are eligible alongside higher-numbered ones', () => {
     const a = job('827-one', 'pending', 827);
     const b = job('827-two', 'pending', 827);
     const later = job('828-three', 'pending', 828);
     const res = pickForProject([a, b, later], new Set(), 3);
-    expect(res.batch.map((j) => j.slug).sort()).toEqual(['827-one', '827-two']);
+    expect(res.batch.map((j) => j.slug).sort()).toEqual(['827-one', '827-two', '828-three']);
   });
 });
 

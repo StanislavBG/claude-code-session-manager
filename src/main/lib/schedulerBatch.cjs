@@ -18,15 +18,29 @@ const os = require('node:os');
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
 /**
- * Per-project batch picker. Applies group-ordering rules scoped to a single
- * project (all jobs sharing one cwd).
+ * Per-project batch picker. `dependsOn` is the ONLY ordering primitive.
  *
- * Rules (same as original global pickNextBatch, but scoped):
- *   1. Find the lowest parallelGroup with pending jobs not already running.
- *   2. Failure gate: if an earlier group has failed jobs, hold this project.
- *   3. If that group has jobs in flight (backfill), fire more from SAME group.
- *   4. If a lower-numbered group arrives late (late-arrival), fire it now.
- *   5. If no group is in flight, start the lowest pending group fresh.
+ * Rules:
+ *   1. Eligible = pending, not already running, and no blocking dependency.
+ *   2. A dep is blocking while a queue row for it exists non-completed; a
+ *      FAILED dep holds its dependents with an explicit reason. Transitive
+ *      holds fall out of this for free (a held job stays `pending`, which is
+ *      itself a blocking state for anything depending on IT).
+ *   3. Everything eligible fires, up to `slots`, ordered by parallelGroup
+ *      ascending as a PRIORITY HINT only — never as a barrier.
+ *
+ * `parallelGroup` used to be a WAVE number and this function used to fire at
+ * most one wave per tick, holding every higher wave while a lower one was in
+ * flight. PRD 832 made the number strictly UNIQUE per PRD and moved ordering
+ * to `dependsOn` — `prdCreate.cjs` now warns that an explicit parallelGroup is
+ * "deprecated and ignored" — but this picker was never updated to match. With
+ * unique numbers every wave is a singleton, so the batch was always exactly
+ * ONE job, and because numbers are allocated monotonically upward, each newly
+ * queued PRD always sorted ABOVE the in-flight one and was held behind it.
+ * Measured effect: max concurrency 1 across 25 recorded runs, against a
+ * 5-slot pool. The group logic is gone; the real limits are the machine-wide
+ * `sessionSlots` pool and the memory gate, both enforced by the caller in
+ * scheduler.cjs's tickQueue.
  *
  * @param {object[]} projectJobs - All jobs for this project (all statuses).
  * @param {Set<string>} runningSlugsInProject - Slugs from the global
@@ -99,96 +113,22 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
     return { batch: [], reason: null };
   }
 
-  // Lowest pending group (computed up-front for the failure-gate check).
-  const lowestPendingGroup = pending.reduce(
-    (min, j) => Math.min(min, j.parallelGroup ?? 99),
-    Infinity,
-  );
-
-  // Cross-group failure gate: refuse to advance past a group with failed jobs.
-  // A failed foundation PRD should not allow later groups to run and
-  // silently corrupt project state. needs_review is NOT a blocker.
-  const blockingFailures = projectJobs.filter(
-    (j) => j.status === 'failed' && (j.parallelGroup ?? 99) < lowestPendingGroup,
-  );
-  if (blockingFailures.length > 0) {
-    const slugs = blockingFailures.map((j) => j.slug).join(', ');
-    const reason = `[scheduler] failure-gate [${projectCwd}]: holding g${lowestPendingGroup} — ` +
-      `${blockingFailures.length} failed job(s) in earlier groups [${slugs}]. ` +
-      `Reset to pending or archive to unblock.`;
-    console.log(reason);
-    return { batch: [], reason };
-  }
-
-  // Groups with at least one job in flight: either tracked in runningSlugsInProject
-  // (this process spawned it) or still marked 'running' in queue.json
-  // (persisted from a previous session that hasn't been orphan-reset yet).
-  const jobBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
-  const activeGroups = new Set();
-  for (const slug of runningSlugsInProject) {
-    const job = jobBySlug.get(slug);
-    if (job) activeGroups.add(job.parallelGroup ?? 99);
-  }
-  for (const j of projectJobs) {
-    if (j.status === 'running' && !runningSlugsInProject.has(j.slug)) {
-      activeGroups.add(j.parallelGroup ?? 99);
-    }
-  }
-
-  if (activeGroups.size > 0) {
-    const lowestActive = Math.min(...activeGroups);
-    if (lowestPendingGroup > lowestActive) {
-      // Earlier group still running — wait for it to drain before advancing.
-      const reason = `[scheduler] concurrency [${projectCwd}]: g${lowestActive} in flight, holding g${lowestPendingGroup}`;
-      console.log(reason);
-      return { batch: [], reason };
-    }
-    if (lowestPendingGroup < lowestActive) {
-      // Late-arrival: a lower-numbered (higher-priority) PRD reconciled AFTER
-      // a higher-numbered group was already picked. Fire it now in parallel
-      // with the active group rather than starving it until drain.
-      if (slots <= 0) {
-        const reason = `[scheduler] concurrency [${projectCwd}]: no slots for late-arrival g${lowestPendingGroup}`;
-        console.log(reason);
-        return { batch: [], reason };
-      }
-      const batch = pending
-        .filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup)
-        .slice(0, slots);
-      console.log(
-        `[scheduler] concurrency [${projectCwd}]: firing late-arrival g${lowestPendingGroup} ` +
-        `(${batch.length} job(s)) alongside active g${lowestActive}`,
-      );
-      return { batch, reason: null };
-    }
-    // Backfill slots remaining in the current group.
-    if (slots <= 0) {
-      const reason = `[scheduler] concurrency [${projectCwd}]: cap reached, no slots`;
-      console.log(reason);
-      return { batch: [], reason };
-    }
-    const batch = pending
-      .filter((j) => (j.parallelGroup ?? 99) === lowestActive)
-      .slice(0, slots);
-    if (batch.length > 0) {
-      console.log(
-        `[scheduler] concurrency [${projectCwd}]: backfilling ${batch.length} into g${lowestActive}`,
-      );
-    }
-    return { batch, reason: null };
-  }
-
-  // No active group — start the next group fresh.
   if (slots <= 0) {
-    const reason = `[scheduler] concurrency [${projectCwd}]: cap reached, no slots`;
+    const reason = `[scheduler] concurrency [${projectCwd}]: no slots free, holding ${pending.length} eligible job(s)`;
     console.log(reason);
     return { batch: [], reason };
   }
+
+  // parallelGroup is a PRIORITY HINT, not a barrier: when there are more
+  // eligible jobs than slots, the lower (earlier-authored) PRD numbers go
+  // first. Everything else about the number is display-only.
   const batch = pending
-    .filter((j) => (j.parallelGroup ?? 99) === lowestPendingGroup)
+    .slice()
+    .sort((a, b) => (a.parallelGroup ?? 99) - (b.parallelGroup ?? 99))
     .slice(0, slots);
   console.log(
-    `[scheduler] concurrency [${projectCwd}]: starting g${lowestPendingGroup} with ${batch.length} job(s)`,
+    `[scheduler] concurrency [${projectCwd}]: firing ${batch.length} of ${pending.length} ` +
+    `eligible job(s) [${batch.map((j) => j.slug).join(', ')}]`,
   );
   return { batch, reason: null };
 }
@@ -196,32 +136,39 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
 /**
  * Pick the next batch of jobs to spawn this tick.
  *
- * Group-ordering gates are evaluated PER PROJECT (keyed by cwd), so jobs in
- * different projects are not serialized by each other's groups. Within a
- * single project, the existing sequential-group semantics are fully preserved.
+ * Dependency gates are evaluated PER PROJECT (keyed by cwd), so jobs in
+ * different projects never serialize each other.
  *
  * O(N) where N = allJobs.length.
  *
  * @param {object[]} allJobs - Full queue.json job list.
  * @param {Set<string>} running - In-process running slugs (runningSet).
- * @param {number} cap - concurrencyCap.
+ * @param {number} freeSlots - Slots free RIGHT NOW in the machine-wide
+ *   `sessionSlots` pool (`sessionSlots.available()`). This is already
+ *   net of every held slot — scheduler jobs AND chat runs — so it must not
+ *   have the running count subtracted from it again. The scheduler no longer
+ *   keeps a private concurrency cap of its own: per sessionSlots.cjs's own
+ *   charter, caps belong to Session-Manager's one pool, not to each consumer.
  * @returns {{ batch: object[], reason: string | null }} Jobs to spawn this
  *   tick, plus (when batch is empty because a gate held it) the human-readable
  *   hold reason that would otherwise only reach console.log.
  */
-function pickNextBatch(allJobs, running, cap) {
+function pickNextBatch(allJobs, running, freeSlots) {
   if (!allJobs.some((j) => j.status === 'pending' && !running.has(j.slug))) {
     return { batch: [], reason: null };
   }
 
-  // Global slot accounting: take the higher of in-process running count and
-  // queue.json running count (handles orphaned running entries from a previous
-  // session not yet reaped).
+  // Orphan correction: a queue.json row still marked `running` that this
+  // process did NOT spawn holds no pool slot (it is a leftover from a crashed
+  // prior session, pending boot reconciliation). The pool cannot see it, so
+  // discount it here rather than starting a job into a slot a soon-to-be-
+  // reaped process may still be occupying.
   const queueRunningCount = allJobs.filter((j) => j.status === 'running').length;
-  const effectiveRunning = Math.max(running.size, queueRunningCount);
-  let slots = cap - effectiveRunning;
+  const untrackedRunning = Math.max(0, queueRunningCount - running.size);
+  let slots = freeSlots - untrackedRunning;
   if (slots <= 0) {
-    const reason = `[scheduler] concurrency: cap ${cap} reached (${effectiveRunning} running), no slots`;
+    const reason = `[scheduler] concurrency: no session slots free ` +
+      `(${freeSlots} free in pool, ${untrackedRunning} untracked running row(s))`;
     console.log(reason);
     return { batch: [], reason };
   }

@@ -92,3 +92,78 @@ test('a FAILED bare-named dep holds the dependent and reports an explicit reason
   assert.match(reason, /depends-gate/);
   assert.match(reason, /874-nav-face-project-home <- leftnav-two-face-framework/);
 });
+
+// ---------------------------------------------------------------------------
+// Parallelism regression coverage.
+//
+// `parallelGroup` used to gate batch membership: the picker fired at most one
+// group per tick and held every higher group while a lower one was in flight.
+// PRD 832 made the number strictly unique per PRD, so every group became a
+// singleton and the batch was always exactly ONE job — measured max
+// concurrency 1 across 25 recorded runs against a 5-slot pool. These tests
+// pin the corrected contract: dependsOn is the only barrier, parallelGroup is
+// a priority hint.
+// ---------------------------------------------------------------------------
+
+test('fires EVERY dependency-eligible job, not one per parallelGroup', () => {
+  const jobs = [
+    job('983-a', 'pending'),
+    job('984-b', 'pending'),
+    job('985-c', 'pending'),
+    job('986-d', 'pending'),
+  ];
+  const { batch } = pick(jobs, new Set(), 5);
+  // Pre-fix this returned exactly ['983-a'] — one singleton group.
+  assert.deepEqual(batch.map((j) => j.slug), ['983-a', '984-b', '985-c', '986-d']);
+});
+
+test('a higher-numbered job is NOT held behind an in-flight lower-numbered one', () => {
+  const jobs = [
+    job('979-running', 'running'),
+    job('988-independent', 'pending'),
+  ];
+  const { batch } = pick(jobs, new Set(['979-running']), 5);
+  // Pre-fix: held by the running-gate ("g979 in flight, holding g988"), which
+  // is how the fix for this very bug ended up stuck behind the bug.
+  assert.deepEqual(batch.map((j) => j.slug), ['988-independent']);
+});
+
+test('dependency-blocked jobs are excluded while independent siblings fire together', () => {
+  const jobs = [
+    job('985-foundation', 'pending'),
+    job('986-dependent', 'pending', { dependsOn: ['foundation'] }),
+    job('987-independent', 'pending'),
+  ];
+  const { batch } = pick(jobs, new Set(), 5);
+  assert.deepEqual(batch.map((j) => j.slug), ['985-foundation', '987-independent']);
+});
+
+test('a FAILED job holds its transitive dependents but not unrelated jobs', () => {
+  const jobs = [
+    job('980-broken', 'failed'),
+    job('981-direct', 'pending', { dependsOn: ['broken'] }),
+    job('982-transitive', 'pending', { dependsOn: ['direct'] }),
+    job('983-unrelated', 'pending'),
+  ];
+  const { batch } = pick(jobs, new Set(), 5);
+  // Pre-fix the cross-group failure gate held 983 too, purely for having a
+  // higher number than the failure.
+  assert.deepEqual(batch.map((j) => j.slug), ['983-unrelated']);
+});
+
+test('parallelGroup orders the batch when eligible jobs exceed free slots', () => {
+  const jobs = [
+    job('990-c', 'pending'),
+    job('988-a', 'pending'),
+    job('989-b', 'pending'),
+  ];
+  const { batch } = pick(jobs, new Set(), 2);
+  assert.deepEqual(batch.map((j) => j.slug), ['988-a', '989-b']);
+});
+
+test('zero free slots holds everything with an explicit reason', () => {
+  const jobs = [job('988-a', 'pending'), job('989-b', 'pending')];
+  const { batch, reason } = pick(jobs, new Set(), 0);
+  assert.deepEqual(batch, []);
+  assert.match(reason, /no slots free/);
+});

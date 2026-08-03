@@ -46,7 +46,10 @@ describe('FINISH_PROTOCOL', () => {
   it('mandates the exact review → security-review → verify → commit sequence', () => {
     expect(FINISH_PROTOCOL).toMatch(/\/code-review/)
     expect(FINISH_PROTOCOL).toMatch(/\/security-review/)
-    expect(FINISH_PROTOCOL).toMatch(/git add -A && git commit/)
+    expect(FINISH_PROTOCOL).toMatch(/git add <path>/)
+    expect(FINISH_PROTOCOL).not.toMatch(/git add -A/)
+    expect(FINISH_PROTOCOL).not.toMatch(/git add \./)
+    expect(FINISH_PROTOCOL).not.toMatch(/git add --all/)
     // ordering: code-review before security-review before commit
     const iCode = FINISH_PROTOCOL.indexOf('/code-review')
     const iSec = FINISH_PROTOCOL.indexOf('/security-review')

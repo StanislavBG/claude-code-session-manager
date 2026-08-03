@@ -195,8 +195,14 @@ sequence. Do not stop before the commit lands; committing is part of the job.
 3. VERIFY — run the project's OWN check commands (typecheck / lint / tests — the
    project's CLAUDE.md names them; infer from the repo if not) and make them
    pass. Do not assume npm; use whatever the target project uses.
-4. COMMIT — stage and commit ALL changes with a clear conventional message:
-   \`git add -A && git commit -m "<type>(<scope>): <summary>"\`.
+4. COMMIT — the queue can run several jobs against this SAME working tree at
+   once. Do NOT stage the whole working tree in one blanket/wildcard git-add
+   sweep — that captures whatever a concurrent sibling job is mid-writing and
+   mis-attributes its work to this commit, corrupting both jobs' verdicts.
+   Stage only the exact paths YOU created or modified for this PRD, then
+   commit: \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`.
+   Your own work must still never be left uncommitted — this only changes
+   which paths get staged, never whether you commit.
 5. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
    one of these two lines (no trailing text after it):
      SCHEDULER_VERDICT: PASS

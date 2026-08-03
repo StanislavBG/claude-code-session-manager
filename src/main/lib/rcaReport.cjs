@@ -81,7 +81,7 @@ const PREVENTION_HINTS = {
   [FAILURE_CLASSES.NO_SENTINEL]:
     'End every run with a truthful `SCHEDULER_VERDICT: PASS`/`FAIL` sentinel as the literal last line, after the finish-protocol commit has landed.',
   [FAILURE_CLASSES.UNCOMMITTED]:
-    'Run `git add -A && git commit` as the final finish-protocol step before printing the verdict sentinel — never end a run with a dirty working tree.',
+    'Stage the exact paths you created or modified — never a blanket/wildcard git-add of the whole tree, since the queue can run sibling jobs against this same working tree and a blanket add sweeps up their in-flight edits — and `git commit` as the final finish-protocol step before printing the verdict sentinel; never end a run with a dirty working tree.',
   [FAILURE_CLASSES.TRANSCRIPT_ERRORS]:
     'Recover or annotate every error within ~10 lines (e.g. `# expected/handled: <why>`) instead of leaving a bare Traceback near the end of the transcript.',
   [FAILURE_CLASSES.UNKNOWN]:

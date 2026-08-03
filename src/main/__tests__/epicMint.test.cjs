@@ -9,7 +9,7 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -323,4 +323,58 @@ test('ensureEpic with forceNewEpic:true mints even when a near-identical open Ep
 
   const index = readActiveIndex(cwd);
   expect(Object.keys(index.sessions)).toHaveLength(2);
+});
+
+test('ensureEpic mints successfully for a real-world call shape carrying tag, openingPrompt, and source (schema validation does not reject valid records)', async () => {
+  const cwd = await mkCwd();
+
+  const minted = await ensureEpic(cwd, {
+    goalText: 'RCA-filed proposal',
+    tag: 'bug',
+    openingPrompt: 'full RCA body text',
+    source: { producer: 'rca-hook', runId: 'run-42' },
+  });
+
+  expect(minted.created).toBe(true);
+  const index = readActiveIndex(cwd);
+  const session = index.sessions[minted.epicId];
+  expect(session.tag).toBe('bug');
+  expect(session.openingPrompt).toBe('full RCA body text');
+  expect(session.source).toEqual({ producer: 'rca-hook', runId: 'run-42' });
+});
+
+test('ensureEpic refuses the mint and appends an epic_mint_refused audit event when the constructed session object fails schema validation', async () => {
+  const cwd = await mkCwd();
+  const auditLog = require('../lib/auditLog.cjs');
+  const schema = require('../lib/promptSessionSchema.cjs');
+
+  // The real construction in ensureEpic is hardcoded and always produces a
+  // valid PromptSession, so to exercise the fail-closed wiring we simulate
+  // a corrupted construction by monkeypatching the schema module's exported
+  // validator in place — epicMint.cjs reads `schema.assertValidPromptSession`
+  // off the same exports object at call time (property lookup, not a
+  // destructured copy), so mutating it here is visible to ensureEpic.
+  const original = schema.assertValidPromptSession;
+  schema.assertValidPromptSession = () => {
+    throw new Error('assertValidPromptSession: invalid PromptSession shape — forced test failure');
+  };
+  try {
+    await expect(
+      ensureEpic(cwd, { goalText: 'should be refused by schema validation' }),
+    ).rejects.toThrow(/forced test failure/);
+  } finally {
+    schema.assertValidPromptSession = original;
+  }
+
+  const index = readActiveIndex(cwd);
+  expect(Object.keys(index.sessions)).toHaveLength(0);
+
+  const records = fs.readFileSync(auditLog.AUDIT_LOG_PATH, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((r) => r.cwd === cwd);
+  expect(records).toHaveLength(1);
+  expect(records[0].kind).toBe('epic_mint_refused');
+  expect(records[0].reason).toMatch(/forced test failure/);
 });

@@ -345,7 +345,11 @@ const schedulerCreatePrd = z.object({
   // forgot to pass sourcePromptId explicitly.
   originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // User-selected Feature/Bug tag (PRD 774) carried from the originating
-  // PromptTicket — deterministic, never LLM-classified.
+  // PromptTicket — deterministic, never LLM-classified. NOT the same value
+  // set as PromptSession's Epic-mission `tag` (lib/promptSessionSchema.cjs's
+  // EpicTagSchema) — that one also includes 'bilko-host-publisher'. Keep
+  // these two enums in sync deliberately if their meanings ever converge;
+  // don't assume editing one updates the other.
   tag: z.enum(['feature', 'bug', 'discussion', 'build', 'project-home-builder']).optional(),
 });
 

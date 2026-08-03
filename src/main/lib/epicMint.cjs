@@ -23,6 +23,11 @@ const crypto = require('node:crypto');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
+// Required as the module object (not destructured) so a test can
+// monkeypatch promptSessionSchema.assertValidPromptSession in place to
+// simulate a corrupted construction — the real construction below is
+// hardcoded and always valid.
+const promptSessionSchema = require('./promptSessionSchema.cjs');
 
 function activeIndexPath(cwd) {
   return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
@@ -327,6 +332,24 @@ function ensureEpic(cwd, { goalText, tag, reuseByGoal = false, epicId: explicitE
       // EpicSource in state/promptSessions.ts.
       ...(source ? { source } : {}),
     };
+
+    // Validate the constructed record against the canonical PromptSession
+    // schema (promptSessionSchema.cjs) before it ever reaches disk — closes
+    // the drift risk between this hand-constructed literal and the
+    // renderer's own createPromptSession, same fail-closed spirit as the
+    // BORN-PROPOSED LAW check above.
+    try {
+      promptSessionSchema.assertValidPromptSession(session);
+    } catch (err) {
+      appendAuditEvent('epic_mint_refused', {
+        cwd,
+        epicId,
+        status,
+        reason: `constructed session object failed PromptSession schema validation: ${err.message}`,
+      });
+      throw err;
+    }
+
     const firstEvent = {
       id: crypto.randomUUID(),
       promptSessionId: epicId,

@@ -54,6 +54,28 @@
       "completedAt": null,
       "tag": "feature",
       "agentType": "architect"
+    },
+    "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb": {
+      "id": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "PRD to EPIC Communication\n\nThis seems to be broken. I do not understand how does the PRDs check back in with the Agent that started them so that, that agent can move on?",
+      "claudeSessionId": "4d5ad773-6991-49be-9549-322afea56aa7",
+      "status": "active",
+      "createdAt": "2026-08-03T03:16:53.067Z",
+      "completedAt": null,
+      "tag": "bug",
+      "agentType": "architect"
+    },
+    "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": {
+      "id": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Agent vs. Skill\n\nSo I want to understand how to design and separate reponsibility between the Skill like /develop vs the \"Agent\" who is Arhichtect using the develop skill or maybe Dev-Lead using the PRD and /develop skill? I'm struggling a bit to understand \"who is in charge\" and how to think about tehse two",
+      "claudeSessionId": "16a2d061-5387-4e37-b409-13f7a00fbb23",
+      "status": "active",
+      "createdAt": "2026-08-03T03:18:00.118Z",
+      "completedAt": null,
+      "tag": "discussion",
+      "agentType": "architect"
     }
   },
   "events": {
@@ -277,6 +299,62 @@
         "id": "pevt-mscmc2yr-35",
         "promptSessionId": "psess-mscgxoqw-7",
         "at": "2026-08-03T02:37:04.899Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscmc2yr-35",
+        "text": "**Already committed** — nothing left for me to do here. Both PRDs ran and self-committed while we were talking:\n\n- `308e744` `docs(project-pages): reverse Stage 2 to agent-owned variant selection`\n- `beda48f` `refactor(project-pages): delete retired Stage 2 variant scorer`\n\n`npm run typecheck` is clean against the current tree. I restored the two unrelated `homeNeedsYou.*` files (belonging to a different in-flight Epic) back to unstaged rather than sweeping them into this commit.\n\nReady for your reboot test — on next launch, \"Generate\"/\"Regenerate\" on any project's Project Pages should have all 4 lenses (Home/Marketing/Feature/Architecture) picked by the `project-home-builder` agent's own judgment instead of always defaulting to preset `v1`.",
+        "id": "pevt-mscmf18f-38",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T02:39:22.623Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscmf18f-38",
+        "text": "Two separate things here, and the second one is a real trap I should flag.\n\n## 1. The screenshot isn't showing what we changed\n\nWhat's on screen — \"THE BRIEF\" header, \"What is in flight\", \"What this is\" — is `ProjectHome.tsx`'s **live React Brief dashboard**. That's the hand-built React view I described in my first answer (the 6-stacked-blocks layout you called \"multiple pages one after the other\"). **PRDs 957/958 never touched it.** They changed the *Project Pages* static-HTML generator, which lives further down that same scroll, below \"What this is\" — the section with the Home/Marketing/Feature/Architecture tab bar and the iframe. You'd have to scroll to the bottom to see it, and even then 957/958 only change *how variants get picked at generation time*, not the live dashboard's layout at all.\n\nSo \"the layout still seems the same\" is correct and expected — we fixed the generator's selection logic, not the Project Home page's own layout. Your original complaint (turn 1: inconsistent stacked blocks, no nav, two different Generate CTAs) is **still entirely unaddressed** — that conversation pivoted to the dynamic-assembly question and never came back to the layout itself.\n\n## 2. Stale `picks.json` will silently defeat the fix\n\n`session-manager-operations/project-pages/picks.json` was written at 12:28 today by the **old deterministic scorer**, and every single value is exactly preset `v1`:\n\n```\nhome:         overview=dashboard, pillars=grid          ← v1\nmarketing:    hero=editorial, proof=stats, ...          ← v1\nfeature:      header=spec, mech=steps, ...              ← v1\narchitecture: summary=layers, map=boxes, ...            ← v1\n```\n\nThe new agent-owned protocol says *\"preserve any existing entries unless the request is explicitly 'start over'\"* — which means **a plain \"Regenerate\" will keep these v1 picks forever** and you'll never see the agent's own judgment. The scorer's output got grandfathered in as if it were a deliberate human hand-pick.\n\nTo actually test …",
+        "id": "pevt-mscn7b7b-4",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T03:01:21.911Z"
+      },
+      {
+        "id": "aa49af33-8870-4471-b8f9-26c03a70b7b6",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscn7b7b-4",
+        "at": "2026-08-03T03:06:21.376Z",
+        "prdSlug": "968-project-home-hosted-html-spec"
+      },
+      {
+        "id": "31b19a2f-5d04-4118-a15d-e6bafdfd69f6",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "kind": "prd_created",
+        "causedByEventId": "aa49af33-8870-4471-b8f9-26c03a70b7b6",
+        "at": "2026-08-03T03:07:01.676Z",
+        "prdSlug": "969-project-pages-brief-lens"
+      },
+      {
+        "id": "eea23877-5b6d-41b0-a5c1-3124aa602879",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "kind": "prd_created",
+        "causedByEventId": "31b19a2f-5d04-4118-a15d-e6bafdfd69f6",
+        "at": "2026-08-03T03:07:39.110Z",
+        "prdSlug": "970-project-home-shipped-default-html"
+      },
+      {
+        "id": "1b746b9b-a306-4d09-ab6b-83e702ece63f",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "kind": "prd_created",
+        "causedByEventId": "eea23877-5b6d-41b0-a5c1-3124aa602879",
+        "at": "2026-08-03T03:08:23.691Z",
+        "prdSlug": "971-project-home-host-generated-doc"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "1b746b9b-a306-4d09-ab6b-83e702ece63f",
+        "text": "Queued a 4-PRD chain implementing the refactor you described:\n\n| NN | Slug | ETA | Depends on |\n|---|---|---|---|\n| **968** | `project-home-hosted-html-spec` | 15m | — |\n| **969** | `project-pages-brief-lens` | 25m | 968 |\n| **970** | `project-home-shipped-default-html` | 20m | 968 |\n| **971** | `project-home-host-generated-doc` | 28m | 969, 970 |\n\n969 and 970 run in parallel after 968; 971 lands last. All under `session-manager-operations/scheduler/epics/psess-mscgxoqw-7/prds/`, `cwd` = this repo.\n\n**968 (spec first)** — rewrites the pipeline architecture doc: Project Home's main content IS a hosted static HTML at the fixed path `project-pages/output/home.html`; app ships a default; 5 lenses not 4; the two competing CTAs (`Refresh brief` + `Generate Now`) consolidate into one **Generate My Project Home**; and it must resolve the stale-`picks.json` hazard I found earlier (scorer-era v1 picks would otherwise be grandfathered in forever by the preserve-hand-picks rule).\n\n**969** — adds the `brief` lens end to end: summary fields, `briefSlots.tsx` (built from the existing `kit.tsx` primitives), `render.tsx`, `projectPages.cjs`'s `LENSES`, preload types. Flagged a real trap in its AC: `get()` currently returns `null` if *any* lens file is missing, so adding a 5th lens would make every existing 4-lens project read as having no output at all — it has to handle that explicitly with a test.\n\n**970** — the shipped default: build-time asset, honest content (says it's the default, zero fabricated project data), same `kit.tsx` design tokens so default and generated read as one system, plus an `isDefault` provenance field on the IPC payload. Called out that the default asset must *not* go through `config.cjs`'s `validatePath` (home-dir `allowedRoots` would reject an npx/global install path).\n\n**971** — the actual layout fix: hosted document as primary content, one Generate action, provenance line, live `PhNow`/`PhOpenQuestions` as a thin strip above, and deletion of `PhWhat`/`Ph…",
+        "id": "pevt-mscngq0f-7",
+        "promptSessionId": "psess-mscgxoqw-7",
+        "at": "2026-08-03T03:08:41.007Z"
       }
     ],
     "psess-msch6x36-16": [
@@ -303,6 +381,46 @@
         "id": "pevt-mschrj0f-23",
         "promptSessionId": "psess-msch6x36-16",
         "at": "2026-08-03T00:29:07.455Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mschrj0f-23",
+        "text": "Committed as `1d87b3a` on `main`: 24 files changed (546 insertions, 2068 deletions). This covers both the Home page control-room redesign and the Repo Viz/Search removal — the two pieces of work from this session.\n\nLeft unstaged/uncommitted: the `session-manager-operations/` state files and the `Hooks/McpServers/Permissions/Settings/Skills/SystemPrompt` tab + `layout.ts` changes, since those belong to a different, concurrently-running agent's in-progress work on this repo — not something I touched or should sweep into this commit. Not pushed, per standing instructions (push/publish needs its own trigger).",
+        "id": "pevt-mscmeqja-37",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T02:39:08.758Z"
+      },
+      {
+        "id": "fa3a7560-7912-4a43-9780-23e46b062920",
+        "promptSessionId": "psess-msch6x36-16",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mscmeqja-37",
+        "at": "2026-08-03T03:04:28.613Z",
+        "prdSlug": "966-home-dashboard-fix-blank-queued-card-add-interactions-legend"
+      },
+      {
+        "id": "178cf5f0-2409-4ee5-bca6-1657bf2c4ac4",
+        "promptSessionId": "psess-msch6x36-16",
+        "kind": "prd_created",
+        "causedByEventId": "fa3a7560-7912-4a43-9780-23e46b062920",
+        "at": "2026-08-03T03:05:11.029Z",
+        "prdSlug": "967-home-session-detail-drawer"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "178cf5f0-2409-4ee5-bca6-1657bf2c4ac4",
+        "text": "Both PRDs are correctly written and filed. Here's the summary of this turn's work.\n\n## Diagnosis\n\nI compared your screenshot against the real committed code (v0.58.0, confirmed as the actual bundled build the running Electron process — PID 2908481, launched 19:55 today — is serving; `dist/assets/*.js` does contain the \"Needs you\"/\"This machine\" strings, so the code is genuinely deployed). Two real gaps explain the mismatch:\n\n1. **The \"Queued\" card region rendered blank** in your screenshot — third column, no header/border visible at all. That's either a real bug (store snapshot not yet arrived when the card first mounts) or a rendering quirk — worth a proper regression test either way.\n2. **I never built the mock's richer interaction layer** — the \"Interactions\" legend toggle, and the Active/Recent session rows opening a slide-in detail drawer (the mock's `ADrawer`) instead of just firing a flat action. Those are the parts that make the mock *feel* like a distinct \"control room\" rather than a plain card list, so their absence is likely the biggest reason it reads as \"doesn't look at all like the design.\"\n\nI deliberately did **not** rebuild the mock's \"Pace\" sparkline or per-project token-% breakdown — both use entirely fabricated numbers in the mock (a hardcoded 14-day array, \"3.19M tokens\", \"87% by Thursday\"), and this app has no real per-project token-attribution data source to back that honestly.\n\n## Action taken\n\nRather than hand-patch this again inline, I decomposed the remaining gap into two PRDs and queued them to the existing Epic (`psess-msch6x36-16`, this same \"Home Page\" Epic), per your \"Execute the PRD decomposition\" instruction:\n\n- **PRD 966** — diagnose+fix the blank Queued card with a permanent jsdom regression test, add the real (non-fabricated) Interactions legend toggle.\n- **PRD 967** — build the real slide-in `HomeSessionDrawer` for Active/Recent session rows (depends on 966), backed only by data this app actually has; Fork/Export buttons only wir…",
+        "id": "pevt-mscnd9i3-6",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T03:05:59.643Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscnd9i3-6",
+        "text": "Done. Set `model: fable` on the `dev-lead` persona (`~/.claude/agents/dev-lead.md`) — since this Epic's `agentType` is `dev-lead`, resuming this Epic's Chat/Terminal session will now launch with `--model fable` per `resolveEpicModel`.\n\nTwo things worth flagging so this does what you expect:\n\n1. **This is global, not scoped to just this Epic.** `dev-lead.md` is the one shared persona definition — every Epic anywhere on this machine that uses `agentType: dev-lead` will now launch on Fable too, not just this \"Home Page\" Epic. There's no per-Epic model override separate from the persona it points at.\n2. **It does not touch PRD 966/967 execution.** I need to correct something from my last summary — I'd said PRD execution model comes from the Epic's persona, but that's wrong: `scheduler.cjs` hardcodes `--model sonnet` for every scheduled PRD job regardless of any persona's `model` field (`resolveEpicModel` only governs the Epic's own live Chat/Terminal session, not scheduler jobs). So the queued PRDs will still run on Sonnet no matter what — which matches what you said (\"scheduler dev-lead is good\"), just wanted to be precise about *why* that's unaffected rather than let the earlier wrong claim stand.\n\nTakes effect on the next resume of this Epic's session (this turn is already running under whatever model launched it).",
+        "id": "pevt-mscob67b-18",
+        "promptSessionId": "psess-msch6x36-16",
+        "at": "2026-08-03T03:32:21.671Z"
       }
     ],
     "psess-msckxplj-24": [
@@ -409,6 +527,90 @@
         "id": "pevt-msclqiwv-33",
         "promptSessionId": "psess-msckxplj-24",
         "at": "2026-08-03T02:20:19.135Z"
+      }
+    ],
+    "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb": [
+      {
+        "id": "pevt-mscnr9oz-11",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T03:16:53.067Z",
+        "text": "PRD to EPIC Communication\n\nThis seems to be broken. I do not understand how does the PRDs check back in with the Agent that started them so that, that agent can move on?"
+      },
+      {
+        "id": "0d8e797f-a56a-472b-8a0a-7d57d79a9af7",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T03:16:53.067Z",
+        "text": "PRD to EPIC Communication\n\nThis seems to be broken. I do not understand how does the PRDs check back in with the Agent that started them so that, that agent can move on?"
+      },
+      {
+        "id": "355fcb3c-1424-42ac-9b75-007d1c366f4f",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "prd_created",
+        "causedByEventId": "0d8e797f-a56a-472b-8a0a-7d57d79a9af7",
+        "at": "2026-08-03T03:18:44.080Z",
+        "prdSlug": "972-notify-epic-prd-path-and-epicid-fallback"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "355fcb3c-1424-42ac-9b75-007d1c366f4f",
+        "text": "It's broken, and I found the exact defect. Here's how it's *supposed* to work, then why it doesn't.\n\n## The intended mechanism\n\nThere's no polling and no agent-to-agent call. It's a one-way write into the Epic's event chain:\n\n1. A PRD file carries `sourcePromptId: <epic-id>` in its frontmatter (and the queue row carries `epicId`).\n2. When a job hits a terminal status, `scheduler.cjs:3057` fires `notifyOriginatingTab(job)`.\n3. That reads the PRD's frontmatter to get `sourcePromptId`, then calls `appendResponseEventIfKnown` (`src/main/promptSessionEvents.cjs:55`), which appends a `response` event onto that Epic's chain in `active-index.json` and broadcasts `promptSession:event-appended` to the renderer.\n4. The Epic's conversation shows it as a new message. The agent \"moves on\" because the result lands in its session as an inbound turn — not because it waited.\n\n## Why it never fires\n\n`notifyOriginatingTab` locates the PRD via `prdPathForJob(job)` → `resolvePrdWriteDir(cwd)` → `<cwd>/session-manager-operations/scheduler/prds/<slug>.md` — **the retired flat directory**. Every modern PRD lives in `scheduler/epics/<epicId>/prds/`. That dir contains only zero-byte `.reserved-NNN` stubs, no `.md` files at all.\n\nCompounding it: `archiveCompletedPrd` renames the file into `prds-archived/` at line 3052-3054, *immediately before* the notify at 3057. So even with correct dir resolution, the live path would be gone.\n\n`parsePrdRaw` ENOENTs → `prd = null` → `sourcePromptId` null → both the transcript append and the response-event append are skipped → it silently falls through to a cwd-matched open tab and fires an unrelated `chat:external-send`.\n\n**Reproduced on your own data:** PRDs 961/962/963/964 (Epic `psess-msckxplj-24`) and 967 (`psess-msch6x36-16`) all completed between 02:22 and 03:16 today. The newest event on either Epic's chain predates every one of those completions. Zero response events landed.\n\n**The tell that confirms it:** `notifyNeedsReview` (line 1920) has a `job.e…",
+        "id": "pevt-mscntz87-14",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T03:18:59.479Z"
+      }
+    ],
+    "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37": [
+      {
+        "id": "pevt-mscnspfc-12",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T03:18:00.118Z",
+        "text": "Agent vs. Skill\n\nSo I want to understand how to design and separate reponsibility between the Skill like /develop vs the \"Agent\" who is Arhichtect using the develop skill or maybe Dev-Lead using the PRD and /develop skill? I'm struggling a bit to understand \"who is in charge\" and how to think about tehse two"
+      },
+      {
+        "id": "2429d69d-a911-4381-a648-943ea2d63993",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-03T03:18:00.118Z",
+        "text": "Agent vs. Skill\n\nSo I want to understand how to design and separate reponsibility between the Skill like /develop vs the \"Agent\" who is Arhichtect using the develop skill or maybe Dev-Lead using the PRD and /develop skill? I'm struggling a bit to understand \"who is in charge\" and how to think about tehse two"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "2429d69d-a911-4381-a648-943ea2d63993",
+        "text": "## The one-line answer\n\n**Agent = who. Skill = a procedure the who reaches for. The agent is always in charge — a skill never is.**\n\nA skill is inert text on disk. It cannot decide to run, cannot decide when it's done, cannot decide to stop. Some agent reads it and follows it. So \"Architect using /develop\" is the right picture; \"/develop using dev-lead\" never happens.\n\n## The three axes you actually have\n\nYour repo already separates these cleanly — the confusion is that they *sound* like the same question:\n\n| Axis | Artifact | Question it answers | Lifetime |\n|---|---|---|---|\n| **Actor** | `~/.claude/agents/*.md` | *Who* is at the keyboard | Whole Epic conversation |\n| **Mission** | Tag (`feature`/`bug`/`discussion`) | *What kind* of work this is | Whole Epic, set at birth |\n| **Procedure** | Skill (`/develop`, `/builder`) | *How* one recurring task is done | One invocation |\n\n`architect.md` says this explicitly: \"Stay agnostic about what kind of work this is… Don't fork `/develop`'s PRD structure into this file.\" That's the axes staying orthogonal.\n\n## Why your two personas feel like they overlap (they don't)\n\nThey're not two agents sharing a skill. They're at **different points in the pipeline, in different processes**:\n\n```\nHuman ──talks to──> architect          (interactive, Opus, Epic-long)\n                       │\n                       │ invokes /develop  ← a procedure, not an agent\n                       ▼\n                    PRD files on disk     ← the handoff artifact\n                       │\n                    scheduler spawns claude -p   ← new process, no memory of the above\n                       ▼\n                    dev-lead              (headless, one PRD, then dies)\n                       │\n                    reads standards.md    ← executor rules, not a skill\n```\n\n`dev-lead` **never invokes `/develop`**. It can't — headless `claude -p` runs don't load skills, which is exactly why `/develop` inlines `standards.md` verbatim into every PRD body. de…",
+        "id": "pevt-mscntx1r-13",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "at": "2026-08-03T03:18:56.655Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mscntx1r-13",
+        "text": "## Part 1 — dev-lead's procedure\n\n**dev-lead follows no skill.** That's the whole point of its design, and it's a hard constraint, not a style choice: dev-lead runs inside a headless `claude -p` process spawned by the scheduler, and **headless runs don't load skills**. So its procedure has to arrive as plain text.\n\nIt comes from exactly three sources, layered:\n\n| Layer | Source | Who wrote it | Scope |\n|---|---|---|---|\n| 1. What to build | The PRD body | `/develop`, at authoring time | This one PRD |\n| 2. How to build | `standards.md` (read by absolute path) | Static file on disk | Every PRD, forever |\n| 3. How to finish | FINISH PROTOCOL, appended by the scheduler | `scheduler.cjs`, at dispatch | Every run |\n\n**Layer 1 — the PRD**, read in a fixed order (`dev-lead.md` step 1): Goal → Acceptance Criteria → Implementation notes → Out of scope. Implementation notes exist so it doesn't re-derive paths, but it's told to verify them against real code, since a PRD can drift between authoring and execution.\n\n**Layer 2 — `standards.md`**, 5 sections at `~/.claude/plugins/cache/session-manager/session-manager-dev/0.1.0/skills/develop/standards.md`: Performance · Debugging approach · API reuse and single source of truth · Test-driven development · **Execution discipline (headless runs)**.\n\nThat last section is the real dev-lead operating manual, and it's notable that it's derived from data — \"400+ scheduler runs\" — not from principle. Its rules are all shaped by one adversary: **the post-run verifier reads the transcript and downgrades to `needs_review` on error markers.** So:\n\n- Bound every command with `timeout` — long hangs are the dominant real failure\n- Run the AC gate **last**, let nothing error after it (the final ~20% is weighted heaviest)\n- Invert negative-assertion greps — bare `grep` exits 1 on no-match, so the *success* path looks like a failure\n- Annotate expected exit 124; never leave a bare `Traceback` unrecovered within ~10 lines\n- Stay inside the AC (this ru…",
+        "id": "pevt-msco1fyq-15",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "at": "2026-08-03T03:24:47.762Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msco1fyq-15",
+        "text": "Agreed — and that principle is already *mostly* honored, which makes the exceptions worth naming precisely. Here's the audit against \"library is SoT, everyone else references it.\"\n\n## Current state: two libraries, cleanly layered\n\nNot a violation — it's a real split of concerns, and `tagLibrary.ts` imports `agentTagDefs.ts`, so the dependency is one-way:\n\n| Library | Owns | Consumed by |\n|---|---|---|\n| `agentTagDefs.ts` → `AGENT_TAG_DEFS` | **Meaning** — `description`, `initialPromptTemplate` | `epicIntake.ts`, `NewEpicCard`, `Home`, `TagLibrary`, `tagLibrary.ts` |\n| `tagLibrary.ts` → `TAG_LIBRARY` | **Membership + routing** — `label`, `developsVia`, `developEagerness`, `EpicTag` union, `TAG_GROUP_ORDER` | `ticketDisplay`, `epicQueueControls`, `NewEpicCard`, `AgentLibrary`, `TagLibrary` |\n\nAnd `NewEpicCard.tsx` is the model citizen — it holds **zero** tag literals in its render path: `TAG_GROUP_ORDER` for the list, `tagLibraryEntry(t).label` for the pill, `agentTagDef(tag).description` for the mission blurb, `tagLibraryEntry(tag).developsVia`/`developEagerness` for the routing line. Exactly the strong coupling you're describing.\n\n## Violations — ranked\n\n**1. `prdFrontmatter.ts:195` silently drops `discussion` — this is a live bug, not just drift.**\n```ts\nif (v === 'feature' || v === 'bug' || v === 'build') fm.tag = v\n```\nThe declared type on line 37 is a 4-tag union *including* `discussion`, but the parser accepts 3. A PRD with `tag: discussion` in its frontmatter loses that field on every round-trip through SchedulerPrdsView. Both the type and the check should be `TAG_GROUP_ORDER.includes(v)`.\n\n**2. `AGENT_TAG_ORDER` (agentTagDefs.ts:97) is hardcoded and its own docblock is stale.**\n```ts\nexport const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder']\n```\nFour entries; missing `build` and `bilko-host-publisher`. Three separate problems in one line:\n- It contradicts `TAG_GROUP_ORDER` (6, derived) — two orderings for \"canonical o…",
+        "id": "pevt-msco6h56-16",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "at": "2026-08-03T03:28:42.570Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msco6h56-16",
+        "text": "Agreed — and the file already knows this rule; it just doesn't follow it. Line 23 literally ends *\"Don't restate any of this elsewhere; link there\"* — and is itself 211 words of restatement.\n\n## The measurement\n\n**5,432 words / 172 lines.** Loaded on every single turn of every session in this project.\n\n| Section | Words | % |\n|---|---:|---:|\n| **Domain model (TAB / EPIC)** | **2,841** | **52%** |\n| Architecture (load-bearing files) | 1,004 | 18% |\n| Avoid | 389 | 7% |\n| Marketing page + purchase flow | 250 | 5% |\n| everything else (9 sections) | 948 | 17% |\n\nTwo bullets alone — line 19 and line 21 — are **1,007 words, 18.5% of the entire always-loaded file.** Neither is a single line under 100 words; the median domain-model bullet is 130.\n\n## Three distinct failure modes\n\n**Mode 1 — restates a reference file that already exists.** Fixable now, pure deletion.\n\n| Line | Words | Already fully covered by | Should become |\n|---|---:|---|---|\n| 23 (lifecycle) | 211 | `prompt-sessions/README.md` §Lifecycle (lines 149–290, incl. §Transitions in detail, §Three entities, §Persisted-vs-derived) | ~25 w + link |\n| 32 (single-writer law) | 170 | `opsOwnership.cjs` header comment (30 lines: the *why*, fail-closed rationale, enforcement-point list) | ~30 w + link |\n| 27 (persistence) | 34 | `prompt-sessions/README.md` §Storage layout | fold into 23's link |\n| 29 (Scheduler browser) | 130 | `scheduler/README.md` §Storage layout + §What lives OUTSIDE | ~30 w + link |\n\n**Mode 2 — states real rules with no reference file to point at.** These are the expensive ones and need a doc *created* before the text can leave.\n\n| Line | Words | Content with no home |\n|---|---:|---|\n| 19 | **549** | Agent+Tag two-axis model, AgentLibrary CRUD, `tags:` frontmatter many-to-many, `agentType` naming rationale (4 call-sites), NewEpicCard column layout, grounding-board inspector-not-control rule, `--model` resolution across two views |\n| 21 | **458** | Settings-is-substrate law, the `model` carve-out, t…",
+        "id": "pevt-msco8ba0-17",
+        "promptSessionId": "agent-vs-skill-so-i-want-to-understand-how-to-de-a0229a37",
+        "at": "2026-08-03T03:30:08.280Z"
       }
     ]
   },

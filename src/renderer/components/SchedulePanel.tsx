@@ -156,6 +156,16 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
     if (changed.length > 0) setAnnouncement(changed.join('; '))
   }, [snap])
 
+  // Per-row hold reasons from the scheduler's last tick. Built into a Map here
+  // (not inside a selector) so no freshly-built value is ever returned from a
+  // zustand selector — see CLAUDE.md's React #185 rule. Keyed by slug, so it is
+  // deliberately unfiltered by scope: rows only ever look up their own slug.
+  const holdBySlug = useMemo(() => {
+    const m = new Map<string, ScheduleJobHold>()
+    for (const h of snap?.lastTick?.holds ?? []) m.set(h.slug, h)
+    return m
+  }, [snap?.lastTick])
+
   // Hooks must run unconditionally on every render — declared here, before the
   // panelView/snap early returns below, so switching to the supervisor
   // sub-panel doesn't change the hook count between renders (React error #300:
@@ -212,15 +222,6 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
   const aheadCount = computeAheadCounts(filteredJobs)
 
   const { inline, collapsedCount } = partitionJobs(filteredJobs, hiddenSlugs, now, showAllCompleted)
-
-  // Per-row hold reasons from the scheduler's last tick. Built into a Map here
-  // (not inside a selector) so no freshly-built value is ever returned from a
-  // zustand selector — see CLAUDE.md's React #185 rule.
-  const holdBySlug = useMemo(() => {
-    const m = new Map<string, ScheduleJobHold>()
-    for (const h of snap.lastTick?.holds ?? []) m.set(h.slug, h)
-    return m
-  }, [snap.lastTick])
 
   const onClearCompleted = () => {
     const next = new Set(hiddenSlugs)

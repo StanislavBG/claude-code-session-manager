@@ -70,6 +70,30 @@ function addAllowedRoot(dir) {
   if (dir) allowedRoots.add(path.resolve(dir));
 }
 
+// PromptSession archive writes (state/promptSessions.ts's markCompleted ->
+// window.api.config.writeJson(promptSessionArchivePath(...))) reach this
+// generic IPC handler with no pty ever having spawned for their cwd (a
+// chat-only Epic on a cold boot), same hazard prdCreate.cjs:152-155 already
+// documents for PRD creation. Registering the root here — narrowly, only
+// when the resolved path is actually under a project's
+// session-manager-operations/prompt-sessions/ — mirrors that precedent for
+// the one other write path (besides mergeActiveIndex's own) that needs it,
+// without widening addAllowedRoot's use to every config:write-json call.
+const PROMPT_SESSIONS_MARKER = `${path.sep}session-manager-operations${path.sep}prompt-sessions${path.sep}`;
+
+function registerPromptSessionsRoot(p) {
+  if (!p || typeof p !== 'string') return;
+  let abs;
+  try {
+    abs = path.resolve(expandHome(p));
+  } catch {
+    return;
+  }
+  const idx = abs.indexOf(PROMPT_SESSIONS_MARKER);
+  if (idx === -1) return;
+  addAllowedRoot(abs.slice(0, idx));
+}
+
 function validatePath(abs) {
   const real = realResolve(abs);
   for (const root of allowedRoots) {
@@ -438,7 +462,10 @@ function registerConfigHandlers() {
   ipcMain.handle('config:read-text', v(s.configPath, ({ path: p }) => readText(p)));
   // `writer` is the renderer's declared owner id for the single-writer law
   // (lib/opsOwnership.cjs). Ignored outside the ops root; required inside it.
-  ipcMain.handle('config:write-json', v(s.configWriteJson, ({ path: p, data, writer }) => writeJson(p, data, { writer })));
+  ipcMain.handle('config:write-json', v(s.configWriteJson, ({ path: p, data, writer }) => {
+    registerPromptSessionsRoot(p);
+    return writeJson(p, data, { writer });
+  }));
   ipcMain.handle('config:write-text', v(s.configWriteText, ({ path: p, text, writer }) => writeTextAtomic(p, text, { writer })));
   ipcMain.handle('config:list-dir', v(s.configListDir, ({ path: p, opts }) => listDir(p, opts || {})));
   ipcMain.handle('config:exists', v(s.configPath, ({ path: p }) => exists(p)));
@@ -469,6 +496,7 @@ module.exports = {
   listDir,
   exists,
   addAllowedRoot,
+  registerPromptSessionsRoot,
   validatePath,
   validateWrite,
 };

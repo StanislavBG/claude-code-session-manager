@@ -33,6 +33,7 @@
  * explicit "un-tombstone" path; today one would be dead code.
  */
 
+const path = require('path');
 const { activeIndexPath, withPathLock } = require('./epicMint.cjs');
 const config = require('../config.cjs');
 
@@ -69,6 +70,14 @@ function compareEventsChainAware(a, b) {
  */
 async function mergeActiveIndex(cwd, { sessions: rawMemorySessions = {}, events: rawMemoryEvents = {}, removedIds = [] } = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('mergeActiveIndex: cwd is required');
+  // Register this project's cwd as a write-allowed root (config.cjs's
+  // validateWrite gate) — mirrors the precedent + comment in
+  // lib/prdCreate.cjs:152-155. A chat-only Epic (headless claude -p, no
+  // Terminal PTY ever spawned for this cwd) reaches this merge on a cold
+  // boot before pty.cjs's addAllowedRoot call has ever run for it — without
+  // this, every active-index.json write for such a project fails with
+  // "Write outside allowed write boundaries".
+  config.addAllowedRoot(path.resolve(cwd));
   const filePath = activeIndexPath(cwd);
   // Null-prototype copies of the CALLER'S OWN payload too: an Epic id equal
   // to "__proto__" is a plain string key from the caller's perspective, but

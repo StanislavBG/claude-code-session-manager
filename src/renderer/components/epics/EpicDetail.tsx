@@ -22,6 +22,14 @@ import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { useBranch } from '../../lib/useBranch'
 import type { ScheduleJob } from '../../../preload/api'
 import { parseTranscriptTurns, selectNewTurns } from '../../lib/terminalHandoffTranscript'
+import { useChatPrefs, resolveEpicVerbosity } from '../../state/chatPrefs'
+import {
+  filterTurnsByVerbosity,
+  ASSISTANT_CLAMP_CHARS,
+  CHAT_VERBOSITY_ORDER,
+  CHAT_VERBOSITY_META,
+  type ChatVerbosity,
+} from '../../lib/chatVerbosity'
 
 /**
  * Parses the Terminal session's own JSONL transcript, filters to turns not
@@ -377,6 +385,49 @@ interface Props {
   onQuote?: (text: string) => void
 }
 
+/**
+ * Three-position density dial for the Discussion feed. Writes a PER-EPIC
+ * override (state/chatPrefs.ts) — picking the level that already equals the
+ * global default clears the override rather than pinning a copy, so the Epic
+ * keeps following the default afterwards.
+ */
+function VerbosityDial({
+  value,
+  hiddenCount,
+  onChange,
+}: {
+  value: ChatVerbosity
+  hiddenCount: number
+  onChange: (level: ChatVerbosity) => void
+}) {
+  return (
+    <div className="flex items-center gap-2" data-testid="epic-verbosity-dial">
+      <div className="flex overflow-hidden rounded-md border border-line">
+        {CHAT_VERBOSITY_ORDER.map((level) => (
+          <button
+            key={level}
+            type="button"
+            onClick={() => onChange(level)}
+            title={CHAT_VERBOSITY_META[level].hint}
+            aria-pressed={value === level}
+            data-testid={`epic-verbosity-${level}`}
+            className={`px-2.5 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+              value === level ? 'bg-accent/15 text-accent' : 'bg-bg-hi text-fg-faint hover:bg-hi hover:text-fg-dim'
+            }`}
+          >
+            {CHAT_VERBOSITY_META[level].label}
+          </button>
+        ))}
+      </div>
+      {hiddenCount > 0 && (
+        <span className="font-mono text-[10.5px] text-fg-faint" data-testid="epic-verbosity-hidden-count">
+          {hiddenCount} hidden
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function EpicDetail({ promptSession, onQuote }: Props) {
   const epicId = promptSession.id
   const { cwd, claudeSessionId: sessionId } = promptSession
@@ -450,6 +501,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     setView('discussion')
   }, [epicId])
 
+  // Raw slices only — never derive inside the selector (zustand v5 compares
+  // snapshots by reference; a freshly-built value re-renders forever).
+  const globalVerbosity = useChatPrefs((s) => s.verbosity)
+  const perEpicVerbosity = useChatPrefs((s) => s.perEpic)
+  const hydrateChatPrefs = useChatPrefs((s) => s.hydrate)
+  const setEpicVerbosity = useChatPrefs((s) => s.setEpicVerbosity)
+  useEffect(() => { void hydrateChatPrefs() }, [hydrateChatPrefs])
+  const verbosity = resolveEpicVerbosity(globalVerbosity, perEpicVerbosity, epicId)
+
   const turns = chat?.turns ?? []
   const running = chat?.running ?? false
   // role:'event' turns are JSONL transcript-feed events (mode, attachment,
@@ -457,7 +517,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // routes every one of them to a typed renderer (never filtered by kind).
   // visibleFeedTurns drops only the two permitted exact-duplicate cases: a
   // repeated ai-title and a last-prompt duplicating the preceding user turn.
-  const visibleTurns = visibleFeedTurns(turns)
+  const dedupedTurns = visibleFeedTurns(turns)
+  // Verbosity dial (lib/chatVerbosity.ts) — a pure DISPLAY filter applied
+  // after dedup. `turns` is untouched, so raising the level restores the full
+  // record with no re-read of the JSONL. Question/notice/error turns are
+  // exempt from the dial by construction (turnMinVerbosity), so a run parked
+  // on a confirmation can never be hidden by it.
+  const { visible: visibleTurns, hiddenCount, hiddenByLevel } = filterTurnsByVerbosity(dedupedTurns, verbosity)
+  const clampBodyChars = ASSISTANT_CLAMP_CHARS[verbosity]
+  const toolStripVariant = verbosity === 'summary' ? ('hidden' as const) : ('collapsible' as const)
   // With event turns interleaved, the array's last element is no longer
   // reliably the last assistant turn (a trailing mode/attachment event is
   // common) — find it explicitly so the "running" indicator still lands on
@@ -737,8 +805,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
         </div>
 
         {mode === 'chat' && (
-          <div className="flex gap-0.5 border-t border-line pt-2">
+          <div className="flex flex-wrap items-center gap-3 border-t border-line pt-2">
             <ViewTabs options={views} active={view} onChange={setView} />
+            {view === 'discussion' && (
+              <VerbosityDial
+                value={verbosity}
+                hiddenCount={hiddenCount}
+                onChange={(level) => setEpicVerbosity(epicId, level)}
+              />
+            )}
           </div>
         )}
       </header>
@@ -815,7 +890,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       enableRawSessionActions={false}
                       linkTarget="browser"
                       inlineFilePreview
-                      toolStripVariant="collapsible"
+                      toolStripVariant={toolStripVariant}
+                      clampBodyChars={clampBodyChars}
                       needsDecisionStyle
                       precedingUserPrompt={precedingUserPrompt}
                       onQuote={onQuote}
@@ -854,6 +930,21 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               )
             })}
 
+            {/* Honest footer for what the dial is holding back — a filtered
+                feed must never read as a complete one. Clicking steps to the
+                lowest level that reveals everything currently hidden. */}
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setEpicVerbosity(epicId, hiddenByLevel.verbose > 0 ? 'verbose' : 'standard')}
+                data-testid="epic-verbosity-reveal"
+                className="mx-auto rounded-full border border-dashed border-rule px-3 py-1 font-mono text-[10.5px] text-fg-faint hover:border-line hover:text-fg-dim"
+              >
+                {hiddenCount} event{hiddenCount === 1 ? '' : 's'} hidden at {CHAT_VERBOSITY_META[verbosity].label} —
+                show {hiddenByLevel.verbose > 0 ? 'everything' : 'tool activity'}
+              </button>
+            )}
+
             {/* In-flight turn: chat.stream/liveToolUses accumulate on
                 chat:run:output/tool-use deltas but never land in `turns`
                 until pushTurn fires on complete/error/needs-input — without
@@ -882,8 +973,12 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   enableRawSessionActions={false}
                   linkTarget="browser"
                   inlineFilePreview
-                  toolStripVariant="collapsible"
+                  toolStripVariant={toolStripVariant}
                   needsDecisionStyle
+                  // Deliberately NOT clamped: this bubble is the live stream,
+                  // and re-clamping it on every delta would fight the user's
+                  // own expand toggle mid-run. The clamp applies once the run
+                  // lands as a real turn above.
                 />
               </div>
             )}

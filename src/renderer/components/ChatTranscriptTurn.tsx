@@ -9,6 +9,7 @@ import { toast } from '../state/toast'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
+import { clampTurnText } from '../lib/chatVerbosity'
 import { formatAgo } from '../lib/formatTime'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 import { InlineConsentTerminal } from './InlineConsentTerminal'
@@ -975,6 +976,7 @@ export function Turn({
   toolStripVariant = 'inline',
   needsDecisionStyle = false,
   precedingUserPrompt,
+  clampBodyChars = null,
   onQuote,
 }: {
   turn: ChatTurn
@@ -1001,9 +1003,12 @@ export function Turn({
   inlineFilePreview?: boolean
   /** 'collapsible' renders CollapsibleToolStrip ("used N tools" toggle)
    *  instead of the always-expanded ToolUseTraceStrip — set only by
-   *  EpicDetail (PRD 827). TerminalChat.tsx/PromptSessionConversation.tsx
-   *  keep the default 'inline' behavior unchanged. */
-  toolStripVariant?: 'inline' | 'collapsible'
+   *  EpicDetail (PRD 827). 'hidden' omits the strip AND the diff cards
+   *  entirely — set only by EpicDetail at 'summary' verbosity
+   *  (lib/chatVerbosity.ts), where the feed is deliberately conversation-only.
+   *  TerminalChat.tsx/PromptSessionConversation.tsx keep the default 'inline'
+   *  behavior unchanged. */
+  toolStripVariant?: 'inline' | 'collapsible' | 'hidden'
   /** Red-tinted "NEEDS YOUR DECISION" styling for question turns instead of
    *  the default amber "Needs your answer" — set only by EpicDetail
    *  (PRD 827), per the Epics design spec's needs-you treatment. */
@@ -1017,6 +1022,14 @@ export function Turn({
    *  notice is the first turn) — the Retry button is omitted in that case
    *  rather than guessing. */
   precedingUserPrompt?: string
+  /** Clamp an ASSISTANT bubble's prose to this many characters, with an
+   *  inline "Show full message" toggle that restores the untruncated text
+   *  from the same `turn.text` already in hand (no re-fetch). null/undefined
+   *  = never clamp, which is every caller except EpicDetail at 'summary'
+   *  verbosity (lib/chatVerbosity.ts's ASSISTANT_CLAMP_CHARS). Deliberately
+   *  ignored for question/notice/error turns — a turn that is asking the
+   *  human something is never abbreviated. */
+  clampBodyChars?: number | null
   /** Shows a hover "Quote" button on this turn that calls onQuote(turn.text)
    *  when clicked — omitted (no button rendered) when not passed, so callers
    *  with no reply-context affordance (Terminal transcript, raw session view)
@@ -1040,6 +1053,11 @@ export function Turn({
   // never respawn it (spawnedRef guards re-spawn to the first mount only).
   const [consentExpanded, setConsentExpanded] = useState(false)
   const [consentGranted, setConsentGranted] = useState(false)
+  // Per-turn override of `clampBodyChars` — reset whenever the caller changes
+  // the clamp (i.e. the user moved the verbosity dial), so switching to
+  // Summary re-collapses turns they had expanded under the previous level.
+  const [bodyExpanded, setBodyExpanded] = useState(false)
+  useEffect(() => { setBodyExpanded(false) }, [clampBodyChars])
   const onConsentGranted = useCallback(() => {
     toast.info('Consent granted — you can retry the run now.')
     setConsentExpanded(false)
@@ -1050,7 +1068,7 @@ export function Turn({
     if (turn.role === 'assistant' && presentation === 'text' && bodyRef.current) {
       linkifyFilePaths(bodyRef.current)
     }
-  }, [turn.role, presentation, turn.text])
+  }, [turn.role, presentation, turn.text, clampBodyChars, bodyExpanded])
 
   if (turn.role === 'user') {
     return (
@@ -1103,7 +1121,7 @@ export function Turn({
             <span>claude · {formatAgo(turn.at, Date.now())}</span>
             <AttributionChips attribution={turn.attribution} />
           </div>
-          {toolStripVariant === 'collapsible' ? (
+          {toolStripVariant === 'hidden' ? null : toolStripVariant === 'collapsible' ? (
             <CollapsibleToolStrip items={turn.toolUses} />
           ) : (
             <ToolUseTraceStrip items={turn.toolUses} />
@@ -1230,9 +1248,14 @@ export function Turn({
   // session-manager-operations/feedback/2026-07-21-chat-empty-assistant-bubble.md).
   if (presentation === 'suppress') return null
 
-  const urls = extractUrls(turn.text)
-  const filePaths = extractFilePaths(turn.text)
-  const isPlan = hasMarkdownList(turn.text)
+  // Clamped bodies extract their callouts from the SHOWN text only — a URL or
+  // file path that lives in the withheld tail would otherwise render a callout
+  // for something not on screen.
+  const clamped = clampTurnText(turn.text, bodyExpanded ? null : clampBodyChars)
+  const shownText = clamped.body
+  const urls = extractUrls(shownText)
+  const filePaths = extractFilePaths(shownText)
+  const isPlan = hasMarkdownList(shownText)
   const isRunning = presentation === 'working'
   // isApiErrorMessage/interruptedByShutdown both mean this turn is
   // incomplete (a dropped API response, a shutdown mid-stream) — reuse the
@@ -1271,12 +1294,12 @@ export function Turn({
             </button>
           )}
         </div>
-        {toolStripVariant === 'collapsible' ? (
+        {toolStripVariant === 'hidden' ? null : toolStripVariant === 'collapsible' ? (
           <CollapsibleToolStrip items={turn.toolUses} running={presentation === 'working'} />
         ) : (
           <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
         )}
-        <DiffCards items={turn.toolUses} />
+        {toolStripVariant !== 'hidden' && <DiffCards items={turn.toolUses} />}
         {presentation === 'working' ? (
           <div className={`border border-line bg-elev px-3 py-2 text-sm text-fg-dim ${bubbleCorners}`}>
             <span className="inline-flex items-center gap-2">
@@ -1295,8 +1318,18 @@ export function Turn({
               className={`prose-chat border px-3 py-2 text-sm leading-relaxed ${bubbleTone} ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd, linkTarget) }}
               // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{ __html: renderChatMarkdown(turn.text) }}
+              dangerouslySetInnerHTML={{ __html: renderChatMarkdown(shownText) }}
             />
+            {(clamped.truncated || bodyExpanded) && clampBodyChars !== null && (
+              <button
+                type="button"
+                onClick={() => setBodyExpanded((v) => !v)}
+                data-testid="chat-turn-expand-body"
+                className="mt-1 font-mono text-[10.5px] font-semibold text-fg-faint hover:text-accent"
+              >
+                {bodyExpanded ? 'Show less' : `Show full message (+${clamped.hiddenChars} chars)`}
+              </button>
+            )}
             {urls.map((url) => (
               <UrlCallout key={url} url={url} />
             ))}

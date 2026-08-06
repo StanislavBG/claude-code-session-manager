@@ -26,8 +26,11 @@ import { useChatPrefs, resolveEpicVerbosity } from '../../state/chatPrefs'
 import {
   filterTurnsByVerbosity,
   ASSISTANT_CLAMP_CHARS,
-  CHAT_VERBOSITY_ORDER,
+  CHAT_VERBOSITY_DISPLAY_ORDER,
   CHAT_VERBOSITY_META,
+  levelNumber,
+  showsToolStrip,
+  showsInjectedPreamble,
   type ChatVerbosity,
 } from '../../lib/chatVerbosity'
 
@@ -403,18 +406,20 @@ function VerbosityDial({
   return (
     <div className="flex items-center gap-2" data-testid="epic-verbosity-dial">
       <div className="flex overflow-hidden rounded-md border border-line">
-        {CHAT_VERBOSITY_ORDER.map((level) => (
+        {CHAT_VERBOSITY_DISPLAY_ORDER.map((level) => (
           <button
             key={level}
             type="button"
             onClick={() => onChange(level)}
-            title={CHAT_VERBOSITY_META[level].hint}
+            title={`Level ${levelNumber(level)} · ${CHAT_VERBOSITY_META[level].label} — ${CHAT_VERBOSITY_META[level].hint}`}
             aria-pressed={value === level}
+            aria-label={`Verbosity level ${levelNumber(level)}, ${CHAT_VERBOSITY_META[level].label}`}
             data-testid={`epic-verbosity-${level}`}
-            className={`px-2.5 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+            className={`flex items-baseline gap-1 px-2 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
               value === level ? 'bg-accent/15 text-accent' : 'bg-bg-hi text-fg-faint hover:bg-hi hover:text-fg-dim'
             }`}
           >
+            <span className="text-[9px] opacity-60">{levelNumber(level)}</span>
             {CHAT_VERBOSITY_META[level].label}
           </button>
         ))}
@@ -523,13 +528,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // record with no re-read of the JSONL. Question/notice/error turns are
   // exempt from the dial by construction (turnMinVerbosity), so a run parked
   // on a confirmation can never be hidden by it.
-  const { visible: visibleTurns, hiddenCount, hiddenByLevel } = filterTurnsByVerbosity(dedupedTurns, verbosity)
+  const { visible: visibleTurns, hiddenCount, revealLevel } = filterTurnsByVerbosity(dedupedTurns, verbosity)
   const clampBodyChars = ASSISTANT_CLAMP_CHARS[verbosity]
-  const toolStripVariant = verbosity === 'summary' ? ('hidden' as const) : ('collapsible' as const)
+  // Tool cards are a level-1/2 affordance only; at 3–5 file changes still
+  // surface through the separate attachment/edited_text_file event turns.
+  const toolStripVariant = showsToolStrip(verbosity) ? ('collapsible' as const) : ('hidden' as const)
   // chatRunner's injected instruction blocks (lib/promptPreamble.ts) are
   // machinery, not conversation — collapsed behind a ≡ glyph everywhere
-  // except 'verbose', which is the level that means "show me the raw record".
-  const injectedPreamble = verbosity === 'verbose' ? ('shown' as const) : ('hidden' as const)
+  // except the single loudest level, which means "show me the raw record".
+  const injectedPreamble = showsInjectedPreamble(verbosity) ? ('shown' as const) : ('hidden' as const)
   // With event turns interleaved, the array's last element is no longer
   // reliably the last assistant turn (a trailing mode/attachment event is
   // common) — find it explicitly so the "running" indicator still lands on
@@ -938,15 +945,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             {/* Honest footer for what the dial is holding back — a filtered
                 feed must never read as a complete one. Clicking steps to the
                 lowest level that reveals everything currently hidden. */}
-            {hiddenCount > 0 && (
+            {hiddenCount > 0 && revealLevel && (
               <button
                 type="button"
-                onClick={() => setEpicVerbosity(epicId, hiddenByLevel.verbose > 0 ? 'verbose' : 'standard')}
+                onClick={() => setEpicVerbosity(epicId, revealLevel)}
                 data-testid="epic-verbosity-reveal"
                 className="mx-auto rounded-full border border-dashed border-rule px-3 py-1 font-mono text-[10.5px] text-fg-faint hover:border-line hover:text-fg-dim"
               >
-                {hiddenCount} event{hiddenCount === 1 ? '' : 's'} hidden at {CHAT_VERBOSITY_META[verbosity].label} —
-                show {hiddenByLevel.verbose > 0 ? 'everything' : 'tool activity'}
+                {hiddenCount} event{hiddenCount === 1 ? '' : 's'} hidden at level {levelNumber(verbosity)} —
+                show all at level {levelNumber(revealLevel)} ({CHAT_VERBOSITY_META[revealLevel].label})
               </button>
             )}
 
@@ -978,7 +985,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   enableRawSessionActions={false}
                   linkTarget="browser"
                   inlineFilePreview
-                  toolStripVariant={toolStripVariant}
+                  // Deliberately NOT dialled down: while a run is in flight
+                  // this strip ("working · N tools") is the only progress
+                  // signal there is, so hiding it at levels 3-5 would leave
+                  // the user staring at a bare "working…" with no idea what
+                  // is happening. Same reasoning as the question/notice
+                  // exemption in chatVerbosity.ts — the dial governs the
+                  // RECORD of what happened, never live interaction. Once the
+                  // run lands as a real turn above, it obeys the dial.
+                  toolStripVariant="collapsible"
                   needsDecisionStyle
                   // Deliberately NOT clamped: this bubble is the live stream,
                   // and re-clamping it on every delta would fight the user's

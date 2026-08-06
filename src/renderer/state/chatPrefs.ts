@@ -31,6 +31,20 @@ interface ChatPrefsState extends PersistedChatPrefs {
 
 export const CHAT_PREFS_FILE = '~/.claude/session-manager/chat-prefs.json'
 
+/**
+ * Values written by the first (3-level) shipment of the dial. Mapped forward
+ * on read so an existing prefs file doesn't silently reset to the default.
+ * This is a one-line data migration, not a compat shim — delete it once no
+ * file on disk can still hold the old value.
+ */
+const LEGACY_LEVELS: Record<string, ChatVerbosity> = { verbose: 'raw' }
+
+function readLevel(v: unknown): ChatVerbosity | null {
+  if (isChatVerbosity(v)) return v
+  if (typeof v === 'string' && LEGACY_LEVELS[v]) return LEGACY_LEVELS[v]
+  return null
+}
+
 function persist(get: () => ChatPrefsState): void {
   const s = get()
   const payload: PersistedChatPrefs = { verbosity: s.verbosity, perEpic: s.perEpic }
@@ -50,10 +64,11 @@ export const useChatPrefs = create<ChatPrefsState>((set, get) => ({
         const d = r.data as Partial<PersistedChatPrefs>
         const perEpic: Record<string, ChatVerbosity> = {}
         for (const [k, v] of Object.entries(d.perEpic ?? {})) {
-          if (isChatVerbosity(v)) perEpic[k] = v
+          const level = readLevel(v)
+          if (level) perEpic[k] = level
         }
         set({
-          verbosity: isChatVerbosity(d.verbosity) ? d.verbosity : CHAT_VERBOSITY_DEFAULT,
+          verbosity: readLevel(d.verbosity) ?? CHAT_VERBOSITY_DEFAULT,
           perEpic,
           hydrated: true,
         })

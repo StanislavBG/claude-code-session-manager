@@ -44,10 +44,11 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
   const onDiscard = () => {
     if (busy) return
     setBusy(true)
+    // markCompleted toasts and rolls its own state back on a rejected write.
     void usePromptSessions
       .getState()
       .markCompleted(epic.id, 'EpicApprovalBar discard')
-      .catch((err) => toast.error(`Could not discard: ${err instanceof Error ? err.message : String(err)}`))
+      .catch(() => {})
       .finally(() => setBusy(false))
   }
 

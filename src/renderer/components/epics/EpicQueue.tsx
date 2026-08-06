@@ -434,7 +434,10 @@ function useRowMenuItems(
     if (status !== 'completed') {
       items.push({
         label: 'Mark completed',
-        onSelect: () => void usePromptSessions.getState().markCompleted(epic.id, 'EpicQueue row menu'),
+        // markCompleted toasts and rolls its own state back on a rejected write.
+        onSelect: () => {
+          usePromptSessions.getState().markCompleted(epic.id, 'EpicQueue row menu').catch(() => {})
+        },
       })
     }
   }

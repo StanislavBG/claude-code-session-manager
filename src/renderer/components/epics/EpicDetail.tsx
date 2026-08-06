@@ -641,7 +641,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     // guard latched on a session that no longer exists.
     setAttached(epicId, false)
     setMode(epicId, 'chat')
-    void markCompleted(epicId, 'EpicDetail').finally(() => setMarkingCompleted(false))
+    // markCompleted toasts and rolls its own state back on a rejected write —
+    // nothing further to handle here beyond releasing the busy flag.
+    void markCompleted(epicId, 'EpicDetail')
+      .catch(() => {})
+      .finally(() => setMarkingCompleted(false))
   }
 
   // Mutual exclusion: a chatRunner run in flight (or queued behind one) for

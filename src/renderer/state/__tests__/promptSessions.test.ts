@@ -382,6 +382,81 @@ describe('promptSessions.ts', () => {
     expect(archive.durableTurns).toBeUndefined()
   })
 
+  it('markCompleted rolls status back to active and toasts when the active-index write rejects', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { toast } = await import('../toast')
+    const store = usePromptSessions.getState()
+
+    const proposed = await store.createPromptSession('/proj', 'Ship the feature')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
+    expect(session.status).toBe('active')
+
+    api.promptSessions.mergeActiveIndex.mockRejectedValue(new Error('write outside allowed boundaries'))
+    const toastErrorSpy = vi.spyOn(toast, 'error')
+
+    await expect(usePromptSessions.getState().markCompleted(session.id)).rejects.toThrow(
+      'write outside allowed boundaries',
+    )
+
+    const after = usePromptSessions.getState().sessions[session.id]
+    expect(after.status).toBe('active')
+    expect(after.completedAt).toBeNull()
+    // The optimistic 'closed' event must be rolled back along with the status.
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events.every((e) => e.kind !== 'closed')).toBe(true)
+
+    expect(toastErrorSpy).toHaveBeenCalledTimes(1)
+    expect(toastErrorSpy.mock.calls[0][0]).toContain('Ship the feature')
+    // The archive write must never have been attempted once the index write
+    // already failed.
+    expect(api.config.writeJson).not.toHaveBeenCalled()
+  })
+
+  it('markCompleted rolls status back to active and toasts when the archive write rejects (index write already succeeded)', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const { toast } = await import('../toast')
+    const store = usePromptSessions.getState()
+
+    const proposed = await store.createPromptSession('/proj', 'Ship the feature')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
+
+    api.config.writeJson.mockRejectedValue(new Error('disk full'))
+    const toastErrorSpy = vi.spyOn(toast, 'error')
+
+    await expect(usePromptSessions.getState().markCompleted(session.id)).rejects.toThrow('disk full')
+
+    const after = usePromptSessions.getState().sessions[session.id]
+    expect(after.status).toBe('active')
+    expect(after.completedAt).toBeNull()
+    const events = usePromptSessions.getState().events[session.id]
+    expect(events.every((e) => e.kind !== 'closed')).toBe(true)
+
+    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Ship the feature'))
+    // The active-index removal that ran before the archive write must be
+    // compensated by a follow-up write restoring the row — not just left
+    // stripped from disk with no archive to replace it.
+    expect(api.promptSessions.mergeActiveIndex.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('markCompleted flips status to completed and persists the archive when both writes succeed (unchanged happy path)', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+
+    const session = await store.createPromptSession('/proj', 'Ship the feature')
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    const after = usePromptSessions.getState().sessions[session.id]
+    expect(after.status).toBe('completed')
+    expect(after.completedAt).toBeTruthy()
+    const archiveCall = api.config.writeJson.mock.calls.find(
+      (c) => c[0] === promptSessionArchivePath('/proj', session.id),
+    )
+    expect(archiveCall).toBeDefined()
+  })
+
   it('resumeArchived mints a fresh independent session id, born proposed and activated only via approveProposed, and records the link back to the archived session', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
@@ -870,6 +945,224 @@ describe('promptSessions.ts', () => {
 
     expect(usePromptSessions.getState().sessions[session.id].goalText).toBe('Live in memory')
     expect(usePromptSessions.getState().sessions[session.id].status).toBe('proposed')
+  })
+
+  // Regression coverage for the self-healing reconciliation: an Epic whose
+  // markCompleted partially failed (archive written, but the active-index
+  // row never got stripped, or a stale row from another writer resurfaced)
+  // must NOT stay stuck showing "Open" forever — the archive is newer and
+  // authoritative, so a hydrate() + hydrateArchived() pass should heal it.
+  describe('hydrateArchived() self-heals a stale active-index row that already has an archive on disk', () => {
+    function setupStaleEpic() {
+      const id = 'psess-stale-1'
+      const cwd = '/proj'
+      const staleSession = {
+        id,
+        cwd,
+        goalText: 'Stale open row',
+        claudeSessionId: 'claude-stale-1',
+        status: 'active' as const,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        completedAt: null,
+      }
+      const archivedSession = { ...staleSession, status: 'completed' as const, completedAt: '2026-08-03T00:00:00.000Z' }
+      const archiveEvents = [
+        { id: 'e1', promptSessionId: id, kind: 'prompt' as const, causedByEventId: null, at: '2026-08-01T00:00:00.000Z', text: 'Stale open row' },
+      ]
+      return { id, cwd, staleSession, archivedSession, archiveEvents, indexPath: '', archivePath: '' }
+    }
+
+    it('archive wins: overrides the stale active-index row and shows the Epic as completed', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions, promptSessionActiveIndexPath, promptSessionArchivePath } = await import('../promptSessions')
+      const ctx = setupStaleEpic()
+      ctx.indexPath = promptSessionActiveIndexPath(ctx.cwd)
+      ctx.archivePath = promptSessionArchivePath(ctx.cwd, ctx.id)
+
+      api.config.readJson.mockImplementation(async (path: string) => {
+        if (path === ctx.indexPath) {
+          return {
+            exists: true,
+            raw: '',
+            data: { sessions: { [ctx.id]: ctx.staleSession }, events: { [ctx.id]: ctx.archiveEvents } },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        if (path === ctx.archivePath) {
+          return {
+            exists: true,
+            raw: '',
+            data: { session: ctx.archivedSession, events: ctx.archiveEvents, transcript: '', archivedAt: ctx.archivedSession.completedAt },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        return { exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }
+      })
+
+      // hydrate() loads the stale row from active-index.json — this is what
+      // marks the id as "index-backed" so hydrateArchived() is allowed to
+      // override it (as opposed to a freshly-created local row).
+      await usePromptSessions.getState().hydrate(ctx.cwd)
+      expect(usePromptSessions.getState().sessions[ctx.id].status).toBe('active')
+
+      api.config.listDir.mockResolvedValue({
+        ok: true,
+        error: null,
+        entries: [
+          { name: 'active-index.json', path: ctx.indexPath, isDirectory: false, isFile: true, mtimeMs: 0, size: 0 },
+          { name: `${ctx.id}.json`, path: ctx.archivePath, isDirectory: false, isFile: true, mtimeMs: 0, size: 0 },
+        ],
+      })
+
+      await usePromptSessions.getState().hydrateArchived(ctx.cwd)
+
+      const healed = usePromptSessions.getState().sessions[ctx.id]
+      expect(healed.status).toBe('completed')
+      expect(healed.completedAt).toBe(ctx.archivedSession.completedAt)
+    })
+
+    it('records a tombstone by routing the removal through the existing mergeActiveIndex removedIds path, not a direct fs write', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions, promptSessionActiveIndexPath, promptSessionArchivePath } = await import('../promptSessions')
+      const ctx = setupStaleEpic()
+      ctx.indexPath = promptSessionActiveIndexPath(ctx.cwd)
+      ctx.archivePath = promptSessionArchivePath(ctx.cwd, ctx.id)
+
+      api.config.readJson.mockImplementation(async (path: string) => {
+        if (path === ctx.indexPath) {
+          return {
+            exists: true,
+            raw: '',
+            data: { sessions: { [ctx.id]: ctx.staleSession }, events: { [ctx.id]: ctx.archiveEvents } },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        if (path === ctx.archivePath) {
+          return {
+            exists: true,
+            raw: '',
+            data: { session: ctx.archivedSession, events: ctx.archiveEvents, transcript: '', archivedAt: ctx.archivedSession.completedAt },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        return { exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }
+      })
+      api.config.listDir.mockResolvedValue({
+        ok: true,
+        error: null,
+        entries: [{ name: `${ctx.id}.json`, path: ctx.archivePath, isDirectory: false, isFile: true, mtimeMs: 0, size: 0 }],
+      })
+
+      await usePromptSessions.getState().hydrate(ctx.cwd)
+      await usePromptSessions.getState().hydrateArchived(ctx.cwd)
+
+      // The one existing mechanism that removes a row from active-index.json
+      // and writes a removal tombstone (activeIndexMerge.cjs, main-side) —
+      // no new/second write path was introduced for this reconciliation.
+      await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+      const call = api.promptSessions.mergeActiveIndex.mock.calls.find(
+        (call) => (call[0] as { removedIds?: string[] }).removedIds?.includes(ctx.id),
+      )
+      expect(call).toBeDefined()
+      expect(api.config.writeJson).not.toHaveBeenCalledWith(
+        expect.stringContaining('active-index.json'),
+        expect.anything(),
+        expect.anything(),
+      )
+    })
+
+    it('is one-shot / idempotent: a second hydrate+hydrateArchived pass performs no further merge writes', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions, promptSessionActiveIndexPath, promptSessionArchivePath } = await import('../promptSessions')
+      const ctx = setupStaleEpic()
+      ctx.indexPath = promptSessionActiveIndexPath(ctx.cwd)
+      ctx.archivePath = promptSessionArchivePath(ctx.cwd, ctx.id)
+
+      api.config.readJson.mockImplementation(async (path: string) => {
+        if (path === ctx.indexPath) {
+          // Disk mock deliberately stays "stale" across both passes (real
+          // activeIndexMerge.cjs would strip this row after the first merge,
+          // but the reconciliation must be idempotent from IN-MEMORY state
+          // alone — it should never rely on disk having caught up yet).
+          return {
+            exists: true,
+            raw: '',
+            data: { sessions: { [ctx.id]: ctx.staleSession }, events: { [ctx.id]: ctx.archiveEvents } },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        if (path === ctx.archivePath) {
+          return {
+            exists: true,
+            raw: '',
+            data: { session: ctx.archivedSession, events: ctx.archiveEvents, transcript: '', archivedAt: ctx.archivedSession.completedAt },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        return { exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }
+      })
+      api.config.listDir.mockResolvedValue({
+        ok: true,
+        error: null,
+        entries: [{ name: `${ctx.id}.json`, path: ctx.archivePath, isDirectory: false, isFile: true, mtimeMs: 0, size: 0 }],
+      })
+
+      // First pass: hydrate() loads the stale row from active-index.json
+      // (marking it index-backed), then hydrateArchived() heals it.
+      await usePromptSessions.getState().hydrate(ctx.cwd)
+      await usePromptSessions.getState().hydrateArchived(ctx.cwd)
+      await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
+      const callsAfterFirstPass = api.promptSessions.mergeActiveIndex.mock.calls.length
+      expect(usePromptSessions.getState().sessions[ctx.id].status).toBe('completed')
+
+      // Second pass over the same cwd, same (still-stale) disk mocks: the
+      // row is already status:'completed' in memory, so it must not be
+      // treated as stale again — no further merge write.
+      await usePromptSessions.getState().hydrate(ctx.cwd)
+      await usePromptSessions.getState().hydrateArchived(ctx.cwd)
+
+      expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalledTimes(callsAfterFirstPass)
+    })
+
+    it('leaves an index-backed Epic untouched when no archive exists on disk for it', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions, promptSessionActiveIndexPath } = await import('../promptSessions')
+      const ctx = setupStaleEpic()
+      ctx.indexPath = promptSessionActiveIndexPath(ctx.cwd)
+
+      api.config.readJson.mockImplementation(async (path: string) => {
+        if (path === ctx.indexPath) {
+          return {
+            exists: true,
+            raw: '',
+            data: { sessions: { [ctx.id]: ctx.staleSession }, events: { [ctx.id]: ctx.archiveEvents } },
+            parseError: null,
+            mtimeMs: 0,
+            error: null,
+          }
+        }
+        return { exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }
+      })
+      api.config.listDir.mockResolvedValue({ ok: true, error: null, entries: [] })
+
+      await usePromptSessions.getState().hydrate(ctx.cwd)
+      await usePromptSessions.getState().hydrateArchived(ctx.cwd)
+
+      expect(usePromptSessions.getState().sessions[ctx.id].status).toBe('active')
+      expect(api.promptSessions.mergeActiveIndex).not.toHaveBeenCalled()
+    })
   })
 })
 

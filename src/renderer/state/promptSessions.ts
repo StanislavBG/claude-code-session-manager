@@ -322,9 +322,17 @@ function hasPendingWrite(path: string): boolean {
   return (pendingWriteCounts.get(path) ?? 0) > 0
 }
 
-/** Fire-and-forget persist of a cwd's active-session slice — called after
- *  every mutation so a reload never loses in-progress work. Sends only THIS
- *  renderer's own in-memory contribution to the main-process merge IPC
+// Ids hydrate() has assigned into the store FROM the active-index disk read
+// (never ids created locally by a user action in this runtime, e.g.
+// createPromptSession). hydrateArchived() consults this to tell "stale
+// active-index row left behind by a partially-failed completion" (safe to
+// override with the archive) apart from "genuinely local unsaved state that
+// happens to share an id" (must never be overridden) — see its own comment.
+const indexBackedIds = new Set<string>()
+
+/** Persists a cwd's active-session slice — called after every mutation so a
+ *  reload never loses in-progress work. Sends only THIS renderer's own
+ *  in-memory contribution to the main-process merge IPC
  *  (lib/activeIndexMerge.cjs's mergeActiveIndex, over
  *  window.api.promptSessions.mergeActiveIndex) rather than doing a
  *  read-merge-write itself. Moved main-side (was a renderer-side
@@ -340,10 +348,18 @@ function hasPendingWrite(path: string): boolean {
  *  withPathLock instance ensureEpic already serializes through, closing that
  *  gap for real. `removedIds` is the ONLY way an id disappears from the
  *  written file (markCompleted/deleteEpic pass their own id there — the two
- *  entry points the domain model allows to erase a row). Best-effort: an IPC
- *  failure is logged, never thrown into the caller (createPromptSession and
- *  appendPromptSessionEvent are synchronous APIs their callers don't await).
- *  No-ops outside a renderer (tests that never stub window.api). */
+ *  entry points the domain model allows to erase a row).
+ *
+ *  The returned promise REJECTS on IPC failure (a `logs.write('warn')` still
+ *  records the trace first, for grepping) — it is no longer swallowed into a
+ *  silent resolve. Callers whose mutation must be durable before the UI
+ *  treats it as such (markCompleted/deleteEpic/approveProposed/renameEpic)
+ *  await this and roll their optimistic state back on rejection. Callers that
+ *  intentionally stay fire-and-forget (createPromptSession,
+ *  appendPromptSessionEvent, resumeArchived's own index write) must append
+ *  their own `.catch(() => {})` — the log line above is their only record of
+ *  failure, same as before this change. No-ops outside a renderer (tests that
+ *  never stub window.api). */
 function persistActiveIndex(
   cwd: string,
   sessions: Record<string, PromptSession>,
@@ -379,6 +395,7 @@ function persistActiveIndex(
       (err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
         api?.logs?.write('promptSessions', 'warn', `persistActiveIndex failed for ${cwd}: ${msg}`)
+        throw err instanceof Error ? err : new Error(msg)
       },
     )
     .finally(() => {
@@ -409,7 +426,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const sessions = { ...get().sessions, [session.id]: session }
     const events = { ...get().events, [session.id]: [firstEvent] }
     set({ sessions, events })
-    persistActiveIndex(cwd, sessions, events)
+    persistActiveIndex(cwd, sessions, events).catch(() => {})
     emitAuditEvent('epic_create', { cwd, epicId: session.id, source: source ?? 'unknown' })
     return session
   },
@@ -419,7 +436,22 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const approved: PromptSession = { ...session, status: 'active' }
     const sessions = { ...get().sessions, [promptSessionId]: approved }
     set({ sessions })
-    persistActiveIndex(session.cwd, sessions, get().events)
+    // Kept synchronous (not awaited/async) because every caller relies on
+    // getting the approved session back immediately to start its chat send
+    // in the same tick. The persist below still gets the honest-contract
+    // treatment: on rejection, roll the flip back to 'proposed' (unless
+    // something else already moved this Epic further, e.g. markCompleted)
+    // and toast — the row never keeps showing 'active' once we know disk
+    // doesn't have it.
+    const { title } = splitTitleAndGoal(session.goalText)
+    persistActiveIndex(session.cwd, sessions, get().events).catch((err: unknown) => {
+      const current = get().sessions[promptSessionId]
+      if (current && current.status === 'active') {
+        set({ sessions: { ...get().sessions, [promptSessionId]: { ...current, status: 'proposed' } } })
+      }
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(`Could not start "${title}" — ${msg}. Reopened for review.`)
+    })
     emitAuditEvent('epic_approve', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
     return approved
   },
@@ -454,7 +486,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const events = { ...get().events, [promptSessionId]: [...existing, fullEvent] }
     set({ events })
     const session = get().sessions[promptSessionId]
-    persistActiveIndex(session.cwd, get().sessions, events)
+    persistActiveIndex(session.cwd, get().sessions, events).catch(() => {})
     return fullEvent
   },
   markCompleted: async (promptSessionId, source) => {
@@ -473,23 +505,50 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     await window.api.chat.cancel(promptSessionId)
     window.api.pty.kill(session.claudeSessionId)
 
-    const tail = get().events[promptSessionId]?.slice(-1)[0] ?? null
+    const priorSession = session
+    const priorEvents = get().events[promptSessionId] ?? []
+    const { title } = splitTitleAndGoal(session.goalText)
+
+    const tail = priorEvents.slice(-1)[0] ?? null
     if (tail) {
       get().appendPromptSessionEvent(promptSessionId, {
         kind: 'closed',
         causedByEventId: tail.id,
       })
     }
+    // Captured AFTER the optimistic 'closed' append above, so a rollback can
+    // restore exactly this (pre-completion) event list.
+    const closedEventList = get().events[promptSessionId] ?? priorEvents
+    const eventsWithClosed = { ...get().events, [promptSessionId]: closedEventList }
 
     const now = new Date().toISOString()
     const completed: PromptSession = { ...session, status: 'completed', completedAt: now }
     const sessions = { ...get().sessions, [promptSessionId]: completed }
     set({ sessions })
+
+    // Undoes the optimistic status flip + 'closed' event append above,
+    // restoring the row disk actually still has, and tells the user why —
+    // the honest-contract requirement this PRD exists for.
+    const rollbackToOpen = (reason: string) => {
+      set({
+        sessions: { ...get().sessions, [promptSessionId]: priorSession },
+        events: { ...get().events, [promptSessionId]: priorEvents },
+      })
+      toast.error(`Could not mark "${title}" completed — ${reason}`)
+    }
+
     // Status flipped to 'completed' — persisting now drops it out of the
     // active index (which keeps everything not yet archived, i.e. 'active' and
     // 'proposed'). The explicit removedIds also strips it from disk even if
-    // another writer's row for this id is still sitting there stale.
-    persistActiveIndex(session.cwd, sessions, get().events, [promptSessionId])
+    // another writer's row for this id is still sitting there stale. Awaited:
+    // the completion isn't durable (and the UI shouldn't show it as such)
+    // until this lands.
+    try {
+      await persistActiveIndex(session.cwd, sessions, eventsWithClosed, [promptSessionId])
+    } catch (err) {
+      rollbackToOpen(err instanceof Error ? err.message : String(err))
+      throw err
+    }
     emitAuditEvent('epic_complete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
 
     let transcript = ''
@@ -521,12 +580,23 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
 
     const archive: PromptSessionArchive = {
       session: completed,
-      events: get().events[promptSessionId] ?? [],
+      events: get().events[promptSessionId] ?? closedEventList,
       transcript,
       archivedAt: now,
       ...(durableTurns ? { durableTurns } : {}),
     }
-    await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive, 'epics')
+    try {
+      await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive, 'epics')
+    } catch (err) {
+      rollbackToOpen(err instanceof Error ? err.message : String(err))
+      // The active-index write above already removed this Epic's row from
+      // disk (removedIds) — the archive that was meant to replace it just
+      // failed to land, so put the row back rather than leaving the Epic in
+      // neither place. Best-effort: any further failure here is already
+      // logged inside persistActiveIndex itself.
+      persistActiveIndex(priorSession.cwd, get().sessions, get().events).catch(() => {})
+      throw err
+    }
   },
   resumeArchived: async (archivedId, source) => {
     const archived = get().sessions[archivedId]
@@ -541,7 +611,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const linked: PromptSession = { ...proposed, resumedFromId: archivedId }
     const sessions = { ...get().sessions, [proposed.id]: linked }
     set({ sessions })
-    persistActiveIndex(linked.cwd, sessions, get().events)
+    persistActiveIndex(linked.cwd, sessions, get().events).catch(() => {})
     const approved = get().approveProposed(linked.id, resolvedSource)
     emitAuditEvent('epic_resume', { cwd: linked.cwd, epicId: linked.id, source: resolvedSource })
     return approved ?? linked
@@ -563,7 +633,15 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const renamed: PromptSession = { ...session, goalText }
     const sessions = { ...get().sessions, [promptSessionId]: renamed }
     set({ sessions })
-    await persistActiveIndex(session.cwd, sessions, get().events)
+    try {
+      await persistActiveIndex(session.cwd, sessions, get().events)
+    } catch (err) {
+      // Rolled back so a failed write never leaves the rename showing as
+      // durable. Rethrown (not toasted here) — every current caller of
+      // renameEpic already awaits it and toasts the rejection itself.
+      set({ sessions: { ...get().sessions, [promptSessionId]: session } })
+      throw err
+    }
   },
   duplicateEpic: async (promptSessionId, source) => {
     const sourceSession = get().sessions[promptSessionId]
@@ -603,12 +681,22 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (useEpicTerminal.getState().isAttached(promptSessionId)) {
       throw new Error('deleteEpic: this Epic has a live Terminal session attached — detach it first')
     }
-    const sessions = { ...get().sessions }
-    const events = { ...get().events }
+    const priorSessions = get().sessions
+    const priorEvents = get().events
+    const sessions = { ...priorSessions }
+    const events = { ...priorEvents }
     delete sessions[promptSessionId]
     delete events[promptSessionId]
     set({ sessions, events })
-    await persistActiveIndex(session.cwd, sessions, events, [promptSessionId])
+    try {
+      await persistActiveIndex(session.cwd, sessions, events, [promptSessionId])
+    } catch (err) {
+      // Rolled back so a failed write never leaves the Epic showing as
+      // deleted. Rethrown (not toasted here) — every current caller of
+      // deleteEpic already catches the rejection and toasts it itself.
+      set({ sessions: priorSessions, events: priorEvents })
+      throw err
+    }
     emitAuditEvent('epic_delete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
   },
   hydrate: async (cwd) => {
@@ -654,6 +742,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       for (const id of newIds) {
         sessions[id] = diskSessions[id]
         events[id] = diskEvents[id] ?? []
+        indexBackedIds.add(id)
         changed = true
       }
       for (const id of goneIds) {
@@ -696,11 +785,23 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       const sessions = { ...existingSessions }
       const events = { ...get().events }
       let changed = false
+      // Ids reconciled this pass: a stale row that hydrate() loaded from
+      // active-index.json (indexBackedIds) but which an archive file on disk
+      // proves was actually already completed — a partially-failed
+      // markCompleted that wrote its archive but never got to strip the
+      // active-index row (or crashed between the two). The archive is the
+      // newer, authoritative write in that case, so it wins here instead of
+      // leaving the Epic stuck showing "Open" forever.
+      const staleReconciled: string[] = []
       for (const entry of result.entries) {
         if (!entry.name.endsWith('.json') || entry.name === 'active-index.json') continue
         const id = entry.name.slice(0, -'.json'.length)
-        // In-memory state always wins over disk on id collision, same as hydrate().
-        if (sessions[id]) continue
+        const inMemory = sessions[id]
+        const isStaleActiveIndexRow = !!inMemory && inMemory.status !== 'completed' && indexBackedIds.has(id)
+        // In-memory state always wins over disk on id collision, same as
+        // hydrate() — UNLESS it's a stale active-index leftover (above),
+        // never a freshly-created local row that merely shares an id.
+        if (inMemory && !isStaleActiveIndexRow) continue
         const fileResult = await window.api.config.readJson(entry.path)
         if (!fileResult.exists || !fileResult.data) continue
         const archive = fileResult.data as Partial<PromptSessionArchive>
@@ -708,9 +809,21 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
         sessions[id] = { ...archive.session, status: 'completed' }
         events[id] = archive.events ?? []
         changed = true
+        if (isStaleActiveIndexRow) staleReconciled.push(id)
       }
       if (!changed) return
       set({ sessions, events })
+      // Strip the stale row(s) from active-index.json and record a removal
+      // tombstone through the SAME merge path markCompleted/deleteEpic use —
+      // no direct fs write. Fire-and-forget like every other reconciliation
+      // write in hydrate()/hydrateArchived(); the in-memory fix above is what
+      // the user sees immediately, and `sessions[id].status` is already
+      // 'completed' by the time this resolves (or a concurrent hydrateArchived
+      // call runs), so a repeat pass sees isStaleActiveIndexRow=false and
+      // never re-issues this write — one-shot without extra bookkeeping.
+      if (staleReconciled.length > 0) {
+        persistActiveIndex(cwd, sessions, events, staleReconciled).catch(() => {})
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       window.api?.logs?.write('promptSessions', 'warn', `hydrateArchived failed for ${cwd}: ${msg}`)

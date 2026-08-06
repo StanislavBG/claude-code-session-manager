@@ -374,10 +374,11 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
   const discard = (row: NeedsYouRow) => {
     if (!row.epicId || busyId) return
     setBusyId(row.id)
+    // markCompleted toasts and rolls its own state back on a rejected write.
     void usePromptSessions
       .getState()
       .markCompleted(row.epicId, 'Home needs-you discard')
-      .catch((err) => toast.error(`Could not discard: ${err instanceof Error ? err.message : String(err)}`))
+      .catch(() => {})
       .finally(() => { setBusyId(null); setOpenId(null) })
   }
 

@@ -1,27 +1,5 @@
 {
   "sessions": {
-    "psess-mscdnslc-10": {
-      "id": "psess-mscdnslc-10",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
-      "claudeSessionId": "f39691ff-11ba-4e3b-abf1-7e1fba7f3789",
-      "status": "active",
-      "createdAt": "2026-08-02T22:34:14.784Z",
-      "completedAt": null,
-      "tag": "build",
-      "agentType": "builder"
-    },
-    "psess-mscg8i3u-2": {
-      "id": "psess-mscg8i3u-2",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Explore the Agent Context and SubAgents\n\nToday the Epic initialization creates an agent that writes PRDs sometiems, then the PRDs get executed from independent sessions. What would be the change to get these session to subsession more close to eachother without violating the Scheduler role of metering sub-sessions effeceively",
-      "claudeSessionId": "bc97fbbb-9c20-47cd-8935-f8683ec5f983",
-      "status": "active",
-      "createdAt": "2026-08-02T23:46:20.202Z",
-      "completedAt": null,
-      "tag": "discussion",
-      "agentType": "architect"
-    },
     "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb": {
       "id": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -65,157 +43,183 @@
       "completedAt": null,
       "tag": "project-home-builder",
       "agentType": "project-home-builder"
+    },
+    "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2": {
+      "id": "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "tradelog\n\nstore\n\nReference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ldqma6uvbeo-image.png",
+      "claudeSessionId": "6bbd34e8-7bf4-4d01-84e2-2cf7b44db38a",
+      "status": "active",
+      "createdAt": "2026-08-04T22:44:25.529Z",
+      "completedAt": null,
+      "tag": "feature",
+      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 68)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: tradelog\n\nstore\n\nReference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ldqma6uvbeo-image.png",
+      "agentType": "architect",
+      "sections": [
+        {
+          "kind": "actor",
+          "label": "Actor",
+          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+          "source": "architect"
+        },
+        {
+          "kind": "injection",
+          "label": "General behaviour",
+          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
+          "source": "general-behavior"
+        },
+        {
+          "kind": "input",
+          "label": "Input",
+          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 68)"
+        },
+        {
+          "kind": "mission",
+          "label": "Mission",
+          "text": "You are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).",
+          "source": "feature"
+        },
+        {
+          "kind": "goal",
+          "label": "Goal",
+          "text": "Goal: tradelog\n\nstore"
+        },
+        {
+          "kind": "reference",
+          "label": "Reference",
+          "text": "Reference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ldqma6uvbeo-image.png",
+          "source": "/home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ldqma6uvbeo-image.png"
+        }
+      ]
+    },
+    "chat-mode-configurations-i-want-to-understand-ho-a4354025": {
+      "id": "chat-mode-configurations-i-want-to-understand-ho-a4354025",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Chat mode - Configurations\n\nI want to understand how does the communication between Session and Chat happens now and what type of dynamic configurations we can add to experiment with. I want to see more of summary not every message, but the avality of full message e.g. verbose should also stay, having 3 levels might be a good way to start and to undersrt how to surface future message better, handle confirmations anr other prompts",
+      "claudeSessionId": "ac767f48-3189-4bb6-afd8-4a1da95826ab",
+      "status": "active",
+      "createdAt": "2026-08-06T21:50:20.481Z",
+      "completedAt": null,
+      "tag": "feature",
+      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 70)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: Chat mode - Configurations\n\nI want to understand how does the communication between Session and Chat happens now and what type of dynamic configurations we can add to experiment with. I want to see more of summary not every message, but the avality of full message e.g. verbose should also stay, having 3 levels might be a good way to start and to undersrt how to surface future message better, handle confirmations anr other prompts",
+      "agentType": "architect",
+      "sections": [
+        {
+          "kind": "actor",
+          "label": "Actor",
+          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+          "source": "architect"
+        },
+        {
+          "kind": "injection",
+          "label": "General behaviour",
+          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
+          "source": "general-behavior"
+        },
+        {
+          "kind": "input",
+          "label": "Input",
+          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 70)"
+        },
+        {
+          "kind": "mission",
+          "label": "Mission",
+          "text": "You are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).",
+          "source": "feature"
+        },
+        {
+          "kind": "goal",
+          "label": "Goal",
+          "text": "Goal: Chat mode - Configurations\n\nI want to understand how does the communication between Session and Chat happens now and what type of dynamic configurations we can add to experiment with. I want to see more of summary not every message, but the avality of full message e.g. verbose should also stay, having 3 levels might be a good way to start and to undersrt how to surface future message better, handle confirmations anr other prompts"
+        }
+      ]
+    },
+    "epics-that-i-marked-as-completed-are-back-open-m-1087173e": {
+      "id": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Epics that I marked as Completed are back Open\n\nmultiple epics that i've arked as completed came back open. What can cause this ? I want to make sure that Session Manager UI makes direct data-changes to data state as it operates",
+      "claudeSessionId": "38294459-d6bf-46c4-a468-1fb24c483cd5",
+      "status": "active",
+      "createdAt": "2026-08-06T22:55:50.385Z",
+      "completedAt": null,
+      "tag": "bug",
+      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 71)\n\nYou are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is attached, read it and reproduce the failure before writing a fix — do not guess at root cause from the description alone. If nothing is attached, reproduce it yourself first.\n\nGoal: Epics that I marked as Completed are back Open\n\nmultiple epics that i've arked as completed came back open. What can cause this ? I want to make sure that Session Manager UI makes direct data-changes to data state as it operates",
+      "agentType": "architect",
+      "sections": [
+        {
+          "kind": "actor",
+          "label": "Actor",
+          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+          "source": "architect"
+        },
+        {
+          "kind": "injection",
+          "label": "General behaviour",
+          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
+          "source": "general-behavior"
+        },
+        {
+          "kind": "input",
+          "label": "Input",
+          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 71)"
+        },
+        {
+          "kind": "mission",
+          "label": "Mission",
+          "text": "You are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is attached, read it and reproduce the failure before writing a fix — do not guess at root cause from the description alone. If nothing is attached, reproduce it yourself first.",
+          "source": "bug"
+        },
+        {
+          "kind": "goal",
+          "label": "Goal",
+          "text": "Goal: Epics that I marked as Completed are back Open\n\nmultiple epics that i've arked as completed came back open. What can cause this ? I want to make sure that Session Manager UI makes direct data-changes to data state as it operates"
+        }
+      ]
+    },
+    "clicking-on-scheduler-gives-me-this-issue-someth-a06ee686": {
+      "id": "clicking-on-scheduler-gives-me-this-issue-someth-a06ee686",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Clicking on Scheduler gives me this issue\n\nsomething broke in this panel\nMinified React error #300; visit https://reactjs.org/docs/error-decoder.html?invariant=300 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.\nretry",
+      "claudeSessionId": "4fb44a0b-f96f-4e6d-b24d-9947de036eba",
+      "status": "active",
+      "createdAt": "2026-08-06T23:19:22.410Z",
+      "completedAt": null,
+      "tag": "bug",
+      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 72)\n\nYou are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is attached, read it and reproduce the failure before writing a fix — do not guess at root cause from the description alone. If nothing is attached, reproduce it yourself first.\n\nGoal: Clicking on Scheduler gives me this issue\n\nsomething broke in this panel\nMinified React error #300; visit https://reactjs.org/docs/error-decoder.html?invariant=300 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.\nretry",
+      "agentType": "architect",
+      "sections": [
+        {
+          "kind": "actor",
+          "label": "Actor",
+          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+          "source": "architect"
+        },
+        {
+          "kind": "injection",
+          "label": "General behaviour",
+          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
+          "source": "general-behavior"
+        },
+        {
+          "kind": "input",
+          "label": "Input",
+          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 72)"
+        },
+        {
+          "kind": "mission",
+          "label": "Mission",
+          "text": "You are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is attached, read it and reproduce the failure before writing a fix — do not guess at root cause from the description alone. If nothing is attached, reproduce it yourself first.",
+          "source": "bug"
+        },
+        {
+          "kind": "goal",
+          "label": "Goal",
+          "text": "Goal: Clicking on Scheduler gives me this issue\n\nsomething broke in this panel\nMinified React error #300; visit https://reactjs.org/docs/error-decoder.html?invariant=300 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.\nretry"
+        }
+      ]
     }
   },
   "events": {
-    "psess-mscdnslc-10": [
-      {
-        "id": "pevt-mscdnslc-11",
-        "promptSessionId": "psess-mscdnslc-10",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-02T22:34:14.784Z",
-        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscdnslc-11",
-        "text": "## Release report — v0.57.0 → v0.57.1\n\n**Build target:** npm registry, `claude-code-session-manager` (config confirmed at `session-manager-operations/architecture/build-target.json`, matches `package.json`).\n\n**Diff:** 3 commits since last published tag (`v0.57.0`):\n- `fix(scheduler): isolate queueHistory tests from live-app + real project state`\n- `docs(prompt-sessions): state explicit retention policy for archived Epics, attachments, transcripts`\n- `chore(ops): sync runtime state — PRD 949 landed, other concurrent Epic activity`\n\n**Bump:** patch (highest-severity commit was `fix:`; no `feat`/breaking).\n\n**Gate:** typecheck PASS, unit tests PASS (224 files / 2084 tests).\n\n**Publish:** isolated worktree (`/tmp/sm-publish-v0.57.1`, `git worktree add` from tag → `npm ci` → `npm run typecheck` → `npm publish`), then pushed `main` + tag `v0.57.1`, worktree removed.\n\n**Verified on registry:** `npm view` reports version `0.57.1`, dist-tag `latest → 0.57.1`.\n\nOther uncommitted runtime-state files (`active-index.json`, `brief.json`, transcript jsonl) were left untouched — never staged, per the isolated-worktree technique.",
-        "id": "pevt-mscdseiy-21",
-        "promptSessionId": "psess-mscdnslc-10",
-        "at": "2026-08-02T22:37:49.834Z"
-      }
-    ],
-    "psess-mscg8i3u-2": [
-      {
-        "id": "pevt-mscg8i3u-3",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-02T23:46:20.202Z",
-        "text": "Explore the Agent Context and SubAgents\n\nToday the Epic initialization creates an agent that writes PRDs sometiems, then the PRDs get executed from independent sessions. What would be the change to get these session to subsession more close to eachother without violating the Scheduler role of metering sub-sessions effeceively"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscg8i3u-3",
-        "text": "**Current state (confirmed in code):** Epic session (architect) mints its own `claudeSessionId` via `--session-id`/`--resume` (chatRunner.cjs:533-537). PRD jobs are deliberately isolated — `scheduler.cjs` spawns `claude -p` with a **fresh** `--session-id` (scheduler.cjs:2240/2590), and PRD_AUTHORING.md explicitly documents this as intentional: \"the PRD body MUST be self-contained — `claude -p` runs it on a fresh Sonnet session with NO conversation context\" (scheduler.cjs:2399).\n\n**Key finding:** the Scheduler's metering role (`sessionSlots.cjs`) is a pure process-count gate — \"may one more `claude -p` launch right now?\" — completely agnostic to whose session identity is being resumed. It doesn't care if a job is `--session-id <fresh>` or `--resume <existing>`. So changing session lineage for PRD jobs doesn't touch metering at all; those are genuinely orthogonal today.\n\n**Two directions, given that:**\n\n- **A — literal shared session** (`--resume <epicSessionId>` for PRD jobs): real continuity, but forces PRDs of one Epic to run serially (can't `--resume` the same session id concurrently), needs a new mutual-exclusion lock against the Epic's own interactive Chat/Terminal attachment (extends the existing \"mutually exclusive view attachment\" invariant to a third consumer), and pollutes one transcript with both architect discussion and dev-lead tool-call noise — undermining the \"self-contained PRD, judged on its own AC\" design that PRD_AUTHORING.md's stuck-job postmortems (fizzpop, etch-engine) actually lean on.\n\n- **B — richer linkage, same isolation** (recommended): keep PRD jobs on fresh, independent, parallelizable sessions, but stop treating the PRD file as the *only* thing dev-lead sees. Derive a condensed context digest from the Epic session's transcript (same AIM-framework spirit as `composeEpicIntake`/`summarizeGroundingBoard`) and prepend it to the PRD's opening prompt, and record provenance (`sourceSessionId`/turn-range) on the PRD so it's inspectable. This ge…",
-        "id": "pevt-mscg9rln-4",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-02T23:47:19.163Z"
-      },
-      {
-        "id": "3f13344a-b2bc-4e13-a781-41079ae553fc",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscg9rln-4",
-        "at": "2026-08-02T23:52:12.713Z",
-        "prdSlug": "950-epic-context-digest-builder"
-      },
-      {
-        "id": "509b9ce1-e667-4a1d-9a0c-9f456effc579",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "3f13344a-b2bc-4e13-a781-41079ae553fc",
-        "at": "2026-08-02T23:52:36.558Z",
-        "prdSlug": "951-wire-epic-digest-into-dispatch"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscg9rln-4",
-        "text": "Both PRDs are authored and queued to Epic `psess-mscg8i3u-2`, implementing direction B as an evolving 2-link chain:\n\n- **950-epic-context-digest-builder** (~15 min) — new `src/main/lib/epicContextDigest.cjs`, `buildContextDigest({ cwd, epicId, maxChars })`, reusing `promptSessionTranscript.cjs`'s `readTurns` and `epicMint.cjs`'s `readActiveIndex`. Bounded, best-effort, never throws, oldest-turn-first truncation. Standalone groundwork with its own unit tests.\n- **951-wire-epic-digest-into-dispatch** (~20 min, `dependsOn: [950-...]`) — prepends that digest into `scheduler.cjs`'s job `prompt` (the `parsed.body + FINISH_PROTOCOL` build site, ~line 2055-2062) only when `job.epicId` resolves via the existing `resolveOriginSessionId`; PRD body itself stays byte-for-byte unchanged (self-containment preserved); a digest failure is caught/logged and never blocks dispatch; persists `originSessionId` + new `contextDigestApplied` into the existing `meta.json` sidecar writes (~2265, ~2291) for provenance; updates `PRD_AUTHORING.md`. Confirms `sessionSlots.cjs` is untouched.\n\n`scheduler_list_jobs` currently returns empty — that's just the live-run queue, not a signal of failure; both PRDs are on disk and will be picked up by the scheduler's normal `when-available` polling. This is a one-shot headless turn, so I can't run the 30-minute tracking loop myself — you'll see them run in the Scheduler tab, or ask me again in a fresh turn to check status/verify against AC once they've landed.\n\nReady to move to the next topic — how Epics are created and schema-consistency enforcement — whenever you want to start it.",
-        "id": "pevt-mscggznr-5",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-02T23:52:56.199Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscggznr-5",
-        "text": "This screenshot is the New Epic card's \"advanced\" grounding board — `computeGroundingBoard` in `src/renderer/lib/groundingBoard.ts:69-155`. It's a read-only **inspector**, not a control (session-manager can't tell the `claude` CLI to skip a file it would discover anyway). Three columns mirror Claude Code's own config layering: **System < Project < Local**.\n\n## System — `~/.claude/` (home dir, machine-wide, every session)\n- **`CLAUDE.md`** — `~/.claude/CLAUDE.md`, your global preferences file (the one that imports `Agents/shared/core.md`). Read via `fileItem`; shows line count and a ~token estimate (chars/4).\n- **`settings.json`** — `~/.claude/settings.json`. Model/permissions/output-style config.\n- **`skills/`** — `~/.claude/skills/`, counted via `dirCountItem` (a dir listing, not content read — hence 0 tok estimate unless present).\n- **`agents/<name>.md`** — the chosen Agent Library persona's file (e.g. `agents/architect.md` in this screenshot). This one is `locked: true` in the code — it's the only System row that's *required* once an agent is selected, since it's literally the system prompt for the role. If no persona is chosen, this row instead reads \"no agent selected — default persona\".\n\n## Project — `<cwd>/` (checked into git, shared with collaborators)\n- **`CLAUDE.md`** — the project's own `CLAUDE.md` (this repo's, 172 lines per the screenshot).\n- **`.claude/skills/`** — project-local skill overrides, dir-counted same as System's.\n- **`mcp servers · N`** — count of keys in `~/.claude.json`'s `mcpServers` object (note: read from the *user*-level `.claude.json`, not a project file — the label lands in this column because MCP servers are effectively project-scoped in practice, listing the first 3 names as detail).\n- **`hooks · N`** — counted by `countHookRules`, which parses the *project's* `settings.json` (`projectSettingsPath`) and sums rule-array lengths across all hook event types.\n- **`Project brief`** — presence-checked at `<cwd>/session-manager-operation…",
-        "id": "pevt-mscgpfwk-6",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-02T23:59:30.500Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mscgpfwk-6",
-        "text": "## Schema consistency\n\n**No runtime schema exists for the `PromptSession` record itself, at any layer.**\n\n- `PromptSession` (`src/renderer/state/promptSessions.ts:29-76`) is a TS-only interface — compile-time, erased at runtime. Data read back from disk is `as`-cast, not parsed.\n- The IPC boundary (`ipcSchemas.cjs:217-248`, `promptSessionsMergeActiveIndex`) validates the **envelope** only — id charset/length, map size caps, prototype-pollution guard — but each session value is `z.unknown()`. `status`'s 3-value union, `tag`'s enum, `createdAt` format: none of it is checked on the wire.\n- Worse: **two independent code paths hand-construct the same record.** The renderer's New Epic flow (`promptSessions.ts:352-379`, `createPromptSession`) builds a `PromptSession` object literal directly and never touches `ensureEpic`. The CLI/scheduler path (`epicMint.cjs:216-351`, `ensureEpic`) builds a *different* object literal, with its own id scheme (`psess-<ts>-<seq>` vs `<slug>-<uuid8>`). They're kept in sync today by a doc comment (\"stay shape-compatible so `hydrate()` reading a main-written index round-trips it\") — convention, not enforcement.\n- `ensureEpic` does enforce one real invariant well: the born-`proposed` law is fail-closed (throws if a mint call passes any status but `proposed`, `epicMint.cjs:299-305`) — so *lifecycle* is actually protected. It's field *shape* that isn't.\n- Schema evolution so far = \"make the new field optional and tolerate its absence\" (`durableTurns`, `promptSessions.ts:85-91`) — never a real migration pass. `prdMigration.cjs` is a precedent for what a real one would look like; nothing equivalent exists for Epic records.\n\n**Net risk:** a future field added to one constructor and not the other silently drifts — no test, no schema, no IPC check would catch it. It'd surface as a blank UI cell or a `hydrate()` crash on read, not at write time.\n\n## Scale\n\n- `active-index.json` is **one flat, unsharded JSON file per project**, read-modify-written whole …",
-        "id": "pevt-mscgxzse-9",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-03T00:06:09.518Z"
-      },
-      {
-        "id": "0bcc1c20-a3ab-44a1-90bb-070701e4c3b0",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-mscgxzse-9",
-        "at": "2026-08-03T00:10:35.220Z",
-        "prdSlug": "952-promptsession-zod-schema-epicmint"
-      },
-      {
-        "id": "2654097d-bc3c-4991-96e3-98887f73b4a3",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "0bcc1c20-a3ab-44a1-90bb-070701e4c3b0",
-        "at": "2026-08-03T00:11:00.313Z",
-        "prdSlug": "953-promptsession-ipc-boundary-drift-test"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "2654097d-bc3c-4991-96e3-98887f73b4a3",
-        "text": "Both PRDs queued to Epic `psess-mscg8i3u-2`:\n\n- **952-promptsession-zod-schema-epicmint** (~18 min) — new `src/main/lib/promptSessionSchema.cjs` canonical zod schema matching the `PromptSession` TS interface (`promptSessions.ts:29-76`) exactly, wired into `ensureEpic`'s mint branch (`epicMint.cjs:309-329`) as a fail-closed check before every disk write, mirroring the existing born-proposed-law pattern.\n- **953-promptsession-ipc-boundary-drift-test** (~20 min, `dependsOn: [952-...]`) — wires the *same* schema into the IPC boundary (`ipcSchemas.cjs`'s `promptSessionsMergeActiveIndex`, currently `z.unknown()` per-session), closing the gap on the renderer's independent `createPromptSession` path. Also extracts that function's object-literal construction into a pure, testable builder and adds a cross-boundary regression test that asserts the renderer's real output validates against the same schema `ensureEpic` uses — this is the actual drift-detector: the two hand-written object literals get checked against one shared source of truth instead of staying in sync by doc-comment convention.\n\nDeliberately left out of scope for both (flagged inline so they don't get silently dropped): unifying the two different id-generation schemes, and retroactive migration/validation of already-written on-disk records — real follow-ups, but separate from closing the \"2x code paths, no schema\" gap you flagged.\n\nThis is a one-shot headless turn, so I can't run the tracking loop now — check the Scheduler tab, or ask me to verify against AC once 952 has landed (953 depends on it).",
-        "id": "pevt-msch4et4-13",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-03T00:11:08.920Z"
-      },
-      {
-        "id": "74ae7600-86f3-4724-8fe2-be40e20d5dd8",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "pevt-msch4et4-13",
-        "at": "2026-08-03T00:20:21.393Z",
-        "prdSlug": "954-epic-create-ipc-handler"
-      },
-      {
-        "id": "399be827-abee-42ad-b8f9-431e601ff186",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "74ae7600-86f3-4724-8fe2-be40e20d5dd8",
-        "at": "2026-08-03T00:21:00.534Z",
-        "prdSlug": "955-route-epic-create-through-ipc"
-      },
-      {
-        "id": "29c81b00-21c0-4800-bc29-646d1239eafb",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "kind": "prd_created",
-        "causedByEventId": "399be827-abee-42ad-b8f9-431e601ff186",
-        "at": "2026-08-03T00:21:15.440Z",
-        "prdSlug": "956-confirm-single-epic-construction"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msch4et4-13",
-        "text": "All three queued to Epic `psess-mscg8i3u-2`, chained off 952:\n\n- **954-epic-create-ipc-handler** (depends on 952) — additive-only `promptSessions:create-epic` IPC channel wrapping `ensureEpic` directly.\n- **955-route-epic-create-through-ipc** (depends on 954) — the actual consolidation: `createPromptSession` stops constructing its own record, becomes async, delegates to 954's handler; retires the second id scheme (`psess-<ts>-<seq>`) in favor of `ensureEpic`'s `<slug>-<uuid8>`; updates all real + test call sites in the same PRD (unavoidably wide, flagged as such).\n- **956-confirm-single-epic-construction** (depends on 955) — repoints 953's drift test into a \"no second constructor exists\" regression guard and fixes stale doc comments.\n\nFull chain now on disk: 950 → 951 (Epic-context digest), 952 → 953 → 954 → 955 → 956 (schema consolidation). This is a one-shot turn, so I can't track execution now — check the Scheduler tab, or ask me to verify against AC in a future turn once they've run.",
-        "id": "pevt-mschhkh0-20",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-03T00:21:22.788Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mschhkh0-20",
-        "text": "Confirmed: PRD 952 has fully landed and is wired into `ensureEpic`.\n\n## The Epic (`PromptSession`) JSON schema\n\nAs-built in `src/main/lib/promptSessionSchema.cjs` — a zod schema mirroring the TS `PromptSession` interface (`src/renderer/state/promptSessions.ts:29-76`) field-for-field, and now the single validated source of truth for every Epic `ensureEpic` mints (checked right before every disk write, `epicMint.cjs:342`):\n\n```js\nPromptSessionSchema = {\n  id: string,                          // required\n  cwd: string,                         // required\n  goalText: string,                    // required\n  claudeSessionId: string,             // required\n  status: 'proposed' | 'active' | 'completed',  // required\n  createdAt: string,                   // required\n  completedAt: string | null,          // required\n  resumedFromId?: string | null,       // optional\n  tag?: EpicTagSchema,                 // optional\n  openingPrompt?: string | null,       // optional\n  source?: EpicSourceSchema,           // optional\n  agentType?: string,                  // optional\n}\n\nEpicTagSchema = enum:\n  'feature' | 'bug' | 'discussion' | 'build' |\n  'project-home-builder' | 'bilko-host-publisher'\n\nEpicSourceSchema = {\n  producer: 'rca-hook' | 'feedback-sweep' | 'propose-epic' | 'scheduler-dispatch',  // required\n  prdSlug?: string,\n  runId?: string,\n  sourceTabId?: string,\n}\n```\n\nOne thing worth flagging: the executor found and documented (code comment, lines 17-23) that `EpicTagSchema`'s 6-value set is **deliberately distinct** from `ipcSchemas.cjs`'s PRD-tag enum (~line 349), which only covers 5 of these values and is missing `'bilko-host-publisher'` — a PRD-scheduling tag and an Epic-mission tag are related but not identical concepts, so it wasn't collapsed into one enum. Worth remembering if a future consolidation pass is tempted to merge them.\n\n`assertValidPromptSession(session)` throws a formatted `path: message` error list (not a raw ZodError dump) — this is what fires on a s…",
-        "id": "pevt-mschi938-21",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-03T00:21:54.692Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-mschi938-21",
-        "text": "Typecheck is clean. Here's what actually landed this session — all 7 PRDs (950-956), across two chains:\n\n## Chain 1 — Epic-context digest for scheduled PRDs\n- **950** (`ad7426e`) — `src/main/lib/epicContextDigest.cjs`: pure digest builder over an Epic's transcript + goalText, bounded, oldest-turn-drop truncation.\n- **951** (`e8197bc`) — wired into `scheduler.cjs`: digest prepended to every PRD job's `-p` prompt when `epicId` resolves; `originSessionId` + `contextDigestApplied` persisted to each run's `meta.json`; `PRD_AUTHORING.md` updated.\n\n## Chain 2 — Schema consolidation (952 → 956)\n- **952** (`7545ec0`) — canonical `promptSessionSchema.cjs`, enforced in `ensureEpic` (invalid shape → refused + `epic_mint_refused` audit event).\n- **953** (`54968e7`) — same schema enforced at the `mergeActiveIndex` IPC boundary (renderer's construction path), plus the cross-boundary drift test.\n- **954** (`d63ad21`) — additive `promptSessions:create-epic` IPC channel over `ensureEpic`.\n- **955** (`4585704` + `ba54269`) — **went further than scoped**, worth flagging explicitly: not only did `createPromptSession` become async and route through `ensureEpic` (retiring the `psess-<ts>-<seq>` id scheme, closing the duplicate-construction-path gap), the executor also implemented a **fail-closed single-creator law** — `ensureEpic()` is now join-only for every caller except `promptSessionsCreateEpic.cjs` (gated by a `MINT_AUTHORITY_NEW_EPIC_UI` token), and **removed the entire agent-facing proposal channel**: `/propose-epic`, `scripts/propose-epic.cjs`, and the RCA hook's/watchdog's auto-filed Epics (`rcaFeedbackHook.cjs` renamed to `rcaReport.cjs`, its auto-mint behavior stripped). This is a materially bigger change than what I wrote into the PRD text — it's a real architectural decision (no agent can silently create an Epic anymore, ever), not just a mechanical async conversion. It's now the documented invariant in this project's own CLAUDE.md.\n- **956** (`af83b53`) — repointed the 953 d…",
-        "id": "pevt-mscln22u-31",
-        "promptSessionId": "psess-mscg8i3u-2",
-        "at": "2026-08-03T02:17:37.350Z"
-      }
-    ],
     "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb": [
       {
         "id": "pevt-mscnr9oz-11",
@@ -456,6 +460,33 @@
         "id": "pevt-msdbi3al-2",
         "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
         "at": "2026-08-03T14:21:35.661Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msdbi3al-2",
+        "text": "You're right that they're stuck, and it's worse than I said last turn — I misread the timestamps.\n\n## What's actually wrong\n\nThose `startedAt` values are **UTC**. `996` and `997` started at **11:46 and 11:48 PM PDT — nearly 8 hours ago**, not 27 minutes. And `scheduler-machine.json`'s `lastRunAt` is `06:48:14Z` = 11:48 PM PDT, so **the scheduler tick loop hasn't run in 7h42m**.\n\nSo it isn't blocked behind ghost rows — the tick loop itself is wedged. It stopped at the exact moment `996` started. Nothing has polled, reaped, or dispatched since.\n\n## Why I can't fix it from here\n\n**The admin API — the purpose-built tool for this — is unreachable.** `scheduler_reset_job` exists precisely to reset a stuck job, and I should have reached for it last turn. But its credential file is stale:\n\n- `admin-api.json` says port **35071** → nothing listening\n- The app is actually listening on **35583** (verified via `ss`, bound by Electron PID 3285816)\n- The token in that file returns `401` against the real port\n- `admin-api.e2e.json` (port 44711) is stale too\n\nThat file was written at 11:45 PM, **3 minutes before the current app instance started at 11:48 PM** — it's a leftover from the previous instance that this one never overwrote. The live token exists only in the app's memory. That's a real bug worth fixing: every scheduler MCP tool depends on that file, so they're all pointing at a dead port.\n\n**And I can't restart the app** — I'm running as a child of Electron 3285816. Killing it terminates this session mid-turn, and you'd get no report of any of this.\n\n## What I did instead — the repair that survives the restart\n\nOn restart, `reconcile()` re-creates a queue row for **every `.md` still in a `prds/` dir**. Three of them were already shipped, so a restart would have silently re-run completed work — the exact duplicate-work hazard this Epic has been about. Archived them (`8b89d1b`, pushed):\n\n| PRD | Why archived |\n|---|---|\n| `997-finish-protocol-explicit-staging` | Landed in `aae…",
+        "id": "pevt-msdbv84l-3",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T14:31:48.453Z"
+      },
+      {
+        "id": "pevt-msdcqmqz-1",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "kind": "response",
+        "causedByEventId": "pevt-msdbv84l-3",
+        "at": "2026-08-03T14:56:13.739Z",
+        "text": "PRD 996-commit-guard-covers-zero-edit-runs finished: completed. Check Scheduler for details.",
+        "prdSlug": "996-commit-guard-covers-zero-edit-runs",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msdcqmqz-1",
+        "text": "**VERIFIED**\n\nA real commit landed in the run window and every criterion checks out against the working tree.\n\n**Run-window evidence (the check that catches the PRD 972 failure mode):**\n```\n$ git log --since=07:40 --format=\"%h %ad %s\"\ne815018 07:56:07 fix(scheduler): close the zero-edit commit-guard bypass (PRD 972 follow-up)\n```\nJob finished `14:56:11Z` = 07:56:11 PDT — the commit lands 4 seconds before the job ends, inside the window. Non-empty diff, so not the empty-diff shape.\n\n---\n\n**AC1 — dirty-tree precondition removed.** `scheduler.cjs:3118-3122`:\n```js\nconst after = await uncommittedChanges(guardCwd);\n// after === null means non-git cwd (or git errored) — best-effort skip,\n// same as always; only a git-status result (even an empty one) counts\nif (after !== null) {\n```\nWas `if (after && after.length > 0)`. An empty (clean) result now reaches the guard. ✅\n\n**AC2 — four defenses preserved.** `commitGuardVerdict` signature at `scheduler.cjs:2211`, guard at `:2212`:\n```js\nif (siblingRunning || jobSelfCommitted || legitimateNoOp) return null;\n```\nAll four intact (baseline delta via `newlyDirty` computed from `guardBaseline` at `:3123-3124`), each documented at `:2189-2194`. ✅\n\n**AC3 — fix-plan regression guard.** `scheduler.cjs:2214`: `if (dirty.length === 0 && isFixPlanJob) return null;` — and correctly scoped to the *zero-edit case only*. Test at `scheduler-commit-guard-noop.test.cjs:93` names the 523 incident, plus `:105` proves a fix-plan job that *did* leave dirt is still flagged. That second test is the one that matters — the exemption isn't a blanket pass. ✅\n\n**AC4 — COMPLETED_EQUIVALENT regression guard.** Test `:118`, \"legitimateNoOp covers the zero-edit case too\". ✅\n\n**AC5 — the PRD 972 shape.** Test `:78`, explicitly named \"must fail against pre-fix main\". New `silent_no_op` verdict at `:2223` → `needs_review`. ✅\n\n**AC6 — sibling-running defense tested.** Test `:134`, \"sibling running + zero-edit → no flag\", with the correct rationale that a concurrent…",
+        "id": "pevt-msdcsfkr-1",
+        "promptSessionId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
+        "at": "2026-08-03T14:57:37.755Z"
       }
     ],
     "not-enough-paralell-processing-why-i-never-see-3-6a96029e": [
@@ -594,6 +625,25 @@
         "id": "pevt-mscva8qh-8",
         "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
         "at": "2026-08-03T06:47:35.609Z"
+      },
+      {
+        "id": "pevt-msdd5cah-2",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "kind": "response",
+        "causedByEventId": "pevt-mscva8qh-8",
+        "at": "2026-08-03T15:07:40.025Z",
+        "text": "PRD 994-scheduler-job-worktree-isolation finished: completed. Check Scheduler for details.",
+        "prdSlug": "994-scheduler-job-worktree-isolation",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msdd5cah-2",
+        "text": "VERIFIED\n\n`git show --stat cca25cb` → **760 insertions across 5 files**, not an empty diff. `git merge-base --is-ancestor cca25cb HEAD` → **YES**, the work is in HEAD (HEAD *is* cca25cb).\n\n| # | Criterion | Verdict | Evidence |\n|---|---|---|---|\n| 1 | `spawnJob` creates worktree, runs child with it as cwd | ✅ | `scheduler.cjs:111` requires `jobWorktree.cjs`; `:2969` `createJobWorktree({cwd, slug})`; `:2260` `executeJob(..., execCwd)` → `:2268` `const spawnCwd = execCwd \\|\\| cwd` |\n| 2 | **LOAD-BEARING** — PRD/queue/logs stay on MAIN tree + test | ✅ | `scheduler.cjs:2263-2267` comment: *\"`cwd` stays the MAIN tree throughout — PRD lookup … key off this value, never the worktree. Only the spawned child's own process cwd (spawnCwd) may point at a job worktree\"*. Test at `scheduler-worktree-exec-cwd.test.cjs:63` — *\"spawns the child in execCwd (worktree) while resolving the PRD from job.cwd (main tree)\"* |\n| 3 | Removed after settle, `prune`, boot reconcile | ✅ | `jobWorktree.cjs:254` `cleanupJobWorktree`, `:259` `execGit(['worktree','prune'])`; `:288` `reconcileWorktreesOnBoot`, wired at `scheduler.cjs:4598` |\n| 4 | Commit integrated into base, or failure surfaced | ✅ | `jobWorktree.cjs:212` `integrateJobBranch` (ff-only, real merge fallback — header `:41-43`); failure path `scheduler.cjs:3007-3009` sets `worktreeIntegrationFailure`, surfaced as a job outcome at `:3171-3174` with branch preserved |\n| 5 | Commit guard works across worktree boundary + explicit test | ✅ | `jobWorktree.test.cjs:75` — *\"a commit made inside the worktree becomes visible on the main tree HEAD after integrateJobBranch\"*, asserting `headBefore` → `headAfter` (`:83-90`) |\n| 6 | Bounded disk: cap + documented estimate + fallback | ✅ | `jobWorktree.cjs:62-70` documents ~30–40 MB/worktree, <200 MB at cap; `DEFAULT_MAX_CONCURRENT_WORKTREES = 4` at `:72`; `:174` returns `{ok:false, reason:'worktree cap reached'}` → in-place fallback. Bonus: `:178-181` closes a TOCTOU race by reserving the slot synchro…",
+        "id": "pevt-msdd8q60-2",
+        "promptSessionId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+        "at": "2026-08-03T15:10:17.976Z"
       }
     ],
     "builder-check-git-vs-the-published-package-for-t-aa68de15": [
@@ -639,6 +689,172 @@
         "at": "2026-08-03T06:48:00.304Z",
         "text": "Generate this project's Project Pages (Home/Marketing/Feature/Architecture/Brief)."
       }
+    ],
+    "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2": [
+      {
+        "id": "pevt-msf8wl6n-3",
+        "promptSessionId": "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-04T22:44:25.529Z",
+        "text": "tradelog\n\nstore\n\nReference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ldqma6uvbeo-image.png"
+      },
+      {
+        "id": "0312a440-3185-47c3-9e16-3a5f093098f3",
+        "promptSessionId": "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-04T22:44:25.529Z",
+        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 68)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: tradelog\n\nstore\n\nReference: /home/bilko/Projects/session-manager/session-manager-operations/prompt-sessions/attachments/ldqma6uvbeo-image.png"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "0312a440-3185-47c3-9e16-3a5f093098f3",
+        "text": "You've hit your weekly limit · resets Aug 6, 10am (America/Los_Angeles)",
+        "id": "pevt-msf8wn96-4",
+        "promptSessionId": "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2",
+        "at": "2026-08-04T22:44:28.218Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msf8wn96-4",
+        "text": "You've hit your weekly limit · resets Aug 6, 10am (America/Los_Angeles)",
+        "id": "pevt-msf939im-5",
+        "promptSessionId": "tradelog-store-reference-home-bilko-projects-ses-0b1d78f2",
+        "at": "2026-08-04T22:49:37.006Z"
+      }
+    ],
+    "chat-mode-configurations-i-want-to-understand-ho-a4354025": [
+      {
+        "id": "pevt-msi1uqmd-13",
+        "promptSessionId": "chat-mode-configurations-i-want-to-understand-ho-a4354025",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-06T21:50:20.481Z",
+        "text": "Chat mode - Configurations\n\nI want to understand how does the communication between Session and Chat happens now and what type of dynamic configurations we can add to experiment with. I want to see more of summary not every message, but the avality of full message e.g. verbose should also stay, having 3 levels might be a good way to start and to undersrt how to surface future message better, handle confirmations anr other prompts"
+      },
+      {
+        "id": "547b782a-e27f-4d11-a01e-fe6d2a1acd26",
+        "promptSessionId": "chat-mode-configurations-i-want-to-understand-ho-a4354025",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-06T21:50:20.481Z",
+        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 70)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: Chat mode - Configurations\n\nI want to understand how does the communication between Session and Chat happens now and what type of dynamic configurations we can add to experiment with. I want to see more of summary not every message, but the avality of full message e.g. verbose should also stay, having 3 levels might be a good way to start and to undersrt how to surface future message better, handle confirmations anr other prompts"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "547b782a-e27f-4d11-a01e-fe6d2a1acd26",
+        "text": "Shipped and committed (`5ef7261`). Typecheck, `lint:selectors`, and the full unit suite (250 files / 2387 tests) are green.\n\n## How Session ↔ Chat communicates today\n\nAn Epic **is** one claude session; Chat is one of two views over it. Two independent streams feed the Discussion feed:\n\n**1. The live run channel** — `src/main/chatRunner.cjs` spawns `claude -p --output-format stream-json --verbose` (`--session-id` first time, `--resume` after) and broadcasts **seven** IPC channels to `state/chat.ts`:\n\n| channel | payload | meaning |\n|---|---|---|\n| `chat:run:queued` | `{position}` | waiting behind the FIFO lane |\n| `chat:run:started` | — | slot acquired, process up |\n| `chat:run:output` | `{delta}` | streamed text → `chat.stream` |\n| `chat:run:tool-use` | `{id,kind,label}` | → `chat.liveToolUses` |\n| `chat:run:complete` | `{finalMessage}` | lands as an assistant turn |\n| `chat:run:needs-input` | `{questions,raw}` | the `<<<SM_NEEDS_INPUT>>>` stop-signal → `question` turn with inline answer buttons |\n| `chat:run:error` / `:notice` | `{message,…}` | terminal / informational (MCP consent denial, 80%-of-kill-ceiling nudge) |\n\nConcurrency: one machine-wide `sessionSlots.cjs` pool, plus a per-tab renderer queue (`PromptTicket`) so a tab only ever has one run in flight.\n\n**2. The transcript feed** — `attachTranscriptFeed` tails the session's own JSONL and ingests **every line** as `role:'event'` turns (thinking blocks, `tool_result` payloads, attachment deltas, mode switches, usage…). `ChatTranscriptTurn.tsx`'s router is documented as *\"a router, never a filter\"* — it renders all of it, including kinds it's never heard of.\n\nThat combination is why the feed is loud: it's a faithful mirror of the whole session, with no reporting layer in between. That layer is what I built.\n\n## What I added\n\n**`lib/chatVerbosity.ts`** — pure, tested classification. `turnMinVerbosity(turn)` → the lowest level that shows it:\n\n- **Summary** — conversation only: your prompts, Claude's replies clam…",
+        "id": "pevt-msi25d59-14",
+        "promptSessionId": "chat-mode-configurations-i-want-to-understand-ho-a4354025",
+        "at": "2026-08-06T21:58:36.237Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msi25d59-14",
+        "text": "Done and committed (`c1a359a`). Typecheck, `lint:selectors`, and the full suite (251 files / 2398 tests, +11 new) are green.\n\n## What was actually causing it\n\nThat bubble in your screenshot isn't your prompt — it's `fullPrompt`. `chatRunner.cjs:524` builds:\n\n```js\nconst fullPrompt = STOP_SIGNAL_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + prompt;\n```\n\n~1,400 characters of fixed instruction blocks in front of every send. The durable exchange log (`recordExchange`) stores the **clean** `prompt` — so hydrated history was always fine. But the CLI's own JSONL records what it was actually *sent*, and `ingestTranscriptEvent` rebuilds user turns straight from that. So the transcript feed — the path that wins for any live/resumed session — was showing you the machine's words with yours at the bottom.\n\n## The fix\n\n**`lib/promptPreamble.ts`** — `splitInjectedPreamble(text)` → `{ preamble, blockKeys, body }`.\n\nThe renderer can't import a main-process `.cjs` (same constraint as `EpicTerminalPane`'s `resolveEpicModel`), and copying two full paragraphs would rot the first time either is reworded. So each block is anchored on its **first and last sentence only** — the parts carrying its identity — and the middle can drift freely.\n\nIt refuses to strip in three cases, all deliberately biased toward over-showing rather than eating your words:\n- a block's opening matches but its closing sentence is missing (truncated/reworded)\n- stripping would leave an **empty** bubble (prompt was boilerplate only)\n- the boilerplate appears anywhere but the very front — the cursor only moves forward, so quoting the preamble at the agent (exactly what you'd do to debug it) is never stripped\n\n**`src/main/__tests__/chat-preamble-anchors.test.cjs`** is the guard that makes the anchor indirection safe: it imports the **real** exported constants, composes the exact `fullPrompt`, and asserts the splitter recovers your sentence byte-for-byte. Reword either block's opening or closing line and CI fails loudly in…",
+        "id": "pevt-msi3psk7-17",
+        "promptSessionId": "chat-mode-configurations-i-want-to-understand-ho-a4354025",
+        "at": "2026-08-06T22:42:28.951Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msi3psk7-17",
+        "text": "Done and committed (`fede93e`). Typecheck, `lint:selectors`, and the full suite (252 files / 2413 tests) are green.\n\n## What I read from your message\n\n\"3,4,5\" and \"1,2 (most verbose)\" enumerates five positions with **1 = loudest** — so I expanded the dial from 3 levels to 5 rather than just re-tiering tools. Here's why that was necessary rather than optional: with only three levels, pulling tool cards out of Standard would have made Standard *identical* to Summary except for text clamping. A degenerate rung. The five-level ladder is what makes \"tools only at the top\" a coherent request.\n\n## The ladder\n\n| # | key | shows | tools |\n|---|---|---|---|\n| **1** | `raw` | everything — usage rollups, `last-prompt`/`ai-title` echoes, mode switches, attachment deltas, injected preamble inline | ✅ |\n| **2** | `detail` | the agent's working trace — `tool_use`, `tool_result`, thinking | ✅ |\n| **3** | `standard` | what **changed** — file diffs, queue ops, snapshots | ❌ |\n| **4** | `brief` | conversation only, replies in full | ❌ |\n| **5** | `summary` | conversation only, replies clamped | ❌ |\n\nEverything in your screenshot — the `usage` card, `tool_use`, `tool_result`, `last-prompt` — is now level 1–2 material. Default stays at 3.\n\nLevel 3 is deliberately not empty: `attachment/edited_text_file` event turns carry their own `DiffCard`, so at Standard you still see *what the agent changed to your code* without seeing *which tools it used to do it*. That's the distinction the level is built on.\n\nThe human numbering inverts the module's internal rank (low rank = quiet). That inversion lives in exactly one function, `levelNumber` — everything else compares ranks, so there's no second place for the two orderings to drift apart. The dial renders 1→5 left-to-right with the number in a small superscript and `Level N · Label — hint` in the tooltip.\n\n## One thing I changed my mind on mid-build\n\nGating tool strips at level 3 broke an existing `EpicDetail` test — and the failure was pointing …",
+        "id": "pevt-msi40z09-19",
+        "promptSessionId": "chat-mode-configurations-i-want-to-understand-ho-a4354025",
+        "at": "2026-08-06T22:51:10.521Z"
+      }
+    ],
+    "epics-that-i-marked-as-completed-are-back-open-m-1087173e": [
+      {
+        "id": "pevt-msi46yyd-8",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-06T22:55:50.385Z",
+        "text": "Epics that I marked as Completed are back Open\n\nmultiple epics that i've arked as completed came back open. What can cause this ? I want to make sure that Session Manager UI makes direct data-changes to data state as it operates"
+      },
+      {
+        "id": "07e3f291-0608-406a-bb45-76ac6278b2ec",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-06T22:55:50.385Z",
+        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 71)\n\nYou are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is attached, read it and reproduce the failure before writing a fix — do not guess at root cause from the description alone. If nothing is attached, reproduce it yourself first.\n\nGoal: Epics that I marked as Completed are back Open\n\nmultiple epics that i've arked as completed came back open. What can cause this ? I want to make sure that Session Manager UI makes direct data-changes to data state as it operates"
+      },
+      {
+        "id": "9af588bc-f72c-481b-8aa4-ddc60719003c",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "prd_created",
+        "causedByEventId": "07e3f291-0608-406a-bb45-76ac6278b2ec",
+        "at": "2026-08-06T23:01:16.761Z",
+        "prdSlug": "998-fix-silent-epic-write-rejection-register-a-project-root-befo"
+      },
+      {
+        "id": "50d92e71-1554-40e2-8142-fc049c42b171",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "prd_created",
+        "causedByEventId": "9af588bc-f72c-481b-8aa4-ddc60719003c",
+        "at": "2026-08-06T23:01:31.014Z",
+        "prdSlug": "999-never-report-an-epic-completed-when-its-write-failed-await-t"
+      },
+      {
+        "id": "673bbe00-e078-47f5-902e-8f32e7c732ef",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "prd_created",
+        "causedByEventId": "50d92e71-1554-40e2-8142-fc049c42b171",
+        "at": "2026-08-06T23:01:49.598Z",
+        "prdSlug": "1000-archive-wins-over-a-stale-active-index-row-reconcile-resurre"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "673bbe00-e078-47f5-902e-8f32e7c732ef",
+        "text": "## Root cause (confirmed from runtime logs, not inferred)\n\n**Every Epic write to disk is being rejected by the write-boundary check, and the UI never tells you.**\n\n`~/.config/claude-code-session-manager/logs/session-manager-2026-08-06.log`:\n\n```\n[21:43:10.313Z] [WARN] [promptSessions] persistActiveIndex failed for /home/bilko/Projects/session-manager:\n  Error: Write outside allowed write boundaries: .../prompt-sessions/active-index.json\n```\n— 16 such lines at 21:43, 15 more at 22:52–22:55, plus one for `social-signals-trader`.\n\nThe chain:\n\n1. `src/main/config.cjs:67` — `allowedRoots = new Set([os.homedir()])`. `validateWrite` **skips the homedir root** (`if (root === os.homedir()) continue`, line 113), so the per-project `prompt-sessions/` write grant at lines 139–147 only applies to a root explicitly added via `addAllowedRoot()`.\n2. `addAllowedRoot` has exactly three callers: `pty.cjs:99` (pty spawn), `lib/prdCreate.cjs:155`, `projectBrief.cjs:239`. **The Epic persistence path never registers the cwd.** So on a cold boot, until you spawn a terminal or create a PRD in that project, every `active-index.json` write *and* every archive write is denied. Registration is in-memory — the app restarted 22:52:08 (v0.60.0 → v0.61.0) and the grant was lost again.\n3. `markCompleted` (`state/promptSessions.ts`) fires `persistActiveIndex` **un-awaited**, and `persistActiveIndex` converts the rejection into a `logs.write('warn')` that nothing surfaces. The archive `writeJson` then also rejects into a `void`-discarded promise at `EpicDetail.tsx:644`. The row disappears from Open in memory → looks completed → nothing hit disk.\n4. On reload, `hydrate()` reads the still-present index row as `active`, and `hydrateArchived()` skips it (`if (sessions[id]) continue`) — so even where an archive *does* exist, it's never read. Permanently Open, no self-healing.\n\nEvidence it's exactly this, not a merge/tombstone race: the audit log shows you completed the same 7 Epics twice today (21:43 and 2…",
+        "id": "pevt-msi4f6o5-9",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "at": "2026-08-06T23:02:13.637Z"
+      },
+      {
+        "id": "pevt-msi4n8tu-1",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "response",
+        "causedByEventId": "pevt-msi4f6o5-9",
+        "at": "2026-08-06T23:08:29.682Z",
+        "text": "PRD 998-fix-silent-epic-write-rejection-register-a-project-root-befo finished: completed. Check Scheduler for details.",
+        "prdSlug": "998-fix-silent-epic-write-rejection-register-a-project-root-befo",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "id": "pevt-msi524gp-2",
+        "promptSessionId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+        "kind": "response",
+        "causedByEventId": "pevt-msi4n8tu-1",
+        "at": "2026-08-06T23:20:03.865Z",
+        "text": "PRD 999-never-report-an-epic-completed-when-its-write-failed-await-t finished: completed. Check Scheduler for details.",
+        "prdSlug": "999-never-report-an-epic-completed-when-its-write-failed-await-t",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      }
+    ],
+    "clicking-on-scheduler-gives-me-this-issue-someth-a06ee686": [
+      {
+        "id": "pevt-msi518h8-13",
+        "promptSessionId": "clicking-on-scheduler-gives-me-this-issue-someth-a06ee686",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-06T23:19:22.410Z",
+        "text": "Clicking on Scheduler gives me this issue\n\nsomething broke in this panel\nMinified React error #300; visit https://reactjs.org/docs/error-decoder.html?invariant=300 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.\nretry"
+      },
+      {
+        "id": "fcc4b6d8-cf67-4ee2-acb0-50ab4781a6dc",
+        "promptSessionId": "clicking-on-scheduler-gives-me-this-issue-someth-a06ee686",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-06T23:19:22.410Z",
+        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 72)\n\nYou are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is attached, read it and reproduce the failure before writing a fix — do not guess at root cause from the description alone. If nothing is attached, reproduce it yourself first.\n\nGoal: Clicking on Scheduler gives me this issue\n\nsomething broke in this panel\nMinified React error #300; visit https://reactjs.org/docs/error-decoder.html?invariant=300 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.\nretry"
+      }
     ]
   },
   "tombstones": {
@@ -662,6 +878,9 @@
     "psess-msckxplj-24": "2026-08-03T06:46:18.660Z",
     "psess-msch6x36-16": "2026-08-03T06:46:24.727Z",
     "psess-mscgxoqw-7": "2026-08-03T06:46:27.300Z",
-    "session-chat-conversion-into-simplified-chat-so--7cda6827": "2026-08-03T06:46:29.986Z"
+    "session-chat-conversion-into-simplified-chat-so--7cda6827": "2026-08-03T06:46:29.986Z",
+    "builder-check-git-vs-the-published-package-for-t-818a8a6e": "2026-08-06T21:48:41.254Z",
+    "psess-mscdnslc-10": "2026-08-06T23:16:37.589Z",
+    "psess-mscg8i3u-2": "2026-08-06T23:16:37.589Z"
   }
 }

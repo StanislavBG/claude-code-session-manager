@@ -1,94 +1,33 @@
 {
   "jobs": [
     {
-      "slug": "997-finish-protocol-explicit-staging",
-      "title": "Drop `git add -A` from the finish protocol — it sweeps concurrent jobs' work into the wrong commit",
+      "slug": "1000-archive-wins-over-a-stale-active-index-row-reconcile-resurre",
+      "title": "Archive wins over a stale active-index row: reconcile resurrected Epics at hydrate",
       "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 997,
-      "estimateMinutes": 30,
-      "sourcePromptId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
+      "parallelGroup": 1000,
+      "estimateMinutes": 40,
+      "sourcePromptId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
       "sourceTabId": null,
-      "epicId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
-      "dependsOn": [],
-      "originSessionId": "b9f9b845-a29a-4bfd-b558-79f065a65fff",
-      "bodyPreview": "# Goal\n\nThe scheduler finish protocol instructs every job to run `git add -A && git commit` (scheduler.cjs:198, restated in lib/rcaReport.cjs:84). That was safe when one job ran per project. It is not safe now that the queue can run several jobs in one working tree: whichever job commits first sweeps every sibling's in-flight edits into its own commit, mis-attributing the work and making both jobs' verdicts unreliable. Observed twice on 2026-08-02: a commit had to be hand-staged to six explicit paths to avoid capturing a concurrent job's half-written renderer files, and PRD 986's implementation was found sitting uncommitted in the tree while 986 was already archived `completed`. Replace the blanket add with explicit staging of the files the job actually changed.\n\n# Acceptance criteria\n",
+      "epicId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
+      "dependsOn": [
+        "998-fix-silent-epic-write-rejection-register-a-project-root-befo"
+      ],
+      "originSessionId": "38294459-d6bf-46c4-a468-1fb24c483cd5",
+      "bodyPreview": "# Goal\n\nOnce an Epic has an archive file on disk AND a leftover row in active-index.json, it is shown Open forever with no self-healing path: hydrate() loads the active-index row as status 'active', and hydrateArchived() then skips it outright (`if (sessions[id]) continue`), so the archive is never read. Two Epics in this repo are in exactly that state right now (psess-mscdnslc-10, psess-mscg8i3u-2 — both archived 2026-08-03 with status 'completed', both still listed as 'active' in active-index.json with no tombstone). Make the archive authoritative so a partially-failed completion heals itself on the next load instead of demanding the user re-complete the Epic forever.\n\n# Acceptance criteria\n",
       "status": "running",
-      "runId": "2026-08-03T06-46-10-973Z",
-      "startedAt": "2026-08-03T06:46:11.483Z",
+      "runId": "2026-08-06T23-08-30-255Z",
+      "startedAt": "2026-08-06T23:08:30.538Z",
       "finishedAt": null,
       "exitCode": null,
       "error": null,
-      "sessionId": "cd5817ba-9d94-4786-8085-3c9d90bb92b0",
+      "sessionId": "38f7a885-c9ff-41dc-b6dc-657430275558",
       "runtime": {
-        "pid": 3280565,
-        "runId": "2026-08-03T06-46-10-973Z",
-        "startedAt": "2026-08-03T06:46:11.483Z",
-        "sessionId": "cd5817ba-9d94-4786-8085-3c9d90bb92b0",
+        "pid": 247776,
+        "runId": "2026-08-06T23-08-30-255Z",
+        "startedAt": "2026-08-06T23:08:30.538Z",
+        "sessionId": "38f7a885-c9ff-41dc-b6dc-657430275558",
         "cwd": "/home/bilko/Projects/session-manager"
       }
-    },
-    {
-      "slug": "996-commit-guard-covers-zero-edit-runs",
-      "title": "The commit guard skips zero-edit runs — remove its dirty-tree precondition",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 996,
-      "estimateMinutes": 45,
-      "sourcePromptId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
-      "sourceTabId": null,
-      "epicId": "prd-to-epic-communication-this-seems-to-be-broke-dd52dacb",
-      "dependsOn": [],
-      "originSessionId": "4d5ad773-6991-49be-9549-322afea56aa7",
-      "bodyPreview": "# Goal\n\nThis is the half of PRD 983 that was deliberately NOT implemented in commit aa482d1 — 983 fixed the self-heal path that actually caused the PRD 972 false green, and left this latent hole open rather than rushing a riskier change. The commit guard in `spawnJob` is wrapped in `const after = await uncommittedChanges(guardCwd); if (after && after.length > 0)`, so it only ever runs when the working tree is DIRTY. A run that exits 0, commits nothing, and leaves NO newly-dirty files — the strongest possible silent-no-op signal, and exactly PRD 972's shape — bypasses `commitGuardVerdict` entirely. Close the hole without regressing the honest no-ops the guard's four existing defenses protect.\n\n# Acceptance criteria\n",
-      "status": "running",
-      "runId": "2026-08-03T06-48-17-640Z",
-      "startedAt": "2026-08-03T06:48:19.033Z",
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null,
-      "sessionId": "7ab9b274-bea5-4e83-b7dd-d936a8f1f7f0"
-    },
-    {
-      "slug": "994-scheduler-job-worktree-isolation",
-      "title": "Run each scheduler job in its own git worktree so concurrent jobs cannot corrupt each other",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 994,
-      "estimateMinutes": 90,
-      "sourcePromptId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
-      "sourceTabId": null,
-      "epicId": "not-enough-paralell-processing-why-i-never-see-3-6a96029e",
-      "dependsOn": [
-        "finish-protocol-explicit-staging"
-      ],
-      "originSessionId": "b9f9b845-a29a-4bfd-b558-79f065a65fff",
-      "bodyPreview": "# Goal\n\nNow that the queue genuinely runs 4-5 jobs wide in one project, N headless agents edit ONE working tree simultaneously. Three concrete failures were observed live on 2026-08-02 with only TWO concurrent writers: a full test run showed 8 failures caused entirely by another job's half-written renderer files; a commit had to be hand-staged to avoid sweeping that job's work in; and one commit was silently rewritten to a new SHA by a concurrent rebase. Give each job its own `git worktree` checkout so its edits, its typecheck/test runs, and its commit are isolated — the same pattern this project already uses for npm publish (\"publish from an isolated git worktree, never the live working directory\") and that the Agent tool exposes as `isolation: worktree`.\n\n# Acceptance criteria\n",
-      "status": "pending",
-      "runId": null,
-      "startedAt": null,
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null
-    },
-    {
-      "slug": "963-nav-consolidate-home-scoped-config",
-      "title": "Consolidate substrate config tabs onto Home face only — no Project-face Settings duplication",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 963,
-      "estimateMinutes": 40,
-      "sourcePromptId": "psess-msckxplj-24",
-      "sourceTabId": null,
-      "epicId": "psess-msckxplj-24",
-      "dependsOn": [
-        "agent-model-nav-consolidation"
-      ],
-      "originSessionId": "473a7285-6dc5-4ade-a2a6-6ce1a9513747",
-      "bodyPreview": "# Goal\n\nSystem Prompt, Skills, MCP Servers, Hooks, Permissions, and Settings (lib/navGroups.ts NAV_ITEMS) are all System/Project/Local settings.json-or-sibling-file editors — legitimately Machine/Project-wide substrate, never per-Epic (established earlier in this Epic). All six currently have `faces: BOTH`, duplicating them onto the Project face's left-nav even though Plugins/Keybindings/Remote/Agent Library/Tag Library — the same category of machine-wide config — are already `faces: HOME` only. Home's left-nav exists precisely so Project-face navigation doesn't need its own separate Settings-shaped entries; consolidate these six onto Home only, matching the existing precedent, without breaking Project-scope editing (which resolves via the active tab's cwd, independent of navFace — see lib/navFace.ts's documented navFace/activeTabId separation).\n\n# Acceptance criteria\n",
-      "status": "completed",
-      "runId": "2026-08-03T02-30-33-039Z",
-      "startedAt": "2026-08-03T02:30:33.218Z",
-      "finishedAt": "2026-08-03T03:13:13.991Z",
-      "exitCode": 0,
-      "error": null,
-      "sessionId": "d239f72e-e23c-403f-97c2-c1e9d7f4f30e"
     }
   ]
 }

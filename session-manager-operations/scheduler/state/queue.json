@@ -1,33 +1,3 @@
 {
-  "jobs": [
-    {
-      "slug": "1000-archive-wins-over-a-stale-active-index-row-reconcile-resurre",
-      "title": "Archive wins over a stale active-index row: reconcile resurrected Epics at hydrate",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "parallelGroup": 1000,
-      "estimateMinutes": 40,
-      "sourcePromptId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
-      "sourceTabId": null,
-      "epicId": "epics-that-i-marked-as-completed-are-back-open-m-1087173e",
-      "dependsOn": [
-        "998-fix-silent-epic-write-rejection-register-a-project-root-befo"
-      ],
-      "originSessionId": "38294459-d6bf-46c4-a468-1fb24c483cd5",
-      "bodyPreview": "# Goal\n\nOnce an Epic has an archive file on disk AND a leftover row in active-index.json, it is shown Open forever with no self-healing path: hydrate() loads the active-index row as status 'active', and hydrateArchived() then skips it outright (`if (sessions[id]) continue`), so the archive is never read. Two Epics in this repo are in exactly that state right now (psess-mscdnslc-10, psess-mscg8i3u-2 — both archived 2026-08-03 with status 'completed', both still listed as 'active' in active-index.json with no tombstone). Make the archive authoritative so a partially-failed completion heals itself on the next load instead of demanding the user re-complete the Epic forever.\n\n# Acceptance criteria\n",
-      "status": "running",
-      "runId": "2026-08-06T23-08-30-255Z",
-      "startedAt": "2026-08-06T23:08:30.538Z",
-      "finishedAt": null,
-      "exitCode": null,
-      "error": null,
-      "sessionId": "38f7a885-c9ff-41dc-b6dc-657430275558",
-      "runtime": {
-        "pid": 247776,
-        "runId": "2026-08-06T23-08-30-255Z",
-        "startedAt": "2026-08-06T23:08:30.538Z",
-        "sessionId": "38f7a885-c9ff-41dc-b6dc-657430275558",
-        "cwd": "/home/bilko/Projects/session-manager"
-      }
-    }
-  ]
+  "jobs": []
 }

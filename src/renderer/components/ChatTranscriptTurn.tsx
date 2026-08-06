@@ -10,6 +10,7 @@ import { renderChatMarkdown } from '../lib/renderChatMarkdown'
 import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { clampTurnText } from '../lib/chatVerbosity'
+import { splitInjectedPreamble, describeInjectedBlocks } from '../lib/promptPreamble'
 import { formatAgo } from '../lib/formatTime'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 import { InlineConsentTerminal } from './InlineConsentTerminal'
@@ -977,6 +978,7 @@ export function Turn({
   needsDecisionStyle = false,
   precedingUserPrompt,
   clampBodyChars = null,
+  injectedPreamble = 'shown',
   onQuote,
 }: {
   turn: ChatTurn
@@ -1030,6 +1032,16 @@ export function Turn({
    *  ignored for question/notice/error turns — a turn that is asking the
    *  human something is never abbreviated. */
   clampBodyChars?: number | null
+  /** 'hidden' collapses chatRunner's own injected instruction blocks
+   *  (lib/promptPreamble.ts) out of a USER bubble, leaving a tiny ≡ glyph
+   *  that expands them in place. Default 'shown' = today's behavior, i.e.
+   *  the raw prompt exactly as the CLI recorded it — every caller except
+   *  EpicDetail below 'verbose' verbosity. Purely presentational: the turn's
+   *  own `text` is never rewritten, so the raw footer's Copy/Show-raw still
+   *  yield the byte-exact prompt that was sent. (Quote deliberately narrows
+   *  to the human's own words — quoting boilerplate back at the agent is
+   *  never what's wanted.) */
+  injectedPreamble?: 'shown' | 'hidden'
   /** Shows a hover "Quote" button on this turn that calls onQuote(turn.text)
    *  when clicked — omitted (no button rendered) when not passed, so callers
    *  with no reply-context affordance (Terminal transcript, raw session view)
@@ -1058,6 +1070,9 @@ export function Turn({
   // Summary re-collapses turns they had expanded under the previous level.
   const [bodyExpanded, setBodyExpanded] = useState(false)
   useEffect(() => { setBodyExpanded(false) }, [clampBodyChars])
+  // Same reset discipline for the user bubble's injected-preamble disclosure.
+  const [preambleOpen, setPreambleOpen] = useState(false)
+  useEffect(() => { setPreambleOpen(false) }, [injectedPreamble])
   const onConsentGranted = useCallback(() => {
     toast.info('Consent granted — you can retry the run now.')
     setConsentExpanded(false)
@@ -1071,19 +1086,57 @@ export function Turn({
   }, [turn.role, presentation, turn.text, clampBodyChars, bodyExpanded])
 
   if (turn.role === 'user') {
+    // chatRunner prepends ~1.4k chars of fixed instruction blocks to every
+    // prompt; the CLI's JSONL records them, so the transcript-derived user
+    // turn is mostly boilerplate with the human's sentence at the bottom.
+    // Split it out for display only — `turn.text` is untouched, so Quote and
+    // the raw footer still carry the exact prompt that was sent.
+    const split = injectedPreamble === 'hidden' ? splitInjectedPreamble(turn.text) : null
+    const hasPreamble = !!split?.preamble
+    const shownText = hasPreamble && !preambleOpen ? split!.body : turn.text
     return (
       <div className="group grid justify-items-end gap-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10.5px] text-fg-faint">you · {formatAgo(turn.at, Date.now())}</span>
+          {hasPreamble && (
+            <button
+              type="button"
+              onClick={() => setPreambleOpen((o) => !o)}
+              data-testid="chat-turn-preamble-toggle"
+              aria-expanded={preambleOpen}
+              aria-label={
+                preambleOpen
+                  ? 'Hide the Session-Manager instructions prepended to this prompt'
+                  : 'Show the Session-Manager instructions prepended to this prompt'
+              }
+              title={`${preambleOpen ? 'Hide' : 'Show'} the ${describeInjectedBlocks(split!.blockKeys)} ` +
+                'instructions Session-Manager prepended to this prompt'}
+              className={`rounded border px-1 font-mono text-[10px] leading-[14px] ${
+                preambleOpen ? 'border-line bg-hi text-fg-dim' : 'border-transparent text-fg-faint hover:border-line hover:text-fg-dim'
+              }`}
+            >
+              ≡
+            </button>
+          )}
           <AttributionChips attribution={turn.attribution} />
         </div>
+        {hasPreamble && preambleOpen && (
+          <div
+            data-testid="chat-turn-preamble"
+            className="max-w-[80%] whitespace-pre-wrap break-words rounded-lg border border-dashed border-rule px-3 py-2 font-mono text-[11px] leading-relaxed text-fg-faint"
+          >
+            {split!.preamble}
+          </div>
+        )}
         <div className="max-w-[80%] break-words rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
-          {turn.text}
+          {shownText}
         </div>
         {onQuote && (
           <button
             type="button"
-            onClick={() => onQuote(turn.text)}
+            // Quote the HUMAN's words, never the injected boilerplate — the
+            // raw footer below still exposes the byte-exact sent prompt.
+            onClick={() => onQuote(split?.body ?? turn.text)}
             data-testid="chat-turn-quote"
             title="Quote this message in your reply"
             aria-label="Quote this message"

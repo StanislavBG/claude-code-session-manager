@@ -54,6 +54,83 @@ function assistantTurn() {
 
 const base = { cwd: '/tmp/proj', tabId: 'tab-1', sessionId: 'sess-1' }
 
+const PREAMBLE =
+  'IMPORTANT: First deliver everything you CAN answer or produce right now — findings, the ' +
+  'requested content, work already completed — as normal output. Only THEN, if something still ' +
+  'blocks you from finishing, end your turn by emitting, as the very last line, exactly:\n' +
+  '<<<SM_NEEDS_INPUT>>>\nfollowed on the next line by a single-line JSON object. ' +
+  'Otherwise complete the task and end with a concise summary of what you did.\n\n'
+const HUMAN = 'Review the Alpaca limits and report back.'
+
+describe('Turn — injectedPreamble disclosure', () => {
+  beforeEach(() => installWindowApiMock())
+  afterEach(() => {
+    if (root && container) {
+      act(() => root!.unmount())
+      container.remove()
+    }
+    container = null
+    root = null
+    delete (window as unknown as { api?: unknown }).api
+  })
+
+  const userTurn = () => ({ id: 'u-1', role: 'user' as const, text: PREAMBLE + HUMAN, at: Date.now() })
+
+  it("CORE: 'hidden' shows only the human's words behind a ≡ toggle, and restores in place", async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const el = mount(createElement(Turn, { turn: userTurn(), ...base, injectedPreamble: 'hidden' } as any))
+
+    expect(el.textContent).toContain(HUMAN)
+    expect(el.textContent).not.toContain('IMPORTANT: First deliver everything')
+    expect(el.querySelector('[data-testid="chat-turn-preamble"]')).toBeFalsy()
+
+    const toggle = el.querySelector('[data-testid="chat-turn-preamble-toggle"]') as HTMLButtonElement
+    expect(toggle).toBeTruthy()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    act(() => toggle.click())
+    expect(el.querySelector('[data-testid="chat-turn-preamble"]')!.textContent).toContain(
+      'IMPORTANT: First deliver everything',
+    )
+    expect(el.textContent).toContain(HUMAN)
+  })
+
+  it("EDGE: 'shown' (the default for every non-Epic caller) renders the raw prompt with no toggle", async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const el = mount(createElement(Turn, { turn: userTurn(), ...base } as any))
+    expect(el.querySelector('[data-testid="chat-turn-preamble-toggle"]')).toBeFalsy()
+    expect(el.textContent).toContain('IMPORTANT: First deliver everything')
+  })
+
+  it('EDGE: a plain human prompt gets no toggle at all', async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const el = mount(
+      createElement(Turn, {
+        turn: { id: 'u-2', role: 'user' as const, text: HUMAN, at: Date.now() },
+        ...base,
+        injectedPreamble: 'hidden',
+      } as any),
+    )
+    expect(el.querySelector('[data-testid="chat-turn-preamble-toggle"]')).toBeFalsy()
+    expect(el.textContent).toContain(HUMAN)
+  })
+
+  it('CORE: Quote yields the human’s words, not the boilerplate', async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const quoted: string[] = []
+    const el = mount(
+      createElement(Turn, {
+        turn: userTurn(),
+        ...base,
+        injectedPreamble: 'hidden',
+        onQuote: (t: string) => quoted.push(t),
+      } as any),
+    )
+    act(() => (el.querySelector('[data-testid="chat-turn-quote"]') as HTMLButtonElement).click())
+    expect(quoted).toEqual([HUMAN])
+  })
+})
+
 describe('Turn — clampBodyChars', () => {
   beforeEach(() => installWindowApiMock())
   afterEach(() => {

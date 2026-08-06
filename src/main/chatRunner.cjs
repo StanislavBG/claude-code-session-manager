@@ -891,6 +891,10 @@ module.exports = {
   splitStopSignal,
   parseContextUsageMarkdown,
   STOP_SENTINEL,
+  // Both instruction blocks are exported so the renderer's preamble splitter
+  // (lib/promptPreamble.ts) can be drift-tested against the REAL text rather
+  // than a copy — see chat-preamble-anchors.test.cjs.
+  STOP_SIGNAL_INSTRUCTION,
   CHAT_MODE_TRUTH_INSTRUCTION,
   KILL_CEILING_MS,
   KILL_CEILING_MIN,

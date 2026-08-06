@@ -526,6 +526,10 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const { visible: visibleTurns, hiddenCount, hiddenByLevel } = filterTurnsByVerbosity(dedupedTurns, verbosity)
   const clampBodyChars = ASSISTANT_CLAMP_CHARS[verbosity]
   const toolStripVariant = verbosity === 'summary' ? ('hidden' as const) : ('collapsible' as const)
+  // chatRunner's injected instruction blocks (lib/promptPreamble.ts) are
+  // machinery, not conversation — collapsed behind a ≡ glyph everywhere
+  // except 'verbose', which is the level that means "show me the raw record".
+  const injectedPreamble = verbosity === 'verbose' ? ('shown' as const) : ('hidden' as const)
   // With event turns interleaved, the array's last element is no longer
   // reliably the last assistant turn (a trailing mode/attachment event is
   // common) — find it explicitly so the "running" indicator still lands on
@@ -892,6 +896,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       inlineFilePreview
                       toolStripVariant={toolStripVariant}
                       clampBodyChars={clampBodyChars}
+                      injectedPreamble={injectedPreamble}
                       needsDecisionStyle
                       precedingUserPrompt={precedingUserPrompt}
                       onQuote={onQuote}

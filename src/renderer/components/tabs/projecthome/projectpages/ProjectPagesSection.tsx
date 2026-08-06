@@ -10,6 +10,7 @@
  * button; a missing lens just says so and points at that action.
  */
 import { useEffect, useState } from 'react'
+import { Z } from '../../../../lib/zLayers'
 import { EmptyState } from '../../../ui/EmptyState'
 import { ViewTabs } from '../../../ui/ViewTabs'
 import { PhBlock, PhCard } from '../ph-primitives'
@@ -105,7 +106,7 @@ export function ProjectPagesSection({
 
   if (fullscreen) {
     return (
-      <div className="fixed inset-0 z-50 bg-bg flex flex-col">
+      <div className={`fixed inset-0 ${Z.dialog} bg-bg flex flex-col`}>
         <div className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 shrink-0">
           <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-faint mr-auto">
             Project Pages · {VIEW_OPTIONS.find((o) => o.key === activeView)?.label}

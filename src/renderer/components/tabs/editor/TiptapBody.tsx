@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { Z } from '../../../lib/zLayers'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -88,7 +89,7 @@ function FrontmatterChip({ frontmatter }: { frontmatter: string }) {
         📋 frontmatter ({lineCount} lines) {open ? '▲' : '▼'}
       </button>
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 min-w-[280px] max-w-[500px] bg-bg-elev border border-line rounded shadow-lg p-2 overflow-x-auto">
+        <div className={`absolute top-full left-0 ${Z.dialog} mt-1 min-w-[280px] max-w-[500px] bg-bg-elev border border-line rounded shadow-lg p-2 overflow-x-auto`}>
           <pre className="text-[10px] text-fg-dim font-mono whitespace-pre leading-relaxed">
             {frontmatter}
           </pre>

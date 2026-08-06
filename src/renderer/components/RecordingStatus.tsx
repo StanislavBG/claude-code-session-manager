@@ -1,4 +1,5 @@
 import { useVoice } from '../state/voice'
+import { Z } from '../lib/zLayers'
 
 /**
  * F1 privacy invariant (PRD §Security): mounted whenever isRecording === true.
@@ -19,7 +20,7 @@ export function RecordingStatus() {
       data-testid="recording-status"
       role="status"
       aria-live="polite"
-      className="fixed inset-x-0 top-0 z-[60] h-7 px-3 flex items-center gap-2 bg-red-950/95 border-b border-red-800 text-red-200 text-xs shrink-0"
+      className={`fixed inset-x-0 top-0 ${Z.recording} h-7 px-3 flex items-center gap-2 bg-red-950/95 border-b border-red-800 text-red-200 text-xs shrink-0`}
     >
       <span
         className="inline-block w-2 h-2 rounded-full bg-red-400 animate-pulse"

@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Z } from '../../lib/zLayers'
 import { usePanelFocusRef } from '../../lib/panelFocus'
 
 export interface OpenFile {
@@ -119,7 +120,7 @@ export function FileTabBar({
       {menu && (
         <div
           ref={menuRef}
-          className="fixed z-[300] w-44 rounded-lg border border-line bg-bg-elev shadow-xl text-xs py-1"
+          className={`fixed ${Z.contextMenu} w-44 rounded-lg border border-line bg-bg-elev shadow-xl text-xs py-1`}
           style={{ left: menu.x, top: menu.y }}
         >
           <button

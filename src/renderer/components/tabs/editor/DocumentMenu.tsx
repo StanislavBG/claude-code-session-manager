@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react'
+import { Z } from '../../../lib/zLayers'
 import { useEditor } from '../../../state/editor'
 import { toast } from '../../../state/toast'
 import { useActiveTab } from '../../../lib/useActiveTab'
@@ -143,8 +144,8 @@ export function DocumentMenu({ path, onRenamed, onDeleted }: Props) {
 
       {open && (
         <>
-          <div className="fixed inset-0 z-[390]" onMouseDown={closeMenu} />
-          <div className="absolute right-0 top-full mt-1 z-[400] w-56 rounded-lg border border-line bg-bg-elev shadow-xl text-xs py-1">
+          <div className={`fixed inset-0 ${Z.contextMenuScrim}`} onMouseDown={closeMenu} />
+          <div className={`absolute right-0 top-full mt-1 ${Z.contextMenu} w-56 rounded-lg border border-line bg-bg-elev shadow-xl text-xs py-1`}>
             <GroupLabel>Edit</GroupLabel>
             <MenuItem label="Rename" onClick={startRename} />
             <MenuItem label="Duplicate" onClick={duplicate} />
@@ -219,7 +220,7 @@ function RenameModal({ value, onChange, onCancel, onConfirm }: {
 }) {
   return (
     <div
-      className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60"
+      className={`fixed inset-0 ${Z.contextMenuDialog} flex items-center justify-center bg-black/60`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div className="w-96 rounded-lg border border-line bg-bg-elev p-4 shadow-2xl">
@@ -250,7 +251,7 @@ function RenameModal({ value, onChange, onCancel, onConfirm }: {
 function DeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <div
-      className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60"
+      className={`fixed inset-0 ${Z.contextMenuDialog} flex items-center justify-center bg-black/60`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div className="w-96 rounded-lg border border-line bg-bg-elev p-4 shadow-2xl">

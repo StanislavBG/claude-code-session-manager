@@ -9,6 +9,7 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react'
+import { Z } from '../../lib/zLayers'
 import { useSessions } from '../../state/sessions'
 import { useLiveTab } from '../../state/live'
 import type { TodoItem } from '../../state/live'
@@ -151,7 +152,7 @@ const TodoChip = forwardRef<HTMLDivElement, {
       </button>
       {open && (
         <div
-          className="absolute bottom-full left-0 mb-1.5 w-80 max-h-72 overflow-auto bg-bg-elev border border-line rounded shadow-xl p-2 z-50"
+          className={`absolute bottom-full left-0 mb-1.5 w-80 max-h-72 overflow-auto bg-bg-elev border border-line rounded shadow-xl p-2 ${Z.dialog}`}
           data-testid="footer-todos-popover"
         >
           <ul className="space-y-0.5">

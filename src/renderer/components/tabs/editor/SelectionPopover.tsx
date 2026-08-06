@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react'
+import { Z_VALUE } from '../../../lib/zLayers'
 import type { SelectionRect } from './useDocEdit'
 
 const QUICK_ACTIONS: { label: string; instruction: string }[] = [
@@ -58,7 +59,7 @@ function clampedStyle(rect: SelectionRect): React.CSSProperties {
     top,
     width: POPOVER_WIDTH,
     transform: 'translateY(-100%)',
-    zIndex: 50,
+    zIndex: Z_VALUE.dialog,
   }
 }
 

@@ -11,6 +11,7 @@
  * plain grouped list.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Z } from '../../lib/zLayers'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useSessions } from '../../state/sessions'
 import { useChat } from '../../state/chat'
@@ -244,7 +245,7 @@ function RowMenu({ anchor, items, onClose }: { anchor: HTMLElement; items: MenuI
     <div
       ref={ref}
       data-testid="epic-queue-row-menu"
-      className="fixed z-[60] min-w-[180px] grid gap-0.5 rounded-lg border border-rule bg-bg-elev p-1 shadow-lg"
+      className={`fixed ${Z.contextMenu} min-w-[180px] grid gap-0.5 rounded-lg border border-rule bg-bg-elev p-1 shadow-lg`}
       style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
     >
       {items.map((it) => {

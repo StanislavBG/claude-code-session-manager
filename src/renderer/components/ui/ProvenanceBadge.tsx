@@ -8,6 +8,7 @@
  * manual override is marked with a dot and explained in the tooltip.
  */
 import { useEffect, useRef, useState } from 'react'
+import { Z } from '../../lib/zLayers'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useProvenance } from '../../state/provenance'
 import { Badge, BADGE_TONE, type BadgeTone } from './Badge'
@@ -97,7 +98,7 @@ export function ProvenanceBadge({
       </button>
       {open && (
         <span
-          className="absolute z-50 top-full right-0 mt-1 min-w-[7.5rem] rounded-md border border-line bg-bg-elev shadow-lg py-1 text-left"
+          className={`absolute ${Z.dialog} top-full right-0 mt-1 min-w-[7.5rem] rounded-md border border-line bg-bg-elev shadow-lg py-1 text-left`}
           onClick={(e) => e.stopPropagation()}
         >
           <span className="block px-2 pb-1 text-[10px] uppercase tracking-wide text-fg-faint">Mark origin as</span>

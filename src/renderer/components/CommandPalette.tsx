@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Z } from '../lib/zLayers'
 import { createPortal } from 'react-dom'
 import { useSessions } from '../state/sessions'
 import { useVoice } from '../state/voice'
@@ -382,7 +383,7 @@ export function CommandPalette({ open, onClose, onCommand }: Props) {
 
   const node = (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-[15vh]"
+      className={`fixed inset-0 ${Z.dialog} flex items-start justify-center bg-black/60 pt-[15vh]`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}

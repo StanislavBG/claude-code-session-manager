@@ -20,6 +20,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Z } from '../lib/zLayers'
 import { createPortal } from 'react-dom'
 import { useTour } from '../state/tour'
 import { log } from '../lib/logger'
@@ -239,7 +240,7 @@ export function TourOverlay() {
       aria-labelledby="tour-title"
       aria-describedby="tour-body"
       data-testid="tour-overlay"
-      className="fixed inset-0 z-[200]"
+      className={`fixed inset-0 ${Z.tour}`}
     >
       {/* Backdrop. When we have a target rect we use a CSS box-shadow trick:
        *  paint a small transparent rectangle and rely on a huge outer shadow

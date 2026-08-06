@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Z } from '../../lib/zLayers'
 import type { FileEntry } from '../../../preload/api'
 import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
@@ -748,7 +749,7 @@ function ContextMenu(props: ContextMenuProps) {
   return (
     <div
       onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-[300] w-56 rounded-lg border border-line bg-bg-elev shadow-xl text-xs py-1"
+      className={`fixed ${Z.contextMenu} w-56 rounded-lg border border-line bg-bg-elev shadow-xl text-xs py-1`}
       style={{ left: x, top: y }}
     >
       {!node.isDirectory && (
@@ -805,7 +806,7 @@ interface ModalProps {
 function Modal(props: ModalProps) {
   return (
     <div
-      className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60"
+      className={`fixed inset-0 ${Z.contextMenuDialog} flex items-center justify-center bg-black/60`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) props.onCancel() }}
     >
       <div className="w-96 rounded-lg border border-line bg-bg-elev p-4 shadow-2xl">

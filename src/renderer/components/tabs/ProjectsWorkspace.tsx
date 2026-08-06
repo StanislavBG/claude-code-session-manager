@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
+import { Z } from '../../lib/zLayers'
 import { useSessions } from '../../state/sessions'
 import { useEditor } from '../../state/editor'
 import { useLayout } from '../../state/layout'
@@ -172,7 +173,7 @@ export function ProjectsWorkspace() {
           {launcherOpen && (
             <div
               data-testid="projects-launcher-list"
-              className="absolute left-0 right-0 top-full z-50 bg-bg-elev border border-line shadow-lg max-h-60 overflow-auto"
+              className={`absolute left-0 right-0 top-full ${Z.dialog} bg-bg-elev border border-line shadow-lg max-h-60 overflow-auto`}
             >
               {sortedRows.length === 0 ? (
                 <div className="px-3 py-2 text-[11.5px] text-fg-faint">No projects found.</div>

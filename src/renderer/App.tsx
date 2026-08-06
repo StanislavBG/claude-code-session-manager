@@ -666,10 +666,12 @@ export function App() {
   return (
     <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>
       {/* Privacy invariant (CLAUDE.md): RecordingStatus must remain mounted
-          whenever isRecording === true. It is fixed-positioned at z-[60] so
-          it paints over any z-50 overlay (Modal, CommandPalette). The pt-7
-          spacer on the outer container shifts the rest of the app down by
-          the banner's 28px height so TabBar stays visible. */}
+          whenever isRecording === true. It is fixed-positioned at the TOP
+          rung of lib/zLayers.ts (`Z.recording`), which is the highest value
+          in that table, so nothing — dialog, context menu, tour, or the
+          Editor's own dialogs — can paint over it. The pt-7 spacer on the
+          outer container shifts the rest of the app down by the banner's
+          28px height so TabBar stays visible. */}
       <RecordingStatus />
       <TabBar splitViewActive={splitView} onToggleSplitView={() => setSplitView(true)} />
       <div className="flex-1 flex min-h-0">
@@ -733,8 +735,9 @@ export function App() {
           when closed). Open/close lifecycle is owned by the voice store. */}
       <MicWizard open={wizardOpen} onClose={closeWizard} />
       <TourOverlay />
-      {/* Toast host — z-[55] sits above z-50 dialogs but below z-[60]
-          RecordingStatus so the privacy banner is never obscured. */}
+      {/* Toast host — `Z.toast` sits above every other overlay so an error
+          raised from one is visible, and below `Z.recording` so the privacy
+          banner is never obscured. See lib/zLayers.ts. */}
       <Toast />
       <CommandPalette
         open={paletteOpen}

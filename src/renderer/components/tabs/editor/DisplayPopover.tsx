@@ -6,6 +6,7 @@
  */
 
 import { useState } from 'react'
+import { Z } from '../../../lib/zLayers'
 import { useEditorPrefs } from '../../../state/editorPrefs'
 
 export function DisplayPopover() {
@@ -24,8 +25,8 @@ export function DisplayPopover() {
 
       {open && (
         <>
-          <div className="fixed inset-0 z-[390]" onMouseDown={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-[400] w-60 rounded-lg border border-line bg-bg-elev shadow-xl text-xs p-2 space-y-1.5">
+          <div className={`fixed inset-0 ${Z.contextMenuScrim}`} onMouseDown={() => setOpen(false)} />
+          <div className={`absolute right-0 top-full mt-1 ${Z.contextMenu} w-60 rounded-lg border border-line bg-bg-elev shadow-xl text-xs p-2 space-y-1.5`}>
             <Row label="Text size">
               <div className="flex items-center rounded border border-line overflow-hidden">
                 <button onClick={() => prefs.bumpFontSize(-1)} className="px-1.5 py-0.5 text-[11px] text-fg-faint hover:text-fg" title="Zoom out">A−</button>

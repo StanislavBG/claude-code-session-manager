@@ -8,6 +8,7 @@
  * closes) rather than inventing a new dialog primitive from scratch.
  */
 import { useEffect, useState, type ReactNode } from 'react'
+import { Z } from '../../../lib/zLayers'
 import { createPortal } from 'react-dom'
 
 export interface DrawerKeyVal {
@@ -66,7 +67,7 @@ export function HomeSessionDrawer({ open, onClose, title, sub, keyVals, tail, fo
   }
 
   const node = (
-    <div className="fixed inset-0 z-50" data-testid="home-drawer-root">
+    <div className={`fixed inset-0 ${Z.dialog}`} data-testid="home-drawer-root">
       <div
         className={`absolute inset-0 bg-black/50 transition-opacity duration-[220ms] ${entered ? 'opacity-100' : 'opacity-0'}`}
         onClick={onBackdropClick}

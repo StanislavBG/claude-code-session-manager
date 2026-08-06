@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { Z } from '../../lib/zLayers'
 import { createPortal } from 'react-dom'
 
 /**
@@ -163,7 +164,7 @@ export function Modal({
 
   const node = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className={`fixed inset-0 ${Z.dialog} flex items-center justify-center bg-black/60`}
       onClick={onBackdropClick}
       data-testid="modal-backdrop"
     >

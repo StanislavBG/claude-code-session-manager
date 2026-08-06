@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Z } from '../../lib/zLayers'
 import { useState } from 'react'
 
 interface Props {
@@ -31,7 +32,7 @@ export function Tooltip({ content, children, align = 'bottom-right' }: Props) {
       {visible && (
         <span
           role="tooltip"
-          className={`absolute z-50 ${positionClasses} px-2 py-1 text-[10px] leading-snug text-fg bg-bg-elev border border-line rounded shadow-lg max-w-[18rem] whitespace-normal pointer-events-none`}
+          className={`absolute ${Z.dialog} ${positionClasses} px-2 py-1 text-[10px] leading-snug text-fg bg-bg-elev border border-line rounded shadow-lg max-w-[18rem] whitespace-normal pointer-events-none`}
         >
           {content}
         </span>

@@ -15,6 +15,7 @@
  */
 
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Z } from '../../lib/zLayers'
 import type { editor } from 'monaco-editor'
 import {
   useEditor,
@@ -560,7 +561,7 @@ export function EditorView() {
 function CloseConfirm({ message, onCancel, onConfirm }: { message: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <div
-      className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60"
+      className={`fixed inset-0 ${Z.contextMenuDialog} flex items-center justify-center bg-black/60`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div className="w-96 rounded-lg border border-line bg-bg-elev p-4 shadow-2xl">

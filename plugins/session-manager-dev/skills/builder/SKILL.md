@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Watch the current project's git history against its published npm package and drive the next publish — diff HEAD against the last release, classify + bump the version from conventional-commit prefixes, gate on typecheck/tests, publish from an isolated git worktree (never the live working directory), then report. Orchestrates 5 nested sub-skills (builder:diff, :classify-and-bump, :gate, :publish, :report). Use when the user says "/builder", "publish", "release", "cut a release", "bump the version", "ship to npm", or asks whether there's anything unpublished.
+description: Watch the current project's git history against its published npm package and drive the next publish — diff HEAD against the last release, classify + bump the version from conventional-commit prefixes, gate on typecheck/tests, publish from an isolated git worktree (never the live working directory), keep the paid Field Manual in step with what shipped, then report. Orchestrates 6 nested sub-skills (builder:diff, :classify-and-bump, :gate, :publish, :manual, :report). Use when the user says "/builder", "publish", "release", "cut a release", "bump the version", "ship to npm", "update the manual", or asks whether there's anything unpublished.
 ---
 
 # builder (orchestrator)
@@ -40,7 +40,12 @@ identifier (`builder:diff`) without the numeric prefix.
       │ version bumped, tagged, pushed, published, dist-tag verified
       ▼
 ┌───────────────────────┐
-│ 4. builder:report          │  version, commits covered, dist-tag, push confirmation
+│ 4. builder:manual          │  does the PAID Field Manual still describe reality?
+└───────────────────────┘     revise chapters → bump manual version → build bundle
+      │ manual release (or an explicit "no content change")
+      ▼
+┌───────────────────────┐
+│ 5. builder:report          │  version, commits covered, dist-tag, manual + push confirmation
 └───────────────────────┘
 ```
 
@@ -50,7 +55,8 @@ identifier (`builder:diff`) without the numeric prefix.
 | 1. `builder:classify-and-bump` | commit list | bump kind (`patch`/`minor`/`major`) | commits don't follow conventional-commit style → say so, ask the user rather than guessing |
 | 2. `builder:gate` | working tree at HEAD | typecheck + unit test result | either fails → stop, report the failure, do not publish |
 | 3. `builder:publish` | bump kind, gate-passed HEAD | published npm package, pushed tag + main | any step fails → stop, report which step and the worktree's state (don't leave it behind uncleaned unless it's evidence of the failure) |
-| 4. `builder:report` | publish result | one summary: version bumped, commits covered, npm dist-tag verified, git push confirmed | n/a |
+| 4. `builder:manual` | commit list + published version | revised chapters + a built manual release bundle, or an explicit "no content change" | build refuses (missing chapter/asset, bad slug, no free chapter) → stop and report; the npm publish already landed and is unaffected |
+| 5. `builder:report` | publish + manual result | one summary: version bumped, commits covered, npm dist-tag verified, git push confirmed, manual edition shipped or explicitly unchanged | n/a |
 
 ## Hard rules — read before running any step
 
@@ -65,6 +71,10 @@ identifier (`builder:diff`) without the numeric prefix.
   after the gate is green is exactly the friction this skill exists to remove.
 - **The gate is a hard stop.** A failing `typecheck` or `test:unit` run means step 3 never
   executes — no publish, no version bump, no tag. Report the failure and stop.
+- **The manual is a product, not a changelog.** `builder:manual` may only claim what it has
+  verified against real code, and may never invent a screenshot. A wrong instruction in a
+  $19.99 paid guide is a refund — treat its accuracy bar as higher than the app's own docs.
+  A manual bundle that isn't pushed to the Bilko repo is not shipped; say so plainly.
 - **Never guess a version bump from unconventional commit messages.** If the commit list
   doesn't cleanly map to `fix:`/`feat:`/`BREAKING CHANGE:` prefixes, `builder:classify-and-bump`
   asks the user which bump to apply rather than inferring one.

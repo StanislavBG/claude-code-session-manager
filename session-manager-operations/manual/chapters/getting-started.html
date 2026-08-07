@@ -1,0 +1,89 @@
+<h1>Getting Started — the 10-minute setup</h1>
+
+<p class="lede">Session Manager is a local cockpit for the Claude Code CLI. It does not replace
+<code>claude</code>; it wraps it — giving you a terminal, a scheduler that runs work while you sleep,
+and roughly two dozen configuration and observability surfaces over the same
+<code>~/.claude/</code> directory the CLI already reads.</p>
+
+<h2>1. Install and launch</h2>
+
+<p>There is nothing to build. The app ships on npm and runs straight from <code>npx</code>:</p>
+
+<pre><code>npx claude-code-session-manager@latest</code></pre>
+
+<p>First launch recompiles the native terminal backend (<code>node-pty</code>) for your Electron
+runtime, so give it a minute. Linux and macOS only.</p>
+
+<p>If you want the stripped-down version — one terminal, no tabs, no config surface — add
+<code>--simple</code>:</p>
+
+<pre><code>npx claude-code-session-manager@latest --simple</code></pre>
+
+<figure class="manual-figure" data-figure="first-launch">
+  <div class="manual-figure__frame" data-capture="app boot, Home tab, empty project list"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> The left nav — every surface lives here.
+    <span class="callout" data-arrow="up">2</span> <strong>Open / Start Project</strong> — the only
+    way a project enters the app.
+    <span class="callout" data-arrow="down">3</span> The Almanac footer: connection dot, 5-hour usage,
+    active branch, app version.
+  </figcaption>
+</figure>
+
+<h2>2. The one idea to internalise: TAB = project, EPIC = unit of work</h2>
+
+<p>Almost every mistake new users make comes from missing this. Session Manager has exactly two
+levels of scope, and they are not interchangeable:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Concept</th><th>What it actually is</th><th>How many</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>TAB</strong></td>
+      <td>A working directory. The cwd <em>is</em> the project identity — everything the app stores
+      for a project keys off that path.</td>
+      <td>One per project. Picking an already-open project re-activates its tab; it never opens a second.</td>
+    </tr>
+    <tr>
+      <td><strong>EPIC</strong></td>
+      <td>One small unit of work inside that project, backed by its own tagged Claude session.</td>
+      <td>Many per tab. Short-lived by design — one Epic per thing you're doing.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note"><strong>The rule that follows:</strong> if you want a second conversation in
+the same project, you want a second <em>Epic</em>, not a second tab. Tabs are for switching projects.</p>
+
+<h2>3. Where your data lives</h2>
+
+<p>When a tab first opens on a directory, Session Manager creates one folder inside it:</p>
+
+<pre><code>&lt;your-project&gt;/session-manager-operations/
+├── prompt-sessions/   # your Epics — active index + archived Epics
+├── scheduler/         # PRDs, queue, and run state
+├── project-brief/     # the Home tab's project brief
+└── logs/</code></pre>
+
+<p>It is plain JSON and Markdown, it sits inside your repo, and it is meant to be read by humans and
+committed if you want it committed. Nothing about your project is stored in a cloud service by this
+app — the marketing page's "local-first" claim is literal.</p>
+
+<h2>4. Your first five minutes</h2>
+
+<ol class="manual-steps">
+  <li><strong>Open / Start Project</strong> in the left nav, and pick a repo you actually work in.
+  A native folder picker opens; "New Folder" starts a fresh one.</li>
+  <li>The Terminal tab boots a real <code>claude</code> session in that directory. This is the same
+  CLI you already use — same settings, same skills, same MCP servers.</li>
+  <li>Press <strong>New Epic</strong>. Pick an <em>Agent</em> (who works) and a <em>Mission</em>
+  (feature / bug / discussion), type what you want, and submit.</li>
+  <li>Watch it run. That's the loop. Everything else in this manual is about doing that loop
+  faster, cheaper, and unattended.</li>
+</ol>
+
+<h2>5. What to read next</h2>
+
+<p>If you only read two more chapters, read <a href="#epics-and-sessions">Epics &amp; Sessions</a>
+(so you stop losing context) and <a href="#scheduler">Scheduler</a> (so the app starts working
+while you don't).</p>

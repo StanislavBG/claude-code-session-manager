@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "title": "The Session Manager Field Manual",
+  "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
+  "documentsAppVersion": "0.64.0",
+  "releasedAt": "2026-08-07",
+  "chapters": [
+    {
+      "slug": "getting-started",
+      "title": "Getting Started — the 10-minute setup",
+      "blurb": "Install, open your first project tab, and understand the one idea the whole app is built on: a TAB is a project, an EPIC is a unit of work.",
+      "free": true,
+      "file": "getting-started.html"
+    },
+    {
+      "slug": "epics-and-sessions",
+      "title": "Epics & Sessions — Terminal and Chat are one session",
+      "blurb": "Why an Epic is a tagged Claude session, how Agent + Mission ground it, and why switching between Terminal and Chat never loses your context.",
+      "file": "epics-and-sessions.html"
+    },
+    {
+      "slug": "scheduler",
+      "title": "Scheduler — author once, run around your token window",
+      "blurb": "Writing a PRD that actually completes, how the queue picks work, auto-pause on rate limits, and reading a job parked in needs_review.",
+      "file": "scheduler.html"
+    }
+  ],
+  "assets": [
+    {
+      "id": "offline-html",
+      "label": "Offline HTML edition",
+      "file": "field-manual-1.0.0.html",
+      "mime": "text/html"
+    }
+  ]
+}

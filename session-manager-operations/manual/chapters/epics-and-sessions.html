@@ -1,0 +1,114 @@
+<h1>Epics &amp; Sessions — Terminal and Chat are one session</h1>
+
+<p class="lede">An Epic <em>is</em> a tagged Claude session. Not a folder of sessions, not a wrapper
+around one — a 1:1 relationship. Once that clicks, the two views over it stop being confusing.</p>
+
+<h2>One session, two views</h2>
+
+<p>Every Epic mints exactly one <code>claudeSessionId</code> when it is created. Both ways of
+talking to it attach to that same id:</p>
+
+<table class="manual-table">
+  <thead><tr><th>View</th><th>What runs underneath</th><th>Best for</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Terminal</strong></td>
+      <td>An interactive PTY: <code>claude --resume &lt;sessionId&gt;</code> in the Epic's cwd.</td>
+      <td>Anything needing approvals, interruptions, or you watching closely.</td>
+    </tr>
+    <tr>
+      <td><strong>Chat</strong></td>
+      <td>Headless: <code>claude -p --resume &lt;sessionId&gt;</code>, streamed back as a feed.</td>
+      <td>Long unattended turns, and reading back what happened.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note"><strong>Switching views hands the session over — it never forks it.</strong>
+Attachment is mutually exclusive: exactly one view holds the session at a time. Context continuity
+across the switch is the whole point, so if you ever see a fresh empty session after switching,
+that's a bug worth reporting, not expected behaviour.</p>
+
+<figure class="manual-figure" data-figure="epic-views">
+  <div class="manual-figure__frame" data-capture="Epic detail with the Terminal/Chat view toggle visible"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> The view toggle — one session, two renderings.
+    <span class="callout" data-arrow="right">2</span> The verbosity dial (1 loudest → 5 quietest).
+    <span class="callout" data-arrow="left">3</span> The Epic's event chain: prompt → PRD → response.
+  </figcaption>
+</figure>
+
+<h2>Creating an Epic: two independent choices</h2>
+
+<p>The New Epic card asks two separate questions, and it is worth being deliberate about both:</p>
+
+<ol class="manual-steps">
+  <li><strong>Agent — who is working.</strong> A persona from your Agent Library
+  (<code>~/.claude/agents/*.md</code>). This also decides which model the session launches with:
+  the persona's own <code>model:</code> field wins, falling back to your global default.</li>
+  <li><strong>Mission — how they work.</strong> One of <em>feature</em>, <em>bug</em>, or
+  <em>discussion</em>. This sets the grounding template the session opens with, and how eagerly
+  the agent should decompose work into scheduled PRDs.</li>
+</ol>
+
+<p>Those two, plus a one-line summary of what's actually grounding the session, compose the
+opening prompt in a fixed order — <strong>Actor, Input, Mission</strong>, then your own goal text.
+That's the AIM framework, and it's why an Epic tends to start productively instead of spending
+three turns establishing context.</p>
+
+<h3>The "advanced" flip: the grounding board</h3>
+
+<p>Flip the New Epic card and you get an inventory of what this session will really load —
+the CLAUDE.md files, skills, MCP servers, and hooks it will discover on disk, plus your git branch
+and the other Epics in the project. It is an <strong>inspector, not a control panel</strong>: there
+is no toggle to make the CLI skip a file it would otherwise find. Read it to understand why an
+agent behaved a certain way.</p>
+
+<h2>Lifecycle: three states, one transition you care about</h2>
+
+<pre><code>proposed ──(Approve &amp; start, or submitting the first prompt)──▶ active ──▶ completed</code></pre>
+
+<ul>
+  <li><strong>proposed</strong> — reserved but not started. <em>Nothing has been spent yet.</em>
+  Every Epic is born here.</li>
+  <li><strong>active</strong> — the session is running, authoring PRDs, receiving scheduler updates.</li>
+  <li><strong>completed</strong> — archived to its own JSON file. The session id is dead; resuming
+  mints a new one that traces back.</li>
+</ul>
+
+<p class="manual-note"><strong>Don't repurpose an Epic.</strong> Its title and objective are fixed
+for the life of its session — that objective <em>is</em> the first prompt. Iterate in follow-up
+messages; when the unit of work changes, start a new Epic. The rename action in the row menu is for
+fixing a typo, not for changing what an Epic is about.</p>
+
+<h2>Where per-task behaviour belongs (and where it doesn't)</h2>
+
+<p>This is the most common architectural mistake users make. Settings — including Permissions,
+Hooks, MCP Servers — edits <em>on-disk files that the CLI reads on every single invocation</em>.
+A Project-scope Settings change alters the substrate for every current and future Epic in that
+project. It is not per-conversation curation and never was.</p>
+
+<table class="manual-table">
+  <thead><tr><th>You want…</th><th>Correct lever</th></tr></thead>
+  <tbody>
+    <tr><td>This kind of task to behave differently</td><td>A custom <strong>Mission tag</strong> (its prompt template)</td></tr>
+    <tr><td>A different reviewer/implementer style or model</td><td>A custom <strong>Agent persona</strong></td></tr>
+    <tr><td>Different permissions, hooks, env vars, MCP servers</td><td><strong>Settings</strong> — genuinely substrate</td></tr>
+  </tbody>
+</table>
+
+<h2>Reading a session without drowning</h2>
+
+<p>The Chat feed has a five-level density dial, numbered loudest-first: <strong>1 raw</strong>,
+2 detail, 3 standard, 4 brief, <strong>5 summary</strong>. Tool cards appear only at levels 1–2.
+Nothing is ever discarded from the store — raise the level and the byte-exact record comes back
+with no re-read.</p>
+
+<p>Two things ignore the dial on purpose, and you should know why:</p>
+
+<ul>
+  <li>A turn <strong>asking you something</strong> is never hidden or clamped at any level. Hiding
+  a question strands a run waiting on an answer nobody can see.</li>
+  <li>The <strong>in-flight</strong> bubble keeps its tool strip at every level — mid-run it's the
+  only progress signal there is.</li>
+</ul>

@@ -1,0 +1,110 @@
+<h1>Scheduler — author once, run around your token window</h1>
+
+<p class="lede">The Scheduler is the feature that pays for the app. You write a PRD, it lands in a
+queue, and Session Manager runs it as a headless <code>claude -p</code> job timed around your plan's
+rolling 5-hour token window — auto-pausing when you're rate-limited and resuming the moment the
+window resets.</p>
+
+<h2>What the Scheduler is a browser over</h2>
+
+<p>It is a viewer and operator surface on one hierarchy, scoped to the active tab's project by
+default ("All projects" is the explicit escape hatch):</p>
+
+<pre><code>TAB (project)
+└── EPIC (unit of work)
+    └── PRD (one scheduled job)</code></pre>
+
+<p>On disk, PRDs live at
+<code>&lt;project&gt;/session-manager-operations/scheduler/epics/&lt;epic-id&gt;/prds/</code>, with the
+queue and history sharded alongside in <code>scheduler/state/</code>. Every PRD belongs to an Epic —
+there is no such thing as a free-floating PRD.</p>
+
+<figure class="manual-figure" data-figure="scheduler-queue">
+  <div class="manual-figure__frame" data-capture="Scheduler tab, Queue view, at least one running job"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Queue / PRDs / History — three views, one panel.
+    <span class="callout" data-arrow="up">2</span> Mode selector: manual · on-reset · when-available.
+    <span class="callout" data-arrow="right">3</span> A job's status badge — <em>needs_review</em> is a
+    question, not a failure.
+  </figcaption>
+</figure>
+
+<h2>The three run modes</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Mode</th><th>Behaviour</th><th>Use when</th></tr></thead>
+  <tbody>
+    <tr><td><code>manual</code></td><td>Nothing runs until you press go.</td><td>You're debugging the queue itself.</td></tr>
+    <tr><td><code>on-reset</code></td><td>Fires at each 5-hour window reset.</td><td>You want a predictable burst, not a trickle.</td></tr>
+    <tr><td><code>when-available</code></td><td>Polls your billing usage every 60 s and runs whenever there's headroom. <strong>The default.</strong></td><td>Almost always.</td></tr>
+  </tbody>
+</table>
+
+<h2>Concurrency: one pool, machine-wide</h2>
+
+<p>Scheduler jobs and Chat runs draw from the <em>same</em> pool of concurrent <code>claude -p</code>
+sessions (default 5, adjustable from the Home tab). On top of that sits a memory gate: a job won't
+start if the machine doesn't have headroom for it. That gate is machine-aware rather than a
+hardcoded job count, which is what makes running five parallel agents on a laptop survivable.</p>
+
+<h2>Writing a PRD that actually finishes</h2>
+
+<p>Two real incidents shaped every rule here, and both are worth internalising:</p>
+
+<div class="manual-incident">
+  <h3>The poll-hang</h3>
+  <p>A PRD used <code>until $(curl … | jq .uptime)</code> to wait for a deploy. The condition was
+  unsatisfiable — that deploy type never restarts the API — so the job spun for
+  <strong>2 h 47 m</strong> until the watchdog killed it.</p>
+  <p><strong>Rule:</strong> never write an unbounded wait. Every loop gets a maximum iteration
+  count and an explicit give-up branch.</p>
+</div>
+
+<div class="manual-incident">
+  <h3>The post-AC overrun</h3>
+  <p>A PRD declared success, then launched a fixture generator over 50,000 seeds that appeared
+  nowhere in its acceptance criteria. It ran <strong>2 h 44 m</strong> before a human killed it.</p>
+  <p><strong>Rule:</strong> the acceptance criteria are the <em>ceiling</em>, not the floor. When
+  the AC are met, stop.</p>
+</div>
+
+<h3>The checklist</h3>
+
+<ol class="manual-steps">
+  <li>One PRD, one outcome. If you can't state the outcome in a sentence, it's two PRDs.</li>
+  <li>Acceptance criteria must be checkable <strong>headlessly</strong>. "Launch the app and click
+  through the tabs" cannot be verified by a <code>claude -p</code> job — it has no GUI and will be
+  SIGTERM'd.</li>
+  <li>Every loop is bounded. Every wait has a timeout.</li>
+  <li>Ordering comes from <code>dependsOn</code> — nothing else gates a batch.</li>
+  <li>Never reuse a PRD number.</li>
+</ol>
+
+<h2>When a job parks in <code>needs_review</code></h2>
+
+<p><code>needs_review</code> is <strong>a question, not a result</strong>. When a job lands there,
+Session Manager writes a deterministic root-cause report next to that run's own log and appends it
+as a response on the Epic that authored the PRD — so the question comes back to the conversation
+that asked it, not to a global inbox you'll never check.</p>
+
+<p>This is also the strongest argument for writing tight PRDs: the clearer the PRD, the less there
+is to route back to you.</p>
+
+<h2>Self-healing you don't have to think about</h2>
+
+<ul>
+  <li><strong>Boot reconciliation</strong> — on startup, jobs whose processes died are reaped and
+  classified (success / timeout / error). A still-alive orphan is terminated gracefully first so its
+  log isn't misread mid-write.</li>
+  <li><strong>Dead-process reaper</strong> — periodic PID-liveness checks catch hung jobs.</li>
+  <li><strong>Supervisor</strong> — every 15 minutes, a probe per running job; it kills a stuck
+  poll-loop's shell without killing the agent that spawned it.</li>
+  <li><strong>Definition-of-done gate</strong> — when the queue drains, completed PRDs are
+  re-verified against their own acceptance criteria and a report is written. Idempotent, so a
+  re-drain over the same set is a no-op.</li>
+  <li><strong>External watchdog</strong> — an out-of-process timer relaunches the app if its
+  heartbeat goes stale while jobs are outstanding.</li>
+</ul>
+
+<p class="manual-note">All of it exists so that "queue it and go to bed" is a real workflow rather
+than an aspiration.</p>

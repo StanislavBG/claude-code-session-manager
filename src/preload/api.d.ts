@@ -1162,46 +1162,6 @@ export interface PluginInstallProgressEvent {
   line: string;
 }
 
-// ────────────────────────────────────────────── Web Remote (PRD 08)
-
-export interface WebRemoteDevice {
-  deviceId: string;
-  deviceName: string;
-  issuedAt: string;
-  lastConnectedAt: string | null;
-}
-
-export interface WebRemoteStatus {
-  enabled: boolean;
-  remoteControlEnabled: boolean;
-  connected: boolean;
-  e2eActive: boolean;
-  /** True once the user has confirmed the SAS on the desktop. */
-  e2eAuthenticated: boolean;
-  /** Explicit E2E session state for UI rendering. */
-  e2eState: 'idle' | 'pending_sas' | 'authenticated' | 'failed';
-  /** 6-digit Short Authentication String pending user confirmation, or null. */
-  pendingSas: string | null;
-  devices: WebRemoteDevice[];
-}
-
-export interface WebRemotePairResult {
-  ok: boolean;
-  deviceId?: string;
-  error?: string;
-}
-
-export interface WebRemoteMutationResult {
-  ok: boolean;
-  error?: string;
-}
-
-export interface WebRemoteAuditTailResult {
-  ok: boolean;
-  lines?: string[];
-  error?: string;
-}
-
 // ────────────────────────────────────────────── Chat runner (PRD 319)
 
 export interface ChatRunPayload {
@@ -1367,7 +1327,6 @@ export interface SessionManagerAPI {
       | { ok: true; url: string; title: string; dataUrl: string }
       | { ok: false; error: string }
     >;
-    saveBinary: (path: string, base64: string, writer?: OpsWriter) => Promise<{ ok: boolean; error?: string }>;
     /** Opens a native "Save As" dialog and writes `text` to the chosen path directly
      *  (bypasses config.cjs's write-boundary check — the path is user-chosen via OS dialog). */
     saveRecording: (payload: { defaultName: string; text: string }) => Promise<
@@ -1507,6 +1466,7 @@ export interface SessionManagerAPI {
     rename: (path: string, newName: string) => Promise<FilesRenameResult>;
     delete: (path: string) => Promise<FilesDeleteResult>;
     duplicate: (path: string) => Promise<FilesDuplicateResult>;
+    saveBinary: (path: string, base64: string, writer?: OpsWriter) => Promise<{ ok: boolean; error?: string }>;
   };
   docEdit: {
     run: (payload: { path: string; before: string; instruction: string; documentText?: string }) => Promise<DocEditResult>;
@@ -1703,27 +1663,6 @@ export interface SessionManagerAPI {
      *  Same 5s cache as status(). Designed for a file-tree sidebar where the
      *  renderer needs per-row badges without a separate git call per file. */
     fileStatus: (cwd: string) => Promise<GitFileStatusMap>;
-  };
-  webRemote: {
-    getStatus: () => Promise<WebRemoteStatus>;
-    enable: () => Promise<WebRemoteMutationResult>;
-    disable: () => Promise<WebRemoteMutationResult>;
-    /** Allow MUTATE-tier commands (pty spawn/write, scheduler writes). Default off. */
-    enableControl: () => Promise<WebRemoteMutationResult>;
-    /** Block MUTATE-tier commands — mobile becomes read-only mirror. */
-    disableControl: () => Promise<WebRemoteMutationResult>;
-    pair: (otp: string) => Promise<WebRemotePairResult>;
-    revokeDevice: (deviceId: string) => Promise<WebRemoteMutationResult>;
-    auditTail: (lines?: number) => Promise<WebRemoteAuditTailResult>;
-    onStatus: (handler: (status: WebRemoteStatus) => void) => () => void;
-    onTokenRevoked: (handler: (ev: { deviceId: string }) => void) => () => void;
-    /** Revoke ALL paired devices and tear down every session immediately (panic). */
-    revokeAll: () => Promise<WebRemoteMutationResult>;
-    /** Subscribe to the completion event broadcast after revokeAll. */
-    onRevokedAll: (handler: (ev: { revokedCount: number }) => void) => () => void;
-    /** Confirm that the SAS shown on the desktop matches the browser — marks the
-     *  E2E session as authenticated and unblocks MUTATE-tier commands. */
-    confirmSas: () => Promise<WebRemoteMutationResult>;
   };
   chat: {
     /** Spawn a headless `claude -p` run for a tab. Results arrive via the on* listeners. */

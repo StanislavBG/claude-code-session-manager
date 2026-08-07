@@ -16,7 +16,7 @@ const saveBinarySpy = vi.fn(async () => ({ ok: true }))
 
 ;(globalThis as any).window.api = {
   chat: { cancel: cancelSpy },
-  browser: { saveBinary: saveBinarySpy },
+  files: { saveBinary: saveBinarySpy },
 }
 
 vi.mock('../../../state/toast', () => ({

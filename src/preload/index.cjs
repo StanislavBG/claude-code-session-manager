@@ -83,7 +83,6 @@ contextBridge.exposeInMainWorld('api', {
     },
     captureDom: (payload) => ipcRenderer.invoke('browser:capture-dom', payload),
     captureShot: (viewId) => ipcRenderer.invoke('browser:capture-shot', { viewId }),
-    saveBinary: (path, base64, writer) => ipcRenderer.invoke('browser:save-binary', { path, base64, writer }),
     saveRecording: (payload) => ipcRenderer.invoke('browser:save-recording', payload),
     replay: (payload) => ipcRenderer.invoke('browser:replay', payload),
     onReplayStep: (viewId, handler) => {
@@ -246,6 +245,7 @@ contextBridge.exposeInMainWorld('api', {
     rename: (path, newName) => ipcRenderer.invoke('files:rename', { path, newName }),
     delete: (path) => ipcRenderer.invoke('files:delete', { path }),
     duplicate: (path) => ipcRenderer.invoke('files:duplicate', { path }),
+    saveBinary: (path, base64, writer) => ipcRenderer.invoke('files:save-binary', { path, base64, writer }),
   },
   docEdit: {
     run: (payload) => ipcRenderer.invoke('docedit:run', payload),
@@ -371,45 +371,6 @@ contextBridge.exposeInMainWorld('api', {
     // kept — StatusBar still uses it for the cheap per-tab branch readout.
     status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
     fileStatus: (cwd) => ipcRenderer.invoke('git:file-status', { cwd }),
-  },
-  webRemote: {
-    /** Current connection state (no token values). */
-    getStatus: () => ipcRenderer.invoke('webRemote:get-status'),
-    /** Turn remote control on. Initiates relay connection if a device is paired. */
-    enable: () => ipcRenderer.invoke('webRemote:enable'),
-    /** Turn remote control off. Immediately drops relay connection. */
-    disable: () => ipcRenderer.invoke('webRemote:disable'),
-    /** Allow MUTATE-tier commands (pty spawn/write, scheduler writes). Default off. */
-    enableControl: () => ipcRenderer.invoke('webRemote:enable-control'),
-    /** Block MUTATE-tier commands — mobile becomes read-only mirror. */
-    disableControl: () => ipcRenderer.invoke('webRemote:disable-control'),
-    /** Pair a new device using the 8-character OTP shown in the web UI. */
-    pair: (otp) => ipcRenderer.invoke('webRemote:pair', { otp }),
-    /** Revoke a paired device by its deviceId. */
-    revokeDevice: (deviceId) => ipcRenderer.invoke('webRemote:revoke-device', { deviceId }),
-    /** Read the last N lines of today's audit log (default 50). */
-    auditTail: (lines) => ipcRenderer.invoke('webRemote:audit-tail', lines ? { lines } : {}),
-    /** Push event from main when connection status changes. */
-    onStatus: (handler) => {
-      const listener = (_e, payload) => handler(payload);
-      ipcRenderer.on('webRemote:status', listener);
-      return () => ipcRenderer.removeListener('webRemote:status', listener);
-    },
-    /** Push event when the relay revokes this device's token. */
-    onTokenRevoked: (handler) => {
-      const listener = (_e, payload) => handler(payload);
-      ipcRenderer.on('webRemote:token-revoked', listener);
-      return () => ipcRenderer.removeListener('webRemote:token-revoked', listener);
-    },
-    /** Revoke ALL paired devices and tear down every session immediately. */
-    revokeAll: () => ipcRenderer.invoke('webRemote:revoke-all'),
-    confirmSas: () => ipcRenderer.invoke('webRemote:confirm-sas'),
-    /** Push event when revokeAll completes (main broadcasts webRemote:revoked-all). */
-    onRevokedAll: (handler) => {
-      const listener = (_e, payload) => handler(payload);
-      ipcRenderer.on('webRemote:revoked-all', listener);
-      return () => ipcRenderer.removeListener('webRemote:revoked-all', listener);
-    },
   },
   chat: {
     /** Spawn a headless claude -p job. Results arrive via the on* listeners. */

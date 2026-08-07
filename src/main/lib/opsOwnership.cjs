@@ -48,8 +48,6 @@ const OWNERS = Object.freeze({
   'scheduler': 'scheduler',
   // Project Home owns the synthesized Brief (generate + hand-edit).
   'project-brief': 'project-home',
-  // Browser tab scratch saves (DOM captures, screenshots, recorded flows).
-  'browser': 'browser',
   // Structured per-tab error log lines (JSONL), tagged for tracing/analysis.
   'logs': 'logs',
   // Host on Bilko.run tab's deterministic bundle prep (dist/index.html +

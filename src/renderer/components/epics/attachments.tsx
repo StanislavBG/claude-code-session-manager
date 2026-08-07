@@ -85,7 +85,7 @@ async function fileToBase64(file: File): Promise<string> {
 /**
  * Resolves each attachment to an absolute path — real drag-drop/file-picker
  * paths pass through, pasted-clipboard images (no real path) are saved first
- * into the project's prompt-sessions/attachments dir via browser.saveBinary
+ * into the project's prompt-sessions/attachments dir via files.saveBinary
  * (declared writer 'epics' under the single-writer law).
  *
  * Shared by BOTH the Epic composer and the New Epic card: the card used to
@@ -102,7 +102,7 @@ export async function resolveAttachmentPaths(items: AttachmentItem[], cwd: strin
     try {
       const destPath = `${cwd}/session-manager-operations/prompt-sessions/attachments/${item.id}-${item.name}`
       const base64 = await fileToBase64(item.file)
-      const res = await window.api.browser.saveBinary(destPath, base64, 'epics')
+      const res = await window.api.files.saveBinary(destPath, base64, 'epics')
       if (res.ok) {
         paths.push(destPath)
       } else {

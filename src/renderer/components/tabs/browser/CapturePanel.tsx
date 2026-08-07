@@ -169,7 +169,7 @@ export function CapturePanel() {
       if (captured.dataUrl) {
         const path = destPath(`${cwd}/session-manager-operations/browser/screenshots`, captured.mode, 'png')
         const base64 = captured.dataUrl.replace(/^data:image\/png;base64,/, '')
-        const result = await window.api.browser.saveBinary(path, base64)
+        const result = await window.api.files.saveBinary(path, base64)
         if (!result.ok) throw new Error(result.error || 'save failed')
         toast.info(`Saved: ${path}`)
       } else {

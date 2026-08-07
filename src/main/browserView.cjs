@@ -895,12 +895,6 @@ function registerBrowserView({ mainWindow, ipcMain }) {
   ipcMain.handle('browser:set-zoom', validated(schemas.browserSetZoom, (payload) => setZoom(payload)));
   ipcMain.handle('browser:find', validated(schemas.browserFind, (payload) => find(payload)));
   ipcMain.handle('browser:stop-find', validated(schemas.browserViewId, (payload) => stopFind(payload)));
-  ipcMain.handle('browser:save-binary', validated(schemas.browserSaveBinary, (payload) => {
-    const { writeBinaryAtomic } = require('./config.cjs');
-    return writeBinaryAtomic(payload.path, Buffer.from(payload.base64, 'base64'), { writer: payload.writer })
-      .then(() => ({ ok: true }))
-      .catch((e) => ({ ok: false, error: e && e.message ? e.message : String(e) }));
-  }));
 }
 
 module.exports = {

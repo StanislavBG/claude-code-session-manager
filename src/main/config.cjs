@@ -153,13 +153,6 @@ function validateWrite(realAbs) {
       if (realAbs === e2eSub || realAbs.startsWith(e2eSub + path.sep)) {
         return;
       }
-      // Browser tab scratch saves (DOM captures, screenshots, recorded
-      // flows): narrowly scoped to session-manager-operations/browser/,
-      // this repo's existing per-project artifact-store convention.
-      const browserSub = path.join(realRoot, 'session-manager-operations', 'browser');
-      if (realAbs === browserSub || realAbs.startsWith(browserSub + path.sep)) {
-        return;
-      }
       // PromptSession persistence (active-index.json + per-session archives,
       // promptSessions.ts) and the scheduler's own read-modify-write of that
       // same active index (promptSessionEvents.cjs, PRD 814) — narrowly

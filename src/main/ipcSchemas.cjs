@@ -25,17 +25,6 @@ const ptyTabId = z.object({ tabId: z.string().min(1).max(128) });
 // have a live PTY? Bounded so the renderer can't ask about unbounded lists.
 const ptyAlive = z.object({ tabIds: z.array(z.string().min(1).max(128)).max(500) });
 
-// v2 mobile: subscribe to a session's live state + summary. cwd is needed to
-// locate the transcript JSONL (transcriptPath); validated against home-dir boundary
-// in webRemote before any fs access.
-const sessionSubscribe = z.object({
-  // tabId becomes a transcript FILENAME (`<tabId>.jsonl`) — restrict to a
-  // session-id charset (no '/', no '.', so it can't traverse out of the project
-  // transcript dir). sessionId is a UUID, which satisfies this.
-  tabId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
-  cwd: z.string().min(1).max(4096),
-});
-
 // 64 KiB cap per pty:write — typewriter input is bounded; a renderer firing
 // megabytes per call is either a bug or an attack. Block it at the boundary.
 const PTY_WRITE_MAX_BYTES = 64 * 1024;
@@ -112,15 +101,6 @@ const clipboardWriteText = z.object({
 const browserSaveRecording = z.object({
   defaultName: z.string().min(1).max(255),
   text: z.string().max(1_000_000),
-});
-
-// PRD 407: binary-safe atomic write (browser:save-binary) for screenshot
-// captures — config:write-text is utf8-only.
-const browserSaveBinary = z.object({
-  path: z.string().min(1).max(4096),
-  base64: z.string().min(1).max(50_000_000),
-  // Single-writer law (lib/opsOwnership.cjs) — required for ops-root paths.
-  writer: z.string().min(1).max(64).optional(),
 });
 
 // PRD 410: replay a recorded step list against a live view. The renderer
@@ -680,6 +660,15 @@ const exchangesList = z.object({
 // this one lives here per PRD 638 so it's reusable without importing files.cjs.
 const filesDuplicate = z.object({ path: z.string().min(1).max(4096) });
 
+// files:save-binary — binary-safe atomic write (formerly browser:save-binary,
+// re-homed off the Browser tab). Mirrors the retired browserSaveBinary shape.
+const filesSaveBinary = z.object({
+  path: z.string().min(1).max(4096),
+  base64: z.string().min(1).max(50_000_000),
+  // Single-writer law (lib/opsOwnership.cjs) — required for ops-root paths.
+  writer: z.string().min(1).max(64).optional(),
+});
+
 // ──────────────────────────────────────────── Doc Edit (PRD 638 rewrite runner)
 // docedit:run — consumed by docEdit.cjs's registerDocEditHandlers.
 const docEditRun = z.object({
@@ -743,23 +732,6 @@ const chatExternalSend = z.object({
     `prompt must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
   ),
 });
-
-// ──────────────────────────────────────────── Web Remote
-// OTP is 8 uppercase alphanumeric chars (case-insensitive entry, normalised to upper in handler).
-const WEB_REMOTE_OTP_RE = /^[A-Z0-9]{8}$/i;
-const DEVICE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-const webRemotePair = z.object({
-  otp: z.string().regex(WEB_REMOTE_OTP_RE),
-}).strict();
-
-const webRemoteRevokeDevice = z.object({
-  deviceId: z.string().regex(DEVICE_ID_RE),
-}).strict();
-
-const webRemoteAuditTail = z.object({
-  lines: z.number().int().min(1).max(500).optional(),
-}).strict();
 
 // ──────────────────────────────────────────── History
 const DATE_YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
@@ -892,83 +864,18 @@ function validated(schema, handler) {
   };
 }
 
-// ──────────────────────────────────────────── Web Remote command allowlist
-// Commands are split into three tiers:
-//   READ_COMMANDS      — return data; allowed when remoteEnabled=true.
-//   SAS_GATED_READS    — return sensitive user data (sessions, PRDs, logs,
-//                        transcript summaries); additionally require
-//                        _e2eAuthenticated=true (SAS confirmed by user).
-//                        A compromised relay cannot exfiltrate this data from
-//                        a session that has not been SAS-confirmed.
-//   MUTATE_COMMANDS    — write files, spawn processes, or mutate persisted
-//                        state; gated behind remoteControlEnabled=true AND
-//                        _e2eAuthenticated=true.
-// ALLOWED_COMMANDS is the union, kept for existing import compatibility.
-//
-// Ungated READ_COMMANDS (justify each):
-//   cmd:app:version      — exposes only the app semver string; no user data.
-//   cmd:session:unsubscribe — teardown lifecycle; returns nothing sensitive.
-const READ_COMMANDS = new Set([
-  'cmd:app:version',
-  // v2 mobile: unsubscribe is a teardown lifecycle call with no data payload.
-  'cmd:session:unsubscribe',
-]);
-
-// Sensitive reads — return user data; require SAS confirmation same as MUTATE.
-const SAS_GATED_READS = new Set([
-  'cmd:sessions:load',
-  'cmd:history:aggregate',
-  // subscribe initiates a live stream of session state/summary — sensitive.
-  'cmd:session:subscribe',
-  // NOTE: cmd:exchanges:list is intentionally NOT allowlisted — webRemote.cjs has
-  // no dispatch handler for it, so an allowlist entry would only fail closed with
-  // an opaque reject. Re-add here together with the handler when remote exchanges
-  // are wired, so the allowlist always mirrors an actual capability.
-  //
-  // Scheduler/Epics commands (cmd:schedule:*) were removed here deliberately
-  // (core scheduler/Epics redesign) — Remote no longer reaches into scheduler
-  // internals at all; a future Remote rebuild will talk to Scheduler/Epics
-  // through whatever higher-level surface that redesign lands on, not this
-  // per-command allowlist.
-]);
-
-const MUTATE_COMMANDS = new Set([
-  'cmd:sessions:save',
-  'cmd:pty:spawn',
-  'cmd:pty:write',
-  // pty:kill terminates a live session; pty:resize drives the geometry of the
-  // user's interactive PTY — both write live process state, so they are gated
-  // behind remoteControlEnabled + SAS like every other mutation. A read-only
-  // mobile mirror has no business killing or resizing the desktop's session.
-  'cmd:pty:kill',
-  'cmd:pty:resize',
-  // Pushes a prompt into an open tab's chat queue — a real mutation of that
-  // tab's session, same tier as pty:write.
-  'cmd:chat:send',
-]);
-
-const ALLOWED_COMMANDS = new Set([...READ_COMMANDS, ...SAS_GATED_READS, ...MUTATE_COMMANDS]);
-
 module.exports = {
   // Centralized slug regex — used by scheduler.cjs and queueOps.cjs for
   // direct test()/match() containment checks alongside the zod parses.
   SCHEDULE_SLUG_RE,
   SCHEDULE_RUN_ID_RE,
   PRD_CREATE_SLUG_RE,
-  READ_COMMANDS,
-  SAS_GATED_READS,
-  MUTATE_COMMANDS,
-  ALLOWED_COMMANDS,
   schemas: {
-    webRemotePair,
-    webRemoteRevokeDevice,
-    webRemoteAuditTail,
     ptySpawn,
     ptyTabId,
     ptyAlive,
     ptyWrite,
     ptyResize,
-    sessionSubscribe,
     browserViewId,
     browserCreate,
     browserSetBounds,
@@ -976,7 +883,6 @@ module.exports = {
     browserCaptureDom,
     browserCaptureSelection,
     browserCopyImage,
-    browserSaveBinary,
     clipboardWriteText,
     browserSaveRecording,
     browserReplay,
@@ -1049,6 +955,7 @@ module.exports = {
     watchersRemove,
     watchersKillTab,
     filesDuplicate,
+    filesSaveBinary,
     docEditRun,
     docEditRunInSession,
     chatRun,

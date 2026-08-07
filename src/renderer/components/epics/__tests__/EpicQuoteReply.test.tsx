@@ -25,7 +25,7 @@ import { flushAsync } from '../../../testUtils/domFlush'
 
 ;(globalThis as any).window.api = {
   chat: { cancel: vi.fn() },
-  browser: { saveBinary: vi.fn(async () => ({ ok: true })) },
+  files: { saveBinary: vi.fn(async () => ({ ok: true })) },
 }
 
 vi.mock('../../../state/toast', () => ({

@@ -318,6 +318,21 @@ async function deleteEntry(filePath) {
   }
 }
 
+/**
+ * Binary-safe atomic write (formerly browser:save-binary). Routes through
+ * config.cjs's writeBinaryAtomic so the single-writer law still applies to
+ * ops-root destinations; `writer` is the renderer's declared owner id.
+ */
+async function saveBinary(filePath, base64, writer) {
+  const { writeBinaryAtomic } = require('./config.cjs');
+  try {
+    await writeBinaryAtomic(filePath, Buffer.from(base64, 'base64'), { writer });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 async function openExternal(filePath) {
   let resolved;
   try { resolved = validateHomePath(filePath); }
@@ -385,6 +400,10 @@ function registerFilesHandlers() {
     const { path: p } = filesPath.parse(payload);
     return deleteEntry(p);
   });
+  ipcMain.handle('files:save-binary', (_e, payload) => {
+    const { path: p, base64, writer } = schemas.filesSaveBinary.parse(payload);
+    return saveBinary(p, base64, writer);
+  });
   // files:open-external / files:show-in-finder consolidated into shell:open
   // (index.cjs, as: 'openPath' / 'revealPath'). The openExternal/showInFinder
   // functions are exported for that handler to call.
@@ -406,4 +425,5 @@ module.exports = {
   deleteEntry,
   duplicateEntry,
   duplicateNameFor,
+  saveBinary,
 };

@@ -112,7 +112,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   config: {
     readJson: (path) => ipcRenderer.invoke('config:read-json', { path }),
-    readText: (path) => ipcRenderer.invoke('config:read-text', { path }),
+    readText: (path, opts) => ipcRenderer.invoke('config:read-text', { path, maxBytes: opts?.maxBytes }),
     writeJson: (path, data, writer) => ipcRenderer.invoke('config:write-json', { path, data, writer }),
     writeText: (path, text, writer) => ipcRenderer.invoke('config:write-text', { path, text, writer }),
     listDir: (path, opts) => ipcRenderer.invoke('config:list-dir', { path, opts }),

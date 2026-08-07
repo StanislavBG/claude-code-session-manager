@@ -22,13 +22,19 @@ export function candidatePath(encoded: string): string {
   return encoded.replace(/-/g, '/')
 }
 
+// A transcript's `cwd` field appears in the very first JSONL record, so
+// reading a small prefix is enough to resolve it — reading whole transcripts
+// (some multi-MB) just to find that one line is what made the initial scan
+// pay ~2000 whole-file reads across the IPC boundary.
+export const CWD_RESOLVE_MAX_BYTES = 64 * 1024
+
 export async function resolveProjectCwd(projectFolder: string): Promise<string | null> {
   const files = await window.api.config.listDir(projectFolder, { filesOnly: true })
   const jsonl = (files.entries as DirEntry[])
     .filter((f) => f.name.endsWith('.jsonl'))
     .sort((a, b) => a.size - b.size)
   for (const f of jsonl) {
-    const r = await window.api.config.readText(f.path)
+    const r = await window.api.config.readText(f.path, { maxBytes: CWD_RESOLVE_MAX_BYTES })
     if (!r.exists || !r.text) continue
     for (const line of r.text.split('\n')) {
       if (!line.includes('"cwd"')) continue

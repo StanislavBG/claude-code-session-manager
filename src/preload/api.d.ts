@@ -43,6 +43,13 @@ export interface ReadTextResult {
   text: string;
   mtimeMs: number;
   error: string | null;
+  /** True when maxBytes was set and the file is larger than the read prefix. */
+  truncated: boolean;
+}
+
+export interface ReadTextOptions {
+  /** Read at most this many bytes from the start of the file instead of the whole file. */
+  maxBytes?: number;
 }
 
 /** One resolved node in a CLAUDE.md-like file's `@path` import chain. */
@@ -1281,7 +1288,7 @@ export interface SessionManagerAPI {
   };
   config: {
     readJson: (path: string) => Promise<ReadJsonResult>;
-    readText: (path: string) => Promise<ReadTextResult>;
+    readText: (path: string, opts?: ReadTextOptions) => Promise<ReadTextResult>;
     /** `writer` declares the owning surface for the single-writer law — required
      *  when `path` is inside a project's session-manager-operations/ root. */
     writeJson: (path: string, data: unknown, writer?: OpsWriter) => Promise<WriteResult>;

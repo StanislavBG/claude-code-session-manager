@@ -199,17 +199,41 @@ async function readJson(abs) {
   }
 }
 
-async function readText(abs) {
+async function readText(abs, opts = {}) {
+  const { maxBytes } = opts;
   try {
     abs = validatePath(expandHome(abs));
-    const raw = await fsp.readFile(abs, 'utf8');
-    const stat = await fsp.stat(abs);
-    return { exists: true, text: raw, mtimeMs: stat.mtimeMs, error: null };
+    if (maxBytes == null) {
+      const raw = await fsp.readFile(abs, 'utf8');
+      const stat = await fsp.stat(abs);
+      return { exists: true, text: raw, mtimeMs: stat.mtimeMs, error: null, truncated: false };
+    }
+    const handle = await fsp.open(abs, 'r');
+    try {
+      const stat = await handle.stat();
+      const readLen = Math.min(maxBytes, stat.size);
+      const buf = Buffer.alloc(readLen);
+      if (readLen > 0) {
+        await handle.read(buf, 0, readLen, 0);
+      }
+      const truncated = stat.size > readLen;
+      let text = buf.toString('utf8');
+      if (truncated) {
+        // A byte-bounded read can split a multi-byte UTF-8 char or a JSONL
+        // line mid-way; drop the partial trailing line so callers never
+        // JSON.parse a truncated fragment.
+        const lastNewline = text.lastIndexOf('\n');
+        text = lastNewline === -1 ? '' : text.slice(0, lastNewline + 1);
+      }
+      return { exists: true, text, mtimeMs: stat.mtimeMs, error: null, truncated };
+    } finally {
+      await handle.close();
+    }
   } catch (e) {
     if (e.code === 'ENOENT') {
-      return { exists: false, text: '', mtimeMs: 0, error: null };
+      return { exists: false, text: '', mtimeMs: 0, error: null, truncated: false };
     }
-    return { exists: false, text: '', mtimeMs: 0, error: e.message };
+    return { exists: false, text: '', mtimeMs: 0, error: e.message, truncated: false };
   }
 }
 
@@ -438,7 +462,7 @@ function closeAllWatchers() {
 function registerConfigHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('config:read-json', v(s.configPath, ({ path: p }) => readJson(p)));
-  ipcMain.handle('config:read-text', v(s.configPath, ({ path: p }) => readText(p)));
+  ipcMain.handle('config:read-text', v(s.configReadText, ({ path: p, maxBytes }) => readText(p, { maxBytes })));
   // `writer` is the renderer's declared owner id for the single-writer law
   // (lib/opsOwnership.cjs). Ignored outside the ops root; required inside it.
   ipcMain.handle('config:write-json', v(s.configWriteJson, ({ path: p, data, writer }) => {

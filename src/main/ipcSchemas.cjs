@@ -89,6 +89,14 @@ const transcriptReadRef = z.object({
 // ──────────────────────────────────────────── Config
 const configPath = z.object({ path: z.string().min(1).max(4096) });
 
+// maxBytes: optional bounded prefix-read length in bytes. Capped at 8 MiB —
+// generous for any legitimate "peek at the start of a file" caller while
+// still blocking a renderer from asking for an effectively-unbounded read.
+const configReadText = z.object({
+  path: z.string().min(1).max(4096),
+  maxBytes: z.number().int().min(1).max(8 * 1024 * 1024).optional(),
+});
+
 // `writer` carries the renderer's declared owner id for the single-writer law
 // (lib/opsOwnership.cjs). Optional on the wire because most writes target
 // ~/.claude, not a project ops root; writes INSIDE the ops root are refused
@@ -790,6 +798,7 @@ module.exports = {
     transcriptPage,
     transcriptReadRef,
     configPath,
+    configReadText,
     configWriteJson,
     configWriteText,
     configListDir,

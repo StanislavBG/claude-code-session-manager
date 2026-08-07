@@ -86,6 +86,7 @@ export default defineConfig({
       'src/main/lib/__tests__/jobWorktree.test.cjs',
       'src/main/__tests__/scheduler-worktree-exec-cwd.test.cjs',
       'src/main/lib/__tests__/coldBootPromptSessionsWrite.test.cjs',
+      'src/main/__tests__/config-readText-bounded.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',
       'scripts/__tests__/active-sessions.test.cjs',

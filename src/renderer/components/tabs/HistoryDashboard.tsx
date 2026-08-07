@@ -7,7 +7,9 @@ import { buildUsageCsv } from '../../lib/usageCsv'
 import { toast } from '../../state/toast'
 import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
-import { encodeWorkspace } from '../../lib/encodeWorkspace'
+import { useKnownProjects } from '../../lib/useKnownProjects'
+import { normalizeCwd } from '../../lib/knownProjectAggregate'
+import { foldHistoryDaysByCwd, hasExclusions, describeExclusions } from '../../lib/historyProjectFold'
 import { ControlBar, type RangeDays } from './history/analytics/ControlBar'
 import { Headline } from './history/analytics/Headline'
 import { BudgetStrip } from './history/analytics/BudgetStrip'
@@ -24,6 +26,8 @@ const MEASURE_KEY = 'sm.history.analytics.measure'
 const RANGE_KEY = 'sm.history.analytics.range'
 const MEASURES: Measure[] = ['in', 'out', 'total', 'prompts', 'sessions', 'time', 'spend']
 const RANGES: RangeDays[] = [30, 60, 90, 0]
+/** Module-level so the `days` fallback is reference-stable across renders. */
+const EMPTY_DAYS: HistoryDashboardDay[] = []
 
 function loadMeasure(): Measure {
   try {
@@ -68,18 +72,20 @@ export function HistoryDashboard() {
   const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
   const prevNavFaceRef = useRef(navFace)
 
-  // `byProject` keys returned by `history:dashboard` are the encoded cwd
-  // slug (same encoding as `~/.claude/projects/<encoded>/`), not the raw
-  // path — see encodeCwd.cjs. Must encode `activeCwd` the same way before
-  // matching, or every project whose path contains a literal `-` (e.g.
-  // this repo's own `session-manager`) silently fails to match and Project
-  // face renders empty.
-  const activeCwdEncoded = activeCwd ? encodeWorkspace(activeCwd) : null
+  // `history:dashboard` keys `byProject` by the encoded `~/.claude/projects/`
+  // folder name, which is a TRANSCRIPT STORE identity, not a project one —
+  // it reported 2028 "projects" here, 2009 of them test-fixture folders.
+  // `foldedDays` below re-keys every day by the RESOLVED CWD (a project is a
+  // cwd — lib/knownProjectAggregate.ts), so from here down a project key IS
+  // a normalized cwd and `activeCwd` matches directly. That also retires the
+  // encodeWorkspace round-trip this used to need, and with it the class of
+  // bug where a path containing a literal `-` failed to round-trip.
+  const activeCwdKey = activeCwd ? normalizeCwd(activeCwd) : null
 
   const [homeKeep, setHomeKeep] = useState<Set<string> | null>(null)
   const keep = useMemo(
-    () => (navFace === 'project' && activeCwdEncoded ? new Set([activeCwdEncoded]) : homeKeep),
-    [navFace, activeCwdEncoded, homeKeep],
+    () => (navFace === 'project' && activeCwdKey ? new Set([activeCwdKey]) : homeKeep),
+    [navFace, activeCwdKey, homeKeep],
   )
   const [selected, setSelected] = useState<string | null>(null)
   const [raw, setRaw] = useState<HistoryDashboardResult | null>(null)
@@ -123,18 +129,40 @@ export function HistoryDashboard() {
     if (navFace === 'home') setHomeKeep(null)
   }, [navFace])
 
-  const facet = useMemo(() => (raw ? facetSlice(raw, keep) : null), [raw, keep])
+  // encoded transcript folder → resolved cwd, from the same unique-per-cwd
+  // aggregate Home's Projects card reads. `resolving` distinguishes "not yet
+  // known" from "known to be none": folding against a half-built map would
+  // briefly report every project as excluded.
+  const { projects, resolving: projectsResolving } = useKnownProjects()
+  const cwdByEncoded = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const p of projects) for (const e of p.encodedIds) m[e] = p.cwd
+    return m
+  }, [projects])
+
+  const folded = useMemo(
+    () => (raw && !projectsResolving ? foldHistoryDaysByCwd(raw.days, cwdByEncoded) : null),
+    [raw, cwdByEncoded, projectsResolving],
+  )
+  // Until cwd resolution finishes, fall through to the raw (folder-keyed)
+  // days rather than rendering an empty dashboard.
+  const days = folded?.days ?? raw?.days ?? EMPTY_DAYS
+  const excluded = folded?.excluded ?? null
+
+  const facet = useMemo(
+    () => (raw ? facetSlice({ days, totals: raw.totals, prevTotals: raw.prevTotals }, keep) : null),
+    [raw, days, keep],
+  )
 
   const filteredDays = useMemo<HistoryDashboardDay[]>(() => {
-    if (!raw) return []
-    if (keep === null) return raw.days
-    return raw.days.map((d) => ({
+    if (keep === null) return days
+    return days.map((d) => ({
       date: d.date,
       byProject: Object.fromEntries(Object.entries(d.byProject).filter(([p]) => keep.has(p))),
     }))
-  }, [raw, keep])
+  }, [days, keep])
 
-  const allProjectRows = useMemo(() => (raw ? buildProjectRows(raw.days, measure) : []), [raw, measure])
+  const allProjectRows = useMemo(() => buildProjectRows(days, measure), [days, measure])
   const projectRows = useMemo(() => buildProjectRows(filteredDays, measure), [filteredDays, measure])
 
   const stackedDays = useMemo(() => filteredDays.map((d) => ({
@@ -149,7 +177,7 @@ export function HistoryDashboard() {
     const totals = emptyTotals()
     const byModel: Record<string, DrillModelBucket> = {}
     const toolBreakdown: Record<string, number> = {}
-    for (const day of raw.days) {
+    for (const day of days) {
       const row = day.byProject[selected]
       if (!row) continue
       totals.promptCount += row.promptCount
@@ -175,7 +203,7 @@ export function HistoryDashboard() {
       }
     }
     return { totals, byModel, toolBreakdown }
-  }, [raw, selected])
+  }, [raw, days, selected])
 
   // Clear selection if its project gets faceted out.
   useEffect(() => {
@@ -264,7 +292,16 @@ export function HistoryDashboard() {
           projectsTouched={projectRows.length}
           totalSessions={facet.totals.sessionCount}
         />
-        <BudgetStrip days={raw.days} />
+        <BudgetStrip days={days} />
+        {excluded && hasExclusions(excluded) && (
+          <div
+            data-testid="history-excluded-note"
+            className="rounded-[10px] border border-line bg-bg-hi px-3 py-2 text-[11.5px] font-mono text-fg-faint"
+            title="A project is a working directory. ~/.claude/projects holds one folder per path the CLI was ever launched from — throwaway /tmp dirs and test fixtures included — and a folder whose cwd can't be recovered from its transcripts is not a project. Their totals are stated here rather than silently folded into the charts."
+          >
+            {describeExclusions(excluded)}
+          </div>
+        )}
         {/* Project face is force-scoped to the active project (see `keep`
             above) — nothing to facet with only one project ever shown, and
             no escape hatch to peek at others. Home face keeps the full

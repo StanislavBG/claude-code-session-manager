@@ -16,16 +16,34 @@ import type { HistoryDashboardProjectRow, HistoryDashboardResult, HistoryDashboa
  * toggle/isolate/show-all filter, resetting to "all" on transition back in.
  *
  * `history:dashboard` keys `byProject` by the ENCODED cwd slug (same
- * encoding as `~/.claude/projects/<encoded>/`), not the raw path — so the
- * fixture below mirrors that real shape via `encodeWorkspace`, and UI
- * lookups (title attr = `chip.projectDir` = the encoded key) match against
- * the encoded key too.
+ * encoding as `~/.claude/projects/<encoded>/`), so the IPC fixture below
+ * mirrors that real shape via `encodeWorkspace`. The component folds those
+ * keys to the RESOLVED CWD before anything renders (lib/historyProjectFold.ts
+ * — a project is a working directory, not a transcript folder), so every UI
+ * lookup below matches on the raw cwd, and `useKnownProjects` is mocked to
+ * supply the encoded→cwd map that fold needs.
  */
+
+vi.mock('../../../lib/useKnownProjects', () => ({
+  useKnownProjects: () => ({
+    projects: [
+      { cwd: '/home/bilko/Projects/alpha', name: 'alpha', encoded: ALPHA_KEY, encodedIds: [ALPHA_KEY], sessionCount: 0, sizeBytes: 0, lastSession: 0, details: {} },
+      { cwd: '/home/bilko/Projects/beta', name: 'beta', encoded: BETA_KEY, encodedIds: [BETA_KEY], sessionCount: 0, sizeBytes: 0, lastSession: 0, details: {} },
+      { cwd: DASH_CWD, name: 'session-manager', encoded: DASH_KEY, encodedIds: [DASH_KEY], sessionCount: 0, sizeBytes: 0, lastSession: 0, details: {} },
+    ],
+    rows: [],
+    enriched: {},
+    loading: false,
+    resolving: false,
+  }),
+}))
 
 const ALPHA_CWD = '/home/bilko/Projects/alpha'
 const BETA_CWD = '/home/bilko/Projects/beta'
+const DASH_CWD = '/home/bilko/Projects/session-manager'
 const ALPHA_KEY = encodeWorkspace(ALPHA_CWD)
 const BETA_KEY = encodeWorkspace(BETA_CWD)
+const DASH_KEY = encodeWorkspace(DASH_CWD)
 
 const ALPHA_TAB: SessionTab = {
   id: 'tab-alpha',
@@ -108,18 +126,18 @@ function showAllBtn(el: HTMLElement): HTMLButtonElement | undefined {
 }
 
 function isIsolatedTo(el: HTMLElement, cwd: string): boolean {
-  const alpha = isolateBtn(el, ALPHA_KEY)
-  const beta = isolateBtn(el, BETA_KEY)
+  const alpha = isolateBtn(el, ALPHA_CWD)
+  const beta = isolateBtn(el, BETA_CWD)
   if (!alpha || !beta) return false
   const alphaActive = !alpha.className.includes('opacity-40')
   const betaActive = !beta.className.includes('opacity-40')
-  if (cwd === ALPHA_KEY) return alphaActive && !betaActive
+  if (cwd === ALPHA_CWD) return alphaActive && !betaActive
   return betaActive && !alphaActive
 }
 
 function isShowingAll(el: HTMLElement): boolean {
-  const alpha = isolateBtn(el, ALPHA_KEY)
-  const beta = isolateBtn(el, BETA_KEY)
+  const alpha = isolateBtn(el, ALPHA_CWD)
+  const beta = isolateBtn(el, BETA_CWD)
   if (!alpha || !beta) return false
   return !alpha.className.includes('opacity-40') && !beta.className.includes('opacity-40')
 }
@@ -150,17 +168,79 @@ describe('HistoryDashboard Home face — full multi-project facet', () => {
     // Shift-click isolates to just this project (plain click toggles it — see
     // ProjectFacet.tsx's onClick={(e) => e.shiftKey ? onIsolate : onToggle}).
     await act(async () => {
-      isolateBtn(el, ALPHA_KEY)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+      isolateBtn(el, ALPHA_CWD)!.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
       await Promise.resolve()
     })
-    expect(isIsolatedTo(el, ALPHA_KEY)).toBe(true)
+    expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
 
     // A re-render on the SAME navFace ('home') must not reset the manual choice.
     await act(async () => {
       useSessions.setState({ tabs: [], activeTabId: null })
       await Promise.resolve()
     })
-    expect(isIsolatedTo(el, ALPHA_KEY)).toBe(true)
+    expect(isIsolatedTo(el, ALPHA_CWD)).toBe(true)
+  })
+})
+
+// A project is a working directory. ~/.claude/projects holds one folder per
+// path the CLI was ever launched from, so the raw payload carried 2028
+// "projects" here — 2009 of them -tmp-sm-*-test-* fixture folders with no
+// resolvable cwd, contributing 4,304 phantom sessions to the `sessions`
+// measure and rendering as raw encoded slugs in the facet.
+describe('HistoryDashboard project axis — folded to unique cwds', () => {
+  const GHOST_KEY = '-tmp-sm-paged-test-08mRjd'
+
+  function withGhost() {
+    const api = installWindowApiMock()
+    const date = '2026-07-30'
+    api.history.dashboard.mockResolvedValue({
+      from: date,
+      to: date,
+      days: [{ date, byProject: {
+        [ALPHA_KEY]: row(ALPHA_KEY, date),
+        [BETA_KEY]: row(BETA_KEY, date),
+        [GHOST_KEY]: { ...row(GHOST_KEY, date), promptCount: 0, estimatedCostUsd: 0, sessionCount: 3 },
+      } }],
+      prevTotals: emptyTotals(),
+      totals: emptyTotals(),
+      byProjectTotals: {},
+      byModelTotals: {},
+      toolsByProject: {},
+      generatedAt: 0,
+      provisionalDates: [],
+    })
+    return api
+  }
+
+  it('keys the facet by resolved cwd, not by the encoded transcript folder', async () => {
+    const el = await mount(<HistoryDashboard />)
+    expect(isolateBtn(el, ALPHA_CWD)).not.toBeNull()
+    expect(isolateBtn(el, ALPHA_KEY)).toBeNull()
+    expect(el.textContent).not.toContain(ALPHA_KEY)
+  })
+
+  it('drops a transcript folder with no resolvable cwd from the project axis', async () => {
+    withGhost()
+    const el = await mount(<HistoryDashboard />)
+    expect(isolateBtn(el, GHOST_KEY)).toBeNull()
+    expect(el.textContent).not.toContain(GHOST_KEY)
+    // Only the two real projects remain on the axis.
+    expect(isolateBtn(el, ALPHA_CWD)).not.toBeNull()
+    expect(isolateBtn(el, BETA_CWD)).not.toBeNull()
+  })
+
+  it('states what it excluded rather than dropping those numbers silently', async () => {
+    withGhost()
+    const el = await mount(<HistoryDashboard />)
+    const note = el.querySelector('[data-testid="history-excluded-note"]')
+    expect(note).not.toBeNull()
+    expect(note!.textContent).toContain('1 transcript folder')
+    expect(note!.textContent).toContain('3 sessions')
+  })
+
+  it('shows no exclusion note when every folder resolves', async () => {
+    const el = await mount(<HistoryDashboard />)
+    expect(el.querySelector('[data-testid="history-excluded-note"]')).toBeNull()
   })
 })
 
@@ -169,8 +249,8 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
     useSessions.setState({ tabs: [ALPHA_TAB], activeTabId: ALPHA_TAB.id })
     useLayout.setState({ navFace: 'project' })
     const el = await mount(<HistoryDashboard />)
-    expect(isolateBtn(el, ALPHA_KEY)).toBeNull()
-    expect(isolateBtn(el, BETA_KEY)).toBeNull()
+    expect(isolateBtn(el, ALPHA_CWD)).toBeNull()
+    expect(isolateBtn(el, BETA_CWD)).toBeNull()
     expect(showAllBtn(el)).toBeUndefined()
   })
 
@@ -189,8 +269,8 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
       await Promise.resolve()
     })
     // Force-scoped: no facet UI, no way to see beta's data from here.
-    expect(isolateBtn(el, ALPHA_KEY)).toBeNull()
-    expect(el.textContent).not.toContain(BETA_KEY)
+    expect(isolateBtn(el, ALPHA_CWD)).toBeNull()
+    expect(el.textContent).not.toContain(BETA_CWD)
   })
 
   it('transitioning back to Home resets to "show all"', async () => {
@@ -213,9 +293,8 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
     // becomes "-". Matching against the raw activeCwd instead of its
     // encoded form silently fails to scope any project whose path has a
     // dash in a segment name — this repo's own cwd is exactly such a case.
-    const dashCwd = '/home/bilko/Projects/session-manager'
-    const dashTab: SessionTab = { ...ALPHA_TAB, id: 'tab-dash', sessionId: 'tab-dash', cwd: dashCwd }
-    const dashKey = encodeWorkspace(dashCwd)
+    const dashTab: SessionTab = { ...ALPHA_TAB, id: 'tab-dash', sessionId: 'tab-dash', cwd: DASH_CWD }
+    const dashKey = DASH_KEY
     const api = installWindowApiMock()
     api.history.dashboard.mockResolvedValue({
       from: '2026-07-30',
@@ -233,6 +312,6 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
     useLayout.setState({ navFace: 'project' })
     const el = await mount(<HistoryDashboard />)
     expect(el.textContent).not.toContain('no sessions in range')
-    expect(el.textContent).not.toContain(BETA_KEY)
+    expect(el.textContent).not.toContain(BETA_CWD)
   })
 })

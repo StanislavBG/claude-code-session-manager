@@ -4765,7 +4765,9 @@ async function init() {
   }
 }
 
-// remote — callable from webRemote.cjs without going through IPC.
+// remote — in-process (non-IPC) scheduler accessors, used by prdCreate.cjs
+// and other main-process callers. (Named for the retired web-remote relay,
+// its original consumer; kept because it still has in-process callers.)
 const remote = {
   // `cwd` is optional: prdCreate.cjs's create flow passes the target
   // project's cwd explicitly (the file may not exist yet, so there's

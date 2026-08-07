@@ -1,7 +1,7 @@
 /**
  * Unit tests for four data-integrity bugs fixed 2026-06-10.
  *
- * Bug 1  webRemote tailLines off-by-one
+ * Bug 1  web-remote tailLines off-by-one (module removed 2026-08-06; logic inlined below)
  * Bug 2  transcripts subscribe LRU eviction
  * Bug 3  historyAggregator tail-cache double-count on rewrite
  * Bug 4  kg savePromptIndex / saveIngestState ordering
@@ -17,9 +17,9 @@ import * as os from 'node:os'
 const require = createRequire(import.meta.url)
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bug 1: tailLines off-by-one (webRemote.cjs)
-// We test the function in isolation by extracting it from the module.
-// webRemote.cjs requires Electron, so we inline the fixed logic here.
+// Bug 1: tailLines off-by-one (originally in the web-remote relay, removed
+// 2026-08-06). The fixed logic was always inlined here (the source module
+// required Electron), so the regression test stands on its own.
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tailLines(filePath: string, fromOffset: number | null) {

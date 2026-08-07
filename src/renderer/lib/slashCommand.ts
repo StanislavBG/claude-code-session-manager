@@ -15,7 +15,6 @@ const SLASH_NAV_COMMANDS: Record<string, NavKey> = {
   history: 'history',
   resume: 'history',
   scheduler: 'scheduler',
-  remote: 'remote',
   projects: 'projects',
   voice: 'voice',
   system: 'system-prompt',

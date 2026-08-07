@@ -5,7 +5,6 @@
  *
  * Single source of truth for the Anthropic summarization call. Used by:
  *   - exchanges.cjs (records durable per-exchange summaries)
- *   - webRemote.cjs (mobile summary push — refactored to import from here)
  *
  * Degrade contracts (never throw — always return a record):
  *   no API key → { summary: text.slice(0,600), model:'raw', degraded:'no_api_key' }

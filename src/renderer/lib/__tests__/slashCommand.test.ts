@@ -31,7 +31,6 @@ describe('matchSlashNav', () => {
   })
 
   it('matches the remaining LeftNav destinations with natural slash names', () => {
-    expect(matchSlashNav('/remote')).toBe('remote')
     expect(matchSlashNav('/projects')).toBe('projects')
     expect(matchSlashNav('/voice')).toBe('voice')
     expect(matchSlashNav('/system')).toBe('system-prompt')

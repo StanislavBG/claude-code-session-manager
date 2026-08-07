@@ -29,6 +29,12 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(cwd, { recursive: true, force: true });
+  // writeTranscript mkdir -p's this run's folder under the REAL
+  // ~/.claude/projects (that's where transcriptPath resolves to), so leaving
+  // it behind accumulates one phantom project directory per test run — 1760
+  // of them had piled up before this cleanup existed, and Home counted every
+  // one as a project. Remove it with the tmp cwd it mirrors.
+  fs.rmSync(path.dirname(transcriptPath(cwd, 'x')), { recursive: true, force: true });
 });
 
 function writeTranscript(cwdArg, sessionId, lines) {

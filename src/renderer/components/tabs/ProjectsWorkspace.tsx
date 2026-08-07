@@ -4,7 +4,7 @@ import { useSessions } from '../../state/sessions'
 import { useEditor } from '../../state/editor'
 import { useLayout } from '../../state/layout'
 import { useProjectsPrefs } from '../../state/projectsPrefs'
-import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
+import { useKnownProjects } from '../../lib/useKnownProjects'
 import { FileTree } from '../layout/FileTree'
 import { EditorView } from './EditorView'
 import { Tooltip } from '../ui/Tooltip'
@@ -60,12 +60,17 @@ export function ProjectsWorkspace() {
   const containerRef = useRef<HTMLDivElement>(null)
   const launcherRef = useRef<HTMLDivElement>(null)
 
-  const { rows, enriched, openInSession, archiveProject } = useKnownProjects()
+  // One entry per real working directory (lib/knownProjectAggregate.ts) — the
+  // launcher lists PROJECTS, not the ~/.claude/projects transcript folders
+  // that back them, so a cwd with several folders appears once and a folder
+  // whose cwd never resolved doesn't appear at all. Pins are keyed by cwd for
+  // the same reason.
+  const { projects, openProject, archiveProjectByCwd } = useKnownProjects()
   const pinned = useProjectsPrefs((s) => s.pinned)
   const togglePin = useProjectsPrefs((s) => s.togglePin)
 
-  const sortedRows = [...rows].sort((a, b) =>
-    (pinned[b.encoded] ? 1 : 0) - (pinned[a.encoded] ? 1 : 0))
+  const sortedRows = [...projects].sort((a, b) =>
+    (pinned[b.cwd] ? 1 : 0) - (pinned[a.cwd] ? 1 : 0))
 
   useEffect(() => {
     if (!launcherOpen) return
@@ -179,21 +184,21 @@ export function ProjectsWorkspace() {
                 <div className="px-3 py-2 text-[11.5px] text-fg-faint">No projects found.</div>
               ) : (
                 sortedRows.map((row) => {
-                  const label = compactPath(enriched[row.encoded]?.cwd ?? candidatePath(row.encoded))
+                  const label = compactPath(row.cwd)
                   return (
-                    <div key={row.encoded} data-testid="projects-launcher-row" className="flex items-center gap-1 px-2 py-1 hover:bg-bg-hi group">
-                      <Tooltip content={pinned[row.encoded] ? 'Unpin' : 'Pin to top'}>
+                    <div key={row.cwd} data-testid="projects-launcher-row" className="flex items-center gap-1 px-2 py-1 hover:bg-bg-hi group">
+                      <Tooltip content={pinned[row.cwd] ? 'Unpin' : 'Pin to top'}>
                         <button
-                          onClick={() => togglePin(row.encoded)}
+                          onClick={() => togglePin(row.cwd)}
                           className={`shrink-0 text-sm leading-none transition-colors ${
-                            pinned[row.encoded] ? 'text-yellow-400' : 'text-fg-faint hover:text-fg-dim'
+                            pinned[row.cwd] ? 'text-yellow-400' : 'text-fg-faint hover:text-fg-dim'
                           }`}
                         >
-                          {pinned[row.encoded] ? '★' : '☆'}
+                          {pinned[row.cwd] ? '★' : '☆'}
                         </button>
                       </Tooltip>
                       <button
-                        onClick={() => { openInSession(row); setLauncherOpen(false) }}
+                        onClick={() => { void openProject(row.cwd); setLauncherOpen(false) }}
                         className="flex-1 min-w-0 text-left text-[11.5px] font-mono truncate text-fg-dim hover:text-fg"
                       >
                         {label}
@@ -201,7 +206,7 @@ export function ProjectsWorkspace() {
                       <button
                         onClick={async () => {
                           if (!window.confirm(`Archive ${label}?`)) return
-                          await archiveProject(row.encoded)
+                          await archiveProjectByCwd(row)
                         }}
                         className="shrink-0 text-[10px] text-fg-faint hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                         title="Archive"

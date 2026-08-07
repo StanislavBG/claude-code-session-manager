@@ -26,12 +26,16 @@ vi.mock('../EditorView', () => ({
 
 vi.mock('../../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
+    projects: [],
     rows: [],
     enriched: {},
+    loading: false,
+    resolving: false,
+    openProject: vi.fn(),
     openInSession: vi.fn(),
     archiveProject: vi.fn(),
+    archiveProjectByCwd: vi.fn(),
   }),
-  candidatePath: (encoded: string) => encoded.replace(/-/g, '/'),
 }))
 
 let container: HTMLDivElement | null = null

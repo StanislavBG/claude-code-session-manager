@@ -17,17 +17,15 @@ const listPersonasSpy = vi.fn(async (): Promise<AgentPersona[]> => [])
 
 vi.mock('../../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
-    rows: [
-      { encoded: '-home-bilko-Projects-alpha', displayPath: '', sessionCount: 0, lastSession: 0, path: '', sizeBytes: 0 },
-      { encoded: '-home-bilko-Projects-beta', displayPath: '', sessionCount: 0, lastSession: 0, path: '', sizeBytes: 0 },
+    projects: [
+      { cwd: '/home/bilko/Projects/alpha', name: 'alpha', encoded: '-home-bilko-Projects-alpha', encodedIds: ['-home-bilko-Projects-alpha'], sessionCount: 0, sizeBytes: 0, lastSession: 0, details: {} },
+      { cwd: '/home/bilko/Projects/beta', name: 'beta', encoded: '-home-bilko-Projects-beta', encodedIds: ['-home-bilko-Projects-beta'], sessionCount: 0, sizeBytes: 0, lastSession: 0, details: {} },
     ],
-    enriched: {
-      '-home-bilko-Projects-alpha': { cwd: '/home/bilko/Projects/alpha' },
-      '-home-bilko-Projects-beta': { cwd: '/home/bilko/Projects/beta' },
-    },
+    rows: [],
+    enriched: {},
     loading: false,
+    resolving: false,
   }),
-  candidatePath: (encoded: string) => encoded.replace(/-/g, '/'),
 }))
 
 let container: HTMLDivElement | null = null

@@ -4,7 +4,7 @@ import { useChatSignals } from '../../lib/useChatSignals'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { useEpicUsage } from '../../state/epicUsage'
-import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
+import { useKnownProjects } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { lastActivityMs } from '../../lib/epicQueueControls'
@@ -47,7 +47,7 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   // re-render the entire workspace on every streaming token (PRD 833 I6).
   const chats = useChatSignals()
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
-  const { rows, enriched } = useKnownProjects()
+  const { projects } = useKnownProjects()
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // Mirrors the open Epic into the store so mergeAppendedEvent (main-process
@@ -67,17 +67,11 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   // are rendered as siblings, not parent/child.
   const [quote, setQuote] = useState<string | undefined>(undefined)
 
-  const knownCwds = useMemo(() => {
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const row of rows) {
-      const cwd = enriched[row.encoded]?.cwd ?? candidatePath(row.encoded)
-      if (!cwd || seen.has(cwd)) continue
-      seen.add(cwd)
-      out.push(cwd)
-    }
-    return out
-  }, [rows, enriched])
+  // One entry per real working directory. Previously this deduped over
+  // `enriched[...]?.cwd ?? candidatePath(row.encoded)`, so every unresolvable
+  // transcript folder contributed a FABRICATED path — thousands of phantom
+  // "projects" to hydrate Epics for. See lib/knownProjectAggregate.ts.
+  const knownCwds = useMemo(() => projects.map((p) => p.cwd), [projects])
 
   // TerminalStage's singleton mount (no `cwd` prop) always scopes to the
   // active tab — Terminal.tsx's dormant-tab mount passes `cwd` explicitly,

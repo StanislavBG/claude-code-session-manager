@@ -1,9 +1,12 @@
-// Pure row-model for the Global Home Projects card. Joins known-project rows
-// against running chats (keyed by Epic id) via each Epic's cwd, so "N live"
-// reflects real in-flight work rather than just recency. Kept dependency-free
-// (plain shapes, no store imports) so it is unit-testable without mocking
-// zustand.
-import type { ProjectRow, EnrichmentState } from './useKnownProjects'
+// Pure row-model for the Global Home Projects card. Joins the unique-per-cwd
+// project aggregates (lib/knownProjectAggregate.ts — one row per real working
+// directory, never per ~/.claude/projects transcript folder) against running
+// chats keyed by Epic id, via each Epic's cwd, so "N live" reflects real
+// in-flight work rather than just recency. Kept dependency-free (plain shapes,
+// no store imports) so it is unit-testable without mocking zustand.
+import { normalizeCwd, type ProjectAggregate } from './knownProjectAggregate'
+
+export { projectNameFromCwd } from './knownProjectAggregate'
 
 export interface ChatSignalLite {
   running: boolean
@@ -22,20 +25,15 @@ export interface HomeProjectRow {
   lastActivityMs: number
 }
 
-export function projectNameFromCwd(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean)
-  return parts.length > 0 ? parts[parts.length - 1] : cwd
-}
-
 /**
- * Builds display rows for the Projects card from `useKnownProjects` rows,
- * enrichment (resolved cwd per encoded project), running chats keyed by Epic
- * id, and Epic sessions keyed by Epic id (for cwd lookup). A project's
- * liveCount is the count of running chats whose Epic's cwd matches.
+ * Builds display rows for the Projects card from the project aggregates,
+ * running chats keyed by Epic id, and Epic sessions keyed by Epic id (for cwd
+ * lookup). A project's liveCount is the count of running chats whose Epic's
+ * cwd matches — compared on the normalized cwd so a stored trailing slash
+ * doesn't silently drop the count.
  */
 export function buildHomeProjectRows(
-  rows: ProjectRow[],
-  enriched: Record<string, EnrichmentState | undefined>,
+  projects: ProjectAggregate[],
   chats: Record<string, ChatSignalLite>,
   sessions: Record<string, EpicSessionLite>,
 ): HomeProjectRow[] {
@@ -44,18 +42,16 @@ export function buildHomeProjectRows(
     if (!chats[epicId]?.running) continue
     const cwd = sessions[epicId]?.cwd
     if (!cwd) continue
-    liveByCwd.set(cwd, (liveByCwd.get(cwd) ?? 0) + 1)
+    const key = normalizeCwd(cwd)
+    liveByCwd.set(key, (liveByCwd.get(key) ?? 0) + 1)
   }
 
-  return rows.map((row) => {
-    const cwd = enriched[row.encoded]?.cwd ?? row.displayPath
-    return {
-      encoded: row.encoded,
-      name: projectNameFromCwd(cwd),
-      cwd,
-      dotSeed: cwd,
-      liveCount: liveByCwd.get(cwd) ?? 0,
-      lastActivityMs: row.lastSession,
-    }
-  })
+  return projects.map((p) => ({
+    encoded: p.encoded,
+    name: p.name,
+    cwd: p.cwd,
+    dotSeed: p.cwd,
+    liveCount: liveByCwd.get(p.cwd) ?? 0,
+    lastActivityMs: p.lastSession,
+  }))
 }

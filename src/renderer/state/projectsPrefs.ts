@@ -5,6 +5,7 @@ export type SortDir = 'asc' | 'desc'
 export type RecentFilter = 'all' | '7d' | '30d'
 
 interface PersistedPrefs {
+  /** Keyed by the project's cwd — a project IS its working directory. */
   pinned: Record<string, boolean>
   sort: { col: SortCol; dir: SortDir }
   recentFilter: RecentFilter
@@ -18,7 +19,7 @@ interface PersistedPrefs {
 interface ProjectsPrefsState extends PersistedPrefs {
   hydrated: boolean
   hydrate: () => Promise<void>
-  togglePin: (encoded: string) => void
+  togglePin: (cwd: string) => void
   setSort: (col: SortCol) => void
   setRecentFilter: (f: RecentFilter) => void
   setHasRemote: (v: boolean | null) => void
@@ -85,8 +86,8 @@ export const useProjectsPrefs = create<ProjectsPrefsState>((set, get) => ({
     set({ hydrated: true })
   },
 
-  togglePin: (encoded) => {
-    const next = { ...get().pinned, [encoded]: !get().pinned[encoded] }
+  togglePin: (cwd) => {
+    const next = { ...get().pinned, [cwd]: !get().pinned[cwd] }
     set({ pinned: next })
     persist(get)
   },

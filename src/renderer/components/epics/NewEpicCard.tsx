@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
 import { useSessions } from '../../state/sessions'
-import { useKnownProjects, candidatePath } from '../../lib/useKnownProjects'
+import { useKnownProjects } from '../../lib/useKnownProjects'
 import { compactPath } from '../../lib/compactPath'
 import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { composeEpicIntake } from '../../lib/epicIntake'
@@ -118,21 +118,15 @@ export function NewEpicCard({
   const createPromptSession = usePromptSessions((s) => s.createPromptSession)
   const approveProposed = usePromptSessions((s) => s.approveProposed)
   const allEpics = usePromptSessions((s) => s.sessions)
-  const { rows, enriched } = useKnownProjects()
+  const { projects } = useKnownProjects()
   const tabs = useSessions((s) => s.tabs)
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
 
-  const knownCwds = useMemo(() => {
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const row of rows) {
-      const cwd = enriched[row.encoded]?.cwd ?? candidatePath(row.encoded)
-      if (!cwd || seen.has(cwd)) continue
-      seen.add(cwd)
-      out.push(cwd)
-    }
-    return out
-  }, [rows, enriched])
+  // One entry per real working directory. Previously this deduped over
+  // `enriched[...]?.cwd ?? candidatePath(row.encoded)`, so every unresolvable
+  // transcript folder contributed a FABRICATED path — thousands of phantom
+  // "projects" to hydrate Epics for. See lib/knownProjectAggregate.ts.
+  const knownCwds = useMemo(() => projects.map((p) => p.cwd), [projects])
 
   const [cwd, setCwd] = useState('')
   const [title, setTitle] = useState('')

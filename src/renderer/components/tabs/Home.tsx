@@ -33,6 +33,7 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
 import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
 import { buildHomeProjectRows, type HomeProjectRow } from '../../lib/homeProjectRows'
+import { projectNameFromCwd } from '../../lib/knownProjectAggregate'
 import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
 import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
@@ -68,7 +69,6 @@ export function Home({ onNavigate }: HomeProps) {
   }, [])
 
   useHydrateKnownEpics()
-  const { rows: knownProjectRows } = useKnownProjects()
   const needsRows = useNeedsYouRows()
   const projectRows = useHomeProjectRows()
   const tabs = useSessions((s) => s.tabs)
@@ -86,7 +86,7 @@ export function Home({ onNavigate }: HomeProps) {
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
         <HomeHeaderWithLegend
           greeting={greeting}
-          projectCount={knownProjectRows.length}
+          projectCount={projectRows.length}
           needsCount={needsRows.length}
           onNavigate={onNavigate}
           onOpenNewEpic={() => setNewEpicOpen(true)}
@@ -113,17 +113,18 @@ export function Home({ onNavigate }: HomeProps) {
 
 // ────────────────────────────────────────────────────────────────────
 // Home project rows — single source for both ProjectsCard and the New-epic
-// project picker drawer, so "known projects" is computed once (useKnownProjects
-// + running chats + Epic sessions, via buildHomeProjectRows) rather than the
-// picker growing its own divergent copy.
+// project picker drawer, so "known projects" is computed once (useKnownProjects'
+// unique-per-cwd aggregates + running chats + Epic sessions, via
+// buildHomeProjectRows) rather than the picker growing its own divergent copy.
+// One row per real working directory — see lib/knownProjectAggregate.ts.
 // ────────────────────────────────────────────────────────────────────
 function useHomeProjectRows(): HomeProjectRow[] {
-  const { rows, enriched } = useKnownProjects()
+  const { projects } = useKnownProjects()
   const chats = useChatSignals()
   const sessions = usePromptSessions((s) => s.sessions)
   return useMemo(
-    () => buildHomeProjectRows(rows, enriched, chats, sessions),
-    [rows, enriched, chats, sessions],
+    () => buildHomeProjectRows(projects, chats, sessions),
+    [projects, chats, sessions],
   )
 }
 
@@ -531,7 +532,7 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
               >
                 <div className="font-mono text-[11.5px] font-semibold text-fg truncate">{q.title || q.slug}</div>
                 <div className="text-[11px] text-fg-faint truncate">
-                  {q.cwd ? projectNameFromCwdLocal(q.cwd) : '—'}
+                  {q.cwd ? projectNameFromCwd(q.cwd) : '—'}
                   {q.estimateMinutes != null ? ` · ~${q.estimateMinutes}m` : ''}
                 </div>
               </button>
@@ -549,11 +550,6 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
       )}
     </div>
   )
-}
-
-function projectNameFromCwdLocal(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean)
-  return parts.length > 0 ? parts[parts.length - 1] : cwd
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -670,11 +666,11 @@ function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
 // knownCwds hydrate loop.
 // ────────────────────────────────────────────────────────────────────
 function useHydrateKnownEpics(): void {
-  const { rows, enriched } = useKnownProjects()
-  const knownCwdsKey = useMemo(
-    () => rows.map((r) => enriched[r.encoded]?.cwd ?? r.displayPath).join('\n'),
-    [rows, enriched],
-  )
+  const { projects } = useKnownProjects()
+  // Unique real cwds only — hydrating a fabricated `candidatePath` decode used
+  // to fire two IPC reads per transcript folder (thousands of them) against
+  // directories that never existed. See lib/knownProjectAggregate.ts.
+  const knownCwdsKey = useMemo(() => projects.map((p) => p.cwd).join('\n'), [projects])
   useEffect(() => {
     for (const cwd of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
       void usePromptSessions.getState().hydrate(cwd)
@@ -737,11 +733,21 @@ const RECENT_SESSIONS_GRID = '92px minmax(0,1.2fr) minmax(0,1fr) 80px 74px 78px'
 
 export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const { rows, loading } = useRecentSessions(5)
+  const { projects } = useKnownProjects()
   const addTab = useSessions((s) => s.addTab)
   const sessions = usePromptSessions((s) => s.sessions)
   const [drawerRow, setDrawerRow] = useState<RecentRow | null>(null)
+  // A session's project is the real cwd its transcript folder resolved to;
+  // candidatePath's `-`→`/` decode is only a last resort for a folder whose
+  // cwd never resolved (it fabricates paths — see knownProjectAggregate.ts).
+  const cwdByEncoded = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const p of projects) for (const e of p.encodedIds) m[e] = p.cwd
+    return m
+  }, [projects])
+  const resolveCwd = (encoded: string) => cwdByEncoded[encoded] ?? candidatePath(encoded)
   const resume = (r: RecentRow) => {
-    const decoded = candidatePath(r.projectEncoded)
+    const decoded = resolveCwd(r.projectEncoded)
     addTab({
       cwd: decoded,
       startupCommand: `claude --resume ${shellQuote(r.sessionId)}`,
@@ -752,7 +758,7 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
   const drawerKeyVals: DrawerKeyVal[] = drawerRow
     ? [
         { label: 'Session', value: drawerRow.sessionId },
-        { label: 'Project', value: decodeProject(drawerRow.projectEncoded) },
+        { label: 'Project', value: resolveCwd(drawerRow.projectEncoded) },
         { label: 'Epic', value: drawerEpicTitle ?? '—' },
         { label: 'Last activity', value: `${absoluteTime(drawerRow.mtimeMs)} (${relativeTime(drawerRow.mtimeMs)})` },
         { label: 'Size', value: `${Math.round(drawerRow.sizeBytes / 1024)}k` },
@@ -789,7 +795,7 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
             >
               <span className="text-[11.5px] text-fg-faint font-mono truncate">{r.sessionId.slice(0, 8)}</span>
               <span className="text-[12.5px] font-semibold text-fg truncate" title={r.projectEncoded}>
-                {decodeProject(r.projectEncoded)}
+                {projectNameFromCwd(resolveCwd(r.projectEncoded))}
               </span>
               <span className="text-[12.5px] text-fg-dim truncate">{epicTitle ?? '—'}</span>
               <span className="text-[11.5px] text-fg-faint font-mono text-right">
@@ -809,7 +815,7 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
       <HomeSessionDrawer
         open={drawerRow != null}
         onClose={() => setDrawerRow(null)}
-        title={drawerEpicTitle ?? (drawerRow ? decodeProject(drawerRow.projectEncoded) : '')}
+        title={drawerEpicTitle ?? (drawerRow ? projectNameFromCwd(resolveCwd(drawerRow.projectEncoded)) : '')}
         sub={drawerRow ? `Recent session · ${drawerRow.sessionId.slice(0, 8)}…` : null}
         keyVals={drawerKeyVals}
         footer={
@@ -825,13 +831,6 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
       />
     </section>
   )
-}
-
-function decodeProject(encoded: string): string {
-  // Show the last path segment for compactness. Reuses useKnownProjects'
-  // candidatePath so the encoded→path decode logic has one implementation.
-  const parts = candidatePath(encoded).split('/').filter(Boolean)
-  return parts.length > 0 ? parts[parts.length - 1] : encoded
 }
 
 function absoluteTime(ms: number): string {

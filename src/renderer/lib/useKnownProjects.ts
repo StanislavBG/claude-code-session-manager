@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { enrichProject, type ProjectDetails } from './projectEnrichment'
 import { useHomeDir } from './useHomeDir'
+import { aggregateProjectsByCwd, normalizeCwd, type ProjectAggregate } from './knownProjectAggregate'
 import type { DirEntry } from '../../preload/api'
 
 export interface ProjectRow {
@@ -56,9 +57,15 @@ interface KnownProjectsState {
   rows: ProjectRow[]
   enriched: Record<string, EnrichmentState>
   loading: boolean
+  /**
+   * True while cwd resolution is still in flight. A project row only exists
+   * once its cwd is known (see knownProjectAggregate.ts), so callers that
+   * render "N projects" must distinguish "none yet" from "none, resolved".
+   */
+  resolving: boolean
 }
 
-let state: KnownProjectsState = { rows: [], enriched: {}, loading: true }
+let state: KnownProjectsState = { rows: [], enriched: {}, loading: true, resolving: true }
 const subscribers = new Set<() => void>()
 let scannedForHome: string | null = null
 let scanToken = 0
@@ -90,7 +97,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 async function runScan(home: string): Promise<void> {
   const token = ++scanToken
-  setState({ loading: true })
+  setState({ loading: true, resolving: true })
   try {
     const r = await window.api.config.listDir(`${home}/.claude/projects`, { dirsOnly: true })
     if (token !== scanToken) return
@@ -111,28 +118,60 @@ async function runScan(home: string): Promise<void> {
     })
     if (token !== scanToken) return
     next.sort((a, b) => b.lastSession - a.lastSession)
-    setState({ rows: next, enriched: {}, loading: false })
-    runEnrichment(next, token)
+    setState({ rows: next, enriched: {}, loading: false, resolving: true })
+    void runEnrichment(next, token)
   } catch (err) {
     console.error('[useKnownProjects] scan failed:', err)
-    if (token === scanToken) setState({ loading: false })
+    if (token === scanToken) setState({ loading: false, resolving: false })
   }
 }
 
-function runEnrichment(rows: ProjectRow[], token: number): void {
-  void mapWithConcurrency(rows, SCAN_CONCURRENCY, async (row) => {
+/**
+ * Two-stage, because a project IS a cwd (knownProjectAggregate.ts) and many
+ * transcript folders share — or never resolve to — one:
+ *
+ *   1. Resolve each folder's cwd from transcript content. Folders with no
+ *      `.jsonl` at all are skipped outright (nothing to read a cwd from), and
+ *      the whole stage publishes once so the UI doesn't thrash a row per file.
+ *   2. Enrich the UNIQUE cwds only, then fan each result back out to every
+ *      folder that resolved to it. This is the expensive stage (4 file reads
+ *      per cwd) and running it per folder meant ~2000 enrichments for ~19 real
+ *      projects on this machine.
+ */
+async function runEnrichment(rows: ProjectRow[], token: number): Promise<void> {
+  const cwdByEncoded: Record<string, string | null> = {}
+  await mapWithConcurrency(rows, SCAN_CONCURRENCY, async (row) => {
     if (token !== scanToken) return
+    // No transcript file ⇒ no cwd to recover; don't pay for a listDir round-trip.
+    if (row.sessionCount === 0) { cwdByEncoded[row.encoded] = null; return }
     try {
       const cwd = await resolveProjectCwd(row.path)
-      if (token !== scanToken) return
-      const details = cwd ? await enrichProject(cwd) : {}
-      if (token !== scanToken) return
-      setState({ enriched: { ...state.enriched, [row.encoded]: { cwd: cwd ?? null, ...details } } })
+      cwdByEncoded[row.encoded] = cwd ? normalizeCwd(cwd) : null
     } catch {
-      if (token === scanToken) {
-        setState({ enriched: { ...state.enriched, [row.encoded]: { cwd: null } } })
-      }
+      cwdByEncoded[row.encoded] = null
     }
+  })
+  if (token !== scanToken) return
+
+  const enriched: Record<string, EnrichmentState> = {}
+  for (const row of rows) enriched[row.encoded] = { cwd: cwdByEncoded[row.encoded] ?? null }
+  setState({ enriched, resolving: false })
+
+  const uniqueCwds = [...new Set(Object.values(cwdByEncoded).filter((c): c is string => !!c))]
+  await mapWithConcurrency(uniqueCwds, SCAN_CONCURRENCY, async (cwd) => {
+    if (token !== scanToken) return
+    let details: ProjectDetails = {}
+    try {
+      details = await enrichProject(cwd)
+    } catch {
+      return
+    }
+    if (token !== scanToken) return
+    const patch = { ...state.enriched }
+    for (const [encoded, resolved] of Object.entries(cwdByEncoded)) {
+      if (resolved === cwd) patch[encoded] = { cwd, ...details }
+    }
+    setState({ enriched: patch })
   })
 }
 
@@ -159,7 +198,19 @@ export function useKnownProjects() {
     void runScan(home)
   }, [home])
 
-  const { rows, enriched, loading } = state
+  const { rows, enriched, loading, resolving } = state
+
+  // One row per unique cwd — the app's project identity. Every "list the
+  // projects" surface consumes THIS, not `rows` (which is one entry per
+  // ~/.claude/projects transcript folder and is only useful for folder-level
+  // bookkeeping such as archiving).
+  const projects = useMemo(() => aggregateProjectsByCwd(rows, enriched), [rows, enriched])
+
+  const openProject = async (cwd: string) => {
+    const id = crypto.randomUUID()
+    // 'projects-tab' isn't a real entry in presets.ts — see openInSession.
+    addTab({ id, cwd, startupCommand: null, presetId: 'projects-tab', dormant: true })
+  }
 
   const openInSession = async (row: ProjectRow) => {
     let cwd = enriched[row.encoded]?.cwd ?? null
@@ -197,5 +248,19 @@ export function useKnownProjects() {
     }
   }
 
-  return { rows, enriched, loading, openInSession, archiveProject }
+  /**
+   * Archives every transcript folder that resolved to this cwd — a project is
+   * the cwd, so archiving it must not leave a sibling folder behind to
+   * resurrect the row on the next scan.
+   */
+  const archiveProjectByCwd = async (project: ProjectAggregate): Promise<{ ok: boolean; error?: string }> => {
+    let last: { ok: boolean; error?: string } = { ok: true }
+    for (const encoded of project.encodedIds) {
+      last = await archiveProject(encoded)
+      if (!last.ok) return last
+    }
+    return last
+  }
+
+  return { rows, enriched, projects, loading, resolving, openProject, openInSession, archiveProject, archiveProjectByCwd }
 }

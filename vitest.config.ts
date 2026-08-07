@@ -59,6 +59,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-archived-twin-guard.test.cjs',
       'src/main/__tests__/scheduler-investigation-clean-skip.test.cjs',
       'src/main/__tests__/runVerify.test.cjs',
+      'src/main/__tests__/runVerify-transcript-commit-evidence.test.cjs',
       'src/main/__tests__/scheduler-meta-code-sha.test.cjs',
       'src/main/__tests__/scheduler-reset-job-fields-guard.test.cjs',
       'src/main/__tests__/scheduler-commit-guard-noop.test.cjs',

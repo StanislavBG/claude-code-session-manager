@@ -271,6 +271,28 @@ function gitHead(cwd) {
   });
 }
 
+// True when cwd is inside a git repository. Used to keep a non-git cwd (e.g.
+// a scratch dir like /tmp) from ever being handed to an investigation's
+// fix-plan as its cwd — the commit guard, worktree isolation, and
+// runVerify's PASS+commit sentinel override all read git state from job.cwd,
+// so a fix plan rooted at a non-repo path gets parked in needs_review even
+// when its commit really landed (Incident: 99-fix-e2e-needs-review-test,
+// 2026-08-07 — green, committed 6ecbd40, PASS sentinel, still needs_review).
+// Bounded and never throws.
+function isGitRepoSync(cwd) {
+  if (!cwd) return false;
+  try {
+    execFileSync('git', ['-C', cwd, 'rev-parse', '--git-dir'], {
+      timeout: 10_000,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Best-effort `git fetch --all --prune` in cwd, bounded and never throwing.
 // A PRD that does its work in a separate `git worktree add` checkout (per
 // standards.md's own recommended pattern for shared repos) commits and pushes
@@ -2666,6 +2688,10 @@ ${logTail}
    estimateMinutes: <your time estimate>
    ---
    \`\`\`
+   \`cwd\` must be the git repo root where the fix will actually land. If the failed job's cwd is
+   not that repo (e.g. a scratch dir like \`/tmp\`), set \`cwd:\` to the correct repo root instead —
+   the scheduler's commit guard and post-run verifier read git state from this path, and a
+   non-repo cwd parks even a fully green, committed run in \`needs_review\`.
 6. The PRD body MUST be self-contained — \`claude -p\` runs it on a fresh Sonnet session with NO conversation context. Include:
    - Root-cause analysis (what went wrong and why)
    - Concrete fix steps (specific files / commands / edits)
@@ -2801,6 +2827,16 @@ async function spawnInvestigation(failedJob, runDir) {
   try { fs.accessSync(cwd, fs.constants.X_OK); }
   catch {
     console.warn(`[scheduler] investigation cwd missing (${cwd}); falling back to ${DEFAULT_PROJECT_CWD}`);
+    cwd = DEFAULT_PROJECT_CWD;
+  }
+  // A non-git cwd is unusable as a fix-plan cwd: the commit guard, worktree
+  // isolation, and runVerify's PASS+commit sentinel override all read git
+  // state from job.cwd, so a fix plan rooted at e.g. /tmp gets parked in
+  // needs_review even when its commit really landed. (Incident:
+  // 99-fix-e2e-needs-review-test, 2026-08-07 — green, committed 6ecbd40,
+  // PASS sentinel, still needs_review.)
+  if (!isGitRepoSync(cwd)) {
+    console.warn(`[scheduler] investigation cwd is not a git repo (${cwd}); falling back to ${DEFAULT_PROJECT_CWD}`);
     cwd = DEFAULT_PROJECT_CWD;
   }
   const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group });
@@ -4959,4 +4995,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob };

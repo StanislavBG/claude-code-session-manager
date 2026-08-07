@@ -157,6 +157,7 @@ function parseLog(logPath) {
   const events = [];
   let resultEvent = null;
   let seq = 0;
+  let transcriptCommitLanded = false;
 
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -165,6 +166,18 @@ function parseLog(logPath) {
     let obj;
     try { obj = JSON.parse(trimmed); } catch { continue; }
     if (!obj || typeof obj !== 'object') continue;
+
+    // Harness-emitted commit evidence: git itself produced these lines (a
+    // `vcs_state_changed` system event, or a tool_use_result carrying a
+    // gitOperation), so the model cannot fabricate them. Detected here as a
+    // plain boolean scan — never pushed into `events`, so the index-based
+    // final-20% math elsewhere is unaffected.
+    if (obj.type === 'system' && obj.subtype === 'vcs_state_changed' && obj.kind === 'commit') {
+      transcriptCommitLanded = true;
+    }
+    if (obj.tool_use_result?.gitOperation?.commit?.kind === 'committed') {
+      transcriptCommitLanded = true;
+    }
 
     // Final result event.
     if (obj.type === 'result') {
@@ -215,7 +228,7 @@ function parseLog(logPath) {
     }
   }
 
-  return { events, resultEvent, error: null };
+  return { events, resultEvent, error: null, transcriptCommitLanded };
 }
 
 // ─── self-recovery helpers ────────────────────────────────────────────────────
@@ -591,6 +604,27 @@ function isAncestorCommit({ cwd, sha, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl 
   }
 }
 
+/**
+ * True when `cwd` is inside a git repository. Used to gate the transcript
+ * commit-evidence fallback below: a job whose cwd is not a git repo can never
+ * produce committedDuringRun=true (gitHead()/committedInWindow() fail closed
+ * there), so the fallback must only apply in that narrow case — never when
+ * git ancestry is actually observable.
+ */
+function isGitRepo(cwd) {
+  if (!cwd) return false;
+  try {
+    execFileSync('git', ['-C', cwd, 'rev-parse', '--git-dir'], {
+      timeout: 10_000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── already-shipped postcondition exemption (original PRD re-runs) ─────────
 
 const PRD_DELIVERABLE_PATH_RE = /(?:^|[`\s(])((?:src|scripts|session-manager-operations|test|tests|docs|bin)\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)\b/g;
@@ -743,11 +777,20 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     }
 
     // ── 2. Parse log ───────────────────────────────────────────────────────
-    const { events, resultEvent, error: parseError } = parseLog(logPath);
+    const { events, resultEvent, error: parseError, transcriptCommitLanded } = parseLog(logPath);
 
     if (parseError) {
       return conclude('verify_unavailable', `log unreadable: ${parseError}`, 'needs_review');
     }
+
+    // A job whose cwd is not a git repo (e.g. an investigation fix-plan that
+    // inherited cwd: /tmp) can never produce committedDuringRun=true —
+    // gitHead()/committedInWindow() both fail closed there. In that case
+    // ONLY, fall back to the harness-emitted commit evidence in the
+    // transcript, which git itself produced and the model cannot fabricate.
+    const cwdIsGitRepo = isGitRepo(queueEntry?.cwd);
+    const commitEvidence = committedDuringRun || (!cwdIsGitRepo && transcriptCommitLanded);
+    const commitEvidenceSource = (!committedDuringRun && commitEvidence) ? 'transcript' : null;
 
     // ── 3. HALT detection ─────────────────────────────────────────────────
     // Primary: check the final `{"type":"result"}` event's `result` text.
@@ -865,7 +908,7 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     // committed anything nor ever emitted the finish-protocol sentinel likely
     // ended before doing real work (e.g. stopped on a clarifying question).
     // Weaker evidence than a caught transcript error, but still not clean.
-    if (sentinel === null && !committedDuringRun) {
+    if (sentinel === null && !commitEvidence) {
       issues.push({
         verdict: 'no_verdict_sentinel',
         reason: 'run made no commit and emitted no SCHEDULER_VERDICT sentinel — likely ended before the finish protocol (e.g. stopped on a clarifying question)',
@@ -894,7 +937,7 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     // bare PASS with no commit from one is still a strong silent-failure
     // signal and stays covered by this check.
     const isFixPlanJob = /^\d+-fix-/.test(queueEntry?.slug || '');
-    if (sentinel === 'pass' && !committedDuringRun && !isFixPlanJob) {
+    if (sentinel === 'pass' && !commitEvidence && !isFixPlanJob) {
       // EXEMPTION: `-merge-main` PRDs (see isMergeMainSlug) can genuinely and
       // correctly find nothing left to do when an out-of-band actor (a human,
       // another agent, a sibling scheduler job) already merged/updated the
@@ -1015,13 +1058,18 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     // MUST NOT apply to halt or deps_unmet — those keep their existing semantics.
     if (
       sentinel === 'pass'
-      && committedDuringRun
+      && commitEvidence
       && (top.verdict === 'transcript_errors' || top.verdict === 'verify_unavailable')
     ) {
       return conclude('clean',
         `SCHEDULER_VERDICT: PASS + commit landed overrides ${top.verdict}`,
         null,
-        { ...(annotations.length ? { annotations } : {}), sentinel, sentinelOverride: top.verdict },
+        {
+          ...(annotations.length ? { annotations } : {}),
+          sentinel,
+          sentinelOverride: top.verdict,
+          ...(commitEvidenceSource ? { commitEvidenceSource } : {}),
+        },
       );
     }
 
@@ -1073,4 +1121,5 @@ module.exports = {
   extractPrdDeliverablePaths,
   allDeliverablesAlreadyTracked,
   isAncestorCommit,
+  isGitRepo,
 };

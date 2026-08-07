@@ -47,6 +47,7 @@ const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
+const runLogRetention = require('./lib/runLogRetention.cjs');
 const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
 const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('../../scripts/lib/watchdogHelpers.cjs');
 const schedulerConfig = require('./lib/schedulerConfig.cjs');
@@ -1146,6 +1147,25 @@ app.whenReady().then(async () => {
       logs.writeLine({ scope: 'history-rollup', level: 'error', message: 'finalizeClosedDays failed', meta: { error: e?.message } });
     });
     runIntradayRefresh();
+    // Run-log retention sweep: same deferred-30s, once-per-boot shape as the
+    // history rollup above. Read-only unless config.schedulerRunLogRetention
+    // opts in (see runLogRetention.cjs's safety model) — non-fatal on error.
+    try {
+      const result = runLogRetention.runBootSweep();
+      logs.writeLine({
+        scope: 'run-log-retention',
+        level: 'info',
+        message: result.deleted ? 'boot sweep applied' : 'boot sweep dry-run',
+        meta: {
+          deleted: result.deleted,
+          removedFiles: result.removedFiles,
+          freedBytes: result.freedBytes,
+          errorCount: result.errors ? result.errors.length : 0,
+        },
+      });
+    } catch (e) {
+      logs.writeLine({ scope: 'run-log-retention', level: 'error', message: 'boot sweep failed', meta: { error: e?.message } });
+    }
   }, 30_000);
   // Keep TODAY's rollup line current so the History dashboard never needs to
   // fall back to a live transcript scan. Shares the same O_EXCL lock file as

@@ -345,6 +345,26 @@ function applyRetention(runsDir, settings, opts) {
   return { deleted: true, removedFiles, freedBytes, errors, report };
 }
 
+/**
+ * One-shot production entry point: reads the REAL scheduler queue (jobs +
+ * machine config, via queueStore.readMergedSync) and calls applyRetention
+ * with those jobs passed EXPLICITLY as opts.jobs — never relying on
+ * applyRetention's own internal queueStore fallback (resolveLiveKeysForApply
+ * above), which exists only as a defensive net for callers who forget to
+ * thread live-job info through, not as this module's primary path. Deletion
+ * still only happens when the read config carries an explicit
+ * schedulerRunLogRetention.enabled === true (see isRetentionEnabled).
+ *
+ * Intended to be called once per app boot (see index.cjs's deferred 30s
+ * startup timer, alongside finalizeClosedDays) — never on its own timer.
+ */
+function runBootSweep(opts) {
+  const runsDir = (opts && opts.runsDir) || DEFAULT_RUNS_DIR;
+  const queueStore = require('./queueStore.cjs');
+  const state = queueStore.readMergedSync();
+  return applyRetention(runsDir, state.config || {}, { jobs: state.jobs || [] });
+}
+
 module.exports = {
   DEFAULT_RUNS_DIR,
   LIVE_STATUSES,
@@ -355,4 +375,5 @@ module.exports = {
   computeReport,
   isRetentionEnabled,
   applyRetention,
+  runBootSweep,
 };

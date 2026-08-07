@@ -21,6 +21,7 @@ const {
   applyRetention,
   liveKeysFromJobs,
   isLiveJob,
+  runBootSweep,
 } = require('../lib/runLogRetention.cjs');
 
 let runsDir;
@@ -316,6 +317,92 @@ test('applyRetention: enabled=true with no liveKeys/jobs falls back to reading t
     applyRetention(runsDir, settings, { now }); // deliberately no liveKeys, no jobs
     expect(fs.existsSync(path.join(runsDir, '2020-05-01T00-00-00-000Z'))).toBe(true);
   } finally {
+    queueStore.readMergedSync = original;
+  }
+});
+
+// ─── runBootSweep: the one production caller ────────────────────────────────
+
+test('runBootSweep: reads queueStore ONCE and threads its jobs explicitly into applyRetention (never the internal fallback re-read)', () => {
+  const now = Date.now();
+  makeRun('2020-01-01T00-00-00-000Z', 'boot-slug', { finishedAt: now - 400 * DAY_MS });
+  makeRun('2020-02-01T00-00-00-000Z', 'boot-slug', { finishedAt: now - 390 * DAY_MS }); // live, protected
+  makeRun('2026-01-01T00-00-00-000Z', 'boot-slug', { finishedAt: now - 1 * DAY_MS }); // most recent
+
+  const queueStore = require('../lib/queueStore.cjs');
+  const original = queueStore.readMergedSync;
+  let calls = 0;
+  queueStore.readMergedSync = () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        config: { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 7 } } },
+        jobs: [{ slug: 'boot-slug', runId: '2020-02-01T00-00-00-000Z', status: 'running' }],
+      };
+    }
+    // If applyRetention's internal fallback ever re-reads the store, this
+    // second shape (no live jobs) would let the protected run be deleted —
+    // proving runBootSweep did NOT thread jobs explicitly.
+    return { config: {}, jobs: [] };
+  };
+  try {
+    const result = runBootSweep({ now, runsDir });
+    expect(calls).toBe(1); // proves applyRetention never fell back to its own re-read
+    expect(result.deleted).toBe(true);
+    expect(fs.existsSync(path.join(runsDir, '2020-01-01T00-00-00-000Z'))).toBe(false); // eligible, removed
+    expect(fs.existsSync(path.join(runsDir, '2020-02-01T00-00-00-000Z'))).toBe(true); // live, protected
+    expect(fs.existsSync(path.join(runsDir, '2026-01-01T00-00-00-000Z'))).toBe(true); // most recent, protected
+  } finally {
+    queueStore.readMergedSync = original;
+  }
+});
+
+test('runBootSweep: dry-run when config has no opt-in', () => {
+  const now = Date.now();
+  makeRun('2020-01-01T00-00-00-000Z', 'noop-slug', { finishedAt: now - 400 * DAY_MS });
+  makeRun('2026-01-01T00-00-00-000Z', 'noop-slug', { finishedAt: now - 1 * DAY_MS });
+
+  const queueStore = require('../lib/queueStore.cjs');
+  const original = queueStore.readMergedSync;
+  queueStore.readMergedSync = () => ({ config: {}, jobs: [] });
+  try {
+    const result = runBootSweep({ now, runsDir });
+    expect(result.deleted).toBe(false);
+    expect(fs.readdirSync(runsDir).length).toBe(2);
+  } finally {
+    queueStore.readMergedSync = original;
+  }
+});
+
+test('runBootSweep: a deletion failure (permission error) is caught, logged in result.errors, and never thrown', () => {
+  const now = Date.now();
+  const dir = makeRun('2020-01-01T00-00-00-000Z', 'fail-slug', { finishedAt: now - 400 * DAY_MS });
+  makeRun('2026-01-01T00-00-00-000Z', 'fail-slug', { finishedAt: now - 1 * DAY_MS });
+
+  const queueStore = require('../lib/queueStore.cjs');
+  const original = queueStore.readMergedSync;
+  queueStore.readMergedSync = () => ({
+    config: { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 7 } } },
+    jobs: [],
+  });
+
+  const originalUnlink = fs.unlinkSync;
+  fs.unlinkSync = (p) => {
+    if (String(p).startsWith(dir)) {
+      const err = new Error('EACCES: permission denied');
+      err.code = 'EACCES';
+      throw err;
+    }
+    return originalUnlink(p);
+  };
+
+  try {
+    expect(() => runBootSweep({ now, runsDir })).not.toThrow();
+    const result = runBootSweep({ now, runsDir });
+    expect(result.deleted).toBe(true);
+    expect(result.errors.length).toBeGreaterThan(0);
+  } finally {
+    fs.unlinkSync = originalUnlink;
     queueStore.readMergedSync = original;
   }
 });

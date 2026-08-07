@@ -32,7 +32,7 @@ function installWindowApiMock(opts: {
   subscribeResult?: { ok: boolean; path: string | null; error?: string }
   bufferEvents?: TranscriptEvent[]
 } = {}) {
-  const onEventHandlers = new Map<string, (ev: TranscriptEvent) => void>()
+  const onEventHandlers = new Map<string, (events: TranscriptEvent[]) => void>()
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
   const subscribe = vi.fn().mockResolvedValue(opts.subscribeResult ?? { ok: true, path: '/tmp/fake.jsonl' })
   const buffer = vi.fn().mockResolvedValue(opts.bufferEvents ?? [])
@@ -63,7 +63,7 @@ function installWindowApiMock(opts: {
       subscribe,
       buffer,
       unsubscribe,
-      onEvent: vi.fn((tabId: string, handler: (ev: TranscriptEvent) => void) => {
+      onEvent: vi.fn((tabId: string, handler: (events: TranscriptEvent[]) => void) => {
         onEventHandlers.set(tabId, handler)
         return () => onEventHandlers.delete(tabId)
       }),
@@ -81,7 +81,10 @@ function installWindowApiMock(opts: {
     subscribe,
     buffer,
     unsubscribe,
-    emit: (tabId: string, ev: TranscriptEvent) => onEventHandlers.get(tabId)?.(ev),
+    // Accepts a single event (wrapped as a 1-element batch, matching a real
+    // one-event flush) or an explicit array (a multi-event batch/flush).
+    emit: (tabId: string, evOrEvents: TranscriptEvent | TranscriptEvent[]) =>
+      onEventHandlers.get(tabId)?.(Array.isArray(evOrEvents) ? evOrEvents : [evOrEvents]),
     hasListener: (tabId: string) => onEventHandlers.has(tabId),
     getCompleteHandler: () => completeHandler,
   }
@@ -278,5 +281,118 @@ describe('chat.ts transcript feed (PRD chat-feed-from-jsonl)', () => {
     // The turn landed once, and the streamed copy of the same text is gone.
     expect(slice.turns.filter((t) => t.role === 'assistant').length).toBe(1)
     expect(slice.stream).toBe(' tail')
+  })
+})
+
+/**
+ * PRD transcript-batch-flush: transcripts.cjs now sends a whole flush's
+ * events as one ordered array per IPC message, and window.api.transcripts
+ * .onEvent's handler is array-shaped to match. ingestTranscriptEvents folds
+ * a whole batch through ONE store commit instead of one per event. These
+ * tests cover the commit-count reduction, order preservation, and
+ * byte-identical results vs. the old per-event path (including the
+ * streamed-then-persisted dedupe rule, which depends on event order).
+ */
+describe('chat.ts ingestTranscriptEvents — batched IPC events land as one commit, in order', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('a live batch (array) emitted on the transcript feed channel lands as one commit with all turns in order', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-batch', cwd: '/proj', sessionUuid: 'sess-uuid-batch' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    const batch = [
+      makeEv('mode', { mode: 'plan' }, { byteOffset: 1000 }),
+      makeEv('user', `${INJECTED_PREAMBLE}\n\nDo the thing`, { byteOffset: 1001 }),
+      makeEv('assistant', 'Working on it.', { byteOffset: 1002 }),
+      makeEv('queue-operation', { operation: 'enqueue' }, { byteOffset: 1003 }),
+    ]
+
+    const setSpy = vi.spyOn(useChat, 'setState')
+    setSpy.mockClear()
+    mock.emit('epic-batch', batch)
+    expect(setSpy).toHaveBeenCalledTimes(1)
+    setSpy.mockRestore()
+
+    const turns = useChat.getState().get('epic-batch').turns
+    expect(turns.map((t) => t.kind)).toEqual(['mode', 'user', 'assistant', 'queue-operation'])
+    expect(turns[2].text).toBe('Working on it.')
+  })
+
+  it('a replay buffer containing 20+ events lands as one commit (benchmark: N commits → 1)', async () => {
+    const events = Array.from({ length: 24 }, (_, i) => makeEv('queue-operation', { i }, { byteOffset: 2000 + i }))
+    const mock = installWindowApiMock({ bufferEvents: events })
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    const setSpy = vi.spyOn(useChat, 'setState')
+    setSpy.mockClear()
+    attachTranscriptFeed({ tabId: 'epic-bench', cwd: '/proj', sessionUuid: 'sess-uuid-bench' })
+    await vi.waitFor(() => expect(useChat.getState().get('epic-bench').turns.length).toBe(24))
+    // The one hydratedTabs write (attach) + one write for the whole 24-event
+    // replay batch — NOT 24 separate per-event commits.
+    expect(setSpy.mock.calls.length).toBeLessThanOrEqual(2)
+    setSpy.mockRestore()
+    mock.emit('epic-bench', []) // no-op sanity: emitting an empty batch is safe
+  })
+
+  it('preserves the streamed-then-persisted dedupe rule when the JSONL line arrives inside a batch, not alone', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-batch-dedupe', cwd: '/proj', sessionUuid: 'sess-uuid-bd' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    // Optimistic user turn (what beginRun pushes on send).
+    const cur = useChat.getState().get('epic-batch-dedupe')
+    useChat.setState({
+      chats: {
+        ...useChat.getState().chats,
+        'epic-batch-dedupe': {
+          ...cur,
+          turns: [...cur.turns, { id: 'optimistic', role: 'user' as const, text: 'Fix the composer', at: Date.now() }],
+        },
+      },
+    })
+
+    // The JSONL line for that same message arrives as part of a larger batch
+    // (mode event before it, queue-operation after) — the dedupe must still
+    // upgrade the optimistic turn in place, not append a duplicate.
+    mock.emit('epic-batch-dedupe', [
+      makeEv('mode', { mode: 'plan' }, { byteOffset: 3000 }),
+      makeEv('user', `${INJECTED_PREAMBLE}\n\nFix the composer`, { byteOffset: 3001 }),
+      makeEv('queue-operation', { operation: 'enqueue' }, { byteOffset: 3002 }),
+    ])
+
+    const users = useChat.getState().get('epic-batch-dedupe').turns.filter((t) => t.role === 'user')
+    expect(users).toHaveLength(1)
+    expect(users[0].ref).toBeTruthy()
+    expect(users[0].text).toContain('Fix the composer')
+  })
+
+  it('byte-identical result: a whole fixture ingested as one batch matches feeding it one event at a time', async () => {
+    installWindowApiMock()
+    const { useChat, ingestTranscriptEvent, ingestTranscriptEvents } = await import('../chat')
+
+    const fixture = [
+      makeEv('mode', { mode: 'plan' }, { byteOffset: 4000, timestamp: '2026-01-01T00:00:00.000Z' }),
+      makeEv('user', `${INJECTED_PREAMBLE}\n\nFirst ask`, { byteOffset: 4001, timestamp: '2026-01-01T00:00:01.000Z' }),
+      makeEv('assistant', 'On it.', { byteOffset: 4002, timestamp: '2026-01-01T00:00:02.000Z' }),
+      makeEv('queue-operation', { operation: 'enqueue' }, { byteOffset: 4003, timestamp: '2026-01-01T00:00:03.000Z' }),
+      makeEv('user', `${INJECTED_PREAMBLE}\n\nSecond ask`, { byteOffset: 4004, timestamp: '2026-01-01T00:00:04.000Z' }),
+      makeEv('attachment', { file: 'a.png' }, { byteOffset: 4005, timestamp: '2026-01-01T00:00:05.000Z' }),
+    ]
+
+    for (const ev of fixture) ingestTranscriptEvent('tab-seq', ev)
+    ingestTranscriptEvents('tab-batch', fixture)
+
+    const strip = (turns: ReturnType<typeof useChat.getState>['chats'][string]['turns']) =>
+      turns.map(({ id: _id, ...rest }) => rest)
+
+    expect(strip(useChat.getState().get('tab-batch').turns)).toEqual(strip(useChat.getState().get('tab-seq').turns))
   })
 })

@@ -68,9 +68,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('transcript:path', { cwd, sessionUuid }),
     usageFor: (cwd, sessionIds) =>
       ipcRenderer.invoke('transcript:usageFor', { cwd, sessionIds }),
+    // Main sends one batch (array) per flush — see transcripts.cjs's doFlush —
+    // so the handler is array-shaped, not per-event, letting subscribers
+    // (live.ts, chat.ts) commit their store once per batch instead of once
+    // per event.
     onEvent: (tabId, handler) => {
       const channel = `transcript:event:${tabId}`;
-      const listener = (_e, ev) => handler(ev);
+      const listener = (_e, events) => handler(events);
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.removeListener(channel, listener);
     },

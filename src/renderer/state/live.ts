@@ -93,6 +93,10 @@ interface LiveState {
   subscribe: (tabId: string, cwd: string, sessionUuid: string) => void
   unsubscribe: (tabId: string) => void
   ingest: (tabId: string, ev: TranscriptEvent, opts?: { replay?: boolean }) => void
+  /** Fold an ORDERED batch of events with exactly ONE store commit — see
+   *  transcript-batch-flush. `ingest` delegates here with a 1-element batch,
+   *  so both paths compute identical per-event results. */
+  ingestBatch: (tabId: string, events: TranscriptEvent[], opts?: { replay?: boolean }) => void
 }
 
 function touchAgent(agents: AgentSpawnEntry[], agentId: string | undefined, ts: number): AgentSpawnEntry[] {
@@ -117,6 +121,166 @@ function blankTab(tabId: string, cwd: string, sessionUuid: string): LiveTab {
   }
 }
 
+/**
+ * Fold one transcript event into a LiveTab, returning the next tab state
+ * plus any newly derived activity entries (unstamped — id assignment and
+ * ring-buffer append happen once per batch in ingestBatch, not here).
+ */
+function applyLiveEvent(
+  cur: LiveTab,
+  ev: TranscriptEvent,
+  opts?: { replay?: boolean },
+): { next: LiveTab; newActivity: ActivityEvent[] } {
+  const now = Date.now()
+  const next: LiveTab = { ...cur, lastEventAt: opts?.replay ? cur.lastEventAt : now }
+  const newActivity: ActivityEvent[] = []
+
+  // Helper to truncate a string to max chars
+  const trunc = (s: string, max: number) => s.length > max ? s.slice(0, max - 1) + '…' : s
+
+  switch (ev.kind) {
+    case 'todo_write': {
+      const todos = Array.isArray(ev.data) ? (ev.data as TodoItem[]) : []
+      next.todos = todos
+      if (!opts?.replay) {
+        newActivity.push({
+          id: 0,
+          kind: 'todo-update',
+          at: now,
+          label: `Todos · ${todos.length} item${todos.length !== 1 ? 's' : ''}`,
+        })
+      }
+      break
+    }
+    case 'tool_use': {
+      const d = ev.data as { name: string; input: unknown; id?: string }
+      // Store only the fields extractToolTarget() reads — not the full input
+      // body (Write/Edit inputs can be hundreds of KB of file content).
+      const raw = d.input as Record<string, unknown> | null | undefined
+      const inputPreview: Record<string, unknown> = {}
+      for (const key of ['command', 'file_path', 'pattern', 'url', 'query', 'subagent_type', 'description']) {
+        if (raw && key in raw) inputPreview[key] = raw[key]
+      }
+      next.lastToolUses = [
+        { id: d.id, name: d.name, input: inputPreview, at: now },
+        ...cur.lastToolUses,
+      ].slice(0, 50)
+      if (!opts?.replay) {
+        const input = d.input as Record<string, unknown> | null | undefined
+        const isFileOp = ['Edit', 'Write', 'NotebookEdit'].includes(d.name)
+        const filePath = typeof input?.file_path === 'string' ? input.file_path : undefined
+        const command = typeof input?.command === 'string' ? input.command : undefined
+        const detail = filePath
+          ? filePath.split('/').pop() ?? filePath
+          : command
+          ? trunc(command, 28)
+          : ''
+        newActivity.push({
+          id: 0,
+          kind: 'tool-use',
+          at: now,
+          label: detail ? `${d.name} · ${detail}` : d.name,
+          target: filePath ?? command,
+          toolName: d.name,
+        })
+        if (isFileOp && filePath) {
+          newActivity.push({
+            id: 0,
+            kind: 'file-edit',
+            at: now,
+            label: `${d.name} · ${trunc(filePath.split('/').pop() ?? filePath, 34)}`,
+            target: filePath,
+            toolName: d.name,
+          })
+        }
+      }
+      break
+    }
+    case 'plan': {
+      const input = ev.data as { plan?: string } | string | undefined
+      const text = typeof input === 'string' ? input : input?.plan ?? JSON.stringify(input)
+      // Cap at 50 — the main-side ring buffer (500 events) bounds REPLAY
+      // growth but every live `plan` event still appends here, so an
+      // explicit slice is required to keep this array bounded across a
+      // long-lived session.
+      next.plans = [{ at: now, content: text ?? '' }, ...cur.plans].slice(0, 50)
+      if (!opts?.replay) {
+        newActivity.push({
+          id: 0,
+          kind: 'plan-revision',
+          at: now,
+          label: 'Plan revised',
+        })
+      }
+      break
+    }
+    case 'agent_spawn': {
+      const d = ev.data as { subagent_type?: string; description?: string; toolUseId?: string }
+      next.agents = [
+        { id: d?.toolUseId, at: now, subagentType: d?.subagent_type, description: d?.description, lastActivityAt: now },
+        ...cur.agents,
+      ].slice(0, 50)
+      if (!opts?.replay) {
+        newActivity.push({
+          id: 0,
+          kind: 'agent-spawn',
+          at: now,
+          label: d?.subagent_type ? `Agent: ${trunc(d.subagent_type, 32)}` : 'Agent spawned',
+        })
+      }
+      break
+    }
+    case 'usage': {
+      const u = ev.data as Partial<UsageSnapshot> & {
+        input_tokens?: number
+        output_tokens?: number
+        cache_creation_input_tokens?: number
+        cache_read_input_tokens?: number
+      }
+      const prevTotal = (cur.usage.inputTokens || 0) + (cur.usage.outputTokens || 0)
+      const addedIn = u.input_tokens ?? u.inputTokens ?? 0
+      const addedOut = u.output_tokens ?? u.outputTokens ?? 0
+      const newTotal = prevTotal + addedIn + addedOut
+      next.usage = {
+        inputTokens: (cur.usage.inputTokens || 0) + addedIn,
+        outputTokens: (cur.usage.outputTokens || 0) + addedOut,
+        cacheCreationInputTokens:
+          (cur.usage.cacheCreationInputTokens || 0) +
+          (u.cache_creation_input_tokens ?? u.cacheCreationInputTokens ?? 0),
+        cacheReadInputTokens:
+          (cur.usage.cacheReadInputTokens || 0) +
+          (u.cache_read_input_tokens ?? u.cacheReadInputTokens ?? 0),
+      }
+      if (!opts?.replay && Math.floor(newTotal / 1000) > Math.floor(prevTotal / 1000)) {
+        newActivity.push({
+          id: 0,
+          kind: 'usage-tick',
+          at: now,
+          label: `${Math.floor(newTotal / 1000)}k tokens`,
+        })
+      }
+      break
+    }
+    case 'tool_result': {
+      // Apply touchAgent even during replay: the intent of the replay guard
+      // was to preserve lastEventAt (handled at the top of applyLiveEvent
+      // already), not to skip agent settlement. Without this, replayed
+      // completed agents are never marked done and the isRunning heuristic
+      // breaks on re-mount.
+      const d = ev.data as { toolUseId?: string }
+      next.agents = touchAgent(cur.agents, d?.toolUseId, now)
+      break
+    }
+    default:
+      // Plain message/user/assistant/system events have no derived field
+      // to update, but they MUST still bump lastEventAt — otherwise
+      // AgentView stays 'idle' the whole time the model is streaming text.
+      break
+  }
+
+  return { next, newActivity }
+}
+
 export const useLive = create<LiveState>((set, get) => ({
   tabs: {},
   refs: {},
@@ -133,7 +297,7 @@ export const useLive = create<LiveState>((set, get) => ({
     })
     // Attach onEvent listener BEFORE invoking subscribe so no live append is
     // missed between subscribe returning and the listener being registered.
-    const off = window.api.transcripts.onEvent(tabId, (ev) => get().ingest(tabId, ev))
+    const off = window.api.transcripts.onEvent(tabId, (events) => get().ingestBatch(tabId, events))
     set({ unsubs: { ...get().unsubs, [tabId]: off } })
     // Await subscribe so the main process has populated sub.buffer + inserted
     // into its Map, then drain the buffer for replay. Chaining (not parallel)
@@ -156,7 +320,7 @@ export const useLive = create<LiveState>((set, get) => ({
         const events = await window.api.transcripts.buffer(tabId)
         // Replay of historical events — don't bump lastEventAt, otherwise
         // AgentView would flash 'working' on every mount while the buffer drains.
-        for (const ev of events) get().ingest(tabId, ev, { replay: true })
+        get().ingestBatch(tabId, events, { replay: true })
       })
       .catch((e) => console.error('[live] transcripts.subscribe failed:', tabId, e))
   },
@@ -181,163 +345,32 @@ export const useLive = create<LiveState>((set, get) => ({
   },
 
   ingest: (tabId, ev, opts) => {
-    const cur = get().tabs[tabId]
-    if (!cur) return
-    const now = Date.now()
-    const next: LiveTab = { ...cur, lastEventAt: opts?.replay ? cur.lastEventAt : now }
-    const newActivity: ActivityEvent[] = []
+    get().ingestBatch(tabId, [ev], opts)
+  },
 
-    // Helper to truncate a string to max chars
-    const trunc = (s: string, max: number) => s.length > max ? s.slice(0, max - 1) + '…' : s
-
-    switch (ev.kind) {
-      case 'todo_write': {
-        const todos = Array.isArray(ev.data) ? (ev.data as TodoItem[]) : []
-        next.todos = todos
-        if (!opts?.replay) {
-          newActivity.push({
-            id: 0,
-            kind: 'todo-update',
-            at: now,
-            label: `Todos · ${todos.length} item${todos.length !== 1 ? 's' : ''}`,
-          })
-        }
-        break
-      }
-      case 'tool_use': {
-        const d = ev.data as { name: string; input: unknown; id?: string }
-        // Store only the fields extractToolTarget() reads — not the full input
-        // body (Write/Edit inputs can be hundreds of KB of file content).
-        const raw = d.input as Record<string, unknown> | null | undefined
-        const inputPreview: Record<string, unknown> = {}
-        for (const key of ['command', 'file_path', 'pattern', 'url', 'query', 'subagent_type', 'description']) {
-          if (raw && key in raw) inputPreview[key] = raw[key]
-        }
-        next.lastToolUses = [
-          { id: d.id, name: d.name, input: inputPreview, at: now },
-          ...cur.lastToolUses,
-        ].slice(0, 50)
-        if (!opts?.replay) {
-          const input = d.input as Record<string, unknown> | null | undefined
-          const isFileOp = ['Edit', 'Write', 'NotebookEdit'].includes(d.name)
-          const filePath = typeof input?.file_path === 'string' ? input.file_path : undefined
-          const command = typeof input?.command === 'string' ? input.command : undefined
-          const detail = filePath
-            ? filePath.split('/').pop() ?? filePath
-            : command
-            ? trunc(command, 28)
-            : ''
-          newActivity.push({
-            id: 0,
-            kind: 'tool-use',
-            at: now,
-            label: detail ? `${d.name} · ${detail}` : d.name,
-            target: filePath ?? command,
-            toolName: d.name,
-          })
-          if (isFileOp && filePath) {
-            newActivity.push({
-              id: 0,
-              kind: 'file-edit',
-              at: now,
-              label: `${d.name} · ${trunc(filePath.split('/').pop() ?? filePath, 34)}`,
-              target: filePath,
-              toolName: d.name,
-            })
-          }
-        }
-        break
-      }
-      case 'plan': {
-        const input = ev.data as { plan?: string } | string | undefined
-        const text = typeof input === 'string' ? input : input?.plan ?? JSON.stringify(input)
-        // Cap at 50 — the main-side ring buffer (500 events) bounds REPLAY
-        // growth but every live `plan` event still appends here, so an
-        // explicit slice is required to keep this array bounded across a
-        // long-lived session.
-        next.plans = [{ at: now, content: text ?? '' }, ...cur.plans].slice(0, 50)
-        if (!opts?.replay) {
-          newActivity.push({
-            id: 0,
-            kind: 'plan-revision',
-            at: now,
-            label: 'Plan revised',
-          })
-        }
-        break
-      }
-      case 'agent_spawn': {
-        const d = ev.data as { subagent_type?: string; description?: string; toolUseId?: string }
-        next.agents = [
-          { id: d?.toolUseId, at: now, subagentType: d?.subagent_type, description: d?.description, lastActivityAt: now },
-          ...cur.agents,
-        ].slice(0, 50)
-        if (!opts?.replay) {
-          newActivity.push({
-            id: 0,
-            kind: 'agent-spawn',
-            at: now,
-            label: d?.subagent_type ? `Agent: ${trunc(d.subagent_type, 32)}` : 'Agent spawned',
-          })
-        }
-        break
-      }
-      case 'usage': {
-        const u = ev.data as Partial<UsageSnapshot> & {
-          input_tokens?: number
-          output_tokens?: number
-          cache_creation_input_tokens?: number
-          cache_read_input_tokens?: number
-        }
-        const prevTotal = (cur.usage.inputTokens || 0) + (cur.usage.outputTokens || 0)
-        const addedIn = u.input_tokens ?? u.inputTokens ?? 0
-        const addedOut = u.output_tokens ?? u.outputTokens ?? 0
-        const newTotal = prevTotal + addedIn + addedOut
-        next.usage = {
-          inputTokens: (cur.usage.inputTokens || 0) + addedIn,
-          outputTokens: (cur.usage.outputTokens || 0) + addedOut,
-          cacheCreationInputTokens:
-            (cur.usage.cacheCreationInputTokens || 0) +
-            (u.cache_creation_input_tokens ?? u.cacheCreationInputTokens ?? 0),
-          cacheReadInputTokens:
-            (cur.usage.cacheReadInputTokens || 0) +
-            (u.cache_read_input_tokens ?? u.cacheReadInputTokens ?? 0),
-        }
-        if (!opts?.replay && Math.floor(newTotal / 1000) > Math.floor(prevTotal / 1000)) {
-          newActivity.push({
-            id: 0,
-            kind: 'usage-tick',
-            at: now,
-            label: `${Math.floor(newTotal / 1000)}k tokens`,
-          })
-        }
-        break
-      }
-      case 'tool_result': {
-        // Apply touchAgent even during replay: the intent of the replay guard
-        // was to preserve lastEventAt (handled at the top of ingest already),
-        // not to skip agent settlement. Without this, replayed completed agents
-        // are never marked done and the isRunning heuristic breaks on re-mount.
-        const d = ev.data as { toolUseId?: string }
-        next.agents = touchAgent(cur.agents, d?.toolUseId, now)
-        break
-      }
-      default:
-        // Plain message/user/assistant/system events have no derived field
-        // to update, but they MUST still bump lastEventAt — otherwise
-        // AgentView stays 'idle' the whole time the model is streaming text.
-        break
+  ingestBatch: (tabId, events, opts) => {
+    const cur0 = get().tabs[tabId]
+    if (!cur0 || events.length === 0) return
+    let working: LiveTab = cur0
+    let allActivity: ActivityEvent[] = []
+    for (const ev of events) {
+      const { next, newActivity } = applyLiveEvent(working, ev, opts)
+      working = next
+      allActivity = allActivity.concat(newActivity)
     }
-
-    // Assign monotonic IDs and push to ring buffer
-    if (newActivity.length > 0) {
-      let seq = cur.activitySeq
-      const stamped = newActivity.map((a) => ({ ...a, id: ++seq }))
-      next.activitySeq = seq
-      next.activityRing = [...cur.activityRing, ...stamped].slice(-32)
+    // Assign monotonic IDs and push to the ring buffer ONCE for the whole
+    // batch — equivalent to doing it per event (slice(-32) is idempotent
+    // under further concatenation+slicing) but with a single store commit.
+    if (allActivity.length > 0) {
+      let seq = cur0.activitySeq
+      const stamped = allActivity.map((a) => ({ ...a, id: ++seq }))
+      working = {
+        ...working,
+        activitySeq: seq,
+        activityRing: [...cur0.activityRing, ...stamped].slice(-32),
+      }
     }
-
-    set({ tabs: { ...get().tabs, [tabId]: next } })
+    set({ tabs: { ...get().tabs, [tabId]: working } })
   },
 }))
 

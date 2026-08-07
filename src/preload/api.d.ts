@@ -1252,7 +1252,10 @@ export interface SessionManagerAPI {
      *  session with no transcript file yet (or one over the main-process size
      *  cap) maps to null. */
     usageFor: (cwd: string, sessionIds: string[]) => Promise<Record<string, { inputTokens: number; outputTokens: number } | null>>;
-    onEvent: (tabId: string, handler: (ev: TranscriptEvent) => void) => () => void;
+    /** Fires once per main-process flush with the ORDERED batch of events that
+     *  flush produced (never one call per event) — see transcripts.cjs's
+     *  doFlush / MAX_EVENTS_PER_BATCH. */
+    onEvent: (tabId: string, handler: (events: TranscriptEvent[]) => void) => () => void;
   };
   sessions: {
     load: () => Promise<LoadedSessions>;

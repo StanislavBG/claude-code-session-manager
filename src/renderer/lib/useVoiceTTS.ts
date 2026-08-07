@@ -27,28 +27,32 @@ export function useVoiceTTS(activeTabId: string | null): void {
       speak(text)
     }
 
-    const off = window.api.transcripts.onEvent(activeTabId, (ev) => {
-      if (ev.kind !== 'message') return
-      // Defense in depth: transcript events arrive from main as `unknown` data.
-      // Validate the shape before destructuring so a malformed JSONL line
-      // can't crash this listener (which would bubble to React's error boundary).
-      const data = ev.data
-      if (typeof data !== 'object' || data === null) return
-      const d = data as { role?: unknown; content?: unknown }
-      if (d.role !== 'assistant') return
-      if (useVoice.getState().isRecording) return
+    // Main sends a batch (array) of events per flush — see transcripts.cjs's
+    // doFlush — so iterate in order rather than expecting one call per event.
+    const off = window.api.transcripts.onEvent(activeTabId, (events) => {
+      for (const ev of events) {
+        if (ev.kind !== 'message') continue
+        // Defense in depth: transcript events arrive from main as `unknown` data.
+        // Validate the shape before destructuring so a malformed JSONL line
+        // can't crash this listener (which would bubble to React's error boundary).
+        const data = ev.data
+        if (typeof data !== 'object' || data === null) continue
+        const d = data as { role?: unknown; content?: unknown }
+        if (d.role !== 'assistant') continue
+        if (useVoice.getState().isRecording) continue
 
-      const content = d.content
-      if (typeof content === 'string') {
-        trySpeak(content)
-      } else if (Array.isArray(content)) {
-        const text = content
-          .filter((b): b is { type: string; text: string } =>
-            typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'text' && typeof (b as { text?: unknown }).text === 'string',
-          )
-          .map((b) => b.text)
-          .join(' ')
-        if (text) trySpeak(text)
+        const content = d.content
+        if (typeof content === 'string') {
+          trySpeak(content)
+        } else if (Array.isArray(content)) {
+          const text = content
+            .filter((b): b is { type: string; text: string } =>
+              typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'text' && typeof (b as { text?: unknown }).text === 'string',
+            )
+            .map((b) => b.text)
+            .join(' ')
+          if (text) trySpeak(text)
+        }
       }
     })
 

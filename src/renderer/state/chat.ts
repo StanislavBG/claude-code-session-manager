@@ -1053,17 +1053,23 @@ export function hasTranscriptFeed(tabId: string): boolean {
 }
 
 /**
- * Fold one transcripts.cjs event into the tab's chat slice. Text events of
- * kind 'user'/'assistant' become real turns (deduped against chatRunner-
- * pushed twins — see the reconciliation rule above); every other kind —
- * including JSONL-only kinds unreachable via chatRunner (mode,
- * queue-operation, attachment, ai-title, …) — lands as a role:'event' turn
- * carrying `kind` + bounded previewText + `ref` (never the full data body:
- * a tool_use input can be hundreds of KB, and holding it per-turn is the
- * exact memory cliff the classifier's ref design exists to avoid).
- * Exported for unit tests; production callers go through attachTranscriptFeed.
+ * Fold one transcripts.cjs event into a tab's chat slice, given the slice
+ * `c` to fold onto. Text events of kind 'user'/'assistant' become real
+ * turns (deduped against chatRunner-pushed twins — see the reconciliation
+ * rule above); every other kind — including JSONL-only kinds unreachable
+ * via chatRunner (mode, queue-operation, attachment, ai-title, …) — lands
+ * as a role:'event' turn carrying `kind` + bounded previewText + `ref`
+ * (never the full data body: a tool_use input can be hundreds of KB, and
+ * holding it per-turn is the exact memory cliff the classifier's ref design
+ * exists to avoid).
+ *
+ * Pure w.r.t. the store: returns the next slice rather than calling patch()
+ * itself, so a whole batch of events can be folded through one `c` value
+ * and committed with a single store write — see ingestTranscriptEvents.
+ * The feedIngest de-dupe-seen bookkeeping is module state (not part of `c`)
+ * and is still mutated per event, in order, exactly as before.
  */
-export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void {
+function applyTranscriptEvent(tabId: string, c: TabChat, ev: TranscriptEvent): TabChat {
   if (ev.ref) {
     const st = feedIngest.get(tabId) ?? { seen: new Set<string>(), lastOffset: -1, lineIndex: -1 }
     if (ev.ref.byteOffset === st.lastOffset) st.lineIndex += 1
@@ -1073,7 +1079,7 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
     }
     feedIngest.set(tabId, st)
     const key = `${ev.ref.byteOffset}:${st.lineIndex}`
-    if (st.seen.has(key)) return
+    if (st.seen.has(key)) return c
     st.seen.add(key)
   }
   const raw = (ev.raw ?? {}) as Record<string, unknown>
@@ -1092,44 +1098,41 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
         : null
   if ((ev.kind === 'assistant' || ev.kind === 'user') && textData !== null && !isMeta) {
     const role = ev.kind
-    patch(tabId, (c) => {
-      let stream = c.stream
-      if (c.running && role === 'assistant' && stream) {
-        // The live tap already streamed this text — excise it so the turn
-        // and the in-flight stream never show the same text simultaneously.
-        const idx = stream.indexOf(textData)
-        if (idx !== -1) stream = stream.slice(0, idx) + stream.slice(idx + textData.length)
-      }
-      const dupIdx = findRecentDuplicateTurn(c.turns, role, textData)
-      if (dupIdx !== -1) {
-        // A twin already landed. If it came from the feed (it has a `ref`),
-        // this is a genuinely repeated line — drop it. Otherwise it is the
-        // optimistic turn beginRun pushed on send, and the JSONL is
-        // authoritative: UPGRADE it in place rather than discarding the
-        // richer record. Dropping the feed turn instead would cost the
-        // byte-exact text, `Show raw`, the branch chip and the `≡` preamble
-        // disclosure — everything CLAUDE.md's promptPreamble contract needs.
-        if (c.turns[dupIdx].ref) return { ...c, stream }
-        return {
-          ...c,
-          stream,
-          turns: c.turns.map((t, i) =>
-            i === dupIdx
-              ? { ...t, text: textData, at, kind: ev.kind, ref: ev.ref, attribution: attribution ?? t.attribution }
-              : t,
-          ),
-        }
-      }
+    let stream = c.stream
+    if (c.running && role === 'assistant' && stream) {
+      // The live tap already streamed this text — excise it so the turn
+      // and the in-flight stream never show the same text simultaneously.
+      const idx = stream.indexOf(textData)
+      if (idx !== -1) stream = stream.slice(0, idx) + stream.slice(idx + textData.length)
+    }
+    const dupIdx = findRecentDuplicateTurn(c.turns, role, textData)
+    if (dupIdx !== -1) {
+      // A twin already landed. If it came from the feed (it has a `ref`),
+      // this is a genuinely repeated line — drop it. Otherwise it is the
+      // optimistic turn beginRun pushed on send, and the JSONL is
+      // authoritative: UPGRADE it in place rather than discarding the
+      // richer record. Dropping the feed turn instead would cost the
+      // byte-exact text, `Show raw`, the branch chip and the `≡` preamble
+      // disclosure — everything CLAUDE.md's promptPreamble contract needs.
+      if (c.turns[dupIdx].ref) return { ...c, stream }
       return {
         ...c,
         stream,
-        turns: capTurns([
-          ...c.turns,
-          { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref, attribution },
-        ]),
+        turns: c.turns.map((t, i) =>
+          i === dupIdx
+            ? { ...t, text: textData, at, kind: ev.kind, ref: ev.ref, attribution: attribution ?? t.attribution }
+            : t,
+        ),
       }
-    })
-    return
+    }
+    return {
+      ...c,
+      stream,
+      turns: capTurns([
+        ...c.turns,
+        { id: turnId(), role, text: textData, at, kind: ev.kind, ref: ev.ref, attribution },
+      ]),
+    }
   }
   // Bounded structured summary for the typed renderers — computed HERE, while
   // ev.data/ev.raw are still in hand from IPC (the store never keeps them).
@@ -1141,13 +1144,35 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
     // card renders from previewText/ref with an explicit empty state.
     signal = undefined
   }
-  patch(tabId, (c) => ({
+  return {
     ...c,
     turns: capTurns([
       ...c.turns,
       { id: turnId(), role: 'event', text: ev.previewText ?? '', at, kind: ev.kind, ref: ev.ref, signal, attribution },
     ]),
-  }))
+  }
+}
+
+/**
+ * Fold one transcripts.cjs event into the tab's chat slice — ONE store
+ * commit. Exported for unit tests; production callers go through
+ * attachTranscriptFeed, which now uses ingestTranscriptEvents (batched).
+ */
+export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void {
+  patch(tabId, (c) => applyTranscriptEvent(tabId, c, ev))
+}
+
+/**
+ * Fold an ORDERED batch of transcripts.cjs events into the tab's chat slice
+ * with exactly ONE store commit, instead of one per event — see
+ * transcript-batch-flush. Events are applied in array order through the
+ * same fold `applyTranscriptEvent` uses per-event, so the result is
+ * byte-identical to calling ingestTranscriptEvent once per event in order;
+ * only the number of store writes changes.
+ */
+export function ingestTranscriptEvents(tabId: string, events: TranscriptEvent[]): void {
+  if (events.length === 0) return
+  patch(tabId, (c) => events.reduce((acc, ev) => applyTranscriptEvent(tabId, acc, ev), c))
 }
 
 /**
@@ -1175,7 +1200,7 @@ export function attachTranscriptFeed(args: { tabId: string; cwd: string; session
   feedRefs.set(tabId, next)
   if (next > 1) return
   useChat.setState({ hydratedTabs: { ...useChat.getState().hydratedTabs, [tabId]: true } })
-  const off = window.api.transcripts.onEvent(tabId, (ev) => ingestTranscriptEvent(tabId, ev))
+  const off = window.api.transcripts.onEvent(tabId, (events) => ingestTranscriptEvents(tabId, events))
   feedUnsubs.set(tabId, off)
   window.api.transcripts
     .subscribe({ tabId, cwd, sessionUuid })
@@ -1192,7 +1217,7 @@ export function attachTranscriptFeed(args: { tabId: string; cwd: string; session
         return
       }
       const events = await window.api.transcripts.buffer(tabId)
-      for (const ev of events) ingestTranscriptEvent(tabId, ev)
+      ingestTranscriptEvents(tabId, events)
     })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)

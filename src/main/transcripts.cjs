@@ -126,8 +126,23 @@ async function readDelta(sub) {
   }
 }
 
+// Cap on the number of events carried in a single `transcript:event:<tabId>`
+// IPC message. One flush can classify a large delta (e.g. a rotated/replayed
+// transcript, or the 8 MB MAX_DELTA_BYTES window) into far more than a
+// screenful of events — sending them all as one unbounded array risks a
+// single oversized IPC payload. Above this count, doFlush sends multiple
+// ordered batches instead of one giant one; each still lands as one store
+// commit on the renderer side.
+const MAX_EVENTS_PER_BATCH = 200;
+
 async function doFlush(sub, { emit = true } = {}) {
   const lines = await readDelta(sub);
+  let batch = [];
+  const flushBatch = () => {
+    if (batch.length === 0) return;
+    if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, batch);
+    batch = [];
+  };
   for (const line of lines) {
     // Index every line — including ones that fail to parse — so line numbers
     // and byte offsets stay correct for paged reads regardless of content.
@@ -142,13 +157,13 @@ async function doFlush(sub, { emit = true } = {}) {
     const ref = { filePath: sub.filePath, byteOffset: line.byteOffset, byteLength: line.byteLength };
     const events = classifyLine(obj, ref);
     for (const ev of events) {
-      if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, ev);
+      batch.push(ev);
       // Mirror to OTEL — no-op when disabled. We emit on the initial drain too
       // so backfilled transcripts show up in the trace store. One span per
-      // emitted event, not per line. doFlush only ever processes a given
-      // line once (readDelta never re-returns already-consumed bytes), so
-      // this can't double-record — paged re-reads (readPage) go through a
-      // separate code path below that never touches OTEL.
+      // emitted event, not per line or per batch. doFlush only ever processes
+      // a given line once (readDelta never re-returns already-consumed
+      // bytes), so this can't double-record — paged re-reads (readPage) go
+      // through a separate code path below that never touches OTEL.
       otel.recordTranscriptEvent({
         tabId: sub.tabId,
         tabCwd: sub.cwd,
@@ -156,8 +171,10 @@ async function doFlush(sub, { emit = true } = {}) {
         data: ev.data,
         ts: Date.now(),
       });
+      if (batch.length >= MAX_EVENTS_PER_BATCH) flushBatch();
     }
   }
+  flushBatch();
 }
 
 /**
@@ -525,4 +542,11 @@ module.exports = {
   // particular) — asserting a memory ceiling requires inspecting what's
   // actually held, not just what a read API returns.
   __getSubForTest: (tabId) => subs.get(tabId),
+  // Test-only: run a live (emit:true) flush directly against a subscription,
+  // without going through the chokidar watcher — lets batching/IPC-shape
+  // tests stay deterministic instead of racing a filesystem watch event.
+  __doFlushForTest: (sub, opts) => doFlush(sub, opts),
+  // Batch size cap for a single transcript:event IPC message — exported so
+  // tests can size fixtures against it without a magic-number duplicate.
+  MAX_EVENTS_PER_BATCH,
 };

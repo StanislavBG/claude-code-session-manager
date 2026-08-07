@@ -90,6 +90,7 @@ export default defineConfig({
       'src/main/lib/__tests__/coldBootPromptSessionsWrite.test.cjs',
       'src/main/__tests__/config-readText-bounded.test.cjs',
       'src/main/__tests__/runLogRetention.test.cjs',
+      'src/main/__tests__/heapSnapshot.test.cjs',
       'scripts/__tests__/watchdog-helpers.test.cjs',
       'scripts/__tests__/watchdog-relaunch.test.cjs',
       'scripts/__tests__/active-sessions.test.cjs',

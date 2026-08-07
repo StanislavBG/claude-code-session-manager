@@ -58,6 +58,7 @@ const { registerBilkoHostIpc } = require('./bilkoHost.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
+const heapSnapshot = require('./heapSnapshot.cjs');
 const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
 const { listExchanges } = require('./exchanges.cjs');
@@ -830,6 +831,10 @@ ipcMain.handle('otel:set-config', async (_e, cfg) => {
 ipcMain.handle('otel:status', () => otel.status());
 ipcMain.handle('otel:config-path', () => otelSettings.storePath());
 
+// Diagnostic-only renderer heap snapshot. No-op unless SM_HEAP_SNAPSHOT=1 —
+// see heapSnapshot.cjs for why this stays off by default.
+heapSnapshot.registerIpc({ ipcMain, getWindow: () => mainWindow });
+
 // --- App lifecycle ---
 
 // E2E under xvfb-run has no working GPU; the GPU process exits ~15 seconds
@@ -1037,6 +1042,8 @@ app.whenReady().then(async () => {
     try { await systemPreferences.askForMediaAccess('microphone'); } catch { /* */ }
   }
 
+  const heapSnapshotMenuItem = heapSnapshot.buildMenuItem(() => mainWindow);
+
   const template = [
     {
       label: 'Session Manager',
@@ -1073,6 +1080,8 @@ app.whenReady().then(async () => {
       submenu: [
         { label: 'Toggle DevTools', accelerator: 'F12', role: 'toggleDevTools' },
         { label: 'Reload', accelerator: 'CmdOrCtrl+R', role: 'reload' },
+        // Diagnostic-only; absent unless SM_HEAP_SNAPSHOT=1 (see heapSnapshot.cjs).
+        ...(heapSnapshotMenuItem ? [heapSnapshotMenuItem] : []),
       ],
     },
     {

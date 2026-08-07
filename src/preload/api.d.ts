@@ -1336,6 +1336,10 @@ export interface SessionManagerAPI {
     status: () => Promise<OtelStatus>;
     configPath: () => Promise<string>;
   };
+  diagnostics: {
+    /** Rejects unless the main process has SM_HEAP_SNAPSHOT=1 set. */
+    takeHeapSnapshot: () => Promise<{ filePath: string; bytes: number | null; ms: number }>;
+  };
   files: {
     list: (path: string, showHidden?: boolean) => Promise<FilesListResult>;
     read: (path: string) => Promise<FilesReadResult>;

@@ -177,6 +177,11 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('otel:status'),
     configPath: () => ipcRenderer.invoke('otel:config-path'),
   },
+  // Diagnostic only — no handler is registered unless the main process was
+  // launched with SM_HEAP_SNAPSHOT=1, so this rejects by default.
+  diagnostics: {
+    takeHeapSnapshot: () => ipcRenderer.invoke('diagnostics:heap-snapshot'),
+  },
   history: {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
     scanProjects: () => ipcRenderer.invoke('history:scan-projects'),

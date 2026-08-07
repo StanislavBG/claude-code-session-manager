@@ -374,6 +374,14 @@
         "id": "pevt-msi8qag5-36",
         "promptSessionId": "settings-home-the-settings-left-navigation-conta-cf9b46d3",
         "at": "2026-08-07T01:02:50.213Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msi8qag5-36",
+        "text": "Committed to `main`, working tree clean.\n\n| Commit | Contents |\n|---|---|\n| `b014cc2` | `refactor(web-remote)` — deletes `webRemote.cjs` (1367 lines), `WebRemote.tsx`, `e2eStateMachine.cjs`, 4 test files, and the `/remote` slash route + `remote` NavKey. Net −2547/+320. |\n| `02df21f` | `chore(ops)` — scheduler/prompt-session runtime state written by the running app. |\n\n**Gates, all run before committing:** `npm run typecheck` exit 0 · `npm run lint` (unstable-selectors 426 files OK, conditional-hooks 204 files OK) · `npx vitest run` **248 files / 2330 tests passed**.\n\nTwo things I deliberately did *not* delete, and documented instead of removing:\n- `scheduler.cjs`'s `remote` accessor object — named for the retired relay but still has in-process callers (`prdCreate.cjs`).\n- `correctness-bugs-2026-06-10.spec.ts`'s tailLines test — it always inlined its own copy of the logic (the source module required Electron), so it stands alone.\n\nRemaining `web-remote` string matches in `files.cjs`, `runVerify.cjs`, `ipcSchemas.cjs`, `navGroupsHome.test.ts` are comments only — verified inert.\n\nTwo notes, since neither was mine to decide:\n\n1. **These changes were already in the working tree when this session started** — they're the Web Remote removal continuing `4fcc209`/`1603b12`, not output of this Epic. I made no source edits; the Settings audit is still a discussion with nothing built.\n2. **`~/.claude/session-manager/web-remote.json` still exists on disk** — the code is gone but its state file isn't. That's item 6 on the audit's remaining list and I left it alone since it's outside the repo.\n\nThe seven Settings-audit items (retire Permissions across its 7 surfaces incl. `Library.tsx`'s catalog presets, \"applies to\" badges, promote `SessionManagerConfig` to a real nav destination, delete `GlobalControlsSection`, one model answer, group the 4 orphan keys, sweep web-remote remnants) are decided but unbuilt — say the word and I'll decompose them into PRDs.",
+        "id": "pevt-msib7ki6-42",
+        "promptSessionId": "settings-home-the-settings-left-navigation-conta-cf9b46d3",
+        "at": "2026-08-07T02:12:15.630Z"
       }
     ]
   },

@@ -20,6 +20,7 @@ export default defineConfig({
       'src/main/__tests__/broadcastCoalescer.test.cjs',
       'src/main/__tests__/historyRollup.test.cjs',
       'src/main/__tests__/historyDashboard.test.cjs',
+      'src/main/__tests__/historyAggregatorIntraday.test.cjs',
       'src/main/__tests__/rcaReport.test.cjs',
       'src/main/__tests__/classifyTranscriptLine.test.cjs',
       'src/main/__tests__/transcriptsUsageFor.test.cjs',

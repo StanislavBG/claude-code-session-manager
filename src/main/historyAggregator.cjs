@@ -74,6 +74,34 @@ class LRUCache {
  */
 const aggrCache = new LRUCache(CACHE_MAX);
 
+// ── bounded concurrency helper ───────────────────────────────────────────────
+
+/**
+ * Run async fn(item) over items with at most `limit` in flight at once, via a
+ * pull-based worker pool (not chunked batches, so a slow item never stalls
+ * the rest of a batch). Node's fs promise APIs are backed by libuv's
+ * fixed-size threadpool (UV_THREADPOOL_SIZE, default 4) — firing every call
+ * at once via a single Promise.all still queues behind that pool one way or
+ * another, so bounding `limit` mainly avoids building thousands of pending
+ * promises/Buffers at once for a 25k+-file walk. Results are returned in
+ * input order; a thrown fn(item) rejects the whole call (callers here always
+ * catch inside fn instead).
+ */
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
 // ── date helpers ──────────────────────────────────────────────────────────────
 
 function decodeCwd(encoded) {
@@ -558,6 +586,149 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
   return { finalizedDates: partial ? [] : Array.from(dates), partial };
 }
 
+// ── intraday fast-walk state ──────────────────────────────────────────────────
+//
+// Two persistent (in-memory only, process-lifetime) caches make repeat ticks
+// cheap:
+//
+// 1. `intradayDirRegistry` — encodedCwd -> { mtimeMs, fileNames }. Verified
+//    empirically on this machine (ext4): appending to an EXISTING file does
+//    NOT change its parent directory's mtime — only creating/removing/
+//    renaming a directory entry does. So a directory's mtime is a safe signal
+//    for "no file was added or removed here since last tick", letting us skip
+//    re-`readdir()`ing it (2,044 directories on the dev machine — this alone
+//    doesn't bound the file-level stat count).
+//
+// 2. `intradayNotToday` — a permanent Set<filePath> of files CONFIRMED to
+//    belong to a day other than today, so they can never contribute to
+//    today's bucket again. This is the lever that makes the walk actually
+//    proportional to files modified today, and it's safe only because of an
+//    existing, unrelated invariant this PRD does not change: a transcript's
+//    `sessionDate` is fixed by its FIRST message's timestamp and never
+//    updates on later appends (see parseJSONL's cache — `merged.sessionDate
+//    = prev.sessionDate`), so `aggregate()`/`refreshIntradayToday()` already
+//    attribute 100% of a file's activity to its original day no matter how
+//    many later days it's appended on. A file whose mtime is confirmed to
+//    predate today can have no content newer than that mtime, so its
+//    sessionDate can't be today either — that classification is exclusion
+//    forever, not just for the rest of today. Combined with #1 (a file
+//    relevant to today must have been CREATED today, which does bump its
+//    directory's mtime and is therefore always discovered), the walk over
+//    time shrinks to: files still active today (small, must keep re-stat-ing
+//    to catch growth) + any brand-new file since the last tick. Everything
+//    else is skipped without even a stat(2) call. Remaining stat/readdir
+//    calls run with bounded concurrency instead of one sequential await per
+//    call, since that was the other half of the sequential-walk cost
+//    (29,625 stats + 2,044 readdirs, 589ms measured on this machine).
+let intradayDirRegistry = new Map(); // encodedCwd -> { mtimeMs, fileNames: string[] }
+let intradayNotToday = new Set(); // filePath -> confirmed not-today, forever
+
+const INTRADAY_STAT_CONCURRENCY = 64;
+const INTRADAY_STRATEGY = 'directory-mtime skips re-readdir of unchanged dirs (new-file detection); ' +
+  'a file confirmed to belong to a past day (mtime, then sessionDate) is excluded from every future tick ' +
+  '(sessionDate is pinned to a transcript\'s first message and never changes on later appends); ' +
+  `remaining stat/readdir calls run with bounded concurrency (${INTRADAY_STAT_CONCURRENCY} in flight)`;
+
+/** Test-only: clears the in-memory directory/exclusion registries between fixtures. */
+function resetIntradayRegistryForTests() {
+  intradayDirRegistry = new Map();
+  intradayNotToday = new Set();
+}
+
+/**
+ * Pure walk-and-parse step (no rollup write) — split out from
+ * refreshIntradayToday() so it can be benchmarked read-only against the real
+ * ~/.claude/projects (see scripts/bench-intraday-walk.cjs) without touching
+ * the rollup file on disk.
+ */
+async function computeIntradayBuckets() {
+  const today = localDate(new Date());
+
+  let projectDirs;
+  try {
+    projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
+  } catch {
+    return { today, buckets: new Map() };
+  }
+
+  const dirEntries = projectDirs.filter((e) => e.isDirectory());
+
+  // Directory count (thousands) is far smaller than file count (tens of
+  // thousands), so stat-ing every directory concurrently is cheap and tells
+  // us which ones had an entry added/removed since we last looked.
+  const dirStats = await mapWithConcurrency(dirEntries, INTRADAY_STAT_CONCURRENCY, async (entry) => {
+    const dirPath = path.join(PROJECTS_DIR, entry.name);
+    try {
+      const stat = await fsp.stat(dirPath);
+      return { encodedCwd: entry.name, dirPath, mtimeMs: stat.mtimeMs };
+    } catch {
+      return null;
+    }
+  });
+
+  // Resolve the jsonl file list per directory — reuse the cached list (no
+  // readdir syscall) when the directory's mtime hasn't moved since the last
+  // tick; re-enumerate only directories that are new or changed. Files
+  // already known to be irrelevant to any future "today" are dropped here so
+  // they never reach the stat step below.
+  const fileCandidates = []; // { filePath, encodedCwd }
+  await mapWithConcurrency(dirStats.filter(Boolean), INTRADAY_STAT_CONCURRENCY, async (d) => {
+    const cached = intradayDirRegistry.get(d.encodedCwd);
+    let fileNames;
+    if (cached && cached.mtimeMs === d.mtimeMs) {
+      fileNames = cached.fileNames;
+    } else {
+      let files;
+      try { files = await fsp.readdir(d.dirPath, { withFileTypes: true }); } catch { files = []; }
+      fileNames = files.filter((f) => f.isFile() && f.name.endsWith('.jsonl')).map((f) => f.name);
+      intradayDirRegistry.set(d.encodedCwd, { mtimeMs: d.mtimeMs, fileNames });
+    }
+    for (const name of fileNames) {
+      const filePath = path.join(d.dirPath, name);
+      if (intradayNotToday.has(filePath)) continue;
+      fileCandidates.push({ filePath, encodedCwd: d.encodedCwd });
+    }
+  });
+
+  // Known caveat: parseJSONL separately detects a same-path file replacement
+  // (inode change — e.g. a `claude --resume` compaction rewriting a
+  // transcript from scratch) and re-parses it in full. If that happens to a
+  // path already in intradayNotToday, this walk will never look at it again
+  // to notice its (hypothetical) new sessionDate, since exclusion here skips
+  // the stat entirely. This is safe in practice: the History dashboard's
+  // actual reads (aggregate()) don't consult this cache at all and always
+  // re-walk live for "today", so the only blast radius is a stale PROVISIONAL
+  // rollup line for the affected project until the next app restart resets
+  // this cache — never a wrong number on the dashboard itself.
+  const buckets = new Map();
+  await mapWithConcurrency(fileCandidates, INTRADAY_STAT_CONCURRENCY, async ({ filePath, encodedCwd }) => {
+    let stat;
+    try { stat = await fsp.stat(filePath); } catch { return; }
+
+    // A file whose mtime is before today can't have any content from today —
+    // and per the sessionDate-pinning invariant above, can never gain any —
+    // so it's excluded forever, with no parse ever needed.
+    const mtimeDate = localDate(new Date(stat.mtimeMs));
+    if (mtimeDate < today) {
+      intradayNotToday.add(filePath);
+      return;
+    }
+
+    const { result: parsed } = await parseJSONL(filePath, stat);
+    if (parsed.skipped) return;
+    if (parsed.sessionDate !== today) {
+      intradayNotToday.add(filePath);
+      return;
+    }
+
+    const key = `${today}|${encodedCwd}`;
+    if (!buckets.has(key)) buckets.set(key, emptyBucket(today, encodedCwd));
+    foldParsedIntoBucket(buckets.get(key), parsed);
+  });
+
+  return { today, buckets };
+}
+
 /**
  * Refresh TODAY's rollup buckets from a live (LRU-warm, cheap) parse of every
  * transcript touched today, and upsert them as provisional lines (v2, no
@@ -568,53 +739,18 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
  * readRollup/appendRollupDays last-write-wins per (date, projectDir, modelId)
  * key, so re-running this simply replaces today's previous provisional lines
  * with fresher ones — no separate "clear provisional" step needed.
+ *
+ * See INTRADAY_STRATEGY / intradayDirRegistry's comment above for why this is
+ * both faster and no less correct than the old unconditional full walk.
  */
 async function refreshIntradayToday() {
-  const today = localDate(new Date());
-
-  let projectDirs;
-  try {
-    projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
-  } catch {
-    return { date: today, projectsUpdated: 0 };
-  }
-
-  const buckets = new Map();
-  for (const projEntry of projectDirs) {
-    if (!projEntry.isDirectory()) continue;
-    const encodedCwd = projEntry.name;
-    const projectDir = path.join(PROJECTS_DIR, encodedCwd);
-
-    let files;
-    try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { continue; }
-
-    for (const fileEntry of files) {
-      if (!fileEntry.name.endsWith('.jsonl')) continue;
-      const filePath = path.join(projectDir, fileEntry.name);
-
-      let stat;
-      try { stat = await fsp.stat(filePath); } catch { continue; }
-
-      // A file whose mtime is before today can't have been touched today —
-      // skip it without even reading it (matches aggregate()'s fast-skip).
-      const mtimeDate = localDate(new Date(stat.mtimeMs));
-      if (mtimeDate < today) continue;
-
-      const { result: parsed } = await parseJSONL(filePath, stat);
-      if (parsed.skipped) continue;
-      if (parsed.sessionDate !== today) continue;
-
-      const key = `${today}|${encodedCwd}`;
-      if (!buckets.has(key)) buckets.set(key, emptyBucket(today, encodedCwd));
-      foldParsedIntoBucket(buckets.get(key), parsed);
-    }
-  }
+  const { today, buckets } = await computeIntradayBuckets();
 
   const entries = [];
   for (const b of buckets.values()) entries.push(...bucketToRollupLines(b));
   if (entries.length) await historyRollup.appendRollupDays(entries);
 
-  return { date: today, projectsUpdated: buckets.size };
+  return { date: today, projectsUpdated: buckets.size, strategy: INTRADAY_STRATEGY };
 }
 
 // ── aggregate ─────────────────────────────────────────────────────────────────
@@ -821,6 +957,7 @@ module.exports = {
   MODEL_PRICING,
   finalizeClosedDays,
   refreshIntradayToday,
+  computeIntradayBuckets,
   // exported for tests
   scanAggrLines,
   parseJSONL,
@@ -828,6 +965,9 @@ module.exports = {
   CACHE_MAX,
   LRUCache,
   computeActiveMinutes,
+  mapWithConcurrency,
+  resetIntradayRegistryForTests,
+  INTRADAY_STAT_CONCURRENCY,
   // exported for historyDashboard.cjs (pure, no I/O at require-time; reused
   // rather than re-implemented so date-range math stays in one place)
   localDate,

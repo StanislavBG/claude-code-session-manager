@@ -4,6 +4,7 @@ import { useWatchers } from '../state/watchers'
 import { useLayout } from '../state/layout'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { useTabDragReorder } from './useTabDragReorder'
+import { useDocumentVisible } from '../lib/useDocumentVisible'
 
 const ACTIVITY_WINDOW_MS = 30_000
 
@@ -33,12 +34,18 @@ export function TabBar() {
   // Re-render the badge layer once a second so the 30s activity window can
   // expire on its own — lastLineAt itself doesn't change when no new line
   // Note: tour-tabbar testid is on the root container below.
-  // arrives, so without a tick the dot would never clear.
+  // arrives, so without a tick the dot would never clear. TabBar is mounted
+  // once in App.tsx, outside Workbench/PanelFocusProvider entirely, so it
+  // has no panel id to gate on — document visibility is the nearest
+  // available signal for "backgrounded" here (see useDocumentVisible.ts).
   const [now, setNow] = useState(() => Date.now())
+  const visible = useDocumentVisible()
   useEffect(() => {
+    if (!visible) return
+    setNow(Date.now())
     const id = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [])
+  }, [visible])
 
   const activeTabIds = (tabId: string): boolean => {
     for (const w of Object.values(watchersById)) {

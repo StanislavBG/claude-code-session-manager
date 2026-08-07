@@ -12,6 +12,7 @@ import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { SchBadge, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 import { resolveEpicRef } from '../lib/epicProvenance'
+import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from './LeftNav'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
@@ -115,6 +116,7 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
   })
 
   const [announcement, setAnnouncement] = useState('')
+  const focused = usePanelFocus()
 
   useEffect(() => {
     window.api.schedule.health().then(setHealth).catch(() => {})
@@ -124,10 +126,16 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
     return off
   }, [])
 
+  // Gated on panel focus — this ticker only drives relative-time labels, so a
+  // backgrounded (but still mounted, dockview renderer:'always') Scheduler
+  // panel stops re-rendering once a second for no visible benefit. Regaining
+  // focus refreshes `now` immediately rather than waiting a full second.
   useEffect(() => {
+    if (!focused) return
+    setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
-  }, [])
+  }, [focused])
 
   const avgDurationMs = useMemo(() => {
     if (!snap) return 150_000
@@ -1122,12 +1130,15 @@ function SupervisorPanel({
 }) {
   const [log, setLog] = useState<SupervisorLogEntry[]>([])
   const [now, setNow] = useState(() => Date.now())
+  const focused = usePanelFocus()
 
   useEffect(() => {
+    if (!focused) return
     window.api.supervisor.getLog().then(setLog).catch(() => {})
+    setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(id)
-  }, [])
+  }, [focused])
 
   const cfg: SupervisorConfig = {
     enabled: supervisorConfig?.enabled ?? true,

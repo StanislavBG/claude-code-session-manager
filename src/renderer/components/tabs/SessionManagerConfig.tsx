@@ -3,6 +3,7 @@ import { GlobalControlsSection } from './GlobalControlsSection'
 import { Toggle } from '../ui/Toggle'
 import { readAppPrefs, writeAppPrefs } from '../../lib/appPrefs'
 import { toast } from '../../state/toast'
+import { useSessionSlots } from '../../lib/useSessionSlots'
 import type { NavKey } from '../LeftNav'
 
 /**
@@ -21,14 +22,12 @@ import type { NavKey } from '../LeftNav'
  * out of sync with whichever one the user last touched.
  */
 
-type SlotSnapshot = { total: number; inUse: number; holders: { owner: string; at: string }[] }
-
 interface SessionManagerConfigProps {
   navigate?: (k: NavKey) => void
 }
 
 export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
-  const [slots, setSlots] = useState<SlotSnapshot | null>(null)
+  const slots = useSessionSlots()
   const [openToHomeOnLaunch, setOpenToHomeOnLaunch] = useState(false)
   const [prefsSaving, setPrefsSaving] = useState(false)
 
@@ -50,18 +49,6 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
       setPrefsSaving(false)
     }
   }
-
-  useEffect(() => {
-    let alive = true
-    const poll = () => {
-      window.api.schedule.sessionSlots()
-        .then((s) => { if (alive) setSlots(s) })
-        .catch(() => { /* diagnostic surface */ })
-    }
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [])
 
   return (
     <div className="max-w-[760px] space-y-6">

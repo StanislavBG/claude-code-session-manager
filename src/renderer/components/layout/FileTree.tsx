@@ -22,7 +22,7 @@ import { Z } from '../../lib/zLayers'
 import type { FileEntry } from '../../../preload/api'
 import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
-import { usePanelFocusRef } from '../../lib/panelFocus'
+import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
 
 // Persist which folders are expanded, per-cwd, so browsing state survives
 // navigating away from the Files sidebar and back (the component unmounts, and
@@ -148,6 +148,7 @@ interface ContextMenuState {
 
 export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: FileTreeProps) {
   const focusedRef = usePanelFocusRef()
+  const focused = usePanelFocus()
   const [root, setRoot] = useState<TreeNode[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // Live mirror of `expanded` so effects keyed on other deps (e.g. showHidden)
@@ -288,14 +289,18 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHidden])
 
-  // Refresh git status every 5s while mounted.
+  // Refresh git status every 5s while mounted AND focused — a backgrounded
+  // file tree (dockview keeps every opened panel mounted) has no business
+  // spawning a `git status` child process every 5s. Regaining focus refreshes
+  // immediately rather than waiting a full interval.
   useEffect(() => {
-    if (!cwd) return
+    if (!cwd || !focused) return
+    tryLoadGitStatus(cwd).then(setGitStatus)
     const id = window.setInterval(() => {
       tryLoadGitStatus(cwd).then(setGitStatus)
     }, 5000)
     return () => window.clearInterval(id)
-  }, [cwd])
+  }, [cwd, focused])
 
   // Close context menu on outside click / escape.
   useEffect(() => {

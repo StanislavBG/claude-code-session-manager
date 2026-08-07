@@ -39,6 +39,7 @@ import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { projectColorFor } from '../../lib/projectColor'
 import { openProjectTab } from '../../lib/homeOpenProject'
+import { useSessionSlots, type SlotSnapshot } from '../../lib/useSessionSlots'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
@@ -242,19 +243,7 @@ function Hero({
   legendOpen: boolean
   onToggleLegend: () => void
 }) {
-  const [slots, setSlots] = useState<SlotSnapshot | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const poll = () => {
-      window.api.schedule.sessionSlots()
-        .then((s) => { if (alive) setSlots(s) })
-        .catch(() => { /* hero slot count is diagnostic-only */ })
-    }
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [])
+  const slots = useSessionSlots()
 
   const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0
@@ -850,29 +839,12 @@ function relativeTime(ms: number): string {
 // (lib/sessionSlots.cjs) joined against running scheduler jobs / chat runs.
 // ────────────────────────────────────────────────────────────────────
 
-type SlotSnapshot = {
-  total: number; inUse: number; holders: { owner: string; at: string }[]
-  min: number; max: number; default: number; envOverride: boolean
-}
-
 export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
-  const [slots, setSlots] = useState<SlotSnapshot | null>(null)
+  const slots = useSessionSlots()
   const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
   const chats = useChatSignals()
   const sessions = usePromptSessions((s) => s.sessions)
   const [drawerRow, setDrawerRow] = useState<ActiveSessionRow | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const poll = () => {
-      window.api.schedule.sessionSlots()
-        .then((s) => { if (alive) setSlots(s) })
-        .catch(() => { /* pool surface is diagnostic-only */ })
-    }
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [])
 
   const total = slots?.total ?? 5
   const inUse = slots?.inUse ?? 0

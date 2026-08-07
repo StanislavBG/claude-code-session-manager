@@ -4,6 +4,11 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { renderScreenComponent, type ScreenRenderCtx } from '../screenComponents'
+import { Skills } from '../tabs/Skills'
+import { Settings } from '../tabs/Settings'
+import { Memory } from '../tabs/Memory'
+import { TagLibrary } from '../tabs/TagLibrary'
+import { AgentLibrary } from '../tabs/AgentLibrary'
 import type { NavKey } from '../LeftNav'
 import { useLayout } from '../../state/layout'
 import { useSessions, type SessionTab } from '../../state/sessions'
@@ -167,19 +172,37 @@ function installBroadWindowApiMock() {
   return api
 }
 
-/** Mirrors Workbench.tsx's `PanelHost` shape at the level this PRD extends it. */
-const Host = memo(function Host({ id, ctx }: { id: NavKey; ctx: ScreenRenderCtx }) {
-  return createElement('div', null, renderScreenComponent(id, ctx))
-})
-
-const STABLE_CTX: ScreenRenderCtx = {}
+/**
+ * Mounts each FIVE_IDS screen's REAL (mocked-and-counted) exported component
+ * directly, rather than through `renderScreenComponent`. screenComponents.tsx
+ * now wraps these five behind `React.lazy` + `Suspense` (perf-lazy-screens);
+ * React.lazy's factory is invoked from inside React's own internal Suspense
+ * scheduling rather than from this test file's call stack, and Vitest's
+ * dynamic-`import()` mock interception does not reliably reach across that
+ * boundary — confirmed by an isolated repro (a trivial `.tsx` component,
+ * lazy-loaded via a separate host module, mocked via `vi.mock` +
+ * `importOriginal`: the mock factory runs, but the component that actually
+ * renders is the unmocked original). This suite's own documented purpose
+ * (see the file's docblock) is verifying `React.memo` bailout on the real
+ * screen components, which is independent of whether `screenComponents.tsx`
+ * additionally wraps them in `lazy()` — so mounting them directly here still
+ * exercises the exact invariant under test, without depending on a mocking
+ * path Suspense doesn't honor.
+ */
+const FIVE_SCREENS: Record<string, (props: object) => ReactNode> = {
+  skills: Skills,
+  settings: Settings,
+  memory: Memory,
+  'tag-library': TagLibrary,
+  'agent-library': AgentLibrary,
+}
 
 function FivePanelHarness({ tick }: { tick: number }) {
   return createElement(
     'div',
     null,
     createElement('div', { 'data-testid': 'tick' }, String(tick)),
-    ...FIVE_IDS.map((id) => createElement(Host, { key: id, id, ctx: STABLE_CTX })),
+    ...FIVE_IDS.map((id) => createElement(FIVE_SCREENS[id], { key: id })),
   )
 }
 
@@ -221,8 +244,8 @@ describe('screen components stay memoized across an unrelated re-render', () => 
     // Simulate the real-world trigger (Workbench.tsx doc comment): a
     // focusedPanelId change re-renders the parent tree, but touches none of
     // the four ScreenRenderCtx callbacks — mirrored here by re-rendering the
-    // harness with a bumped, unrelated `tick` while `STABLE_CTX` keeps its
-    // reference.
+    // harness with a bumped, unrelated `tick` while each screen's own props
+    // (none) keep their identity.
     await act(async () => {
       root.render(createElement(FivePanelHarness, { tick: 1 }))
       await Promise.resolve()
@@ -424,5 +447,63 @@ describe('memoized screens still react to their own store', () => {
     })
 
     expect(el.textContent).toContain('View publish in progress')
+  })
+})
+
+// ─── 4. Lazy screen boundary actually renders ──────────────────────────────
+
+/**
+ * perf-lazy-screens: screenComponents.tsx now wraps 'skills' and 'history'
+ * (among others) in `React.lazy` + `Suspense`. Unlike the memo tests above,
+ * this exercises the REAL path — `renderScreenComponent` → `LazyScreen` →
+ * `Suspense` → the dynamically-imported module — end to end, proving a
+ * lazily-loaded screen actually paints its real content once the chunk
+ * resolves, not just that a non-null placeholder element was returned.
+ */
+describe('lazy screen boundary (screenComponents.tsx React.lazy + Suspense)', () => {
+  let container: HTMLDivElement
+  let root: Root
+
+  beforeEach(() => {
+    installBroadWindowApiMock()
+    useSessions.setState({ tabs: [], activeTabId: null })
+    useConfig.setState({ files: {}, watchRefs: {} })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    container.remove()
+    delete (window as unknown as { api?: unknown }).api
+  })
+
+  it('navigating to the lazily-loaded "skills" screen renders its real content', async () => {
+    const ctx: ScreenRenderCtx = {}
+    await act(async () => {
+      root.render(createElement('div', null, renderScreenComponent('skills', ctx)))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushAsync(12)
+
+    // The page title from PAGE_META only appears once the lazy Skills
+    // component (wrapped by SectionFrame) has actually resolved and
+    // mounted — the Suspense fallback ("Loading…") carries no such text.
+    expect(container.textContent).toContain('Reusable instructions')
+    expect(container.textContent).not.toContain('Loading…')
+  })
+
+  it('navigating to the lazily-loaded "history" screen renders its real content', async () => {
+    const ctx: ScreenRenderCtx = {}
+    await act(async () => {
+      root.render(createElement('div', null, renderScreenComponent('history', ctx)))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushAsync(12)
+
+    expect(container.textContent).toContain('Every session, ever')
   })
 })

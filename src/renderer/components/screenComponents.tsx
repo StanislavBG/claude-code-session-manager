@@ -1,25 +1,40 @@
-import type { ReactNode } from 'react'
+import { Suspense, lazy, type ReactNode } from 'react'
 import type { NavKey } from './LeftNav'
 import { Home } from './tabs/Home'
 import { ProjectHome } from './tabs/projecthome/ProjectHome'
-import { Skills } from './tabs/Skills'
-import { History } from './tabs/History'
 import { EditorView } from './tabs/EditorView'
 import { VoiceModal } from './layout/VoiceModal'
-import { Settings } from './tabs/Settings'
-import { Permissions } from './tabs/Permissions'
-import { SystemPrompt } from './tabs/SystemPrompt'
-import { Memory } from './tabs/Memory'
-import { Plugins } from './tabs/Plugins'
-import { McpServers } from './tabs/McpServers'
-import { Hooks } from './tabs/Hooks'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
-import { Scheduler } from './tabs/Scheduler'
-import { AgentLibrary } from './tabs/AgentLibrary'
-import { TagLibrary } from './tabs/TagLibrary'
-import { HostBilko } from './tabs/HostBilko'
 import { SectionFrame } from './layout/SectionFrame'
 import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
+
+// Lazy-loaded so these rarely-first-opened screens (and their heavier
+// dependencies — react-force-graph-2d via Plugins -> SkillReferenceGraph,
+// the Scheduler cockpit, History's analytics dashboard) are not parsed at
+// boot. Each panel is already wrapped in an ErrorBoundary by Workbench.tsx's
+// screenNode, so a chunk-load failure here surfaces as a pane error, not a
+// blank app. Home / the terminal path / EditorView / VoiceModal stay eager
+// (boot destination / privacy-critical recording path / already-lazy Tiptap
+// body / recording indicator).
+const Skills = lazy(() => import('./tabs/Skills').then((m) => ({ default: m.Skills })))
+const History = lazy(() => import('./tabs/History').then((m) => ({ default: m.History })))
+const Scheduler = lazy(() => import('./tabs/Scheduler').then((m) => ({ default: m.Scheduler })))
+const Settings = lazy(() => import('./tabs/Settings').then((m) => ({ default: m.Settings })))
+const Permissions = lazy(() => import('./tabs/Permissions').then((m) => ({ default: m.Permissions })))
+const SystemPrompt = lazy(() => import('./tabs/SystemPrompt').then((m) => ({ default: m.SystemPrompt })))
+const Memory = lazy(() => import('./tabs/Memory').then((m) => ({ default: m.Memory })))
+const Plugins = lazy(() => import('./tabs/Plugins').then((m) => ({ default: m.Plugins })))
+const McpServers = lazy(() => import('./tabs/McpServers').then((m) => ({ default: m.McpServers })))
+const Hooks = lazy(() => import('./tabs/Hooks').then((m) => ({ default: m.Hooks })))
+const AgentLibrary = lazy(() => import('./tabs/AgentLibrary').then((m) => ({ default: m.AgentLibrary })))
+const TagLibrary = lazy(() => import('./tabs/TagLibrary').then((m) => ({ default: m.TagLibrary })))
+const HostBilko = lazy(() => import('./tabs/HostBilko').then((m) => ({ default: m.HostBilko })))
+
+const SCREEN_LOADING_FALLBACK = <div className="p-6 text-xs text-fg-faint">Loading…</div>
+
+function LazyScreen({ children }: { children: ReactNode }) {
+  return <Suspense fallback={SCREEN_LOADING_FALLBACK}>{children}</Suspense>
+}
 
 /**
  * screenComponents — single source of truth for "what does NavKey `k` render
@@ -111,19 +126,19 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
   const meta = PAGE_META[active]
   const body = (() => {
     switch (active) {
-      case 'skills':        return <Skills />
-      case 'history':       return <History />
-      case 'scheduler':     return <Scheduler navigate={ctx.onNavigate} />
-      case 'plugins':       return <Plugins />
-      case 'mcp':           return <McpServers />
-      case 'hooks':         return <Hooks />
-      case 'memory':        return <Memory />
-      case 'system-prompt': return <SystemPrompt />
-      case 'permissions':   return <Permissions />
-      case 'settings':      return <Settings />
-      case 'agent-library': return <AgentLibrary />
-      case 'tag-library':   return <TagLibrary />
-      case 'bilko-host':    return <HostBilko />
+      case 'skills':        return <LazyScreen><Skills /></LazyScreen>
+      case 'history':       return <LazyScreen><History /></LazyScreen>
+      case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
+      case 'plugins':       return <LazyScreen><Plugins /></LazyScreen>
+      case 'mcp':           return <LazyScreen><McpServers /></LazyScreen>
+      case 'hooks':         return <LazyScreen><Hooks /></LazyScreen>
+      case 'memory':        return <LazyScreen><Memory /></LazyScreen>
+      case 'system-prompt': return <LazyScreen><SystemPrompt /></LazyScreen>
+      case 'permissions':   return <LazyScreen><Permissions /></LazyScreen>
+      case 'settings':      return <LazyScreen><Settings /></LazyScreen>
+      case 'agent-library': return <LazyScreen><AgentLibrary /></LazyScreen>
+      case 'tag-library':   return <LazyScreen><TagLibrary /></LazyScreen>
+      case 'bilko-host':    return <LazyScreen><HostBilko /></LazyScreen>
       // Former-modal tools rendered with variant="page" so they paint inline
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.

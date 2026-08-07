@@ -4,13 +4,6 @@ import { SCREEN_KEYS } from '../../lib/screenKeys'
 import { buildCommands } from '../../components/CommandPalette'
 import { getNavItemsForFace } from '../../lib/navGroups'
 
-// react-force-graph-2d (pulled in transitively via screenComponents ->
-// Plugins -> SkillReferenceGraph) touches `window` at module-import time,
-// which the 'node' vitest environment this file runs under doesn't provide.
-// Stub it — this test only needs renderScreenComponent's return value to be
-// non-null, not a real force-graph render.
-vi.mock('react-force-graph-2d', () => ({ default: () => null }))
-
 // hydrateOpenToHomePref's only IPC dependency — mocked at the module
 // boundary rather than via a real window.api, since this suite runs under
 // the 'node' vitest environment (no window/jsdom).

@@ -1,9 +1,17 @@
-import { useMemo, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 import { ListDetail } from '../../ui/ListDetail'
 import { MarkdownEditor } from '../../ui/MarkdownEditor'
 import { EmptyState } from '../../ui/EmptyState'
-import { SkillReferenceGraph } from './SkillReferenceGraph'
 import { detectSkillEdges, type PluginSkillEntry } from '../../../lib/pluginSkills'
+
+// Lazy-loaded so react-force-graph-2d (and its d3-force dependency) is not
+// bundled for users who never switch a plugin's skill browser into graph
+// view. The Plugins screen is already wrapped in an ErrorBoundary by
+// Workbench.tsx's screenNode, so a chunk-load failure surfaces as a pane
+// error, not a blank app.
+const SkillReferenceGraph = lazy(() =>
+  import('./SkillReferenceGraph').then((m) => ({ default: m.SkillReferenceGraph }))
+)
 
 /**
  * Full-page skill drill-in, one level deeper than PluginHomePage: header row
@@ -72,7 +80,9 @@ export function SkillHomePage({
         {skills.length === 0 ? (
           <EmptyState title="no skills in this plugin" />
         ) : view === 'graph' ? (
-          <SkillReferenceGraph skills={skills} edges={edges} selectedId={selectedId} onSelect={setSelectedId} />
+          <Suspense fallback={<div className="p-6 text-xs text-fg-faint">Loading graph…</div>}>
+            <SkillReferenceGraph skills={skills} edges={edges} selectedId={selectedId} onSelect={setSelectedId} />
+          </Suspense>
         ) : (
           <ListDetail
             sidebar={

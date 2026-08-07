@@ -12,7 +12,7 @@
  * from the same `ProjectBrief` data instead of drawn twice.
  */
 
-import { useEffect, useMemo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import { useSessions } from '../../../state/sessions'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useChatSignals } from '../../../lib/useChatSignals'
@@ -100,7 +100,7 @@ function PhOpenQuestions({
   )
 }
 
-export function ProjectHome() {
+function ProjectHomeComponent() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId)
@@ -186,3 +186,6 @@ export function ProjectHome() {
     </div>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const ProjectHome = memo(ProjectHomeComponent)

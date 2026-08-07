@@ -20,7 +20,7 @@
  * Data sources are all existing zustand stores; nothing new on the backend.
  */
 
-import { useMemo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useMemo, useEffect, useState, type ReactNode } from 'react'
 import type { NavKey } from '../LeftNav'
 import { useBilling, getBillingData, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
@@ -60,7 +60,7 @@ interface HomeProps {
   onOpenScheduler?: () => void
 }
 
-export function Home({ onNavigate }: HomeProps) {
+function HomeComponent({ onNavigate }: HomeProps) {
   const greeting = useMemo(() => {
     const h = new Date().getHours()
     if (h < 5)  return 'Up late'
@@ -111,6 +111,14 @@ export function Home({ onNavigate }: HomeProps) {
     </div>
   )
 }
+
+/**
+ * Memoized: Home only reads ScreenRenderCtx callbacks as props (stable
+ * identities since perf-workbench-ctx-identity landed) — its own data comes
+ * from store hooks inside the component, so a parent re-render that changes
+ * nothing for Home should cost nothing.
+ */
+export const Home = memo(HomeComponent)
 
 // ────────────────────────────────────────────────────────────────────
 // Home project rows — single source for both ProjectsCard and the New-epic

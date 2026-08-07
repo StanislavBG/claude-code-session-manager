@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect } from 'react'
+import { memo, useCallback, useRef, useState, useEffect } from 'react'
 import { Z } from '../../lib/zLayers'
 import { useSessions } from '../../state/sessions'
 import { useEditor } from '../../state/editor'
@@ -30,7 +30,7 @@ function loadCollapsed(): boolean {
   try { return localStorage.getItem(COLLAPSED_KEY) === '1' } catch { return false }
 }
 
-export function ProjectsWorkspace() {
+function ProjectsWorkspaceComponent() {
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
@@ -255,3 +255,6 @@ export function ProjectsWorkspace() {
     </div>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const ProjectsWorkspace = memo(ProjectsWorkspaceComponent)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
@@ -69,7 +69,7 @@ const pluginProvInput = (r: PluginRow): ProvenanceInput => ({
  * as a read-only inspector for now (plugin editing would duplicate the Skills/
  * Subagents/Hooks tabs' UI — out of scope here).
  */
-export function Plugins() {
+function PluginsComponent() {
   const home = useHomeDir()
   const [rows, setRows] = useState<PluginRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -234,6 +234,9 @@ export function Plugins() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const Plugins = memo(PluginsComponent)
 
 /**
  * 2-way tab switcher: Installed / Library, matching the ViewSwitcher pattern

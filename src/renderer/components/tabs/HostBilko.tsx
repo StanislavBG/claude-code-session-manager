@@ -10,7 +10,7 @@
  * confirmed mechanism that actually takes it down (Bilko's publish tool
  * rm -rf's + rebuilds the whole slug directory on every publish).
  */
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
@@ -42,7 +42,7 @@ function navigateToEpic(epicId: string): void {
   window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
 }
 
-export function HostBilko() {
+function HostBilkoComponent() {
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
 
@@ -431,3 +431,6 @@ export function HostBilko() {
     </div>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const HostBilko = memo(HostBilkoComponent)

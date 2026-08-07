@@ -14,7 +14,7 @@
  * binary sniff; the Docs feel rides marked + the .markdown-body page canvas.
  */
 
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Z } from '../../lib/zLayers'
 import type { editor } from 'monaco-editor'
 import {
@@ -81,7 +81,7 @@ function isMediaPath(p: string): boolean {
   return isImage(p) || isPdf(p)
 }
 
-export function EditorView() {
+function EditorViewComponent() {
   const focusedRef = usePanelFocusRef()
   const openFiles = useEditor((s) => s.openFiles)
   const activeFilePath = useEditor((s) => s.activeFilePath)
@@ -557,6 +557,9 @@ export function EditorView() {
     </div>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const EditorView = memo(EditorViewComponent)
 
 function CloseConfirm({ message, onCancel, onConfirm }: { message: string; onCancel: () => void; onConfirm: () => void }) {
   return (

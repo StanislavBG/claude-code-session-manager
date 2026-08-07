@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -29,7 +29,7 @@ import type { AgentPersona } from '../../../preload/api'
  * the agent side. Home face only — the taxonomy is machine-wide, not
  * per-project.
  */
-export function TagLibrary() {
+function TagLibraryComponent() {
   const [selectedTag, setSelectedTag] = useState<TagLibraryEntry['tag']>(TAG_LIBRARY[0].tag)
   const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
   const [adding, setAdding] = useState(false)
@@ -143,6 +143,9 @@ export function TagLibrary() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const TagLibrary = memo(TagLibraryComponent)
 
 function TagLibraryDetail({
   entry, personas, adding, setAdding, onAssign, onUnassign,

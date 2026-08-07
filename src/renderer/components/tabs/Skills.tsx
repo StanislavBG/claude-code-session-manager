@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
@@ -41,7 +41,7 @@ interface Item {
   description?: string
 }
 
-export function Skills() {
+function SkillsComponent() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -375,3 +375,6 @@ export function Skills() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const Skills = memo(SkillsComponent)

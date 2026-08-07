@@ -63,11 +63,32 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
 
 /**
+ * Per-NavKey element cache backing `renderScreenComponent`'s memoization.
+ * Keyed on `ctx` reference equality (stable since perf-workbench-ctx-identity
+ * landed): calling this function twice in a row for the same `active` with
+ * the SAME `ctx` object returns the identical `ReactNode` reference, so
+ * React bails out of reconciling that screen's subtree entirely rather than
+ * diffing a freshly-built element tree against the previous one every time a
+ * panel host re-renders for an unrelated reason. A genuine ctx identity
+ * change (a callback in ScreenRenderCtx actually changed) still misses the
+ * cache and recomputes, so this never masks a real prop update.
+ */
+const screenElementCache = new Map<NavKey, { ctx: ScreenRenderCtx; node: ReactNode }>()
+
+/**
  * Renders the screen for NavKey `active`. `active === 'terminal'` is
  * special-cased by callers (Workbench.tsx keeps TerminalStage as an
  * always-mounted singleton) — this function is never called for 'terminal'.
  */
 export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode {
+  const cached = screenElementCache.get(active)
+  if (cached && cached.ctx === ctx) return cached.node
+  const node = computeScreenComponent(active, ctx)
+  screenElementCache.set(active, { ctx, node })
+  return node
+}
+
+function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode {
   // Screens that draw their own chrome — render bare.
   switch (active) {
     case 'overview':

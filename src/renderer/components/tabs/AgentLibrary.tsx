@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
@@ -59,7 +59,7 @@ function toDraft(p: AgentPersona): Draft {
 
 const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', color: '', tags: [], body: '' }
 
-export function AgentLibrary() {
+function AgentLibraryComponent() {
   const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -319,6 +319,9 @@ export function AgentLibrary() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const AgentLibrary = memo(AgentLibraryComponent)
 
 function AgentPersonaEditor({
   obj, set, saved, dirty, isNew, busy, confirmDelete, setConfirmDelete,

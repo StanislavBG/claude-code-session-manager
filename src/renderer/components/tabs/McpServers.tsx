@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
@@ -102,7 +102,7 @@ export function nextServerName(servers: Record<string, McpServer>): string {
   return name
 }
 
-export function McpServers() {
+function McpServersComponent() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -367,6 +367,9 @@ export function McpServers() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const McpServers = memo(McpServersComponent)
 
 function McpServerEditor({
   name,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
@@ -34,7 +34,7 @@ const SCOPE_LS_KEY = 'sm.memoryTab.scope'
  * Consolidates two former nav destinations (Memory + Agent Memory) that were
  * the same list+detail CRUD over different keys. One surface, scope toggle.
  */
-export function Memory() {
+function MemoryComponent() {
   const [scope, setScope] = useState<MemoryScope>(() =>
     localStorage.getItem(SCOPE_LS_KEY) === 'subagent' ? 'subagent' : 'workspace',
   )
@@ -57,6 +57,8 @@ export function Memory() {
   )
 }
 
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const Memory = memo(MemoryComponent)
 
 function WorkspaceMemoryView() {
   const home = useHomeDir()

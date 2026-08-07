@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { usePromptSessions } from '../../state/promptSessions'
 import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
@@ -193,7 +193,7 @@ interface SchedulerProps {
   navigate?: (k: NavKey) => void
 }
 
-export function Scheduler({ navigate }: SchedulerProps = {}) {
+function SchedulerComponent({ navigate }: SchedulerProps = {}) {
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
     return (stored === 'prds' || stored === 'history' || stored === 'machine') ? stored : 'queue'
@@ -299,3 +299,7 @@ export function Scheduler({ navigate }: SchedulerProps = {}) {
     </div>
   )
 }
+
+// Memoized: `navigate` is a stable ScreenRenderCtx callback identity; own
+// data comes from store hooks inside the component.
+export const Scheduler = memo(SchedulerComponent)

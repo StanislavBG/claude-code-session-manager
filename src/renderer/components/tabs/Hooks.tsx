@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { SaveBar } from '../ui/SaveBar'
@@ -151,7 +151,7 @@ function countFor(hooks: HooksConfig, ev: HookEvent): number {
   return (hooks[ev] ?? []).reduce((acc, g) => acc + (g.hooks?.length ?? 0), 0)
 }
 
-export function Hooks() {
+function HooksComponent() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -463,6 +463,9 @@ export function Hooks() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const Hooks = memo(HooksComponent)
 
 function HookGroupEditor({
   group,

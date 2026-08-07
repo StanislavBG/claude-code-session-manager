@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -43,7 +43,7 @@ function serialize(full: Record<string, unknown>, perms: PermissionsShape): stri
   return JSON.stringify(next, null, 2) + '\n'
 }
 
-export function Permissions() {
+function PermissionsComponent() {
   const home = useHomeDir()
   const activeTab = useActiveTab()
   const cwd = activeTab?.cwd ?? null
@@ -253,6 +253,9 @@ export function Permissions() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const Permissions = memo(PermissionsComponent)
 
 function ModeSelector({
   value,

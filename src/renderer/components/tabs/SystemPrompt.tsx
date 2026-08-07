@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -17,7 +17,7 @@ function estimateTokens(text: string): number {
   return Math.round(text.length / 4)
 }
 
-export function SystemPrompt() {
+function SystemPromptComponent() {
   const home = useHomeDir()
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
@@ -174,3 +174,6 @@ export function SystemPrompt() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const SystemPrompt = memo(SystemPromptComponent)

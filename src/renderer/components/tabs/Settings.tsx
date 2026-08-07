@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ScopeSwitcher } from '../ui/ScopeSwitcher'
 import { SaveBar } from '../ui/SaveBar'
@@ -19,7 +19,7 @@ import { settingsSchema } from '../../lib/settingsSchema'
 import { SettingsTelemetry } from './SettingsTelemetry'
 import { SettingsAppPrefs } from './SettingsAppPrefs'
 
-export function Settings() {
+function SettingsComponent() {
   const home = useHomeDir()
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
@@ -224,3 +224,6 @@ export function Settings() {
     </Panel>
   )
 }
+
+// Memoized: no props; own data comes from store/IPC hooks inside the component.
+export const Settings = memo(SettingsComponent)

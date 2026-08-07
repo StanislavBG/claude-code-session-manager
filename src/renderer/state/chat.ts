@@ -9,6 +9,7 @@ import { usePromptSessions } from './promptSessions'
 import { useEpicTerminal } from './epicTerminal'
 import { summarizeSignal, type ChatSignal } from '../lib/chatSignals'
 import { extractAttribution, type Attribution } from '../lib/chatAttribution'
+import { splitInjectedPreamble } from '../lib/promptPreamble'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -957,11 +958,18 @@ function applyNotice(tabId: string, _sessionId: string, message: string): void {
 // line lands: an ingested assistant/user text event appends the turn and
 // excises its own text from `stream` (so the same text never shows twice as
 // turn + live tap), and whichever source arrives SECOND with identical
-// (role, trimmed text) within the last DEDUP_WINDOW turns is folded into the
-// first — ingestTranscriptEvent skips a text event already pushed by
-// chatRunner's complete/needs-input handlers, and pushTurn merges a
-// completion into an already-landed feed turn (attaching outcome/toolUses)
-// instead of appending. Either arrival order renders the text exactly once.
+// (role, identity text) within the last DEDUP_WINDOW turns is folded into the
+// first — ingestTranscriptEvent folds a text event already pushed by
+// chatRunner's complete/needs-input handlers (upgrading that turn in place so
+// the JSONL's byte-exact text + `ref` win), and pushTurn merges a completion
+// into an already-landed feed turn (attaching outcome/toolUses) instead of
+// appending. Either arrival order renders the text exactly once.
+//
+// "Identity text" is NOT the raw string for a user turn: the optimistic turn
+// beginRun pushes holds what the human typed, while the JSONL holds what
+// chatRunner actually sent — the same message behind ~1.4k chars of injected
+// preamble. See turnIdentity/findRecentDuplicateTurn; comparing raw text made
+// every prompt render twice.
 //
 // This feed NEVER writes the durable per-Epic stores: capturePromptSessionTurn
 // / appendResponseEvent stay driven exclusively by chatRunner's own IPC
@@ -1008,11 +1016,30 @@ interface FeedIngestState {
 }
 const feedIngest = new Map<string, FeedIngestState>()
 
+/**
+ * Identity key for duplicate detection.
+ *
+ * For a USER turn the two sources do NOT carry the same string: `beginRun`
+ * pushes an optimistic turn holding exactly what the human typed, while the
+ * JSONL records what `chatRunner.cjs` actually sent — the same text with
+ * ~1.4k chars of injected preamble bolted on the front (promptPreamble.ts).
+ * A raw `text === text` comparison therefore never matched, and every prompt
+ * rendered twice in the Discussion: once bare, once with the `≡` preamble
+ * glyph. Compare the human body so the two forms of one message collapse.
+ *
+ * Assistant turns are unaffected — nothing is injected into those.
+ */
+function turnIdentity(role: ChatTurnRole, text: string): string {
+  const t = text.trim()
+  return role === 'user' ? splitInjectedPreamble(t).body.trim() : t
+}
+
 function findRecentDuplicateTurn(turns: ChatTurn[], role: ChatTurnRole, text: string): number {
-  const needle = text.trim()
+  const needle = turnIdentity(role, text)
+  if (!needle) return -1
   const from = Math.max(0, turns.length - DEDUP_WINDOW)
   for (let i = turns.length - 1; i >= from; i--) {
-    if (turns[i].role === role && turns[i].text.trim() === needle) return i
+    if (turns[i].role === role && turnIdentity(role, turns[i].text) === needle) return i
   }
   return -1
 }
@@ -1066,13 +1093,32 @@ export function ingestTranscriptEvent(tabId: string, ev: TranscriptEvent): void 
   if ((ev.kind === 'assistant' || ev.kind === 'user') && textData !== null && !isMeta) {
     const role = ev.kind
     patch(tabId, (c) => {
-      if (findRecentDuplicateTurn(c.turns, role, textData) !== -1) return c
       let stream = c.stream
       if (c.running && role === 'assistant' && stream) {
         // The live tap already streamed this text — excise it so the turn
         // and the in-flight stream never show the same text simultaneously.
         const idx = stream.indexOf(textData)
         if (idx !== -1) stream = stream.slice(0, idx) + stream.slice(idx + textData.length)
+      }
+      const dupIdx = findRecentDuplicateTurn(c.turns, role, textData)
+      if (dupIdx !== -1) {
+        // A twin already landed. If it came from the feed (it has a `ref`),
+        // this is a genuinely repeated line — drop it. Otherwise it is the
+        // optimistic turn beginRun pushed on send, and the JSONL is
+        // authoritative: UPGRADE it in place rather than discarding the
+        // richer record. Dropping the feed turn instead would cost the
+        // byte-exact text, `Show raw`, the branch chip and the `≡` preamble
+        // disclosure — everything CLAUDE.md's promptPreamble contract needs.
+        if (c.turns[dupIdx].ref) return { ...c, stream }
+        return {
+          ...c,
+          stream,
+          turns: c.turns.map((t, i) =>
+            i === dupIdx
+              ? { ...t, text: textData, at, kind: ev.kind, ref: ev.ref, attribution: attribution ?? t.attribution }
+              : t,
+          ),
+        }
       }
       return {
         ...c,

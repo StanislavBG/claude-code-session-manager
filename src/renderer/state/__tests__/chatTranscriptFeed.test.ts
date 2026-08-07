@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { TranscriptEvent } from '../../../preload/api'
+import { INJECTED_PROMPT_BLOCKS } from '../../lib/promptPreamble'
+
+/** A realistic chatRunner preamble, composed from the REAL anchor constants
+ *  (src/main/__tests__/chat-preamble-anchors.test.cjs keeps those honest
+ *  against the main-process strings) rather than a copied literal. */
+const INJECTED_PREAMBLE = INJECTED_PROMPT_BLOCKS.map((b) => `${b.start} …filler… ${b.end}`).join('\n\n')
 
 /**
  * PRD chat-feed-from-jsonl: the Epic Chat view's transcript is sourced from
@@ -143,6 +149,56 @@ describe('chat.ts transcript feed (PRD chat-feed-from-jsonl)', () => {
 
     mock.emit('epic-3', makeEv('assistant', 'Same text.', { byteOffset: 500 }))
     expect(useChat.getState().get('epic-3').turns.filter((t) => t.role === 'assistant').length).toBe(1)
+  })
+
+  // The prompt rendered TWICE in the Discussion: beginRun pushes an optimistic
+  // user turn holding exactly what the human typed, while the JSONL records
+  // what chatRunner actually sent — the same message with ~1.4k chars of
+  // injected preamble on the front. A raw text=== comparison never matched.
+  it('de-dupes the optimistic user turn against the JSONL line carrying the injected preamble', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-preamble', cwd: '/proj', sessionUuid: 'sess-uuid-p' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    // What beginRun pushes on send: the human's own words, no ref, no kind.
+    const cur = useChat.getState().get('epic-preamble')
+    useChat.setState({
+      chats: {
+        ...useChat.getState().chats,
+        'epic-preamble': {
+          ...cur,
+          turns: [...cur.turns, { id: 'optimistic', role: 'user' as const, text: 'Fix the composer', at: Date.now() }],
+        },
+      },
+    })
+
+    // The JSONL line for that same message, preamble and all.
+    mock.emit('epic-preamble', makeEv('user', `${INJECTED_PREAMBLE}\n\nFix the composer`, { byteOffset: 700 }))
+
+    const users = useChat.getState().get('epic-preamble').turns.filter((t) => t.role === 'user')
+    expect(users).toHaveLength(1)
+    // Upgraded in place, not dropped: the byte-exact text and `ref` survive so
+    // Show raw / the ≡ preamble disclosure still work.
+    expect(users[0].ref).toBeTruthy()
+    expect(users[0].kind).toBe('user')
+    expect(users[0].text).toContain('Fix the composer')
+    expect(users[0].text).toContain(INJECTED_PROMPT_BLOCKS[0].start)
+  })
+
+  it('still renders two genuinely different prompts sent back to back', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-two', cwd: '/proj', sessionUuid: 'sess-uuid-two' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    mock.emit('epic-two', makeEv('user', `${INJECTED_PREAMBLE}\n\nFirst ask`, { byteOffset: 800 }))
+    mock.emit('epic-two', makeEv('user', `${INJECTED_PREAMBLE}\n\nSecond ask`, { byteOffset: 900 }))
+
+    const users = useChat.getState().get('epic-two').turns.filter((t) => t.role === 'user')
+    expect(users).toHaveLength(2)
   })
 
   it('does NOT de-dupe identical completions on a tab with no transcript feed (plain dormant tab)', async () => {

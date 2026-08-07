@@ -67,6 +67,14 @@ export function App() {
     useLayout.getState().openPanel(k)
   }, [])
 
+  // Stable identities for the two Workbench callback props that used to be
+  // inline arrows — an inline arrow is a fresh function every App render,
+  // which (via Workbench's context value) fanned out into every mounted
+  // PanelHost. `navigate` above is already stable; these two just close over
+  // it as their sole dependency.
+  const handleOpenVoice = useCallback(() => navigate('voice'), [navigate])
+  const handleOpenScheduler = useCallback(() => navigate('scheduler'), [navigate])
+
   // Open a file in the main-space Editor scene and route there. Used by the
   // Files sidebar; terminal file-links reach the same place via the
   // 'sm:open-editor' event below (Terminal has no `navigate` of its own).
@@ -694,8 +702,8 @@ export function App() {
             <Workbench
               onNavigate={navigate}
               onNewSession={handleNewSession}
-              onOpenVoice={() => navigate('voice')}
-              onOpenScheduler={() => navigate('scheduler')}
+              onOpenVoice={handleOpenVoice}
+              onOpenScheduler={handleOpenScheduler}
             />
           </div>
           {terminalToast && (

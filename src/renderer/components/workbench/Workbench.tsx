@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewGroupPanel, type DockviewReadyEvent, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
@@ -37,13 +37,21 @@ interface PanelParams {
  * Workbench keeps current across renders (portalled dockview content still
  * inherits it — `createPortal` preserves the calling React tree's context).
  */
-const WorkbenchCtxContext = createContext<ScreenRenderCtx | null>(null)
+export const WorkbenchCtxContext = createContext<ScreenRenderCtx | null>(null)
 
-function PanelHost(props: IDockviewPanelProps<PanelParams>) {
+/**
+ * Memoized so a context change that doesn't touch this panel's own props
+ * (dockview never changes `props.params` after mount — see the PanelParams
+ * doc comment above) doesn't re-render it. Combined with the useMemo'd
+ * context value below, a panel switch (which only changes `focusedPanelId`
+ * in the layout store, not any of the four callbacks) now re-renders zero
+ * background PanelHosts instead of every one ever mounted.
+ */
+const PanelHost = memo(function PanelHost(props: IDockviewPanelProps<PanelParams>) {
   const ctx = useContext(WorkbenchCtxContext)
   if (!ctx) return null
   return <>{screenNode(props.params.id, ctx)}</>
-}
+})
 
 const COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   screen: PanelHost as React.FunctionComponent<IDockviewPanelProps>,
@@ -85,7 +93,7 @@ type WorkbenchProps = ScreenRenderCtx
  * a dockview-driven activation (tab click/close/drag) calls `focusPanel` to
  * mirror it back into the store.
  */
-export function Workbench(ctx: WorkbenchProps) {
+export function Workbench({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }: WorkbenchProps) {
   const apiRef = useRef<DockviewApi | null>(null)
   const focusedPanelId = useLayout((s) => s.focusedPanelId) ?? DEFAULT_PANEL_ID
   const focusToken = useLayout((s) => s.focusToken)
@@ -306,13 +314,27 @@ export function Workbench(ctx: WorkbenchProps) {
     [onReady],
   )
 
+  // Built from the four individual callback identities rather than from a
+  // spread of the whole props object — App's own render creates a fresh
+  // props object every time (React always does, for a component invoked as
+  // `<Workbench a={x} b={y} .../>`), so using `ctx` directly as the context
+  // value (the old behavior) changed identity on every App render even when
+  // none of the four callbacks actually changed. This only changes identity
+  // when a callback itself changes, which is what makes a panel switch (a
+  // focusedPanelId change in the layout store, not a callback change) not
+  // re-render any background PanelHost.
+  const ctxValue = useMemo(
+    () => ({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }),
+    [onNavigate, onNewSession, onOpenVoice, onOpenScheduler],
+  )
+
   // Gate the very first paint on hydration so `onReady` never fires against
   // a default layout that a beat later gets torn down and replaced by the
   // persisted one — avoids both the visible flash and a wasted mount/unmount.
   if (!hydrated) return null
 
   return (
-    <WorkbenchCtxContext.Provider value={ctx}>
+    <WorkbenchCtxContext.Provider value={ctxValue}>
       <DockviewReact {...props} />
     </WorkbenchCtxContext.Provider>
   )

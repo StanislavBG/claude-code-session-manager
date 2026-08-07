@@ -23,6 +23,7 @@ const path = require('node:path');
 let tmpHome;
 let originalHome;
 let executeJob;
+let spawnJob;
 let PRDS_DIR;
 
 beforeAll(() => {
@@ -30,7 +31,7 @@ beforeAll(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-missing-skip-'));
   process.env.HOME = tmpHome;
 
-  ({ executeJob, PRDS_DIR } = require('../scheduler.cjs'));
+  ({ executeJob, spawnJob, PRDS_DIR } = require('../scheduler.cjs'));
 
   if (!PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${PRDS_DIR}) is not under the temp HOME (${tmpHome})`);
@@ -82,6 +83,58 @@ test('a job whose PRD source exists but is unreadable for a non-ENOENT reason st
 
     expect(result.exitCode).toBe(-1);
     expect(result.skipped).toBeUndefined();
+  } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+function registerActiveProject(cwd) {
+  const projectsDir = path.join(tmpHome, '.claude', 'projects');
+  const slugDir = path.join(projectsDir, `fake-project-slug-${path.basename(cwd)}`);
+  fs.mkdirSync(slugDir, { recursive: true });
+  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
+}
+
+function writeProjectQueue(cwd, jobs) {
+  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
+  return path.join(stateDir, 'queue.json');
+}
+
+// This is the actual regression case: PRD 812's fix only covered executeJob's
+// own return value. The bug lived one layer up, in spawnJob's post-run
+// handler, which only short-circuited on skipped === 'prd-archived' and let
+// 'prd-missing' fall through into the verify path meant for real runs —
+// downgrading a stale-queue-entry retire into a needs_review with a bogus RCA
+// feedback item. Drive spawnJob itself (not just executeJob) so this covers
+// the actual defect, not just the classification it depends on.
+test("spawnJob's post-run handler retires a prd-missing skip as a plain completion, without running verify", async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-missing-spawnjob-project-'));
+  registerActiveProject(projectCwd);
+  const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-prd-missing-spawnjob-run-'));
+  try {
+    const slug = `812-test-spawnjob-missing-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+    const queuePath = writeProjectQueue(projectCwd, [
+      { slug, status: 'pending', cwd: projectCwd },
+    ]);
+
+    const job = { slug, cwd: projectCwd };
+    await spawnJob(job, 'run-spawnjob-missing', runDir, projectCwd);
+
+    const state = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+    const row = state.jobs.find((j) => j.slug === slug);
+    expect(row).toBeDefined();
+    expect(row.status).toBe('completed');
+    expect(row.exitCode).toBe(0);
+    expect(row.error).toBeNull();
+    // No verify pass ran and no RCA feedback fired: a verified run always
+    // stamps a verify-derived status ('needs_review') or a landedCommit/verify
+    // field onto the row. Neither is present here — the row was completed by
+    // the early-return skip branch, not the verification block further down.
+    expect(row.status).not.toBe('needs_review');
+    expect(row.landedCommit).toBeUndefined();
   } finally {
     fs.rmSync(projectCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });

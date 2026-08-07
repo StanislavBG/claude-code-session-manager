@@ -131,6 +131,48 @@
           "text": "Goal: Settings Home\n\nThe Settings Left Navigation contains a lot of configurations that are not clear if they are properaly applied or not. It is time to auit carefully and clean up the configursation\n(1) Are they trully global change that effects multiple sessions or projects? \n(2) Is Settings the only place for this, lots of areas have more dedicate and indepenet left-navs. The entire Home-Landing page and the 2nd left-navigation menu are only Settings themself. We should stronly consider moving things out of settings\n(3) Settings that do not have at least one consumer or rffeence shold also be deleted, they are duds!"
         }
       ]
+    },
+    "performance-identiy-why-session-manager-is-feeli-24e0a0ae": {
+      "id": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+      "cwd": "/home/bilko/Projects/session-manager",
+      "goalText": "Performance\n\nIdentiy why Session Manager is feeling slow, tabbing between sessions, swapping tags etc. Make sure you look for memory leans and that we proactively imprve performance on the Elector app and operations",
+      "claudeSessionId": "baded3e3-ab2f-4944-ac74-174f2fbee25e",
+      "status": "active",
+      "createdAt": "2026-08-07T05:36:54.664Z",
+      "completedAt": null,
+      "tag": "discussion",
+      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 78)\n\nYou are in an open-ended discussion. The goal is a decision or shared understanding, not a code change — do not start editing files unless the human explicitly asks you to after the discussion lands somewhere.\n\nGoal: Performance\n\nIdentiy why Session Manager is feeling slow, tabbing between sessions, swapping tags etc. Make sure you look for memory leans and that we proactively imprve performance on the Elector app and operations",
+      "agentType": "architect",
+      "sections": [
+        {
+          "kind": "actor",
+          "label": "Actor",
+          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+          "source": "architect"
+        },
+        {
+          "kind": "injection",
+          "label": "General behaviour",
+          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
+          "source": "general-behavior"
+        },
+        {
+          "kind": "input",
+          "label": "Input",
+          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 78)"
+        },
+        {
+          "kind": "mission",
+          "label": "Mission",
+          "text": "You are in an open-ended discussion. The goal is a decision or shared understanding, not a code change — do not start editing files unless the human explicitly asks you to after the discussion lands somewhere.",
+          "source": "discussion"
+        },
+        {
+          "kind": "goal",
+          "label": "Goal",
+          "text": "Goal: Performance\n\nIdentiy why Session Manager is feeling slow, tabbing between sessions, swapping tags etc. Make sure you look for memory leans and that we proactively imprve performance on the Elector app and operations"
+        }
+      ]
     }
   },
   "events": {
@@ -406,6 +448,372 @@
         "id": "pevt-msib7ki6-42",
         "promptSessionId": "settings-home-the-settings-left-navigation-conta-cf9b46d3",
         "at": "2026-08-07T02:12:15.630Z"
+      }
+    ],
+    "performance-identiy-why-session-manager-is-feeli-24e0a0ae": [
+      {
+        "id": "pevt-msiiir2k-70",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-07T05:36:54.664Z",
+        "text": "Performance\n\nIdentiy why Session Manager is feeling slow, tabbing between sessions, swapping tags etc. Make sure you look for memory leans and that we proactively imprve performance on the Elector app and operations"
+      },
+      {
+        "id": "3ce7146c-7d25-4a3b-b115-ba81b17dd526",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-07T05:36:54.664Z",
+        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 78)\n\nYou are in an open-ended discussion. The goal is a decision or shared understanding, not a code change — do not start editing files unless the human explicitly asks you to after the discussion lands somewhere.\n\nGoal: Performance\n\nIdentiy why Session Manager is feeling slow, tabbing between sessions, swapping tags etc. Make sure you look for memory leans and that we proactively imprve performance on the Elector app and operations"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "3ce7146c-7d25-4a3b-b115-ba81b17dd526",
+        "text": "## Verdict\n\nThe app isn't slow because of one bug. It's slow because of **four compounding structural choices**, and there is at least one real unbounded-growth problem: your running renderer is at **1.55 GB RSS after 5h46m** (`pid 377635`), main at 351 MB. That is not a healthy steady state for this app.\n\nEvidence gathered against the live machine, not inferred.\n\n---\n\n## 1. Nothing ever unmounts — every screen you've visited keeps running forever\n\n`Workbench.tsx:167` mounts every panel with `renderer: 'always'`, and `mountPanel` only calls `setActive()` on an existing panel. The comment at `Workbench.tsx:78` says this outright: *\"a screen's panel opens once and then stays mounted… closing its panel is what unmounts it, not losing focus.\"*\n\nWorse: the layout is persisted (`api.toJSON()` → `layout.save`) and restored via `fromJSON` on boot. **So at startup you re-mount every screen you had open last session, all at once.**\n\nEach of those never-unmounted screens keeps its timers alive:\n\n| Site | Interval | What it does |\n|---|---|---|\n| `Home.tsx:255` | 5 s | `schedule.sessionSlots()` IPC |\n| `Home.tsx:873` | 5 s | `schedule.sessionSlots()` IPC — **second copy** |\n| `SessionManagerConfig.tsx:62` | 5 s | `schedule.sessionSlots()` IPC — **third copy** |\n| `SchedulePanel.tsx:128` | **1 s** | `setNow()` → re-renders a 1386-line component tree |\n| `SchedulePanel.tsx:1128` | 5 s | `setNow()` |\n| `TabBar.tsx:39` | **1 s** | `setNow()` → re-renders the whole tab strip |\n| `FileTree.tsx:294` | 5 s | spawns a real `git status` child process |\n| `EpicsWorkspace.tsx:198` | 30 s | usage fetch across rows |\n| `Scheduler.tsx:95`, `EpicQueueControls.tsx:147`, `AlmanacFooter.tsx:37` | 30–60 s | tickers |\n\nThree independent 5-second pollers hitting the *same* `sessionSlots()` endpoint, plus two 1-second full-subtree re-renders, running permanently regardless of what's on screen.\n\nThe gating mechanism **already exists and is unused here**: `lib/panelFocus.tsx`'s `usePanelFocus()` / `use…",
+        "id": "pevt-msiiolkl-72",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T05:41:27.477Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msiiolkl-72",
+        "text": "Found the actual root cause of slow panel switching. It's not the pollers — it's a context-identity bug.\n\n## The switch cost is O(panels you've ever opened), not O(1)\n\n`Workbench.tsx:315`:\n```tsx\n<WorkbenchCtxContext.Provider value={ctx}>\n```\n\n`ctx` **is the props object of `Workbench`** (`Workbench.tsx:88` — `export function Workbench(ctx: WorkbenchProps)`). React builds a fresh props object on every `App` render, and `App.tsx:697-698` passes two inline arrows:\n\n```tsx\nonOpenVoice={() => navigate('voice')}\nonOpenScheduler={() => navigate('scheduler')}\n```\n\n(`navigate` and `handleNewSession` *are* `useCallback`'d — the object identity alone is enough to break it.)\n\nNow trace a panel switch:\n\n1. You click a nav item → `useLayout.focusPanel(id)`\n2. `App.tsx:48` subscribes to `focusedPanelId` → **App re-renders**\n3. New `ctx` object → Provider value changes\n4. **Every mounted `PanelHost` re-renders** (`Workbench.tsx:43` — `useContext(WorkbenchCtxContext)`)\n5. Each calls `renderScreenComponent(id, ctx)` → fresh element tree for *every open screen*\n6. With **1 `React.memo` in the entire renderer**, React reconciles all of them fully\n\nSo switching to Settings also re-renders Home, Scheduler, History, Memory, Plugins and every open Epic detail — including the uncached `renderChatMarkdown` → `marked.parse` + `DOMPurify.sanitize` per turn (`ChatTranscriptTurn.tsx:1368`, `EpicDetail.tsx:206`).\n\nAnd it isn't only nav clicks. App re-renders on `navFace`, `activeTabId`, `tabs` (`App.tsx:98-99` — any terminal store touch), `isRecording`, `wizardOpen`, and three local `useState`. Every one of those fans out to every mounted panel. That's your steady-state sluggishness *and* why it degrades the longer the app is open.\n\n---\n\n## Fix plan, ordered by (impact ÷ risk)\n\n**P1 — Stabilize `ctx`.** `useMemo` the four callbacks into one object in `App.tsx`, hoist the two inline arrows into `useCallback`. Then wrap `PanelHost` in `React.memo`. Panel switch drops from \"re-render everything\" to…",
+        "id": "pevt-msiiz5df-75",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T05:49:39.699Z"
+      },
+      {
+        "id": "e2e1a857-54d8-49f3-9191-517476e31488",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msiiz5df-75",
+        "at": "2026-08-07T13:39:34.285Z",
+        "prdSlug": "1005-perf-workbench-ctx-identity"
+      },
+      {
+        "id": "546be0ba-c88f-42b4-9f97-fea86f8c80da",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "e2e1a857-54d8-49f3-9191-517476e31488",
+        "at": "2026-08-07T13:39:48.109Z",
+        "prdSlug": "1006-perf-chat-markdown-cache"
+      },
+      {
+        "id": "7323f796-8c6a-4b68-8d9b-08649d011c62",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "546be0ba-c88f-42b4-9f97-fea86f8c80da",
+        "at": "2026-08-07T13:40:15.541Z",
+        "prdSlug": "1007-perf-gate-background-polling"
+      },
+      {
+        "id": "272471b6-d66c-4abc-8891-cb54940190f2",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "7323f796-8c6a-4b68-8d9b-08649d011c62",
+        "at": "2026-08-07T13:40:36.737Z",
+        "prdSlug": "1008-perf-bounded-readtext-cwd-resolve"
+      },
+      {
+        "id": "ef295a2a-1375-458d-ba3f-f9fb0547cefc",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "272471b6-d66c-4abc-8891-cb54940190f2",
+        "at": "2026-08-07T13:40:57.576Z",
+        "prdSlug": "1009-perf-intraday-refresh-walk"
+      },
+      {
+        "id": "9a6a10f1-3f02-4372-98e1-ad58004aa163",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "ef295a2a-1375-458d-ba3f-f9fb0547cefc",
+        "at": "2026-08-07T13:41:22.439Z",
+        "prdSlug": "1010-perf-screen-memo"
+      },
+      {
+        "id": "523c728b-372e-47e3-8a81-3837ace7097e",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "9a6a10f1-3f02-4372-98e1-ad58004aa163",
+        "at": "2026-08-07T13:41:41.034Z",
+        "prdSlug": "1011-perf-code-split-heavy-screens"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msiiz5df-75",
+        "text": "All 7 queued and picked up by the scheduler. 1005 and 1007 are already running.\n\n| # | PRD | Status | Blocks on |\n|---|---|---|---|\n| 1005 | `perf-workbench-ctx-identity` — stabilize `WorkbenchCtxContext` value + `React.memo` on `PanelHost` | **running** | — |\n| 1006 | `perf-chat-markdown-cache` — bounded LRU for `marked` + `DOMPurify`, memoize the 3 call sites | pending | — |\n| 1007 | `perf-gate-background-polling` — gate timers on `usePanelFocus`, collapse 3 duplicate `sessionSlots()` pollers into 1 | **running** | — |\n| 1008 | `perf-bounded-readtext-cwd-resolve` — `readText({maxBytes})` + stop reading whole transcripts to find a cwd | pending | — |\n| 1009 | `perf-intraday-refresh-walk` — kill the 589 ms / 29,625-sequential-stat main-process stall every 5 min | pending | — |\n| 1010 | `perf-screen-memo` — `React.memo` every screen, memoize `renderScreenComponent` per id | pending | 1005 |\n| 1011 | `perf-code-split-heavy-screens` — lazy-load force-graph / recharts / Scheduler out of the 2.48 MB boot chunk | pending | 1010 |\n\n**Ordering:** 1005 → 1010 → 1011 is a serial chain (all three touch the render path; 1010 and 1011 both edit `screenComponents.tsx`, so serialising them avoids a merge conflict). 1006, 1008, 1009 are fully independent and can run in parallel.\n\n**Things I deliberately built into the PRDs, so you know what to expect:**\n\n- **1005 and 1010 explicitly forbid** switching dockview to `renderer: 'onlyWhenVisible'`. Your ask was *faster switching*, which depends on panels staying mounted — these PRDs make mounted-but-background panels free rather than unmounting them. That was the fork in my earlier Q1 and your answer settled it.\n- **1006 requires DOMPurify still run on every distinct input.** Caching the sanitized output is fine; skipping sanitization is not, and there's an AC asserting a script tag is stripped on both cold and warm paths.\n- **1008 preserves the drop-never-guess rule** in `knownProjectAggregate.ts` — the AC forbids reintroducing a `cand…",
+        "id": "pevt-msizva1x-78",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T13:42:32.613Z"
+      },
+      {
+        "id": "pevt-msizxuhf-17",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msizva1x-78",
+        "at": "2026-08-07T13:44:32.403Z",
+        "text": "PRD 1006-perf-chat-markdown-cache finished: completed. Check Scheduler for details.",
+        "prdSlug": "1006-perf-chat-markdown-cache",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msizxuhf-17",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — bounded cache keyed on the exact input string, named cap constant (suggest 400), oldest-first eviction**\n\n`src/renderer/lib/renderChatMarkdown.ts:37-53`:\n```\n37\texport const CHAT_MARKDOWN_CACHE_CAP = 400\n39\tconst cache = new Map<string, string>()\n41\texport function renderChatMarkdown(src: string): string {\n42\t  const cached = cache.get(src)\n43\t  if (cached !== undefined) return cached\n49\t  cache.set(src, html)\n50\t  if (cache.size > CHAT_MARKDOWN_CACHE_CAP) {\n51\t    const oldestKey = cache.keys().next().value\n52\t    if (oldestKey !== undefined) cache.delete(oldestKey)\n53\t  }\n```\nKeyed on raw `src` only; `Map` insertion order makes `keys().next().value` the oldest. ✅\n\n**AC2 — cache hit byte-identical to cache miss, asserted in a test**\n\n`src/renderer/lib/__tests__/renderChatMarkdown.test.ts:72-77` — `expect(warm).toBe(cold)`. ✅\n\n**AC3 — exported `clearChatMarkdownCache()`**\n\n`src/renderer/lib/renderChatMarkdown.ts:58-60`. ✅\n\n**AC4 — three call sites memoized, approach stated per site**\n\nAll three now `useMemo`, confirmed by `grep` on the live tree:\n- `ChatTranscriptTurn.tsx:738` — `const html = useMemo(() => renderChatMarkdown(signal?.text ?? ''), [signal?.text])`, consumed at `:746`\n- `ChatTranscriptTurn.tsx:1307` — `const shownHtml = useMemo(() => renderChatMarkdown(shownText), [shownText])`, consumed at `:1370`\n- `EpicDetail.tsx:148` — `const displayHtml = useMemo(() => renderChatMarkdown(displayText), [displayText])`, consumed at `:207`\n\nApproach is `useMemo` at all three (not `React.memo`), stated in the commit body. Both hooks sit above their components' returns — `npm run lint:hooks` confirms (below). ✅\n\n**AC5 — new unit test: same input identical, evicts at cap, `clearChatMarkdownCache` resets**\n\n`renderChatMarkdown.test.ts:72-77`, `:79-91` (writes `CAP+1` entries, asserts entry 0 recomputes correctly and entry `CAP` is still cached), `:93-99`. ✅\n\n**AC6 — sanitization not weakened; script tag stripped on cold…",
+        "id": "pevt-msj00hz0-79",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T13:46:36.156Z"
+      },
+      {
+        "id": "pevt-msj03ctp-18",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj00hz0-79",
+        "at": "2026-08-07T13:48:49.453Z",
+        "text": "PRD 1008-perf-bounded-readtext-cwd-resolve finished: completed. Check Scheduler for details.",
+        "prdSlug": "1008-perf-bounded-readtext-cwd-resolve",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj03ctp-18",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — `readText` accepts optional `{ maxBytes }`, reads at most that many bytes from the START via open+read (not readFile-then-slice), returns a truncation flag**\n\n`src/main/config.cjs:202-238`:\n```\n202\tasync function readText(abs, opts = {}) {\n203\t  const { maxBytes } = opts;\n205\t    if (maxBytes == null) {\n206\t      const raw = await fsp.readFile(abs, 'utf8');\n211\t    const handle = await fsp.open(abs, 'r');\n213\t      const stat = await handle.stat();\n214\t      const readLen = Math.min(maxBytes, stat.size);\n215\t      const buf = Buffer.alloc(readLen);\n217\t        await handle.read(buf, 0, readLen, 0);\n219\t      const truncated = stat.size > readLen;\n227\t      return { exists: true, text, mtimeMs: stat.mtimeMs, error: null, truncated };\n```\n`fsp.open` + `handle.read(buf, 0, readLen, 0)` — a real bounded prefix read from offset 0, not a full read then slice. ✅\n\n**AC2 — zod schema extended, preload forwards it**\n\n`src/main/ipcSchemas.cjs:92-97`:\n```\n92\t// maxBytes: optional bounded prefix-read length in bytes. Capped at 8 MiB —\n97\t  maxBytes: z.number().int().min(1).max(8 * 1024 * 1024).optional(),\n```\n`src/preload/index.cjs:115`:\n```\nreadText: (path, opts) => ipcRenderer.invoke('config:read-text', { path, maxBytes: opts?.maxBytes }),\n```\nTypes also updated — `src/preload/api.d.ts:1291`: `readText: (path: string, opts?: ReadTextOptions) => Promise<ReadTextResult>`. ✅\n\n**AC3 — no-options callers behave identically, asserted by a test**\n\n`src/main/__tests__/config-readText-bounded.test.cjs:54-63` asserts `r.text` equals the exact written content, `exists`, `mtimeMs` type and `error === null` on the no-opts path. Code-side, `maxBytes == null` short-circuits to the original `fsp.readFile` at `config.cjs:206`. ✅ *(One deviation worth naming: the return object now carries an additional `truncated: false` field on the unbounded path. That's additive — every pre-existing field is unchanged — so callers behave identically, but th…",
+        "id": "pevt-msj06per-81",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T13:51:25.731Z"
+      },
+      {
+        "id": "pevt-msj071gh-19",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj06per-81",
+        "at": "2026-08-07T13:51:41.345Z",
+        "text": "PRD 1007-perf-gate-background-polling finished: completed. Check Scheduler for details.",
+        "prdSlug": "1007-perf-gate-background-polling",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj071gh-19",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — single shared session-slots source, ≤1 IPC call per interval regardless of consumer count**\n\nNew file `src/renderer/lib/useSessionSlots.ts` — module-level singleton explicitly mirroring `useKnownProjects.ts`'s shape (`:24-27`: `snapshot`, `subscribers`, `activeConsumers`, `pollTimer`). Idempotence is the mechanism at `:50`:\n```\n49\tfunction startPolling() {\n50\t  if (pollTimer != null) return\n51\t  void pollOnce()\n52\t  pollTimer = setInterval(() => { void pollOnce() }, POLL_INTERVAL_MS)\n```\nA second/third consumer registering while the timer exists is a no-op. ✅\n\n**AC2 — all three sites consume it; no component polls `sessionSlots()` on its own interval**\n\n- `Home.tsx:42` imports `useSessionSlots`; consumed at `Home.tsx:246` (Hero) and `Home.tsx:843` (ActiveSessionsCard)\n- `SessionManagerConfig.tsx:6` imports it; consumed at `:30`\n\n`grep -n \"setInterval\" src/renderer/components/tabs/Home.tsx src/renderer/components/tabs/SessionManagerConfig.tsx` returns **nothing** — all three private pollers are gone. And a repo-wide `grep` for `sessionSlots` across the renderer shows the only live call site is `useSessionSlots.ts:35`; every other hit is a comment. ✅\n\n**AC3 — poller stops when no focused consumer remains, resumes on focus**\n\n`useSessionSlots.ts:78-86`:\n```\n78\t  useEffect(() => {\n79\t    if (!focused) return\n80\t    activeConsumers += 1\n81\t    startPolling()\n82\t    return () => {\n83\t      activeConsumers -= 1\n84\t      if (activeConsumers <= 0) stopPolling()\n85\t    }\n86\t  }, [focused])\n```\nEffect keyed on `focused`, so losing focus runs the cleanup and decrements. ✅\n\n**AC4 — 1s tickers at TabBar:39 and SchedulePanel:128, and the 5s at SchedulePanel:1128, gated; TabBar's mechanism stated**\n\n- `TabBar.tsx:43-49` — gated on `useDocumentVisible()` (new `lib/useDocumentVisible.ts`), with the reason in-code at `:37-40`: TabBar is mounted in App.tsx outside any `PanelFocusProvider`, so it has no panel id. **Mechanism stated as …",
+        "id": "pevt-msj09r0a-82",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T13:53:47.770Z"
+      },
+      {
+        "id": "pevt-msj0dkp0-20",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj09r0a-82",
+        "at": "2026-08-07T13:56:46.212Z",
+        "text": "PRD 1005-perf-workbench-ctx-identity finished: completed. Check Scheduler for details.",
+        "prdSlug": "1005-perf-workbench-ctx-identity",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj0dkp0-20",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — inline arrow props replaced by `useCallback`-wrapped handlers with stable identity**\n\n`src/renderer/App.tsx:75-76`:\n```\n75\t  const handleOpenVoice = useCallback(() => navigate('voice'), [navigate])\n76\t  const handleOpenScheduler = useCallback(() => navigate('scheduler'), [navigate])\n```\nCall site `App.tsx:705-706`:\n```\n705\t              onOpenVoice={handleOpenVoice}\n706\t              onOpenScheduler={handleOpenScheduler}\n```\n`navigate` is itself `useCallback`'d (`App.tsx:59`), so both handlers are stable across renders. ✅\n\n**AC2 — Workbench builds a `useMemo`'d context value instead of passing the raw props object**\n\n`src/renderer/components/workbench/Workbench.tsx:326-329`:\n```\n326\t  const ctxValue = useMemo(\n327\t    () => ({ onNavigate, onNewSession, onOpenVoice, onOpenScheduler }),\n328\t    [onNavigate, onNewSession, onOpenVoice, onOpenScheduler],\n329\t  )\n```\nConsumed at `:337` — `<WorkbenchCtxContext.Provider value={ctxValue}>`. Identity now changes only when a callback identity actually changes, not on every App render. ✅\n\n**AC3 — `PanelHost` wrapped in `React.memo`**\n\n`Workbench.tsx:50`:\n```\n50\tconst PanelHost = memo(function PanelHost(props: IDockviewPanelProps<PanelParams>) {\n```\n`memo` imported at `:1`. ✅\n\n**AC4 — new test asserts context value identity is unchanged across re-renders with unchanged props (via `Object.is`)**\n\n`src/renderer/components/workbench/__tests__/Workbench.test.tsx:125` — *\"does not change context value identity when Workbench re-renders with unchanged callback props\"*, asserting at `:150`:\n```\n150\t    expect(Object.is(first, second)).toBe(true)\n```\nThere is also a **negative-control** test at `:153` — *\"changes context value identity when a callback prop actually changes\"* — asserting `Object.is(first, second)).toBe(false)` at `:178`. That's the test that proves the first one isn't trivially passing. ✅\n\n**AC5 — new test asserts a `focusedPanelId` change does not re-render a memoized …",
+        "id": "pevt-msj0i5yt-84",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T14:00:20.405Z"
+      },
+      {
+        "id": "pevt-msj0ve28-21",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj0i5yt-84",
+        "at": "2026-08-07T14:10:37.424Z",
+        "text": "PRD 1009-perf-intraday-refresh-walk finished: completed. Check Scheduler for details.",
+        "prdSlug": "1009-perf-intraday-refresh-walk",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj0ve28-21",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — no longer stats every jsonl file per tick; strategy stated**\n\n`src/main/historyAggregator.cjs:627-630` names the strategy in code, and `refreshIntradayToday` returns it (`:753`, `strategy: INTRADAY_STRATEGY`). Two mechanisms, both present in `computeIntradayBuckets`:\n- **Directory-mtime skip** (`:676-682`): `if (cached && cached.mtimeMs === d.mtimeMs) fileNames = cached.fileNames` — no `readdir` syscall for unchanged dirs.\n- **Permanent past-day exclusion** (`:704-712`): a file whose mtime predates today is added to `intradayNotToday` and skipped at `:689` on every later tick, so it's never stat'd again.\n\nStated in the result: *\"directory mtime skips re-readdir of directories with no new/removed files, and a file confirmed to belong to a past day is permanently excluded from all future ticks.\"* ✅\n\n**AC2 — output for a given day unchanged vs the old implementation, proven by test**\n\n`src/main/__tests__/historyAggregatorIntraday.test.cjs:202` — *\"refreshIntradayToday output matches the old unconditional-walk algorithm for the same fixture\"*. It keeps a `legacyRefreshIntradayToday()` reference implementation, runs both over the same seeded tree (including a yesterday-only file at `:212-214` that must be excluded by both), and asserts field-by-field equality of the rollup lines at `:222-229`. This is the right shape — a differential test against the old algorithm, not a hand-written expectation. ✅\n\n**AC3 — a file modified today in a directory the fast path would skip is still picked up**\n\n`historyAggregatorIntraday.test.cjs:233` — the explicit test I required. **This is the test that was red when I validated PRD 1005 an hour ago** (`AssertionError: expected +0 to be 1`), and it is now green:\n```\nTest Files  1 passed (1)\n     Tests  4 passed (4)\n```\nThere's also a companion at `:276` for a brand-new file created after the first tick. ✅\n\n**AC4 — bounded concurrency, not one sequential await per file**\n\n`historyAggregator…",
+        "id": "pevt-msj11w3u-89",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T14:15:40.746Z"
+      },
+      {
+        "id": "pevt-msj1413a-22",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj11w3u-89",
+        "at": "2026-08-07T14:17:20.518Z",
+        "text": "PRD 1010-perf-screen-memo finished: completed. Check Scheduler for details.",
+        "prdSlug": "1010-perf-screen-memo",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj1413a-22",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — every screen reachable from `renderScreenComponent` is `React.memo`-wrapped, or listed with a reason if skipped**\n\nI checked each of the 18 screens individually rather than trust the list. All 17 real screens are wrapped:\n```\nHome:               tabs/Home.tsx:121              export const Home = memo(HomeComponent)\nProjectHome:        projecthome/ProjectHome.tsx:191\nEditorView:         tabs/EditorView.tsx:562\nProjectsWorkspace:  tabs/ProjectsWorkspace.tsx:260\nSkills:             tabs/Skills.tsx:380\nHistory:            tabs/History.tsx:16\nScheduler:          tabs/Scheduler.tsx:305\nPlugins:            tabs/Plugins.tsx:239\nMcpServers:         tabs/McpServers.tsx:372\nHooks:              tabs/Hooks.tsx:468\nMemory:             tabs/Memory.tsx:61\nSystemPrompt:       tabs/SystemPrompt.tsx:179\nPermissions:        tabs/Permissions.tsx:258\nSettings:           tabs/Settings.tsx:229\nAgentLibrary:       tabs/AgentLibrary.tsx:324\nTagLibrary:         tabs/TagLibrary.tsx:148\nHostBilko:          tabs/HostBilko.tsx:436\nVoiceModal:         NO-MEMO  ← deliberate\n```\n`VoiceModal` is the one skip, with the reason stated in both the commit body and the result: the privacy invariant requires a recording surface never stall behind a memo bailout. That matches the instruction I wrote into this PRD verbatim (\"If in doubt, skip it and say so\"). ✅\n\n**AC2 — `renderScreenComponent` memoizes per NavKey; same id + same ctx returns an identical element reference**\n\n`src/renderer/components/screenComponents.tsx:76`:\n```\n76\tconst screenElementCache = new Map<NavKey, { ctx: ScreenRenderCtx; node: ReactNode }>()\n```\n`:84-85`:\n```\n84\t  const cached = screenElementCache.get(active)\n85\t  if (cached && cached.ctx === ctx) return cached.node\n```\nAsserted at `screenMemoization.test.tsx:43` — `expect(Object.is(first, second)).toBe(true)`. ✅\n\n**AC3 — memoization correctly invalidated on a genuine ctx change; covered by a test**\n\n`screenMemoization.test.tsx:50` …",
+        "id": "pevt-msj16qnz-90",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T14:19:26.975Z"
+      },
+      {
+        "id": "pevt-msj27npv-23",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj16qnz-90",
+        "at": "2026-08-07T14:48:09.427Z",
+        "text": "PRD 1011-perf-code-split-heavy-screens finished: completed. Check Scheduler for details.",
+        "prdSlug": "1011-perf-code-split-heavy-screens",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj27npv-23",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — `SkillReferenceGraph` (and `react-force-graph-2d`) lazy + Suspense, not statically imported**\n\n`src/renderer/components/tabs/plugins/PluginSkillBrowser.tsx:12-14`:\n```\n12\tconst SkillReferenceGraph = lazy(() =>\n13\t  import('./SkillReferenceGraph').then((m) => ({ default: m.SkillReferenceGraph }))\n14\t)\n```\nWrapped in `Suspense` at `:83`. A repo-wide grep for `react-force-graph` outside `SkillReferenceGraph.tsx` itself returns only comments — no remaining static import. Build confirms it split out: `SkillReferenceGraph-DshIgQqr.js` = **189,675 bytes**. ✅\n\n**AC2 — History screen lazy + Suspense**\n\n`screenComponents.tsx:20` — `const History = lazy(() => import('./tabs/History')...)`. Emitted as `History-Rvm2FFjE.js` = **32,489 bytes**. ✅\n\n**AC3 — Scheduler screen lazy + Suspense**\n\n`screenComponents.tsx:21`. Emitted as `Scheduler-DY0UMRM2.js` = **65,472 bytes**. ✅\n\n**AC4 — Suspense fallback consistent with `EditorView.tsx:428`, wrapped in the existing ErrorBoundary**\n\n`screenComponents.tsx:33`:\n```\n33\tconst SCREEN_LOADING_FALLBACK = <div className=\"p-6 text-xs text-fg-faint\">Loading…</div>\n35\tfunction LazyScreen({ children }: { children: ReactNode }) {\n36\t  return <Suspense fallback={SCREEN_LOADING_FALLBACK}>{children}</Suspense>\n```\nByte-for-byte the same className as the existing `EditorView.tsx:428` fallback. ErrorBoundary is inherited, not re-added — `Workbench.tsx:72` already wraps every panel: `<ErrorBoundary>{renderScreenComponent(id as NavKey, ctx)}</ErrorBoundary>`, and the code comment at `screenComponents.tsx:14-15` states this reasoning explicitly. ✅\n\n**AC5 — `npm run build` succeeds; index chunk ≥600 KB smaller than the 2,485,459-byte baseline; both sizes reported**\n\nI ran the build myself:\n```\n✓ built in 25.65s\ndist/assets/index-BRAPekRj.js   1,821,952 bytes\n```\nBaseline **2,485,459** (my own measurement earlier in this session, from `ls -laS dist/assets/*.js` → `2485459 dist/assets/index-DpTeoxy6.js`) → *…",
+        "id": "pevt-msj2clih-96",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T14:51:59.849Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj2clih-96",
+        "text": "## Round 2 sweep — findings\n\nFirst, the round-1 result is measurable, not theoretical:\n\n| | Before round 1 | Now |\n|---|---|---|\n| Renderer RSS | **1,551 MB** @ 5h46m | **773 MB** @ 14h59m |\n\nHalf the memory, at 2.6× the uptime. The retention causes were real. Here's the next tier.\n\n### 1. The screens are memoized; the things *inside* their lists are not\n\nRound 1 memoized 17 screen components. But the components rendered **N times inside** those screens were missed — and they're the ones that multiply.\n\n**`JobRow`** (`SchedulePanel.tsx:879`) is rendered in a map at `:468` and takes a `now` prop that the 1-second ticker at `:134` updates every second while the panel is focused. So **every queued job row re-renders once per second**, and `eta={etaForJob(...)}` is recomputed inline per row per render at `:471`. Round 1's focus-gating stopped this when the panel is backgrounded — but it still runs continuously whenever you're actually looking at the Scheduler.\n\n**`Turn`** (`ChatTranscriptTurn.tsx:968`) is a ~430-line component rendered per timeline item from `EpicDetail.tsx:899` and `:976`, unmemoized, unvirtualized, over a feed capped at 1000 turns. Round 1 cached the *markdown*; the component tree around it still reconciles in full.\n\n### 2. Transcript events fan out one-IPC-message-per-event\n\n`transcripts.cjs:144-146` sends one IPC message per classified event inside a per-event loop. The renderer then commits once per event: `live.ts:340` runs `set({ tabs: { ...get().tabs, [tabId]: next } })` — an O(tabs) object spread — **per event**, and `chat.ts`'s ingest path does the same.\n\nOne JSONL line can classify into several events. I measured a real local transcript: peak **11 lines in a single second**, 37 seconds above 5 lines. So a single flush fans out into dozens of IPC round-trips and dozens of store notifications where one batch would do.\n\n### 3. Dead dependencies confirmed\n\n```\ngrep -rn \"from 'recharts'\"      src/  →  (empty)\ngrep -rn \"from 'framer-motion'\" src/  …",
+        "id": "pevt-msj2j0d4-99",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T14:56:59.032Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj2j0d4-99",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — whole-repo re-verify grep, pasted, stop-if-found**\n\nI ran this **independently myself**, not from the executor's report:\n```\ngrep -rn \"recharts|framer-motion\" --include=*.ts --include=*.tsx --include=*.cjs --include=*.js --include=*.json .\n  (excluding node_modules/, dist/, .git/, session-manager-operations/)\n→ (empty)\n```\nZero hits anywhere in source, scripts, config, or build output. The executor's own reported grep matches this — only `package.json` (pre-removal) and PRD/epic markdown describing the task itself. ✅\n\n**AC2 — removed from `package.json`**\n\n```\ngrep -n \"recharts\\|framer-motion\" package.json → (empty)\n```\n✅\n\n**AC3 — `package-lock.json` regenerated consistently**\n\nNot just the two top-level lines — I parsed the lockfile's `packages` object directly: **646 total packages, zero entries containing `recharts` or `framer-motion`** anywhere in the dependency graph (not just top-level). Commit shows **267 lines removed** from the lockfile, consistent with a real transitive-dependency purge, not a hand-edit. ✅\n\n**AC4 — build succeeds, chunk composition unchanged, byte sizes reported**\n\nThe executor's claim — build before/after produced an **identical** chunk file list and a **byte-identical** index chunk (`index-BRAPekRj.js`, same hash, 1,821,952 bytes both times) — is exactly the expected outcome for genuinely-unbundled dependencies, and matches the file already on disk from my own 1011 validation build earlier in this session (`1821952` bytes, same hash `BRAPekRj`). I did not re-run a third build myself since the file is unchanged and the hash match is itself the proof (Vite content-hashes chunk filenames; an identical hash means byte-identical output). ✅\n\n**AC5 — `timeout 300 npm run typecheck`**\n\nThe run log candidly reports concurrent typecheck failures during execution, all traced to sibling job (1012/1013) files it doesn't touch. I re-ran typecheck myself on the current tree, after those siblings' edit…",
+        "id": "pevt-msj2smb3-101",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T15:04:27.375Z"
+      },
+      {
+        "id": "pevt-msj2who6-24",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj2smb3-101",
+        "at": "2026-08-07T15:07:27.990Z",
+        "text": "PRD 1012-perf-list-row-memo finished: completed. Check Scheduler for details.",
+        "prdSlug": "1012-perf-list-row-memo",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj2who6-24",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — `JobRow` wrapped in `React.memo`**\n\n`src/renderer/components/SchedulePanel.tsx:1109`:\n```\n1109\texport const JobRow = memo(JobRowComponent)\n```\nInner function renamed to `JobRowComponent` at `:900`; exported name unchanged, so no call site churn. ✅\n\n**AC2 — the 1s tick no longer re-renders rows whose output is unchanged; approach stated**\n\nApproach: **quantize the ticking value to \"unused\"**. The always-changing `now: number` prop is replaced by `elapsedMs: number | null`, computed at the call site `SchedulePanel.tsx:489`:\n```\n489\telapsedMs={j.status === 'running' && j.startedAt ? now - Date.parse(j.startedAt) : null}\n```\nEvery non-running row receives a literal `null` every tick, so shallow-equality holds and memo bails; only the running row gets a changing value. The reasoning is recorded in-code at `:486-488`.\n\nThis is the approach my implementation notes recommended over a hand-written `areEqual` comparator, and for the stated reason — a comparator that forgets a prop is a silent staleness bug, whereas this is provably correct because the row cannot display precision it never receives. ✅\n\n**AC3 — `etaForJob` no longer recomputed inline per row**\n\nReplaced by `computeEtaMap` (`:875`), called **once per render** at `:246` before the map, and consumed as a lookup at `:485` (`eta={etaMap.get(j.slug) ?? null}`). I checked the old function is genuinely gone, not merely unused:\n```\ngrep -rn \"etaForJob\" src/renderer/  →  (empty)\n```\nThe helper comment at `:782` also notes the jobs are pre-sorted so `computeEtaMap` is O(1) per job — it finds the running job once rather than re-scanning per pending row. ✅\n\n**AC4 — `Turn` wrapped in `React.memo`**\n\n`ChatTranscriptTurn.tsx:1406` — `export const Turn = memo(TurnComponent)`, inner renamed at `:968`. ✅\n\n**AC5 — `TurnFrame` / `TurnRawFooter` memoized or verified cheap with a reason**\n\nBoth left unmemoized (`:536`, `:442`), with the reason given: small JSX, local `useState` only…",
+        "id": "pevt-msj30z4v-102",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T15:10:57.247Z"
+      },
+      {
+        "id": "pevt-msj31j7u-25",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj30z4v-102",
+        "at": "2026-08-07T15:11:23.274Z",
+        "text": "PRD 1013-perf-batch-transcript-ipc finished: completed. Check Scheduler for details.",
+        "prdSlug": "1013-perf-batch-transcript-ipc",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "id": "pevt-msj33p15-26",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj31j7u-25",
+        "at": "2026-08-07T15:13:04.121Z",
+        "text": "PRD 1016-perf-heap-snapshot-diagnostic finished: completed. Check Scheduler for details.",
+        "prdSlug": "1016-perf-heap-snapshot-diagnostic",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj33p15-26",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — `doFlush` sends ONE IPC message per flush (array), not one per event**\n\n`src/main/transcripts.cjs:136-144`:\n```\n136\tconst MAX_EVENTS_PER_BATCH = 200;\n138\tasync function doFlush(sub, { emit = true } = {}) {\n140\t  let batch = [];\n141\t  const flushBatch = () => {\n142\t    if (batch.length === 0) return;\n143\t    if (emit) sendIfAlive(window, `transcript:event:${sub.tabId}`, batch);\n144\t    batch = [];\n```\nThe per-event `sendIfAlive` is gone; events accumulate via `batch.push(ev)` at `:160` and ship as one array. ✅\n\n**AC2 — preload + renderer accept the batched payload; state which shape and why**\n\nArray-shaped, declared in the type: `src/preload/api.d.ts:1258`:\n```\nonEvent: (tabId: string, handler: (events: TranscriptEvent[]) => void) => () => void;\n```\nRationale given, and it's the correct one: fanning the array back out in preload would make AC3 (one `set()` per batch) **impossible**, since the handler would be re-entered per event. That's not a preference, it's forced by the requirement. ✅\n\n**AC3 — `live.ts` commits a whole batch with ONE `set()`**\n\n`live.ts:351` `ingestBatch`, committing once at `:373` (`set({ tabs: { ...get().tabs, [tabId]: working } })`). Subscription rewired at `:300`. The old single-event `ingest` now delegates (`:348` → `get().ingestBatch(tabId, [ev], opts)`), so there's one code path, not two that can drift. ✅\n\n**AC4 — `chat.ts` commits once per batch**\n\n`chat.ts:1173` `ingestTranscriptEvents`, wired at `:1203` and for buffer replay at `:1220`. ✅\n\n**AC5 — event order preserved exactly, with a test**\n\n`transcripts-batch-flush.test.cjs:114` — *\"order is preserved exactly across a multi-event flush (matches per-event order semantics)\"*, and renderer-side `live.test.ts:231` — *\"preserves event order across a batch identically to sequential per-event ingest\"*. ✅\n\n**AC6 — nothing dropped or duplicated; store state byte-identical to the per-event path**\n\n`live.test.ts:265` — *\"byte-identical result: …",
+        "id": "pevt-msj34lb9-103",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T15:13:45.957Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj34lb9-103",
+        "text": "My earlier `ps` invocation misparsed its own columns — the live renderer is fine: **pid 377635, 712 MB, up 15h22m, never restarted**. The app survived the whole PRD run.\n\n**VERIFIED** — with one acceptance criterion whose *purpose* was not achieved, explained below.\n\n---\n\n**AC1 — opt-in mechanism, no restart, no debugging port; shape justified**\n\n`src/main/heapSnapshot.cjs:69` uses `win.webContents.takeHeapSnapshot(filePath)` — Electron's own DevTools-protocol capture — rather than `--remote-debugging-port`. That's exactly the API I pointed at, and the justification is right: it never listens on a socket. Gated by `isEnabled()` at `:32-34`, reading `process.env.SM_HEAP_SNAPSHOT === '1'` **fresh per call, never cached at require time** (`:6-7`), which is what makes it per-case testable. ✅\n\n**AC2 — timestamped file under `~/.claude/session-manager/`, path logged and returned**\n\n`snapshotDir()` at `:36-38` → `~/.claude/session-manager`. `timestampedFilename()` at `:40-42`. Returned at `:75` as `{ filePath, bytes, ms }` and logged at `:76`. ✅\n\n**AC3 — OFF by default; no capability exposed, no port opened; test asserts it**\n\nThree independent default-off gates, each tested:\n- `registerIpc` at `:86-90` — `if (!isEnabled()) return false`, registers no channel. Test at `heapSnapshot.test.cjs:38`.\n- `buildMenuItem` at `:98-99` — returns `null`. Test at `:57`.\n- `captureSnapshot` at `:50-52` — throws before touching the window. Test at `:69` (*\"rejects when disabled, without touching the window\"*).\n\n`index.cjs` splices conditionally: `...(heapSnapshotMenuItem ? [heapSnapshotMenuItem] : [])`. ✅\n\n**AC4 — does not kill/restart/interrupt any scheduler job or chat run; state how verified**\n\nVerified by the executor against an isolated throwaway renderer (separate process and `userData` dir), and I confirmed the outcome independently: the live renderer **pid 377635 is still up at 15h22m** having never restarted across this PRD's execution, and the scheduler queue still shows a runn…",
+        "id": "pevt-msj37poo-104",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T15:16:11.592Z"
+      },
+      {
+        "id": "pevt-msj39md7-27",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msj37poo-104",
+        "at": "2026-08-07T15:17:40.603Z",
+        "text": "PRD 1015-perf-run-log-retention finished: completed. Check Scheduler for details.",
+        "prdSlug": "1015-perf-run-log-retention",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msj39md7-27",
+        "text": "The gap is fully explained and it's *conservative*: 55 of the newest 400 dirs contain only `definition-of-done-*.md` reports with no `<slug>.log`, so `scanRunEntries` yields no entry for them — they're never counted and never eligible for removal.\n\n**VERIFIED**\n\n---\n\n**AC1 — retention module computing eligible dirs; age-based AND count-based, combinable**\n\n`src/main/lib/runLogRetention.cjs` exports `computeEligibility`, `computeReport`, `applyRetention`. Policy handled at `:183-205`:\n```\n183\tconst { maxAgeDays, keepPerSlug } = policy || {};\n204\tconst ageOk = maxAgeDays == null || ageDays > maxAgeDays;\n205\tconst countOk = keepPerSlug == null || rank >= keepPerSlug;\n```\nCombined with **AND** — an entry must clear *both* floors. The module doc at `:38-41` states the reasoning: \"A policy is a safety floor, not a removal trigger.\" Tested at `:226`. ✅\n\n**AC2 — DEFAULT IS DRY-RUN; test asserts zero removed**\n\n`:312-315` returns `{ deleted: false, reason: 'dry-run: schedulerRunLogRetention.enabled is not true (or has no policy)' }`.\n\nI ran this myself against the **real** runs directory:\n```\ndeleted: false\nreason: dry-run: schedulerRunLogRetention.enabled is not true (or has no policy)\neligible entries: 0   removableDirs: 0\n```\nAnd the ground truth: `runs/` is still **1.2 GB**, and the directory count went **up** (2351 → 2353) from new runs. Nothing was deleted. Tests at `:72` and `:89`. ✅\n\n**AC3 — deletion requires an explicit named setting; test asserts it**\n\n`isRetentionEnabled` at `:271-273` requires `cfg.enabled === true` **AND** a non-empty policy. Setting name: `schedulerRunLogRetention.enabled` + `.policy`. I verified the belt-and-braces myself — with a real policy but `enabled: false`:\n```\ndeleted: false        ← policy present, still refuses\neligibleSummary: { count: 189, bytes: 89899242 }\n```\nTests at `:100` and `:115`. ✅\n\n**AC4 — live jobs (queued/running/needs_review) NEVER eligible** — the safety-critical one\n\n`LIVE_STATUSES` at `:56` = `['pending', 'running',…",
+        "id": "pevt-msj3szus-108",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T15:32:44.548Z"
+      },
+      {
+        "id": "6ba2ed22-b519-4e34-b5af-c5af8c3463ef",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-msj3szus-108",
+        "at": "2026-08-07T19:52:34.780Z",
+        "prdSlug": "1017-enable-7d-run-log-retention"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "6ba2ed22-b519-4e34-b5af-c5af8c3463ef",
+        "text": "**PRD 1017 is queued** (`pending`) — it wires the caller, sets `{ enabled: true, policy: { maxAgeDays: 7, keepPerSlug: 1 } }` in `scheduler-machine.json`, and is required to paste the dry-run delete set *before* removing anything and a measured `du` before/after *after*. It's explicitly barred from loosening any of PRD 1015's safety rules to free more bytes.\n\n## On the heap snapshot — I'm not queuing anything\n\nYou said you don't understand it and that 700 MB sounds bad. Queuing more work on that would be me acting on a question you didn't actually ask. Here's the decision in plain terms so you can make it whenever you want:\n\n- **Nothing is broken.** Memory halved (1,551 MB → 712 MB) while uptime nearly tripled. If the app feels responsive, it is.\n- **Taking a snapshot costs you one app restart**, timed for when the queue is idle. That's the entire cost.\n- **What you'd get:** a definitive answer to \"is something still leaking, or is 700 MB just what this app legitimately weighs?\" Today that's genuinely unknown.\n- **How:** relaunch with `SM_HEAP_SNAPSHOT=1`, then use the new **Dev → Take Heap Snapshot (renderer)** menu item. It writes a `.heapsnapshot` file to `~/.claude/session-manager/`, which you open in Chrome DevTools' Memory tab. The how-to-read-it notes are in `session-manager-operations/architecture/heap-snapshot-diagnostics.md`.\n\nMy honest recommendation: **leave it.** 700 MB for an app hosting Monaco, xterm, and every screen you've opened is defensible — VS Code sits in the same range. Revisit only if it climbs back toward 1.5 GB or the app starts feeling sluggish again. Say the word and I'll queue the capture-and-analyze PRD.\n\n## Summary\n\nAnswered both questions with measurements rather than estimates.\n\n**Retention:** found two things that made \"just enable 7d\" not that simple — `applyRetention` has **zero production callers** (the mechanism is inert; my own PRD 1015 put wiring it out of scope), and `scheduler-machine.json` has no retention key. Also measur…",
+        "id": "pevt-msjd4gon-143",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T19:53:36.119Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msjd4gon-143",
+        "text": "**Published: v0.63.0** — live on npm, pushed to GitHub, worktree cleaned.\n\n```\nnpm view claude-code-session-manager version    → 0.63.0\nnpm view claude-code-session-manager dist-tags  → { latest: '0.63.0' }\ngit push origin main                            → d8c74b1..6d236a7\ngit push origin v0.63.0                         → [new tag]\nunpushed commits                                 → 0\ngit worktree list                                → main repo only\n```\n\nAvailable now via `npx claude-code-session-manager@latest`.\n\n## The gate failure, and why I published anyway\n\nThe first gate run **failed** — 5 tests across 4 files. I didn't rerun-until-green and ship; the numbers told the story:\n\n- Failures were `EpicDetail` / `EpicTerminalPane` tests at **5080ms / 5042ms / 5054ms** — those are 5-second **timeouts**, not assertion failures.\n- The same 3 files in isolation: **57 tests in 2.43s** — a 200× margin under the timeout.\n- Different tests failed each run (5 → 0 → 3), classic contention, not a deterministic bug.\n- Decisive check: full suite with `--maxWorkers=2` → **261/261 files, 2416/2416 tests, exit 0**, with test time dropping 158s → 46s.\n\nThe cause was CPU oversubscription — I was running the full suite repeatedly on a box also hosting the live Electron app and scheduler. Not a code regression, and not something a user hits. My initial guess that the scheduler's `queue.json` writes were the cause was wrong; the failing tests never touch scheduler state.\n\nVersion bump was **minor** (0.62.1 → 0.63.0) per conventional commits — two `feat:` commits (`feat(scheduler)` retention, `feat(diagnostics)` heap snapshot) alongside ten `perf:`/`chore:`/`fix:`.\n\nBuilt and published from an isolated worktree checked out from the `v0.63.0` tag with a clean `npm ci`, so nothing from the live working directory leaked into the 31.9 MB tarball. Typecheck re-run green inside that worktree before publishing.\n\n## Summary\n\nRan the project's own `builder` pipeline end to end. Gated on typecheck …",
+        "id": "pevt-msjdh9o9-147",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T20:03:33.561Z"
+      },
+      {
+        "id": "pevt-msje2qoz-42",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "kind": "response",
+        "causedByEventId": "pevt-msjdh9o9-147",
+        "at": "2026-08-07T20:20:15.395Z",
+        "text": "PRD 1017-enable-7d-run-log-retention finished: completed. Check Scheduler for details.",
+        "prdSlug": "1017-enable-7d-run-log-retention",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msje2qoz-42",
+        "text": "**VERIFIED**\n\nPer-criterion evidence:\n\n---\n\n**AC1 — exactly ONE production caller, on a predictable low-risk trigger, stated**\n\n`src/main/lib/runLogRetention.cjs` gains `runBootSweep()`, called once from `src/main/index.cjs:1154`. Placed **inside the existing deferred-30s `setTimeout`** alongside `finalizeClosedDays()` / `runIntradayRefresh()` — exactly the pattern I asked it to mirror, not a new timer. Grep confirms this is the only invocation:\n```\nsrc/main/index.cjs:1154:  const result = runLogRetention.runBootSweep();\n```\n(`health.cjs:17` imports only the read-only `computeReport`/`isRetentionEnabled`/`liveKeysFromJobs`.) ✅\n\n**AC2 — caller passes real queue jobs explicitly, NOT the internal fallback; verified by test**\n\n```\nfunction runBootSweep(opts) {\n  const runsDir = (opts && opts.runsDir) || DEFAULT_RUNS_DIR;\n  const queueStore = require('./queueStore.cjs');\n  const state = queueStore.readMergedSync();\n  return applyRetention(runsDir, state.config || {}, { jobs: state.jobs || [] });\n}\n```\n`jobs` threaded explicitly. Test: *\"runBootSweep: reads queueStore ONCE and threads its jobs explicitly into applyRetention (never the internal fallback re-read)\"*. ✅\n\n**AC3 — config written exactly as specified**\n\nRead from the live `~/.claude/session-manager/scheduler-machine.json`:\n```json\n{ \"enabled\": true, \"policy\": { \"maxAgeDays\": 7, \"keepPerSlug\": 1 } }\n```\nByte-for-byte the approved policy. ✅\n\n**AC4 — dry-run delete set on record before enabling** — recorded in the run result; and independently corroborated by my own pre-enable measurement last turn (**178 MB / 494 entries / 109 dirs** for 7d+keep1), which the actual outcome closely tracks. ✅\n\n**AC5 — actual bytes freed + `du` re-measure**\n\nI measured this myself rather than take the report:\n\n| | before (my measurement last turn) | after |\n|---|---|---|\n| size | 1.19 GB | **1004 MB** |\n| dirs | 2,359 | **2,261** |\n\n**~186 MB freed, 98 directories removed** — against a 178 MB / 109 dir prediction. ✅\n\n**AC6 — every PR…",
+        "id": "pevt-msje7rkf-152",
+        "promptSessionId": "performance-identiy-why-session-manager-is-feeli-24e0a0ae",
+        "at": "2026-08-07T20:24:09.807Z"
       }
     ]
   },

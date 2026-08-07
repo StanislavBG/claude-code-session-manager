@@ -972,7 +972,6 @@ export function Turn({
   runActive = false,
   consentActionDisabled = false,
   enableRawSessionActions = true,
-  linkTarget = 'external',
   inlineFilePreview = false,
   toolStripVariant = 'inline',
   needsDecisionStyle = false,
@@ -994,11 +993,6 @@ export function Turn({
    *  InlineConsentTerminal PTY widget against a real tab's sessionId and has
    *  no equivalent there. */
   enableRawSessionActions?: boolean
-  /** 'browser' routes http(s) link clicks through the embedded Browser
-   *  (state/browser.ts) instead of shell.openExternal — set only by
-   *  PromptSessionConversation (PRD 805). TerminalChat.tsx keeps the default
-   *  'external' behavior unchanged. */
-  linkTarget?: 'external' | 'browser'
   /** Renders file/markdown references with an inline MarkdownPreview toggle
    *  instead of Open-in-Editor-only — set only by PromptSessionConversation
    *  (PRD 805), which has no Editor screen to navigate to. */
@@ -1369,7 +1363,7 @@ export function Turn({
             <div
               ref={bodyRef}
               className={`prose-chat border px-3 py-2 text-sm leading-relaxed ${bubbleTone} ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
-              onClick={(e) => { void handleChatLinkClick(e, cwd, linkTarget) }}
+              onClick={(e) => { void handleChatLinkClick(e, cwd) }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: renderChatMarkdown(shownText) }}
             />

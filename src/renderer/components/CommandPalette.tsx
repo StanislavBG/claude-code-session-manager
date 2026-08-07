@@ -172,7 +172,6 @@ export function buildCommands(): Command[] {
     { id: 'nav:overview', label: 'Home — this machine', section: 'nav', emitOnly: true },
     { id: 'nav:project-home', label: 'Go to Home', section: 'nav', emitOnly: true },
     { id: 'nav:terminal', label: 'Go to Terminal', section: 'nav', emitOnly: true },
-    { id: 'nav:browser', label: 'Go to Browser', section: 'nav', emitOnly: true },
     { id: 'nav:settings', label: 'Go to Settings', section: 'nav', emitOnly: true },
     { id: 'nav:permissions', label: 'Go to Permissions', section: 'nav', emitOnly: true },
     { id: 'nav:skills', label: 'Go to Skills', section: 'nav', emitOnly: true },
@@ -184,7 +183,6 @@ export function buildCommands(): Command[] {
     { id: 'nav:projects', label: 'Go to File Explorer', section: 'nav', emitOnly: true },
     { id: 'nav:history', label: 'Go to History', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
-    { id: 'nav:remote', label: 'Go to Remote', section: 'nav', emitOnly: true },
     { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },
   ]
   return cmds

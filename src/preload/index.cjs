@@ -56,65 +56,6 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('pty:write-error', listener);
     },
   },
-  browser: {
-    create: (payload) => ipcRenderer.invoke('browser:create', payload),
-    setBounds: (payload) => ipcRenderer.invoke('browser:set-bounds', payload),
-    show: (viewId) => ipcRenderer.invoke('browser:show', { viewId }),
-    hide: (viewId) => ipcRenderer.invoke('browser:hide', { viewId }),
-    destroy: (viewId) => ipcRenderer.invoke('browser:destroy', { viewId }),
-    navigate: (payload) => ipcRenderer.invoke('browser:navigate', payload),
-    back: (viewId) => ipcRenderer.invoke('browser:back', { viewId }),
-    forward: (viewId) => ipcRenderer.invoke('browser:forward', { viewId }),
-    reload: (viewId) => ipcRenderer.invoke('browser:reload', { viewId }),
-    stop: (viewId) => ipcRenderer.invoke('browser:stop', { viewId }),
-    onNavState: (viewId, handler) => {
-      const channel = `browser:nav-state:${viewId}`;
-      const listener = (_e, state) => handler(state);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    },
-    recordStart: (viewId) => ipcRenderer.invoke('browser:record-start', { viewId }),
-    recordStop: (viewId) => ipcRenderer.invoke('browser:record-stop', { viewId }),
-    onRecordStep: (viewId, handler) => {
-      const channel = `browser:record-step:${viewId}`;
-      const listener = (_e, step) => handler(step);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    },
-    captureDom: (payload) => ipcRenderer.invoke('browser:capture-dom', payload),
-    captureShot: (viewId) => ipcRenderer.invoke('browser:capture-shot', { viewId }),
-    saveRecording: (payload) => ipcRenderer.invoke('browser:save-recording', payload),
-    replay: (payload) => ipcRenderer.invoke('browser:replay', payload),
-    onReplayStep: (viewId, handler) => {
-      const channel = `browser:replay-step:${viewId}`;
-      const listener = (_e, step) => handler(step);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    },
-    setZoom: (payload) => ipcRenderer.invoke('browser:set-zoom', payload),
-    find: (payload) => ipcRenderer.invoke('browser:find', payload),
-    stopFind: (viewId) => ipcRenderer.invoke('browser:stop-find', { viewId }),
-    onFindResult: (viewId, handler) => {
-      const channel = `browser:find-result:${viewId}`;
-      const listener = (_e, result) => handler(result);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    },
-    pickerStart: (viewId) => ipcRenderer.invoke('browser:picker-start', { viewId }),
-    pickerStop: (viewId) => ipcRenderer.invoke('browser:picker-stop', { viewId }),
-    onPickerEvent: (viewId, handler) => {
-      const channel = `browser:picker-event:${viewId}`;
-      const listener = (_e, ev) => handler(ev);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    },
-    capture: (payload) => ipcRenderer.invoke('browser:capture', payload),
-    onOpenTabRequest: (handler) => {
-      const listener = (_e, payload) => handler(payload);
-      ipcRenderer.on('browser:open-tab-request', listener);
-      return () => ipcRenderer.removeListener('browser:open-tab-request', listener);
-    },
-  },
   transcripts: {
     subscribe: (payload) => ipcRenderer.invoke('transcript:subscribe', payload),
     unsubscribe: (tabId) => ipcRenderer.invoke('transcript:unsubscribe', { tabId }),
@@ -309,7 +250,6 @@ contextBridge.exposeInMainWorld('api', {
   clipboard: {
     pasteImage: () => ipcRenderer.invoke('clipboard:paste-image'),
     pasteText: () => ipcRenderer.invoke('clipboard:paste-text'),
-    copyImage: (dataUrl) => ipcRenderer.invoke('browser:copy-image', { dataUrl }),
     writeText: (text) => ipcRenderer.invoke('clipboard:write-text', { text }),
   },
   memory: {

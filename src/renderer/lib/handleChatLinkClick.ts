@@ -1,7 +1,6 @@
 import type { MouseEvent } from 'react'
 import { useEditor } from '../state/editor'
 import { useSessions } from '../state/sessions'
-import { useBrowserState } from '../state/browser'
 import { toast } from '../state/toast'
 import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
 
@@ -95,24 +94,9 @@ export async function readLinkifiedFileText(raw: string, cwd = ''): Promise<stri
   return resolved?.text ?? null
 }
 
-/**
- * Opens a URL in the embedded Browser (state/browser.ts) instead of the OS
- * browser, then switches the app to the Browser screen — the same 'sm:navigate'
- * plumbing AlmanacFooter/TerminalChat use for cross-screen navigation, and the
- * same openTab() call Browser.tsx itself uses for a new sub-tab. Used by
- * PromptSessionConversation (PRD 805) so links clicked from the scoped
- * conversation stay inside the app rather than shelling out via
- * shell.openExternal.
- */
-export function openUrlInBrowserTab(url: string): void {
-  useBrowserState.getState().openTab({ url })
-  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'browser' }))
-}
-
 export async function handleChatLinkClick(
   e: MouseEvent,
   cwd = '',
-  linkTarget: 'external' | 'browser' = 'external',
 ): Promise<void> {
   const target = e.target as HTMLElement
   const a = target.closest('a')
@@ -120,11 +104,7 @@ export async function handleChatLinkClick(
     const href = a.getAttribute('href') || ''
     if (/^https?:\/\//i.test(href)) {
       e.preventDefault()
-      if (linkTarget === 'browser') {
-        openUrlInBrowserTab(href)
-      } else {
-        window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
-      }
+      window.api.shell.open({ as: 'external', url: href }).catch(() => { /* ignore */ })
     }
     return
   }

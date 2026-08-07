@@ -7,10 +7,9 @@ import { useLayout } from '../state/layout'
 
 /**
  * TerminalStage — the "always mounted, visibility-toggled" terminal layer.
- * Extracted from MainPane so SplitAgentBrowser can render the SAME terminal
- * instance layer without a second <Terminal> mount for the active tab (which
- * would try to re-spawn the already-live PTY and fail with "session already
- * exists").
+ * Extracted from MainPane so the SAME terminal instance layer can be reused
+ * without a second <Terminal> mount for the active tab (which would try to
+ * re-spawn the already-live PTY and fail with "session already exists").
  */
 interface TerminalStageProps {
   visible?: boolean
@@ -48,8 +47,6 @@ export function TerminalStage({ visible = true }: TerminalStageProps) {
       ) : (
         // Epics workspace (PRD 829): the two-pane Epic queue + detail
         // surface, in place of the old bare "no active session" message.
-        // SplitAgentBrowser keeps the plain <NoSession /> for its own
-        // no-session state — this swap is local to TerminalStage.
         <EpicsWorkspace />
       )}
       <LiveTranscript />

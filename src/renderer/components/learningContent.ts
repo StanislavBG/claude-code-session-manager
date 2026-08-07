@@ -95,19 +95,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'If the prompt looks frozen, scroll up: Claude often produced output but the cursor is below the visible window.',
       ],
     },
-  'browser': {
-      headline: 'An embedded dev browser for capturing DOM state and recording click-sequences',
-      intro:
-        'Browser is a foundation stub today — the tab shell exists so later work can add sub-tabs, an address bar, an embedded webview, and capture/record/observe tooling without a routing change.',
-      sections: [
-        {
-          title: 'What you see',
-          items: [
-            { body: 'A placeholder page. The embedded browser, DOM capture, and click-recording features arrive in follow-up work.' },
-          ],
-        },
-      ],
-    },
   'system-prompt': {
       headline: 'Edit the CLAUDE.md files that shape Claude\'s house rules',
       intro:
@@ -528,32 +515,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       tips: [
         'The speech model downloads on first use only, then stays cached — later recordings start instantly.',
         'Hold-to-talk is best for quick interjections; Tap on/off is better for longer dictation where you don\'t want to hold a key.',
-      ],
-    },
-  'remote': {
-      headline: 'Remote Access — disabled by default',
-      intro: 'Lets a paired phone or web browser see your sessions and, optionally, send commands to this machine over an encrypted relay. It is off until you turn it on, and even then only a fixed list of command types is accepted — there is no "run any shell command" verb exposed to the relay. Two separate switches keep watching and controlling apart.',
-      sections: [
-        {
-          title: 'Two switches',
-          items: [
-            { term: 'Allow remote control from the web', body: 'The master switch. While off, the relay refuses every connection and no remote traffic is accepted. Turning it on lets a paired device connect and watch session output.' },
-            { term: 'Allow command writes (pty + scheduler)', body: 'A second switch, off by default, that must also be on before a paired device can run terminal commands or queue scheduler jobs. With it off, devices can watch but cannot change anything.' },
-          ],
-        },
-        {
-          title: 'Security model',
-          items: [
-            { term: 'Command allowlist', body: 'Only an enumerated set of command types is accepted (17 today: 2 plain reads, 6 sensitive reads, and 9 write/control commands). Anything unrecognised is rejected with an opaque error so the relay learns nothing.' },
-            { term: 'Encrypted session + code check', body: 'Sessions establish an end-to-end key, then show a short verification code you compare with the one in the browser. Until you confirm the codes match, sensitive reads and all command writes stay blocked.' },
-            { term: 'Path safety', body: 'Any folder or file path in a remote command passes through the same home-directory boundary check (validatePath) used by the local app — nothing outside your home directory can be reached.' },
-            { term: 'Audit log', body: 'Every command is recorded to ~/.claude/session-manager/logs/remote-audit-YYYY-MM-DD.log (file mode 0600, stays on this machine). Token and payload values are never written. You can view the last 100 lines in-app from the Audit log section.' },
-          ],
-        },
-      ],
-      tips: [
-        'Pair a device by clicking "Pair Device…" and entering the 8-character code shown under "Add Device" in the web app.',
-        'Revoke a single device from the Paired Devices list, or hit Panic / "Revoke all" to tear down every session and invalidate all device tokens at once if you suspect compromise.',
       ],
     },
   'agent-library': {

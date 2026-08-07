@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, nativeImage, powerSaveBlocker, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker, protocol } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -9,8 +9,6 @@ const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const { terminateLosingInstance } = require('./lib/singleInstanceGuard.cjs');
 const { acquireSchedulerOwnership, releaseSchedulerOwnership } = require('./lib/instanceLock.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
-const browserView = require('./browserView.cjs');
-const browserCapture = require('./browserCapture.cjs');
 const configMgr = require('./config.cjs');
 const transcripts = require('./transcripts.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
@@ -40,13 +38,6 @@ const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
 chatRunner.registerAdminRoute(adminHttp);
-const { createBrowserAgentServer } = require('./browserAgentServer.cjs');
-const browserAgentServer = createBrowserAgentServer({
-  listTabs: () => browserView.listViews(),
-  screenshot: ({ viewId }) => browserView.captureShotForAgent({ viewId }),
-  action: (params) => browserView.dispatchViewAction(params),
-  dom: ({ viewId }) => browserView.captureAgentDom({ viewId }),
-});
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const teams = require('./teams.cjs');
@@ -69,7 +60,6 @@ const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
-const webRemote = require('./webRemote.cjs');
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
@@ -306,8 +296,6 @@ async function rebootApp() {
     ptyManager.attachWindow(mainWindow);
     configMgr.attachWindow(mainWindow);
     transcripts.attachWindow(mainWindow);
-    browserView.attachWindow(mainWindow);
-    browserCapture.attachWindow(mainWindow);
     voiceHotkey.init(mainWindow).catch((e) => {
       logs.writeLine({ scope: 'voice-hotkey', level: 'error', message: 'reinit failed', meta: { error: e?.message } });
     });
@@ -506,25 +494,6 @@ ipcMain.handle('app:pick-directory', async () => {
 
 ipcMain.on('app:reboot-app', () => rebootApp());
 
-// Recorder export "Save to file…" (PRD 412) — native Save As dialog, written
-// directly since the path is user-chosen, not renderer input.
-ipcMain.handle('browser:save-recording', validated(schemas.browserSaveRecording, async ({ defaultName, text }) => {
-  try {
-    const result = await dialog.showSaveDialog(mainWindow, {
-      defaultPath: defaultName,
-      filters: [
-        { name: 'Markdown', extensions: ['md'] },
-        { name: 'All Files', extensions: ['*'] },
-      ],
-    });
-    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
-    await fsp.writeFile(result.filePath, text, 'utf8');
-    return { ok: true, path: result.filePath };
-  } catch (e) {
-    return { ok: false, error: e && e.message ? e.message : String(e) };
-  }
-}));
-
 // Image paste — Ctrl+V in the Terminal pane. Reads the OS clipboard via
 // Electron's native API (renderer's navigator.clipboard.read() doesn't expose
 // raw image MIME types under contextIsolation), saves the bitmap to a temp
@@ -564,19 +533,6 @@ ipcMain.handle('clipboard:paste-text', async () => {
 ipcMain.handle('clipboard:write-text', validated(schemas.clipboardWriteText, ({ text }) => {
   try {
     clipboard.writeText(text);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e && e.message ? e.message : String(e) };
-  }
-}));
-
-// PRD 407 Capture panel — write side of paste-image's read. Writes a
-// screenshot capture to the OS clipboard as an image.
-ipcMain.handle('browser:copy-image', validated(schemas.browserCopyImage, ({ dataUrl }) => {
-  try {
-    const img = nativeImage.createFromDataURL(dataUrl);
-    if (!img || img.isEmpty()) return { ok: false, error: 'empty image' };
-    clipboard.writeImage(img);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e && e.message ? e.message : String(e) };
@@ -841,7 +797,6 @@ agentMemory.registerAgentMemoryHandlers();
 git.register(ipcMain);
 filesIpc.registerFilesHandlers();
 registerDocEditHandlers();
-webRemote.registerRemoteHandlers();
 chatRunner.registerChatHandlers();
 
 // Direct in-process PRD authoring for a queued PromptTicket classified
@@ -943,11 +898,6 @@ app.on('web-contents-created', (_e, wc) => {
   });
 
   wc.on('will-navigate', (event, url) => {
-    // The embedded Browser tab's WebContentsView is a real browser — it must
-    // be able to navigate anywhere. Exempt ONLY webContents registered by
-    // browserView.cjs; the main window's lock below is unchanged.
-    if (browserView.isBrowserViewContents(wc.id)) return;
-
     const allowed = useDevServer
       ? ['http://localhost:5173', 'http://127.0.0.1:5173']
       : [];
@@ -1144,16 +1094,12 @@ app.whenReady().then(async () => {
   ptyManager.attachWindow(mainWindow);
   configMgr.attachWindow(mainWindow);
   transcripts.attachWindow(mainWindow);
-  browserView.registerBrowserView({ mainWindow, ipcMain });
-  browserCapture.attachWindow(mainWindow);
-  browserCapture.registerBrowserCapture({ ipcMain, getView: browserView.getView });
   voiceHotkey.init(mainWindow).catch((e) => {
     logs.writeLine({ scope: 'voice-hotkey', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
   scheduler.attachWindow(mainWindow);
   watchers.attachWindow(mainWindow);
   pluginInstall.attachWindow(mainWindow);
-  webRemote.attachWindow(mainWindow);
   chatRunner.attachWindow(mainWindow);
   promptSessionEvents.attachWindow(mainWindow);
   attachDocEditWindow(mainWindow);
@@ -1177,17 +1123,11 @@ app.whenReady().then(async () => {
     console.log(`[main] scheduler ownership held by pid ${ownership.holderPid} — running scheduler-passive (no reconciliation, no admin server)`);
     logs.writeLine({ scope: 'scheduler', level: 'info', message: 'scheduler-passive: ownership held by another instance', meta: { holderPid: ownership.holderPid } });
   }
-  browserAgentServer.start().catch((e) => {
-    logs.writeLine({ scope: 'browser-agent-server', level: 'error', message: 'init failed', meta: { error: e?.message } });
-  });
   // First-boot default: install the bundled session-manager-dev plugin (its 10
   // dev skills) from the app's own marketplace. One-shot + idempotent; never
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
   seedDevPlugin({ logger: console }).catch((e) => {
     logs.writeLine({ scope: 'seed-dev-plugin', level: 'error', message: 'seed failed', meta: { error: e?.message } });
-  });
-  webRemote.init().catch((e) => {
-    logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
   // History rollup finalize pass: deferred 30s past boot so it never competes
   // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this
@@ -1249,7 +1189,6 @@ let teardownDone = false;
 function runShutdownCleanup() {
   if (teardownDone) return;          // idempotent — will-quit may still fire after an app.exit path
   teardownDone = true;
-  webRemote.destroy();
   // Mark a clean exit so the next boot can distinguish a graceful quit from an
   // OOM-kill / native crash (which leaves the sentinel `open`).
   crashDiagnostics.markCleanShutdown();
@@ -1287,7 +1226,6 @@ app.on('before-quit', () => {
   transcripts.closeAll();
   watchers.manager.killAll();
   adminHttp.stop().catch(() => {});
-  browserAgentServer.stop().catch(() => {});
   // Best-effort flush of any pending OTEL spans. shutdown() has its own 2s
   // ceiling so a wedged exporter can't hold quit.
   otel.shutdown().catch(() => {});

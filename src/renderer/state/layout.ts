@@ -197,7 +197,7 @@ export function getPanelDefinition(id: string): PanelDefinition | undefined {
  * Pure predicate (no store reads) so App.tsx's reconciliation effect is
  * unit-testable without mounting App. Scoped to 'projects' only — 'terminal'
  * (Epics workspace) intentionally renders with activeTabId === null, and
- * 'browser'/'editor' own independent tab-id state, not session activeTabId.
+ * 'editor' owns independent tab-id state, not session activeTabId.
  */
 export function needsProjectsPanelReconciliation(
   focusedPanelId: string | null,

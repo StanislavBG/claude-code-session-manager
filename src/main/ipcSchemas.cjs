@@ -39,104 +39,10 @@ const ptyResize = z.object({
   rows: z.number().int().min(3).max(1000),
 });
 
-// ──────────────────────────────────────────── Browser (WebContentsView embed)
-// viewId is a renderer-generated identifier; restrict to a safe charset (no
-// '/', no '.') since it keys the in-process Map<viewId, WebContentsView> —
-// not used as a filesystem path, but kept consistent with tabId conventions.
-const BROWSER_VIEW_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
-const browserViewId = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-});
-
-const browserCreate = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  // Non-persistent partition string (PRD 400 run-mode isolation). No leading
-  // 'persist:' enforced here — callers choose persistence explicitly.
-  partition: z.string().min(1).max(256),
-});
-
-const BOUNDS_INT = z.number().int().min(0).max(100000);
-const browserSetBounds = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  x: BOUNDS_INT,
-  y: BOUNDS_INT,
-  width: BOUNDS_INT,
-  height: BOUNDS_INT,
-});
-
-const browserNavigate = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  url: z.string().min(1).max(8192),
-});
-
-// PRD 407: DOM/text capture from the active browser sub-tab.
-const browserCaptureDom = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  kind: z.enum(['text', 'html']),
-});
-
-// PRD 404: filter -> prune -> summarize -> chunk capture of a picked
-// selection (browser:capture). selectors comes from the PRD 403 picker.
-const browserCaptureSelection = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  selectors: z.array(z.string().min(1).max(2048)).min(1).max(50),
-  mode: z.enum(['agent', 'html', 'a11y', 'selector']),
-});
-
-// PRD 407: clipboard image write (browser:copy-image). dataUrl is a PNG data
-// URL from webContents.capturePage() — capped well above any realistic
-// screenshot so a malformed/huge payload can't wedge the IPC channel.
-const browserCopyImage = z.object({
-  dataUrl: z.string().min(1).max(50_000_000),
-});
-
 // Recorder export (PRD 412): write arbitrary recorded-flow text to the OS
-// clipboard, separate from the image-only browserCopyImage above.
+// clipboard.
 const clipboardWriteText = z.object({
   text: z.string().max(1_000_000),
-});
-
-// Recorder export (PRD 412): native "Save As" dialog write, bypassing the
-// config.cjs write-boundary since the path is user-chosen via OS dialog.
-const browserSaveRecording = z.object({
-  defaultName: z.string().min(1).max(255),
-  text: z.string().max(1_000_000),
-});
-
-// PRD 410: replay a recorded step list against a live view. The renderer
-// owns the step list (main never persists recorded steps), so every call is
-// self-contained. `select` is accepted for forward-compat even though the
-// live recorder engine doesn't emit it yet.
-const browserReplayStep = z.object({
-  n: z.number().int().min(1),
-  verb: z.enum(['navigate', 'click', 'type', 'select', 'wait-for']),
-  target: z.string().max(2000),
-  value: z.string().max(2000).optional(),
-  variable: z.string().max(64).nullable().optional(),
-  kind: z.enum(['nav', 'assert']).optional(),
-  masked: z.boolean().optional(),
-  variableSuggestion: z.string().max(64).optional(),
-});
-
-const browserReplay = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  steps: z.array(browserReplayStep).max(500),
-  values: z.record(z.string().max(64), z.string().max(2000)).optional(),
-  continueOnError: z.boolean().optional(),
-});
-
-// PRD 402: address-bar zoom control. factor is clamped again in
-// browserView.cjs's setZoom — this just bounds the wire payload.
-const browserSetZoom = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  factor: z.number().min(0.1).max(10),
-});
-
-// PRD 402: Cmd/Ctrl+F find bar.
-const browserFind = z.object({
-  viewId: z.string().min(1).max(128).regex(BROWSER_VIEW_ID_RE),
-  text: z.string().max(2000),
-  forward: z.boolean().optional(),
 });
 
 // ──────────────────────────────────────────── Transcripts
@@ -876,18 +782,7 @@ module.exports = {
     ptyAlive,
     ptyWrite,
     ptyResize,
-    browserViewId,
-    browserCreate,
-    browserSetBounds,
-    browserNavigate,
-    browserCaptureDom,
-    browserCaptureSelection,
-    browserCopyImage,
     clipboardWriteText,
-    browserSaveRecording,
-    browserReplay,
-    browserSetZoom,
-    browserFind,
     transcriptSubscribe,
     transcriptTabId,
     transcriptPath,

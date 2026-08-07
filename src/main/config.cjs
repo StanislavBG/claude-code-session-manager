@@ -129,10 +129,7 @@ function validateWrite(realAbs) {
     (p) => realAbs === p || realAbs.startsWith(p + path.sep)
   );
   if (inWritePrefix) return;
-  // Also allowed inside a registered project root's .claude/ subtree, OR its
-  // tests/fixtures/browser-capture/ subtree (PRD 407 "PRD fixture" capture
-  // destination — narrowly scoped to that one path segment, not a general
-  // project-root write grant).
+  // Also allowed inside a registered project root's .claude/ subtree.
   for (const root of allowedRoots) {
     if (root === os.homedir()) continue;
     let realRoot;
@@ -140,17 +137,6 @@ function validateWrite(realAbs) {
     if (realAbs === realRoot || realAbs.startsWith(realRoot + path.sep)) {
       const claudeSub = path.join(realRoot, '.claude');
       if (realAbs === claudeSub || realAbs.startsWith(claudeSub + path.sep)) {
-        return;
-      }
-      const fixturesSub = path.join(realRoot, 'tests', 'fixtures', 'browser-capture');
-      if (realAbs === fixturesSub || realAbs.startsWith(fixturesSub + path.sep)) {
-        return;
-      }
-      // PRD 410 Recorder → Playwright-spec export: narrowly scoped to
-      // tests/e2e/ (matches the repo's existing e2e spec location), not a
-      // general project-root write grant.
-      const e2eSub = path.join(realRoot, 'tests', 'e2e');
-      if (realAbs === e2eSub || realAbs.startsWith(e2eSub + path.sep)) {
         return;
       }
       // PromptSession persistence (active-index.json + per-session archives,

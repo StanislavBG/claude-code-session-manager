@@ -29,82 +29,6 @@ export interface WriteErrorEvent {
   reason: string;
 }
 
-export interface BrowserNavState {
-  url: string;
-  title: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  loading: boolean;
-  isSecure: boolean;
-}
-
-/** One captured recorder step (PRD 408 engine → PRD 409 panel). */
-export interface RecordStep {
-  n: number;
-  /** `select` is accepted by replay/export (PRD 410) for forward-compat;
-   * the live engine does not emit it yet. */
-  verb: 'navigate' | 'click' | 'type' | 'select' | 'wait-for' | 'drag';
-  target: string;
-  kind?: 'nav' | 'assert';
-  /** True for `type` steps — the actual typed value is never captured. */
-  masked?: boolean;
-  /** Engine-suggested `{{var}}` name for a `type` step (e.g. field name). */
-  variableSuggestion?: string;
-  /** Renderer-owned: set once the user checks "parameterize as {{var}}". */
-  variable?: string | null;
-  /** `select` steps only — the option value to choose on replay/export. */
-  value?: string;
-  /** Click position, or drag-start position for `drag` steps. */
-  x?: number;
-  /** Click position, or drag-start position for `drag` steps. */
-  y?: number;
-  /** `drag` steps only — drag-end target selector. */
-  endTarget?: string;
-  /** `drag` steps only — drag-end x position. */
-  endX?: number;
-  /** `drag` steps only — drag-end y position. */
-  endY?: number;
-}
-
-/** Per-step replay outcome (PRD 410), streamed as `browser:replay-step:<viewId>`. */
-export interface ReplayStepResult {
-  n: number;
-  status: 'pass' | 'fail';
-  detail?: string;
-}
-
-/** find-in-page result (PRD 402), streamed as `browser:find-result:<viewId>`. */
-export interface FindResult {
-  requestId: number;
-  matches: number;
-  activeMatchOrdinal: number;
-}
-
-/** Element-picker event (PRD 403), streamed as `browser:picker-event:<viewId>`. */
-export interface PickerEvent {
-  type: 'hover' | 'pick' | 'unpick' | 'exit';
-  selector?: string;
-  label?: string;
-  tag?: string;
-  rect?: { x: number; y: number; width: number; height: number };
-  /** Present on a 'pick' event fired by an unmodified click — the selection was replaced, not accumulated. */
-  replace?: boolean;
-}
-
-/** One entry in `~/.claude/session-manager/browser/history.json` (PRD 402). */
-export interface BrowserHistoryEntry {
-  url: string;
-  title: string;
-  ts: number;
-}
-
-/** One entry in `~/.claude/session-manager/browser/bookmarks.json` (PRD 402). */
-export interface BrowserBookmark {
-  url: string;
-  title: string;
-  ts: number;
-}
-
 export interface ReadJsonResult {
   exists: boolean;
   raw: string;
@@ -133,7 +57,7 @@ export interface ImportRef {
 /** Declared owner ids for the single-writer law over a project's
  *  session-manager-operations/ root. Mirrors OWNERS in
  *  src/main/lib/opsOwnership.cjs — one writer per namespace; everyone reads. */
-export type OpsWriter = 'epics' | 'scheduler' | 'project-home' | 'browser';
+export type OpsWriter = 'epics' | 'scheduler' | 'project-home';
 
 export interface WriteResult {
   ok: boolean;
@@ -1304,62 +1228,6 @@ export interface SessionManagerAPI {
     onExit: (tabId: string, handler: (info: PtyExit) => void) => () => void;
     onWriteError: (handler: (ev: WriteErrorEvent) => void) => () => void;
   };
-  browser: {
-    create: (payload: { viewId: string; partition: string }) => Promise<{ ok: boolean }>;
-    setBounds: (payload: { viewId: string; x: number; y: number; width: number; height: number }) => Promise<{ ok: boolean }>;
-    show: (viewId: string) => Promise<{ ok: boolean }>;
-    hide: (viewId: string) => Promise<{ ok: boolean }>;
-    destroy: (viewId: string) => Promise<{ ok: boolean }>;
-    navigate: (payload: { viewId: string; url: string }) => Promise<{ ok: boolean; error?: string }>;
-    back: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    forward: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    reload: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    stop: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    onNavState: (viewId: string, handler: (state: BrowserNavState) => void) => () => void;
-    recordStart: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    recordStop: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    onRecordStep: (viewId: string, handler: (step: RecordStep) => void) => () => void;
-    captureDom: (payload: { viewId: string; kind: 'text' | 'html' }) => Promise<
-      | { ok: true; url: string; title: string; text: string; truncated?: boolean }
-      | { ok: false; error: string }
-    >;
-    captureShot: (viewId: string) => Promise<
-      | { ok: true; url: string; title: string; dataUrl: string }
-      | { ok: false; error: string }
-    >;
-    /** Opens a native "Save As" dialog and writes `text` to the chosen path directly
-     *  (bypasses config.cjs's write-boundary check — the path is user-chosen via OS dialog). */
-    saveRecording: (payload: { defaultName: string; text: string }) => Promise<
-      | { ok: true; path: string }
-      | { ok: false; canceled: true }
-      | { ok: false; error: string }
-    >;
-    replay: (payload: {
-      viewId: string;
-      steps: RecordStep[];
-      values?: Record<string, string>;
-      continueOnError?: boolean;
-    }) => Promise<{ ok: boolean; error?: string; stopped?: boolean; failedAt?: number }>;
-    onReplayStep: (viewId: string, handler: (step: ReplayStepResult) => void) => () => void;
-    setZoom: (payload: { viewId: string; factor: number }) => Promise<{ ok: boolean; error?: string; factor?: number }>;
-    find: (payload: { viewId: string; text: string; forward?: boolean }) => Promise<{ ok: boolean; error?: string }>;
-    stopFind: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    onFindResult: (viewId: string, handler: (result: FindResult) => void) => () => void;
-    pickerStart: (viewId: string) => Promise<{ ok: boolean; error?: string }>;
-    pickerStop: (viewId: string) => Promise<{ ok: boolean; error?: string; wasPicking?: boolean }>;
-    onPickerEvent: (viewId: string, handler: (ev: PickerEvent) => void) => () => void;
-    /** Selection-scoped capture pipeline (PRD 404): filter -> prune -> summarize -> chunk for 'agent', outerHTML for 'html', CDP AX-tree for 'a11y', fallback-chain for 'selector'. */
-    capture: (payload: {
-      viewId: string;
-      selectors: string[];
-      mode: 'agent' | 'html' | 'a11y' | 'selector';
-    }) => Promise<
-      | { ok: true; mode: string; text: string; meta: { chunks?: number; tokens?: number } }
-      | { ok: false; error: string }
-    >;
-    /** Fired when the embedded page tries to open a new window (target="_blank", window.open, ctrl/cmd-click) — the main process denies the native popup and forwards the URL here. */
-    onOpenTabRequest: (handler: (payload: { url: string }) => void) => () => void;
-  };
   transcripts: {
     subscribe: (payload: { tabId: string; cwd: string; sessionUuid: string }) => Promise<SubscribeResult>;
     /** Release the sub back to the LRU cache (view-switch). Does not destroy the watcher. */
@@ -1576,8 +1444,6 @@ export interface SessionManagerAPI {
       | { ok: true; text: string }
       | { ok: false; error?: string }
     >;
-    /** Write side — copies a Capture-panel screenshot data URL to the OS clipboard. */
-    copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>;
     /** Write side — copies arbitrary text (e.g. a recorded flow export) to the OS clipboard. */
     writeText: (text: string) => Promise<{ ok: boolean; error?: string }>;
   };

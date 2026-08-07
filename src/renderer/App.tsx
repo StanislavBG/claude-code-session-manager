@@ -6,7 +6,6 @@ import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { BroadcastBar } from './components/BroadcastBar'
 import { WatchersPopover } from './components/WatchersPopover'
 import { Workbench } from './components/workbench/Workbench'
-import { SplitAgentBrowser } from './components/SplitAgentBrowser'
 import { RecordingStatus } from './components/RecordingStatus'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
@@ -53,7 +52,6 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
-  const [splitView, setSplitView] = useState(false)
   const [terminalToast, setTerminalToast] = useState<string | null>(null)
 
   // Every NavKey routes through the layout store. Used by CommandPalette
@@ -135,10 +133,10 @@ export function App() {
   // is scoped to navFace === 'project' (needsProjectsPanelReconciliation's
   // default) and must not fire while browsing it from Home.
   // Scoped ONLY to 'projects': 'terminal' (Epics workspace) intentionally
-  // renders with activeTabId === null (see navigate() above), and
-  // 'browser'/'editor' own independent tab-id state (useBrowserState()
-  // .activeTabId, no activeTab dependency in EditorView) so they don't need
-  // this guard — see needsProjectsPanelReconciliation's own comment.
+  // renders with activeTabId === null (see navigate() above), and 'editor'
+  // owns independent tab-id state (no activeTab dependency in EditorView)
+  // so it doesn't need this guard — see needsProjectsPanelReconciliation's
+  // own comment.
   useEffect(() => {
     if (needsProjectsPanelReconciliation(focusedPanelId, activeTabId, navFace)) {
       useLayout.getState().openPanel('overview')
@@ -503,8 +501,6 @@ export function App() {
         setPaletteOpen((v) => !v)
       } else if (e.key === 'Escape' && paletteOpen) {
         setPaletteOpen(false)
-      } else if (e.key === 'Escape' && splitView) {
-        setSplitView(false)
       } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         // Alt+1..Alt+5 — activate tab at index 0..4. e.code is layout-stable
         // (e.key is the alt-modified char on some non-US layouts). Capture
@@ -531,7 +527,7 @@ export function App() {
     // textarea keeps other shortcuts (typing) from being affected.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [paletteOpen, splitView])
+  }, [paletteOpen])
 
   // F8 — read persisted turn-detector settings on mount, seed the store, and
   // (when opted-in and not in dictation mode) spawn the turn-detector worker
@@ -651,18 +647,6 @@ export function App() {
   // above (React rules), so background services still init the same way.
   if (simpleMode === true) return <SimpleShell />
 
-  if (splitView) {
-    return (
-      <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>
-        {/* Privacy invariant (CLAUDE.md): RecordingStatus must remain mounted
-            whenever isRecording === true, even in split view. */}
-        <RecordingStatus />
-        <SplitAgentBrowser onExit={() => setSplitView(false)} />
-        <Toast />
-      </div>
-    )
-  }
-
   return (
     <div className={`h-full w-full flex flex-col bg-bg text-fg text-sm ${isRecording ? 'pt-7' : ''}`}>
       {/* Privacy invariant (CLAUDE.md): RecordingStatus must remain mounted
@@ -673,7 +657,7 @@ export function App() {
           outer container shifts the rest of the app down by the banner's
           28px height so TabBar stays visible. */}
       <RecordingStatus />
-      <TabBar splitViewActive={splitView} onToggleSplitView={() => setSplitView(true)} />
+      <TabBar />
       <div className="flex-1 flex min-h-0">
         <AlmanacSidebar
           active={focusedPanelId}

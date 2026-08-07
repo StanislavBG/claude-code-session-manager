@@ -1,19 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { useWatchers } from '../state/watchers'
-import { useBrowserState } from '../state/browser'
 import { useLayout } from '../state/layout'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { useTabDragReorder } from './useTabDragReorder'
 
 const ACTIVITY_WINDOW_MS = 30_000
 
-interface TabBarProps {
-  onToggleSplitView?: () => void
-  splitViewActive?: boolean
-}
-
-export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {}) {
+export function TabBar() {
   // Subscribe per-slice. A bare `useSessions()` returns a fresh object every
   // tick (no shallow-equality selector), which trips React #185 (Maximum
   // update depth) under any external setState — manifesting as a blank app
@@ -24,8 +18,6 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
   const setActive = useSessions((s) => s.setActive)
   const reorderTab = useSessions((s) => s.reorderTab)
   const watchersById = useWatchers((s) => s.watchers)
-  const hasBrowserTabs = useBrowserState((s) => s.tabs.length > 0)
-  const canSplitView = activeTabId != null && hasBrowserTabs
   const openPanel = useLayout((s) => s.openPanel)
   const openProjectPanel = useLayout((s) => s.openProjectPanel)
   const setEpicsWorkspaceOpen = useLayout((s) => s.setEpicsWorkspaceOpen)
@@ -155,19 +147,6 @@ export function TabBar({ onToggleSplitView, splitViewActive }: TabBarProps = {})
         })}
       </div>
       <div className="flex items-center gap-2 pb-2 pl-3 text-[12px] text-fg-faint shrink-0">
-        {canSplitView && onToggleSplitView && (
-          <button
-            onClick={onToggleSplitView}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border border-line hover:bg-bg-hi/40 ${
-              splitViewActive ? 'text-accent border-accent' : 'text-fg-faint hover:text-fg'
-            }`}
-            title="Split view: agent terminal + browser"
-            aria-pressed={splitViewActive ?? false}
-          >
-            <span aria-hidden="true">⇄</span>
-            <span>Split view</span>
-          </button>
-        )}
         <span className="font-semibold text-fg-dim">Claude Session Manager</span>
         <span className="font-mono text-[11px] text-fg-faint">v{__APP_VERSION__}</span>
       </div>

@@ -15,9 +15,9 @@ export type AlmanacIconName =
   | 'scheduler' | 'settings' | 'mic' | 'clock' | 'leaf'
   | 'system-prompt'
   | 'permissions' | 'agent-memory' | 'tool' | 'quick-open'
-  | 'remote' | 'wifi' | 'shield' | 'link' | 'copy'
+  | 'wifi' | 'shield' | 'link' | 'copy'
   | 'check' | 'x' | 'send'
-  | 'browser' | 'target' | 'record' | 'eye' | 'camera'
+  | 'target' | 'eye'
   | 'arrowleft' | 'arrowright' | 'reload' | 'lock' | 'stop'
   | 'star' | 'minus' | 'paperclip'
   | 'expand' | 'collapse'
@@ -75,7 +75,6 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'permissions':  return <svg {...props}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /><circle cx="12" cy="15.5" r="1.2" fill="currentColor" stroke="none" /></svg>
     case 'tool':         return <svg {...props}><path d="M14 4a4 4 0 014 4l-7 7-4-4 7-7zM7 11l-3 3 6 6 3-3" /></svg>
     case 'quick-open':   return <svg {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 9h18M7 13h10M7 16h6" /></svg>
-    case 'remote':       return <svg {...props}><path d="M5 12.5a7 7 0 0114 0M1.5 9a11 11 0 0121 0M8.5 16a3.5 3.5 0 017 0" /><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none" /></svg>
     case 'wifi':         return <svg {...props}><path d="M5 12.5a10 10 0 0114 0M8 15.5a6 6 0 018 0M12 18.5h.01" /></svg>
     case 'shield':       return <svg {...props}><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></svg>
     case 'link':         return <svg {...props}><path d="M9 12h6" /><path d="M10 8H7a4 4 0 000 8h3M14 8h3a4 4 0 010 8h-3" /></svg>
@@ -83,11 +82,8 @@ export function AlmanacIcon({ name, size = 17, stroke = 1.6, className }: IconPr
     case 'check':        return <svg {...props}><path d="M5 12l5 5 9-10" /></svg>
     case 'x':            return <svg {...props}><path d="M6 6l12 12M18 6L6 18" /></svg>
     case 'send':         return <svg {...props}><path d="M4 11l17-7-7 17-3-7z" /></svg>
-    case 'browser':      return <svg {...props}><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="3.2" ry="8" /><path d="M4 12h16" /></svg>
     case 'target':       return <svg {...props}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
-    case 'record':       return <svg {...props}><circle cx="12" cy="12" r="7" fill="currentColor" stroke="none" /></svg>
     case 'eye':          return <svg {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
-    case 'camera':        return <svg {...props}><path d="M4 8h3l2-2h6l2 2h3v11H4z" /><circle cx="12" cy="13.5" r="3.5" /></svg>
     case 'arrowleft':    return <svg {...props}><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
     case 'arrowright':   return <svg {...props}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
     case 'reload':       return <svg {...props}><path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>

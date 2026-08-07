@@ -14,9 +14,7 @@ import { Plugins } from './tabs/Plugins'
 import { McpServers } from './tabs/McpServers'
 import { Hooks } from './tabs/Hooks'
 import { ProjectsWorkspace } from './tabs/ProjectsWorkspace'
-import { Browser } from './tabs/Browser'
 import { Scheduler } from './tabs/Scheduler'
-import { WebRemote } from './tabs/WebRemote'
 import { AgentLibrary } from './tabs/AgentLibrary'
 import { TagLibrary } from './tabs/TagLibrary'
 import { HostBilko } from './tabs/HostBilko'
@@ -58,7 +56,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'agent-library': { title: 'Agent Library',                 intro: 'Every agent persona available on this machine — global definitions in ~/.claude/agents, and which currently-open projects override them locally. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
   'tag-library':   { title: 'Tag Library',                   intro: 'Every Epic intent tag, its meaning, and its /develop-eagerness default. Assign or remove which agent personas carry each tag.' },
   'bilko-host':    { title: 'Host on Bilko.run',              intro: 'Publish this project\'s generated Marketing page to bilko.run as a static-path listing, via the bilko-host MCP\'s gated publish pipeline.' },
-  'remote':        { title: 'Remote Access',              intro: 'Web remote control — disabled by default. Pair your browser, then issue scheduler + terminal commands from any device over a secure relay you self-host.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
 }
@@ -88,8 +85,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       return <EditorView />
     case 'projects':
       return <ProjectsWorkspace />
-    case 'browser':
-      return <Browser />
   }
 
   const meta = PAGE_META[active]
@@ -105,7 +100,6 @@ export function renderScreenComponent(active: NavKey, ctx: ScreenRenderCtx): Rea
       case 'system-prompt': return <SystemPrompt />
       case 'permissions':   return <Permissions />
       case 'settings':      return <Settings />
-      case 'remote':        return <WebRemote />
       case 'agent-library': return <AgentLibrary />
       case 'tag-library':   return <TagLibrary />
       case 'bilko-host':    return <HostBilko />

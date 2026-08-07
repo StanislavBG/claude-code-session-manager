@@ -14,7 +14,6 @@ export type NavKey =
   | 'overview'
   | 'project-home'
   | 'terminal'
-  | 'browser'
   | 'system-prompt'
   | 'settings'
   | 'permissions'
@@ -37,7 +36,6 @@ export type NavKey =
   // also gets a NavKey + MainPane screen. Screens render the same modal
   // components with variant="page" so the body content is unchanged.
   | 'voice'
-  | 'remote'
   // Read-only directory of global + per-project agent personas (Home face only).
   | 'agent-library'
   // Read-only directory of the Epic intent-tag taxonomy (Home face only).

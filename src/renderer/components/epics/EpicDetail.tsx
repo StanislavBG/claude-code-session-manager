@@ -903,7 +903,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       runActive={running && t.role === 'assistant' && i === lastAssistantIndex}
                       consentActionDisabled={running}
                       enableRawSessionActions={false}
-                      linkTarget="browser"
                       inlineFilePreview
                       toolStripVariant={toolStripVariant}
                       clampBodyChars={clampBodyChars}
@@ -987,7 +986,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   runActive
                   consentActionDisabled={running}
                   enableRawSessionActions={false}
-                  linkTarget="browser"
                   inlineFilePreview
                   // Deliberately NOT dialled down: while a run is in flight
                   // this strip ("working · N tools") is the only progress

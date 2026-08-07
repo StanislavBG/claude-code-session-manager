@@ -16,7 +16,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'overview',
   'project-home',
   'terminal',
-  'browser',
   'scheduler',
   'history',
   // Configure
@@ -29,7 +28,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'system-prompt',
   'permissions',
   'settings',
-  'remote',
   'agent-library',
   'tag-library',
   'bilko-host',

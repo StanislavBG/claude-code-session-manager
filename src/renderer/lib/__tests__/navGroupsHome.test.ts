@@ -19,7 +19,7 @@ describe('navGroups Home swap', () => {
 
 describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
-    'overview', 'browser', 'plugins', 'remote', 'voice', 'agent-library', 'tag-library',
+    'overview', 'plugins', 'voice', 'agent-library', 'tag-library',
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host']
@@ -74,23 +74,6 @@ describe('project-home is project-only', () => {
   it('project face includes project-home', () => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
     expect(keys).toContain('project-home')
-  })
-})
-
-describe('browser is home-only', () => {
-  it('NAV_ITEMS tags browser with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'browser')
-    expect(item?.faces).toEqual(['home'])
-  })
-
-  it('project face excludes browser', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('browser')
-  })
-
-  it('home face includes browser', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('browser')
   })
 })
 
@@ -164,22 +147,8 @@ describe('memory is project-only', () => {
   })
 })
 
-describe('remote is home-only', () => {
-  it('NAV_ITEMS tags remote with faces: [home]', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'remote')
-    expect(item?.faces).toEqual(['home'])
-  })
-
-  it('project face excludes remote', () => {
-    const keys = getNavItemsForFace('project').map((item) => item.key)
-    expect(keys).not.toContain('remote')
-  })
-
-  it('home face includes remote', () => {
-    const keys = getNavItemsForFace('home').map((item) => item.key)
-    expect(keys).toContain('remote')
-  })
-})
+// ('remote' nav row retired with the web-remote feature removal, 2026-08-06 —
+// the NavKey literal no longer exists, so absence is enforced by the type system.)
 
 describe('scheduler — one combined screen on both faces, retired standalone sm-config folded in here', () => {
   it('NAV_ITEMS tags scheduler with faces: [home, project] and no per-face label override', () => {

@@ -284,3 +284,60 @@ test('a directory whose sole entry is eligible is fully removed (dir + files)', 
   applyRetention(runsDir, settings, { now });
   expect(fs.existsSync(path.join(runsDir, '2020-01-01T00-00-00-000Z'))).toBe(false);
 });
+
+// ─── liveKeysFromJobs: null-runId backfill (needs_review can lose its runId) ─
+
+test('liveKeysFromJobs: backfills protection via a runsDir scan when a live job has lost its runId', () => {
+  makeRun('2020-01-01T00-00-00-000Z', 'lost-slug', { finishedAt: Date.now() });
+  const jobs = [{ slug: 'lost-slug', runId: null, status: 'needs_review' }];
+  const keys = liveKeysFromJobs(jobs, { runsDir });
+  expect(keys.has('lost-slug|2020-01-01T00-00-00-000Z')).toBe(true);
+});
+
+test('liveKeysFromJobs: without a runsDir hint, a live job with no runId yields no protection (documented limitation — callers should always pass runsDir)', () => {
+  const jobs = [{ slug: 'lost-slug', runId: null, status: 'needs_review' }];
+  expect(liveKeysFromJobs(jobs).size).toBe(0);
+});
+
+// ─── applyRetention: fail-safe fallback when the caller forgets liveKeys/jobs ─
+
+test('applyRetention: enabled=true with no liveKeys/jobs falls back to reading the real scheduler queue (queueStore) instead of silently protecting nothing', () => {
+  const now = Date.now();
+  makeRun('2020-05-01T00-00-00-000Z', 'fallback-slug', { finishedAt: now - 400 * DAY_MS });
+  makeRun('2020-06-01T00-00-00-000Z', 'fallback-slug', { finishedAt: now - 1 * DAY_MS }); // most recent, unrelated
+
+  const queueStore = require('../lib/queueStore.cjs');
+  const original = queueStore.readMergedSync;
+  queueStore.readMergedSync = () => ({
+    jobs: [{ slug: 'fallback-slug', runId: '2020-05-01T00-00-00-000Z', status: 'running' }],
+  });
+  try {
+    const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 0 } } };
+    applyRetention(runsDir, settings, { now }); // deliberately no liveKeys, no jobs
+    expect(fs.existsSync(path.join(runsDir, '2020-05-01T00-00-00-000Z'))).toBe(true);
+  } finally {
+    queueStore.readMergedSync = original;
+  }
+});
+
+test('applyRetention: dry-run path (enabled=false) never reads queueStore for live protection', () => {
+  const now = Date.now();
+  makeRun('2020-05-01T00-00-00-000Z', 'no-touch-slug', { finishedAt: now - 400 * DAY_MS });
+  makeRun('2020-06-01T00-00-00-000Z', 'no-touch-slug', { finishedAt: now - 1 * DAY_MS });
+
+  const queueStore = require('../lib/queueStore.cjs');
+  const original = queueStore.readMergedSync;
+  let called = false;
+  queueStore.readMergedSync = () => {
+    called = true;
+    return { jobs: [] };
+  };
+  try {
+    const settings = { schedulerRunLogRetention: { enabled: false, policy: { maxAgeDays: 0 } } };
+    const result = applyRetention(runsDir, settings, { now });
+    expect(result.deleted).toBe(false);
+    expect(called).toBe(false);
+  } finally {
+    queueStore.readMergedSync = original;
+  }
+});

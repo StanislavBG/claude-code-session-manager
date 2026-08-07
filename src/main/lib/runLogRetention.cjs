@@ -29,8 +29,9 @@
  *     `schedulerRunLogRetention.enabled === true` AND a non-empty policy.
  *     Everywhere else (computeReport, and applyRetention with no opt-in)
  *     this module only READS the filesystem.
- *   - An entry belonging to a job that is currently live (queued / running /
- *     needs_review / investigating — see LIVE_STATUSES) is never eligible,
+ *   - An entry belonging to a job that is currently live — status `pending`
+ *     (queued), `running`, `needs_review`, or `investigating` (the exact
+ *     literals scheduler.cjs uses; see LIVE_STATUSES) — is never eligible,
  *     regardless of age or count policy.
  *   - The most recent entry for any given slug is never eligible, even past
  *     an age cap — every PRD keeps at least its latest evidence.
@@ -65,11 +66,38 @@ function isLiveJob(job) {
  * Build the `${slug}|${runId}` protection set from a scheduler job list
  * (queueStore.readMergedSync().jobs, or any array with the same shape). Jobs
  * with no runId yet (never started) have no run directory to protect.
+ *
+ * A `needs_review` job can lose its `runId` (an old queue-schema gap —
+ * scheduler.cjs's own `resolveRunId` backfill exists for the same reason)
+ * while a run directory for its slug still exists on disk. When `runsDir` is
+ * given, every run directory containing `<slug>.log` is protected for such a
+ * job — not just scheduler.cjs's single newest match, since this module has
+ * no way to know which one the job actually corresponds to and protecting
+ * too many is always safe here, never protecting too few.
  */
-function liveKeysFromJobs(jobs) {
+function liveKeysFromJobs(jobs, opts) {
+  const runsDir = opts && opts.runsDir;
   const keys = new Set();
   for (const job of jobs || []) {
-    if (isLiveJob(job) && job.runId) keys.add(`${job.slug}|${job.runId}`);
+    if (!isLiveJob(job) || !job.slug) continue;
+    if (job.runId) {
+      keys.add(`${job.slug}|${job.runId}`);
+      continue;
+    }
+    if (!runsDir) continue;
+    let dirs;
+    try {
+      dirs = fs.readdirSync(runsDir);
+    } catch {
+      continue;
+    }
+    for (const d of dirs) {
+      try {
+        if (fs.existsSync(path.join(runsDir, d, `${job.slug}.log`))) keys.add(`${job.slug}|${d}`);
+      } catch {
+        // skip
+      }
+    }
   }
   return keys;
 }
@@ -246,6 +274,29 @@ function isRetentionEnabled(settings) {
 }
 
 /**
+ * Resolve the live-job protection set for applyRetention. Prefers whatever
+ * the caller supplied (opts.liveKeys, or opts.jobs to derive it from); if
+ * neither is given AND deletion is actually about to happen, falls back to
+ * reading the real scheduler queue itself via queueStore.cjs (plain Node, no
+ * Electron deps — safe to require here) rather than silently treating no
+ * jobs as live. This is deliberately defense-in-depth: a future caller that
+ * forgets to thread live-job info through must not thereby lose live-job
+ * protection.
+ */
+function resolveLiveKeysForApply(runsDir, opts, enabled) {
+  if (opts && opts.liveKeys) return opts.liveKeys;
+  if (opts && opts.jobs) return liveKeysFromJobs(opts.jobs, { runsDir });
+  if (!enabled) return new Set(); // dry-run path never deletes; no live read needed
+  try {
+    const queueStore = require('./queueStore.cjs');
+    const state = queueStore.readMergedSync();
+    return liveKeysFromJobs(state.jobs || [], { runsDir });
+  } catch {
+    return new Set();
+  }
+}
+
+/**
  * Compute the report, and — ONLY when isRetentionEnabled(settings) — delete
  * the eligible files and rmdir any directory left fully empty. With no
  * opt-in (the default), this is exactly computeReport(): read-only,
@@ -254,9 +305,11 @@ function isRetentionEnabled(settings) {
 function applyRetention(runsDir, settings, opts) {
   const cfg = (settings && settings.schedulerRunLogRetention) || null;
   const policy = (cfg && cfg.policy) || {};
-  const report = computeReport(runsDir, policy, opts);
+  const enabled = isRetentionEnabled(settings);
+  const liveKeys = resolveLiveKeysForApply(runsDir, opts, enabled);
+  const report = computeReport(runsDir, policy, { now: opts && opts.now, liveKeys });
 
-  if (!isRetentionEnabled(settings)) {
+  if (!enabled) {
     return {
       deleted: false,
       reason: 'dry-run: schedulerRunLogRetention.enabled is not true (or has no policy)',

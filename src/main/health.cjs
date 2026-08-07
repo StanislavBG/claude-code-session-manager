@@ -379,7 +379,7 @@ async function check() {
   // `config`, same home as every other scheduler machine setting.
   try {
     const retentionCfg = queueState?.config?.schedulerRunLogRetention;
-    const liveKeys = liveKeysFromJobs(queueState?.jobs || []);
+    const liveKeys = liveKeysFromJobs(queueState?.jobs || [], { runsDir: DEFAULT_RUNS_DIR });
     const report = computeReport(
       DEFAULT_RUNS_DIR,
       retentionCfg?.policy || {},

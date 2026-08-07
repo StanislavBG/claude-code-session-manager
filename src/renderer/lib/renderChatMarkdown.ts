@@ -30,8 +30,31 @@ const renderTableDefault = chatMarkdownRenderer.table.bind(chatMarkdownRenderer)
 chatMarkdownRenderer.table = (token) =>
   `<div class="prose-chat-table-wrap">${renderTableDefault(token)}</div>`
 
+// Bounded cache keyed on the raw source string. `chatMarkdownRenderer` and the
+// marked options above are module constants that never vary per call, so the
+// source string alone is a complete cache key. A Map preserves insertion
+// order, so the first key is always the oldest — eviction just deletes it.
+export const CHAT_MARKDOWN_CACHE_CAP = 400
+
+const cache = new Map<string, string>()
+
 export function renderChatMarkdown(src: string): string {
-  return DOMPurify.sanitize(
+  const cached = cache.get(src)
+  if (cached !== undefined) return cached
+
+  const html = DOMPurify.sanitize(
     marked.parse(src, { async: false, breaks: true, renderer: chatMarkdownRenderer }) as string,
   )
+
+  cache.set(src, html)
+  if (cache.size > CHAT_MARKDOWN_CACHE_CAP) {
+    const oldestKey = cache.keys().next().value
+    if (oldestKey !== undefined) cache.delete(oldestKey)
+  }
+
+  return html
+}
+
+export function clearChatMarkdownCache(): void {
+  cache.clear()
 }

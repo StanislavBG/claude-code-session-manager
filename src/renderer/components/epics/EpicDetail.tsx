@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChat, attachTranscriptFeed, detachTranscriptFeed } from '../../state/chat'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
@@ -145,6 +145,7 @@ function ResponseEvent({
   }
 
   const displayText = expanded && fullText ? fullText : (event.text ?? '')
+  const displayHtml = useMemo(() => renderChatMarkdown(displayText), [displayText])
   // A 'response' event with outcome 'needs_review' is written exclusively by
   // scheduler.cjs's notifyNeedsReview for a root-cause report rcaReport.cjs
   // filed (see that function's own doc comment) — it is a question routed
@@ -203,7 +204,7 @@ function ResponseEvent({
         data-testid="epic-response-event-text"
         className="prose-chat inline [&_*]:m-0 [&_*]:inline"
         // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: renderChatMarkdown(displayText) }}
+        dangerouslySetInnerHTML={{ __html: displayHtml }}
       />
       <span aria-hidden="true"> —</span>
       {truncated && (

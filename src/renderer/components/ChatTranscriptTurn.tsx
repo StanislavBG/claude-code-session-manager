@@ -735,6 +735,7 @@ function ThinkingBlock({ turn }: { turn: ChatTurn }) {
 function McpInstructionsCard({ turn }: { turn: ChatTurn }) {
   const signal = turn.signal
   const serverName = signal?.names?.[0] ?? 'MCP server'
+  const html = useMemo(() => renderChatMarkdown(signal?.text ?? ''), [signal?.text])
   return (
     <div className="mb-1.5 overflow-hidden rounded-lg border border-accent/30" data-testid="mcp-instructions-card">
       <div className="bg-accent/10 px-2 py-1 font-mono text-[10.5px] text-accent">
@@ -743,7 +744,7 @@ function McpInstructionsCard({ turn }: { turn: ChatTurn }) {
       <div
         className="prose-chat bg-elev px-2 py-1.5 text-xs leading-relaxed text-fg"
         // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: renderChatMarkdown(signal?.text ?? '') }}
+        dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
   )
@@ -1303,6 +1304,7 @@ export function Turn({
   const urls = extractUrls(shownText)
   const filePaths = extractFilePaths(shownText)
   const isPlan = hasMarkdownList(shownText)
+  const shownHtml = useMemo(() => renderChatMarkdown(shownText), [shownText])
   const isRunning = presentation === 'working'
   // isApiErrorMessage/interruptedByShutdown both mean this turn is
   // incomplete (a dropped API response, a shutdown mid-stream) — reuse the
@@ -1365,7 +1367,7 @@ export function Turn({
               className={`prose-chat border px-3 py-2 text-sm leading-relaxed ${bubbleTone} ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd) }}
               // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{ __html: renderChatMarkdown(shownText) }}
+              dangerouslySetInnerHTML={{ __html: shownHtml }}
             />
             {(clamped.truncated || bodyExpanded) && clampBodyChars !== null && (
               <button

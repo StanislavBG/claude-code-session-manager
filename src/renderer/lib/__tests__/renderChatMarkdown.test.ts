@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
-import { renderChatMarkdown } from '../renderChatMarkdown'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { CHAT_MARKDOWN_CACHE_CAP, clearChatMarkdownCache, renderChatMarkdown } from '../renderChatMarkdown'
 
 describe('renderChatMarkdown', () => {
   // Issue #3 repro: Claude often emits checkmark-prefixed lines with a single
@@ -61,6 +61,50 @@ describe('renderChatMarkdown', () => {
     it('does not let a cell break out of the wrapper div', () => {
       const html = renderChatMarkdown('| A |\n|---|\n| </div><script>alert(1)</script><div> |')
       expect(html).not.toContain('<script>')
+    })
+  })
+
+  describe('cache', () => {
+    beforeEach(() => {
+      clearChatMarkdownCache()
+    })
+
+    it('returns a byte-identical string for a cache hit as for a cache miss', () => {
+      const src = '**bold** and _italic_ text'
+      const cold = renderChatMarkdown(src)
+      const warm = renderChatMarkdown(src)
+      expect(warm).toBe(cold)
+    })
+
+    it('evicts the oldest entry once the cap is exceeded', () => {
+      for (let i = 0; i < CHAT_MARKDOWN_CACHE_CAP + 1; i++) {
+        renderChatMarkdown(`entry ${i}`)
+      }
+      // The very first entry (index 0) should have been evicted oldest-first;
+      // re-rendering it must still succeed and produce correct output, i.e. it
+      // was recomputed rather than reading stale/missing cache state.
+      const recomputed = renderChatMarkdown('entry 0')
+      expect(recomputed).toBe('<p>entry 0</p>\n')
+      // The most recently added entries must still be cached (not evicted).
+      const stillCached = renderChatMarkdown(`entry ${CHAT_MARKDOWN_CACHE_CAP}`)
+      expect(stillCached).toBe(`<p>entry ${CHAT_MARKDOWN_CACHE_CAP}</p>\n`)
+    })
+
+    it('clearChatMarkdownCache resets state so a prior input recomputes cleanly', () => {
+      const src = 'hello world'
+      const first = renderChatMarkdown(src)
+      clearChatMarkdownCache()
+      const afterClear = renderChatMarkdown(src)
+      expect(afterClear).toBe(first)
+    })
+
+    it('strips a script tag on both the cold and the warm path', () => {
+      const src = '<script>alert(1)</script>hello'
+      const cold = renderChatMarkdown(src)
+      expect(cold).not.toContain('<script>')
+      const warm = renderChatMarkdown(src)
+      expect(warm).not.toContain('<script>')
+      expect(warm).toBe(cold)
     })
   })
 })

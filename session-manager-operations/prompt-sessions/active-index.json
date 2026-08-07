@@ -190,6 +190,14 @@
         "id": "pevt-msi7ws5t-25",
         "promptSessionId": "in-the-aggregation-logic-for-home-project-shoud--cf4e62f0",
         "at": "2026-08-07T00:39:53.489Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msi7ws5t-25",
+        "text": "Working tree is clean. Everything from this session is committed:\n\n| commit | what |\n|---|---|\n| `27313d2` | `refactor(epics)` — prompt collapsed to one row, dashed attach zone dropped |\n| `3e320f6` | `fix(chat)` — each prompt renders once; dedupe on the human body |\n| `e50ef1b` | `fix(history)` — analytics project axis keyed by cwd, not transcript folder |\n| `21ca59c` | `chore(ops)` — prompt-session runtime state |\n\nOne thing worth flagging: `git status` now reports **9 commits ahead of origin/main**, not the 4 above. The extra five (`02df21f`, `b014cc2`, `4fcc209`, `1603b12`, `11648cc` — the Browser/Web-Remote removals) were already in local history when this session started, and they're showing as unpushed even though my earlier push in this session reported `c47210f..3b78dde` succeeding. So `origin/main` appears to have moved back to a different lineage since then — worth a look before the next push. I didn't push, since you asked only for a commit.",
+        "id": "pevt-msib90s6-44",
+        "promptSessionId": "in-the-aggregation-logic-for-home-project-shoud--cf4e62f0",
+        "at": "2026-08-07T02:13:23.382Z"
       }
     ],
     "electron-refactor-into-node-js-server-browser-fo-4c8f644f": [
@@ -340,6 +348,22 @@
         "id": "pevt-msi9hmdv-41",
         "promptSessionId": "electron-refactor-into-node-js-server-browser-fo-4c8f644f",
         "at": "2026-08-07T01:24:05.395Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msi9hmdv-41",
+        "text": "Done.\n\n## Committed\n\n```\n21ca59c chore(ops): sync prompt-session runtime state\n```\n\n2 files, 9 insertions, 0 deletions — append-only Epic event-chain entries (a `response` event on the `settings-home` Epic plus its transcript line). Working tree was clean immediately after.\n\nCommitted to `main` rather than a branch: this repo's established pattern is ops-state snapshots going straight to main (`02df21f`, `3b78dde`, `5fb8627` are all `chore(ops)` on main), and branching live runtime state would strand it off main and conflict on the app's next write.\n\n## The HEAD inconsistency I flagged is resolved — not by me\n\nBetween my last turn and this one, PRD 1002's deletions were committed by someone else:\n\n```\nb014cc2 refactor(web-remote): remove the mobile relay and everything built on it\n02df21f chore(ops): sync scheduler + prompt-session runtime state\n```\n\n```\ngit cat-file -e HEAD:src/main/webRemote.cjs                     → gone from HEAD\ngit cat-file -e HEAD:src/renderer/components/tabs/WebRemote.tsx → gone from HEAD\n```\n\nSo the defect I raised across three validations — CLAUDE.md at HEAD claiming files were deleted while HEAD still contained them — no longer exists. Nothing was left for me to commit on that front.\n\n## PRD 1003's `test:e2e` gap: attempted, still open\n\nThe queue was empty (`(EMPTY - safe)`), so the second-Electron hazard was gone and I ran it. It hit my tool's hard 10-minute ceiling and was SIGTERM'd (exit 143) before producing a result. **Inconclusive — not a pass and not a failure.** I did not retry; a second attempt would hit the same ceiling.\n\nNothing harmful left behind: no stray `xvfb`, and the `playwright` processes present are pre-existing MCP servers (`@playwright/mcp`, and one from `~/Projects/burrow`), not residue from my run. `test-results/` is gitignored.\n\n**This remains the one unverified criterion across all four PRDs.** Run `npm run test:e2e` in a terminal without a 10-minute cap to close it. Static analysis still says the risk is low — `…",
+        "id": "pevt-msibmt1k-45",
+        "promptSessionId": "electron-refactor-into-node-js-server-browser-fo-4c8f644f",
+        "at": "2026-08-07T02:24:06.536Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msibmt1k-45",
+        "text": "Both cleanups done and committed as `3ef1152`.\n\n## 1. `CLAUDE.md:3` — the AC4 miss\n\nRemoved `Web Remote` from the live-tab list and replaced the present-tense cockpit sentence. Given you're bringing remote control back, I wrote it as a **restore pointer plus an explicit do-not-touch on the Bilko side** rather than deleting the history — AC4 allowed either, and a note is more useful than silence here:\n\n> The **desktop half** of the web remote (the `webRemote.cjs` relay client, its E2E crypto, and the Web Remote tab) was **removed 2026-08-06** as a deliberate scope reduction — see `b014cc2` to restore it. The **bilko.run side is intentionally still live** (same-origin relay + session state/summary protocol, hosted in `~/Projects/Bilko/`): remote control is planned to come back, so do NOT delete or decommission the relay, its routes, or its product-page copy on that side.\n\nNothing in `~/Projects/Bilko/` was touched.\n\n## 2. OWNERS drift — bigger than I reported\n\nI flagged one missing entry. There were three problems, all in the same two sentences:\n\n| Problem | Fix |\n|---|---|\n| `logs → logs` missing from the owners list (code has 5, doc had 4) | Added |\n| `logs/README.md` missing from the README enumeration — the file exists on disk | Added |\n| **`logs/` and `bilko-host/` both listed as \"deliberately NOT in `OWNERS`\"** — while the *same section's* owners list named `bilko-host` as an owner. CLAUDE.md contradicted itself. | Both removed from the non-OWNERS enumeration |\n\nThe `bilko-host` self-contradiction is the one I'd missed entirely last turn; I only caught it by diffing the enumeration against `opsOwnership.cjs` rather than against my earlier note.\n\n## Verification\n\n```\nCLAUDE.md: prompt-sessions → epics, scheduler → scheduler, project-brief → project-home, logs → logs, bilko-host → bilko-host\ncode:      prompt-sessions: epics  scheduler: scheduler  project-brief: project-home  logs: logs  bilko-host: bilko-host\n→ exact match\n\ncontradiction check (each OWNERS ns vs …",
+        "id": "pevt-msidmaj9-47",
+        "promptSessionId": "electron-refactor-into-node-js-server-browser-fo-4c8f644f",
+        "at": "2026-08-07T03:19:41.781Z"
       }
     ],
     "settings-home-the-settings-left-navigation-conta-cf9b46d3": [

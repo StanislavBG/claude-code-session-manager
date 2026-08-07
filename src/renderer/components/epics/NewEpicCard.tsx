@@ -3,7 +3,7 @@ import { usePromptSessions, type PromptSession } from '../../state/promptSession
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { compactPath } from '../../lib/compactPath'
-import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
+import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
@@ -143,6 +143,7 @@ export function NewEpicCard({
   const agentTouchedRef = useRef(false)
   const att = useAttachments()
   const [creating, setCreating] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const [advanced, setAdvanced] = useState(false)
   const [home, setHome] = useState<string | null>(null)
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
@@ -344,7 +345,17 @@ export function NewEpicCard({
         >
           {/* front */}
           <div
-            className="absolute inset-0 flex flex-col rounded-2xl border border-line bg-bg-hi px-[26px] pt-6 pb-[18px]"
+            data-testid="new-epic-front"
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              if (e.dataTransfer.files.length) att.add(e.dataTransfer.files)
+            }}
+            className={`absolute inset-0 flex flex-col rounded-2xl border bg-bg-hi px-[26px] pt-6 pb-[18px] ${
+              dragOver ? 'border-accent' : 'border-line'
+            }`}
             style={{ backfaceVisibility: 'hidden' }}
           >
             <NewEpicHeader eyebrow="New Epic" advanced={advanced} setAdvanced={setAdvanced} />
@@ -471,14 +482,26 @@ export function NewEpicCard({
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               onPaste={(e) => attachPastedFiles(e, att)}
-              placeholder="The objective, in a sentence or two — this is sent as the first instruction."
+              placeholder="The objective, in a sentence or two — this is sent as the first instruction. ⌘V to attach a screenshot."
               className="mb-3 w-full resize-y appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-[13px] leading-[1.55] text-fg outline-none"
             />
 
-            <div className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
-              references{att.items.length ? ` · ${att.items.length}` : ''}
+            {/* References — one compact line, not the old full-width dashed
+                drop zone. ⌘V is handled by the title/objective inputs and drop
+                by this card's own container, so the only control that needs a
+                place on screen is the small attach button. */}
+            <div className="flex items-center gap-2">
+              <AttachButton
+                att={att}
+                testId="new-epic-attach"
+                size={14}
+                className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-line bg-bg text-fg-dim hover:bg-bg-elev hover:text-fg"
+              />
+              <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint">
+                references{att.items.length ? ` · ${att.items.length}` : ''}
+              </span>
             </div>
-            <AttachTray att={att} tall testId="new-epic-attach-tray" />
+            <AttachTray att={att} testId="new-epic-attach-tray" />
             </div>
 
             <div className="mt-3 flex flex-shrink-0 items-center gap-2.5 border-t border-rule pt-3">

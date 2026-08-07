@@ -146,6 +146,28 @@ describe('EpicComposer', () => {
     expect(el.querySelector('[data-testid="epic-composer-cancel"]')).toBeNull()
   })
 
+  // The composer is deliberately ONE row: attach lives in the small icon
+  // button beside the mic, and the ⌘V/drop hint lives inside the prompt's own
+  // placeholder. The old full-width dashed "Paste a screenshot (⌘V) or drop
+  // files here · Attach" row is gone — it duplicated both affordances and cost
+  // a permanent slab of vertical space.
+  it('renders no dashed attach row and no second "Attach" button', () => {
+    const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
+    expect(el.textContent).not.toContain('Paste a screenshot (⌘V) or drop files here')
+    expect(el.querySelector('[data-testid="epic-composer-attach-tray"]')).toBeNull()
+    const attachButtons = Array.from(el.querySelectorAll('button')).filter((b) => b.textContent?.trim() === 'Attach')
+    expect(attachButtons).toHaveLength(0)
+    // The one attach control is the icon button in the tools strip.
+    expect(el.querySelector('[data-testid="epic-composer-attach"]')).not.toBeNull()
+  })
+
+  it('keeps the paste hint inside the prompt itself', () => {
+    const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
+    const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
+    expect(textarea.placeholder).toContain('⌘V to attach a screenshot')
+    expect(textarea.rows).toBe(1)
+  })
+
   it('adds and removes an attachment chip', () => {
     const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
     const fileInput = el.querySelector('[data-testid="epic-composer-attach-input"]') as HTMLInputElement

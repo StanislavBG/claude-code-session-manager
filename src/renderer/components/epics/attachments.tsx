@@ -116,106 +116,92 @@ export async function resolveAttachmentPaths(items: AttachmentItem[], cwd: strin
   return paths
 }
 
-/** Paste (⌘V) / drag-drop / file-picker tray for reference attachments.
- *  Chips show a thumbnail (images) or file icon, name, size, and a remove
- *  button. Matches the design mock's AttachTray. */
-export function AttachTray({
+/** Attach entry point — a small icon-only button plus its hidden file input.
+ *
+ *  This is the ONLY attach control either prompt surface renders. The old
+ *  full-width dashed "Paste a screenshot (⌘V) or drop files here · Attach"
+ *  row is gone: it cost a whole row of vertical space to advertise two
+ *  affordances that already work anywhere in the prompt (⌘V is handled by the
+ *  textareas via attachPastedFiles, drag-drop by the surrounding container),
+ *  and its "Attach" button duplicated this button. The paste/drop hint now
+ *  lives inside the prompt itself — the textarea placeholder — rather than
+ *  occupying a row of its own.
+ *
+ *  `testId` also names the hidden input as `<testId>-input`, so callers can
+ *  drive a file selection in tests without reaching through the chips tray. */
+export function AttachButton({
   att,
-  tall,
   testId,
-  hideZoneWhenEmpty,
+  className = '',
+  size = 17,
 }: {
   att: AttachmentsState
-  tall?: boolean
   testId?: string
-  /** Suppress the dashed drop-zone prompt row entirely while there are no
-   *  attachments yet — used by EpicComposer, whose own input-tools row
-   *  already carries a dedicated attach button and whose outer container
-   *  already handles paste/drag-drop, so the full-width dashed prompt would
-   *  be a redundant second affordance (Epics.html composer screenshot,
-   *  2026-08-01 sync: no dashed zone shown once the input row exists).
-   *  NewEpicCard (tall variant) omits this — it has no other attach entry
-   *  point, so its dashed zone stays the primary one. */
-  hideZoneWhenEmpty?: boolean
+  className?: string
+  size?: number
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [over, setOver] = useState(false)
-
-  const onPaste = (e: React.ClipboardEvent) => { attachPastedFiles(e, att) }
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setOver(false)
-    if (e.dataTransfer.files.length) att.add(e.dataTransfer.files)
-  }
-
-  const showZone = !hideZoneWhenEmpty || att.items.length > 0 || over
-
+  const label = 'Attach files — or paste a screenshot (⌘V) or drop files onto the prompt'
   return (
-    <div data-testid={testId}>
-      {showZone && (
-        <div
-          onPaste={onPaste}
-          onDragOver={(e) => { e.preventDefault(); setOver(true) }}
-          onDragLeave={() => setOver(false)}
-          onDrop={onDrop}
-          tabIndex={0}
-          className={`flex items-center gap-2.5 rounded-[10px] border border-dashed outline-none ${
-            tall ? 'p-3.5' : 'px-3 py-2.5'
-          } ${over ? 'border-accent bg-accent/10' : 'border-rule'}`}
+    <>
+      <button
+        type="button"
+        data-testid={testId}
+        onClick={() => inputRef.current?.click()}
+        aria-label={label}
+        title={label}
+        className={className}
+      >
+        <AlmanacIcon name="paperclip" size={size} />
+      </button>
+      <input
+        ref={inputRef}
+        data-testid={testId ? `${testId}-input` : undefined}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) att.add(e.target.files)
+          e.target.value = ''
+        }}
+      />
+    </>
+  )
+}
+
+/** Chips for the currently-attached references — a thumbnail (images) or file
+ *  icon, name, size, and a remove button. Renders nothing at all when there is
+ *  nothing attached, so an empty prompt costs zero vertical space; the attach
+ *  affordances themselves live in AttachButton + the prompt's own
+ *  paste/drop handlers. */
+export function AttachTray({ att, testId }: { att: AttachmentsState; testId?: string }) {
+  if (att.items.length === 0) return null
+  return (
+    <div data-testid={testId} className="mt-2 flex flex-wrap gap-2">
+      {att.items.map((i) => (
+        <span
+          key={i.id}
+          className="inline-flex max-w-[240px] items-center gap-2 rounded-[9px] border border-line bg-bg-hi py-1 pl-2 pr-2.5"
         >
-          <span className={over ? 'text-accent' : 'text-fg-faint'} aria-hidden="true">
-            <AlmanacIcon name="paperclip" size={14} />
-          </span>
-          <span className="text-[12.5px] leading-snug text-fg-faint">
-            Paste a screenshot (⌘V) or drop files here
-          </span>
+          {i.url ? (
+            <img src={i.url} alt="" className="h-6 w-[30px] rounded object-cover border border-rule" />
+          ) : (
+            <span className="text-accent" aria-hidden="true">
+              <AlmanacIcon name="file" size={14} />
+            </span>
+          )}
+          <span className="truncate font-mono text-[11px] text-fg-dim">{i.name}</span>
+          <span className="shrink-0 font-mono text-[10px] text-fg-faint">{i.size}</span>
           <button
             type="button"
-            onClick={() => inputRef.current?.click()}
-            className="ml-auto shrink-0 rounded-lg border border-line bg-bg-hi px-2.5 py-1 text-xs font-semibold text-fg-dim hover:bg-bg-hi/80"
+            onClick={() => att.remove(i.id)}
+            title="Remove"
+            className="shrink-0 text-fg-faint hover:text-fg"
           >
-            Attach
+            ×
           </button>
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) att.add(e.target.files)
-              e.target.value = ''
-            }}
-          />
-        </div>
-      )}
-      {att.items.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-2">
-          {att.items.map((i) => (
-            <span
-              key={i.id}
-              className="inline-flex max-w-[240px] items-center gap-2 rounded-[9px] border border-line bg-bg-hi py-1 pl-2 pr-2.5"
-            >
-              {i.url ? (
-                <img src={i.url} alt="" className="h-6 w-[30px] rounded object-cover border border-rule" />
-              ) : (
-                <span className="text-accent" aria-hidden="true">
-                  <AlmanacIcon name="file" size={14} />
-                </span>
-              )}
-              <span className="truncate font-mono text-[11px] text-fg-dim">{i.name}</span>
-              <span className="shrink-0 font-mono text-[10px] text-fg-faint">{i.size}</span>
-              <button
-                type="button"
-                onClick={() => att.remove(i.id)}
-                title="Remove"
-                className="shrink-0 text-fg-faint hover:text-fg"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+        </span>
+      ))}
     </div>
   )
 }

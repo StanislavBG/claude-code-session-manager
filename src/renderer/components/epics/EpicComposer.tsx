@@ -3,11 +3,18 @@ import { useShallow } from 'zustand/react/shallow'
 import { useChat } from '../../state/chat'
 import type { PromptSession } from '../../state/promptSessions'
 import { epicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
-import { AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
+import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { useVoice, selectCanRecord } from '../../state/voice'
 import { copyFor } from '../../lib/voiceCopy'
 import { takePendingEpicDraft } from '../../lib/epicDraftText'
+
+/** Height of every control in the composer's single row — the textarea's
+ *  collapsed height, the tools column, Cancel and Send. One constant so they
+ *  can't drift apart. Was 58px alongside a separate dashed attach row above;
+ *  the row is gone (see attachments.tsx's AttachButton) and a one-line prompt
+ *  no longer reserves two lines, which is where the vertical space came from. */
+const CONTROL_H = 44
 
 /** An Epic that's already completed/archived shows no composer — its
  *  claudeSessionId is dead. Parent surfaces should gate on this instead of
@@ -91,7 +98,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
     if (!el) return
     el.style.height = 'auto'
     const chrome = el.offsetHeight - el.clientHeight
-    el.style.height = `${Math.min(180, Math.max(58, el.scrollHeight + chrome))}px`
+    el.style.height = `${Math.min(160, Math.max(CONTROL_H, el.scrollHeight + chrome))}px`
   }, [text])
 
   const canSend = Boolean(text.trim() || att.items.length)
@@ -128,21 +135,19 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
     if (e.dataTransfer.files.length) att.add(e.dataTransfer.files)
   }
 
-  const attachInputRef = useRef<HTMLInputElement | null>(null)
-
   return (
     <div
       data-testid="epic-composer"
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
-      className={`border-t px-[22px] pb-3 pt-2 ${dragOver ? 'border-accent bg-accent/5' : 'border-rule bg-bg'}`}
+      className={`border-t px-[22px] py-2 ${dragOver ? 'border-accent bg-accent/5' : 'border-rule bg-bg'}`}
     >
-      <AttachTray att={att} testId="epic-composer-attach-tray" hideZoneWhenEmpty />
+      <AttachTray att={att} testId="epic-composer-attach-tray" />
 
       {quote && (
         <div
-          className="mt-2 flex items-start gap-2 rounded-md border-l-2 border-accent bg-bg-hi py-1.5 pl-2.5 pr-2"
+          className="mb-2 flex items-start gap-2 rounded-md border-l-2 border-accent bg-bg-hi py-1.5 pl-2.5 pr-2"
           data-testid="epic-composer-quote-strip"
         >
           <p className="min-w-0 flex-1 line-clamp-2 text-[12.5px] leading-relaxed text-fg-dim">{quote}</p>
@@ -158,9 +163,9 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
         </div>
       )}
 
-      <div className="mt-2 flex items-end gap-2">
+      <div className="flex items-end gap-2">
         <div
-          className="flex h-[58px] shrink-0 items-center overflow-hidden rounded-[10px] border border-line bg-bg-hi"
+          className="flex h-[44px] shrink-0 items-center overflow-hidden rounded-[10px] border border-line bg-bg-hi"
           data-testid="epic-composer-input-tools"
         >
           <button
@@ -171,7 +176,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
             aria-pressed={dictating}
             aria-label={micLabel}
             title={micLabel}
-            className={`grid h-full w-11 place-items-center ${
+            className={`grid h-full w-10 place-items-center ${
               dictating ? 'text-red-400' : isRecording ? 'text-fg-faint' : 'text-accent hover:text-accent/80'
             }`}
           >
@@ -183,26 +188,10 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
             </svg>
           </button>
           <span className="h-full w-px bg-line" aria-hidden="true" />
-          <button
-            type="button"
-            data-testid="epic-composer-attach"
-            onClick={() => attachInputRef.current?.click()}
-            aria-label="Attach files or paste a screenshot"
-            title="Attach files or paste a screenshot"
-            className="grid h-full w-11 place-items-center text-fg-dim hover:text-fg"
-          >
-            <AlmanacIcon name="folder" size={17} />
-          </button>
-          <input
-            ref={attachInputRef}
-            data-testid="epic-composer-attach-input"
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) att.add(e.target.files)
-              e.target.value = ''
-            }}
+          <AttachButton
+            att={att}
+            testId="epic-composer-attach"
+            className="grid h-full w-10 place-items-center text-fg-dim hover:text-fg"
           />
         </div>
         <textarea
@@ -212,16 +201,16 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={(e) => attachPastedFiles(e, att)}
-          rows={2}
-          placeholder={running ? 'Queue a follow-up…' : `Add to "${epic.goalText}" — Enter to send, ⌘V to attach a screenshot`}
-          className="min-h-[58px] max-h-[180px] flex-1 resize-none overflow-y-auto rounded-[10px] border border-line bg-bg-hi px-3 py-2.5 text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none"
+          rows={1}
+          placeholder={running ? 'Queue a follow-up… — ⌘V to attach a screenshot' : `Add to "${epic.goalText}" — Enter to send, ⌘V to attach a screenshot`}
+          className="min-h-[44px] max-h-[160px] flex-1 resize-none overflow-y-auto rounded-[10px] border border-line bg-bg-hi px-3 py-2.5 text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none"
         />
         {running && (
           <button
             type="button"
             data-testid="epic-composer-cancel"
             onClick={() => window.api.chat.cancel(epic.id)}
-            className="h-[58px] shrink-0 px-1 text-[12.5px] font-semibold text-delta-bad hover:text-delta-bad/80"
+            className="h-[44px] shrink-0 px-1 text-[12.5px] font-semibold text-delta-bad hover:text-delta-bad/80"
           >
             Cancel
           </button>
@@ -231,7 +220,7 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
           data-testid="epic-composer-send"
           onClick={() => void submit()}
           disabled={!canSend || sending}
-          className={`inline-flex h-[58px] shrink-0 items-center gap-1.5 rounded-[10px] px-5 text-[13px] font-semibold ${
+          className={`inline-flex h-[44px] shrink-0 items-center gap-1.5 rounded-[10px] px-5 text-[13px] font-semibold ${
             canSend && !sending ? 'bg-accent text-white hover:bg-accent/90' : 'bg-bg-hi text-fg-faint'
           }`}
         >

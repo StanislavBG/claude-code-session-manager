@@ -101,7 +101,15 @@ The redesign replaces that with a **two-pane workspace** that owns the full `ter
 - Attachment support: paste (⌘V) and drag-drop files/screenshots; image thumbnails +
   filename/size chips with remove buttons; also a mic button (dictate) and an attach
   button in a joined button group left of the textarea.
-- Auto-growing textarea (58–180px). Placeholder reflects state: running →
+- **The composer is ONE row (2026-08-06).** There is no dashed "Paste a screenshot (⌘V)
+  or drop files here · Attach" zone above the textarea and no `Attach` text button: ⌘V is
+  handled by the textarea itself and drop by the composer container, so that row only
+  duplicated the small attach icon button while costing a permanent slab of vertical
+  space. The hint lives inside the prompt (placeholder). The chips tray renders nothing
+  at all until something is attached. Same rule applies to the New Epic card, whose
+  references block is now a single line: attach icon button + `references · N` label.
+- Auto-growing textarea (44–160px, `rows={1}`; `CONTROL_H` in EpicComposer.tsx keeps the
+  tools strip, Cancel and Send at the same height). Placeholder reflects state: running →
   "Running… send to queue a follow-up in this Epic".
 - When Epic is running: red "Cancel" text-button + primary button reads **Queue** instead
   of **Send**. Send button disabled-toned until text or attachments exist.

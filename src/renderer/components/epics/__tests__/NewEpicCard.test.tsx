@@ -142,7 +142,7 @@ describe('NewEpicCard', () => {
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
     act(() => setNativeValue(goal, 'Investigate the crash'))
 
-    const fileInput = el.querySelector('[data-testid="new-epic-attach-tray"] input[type="file"]') as HTMLInputElement
+    const fileInput = el.querySelector('[data-testid="new-epic-attach-input"]') as HTMLInputElement
     const file = new File(['x'], 'crash.log', { type: 'text/plain' })
     Object.defineProperty(file, 'path', { value: '/home/bilko/Downloads/crash.log' })
     Object.defineProperty(fileInput, 'files', { value: [file] })

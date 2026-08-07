@@ -14,6 +14,7 @@ const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
+const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -368,6 +369,37 @@ async function check() {
         `Persona import broken: "${broken.importPath}" ${broken.exists ? 'is empty' : 'does not exist'}`
       );
     }
+  }
+
+  // 6.6. Run-log retention report (informational only — never blocks health).
+  // Read-only against the REAL scheduled-plans/runs/ dir: reports current
+  // usage + what the configured policy (if any) would remove. Nothing is
+  // ever deleted here; see runLogRetention.cjs's header for the safety
+  // model. schedulerRunLogRetention lives in scheduler-machine.json's
+  // `config`, same home as every other scheduler machine setting.
+  try {
+    const retentionCfg = queueState?.config?.schedulerRunLogRetention;
+    const liveKeys = liveKeysFromJobs(queueState?.jobs || []);
+    const report = computeReport(
+      DEFAULT_RUNS_DIR,
+      retentionCfg?.policy || {},
+      { liveKeys }
+    );
+    status.components.run_log_retention = {
+      ok: true,
+      path: DEFAULT_RUNS_DIR,
+      totalBytes: report.usage.totalBytes,
+      dirCount: report.usage.dirCount,
+      runCount: report.usage.runCount,
+      oldestRunAt: report.usage.oldestRunAt,
+      policyConfigured: !!retentionCfg?.policy,
+      retentionEnabled: isRetentionEnabled(queueState?.config || {}),
+      wouldRemoveCount: report.eligibleSummary.count,
+      wouldRemoveBytes: report.eligibleSummary.bytes,
+      wouldRemoveDirs: report.removableDirs.length,
+    };
+  } catch (e) {
+    status.components.run_log_retention = { ok: true, error: e.message };
   }
 
   // 7. Summary scoring: ok if all critical components pass.

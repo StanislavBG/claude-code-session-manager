@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ScheduleStateSnapshot, ScheduleJob, ScheduleJobHold, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
 import { toast } from '../state/toast'
@@ -196,6 +196,15 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
     }
   }, [focusedJobIdx])
 
+  // Stable identity so JobRow (React.memo) doesn't bail out of memoization on
+  // every render just because the map created a fresh closure — declared
+  // unconditionally alongside the other hooks above, before the early
+  // returns below (rules of hooks).
+  const handleRowFocused = useCallback((i: number) => {
+    setFocusedJobIdx(i)
+    try { localStorage.setItem(FOCUSED_IDX_KEY, String(i)) } catch { /* */ }
+  }, [])
+
   if (!snap) return null
 
   if (panelView === 'supervisor') {
@@ -230,6 +239,11 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
   const aheadCount = computeAheadCounts(filteredJobs)
 
   const { inline, collapsedCount } = partitionJobs(filteredJobs, hiddenSlugs, now, showAllCompleted)
+
+  // Computed once per render (i.e. once per tick) rather than once per row
+  // inline inside the JSX .map below — also finds the currently-running job
+  // a single time instead of re-scanning `jobs` for every pending row.
+  const etaMap = computeEtaMap(inline, jobs, aheadCount, avgDurationMs, status.kind, now)
 
   const onClearCompleted = () => {
     const next = new Set(hiddenSlugs)
@@ -468,15 +482,15 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
               <JobRow
                 key={j.slug}
                 job={j}
-                eta={etaForJob(j, jobs, aheadCount.get(j.slug) ?? 0, avgDurationMs, status.kind, now)}
-                now={now}
+                eta={etaMap.get(j.slug) ?? null}
+                // Only running rows tick — everyone else gets a stable `null`
+                // across ticks, so JobRow's memo bails for them instead of
+                // re-rendering once a second for an unused `now` value.
+                elapsedMs={j.status === 'running' && j.startedAt ? now - Date.parse(j.startedAt) : null}
                 avgDurationMs={avgDurationMs}
                 listIndex={idx}
                 hold={holdBySlug.get(j.slug)}
-                onFocused={(i) => {
-                  setFocusedJobIdx(i)
-                  try { localStorage.setItem(FOCUSED_IDX_KEY, String(i)) } catch { /* */ }
-                }}
+                onFocused={handleRowFocused}
               />
             ))}
           </div>
@@ -765,7 +779,7 @@ function computeStatus({
 }
 
 /** O(N log N) once: for each job, count of running+pending jobs ahead of it
- *  in (parallelGroup, slug) order. Lets etaForJob be O(1). */
+ *  in (parallelGroup, slug) order. Lets computeEtaMap be O(1) per job. */
 function computeAheadCounts(jobs: ScheduleJob[]): Map<string, number> {
   const active = jobs
     .filter((j) => j.status === 'running' || j.status === 'pending')
@@ -852,34 +866,44 @@ function withUtilization(line1: string, utilization: number | null | undefined):
   return `${line1} · util ${Math.round(utilization)}%`
 }
 
-/** Per-job ETA. O(1) given pre-computed `aheadIndex` from computeAheadCounts.
- *  Approximates serial execution within group at the rolling-avg duration;
- *  subtracts elapsed time for the currently-running job (if any). */
-function etaForJob(
-  job: ScheduleJob,
+/** Per-job ETA for every row in `jobsToShow`, computed once per tick in one
+ *  pass instead of once per row inline inside a JSX .map — also finds the
+ *  currently-running job a single time and reuses its elapsed time, instead
+ *  of re-scanning `allJobs` with `.find(...)` from scratch per pending row.
+ *  O(1) per job given the pre-computed `aheadIndex` from computeAheadCounts.
+ *  Approximates serial execution within group at the rolling-avg duration. */
+function computeEtaMap(
+  jobsToShow: ScheduleJob[],
   allJobs: ScheduleJob[],
-  aheadIndex: number,
+  aheadIndex: Map<string, number>,
   avgDurationMs: number,
   statusKind: StatusKind,
   now: number,
-): string | null {
-  if (job.status !== 'pending') return null
-  if (statusKind === 'paused' || statusKind === 'manual' || statusKind === 'auto-throttled') return null
-  let estMs = aheadIndex * avgDurationMs
-  if (aheadIndex > 0) {
-    const running = allJobs.find((j) => j.status === 'running' && j.startedAt)
-    if (running && running.startedAt) {
-      estMs -= Math.min(avgDurationMs, now - Date.parse(running.startedAt))
-    }
+): Map<string, string | null> {
+  const m = new Map<string, string | null>()
+  if (statusKind === 'paused' || statusKind === 'manual' || statusKind === 'auto-throttled') {
+    for (const j of jobsToShow) m.set(j.slug, null)
+    return m
   }
-  if (estMs <= 5_000) return '~now'
-  return `~${formatTimingLabel(estMs)}`
+  const running = allJobs.find((j) => j.status === 'running' && j.startedAt)
+  const runningElapsedMs = running?.startedAt ? now - Date.parse(running.startedAt) : 0
+  for (const j of jobsToShow) {
+    if (j.status !== 'pending') { m.set(j.slug, null); continue }
+    const aheadIdx = aheadIndex.get(j.slug) ?? 0
+    let estMs = aheadIdx * avgDurationMs
+    if (aheadIdx > 0) estMs -= Math.min(avgDurationMs, runningElapsedMs)
+    m.set(j.slug, estMs <= 5_000 ? '~now' : `~${formatTimingLabel(estMs)}`)
+  }
+  return m
 }
 
-export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused, hold }: {
+function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocused, hold }: {
   job: ScheduleJob
   eta: string | null
-  now: number
+  /** Live elapsed ms since `job.startedAt`, ticking once a second — `null`
+   *  for every non-running row so its props stay reference/value-stable
+   *  across ticks and the React.memo wrapper below can bail out. */
+  elapsedMs: number | null
   avgDurationMs: number
   listIndex: number
   onFocused: (index: number) => void
@@ -907,8 +931,8 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused, hol
   const isFailed = job.status === 'failed'
 
   let trailingLabel: string | null = null
-  if (isRunning && job.startedAt) {
-    trailingLabel = `${formatDuration(now - Date.parse(job.startedAt))} elapsed`
+  if (isRunning && elapsedMs !== null) {
+    trailingLabel = `${formatDuration(elapsedMs)} elapsed`
   } else if (job.status === 'completed' && job.startedAt && job.finishedAt) {
     trailingLabel = `took ${formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))}`
   } else if (eta) {
@@ -924,8 +948,8 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused, hol
       : null
 
   // Progress fraction for running jobs (capped at 0.99 so it never "completes")
-  const progressPct = isRunning && job.startedAt
-    ? Math.min(0.99, (now - Date.parse(job.startedAt)) / avgDurationMs)
+  const progressPct = isRunning && elapsedMs !== null
+    ? Math.min(0.99, elapsedMs / avgDurationMs)
     : 0
 
   return (
@@ -1018,8 +1042,8 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused, hol
               v={
                 job.startedAt && job.finishedAt
                   ? formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))
-                  : isRunning && job.startedAt
-                    ? formatDuration(now - Date.parse(job.startedAt))
+                  : isRunning && elapsedMs !== null
+                    ? formatDuration(elapsedMs)
                     : '—'
               }
             />
@@ -1081,6 +1105,8 @@ export function JobRow({ job, eta, now, avgDurationMs, listIndex, onFocused, hol
     </div>
   )
 }
+
+export const JobRow = memo(JobRowComponent)
 
 // ─── Filter bar ─────────────────────────────────────────────────────────────
 

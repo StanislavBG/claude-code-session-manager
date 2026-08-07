@@ -54,7 +54,7 @@ describe('JobRow prompt-session trace chip', () => {
     })
     const j = job({ sourceTabId: 'tab-1' })
     const el = mount(
-      <JobRow job={j} eta={null} now={Date.now()} avgDurationMs={60_000} listIndex={0} onFocused={vi.fn()} />,
+      <JobRow job={j} eta={null} elapsedMs={null} avgDurationMs={60_000} listIndex={0} onFocused={vi.fn()} />,
     )
 
     const chip = el.querySelector('[data-testid="job-row-prompt-session-chip"]') as HTMLElement
@@ -76,7 +76,7 @@ describe('JobRow prompt-session trace chip', () => {
   it('renders a muted, non-clickable chip with the short id when the source is set but unresolved', () => {
     const j = job({ sourceTabId: 'tab-missing-1234', sourcePromptId: null })
     const el = mount(
-      <JobRow job={j} eta={null} now={Date.now()} avgDurationMs={60_000} listIndex={0} onFocused={vi.fn()} />,
+      <JobRow job={j} eta={null} elapsedMs={null} avgDurationMs={60_000} listIndex={0} onFocused={vi.fn()} />,
     )
 
     const chip = el.querySelector('[data-testid="job-row-prompt-session-chip"]') as HTMLElement
@@ -91,7 +91,7 @@ describe('JobRow prompt-session trace chip', () => {
   it('renders no chip when neither sourcePromptId nor sourceTabId is set', () => {
     const j = job({ sourceTabId: null, sourcePromptId: null })
     const el = mount(
-      <JobRow job={j} eta={null} now={Date.now()} avgDurationMs={60_000} listIndex={0} onFocused={vi.fn()} />,
+      <JobRow job={j} eta={null} elapsedMs={null} avgDurationMs={60_000} listIndex={0} onFocused={vi.fn()} />,
     )
 
     expect(el.querySelector('[data-testid="job-row-prompt-session-chip"]')).toBeNull()

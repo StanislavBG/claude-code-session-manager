@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { fullSignalText, fullSignalNames, isToolFamilyKind } from '../lib/chatSignals'
@@ -965,7 +965,7 @@ export function nearestPrecedingUserPrompt(turns: ChatTurn[], index: number): st
   return undefined
 }
 
-export function Turn({
+function TurnComponent({
   turn,
   cwd,
   tabId,
@@ -1392,3 +1392,15 @@ export function Turn({
     </div>
   )
 }
+
+// Historical turns (chat.ts's turns array) are appended immutably — earlier
+// elements keep their object identity across a re-render that only appends
+// one more — so a plain shallow-prop memo lets an unrelated Turn instance
+// bail out of re-rendering entirely when its own turn/props didn't change.
+// This is safe for both invariants above: a question/notice turn is never
+// specially suppressed by this memo (it only skips re-render when the
+// rendered output would be byte-identical anyway), and EpicDetail's in-flight
+// bubble passes a brand-new `turn` object literal every render (its `text`
+// mutates as the stream grows), so it never satisfies the shallow-equal
+// check and keeps updating live while a run is in flight.
+export const Turn = memo(TurnComponent)

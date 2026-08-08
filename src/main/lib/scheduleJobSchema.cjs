@@ -38,6 +38,19 @@ const ScheduleJobRuntimeSchema = z
   })
   .passthrough();
 
+// One entry per accepted status transition (scheduleJobTransitions.cjs).
+// Bounded to STATUS_HISTORY_CAP entries there; this schema just validates
+// shape, not length, since the cap is enforced at write time.
+const ScheduleJobStatusHistoryEntrySchema = z
+  .object({
+    from: z.string().nullable(),
+    to: z.string(),
+    reason: z.string().nullable(),
+    source: z.string().nullable(),
+    at: z.string(),
+  })
+  .passthrough();
+
 // Only `slug` and `status` are required. Every other ScheduleJob field
 // (src/preload/api.d.ts:375-422) is declared here for documentation and type
 // checking when present, but kept optional: a job row moves through several
@@ -72,6 +85,7 @@ const ScheduleJobSchema = z
     sourceTabId: z.string().nullable().optional(),
     sourcePromptId: z.string().nullable().optional(),
     epicId: z.string().nullable().optional(),
+    statusHistory: z.array(ScheduleJobStatusHistoryEntrySchema).optional(),
   })
   .passthrough();
 
@@ -94,6 +108,7 @@ module.exports = {
   ScheduleJobSchema,
   ScheduleJobRuntimeSchema,
   ScheduleJobStatusSchema,
+  ScheduleJobStatusHistoryEntrySchema,
   JOB_STATUSES,
   assertValidScheduleJob,
 };

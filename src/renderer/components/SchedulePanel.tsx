@@ -1028,6 +1028,24 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
             )}
           </DetailBlock>
 
+          {job.statusHistory && job.statusHistory.length > 0 && (
+            <DetailBlock label="History">
+              <div className="grid gap-1">
+                {job.statusHistory.map((entry, i) => (
+                  <div key={i} className="font-mono text-xs leading-relaxed">
+                    <div className="text-fg">
+                      {entry.from ?? '(new)'} → {entry.to}
+                      <span className="text-fg-faint"> · {formatClock(Date.parse(entry.at))}</span>
+                    </div>
+                    {entry.reason && (
+                      <div className="text-fg-faint break-words">{entry.reason}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </DetailBlock>
+          )}
+
           <DetailBlock label="Timing">
             <DetailLine
               k="started"

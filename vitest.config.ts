@@ -70,6 +70,8 @@ export default defineConfig({
       'src/main/__tests__/health-prd-migration.test.cjs',
       'src/main/__tests__/epicMint.test.cjs',
       'src/main/__tests__/promptSessionSchema.test.cjs',
+      'src/main/__tests__/scheduleJobSchema.test.cjs',
+      'src/main/__tests__/scheduleJobStatusDrift.test.cjs',
       'src/main/__tests__/activeIndexMerge.test.cjs',
       'src/main/__tests__/scheduler-writeprd-epic-rollback.test.cjs',
       'src/main/__tests__/promptSessionTranscript.test.cjs',

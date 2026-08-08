@@ -14,6 +14,7 @@ const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
+const { computeStallSummary } = require('./scheduler.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
@@ -131,6 +132,55 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
   };
 }
 
+// computeProjectProblemCounts(jobs) → { [cwd]: { failed, needs_review, quarantined } }
+//
+// health.cjs's machine-wide `failed` count answered "is the machine stuck",
+// never "is any ONE project stuck" — a single project with 4 quarantined
+// PRDs and nothing else running was invisible in a rollup dominated by other
+// projects' healthy jobs. Breaks down every non-terminal-problem status
+// (failed/needs_review/quarantined — deliberately NOT 'completed'/'running'/
+// 'pending'/'investigating', which are not problems) by project cwd.
+function computeProjectProblemCounts(jobs) {
+  const byProject = {};
+  for (const j of jobs || []) {
+    if (j.status !== 'failed' && j.status !== 'needs_review' && j.status !== 'quarantined') continue;
+    const cwd = j.cwd || '(unknown)';
+    byProject[cwd] = byProject[cwd] || { failed: 0, needs_review: 0, quarantined: 0 };
+    byProject[cwd][j.status] += 1;
+  }
+  return byProject;
+}
+
+// evaluatePerProjectStall(stallSummary, lastRunAtIso, now, thresholdMs) →
+// { [cwd]: { stalled, pastThreshold?, ageMs?, caveat? } }
+//
+// computeStallSummary's per-project `stalled` flag (scheduler.cjs) is a
+// point-in-time verdict with no duration attached — a project can flip
+// stalled/unstalled within a single tick as work completes, so flagging RED
+// the instant it's true would false-trip on ordinary queue churn. There is
+// no per-project lastRunAt persisted (only a machine-wide one), so this
+// reuses that machine-wide timestamp as the best available "has the
+// scheduler ticked recently at all" signal, gated per-project by whether
+// THAT project currently holds stalled work.
+function evaluatePerProjectStall(stallSummary, lastRunAtIso, now, thresholdMs) {
+  const lastRunAt = lastRunAtIso ? Date.parse(lastRunAtIso) : null;
+  const results = {};
+  for (const cwd of Object.keys(stallSummary?.byProject || {})) {
+    const counts = stallSummary.byProject[cwd];
+    if (!counts.stalled) {
+      results[cwd] = { stalled: false };
+      continue;
+    }
+    if (lastRunAt == null || Number.isNaN(lastRunAt)) {
+      results[cwd] = { stalled: true, pastThreshold: false, caveat: 'no-lastRunAt' };
+      continue;
+    }
+    const ageMs = now - lastRunAt;
+    results[cwd] = { stalled: true, pastThreshold: ageMs >= thresholdMs, ageMs };
+  }
+  return results;
+}
+
 // Pure evaluator over migratePrds()'s { moved, skipped, unresolved } result —
 // kept separate from the fs-touching check() call site so it's directly
 // unit-testable, matching evaluateTickLiveness's pattern.
@@ -222,18 +272,42 @@ async function check() {
     const failedCount = Object.values(queueState.jobs || {}).filter(
       (j) => j.status === 'failed'
     ).length;
+    const needsReviewCount = Object.values(queueState.jobs || {}).filter(
+      (j) => j.status === 'needs_review'
+    ).length;
+    const quarantinedCount = Object.values(queueState.jobs || {}).filter(
+      (j) => j.status === 'quarantined'
+    ).length;
     const heartbeatPath = path.join(
       os.homedir(),
       '.claude/session-manager/scheduler-heartbeat.log'
     );
     const heartbeat = readFreshHeartbeat(heartbeatPath);
     const liveness = evaluateTickLiveness(queueState, heartbeat, Date.now(), runningCount);
+
+    // Per-project rollup (PRD: monitoring must not collapse per-project
+    // reality into one machine-wide boolean — see computeStallSummary /
+    // computeProjectProblemCounts headers). A project holding ONLY
+    // failed/needs_review/quarantined rows (0 running, 0 pending) never
+    // trips evaluateTickLiveness above, since that check requires actual
+    // pending work — this is what let the burrow project go dark.
+    const stallSummary = computeStallSummary(queueState);
+    const now = Date.now();
+    const perProjectStall = evaluatePerProjectStall(stallSummary, queueState.lastRunAt, now, TICK_STALL_THRESHOLD_MS);
+    const projectsPastThreshold = Object.entries(perProjectStall)
+      .filter(([, v]) => v.pastThreshold)
+      .map(([cwd]) => cwd);
+
     status.components.scheduler_queue = {
-      ok: !liveness.stalled,
+      ok: !liveness.stalled && projectsPastThreshold.length === 0,
       path: queuePath,
       jobs: Object.keys(queueState.jobs || {}).length,
       running: runningCount,
       failed: failedCount,
+      needsReview: needsReviewCount,
+      quarantined: quarantinedCount,
+      byProject: computeProjectProblemCounts(queueState.jobs),
+      perProjectStall,
       tickLiveness: liveness.reason,
     };
     if (liveness.stalled) {
@@ -248,6 +322,18 @@ async function check() {
         liveness.reason === 'cannot-verify-utilization'
           ? `Tick hasn't advanced in a while but scheduler-heartbeat.log is missing/stale, so current billing utilization can't be checked — cannot rule out a legitimate when-available hold`
           : 'No lastRunAt recorded yet — cannot assess tick liveness';
+    }
+    if (projectsPastThreshold.length > 0) {
+      status.components.scheduler_queue.stalledProjects = projectsPastThreshold;
+      for (const cwd of projectsPastThreshold) {
+        const ageMin = Math.round(perProjectStall[cwd].ageMs / 60_000);
+        const counts = status.components.scheduler_queue.byProject[cwd] || {};
+        status.issues.push(
+          `Project fully stalled: ${cwd} — 0 running, 0 pending, only problem jobs `
+          + `(failed=${counts.failed ?? 0} needs_review=${counts.needs_review ?? 0} quarantined=${counts.quarantined ?? 0}), `
+          + `no scheduler tick in ~${ageMin}m (threshold ${Math.round(TICK_STALL_THRESHOLD_MS / 60_000)}m)`
+        );
+      }
     }
   } catch (e) {
     if (e.code !== 'ENOENT') {
@@ -422,4 +508,13 @@ if (require.main === module) {
   })();
 }
 
-module.exports = { check, evaluateTickLiveness, readFreshHeartbeat, evaluatePrdMigrationHealth, TICK_STALL_THRESHOLD_MS, HEARTBEAT_STALE_MS };
+module.exports = {
+  check,
+  evaluateTickLiveness,
+  readFreshHeartbeat,
+  evaluatePrdMigrationHealth,
+  computeProjectProblemCounts,
+  evaluatePerProjectStall,
+  TICK_STALL_THRESHOLD_MS,
+  HEARTBEAT_STALE_MS,
+};

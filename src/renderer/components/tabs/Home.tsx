@@ -300,7 +300,7 @@ function Hero({
 const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
   { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
   { term: 'Queued job', description: 'Click a job row to open a popover with its real details (project, estimate, status) and actions — Open in Scheduler, plus Nudge scheduler now while it\'s pending. Use "Open Scheduler →" in the card header to jump straight to the Scheduler tab.' },
-  { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed session, Open a session waiting on input, or Retry / view a failed job.' },
+  { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed session, Open a session waiting on input, Retry / view a failed job, or Adopt / view a quarantined PRD.' },
   { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view.' },
   { term: 'Recent row', description: 'Click resume to open a new Terminal tab that resumes that transcript session.' },
   { term: 'Project row', description: 'Click a project to activate its open Terminal tab, or open a new dormant one.' },
@@ -396,6 +396,20 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
       .finally(() => { setBusyId(null); setOpenId(null) })
   }
 
+  // Deliberately NOT a Retry: a quarantined PRD has unproven provenance
+  // (no createdVia stamp) and re-running it is exactly what quarantine
+  // exists to prevent. The only correct actions are adopt (stamp it) or
+  // archive from the Scheduler tab's Quarantined filter.
+  const adoptJob = (row: NeedsYouRow) => {
+    if (!row.jobSlug || busyId) return
+    setBusyId(row.id)
+    window.api.schedule
+      .adoptPrd(row.jobSlug)
+      .then((r) => { if (!r.ok) toast.error(r.message ?? 'Could not adopt PRD.'); else toast.info(`${row.jobSlug} adopted — will run on the next tick.`) })
+      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+      .finally(() => { setBusyId(null); setOpenId(null) })
+  }
+
   return (
     <section id="home-needs-you" className="mb-6 scroll-mt-4">
       <div className="flex items-baseline justify-between mb-3">
@@ -410,7 +424,11 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
       <div className="grid gap-[7px]">
         {rows.map((row) => {
           const open = openId === row.id
-          const tone = row.kind === 'job-failed' ? 'bg-accent' : row.kind === 'needs-input' ? 'bg-honey' : 'bg-sage'
+          const tone =
+            row.kind === 'job-failed' ? 'bg-accent'
+            : row.kind === 'job-quarantined' ? (row.escalated ? 'bg-accent' : 'bg-honey')
+            : row.kind === 'needs-input' ? 'bg-honey'
+            : 'bg-sage'
           return (
             <div key={row.id} className={`border rounded-[11px] overflow-hidden ${open ? 'bg-bg-hi border-line' : 'bg-bg border-line/60'}`}>
               <button
@@ -443,6 +461,12 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
                     {row.kind === 'job-failed' && (
                       <>
                         <NeedsButton onClick={() => retryJob(row)} disabled={busyId === row.id}>Retry now</NeedsButton>
+                        <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
+                      </>
+                    )}
+                    {row.kind === 'job-quarantined' && (
+                      <>
+                        <NeedsButton onClick={() => adoptJob(row)} disabled={busyId === row.id}>Adopt PRD</NeedsButton>
                         <NeedsButton quiet onClick={() => onNavigate?.('scheduler')}>View in Scheduler</NeedsButton>
                       </>
                     )}

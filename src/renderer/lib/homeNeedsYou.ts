@@ -1,13 +1,22 @@
 // Pure row-model for the Global Home "Needs you" section (Home Screen A
-// design). Joins three REAL signals that already gate on a human somewhere
+// design). Joins four REAL signals that already gate on a human somewhere
 // in the app — nothing here is fabricated:
 //   - a `proposed` Epic (the human gate that replaced the feedback folder —
 //     see EpicApprovalBar.tsx)
 //   - a chat ticket in `needs-input` (the composer's stop-signal protocol)
 //   - a scheduler job in `failed` / `needs_review` (the queue's own verdict)
+//   - a scheduler job `quarantined` (no createdVia provenance — the
+//     PRD-authoring lockdown gate; see scheduler.cjs's reconcile())
 // Kept dependency-free (plain shapes, no store imports) so it is
 // unit-testable without mocking zustand — same shape as homeSessionRows.ts.
 import { projectNameFromCwd } from './homeProjectRows'
+
+// Mirrors QUARANTINE_ESCALATE_MS in src/main/lib/schedulerConfig.cjs — that
+// side is authoritative for the warn-log escalation
+// (scheduler.cjs's findStaleQuarantinedJobs); this only decides when a
+// quarantined row's Home tone/label switches from "needs adoption" to
+// "stale, needs adoption" so a stranded row reads differently at a glance.
+export const QUARANTINE_ESCALATE_MS = 24 * 60 * 60 * 1000
 
 export interface ProposedEpicLite {
   id: string
@@ -30,9 +39,13 @@ export interface ScheduleJobLite {
   cwd: string | null
   status: string
   error: string | null
+  /** Bounded status-transition trail (see ScheduleJobStatusHistoryEntry) —
+   *  only the `to === 'quarantined'` entry's `at` is read here, to compute
+   *  how long a quarantined row has sat un-adopted. */
+  statusHistory?: { to: string; at: string }[]
 }
 
-export type NeedsYouKind = 'proposed-epic' | 'needs-input' | 'job-failed'
+export type NeedsYouKind = 'proposed-epic' | 'needs-input' | 'job-failed' | 'job-quarantined'
 
 export interface NeedsYouRow {
   id: string
@@ -43,8 +56,19 @@ export interface NeedsYouRow {
   project: string | null
   /** Epic id for 'proposed-epic' / 'needs-input' rows (drives Approve/Open actions). */
   epicId: string | null
-  /** Job slug for 'job-failed' rows (drives Retry). */
+  /** Job slug for 'job-failed' / 'job-quarantined' rows (drives Retry / Adopt). */
   jobSlug: string | null
+  /** 'job-quarantined' only — true once the row has sat un-adopted past
+   *  QUARANTINE_ESCALATE_MS. Drives the row's tone/label on Home. */
+  escalated?: boolean
+}
+
+/** Finds the recorded quarantine timestamp, if any — see ScheduleJobLite.statusHistory. */
+function quarantinedAtMs(job: ScheduleJobLite): number | null {
+  const entry = (job.statusHistory ?? []).find((h) => h.to === 'quarantined')
+  if (!entry) return null
+  const ms = Date.parse(entry.at)
+  return Number.isNaN(ms) ? null : ms
 }
 
 /**
@@ -53,12 +77,15 @@ export interface NeedsYouRow {
  * read) — only `status === 'proposed'` entries surface here since archived
  * Epics are 'completed'. `chats` keys on Epic id (== tabId); only chats
  * whose most recent ticket is 'needs-input' surface. `jobs` is the
- * scheduler snapshot; only 'failed' / 'needs_review' surface.
+ * scheduler snapshot; 'failed' / 'needs_review' / 'quarantined' surface.
+ * `now` defaults to Date.now() and only affects a quarantined row's
+ * `escalated` flag — pass it explicitly in tests for determinism.
  */
 export function buildNeedsYouRows(
   sessions: Record<string, ProposedEpicLite>,
   chats: Record<string, { ticketHistory?: TicketLite[] }>,
   jobs: ScheduleJobLite[],
+  now: number = Date.now(),
 ): NeedsYouRow[] {
   const rows: NeedsYouRow[] = []
 
@@ -93,6 +120,30 @@ export function buildNeedsYouRows(
   }
 
   for (const job of jobs) {
+    // Quarantined is deliberately NOT folded into the failed/needs_review
+    // branch below: it must never offer Retry (re-running an unstamped PRD
+    // is exactly what quarantine exists to prevent) and has its own action
+    // — adopt (or archive) from the Scheduler tab.
+    if (job.status === 'quarantined') {
+      const quarantinedAt = quarantinedAtMs(job)
+      const ageMs = quarantinedAt != null ? now - quarantinedAt : null
+      const escalated = ageMs != null && ageMs >= QUARANTINE_ESCALATE_MS
+      rows.push({
+        id: `job:${job.slug}`,
+        kind: 'job-quarantined',
+        label: escalated ? 'Quarantined PRD — stale, needs adoption' : 'Scheduler PRD quarantined',
+        detail: job.title || job.slug,
+        meta:
+          ageMs != null
+            ? `No createdVia provenance for ${Math.round(ageMs / (60 * 60 * 1000))}h — adopt it to run, or archive from the Scheduler tab.`
+            : 'No createdVia provenance. Adopt it to run, or archive from the Scheduler tab.',
+        project: job.cwd ? projectNameFromCwd(job.cwd) : null,
+        epicId: null,
+        jobSlug: job.slug,
+        escalated,
+      })
+      continue
+    }
     if (job.status !== 'failed' && job.status !== 'needs_review') continue
     rows.push({
       id: `job:${job.slug}`,

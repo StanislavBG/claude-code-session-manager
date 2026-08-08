@@ -75,7 +75,11 @@ const {
   USAGE_REFRESH_INTERVAL_MS,
   MAX_JOB_DURATION_MS,
   BROADCAST_COALESCE_MS,
+  QUARANTINE_ESCALATE_MS: QUARANTINE_ESCALATE_MS_DEFAULT,
 } = require('./lib/schedulerConfig.cjs');
+const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
+  ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
+  : QUARANTINE_ESCALATE_MS_DEFAULT;
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
@@ -961,13 +965,24 @@ function appendHeartbeat(entry) {
  * computeStallSummary(state) → { stalled, total, running, pending, byProject }
  *
  * Pure, no IO. `state` is a merged queue-store read ({ jobs, invalidJobs,
- * paused }). "Stalled" = the queue holds work — valid rows OR rows
- * quarantined for an invalid status — but nothing is running or pending and
- * the scheduler isn't paused. The 2026-08-07 incident sat exactly in this
- * state for 4+ hours: 2 jobs, 0 running, 0 pending, and the only visible
- * symptom was a heartbeat `counts` object that had silently minted a
- * `queued` bucket instead of reporting anything actionable. `byProject`
- * breaks the stalled rows down by cwd for the log line / toast.
+ * paused }). The engine (reconcile/reaper/auto-fix/reverify) already
+ * operates machine-wide via queueStore's stateCwds() — this function is
+ * MONITORING, and monitoring must not collapse per-project reality into one
+ * boolean. `stalled` (top-level) is the pre-existing machine-wide roll-up:
+ * the queue holds work — valid rows OR rows quarantined for an invalid
+ * status — but nothing anywhere is running or pending and the scheduler
+ * isn't paused. The 2026-08-07 incident sat exactly in this state for 4+
+ * hours: 2 jobs, 0 running, 0 pending, and the only visible symptom was a
+ * heartbeat `counts` object that had silently minted a `queued` bucket
+ * instead of reporting anything actionable.
+ *
+ * `byProject[cwd].stalled` is the PER-PROJECT verdict added for the
+ * "burrow went dark while other projects were busy" gap: a project can hold
+ * jobs (including ones parked `quarantined`) with 0 running and 0 pending
+ * while the machine-wide `stalled` above reads false because a different
+ * project has running/pending work. Each project's own status counts
+ * (`byProject[cwd][status]`) already summed to a total before this — the
+ * fix is only the boolean, not the counting.
  */
 function computeStallSummary(state) {
   const jobs = Array.isArray(state?.jobs) ? state.jobs : [];
@@ -989,7 +1004,43 @@ function computeStallSummary(state) {
   }
   const total = jobs.length + invalidJobs.length;
   const stalled = total > 0 && running === 0 && pending === 0 && !state?.paused;
+  for (const key of Object.keys(byProject)) {
+    const counts = byProject[key];
+    const projRunning = counts.running || 0;
+    const projPending = counts.pending || 0;
+    const projTotal = Object.keys(counts)
+      .filter((k) => k !== 'stalled')
+      .reduce((sum, k) => sum + counts[k], 0);
+    counts.stalled = projTotal > 0 && projRunning === 0 && projPending === 0 && !state?.paused;
+  }
   return { stalled, total, running, pending, byProject };
+}
+
+/**
+ * findStaleQuarantinedJobs(jobs, now, thresholdMs) → [{ slug, cwd, ageMs }]
+ *
+ * Pure, no IO. A 'quarantined' row (no createdVia provenance) can otherwise
+ * sit forever with nothing looking at it — quarantine only ever clears via a
+ * human adopting or archiving it. This is the escalation half of that gate:
+ * any quarantined row whose recorded quarantine timestamp (statusHistory's
+ * `to === 'quarantined'` entry — stamped at creation, or backfilled from the
+ * PRD file's mtime by reconcile() for rows quarantined before that stamp
+ * existed) is older than `thresholdMs` is reported so the caller can
+ * warn-log and surface it distinctly. A row with no recoverable timestamp is
+ * skipped rather than guessed at.
+ */
+function findStaleQuarantinedJobs(jobs, now, thresholdMs) {
+  const stale = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'quarantined') continue;
+    const entry = (j.statusHistory || []).find((h) => h.to === 'quarantined');
+    if (!entry) continue;
+    const since = Date.parse(entry.at);
+    if (Number.isNaN(since)) continue;
+    const ageMs = now - since;
+    if (ageMs >= thresholdMs) stale.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs });
+  }
+  return stale;
 }
 
 // An empty queue and an unreadable queue are NOT the same thing, and
@@ -1356,6 +1407,21 @@ async function reconcile(state) {
       console.log(`[scheduler] reconcile: adopted quarantined PRD ${job.slug} — createdVia=${p.createdVia}`);
       appendAuditEvent('scheduler_prd_adopted', { slug: job.slug, cwd: p.cwd, createdVia: p.createdVia, source: 'reconcile' });
     }
+    // Backfill a quarantine timestamp for rows quarantined before the
+    // statusHistory stamp below existed (e.g. the burrow-project rows
+    // quarantined under the PRD-authoring lockdown) — findStaleQuarantinedJobs
+    // needs SOME timestamp to escalate an un-adopted row past its age
+    // threshold, and the PRD file's own mtime is the best available proxy
+    // for "when this file first showed up unstamped" for a row that has
+    // never been touched since.
+    if (updatedJob.status === 'quarantined' && !(updatedJob.statusHistory || []).some((h) => h.to === 'quarantined')) {
+      try {
+        const at = new Date(fs.statSync(p.path).mtimeMs).toISOString();
+        const history = Array.isArray(updatedJob.statusHistory) ? [...updatedJob.statusHistory] : [];
+        history.push({ from: null, to: 'quarantined', reason: 'backfilled from PRD file mtime', source: 'reconcile-backfill', at });
+        updatedJob.statusHistory = history;
+      } catch { /* best-effort only — a missing/unreadable file just skips the backfill */ }
+    }
     next.push(updatedJob);
   }
   // Slugs on disk with no matching state.jobs row are normally brand-new
@@ -1590,6 +1656,18 @@ async function reconcile(state) {
     // to 'pending' on the very next pass, within one tick of being stamped.
     if (!p.createdVia && !isFixPlanSlug(slug)) {
       entry.status = 'quarantined';
+      // Stamped at creation (not via transitionJob, since this is a
+      // brand-new row minted directly at 'quarantined' rather than
+      // transitioning through 'pending') so findStaleQuarantinedJobs has a
+      // real quarantine timestamp to escalate against, instead of only the
+      // reconcile-backfill fallback above.
+      entry.statusHistory = [{
+        from: null,
+        to: 'quarantined',
+        reason: 'missing createdVia provenance frontmatter',
+        source: 'reconcile',
+        at: new Date().toISOString(),
+      }];
       console.warn(`[scheduler] reconcile: quarantining unstamped PRD ${slug} (${p.path}) — no createdVia provenance; adopt it from the Scheduler tab's Quarantined filter or via scheduler_update_prd to make it runnable`);
       appendAuditEvent('prd_quarantined', { slug, cwd: p.cwd, path: p.path, reason: 'missing createdVia provenance frontmatter' });
     }
@@ -1692,12 +1770,15 @@ let pollLoopTimer = null;
 let rescheduleInterval = null;
 let heartbeatInterval = null;
 // Stall-detector state (computeStallSummary), read/written only inside the
-// heartbeat interval below. stallSince: wall-clock ms the stalled condition
-// was first observed, null when clear. stallToasted: rate-limits the
-// error-log + toast to once per stall episode (cleared the moment the queue
-// stops being stalled) rather than every 60s heartbeat tick.
-let stallSince = null;
-let stallToasted = false;
+// heartbeat interval below. Keyed per-project cwd (never a single value) —
+// a single module-level flag would let one busy project's activity clear or
+// suppress another stalled project's alert. stallSince.get(cwd): wall-clock
+// ms that project's stalled condition was first observed, absent when clear.
+// stallToasted.get(cwd): rate-limits that project's error-log + toast to
+// once per stall episode (cleared the moment that project stops being
+// stalled) rather than every 60s heartbeat tick.
+let stallSince = new Map();
+let stallToasted = new Map();
 // (The 5-minute feedback sweep that used to piggyback on this heartbeat is
 // gone: it scanned each active project's session-manager-operations/feedback/
 // and auto-queued a /process-feedback PRD. Both the folder and that skill are
@@ -4924,6 +5005,7 @@ async function init() {
   if (rescheduleInterval) clearInterval(rescheduleInterval);
   rescheduleInterval = setInterval(() => {
     rescheduleTimer().catch(() => {});
+    const s = readQueueSync();
     // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
     // job whose work actually landed (committed in-window, no FAIL sentinel)
     // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded — the
@@ -4933,10 +5015,32 @@ async function init() {
     // MAX_CONCURRENT_INVESTIGATIONS (spawnInvestigation queues/early-returns
     // past it), so this interval firing cannot fan out investigations.
     if (process.env.SM_REVERIFY_PERIODIC_DISABLE !== '1') {
-      const s = readQueueSync();
       if (s.jobs.some((j) => j.status === 'needs_review')) {
         reverifyNeedsReview().catch(() => {});
       }
+      // A quarantined row only ever promotes to 'pending' through
+      // reconcile()'s adopt path (see reconcile()'s "Adopt path" comment) —
+      // it re-checks the PRD file's createdVia stamp every pass. broadcast()
+      // already runs reconcile+writeQueue on every normal poll tick, but an
+      // idle queue (nothing pending/running to fire) can back off that
+      // cadence for a long time; this guarantees an adopted-but-still-
+      // quarantined row is re-checked within 10 minutes regardless.
+      if (s.jobs.some((j) => j.status === 'quarantined')) {
+        broadcast().catch(() => {});
+      }
+    }
+    // Age-based escalation (independent of the self-heal kill-switch above —
+    // this is a monitoring signal, not an auto-fix action): a quarantined
+    // row nobody has adopted or archived past QUARANTINE_ESCALATE_MS is
+    // warn-logged by project + slug + age so it cannot sit stranded and
+    // silent (the four burrow-project rows this PRD was written against).
+    for (const stale of findStaleQuarantinedJobs(s.jobs, Date.now(), QUARANTINE_ESCALATE_MS)) {
+      console.warn(
+        `[scheduler] QUARANTINED PRD STALE: project=${stale.cwd ?? '(unknown)'} slug=${stale.slug} `
+        + `age=${Math.round(stale.ageMs / 3_600_000)}h (>= ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h threshold) — `
+        + `adopt it from the Scheduler tab's Quarantined filter, or archive it; nothing else will clear this`,
+      );
+      appendAuditEvent('prd_quarantine_stale', { slug: stale.slug, cwd: stale.cwd, ageMs: stale.ageMs });
     }
   }, 10 * 60_000);
 
@@ -4981,27 +5085,42 @@ async function init() {
     }
 
     const stall = computeStallSummary(s);
-    if (stall.stalled) {
-      if (stallSince === null) stallSince = Date.now();
-      if (!stallToasted && Date.now() - stallSince >= POLL_INTERVAL_MS) {
-        stallToasted = true;
-        console.error(
-          `[scheduler] STALL DETECTED: ${stall.total} job(s) queued, 0 running, 0 pending, not paused, `
-          + `for >= ${Math.round(POLL_INTERVAL_MS / 1000)}s`,
-          stall.byProject,
-        );
-        appendAuditEvent('scheduler_stall_detected', { total: stall.total, byProject: stall.byProject });
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          sendIfAlive(mainWindow, 'schedule:stall', {
-            message: `Scheduler stall: ${stall.total} job(s) queued but none running or pending. Check the Scheduler tab.`,
-            total: stall.total,
-            byProject: stall.byProject,
-          });
-        }
+    // Per-project alerting (see computeStallSummary's header): a project
+    // stalled while others are busy must still fire, and one project
+    // recovering must not clear or suppress another's still-open episode —
+    // that is exactly what a single module-level stallSince/stallToasted
+    // flag masked before (the burrow-vs-others incident this PRD fixes).
+    const now = Date.now();
+    const stalledCwds = Object.keys(stall.byProject).filter((cwd) => stall.byProject[cwd].stalled);
+    for (const cwd of [...stallSince.keys()]) {
+      if (!stalledCwds.includes(cwd)) {
+        stallSince.delete(cwd);
+        stallToasted.delete(cwd);
       }
-    } else {
-      stallSince = null;
-      stallToasted = false;
+    }
+    const toAlert = [];
+    for (const cwd of stalledCwds) {
+      if (!stallSince.has(cwd)) stallSince.set(cwd, now);
+      if (!stallToasted.get(cwd) && now - stallSince.get(cwd) >= POLL_INTERVAL_MS) {
+        stallToasted.set(cwd, true);
+        toAlert.push(cwd);
+      }
+    }
+    if (toAlert.length > 0) {
+      console.error(
+        `[scheduler] STALL DETECTED in project(s): ${toAlert.join(', ')} — 0 running, 0 pending, not paused, `
+        + `for >= ${Math.round(POLL_INTERVAL_MS / 1000)}s`,
+        stall.byProject,
+      );
+      appendAuditEvent('scheduler_stall_detected', { projects: toAlert, total: stall.total, byProject: stall.byProject });
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        sendIfAlive(mainWindow, 'schedule:stall', {
+          message: `Scheduler stall in ${toAlert.length} project(s): ${toAlert.join(', ')}. Check the Scheduler tab.`,
+          projects: toAlert,
+          total: stall.total,
+          byProject: stall.byProject,
+        });
+      }
     }
 
     appendHeartbeat({
@@ -5507,4 +5626,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };

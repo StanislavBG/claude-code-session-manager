@@ -566,12 +566,12 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
 
 const GUIDE_STEPS: Array<{ title: string; body: string }> = [
   {
-    title: 'Create an Epic',
-    body: "Describe the outcome you want in the Epics tab. Its thread writes the PRD files into the epic's folder.",
+    title: 'Create a session',
+    body: "Describe the outcome you want in the Sessions tab. Its thread writes the PRD files into the session's folder.",
   },
   {
     title: 'Queue what it wrote',
-    body: 'The PRDs tab lists every file the epic produced. Queue one, or the whole epic, and they appear here.',
+    body: 'The PRDs tab lists every file the session produced. Queue one, or the whole session, and they appear here.',
   },
   {
     title: 'Leave it alone',
@@ -580,10 +580,10 @@ const GUIDE_STEPS: Array<{ title: string; body: string }> = [
 ]
 
 const GUIDE_GLOSSARY: Array<{ term: string; def: string }> = [
-  { term: 'Epic', def: 'A goal, and the folder of PRDs written to reach it.' },
-  { term: 'PRD', def: 'One markdown file = one job. Authored by the epic.' },
+  { term: 'Session', def: 'A goal, and the folder of PRDs written to reach it.' },
+  { term: 'PRD', def: 'One markdown file = one job. Authored by the session.' },
   { term: '5-hour window', def: 'Your Claude billing window, on a rolling clock.' },
-  { term: 'Session pool', def: '5 slots shared with terminal and epic chats.' },
+  { term: 'Session pool', def: '5 slots shared with terminal and session chats.' },
 ]
 
 /**
@@ -1052,8 +1052,8 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
           <DetailBlock label="Location">
             <DetailLine k="group" v={`${job.parallelGroup} · ${job.slug}`} />
             <DetailLine k="cwd" v={job.cwd ?? '—'} wrap />
-            <DetailLine k="epic" v={epicRef.label ?? epicRef.epicId ?? '—'} wrap />
-            <DetailLine k="epic id" v={epicRef.epicId ?? '—'} wrap />
+            <DetailLine k="session" v={epicRef.label ?? epicRef.epicId ?? '—'} wrap />
+            <DetailLine k="session id" v={epicRef.epicId ?? '—'} wrap />
             <DetailLine k="prompt id" v={job.sourcePromptId ?? '—'} wrap />
             <DetailLine k="source tab" v={job.sourceTabId ?? '—'} wrap />
           </DetailBlock>

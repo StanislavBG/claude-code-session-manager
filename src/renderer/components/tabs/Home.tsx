@@ -168,7 +168,7 @@ function AgentsCard() {
     <section className="mb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="m-0 font-serif text-[22px] font-medium">Agents</h2>
-        <span className="font-mono text-[12px] text-fg-faint">1 tag per Epic</span>
+        <span className="font-mono text-[12px] text-fg-faint">1 tag per session</span>
       </div>
       <div className="grid gap-2">
         {AGENT_TAG_ORDER.map((tag) => {
@@ -300,11 +300,11 @@ function Hero({
 const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
   { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
   { term: 'Queued job', description: 'Click a job row to open a popover with its real details (project, estimate, status) and actions — Open in Scheduler, plus Nudge scheduler now while it\'s pending. Use "Open Scheduler →" in the card header to jump straight to the Scheduler tab.' },
-  { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed Epic, Open a session waiting on input, or Retry / view a failed job.' },
-  { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view (Epic).' },
+  { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed session, Open a session waiting on input, or Retry / view a failed job.' },
+  { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view.' },
   { term: 'Recent row', description: 'Click resume to open a new Terminal tab that resumes that transcript session.' },
   { term: 'Project row', description: 'Click a project to activate its open Terminal tab, or open a new dormant one.' },
-  { term: 'New epic', description: 'Opens a project picker; confirming activates-or-opens that project\'s tab and lands you in its Epics workspace to start the Epic.' },
+  { term: 'New session', description: 'Opens a project picker; confirming activates-or-opens that project\'s tab and lands you in its Sessions workspace to start the session.' },
 ]
 
 function InteractionsLegend() {
@@ -353,7 +353,7 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
     try {
       const approved = usePromptSessions.getState().approveProposed(row.epicId, 'Home needs-you')
       if (!approved) {
-        toast.error('This Epic is no longer awaiting approval.')
+        toast.error('This session is no longer awaiting approval.')
         return
       }
       useChat.getState().send({
@@ -362,7 +362,7 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
         cwd: approved.cwd,
         prompt: approved.openingPrompt || approved.goalText,
       })
-      toast.info('Epic approved and started.')
+      toast.info('Session approved and started.')
     } finally {
       setBusyId(null)
       setOpenId(null)

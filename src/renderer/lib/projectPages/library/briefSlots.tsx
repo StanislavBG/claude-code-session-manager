@@ -120,7 +120,7 @@ function BfAreasTable({ summary }: P) {
             <span style={{ display: 'block', fontFamily: PK.sans, fontSize: 12.5, color: PK.inkSoft, marginTop: 3 }}>{a.note}</span>
           </span>
           <span style={{ fontFamily: PK.mono, fontSize: 11.5, color: a.epic ? PK.inkSoft : PK.inkMute }}>
-            {a.epic ? `touched by ${a.epic}` : 'no open Epic'}
+            {a.epic ? `touched by ${a.epic}` : 'no open session'}
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ flex: 1, height: 6, background: PK.panel, border: `1px solid ${PK.rule}`, borderRadius: 999, overflow: 'hidden' }}>
@@ -147,7 +147,7 @@ function BfAreasCards({ summary }: P) {
           </div>
           <PkBody size={13} style={{ marginTop: 8 }}>{a.note}</PkBody>
           <div style={{ fontFamily: PK.mono, fontSize: 10.5, color: PK.inkMute, marginTop: 10 }}>
-            {a.files} files · {a.epic ? `touched by ${a.epic}` : 'no open Epic'}
+            {a.files} files · {a.epic ? `touched by ${a.epic}` : 'no open session'}
           </div>
         </div>
       )) : <EmptyNote>No areas inferred yet.</EmptyNote>}
@@ -234,7 +234,7 @@ export const PAGE_BRIEF: PageLensDef = {
       { id: 'quote', label: 'Dark pull-quote', note: 'Inverted, serif-led — leads with the purpose as a statement.', component: BfPurposeQuote },
     ] },
     { id: 'areas', label: 'How it\'s put together', variants: [
-      { id: 'table', label: 'Dense rows', note: 'Name, note, owning Epic, heat bar — one row per area.', component: BfAreasTable },
+      { id: 'table', label: 'Dense rows', note: 'Name, note, owning session, heat bar — one row per area.', component: BfAreasTable },
       { id: 'cards', label: '2×2 cards', note: 'Even weight across every area, heat as a pill.', component: BfAreasCards },
     ] },
     { id: 'scope', label: 'How the goal has moved', variants: [

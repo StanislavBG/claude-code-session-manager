@@ -20,7 +20,7 @@ const PERSONAS: AgentPersona[] = [
     tools: ['Read', 'Grep', 'Glob', 'Bash'],
     model: null,
     color: null,
-    tags: [],
+    tags: [], projects: [], action: null, actionLabel: null,
     path: '/home/bilko/.claude/agents/builder.md',
     body: 'You are the Builder agent.',
     overridingProjects: ['session-manager'],
@@ -31,7 +31,7 @@ const PERSONAS: AgentPersona[] = [
     tools: [],
     model: null,
     color: null,
-    tags: [],
+    tags: [], projects: [], action: null, actionLabel: null,
     path: '/home/bilko/.claude/agents/debugger.md',
     body: 'You are the Debugger agent.',
     overridingProjects: [],
@@ -54,6 +54,10 @@ function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
         }
       }),
     },
+    // The Action-scope field lists this machine's known projects (useKnownProjects
+    // -> useHomeDir), so the persona editor now needs these two reads to mount.
+    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
+    config: { listDir: vi.fn().mockResolvedValue([]), readText: vi.fn().mockResolvedValue(''), exists: vi.fn().mockResolvedValue(false) },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, emitChanged: () => changedHandlers.forEach((h) => h()) }

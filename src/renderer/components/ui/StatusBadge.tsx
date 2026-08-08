@@ -6,15 +6,19 @@
  * is light enough to achieve the required ratio.
  */
 
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'needs_review' | 'unqueued'
+// Mirrors ScheduleJobStatus (src/preload/api.d.ts:363), itself derived from
+// JOB_STATUSES (src/main/lib/scheduleJobSchema.cjs) — the renderer can't
+// import that .cjs directly, so this union is a manually-kept mirror. Drift
+// is caught by src/main/__tests__/scheduleJobSchema.test.cjs.
+export type JobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review'
 
 export const CLASSES: Record<JobStatus, string> = {
   pending:      'bg-bg-hi text-fg-dim border-line',
   running:      'bg-amber-950/50 text-amber-200 border-amber-800/60',
+  investigating: 'bg-blue-950/50 text-blue-200 border-blue-800/60',
   completed:    'bg-green-950/50 text-green-200 border-green-800/60',
   failed:       'bg-red-950/50 text-red-200 border-red-800/60',
   needs_review: 'bg-orange-950/50 text-orange-200 border-orange-800/60',
-  unqueued:     'bg-bg-elev text-fg-dim border-dashed border-line',
 }
 
 interface StatusBadgeProps {

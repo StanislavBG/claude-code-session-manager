@@ -135,21 +135,21 @@ describe('EpicsWorkspace', () => {
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })
 
-  it('"New Epic" swaps in the creation card; picking a project + goal creates and selects the new Epic', async () => {
+  it('"New Session" swaps in the creation card; picking a project + goal creates and selects the new Epic', async () => {
     installWindowApiMock()
     // Active tab's cwd deliberately NOT a known project, so NewEpicCard
     // still shows its own project selector (it collapses to a static label
     // once the active tab's cwd is already a known project) — this test is
     // exercising that selector, not EpicsWorkspace's own scoping. A tab must
     // stay active, though: EpicsWorkspace itself now shows an empty state
-    // with no "New Epic" entry point at all when no tab is active.
+    // with no "New Session" entry point at all when no tab is active.
     useSessions.setState({
       tabs: [{ ...ALPHA_TAB, id: 'tab-gamma', sessionId: 'tab-gamma', cwd: '/home/bilko/Projects/gamma' }],
       activeTabId: 'tab-gamma',
     })
     const el = mount(<EpicsWorkspace />)
 
-    const newEpicBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('New Epic')) as HTMLButtonElement
+    const newEpicBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('New Session')) as HTMLButtonElement
     act(() => {
       newEpicBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
@@ -381,7 +381,7 @@ describe('EpicsWorkspace', () => {
 
       const el = mount(<EpicsWorkspace cwd="/home/bilko/Projects/alpha" />)
       expect(el.querySelector('[data-testid="epic-detail"]')).toBeNull()
-      expect(el.textContent).toContain('No Epic selected')
+      expect(el.textContent).toContain('No session selected')
     })
   })
 

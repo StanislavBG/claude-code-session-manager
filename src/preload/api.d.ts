@@ -208,6 +208,14 @@ export interface AgentPersona {
   color: string | null;
   /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
   tags: string[];
+  /** Project cwds whose Sessions toolbar shows a one-click Action button for this
+   *  agent. The single entry `'*'` means every project. Empty = no Action button. */
+  projects: string[];
+  /** The opening instruction that Action button sends into the new session.
+   *  Null when this persona isn't wired as an Action. */
+  action: string | null;
+  /** Caption override for the Action button (defaults to the persona name). */
+  actionLabel: string | null;
   /** "<Department> — <Human title>" (e.g. "Engineering — Architect"), free text — drives
    *  department grouping in the New Epic Agent picker. Optional/null when not set. */
   title?: string | null;
@@ -227,6 +235,12 @@ export interface AgentPersonaSaveInput {
   model: string;
   color: string;
   tags: string[];
+  /** Project cwds (or the `'*'` sentinel) this persona's Action button appears in. */
+  projects?: string[];
+  /** Opening instruction sent by this persona's Action button. */
+  action?: string;
+  /** Caption override for this persona's Action button. */
+  actionLabel?: string;
   title?: string;
   body: string;
 }
@@ -346,6 +360,12 @@ export interface ScheduleConfig {
   schemaVersion: 1;
 }
 
+/** Mirrors JOB_STATUSES (src/main/lib/scheduleJobSchema.cjs) — the single
+ *  source of truth asserted at read time by queueStore.cjs's shapeJobs. This
+ *  file can't require that .cjs module (types-only, erased at build time),
+ *  so this union is a manually-kept copy; drift from JOB_STATUSES (and from
+ *  the renderer's own mirrors in StatusBadge.tsx/SchedulePanel.tsx) is
+ *  caught by src/main/__tests__/scheduleJobStatusDrift.test.cjs. */
 export type ScheduleJobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review';
 
 export interface ScheduleJobRuntime {

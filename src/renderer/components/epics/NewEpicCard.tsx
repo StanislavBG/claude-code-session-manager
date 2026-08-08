@@ -358,7 +358,7 @@ export function NewEpicCard({
             }`}
             style={{ backfaceVisibility: 'hidden' }}
           >
-            <NewEpicHeader eyebrow="New Epic" advanced={advanced} setAdvanced={setAdvanced} />
+            <NewEpicHeader eyebrow="New session" advanced={advanced} setAdvanced={setAdvanced} />
             <h2 className="m-0 font-serif text-2xl font-semibold tracking-[-0.3px] text-fg">
               What are we trying to achieve?
             </h2>
@@ -399,7 +399,7 @@ export function NewEpicCard({
               <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
-                  title="Who runs this Epic — from the Agent Library (~/.claude/agents)."
+                  title="Who runs this session — from the Agent Library (~/.claude/agents)."
                 >
                   1 · agent — who is working
                 </div>
@@ -435,7 +435,7 @@ export function NewEpicCard({
               <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
-                  title="The Epic's mission — from the Tag Library. Sets how eagerly /develop fires."
+                  title="The session's mission — from the Tag Library. Sets how eagerly /develop fires."
                 >
                   2 · mission — how they work
                 </div>
@@ -473,7 +473,7 @@ export function NewEpicCard({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onPaste={(e) => attachPastedFiles(e, att)}
-              placeholder="Epic title"
+              placeholder="Session title"
               className="mb-2 w-full appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-sm font-semibold text-fg outline-none"
             />
             <textarea
@@ -509,7 +509,7 @@ export function NewEpicCard({
                 type="button"
                 data-testid="new-epic-flip-to-grounding"
                 onClick={() => setAdvanced(true)}
-                title="See what this Epic's session will actually load"
+                title="See what this session will actually load"
                 className="rounded-md border border-accent-muted bg-bg px-2.5 py-1.5 text-xs font-semibold text-accent hover:bg-bg-elev"
               >
                 ⤺ Grounding{board ? ` · ${sourceCount} sources` : ''}
@@ -530,7 +530,7 @@ export function NewEpicCard({
                   disabled={!canCreate || creating}
                   className="rounded-md bg-accent px-4 py-2 text-[12.5px] font-semibold text-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {creating ? 'Starting…' : 'Start Epic'}
+                  {creating ? 'Starting…' : 'Start Session'}
                 </button>
               </span>
             </div>
@@ -541,9 +541,9 @@ export function NewEpicCard({
             className="absolute inset-0 flex flex-col rounded-2xl border border-line bg-bg-hi px-[26px] pt-6 pb-[18px]"
             style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
           >
-            <NewEpicHeader eyebrow="New Epic · grounding" advanced={advanced} setAdvanced={setAdvanced} />
+            <NewEpicHeader eyebrow="New session · grounding" advanced={advanced} setAdvanced={setAdvanced} />
             <h2 className="m-0 font-serif text-2xl font-semibold tracking-[-0.3px] text-fg">
-              What this Epic will know
+              What this session will know
             </h2>
             <p className="my-2 mb-[18px] text-[13.5px] leading-[1.55] text-fg-dim">
               Every layer of context this Epic's session actually loads before your goal is sent —
@@ -562,7 +562,7 @@ export function NewEpicCard({
                 <span className="rounded-full bg-fg-faint px-2 py-0.5 font-mono text-[11px] font-semibold text-bg-hi">#{tag}</span>
                 <span className="ml-auto font-mono text-[11px] text-fg-faint">{tokenTotal.toFixed(1)}k of 200k window (estimate)</span>
               </div>
-              <div className="mt-1 text-sm font-semibold text-fg">{title || 'Untitled Epic'}</div>
+              <div className="mt-1 text-sm font-semibold text-fg">{title || 'Untitled session'}</div>
               <div className="mt-0.5 text-[12.5px] leading-[1.5] text-fg-dim">{goal || selectedTagMission}</div>
               {/* Agent has no effect on /develop today — only the Mission tag does
                   (tagLibrary.ts's developEagerness/developsVia). Stated here,
@@ -671,7 +671,7 @@ export function NewEpicCard({
                   disabled={!canCreate || creating}
                   className="rounded-md bg-accent px-4 py-2 text-[12.5px] font-semibold text-bg-hi disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {creating ? 'Starting…' : 'Start Epic'}
+                  {creating ? 'Starting…' : 'Start Session'}
                 </button>
               </span>
             </div>

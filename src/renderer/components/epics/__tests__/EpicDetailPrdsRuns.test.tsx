@@ -94,7 +94,7 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
 
     expect(el.querySelector('[data-testid="epic-prds-placeholder"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="epic-prd-card"]')).toBeNull()
-    expect(el.textContent).toContain('No PRD yet for this Epic')
+    expect(el.textContent).toContain('No PRD yet for this session')
   })
 
   it('joins a PRD file with no job row as status draft', async () => {
@@ -291,6 +291,6 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
 
     expect(el.querySelector('[data-testid="epic-runs-placeholder"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="epic-run-card"]')).toBeNull()
-    expect(el.textContent).toContain('No agent runs in this Epic yet')
+    expect(el.textContent).toContain('No agent runs in this session yet')
   })
 })

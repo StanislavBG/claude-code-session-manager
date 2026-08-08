@@ -241,7 +241,7 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   if (cwd === undefined && !activeTab) {
     return (
       <div className="flex h-full min-h-0 w-full" data-testid="epics-workspace">
-        <EmptyState title="No project open" hint="Open a project tab to see its Epics." />
+        <EmptyState title="No project open" hint="Open a project tab to see its sessions." />
       </div>
     )
   }
@@ -280,10 +280,10 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
       ) : (
         <div className="min-h-0 min-w-0 flex-1">
           <EmptyState
-            title="No Epic selected"
+            title="No session selected"
             hint={
               <button type="button" onClick={handleNew} className="mt-2 text-accent font-semibold text-xs">
-                + New Epic
+                + New Session
               </button>
             }
           />

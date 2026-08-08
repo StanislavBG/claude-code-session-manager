@@ -127,13 +127,13 @@ describe('EpicQueue row menu', () => {
     const labels = menuItemButtons(menu).map((b) => b.textContent)
 
     expect(labels).toEqual([
-      'Copy Epic ID',
+      'Copy session ID',
       'Rename title',
       'Edit goal / first prompt',
       'Resume in terminal',
       'Mark completed',
-      'Duplicate as new Epic',
-      'Delete Epic',
+      'Duplicate as new session',
+      'Delete session',
     ])
   })
 
@@ -144,12 +144,12 @@ describe('EpicQueue row menu', () => {
     const labels = menuItemButtons(menu).map((b) => b.textContent)
 
     expect(labels).toEqual([
-      'Copy Epic ID',
+      'Copy session ID',
       'Rename title',
       'Edit goal / first prompt',
       'Reopen',
-      'Duplicate as new Epic',
-      'Delete Epic',
+      'Duplicate as new session',
+      'Delete session',
     ])
   })
 
@@ -157,7 +157,7 @@ describe('EpicQueue row menu', () => {
     const epic = makeEpic({ id: 'epic-copy-me' })
     const el = mount(createElement(EpicQueue, baseProps(epic)))
     const menu = openMenu(el)
-    clickMenuItem(menu, 'Copy Epic ID')
+    clickMenuItem(menu, 'Copy session ID')
     await flushAsync(2)
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('epic-copy-me')
@@ -293,21 +293,21 @@ describe('EpicQueue row menu', () => {
     const onSelect = vi.fn()
     const el = mount(createElement(EpicQueue, baseProps(epic, { onSelect })))
     const menu = openMenu(el)
-    clickMenuItem(menu, 'Duplicate as new Epic')
+    clickMenuItem(menu, 'Duplicate as new session')
     await flushAsync(2)
 
     expect(duplicateEpic).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
     expect(onSelect).toHaveBeenCalledWith('epic-dup')
   })
 
-  describe('Delete Epic', () => {
+  describe('Delete session', () => {
     it('requires a second click within the confirm window before calling deleteEpic', () => {
       const deleteEpic = vi.spyOn(usePromptSessions.getState(), 'deleteEpic').mockResolvedValue(undefined)
       const epic = makeEpic()
       const el = mount(createElement(EpicQueue, baseProps(epic)))
       const menu = openMenu(el)
 
-      const first = clickMenuItem(menu, 'Delete Epic')
+      const first = clickMenuItem(menu, 'Delete session')
       expect(deleteEpic).not.toHaveBeenCalled()
       expect(first.getAttribute('data-testid')).toBe('epic-queue-row-menu-confirm')
       expect(first.textContent).toBe('Click again to delete…')
@@ -323,7 +323,7 @@ describe('EpicQueue row menu', () => {
       const el = mount(createElement(EpicQueue, baseProps(epic)))
       const menu = openMenu(el)
 
-      const first = clickMenuItem(menu, 'Delete Epic')
+      const first = clickMenuItem(menu, 'Delete session')
       act(() => first.click())
       await flushAsync(2)
 

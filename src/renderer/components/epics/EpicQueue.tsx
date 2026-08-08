@@ -31,6 +31,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useBuildTarget } from '../../lib/useBuildTarget'
+import { SessionActionsBar } from './SessionActionsBar'
 
 const BUILD_GOAL_TEXT =
   '/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there\'s anything new.'
@@ -113,7 +114,7 @@ function useBuildAction(onSelect: (id: string) => void) {
     if (!activeTabCwd || creating) return
     if (inFlight) {
       onSelect(inFlight.id)
-      toast.info('A Build Epic is already in flight for this project — opening it.')
+      toast.info('A Build session is already in flight for this project — opening it.')
       return
     }
     if (!target) return
@@ -141,8 +142,8 @@ function useBuildAction(onSelect: (id: string) => void) {
     : !target
       ? 'No publish target found for this project — add session-manager-operations/architecture/build-target.json or a publishable package.json'
       : inFlight
-        ? 'A Build Epic is already in flight for this project — opens it instead of starting a new one'
-        : 'Start a fresh Epic that checks git vs the published package and publishes if there\'s anything new'
+        ? 'A Build session is already in flight for this project — opens it instead of starting a new one'
+        : 'Start a fresh Build session that checks git vs the published package and publishes if there\'s anything new'
 
   return { disabled, inFlight, tooltip, handleClick }
 }
@@ -412,10 +413,10 @@ function useRowMenuItems(
 ): MenuItem[] {
   const items: MenuItem[] = [
     {
-      label: 'Copy Epic ID',
+      label: 'Copy session ID',
       onSelect: () => {
         void navigator.clipboard?.writeText(epic.id).then(
-          () => toast.info('Epic id copied'),
+          () => toast.info('Session id copied'),
           () => toast.error('Copy failed'),
         )
       },
@@ -455,7 +456,7 @@ function useRowMenuItems(
     })
   }
   items.push({
-    label: 'Duplicate as new Epic',
+    label: 'Duplicate as new session',
     onSelect: () => {
       usePromptSessions
         .getState()
@@ -467,7 +468,7 @@ function useRowMenuItems(
     },
   })
   items.push({
-    label: 'Delete Epic',
+    label: 'Delete session',
     danger: true,
     confirm: true,
     confirmLabel: 'Click again to delete…',
@@ -506,7 +507,7 @@ function RowMenuButton({
           e.stopPropagation()
           setOpen((v) => !v)
         }}
-        title="Epic actions"
+        title="Session actions"
         aria-label={`Actions for ${epic.goalText}`}
         data-testid="epic-queue-row-menu-trigger"
         className={className}
@@ -518,45 +519,14 @@ function RowMenuButton({
   )
 }
 
-/** Toolbar's single entry point, replacing the old split Build button + "+ New
- *  Epic" button trio with one accent "Actions" trigger + RowMenu — reuses the
- *  same dropdown pattern as the per-row overflow menu. Exactly two items:
- *  "+ New Epic" and "Run Build" — no further split of Run Build into a
- *  separate "discuss first" entry. */
-function ActionsMenuButton({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement | null>(null)
+/** Toolbar — one button per Action, no dropdown. The fixed "+ New Session"
+ *  and "Run Build" entries plus one project-scoped Agent Library persona each
+ *  (see `SessionActionsBar` / `lib/projectActions.ts`). Build's own gating
+ *  stays here because it owns the publish-target + in-flight-dedup logic a
+ *  generic Action can't express; the bar just renders what it's handed. */
+function ActionsToolbar({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
   const build = useBuildAction(onSelect)
-
-  const items: MenuItem[] = [
-    {
-      label: '+ New Epic',
-      onSelect: onNew,
-      testId: 'epic-queue-new',
-    },
-    {
-      label: build.inFlight ? 'Open Build in progress' : 'Run Build',
-      onSelect: () => void build.handleClick(),
-      disabled: build.disabled,
-      title: build.tooltip,
-      testId: 'epic-queue-build',
-    },
-  ]
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        data-testid="epic-queue-actions"
-        className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 bg-accent text-white text-xs font-semibold shadow-sm"
-      >
-        Actions
-      </button>
-      {open && btnRef.current && <RowMenu anchor={btnRef.current} items={items} onClose={() => setOpen(false)} />}
-    </>
-  )
+  return <SessionActionsBar onNew={onNew} onSelect={onSelect} build={build} />
 }
 
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
@@ -776,12 +746,15 @@ export function EpicQueue({
 
   return (
     <aside className="w-[352px] h-full shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
-      <div className={`flex items-center gap-2 px-3.5 py-3 ${filters ? '' : 'border-b border-line'}`}>
-        <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Epic queue</span>
-        <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
-        <span className="ml-auto flex items-center gap-1.5">
-          <ActionsMenuButton onNew={onNew} onSelect={onSelect} />
-        </span>
+      {/* Actions get the full width of the header now that each one is its own
+          button — the filter strip below them is deliberately the compact half
+          of this header, sitting directly on top of the list it filters. */}
+      <div className="px-3.5 pt-3 pb-2.5 flex flex-col gap-2 border-b border-line">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Sessions</span>
+          <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
+        </div>
+        <ActionsToolbar onNew={onNew} onSelect={onSelect} />
       </div>
 
       {filters}
@@ -789,11 +762,11 @@ export function EpicQueue({
       <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1.5">
         {isEmpty ? (
           <EmptyState
-            title={emptyState?.title ?? 'No Epics yet'}
+            title={emptyState?.title ?? 'No sessions yet'}
             hint={
               emptyState?.hint ?? (
                 <button type="button" onClick={onNew} className="mt-2 text-accent font-semibold text-xs">
-                  + New Epic
+                  + New Session
                 </button>
               )
             }

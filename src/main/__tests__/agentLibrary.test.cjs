@@ -213,3 +213,43 @@ test('removeOverride deletes a project overlay resolved by project name, and rej
     removeOverride({ name: 'builder', projectName: 'not-open', loadSessions, validatePath: identityValidatePath }),
   ).rejects.toThrow(/project not open/);
 });
+
+test('projects/action/actionLabel round-trip through savePersona -> listPersonas, with newlines preserved', async () => {
+  const globalDir = await mkTmp('sm-agent-library-action-');
+  const action = '/builder\n\nCheck git vs the published package and publish anything new.';
+  await savePersona({
+    name: 'builder',
+    description: 'Drives the next publish.',
+    tools: ['Bash'],
+    model: 'inherit',
+    color: '',
+    tags: ['build'],
+    projects: ['/home/bilko/Projects/alpha', '/home/bilko/Projects/beta'],
+    action,
+    actionLabel: 'Run Build',
+    body: 'Body.',
+    globalDir,
+    validatePath: identityValidatePath,
+    writeTextAtomic: fakeWriteTextAtomic,
+  });
+
+  // The frontmatter parser is line-based, so the multi-line action must be
+  // stored escaped — a raw newline would silently truncate it on read.
+  const raw = await fsp.readFile(path.join(globalDir, 'builder.md'), 'utf8');
+  expect(raw).toContain('action: /builder\\n\\nCheck git');
+  expect(raw).toContain('projects: /home/bilko/Projects/alpha, /home/bilko/Projects/beta');
+
+  const [p] = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath });
+  expect(p.projects).toEqual(['/home/bilko/Projects/alpha', '/home/bilko/Projects/beta']);
+  expect(p.action).toBe(action);
+  expect(p.actionLabel).toBe('Run Build');
+});
+
+test('a persona with no Action fields reports them as empty/null rather than undefined', async () => {
+  const globalDir = await mkTmp('sm-agent-library-noaction-');
+  await fsp.writeFile(path.join(globalDir, 'plain.md'), '---\nname: plain\n---\nBody.\n');
+  const [p] = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath });
+  expect(p.projects).toEqual([]);
+  expect(p.action).toBeNull();
+  expect(p.actionLabel).toBeNull();
+});

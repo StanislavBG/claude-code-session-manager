@@ -36,7 +36,7 @@ export function NewEpicProjectDrawer({
     <HomeSessionDrawer
       open={open}
       onClose={onClose}
-      title="New epic"
+      title="New session"
       sub="Pick a project to start it in"
       keyVals={[]}
       footer={

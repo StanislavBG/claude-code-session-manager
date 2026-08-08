@@ -48,9 +48,9 @@ function answerInEpic(epicId: string): void {
 function PhNow({ cwd, snapshots }: { cwd: string; snapshots: EpicSnapshots }) {
   const cards = useMemo(() => inFlightCards(cwd, snapshots), [cwd, snapshots])
   return (
-    <PhBlock kicker="now" title="What is in flight" note="Live from the Epic queue — this block is never hand-written.">
+    <PhBlock kicker="now" title="What is in flight" note="Live from the session queue — this block is never hand-written.">
       {cards.length === 0 ? (
-        <p className="text-xs text-fg-faint">No Epics in flight.</p>
+        <p className="text-xs text-fg-faint">No sessions in flight.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           {cards.map((card) => (

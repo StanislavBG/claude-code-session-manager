@@ -63,49 +63,33 @@ afterEach(() => {
   root = null
 })
 
-function openActionsMenu(el: HTMLElement) {
-  const trigger = el.querySelector('[data-testid="epic-queue-actions"]') as HTMLButtonElement
-  act(() => trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-  return el.querySelector('[data-testid="epic-queue-row-menu"]') as HTMLDivElement
-}
-
-describe('EpicQueue — Actions toolbar menu', () => {
-  it('renders a single accent "Actions" button in the header, with no other toolbar buttons', async () => {
+describe('EpicQueue — Actions toolbar', () => {
+  it('renders every Action as its own button — no dropdown trigger', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
-    const btn = el.querySelector('[data-testid="epic-queue-actions"]') as HTMLButtonElement
-    expect(btn).not.toBeNull()
-    expect(btn.textContent).toBe('Actions')
-    expect(btn.className).toContain('bg-accent')
-    expect(el.querySelector('[data-testid="epic-queue-build"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-queue-actions"]')).toBeNull()
+    const bar = el.querySelector('[data-testid="session-actions-bar"]') as HTMLDivElement
+    expect(bar).not.toBeNull()
+    const labels = Array.from(bar.querySelectorAll('button')).map((b) => b.textContent)
+    expect(labels).toEqual(['+ New Session', 'Run Build'])
+    expect((el.querySelector('[data-testid="epic-queue-new"]') as HTMLButtonElement).className).toContain('bg-accent')
   })
 
-  it('opens a menu with exactly New Epic and Run Build', async () => {
-    resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
-    const el = mount(<EpicQueue {...baseProps()} />)
-    await act(async () => {})
-    const menu = openActionsMenu(el)
-    const labels = Array.from(menu.querySelectorAll('button')).map((b) => b.textContent)
-    expect(labels).toEqual(['+ New Epic', 'Run Build'])
-  })
-
-  it('New Epic item calls onNew', async () => {
+  it('New Session button calls onNew', async () => {
     resolveBuildTargetMock.mockResolvedValue({ registry: 'npm', packageName: 'foo', versionBumpPolicy: 'conventional-commits', gates: [] })
     const onNew = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onNew={onNew} />)
     await act(async () => {})
-    openActionsMenu(el)
     const btn = el.querySelector('[data-testid="epic-queue-new"]') as HTMLButtonElement
     act(() => btn.click())
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 
-  it('Run Build item is disabled with a tooltip when resolveBuildTarget returns null', async () => {
+  it('Run Build is disabled with a tooltip when resolveBuildTarget returns null', async () => {
     resolveBuildTargetMock.mockResolvedValue(null)
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
-    openActionsMenu(el)
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     expect(btn.title.length).toBeGreaterThan(0)
@@ -116,7 +100,6 @@ describe('EpicQueue — Actions toolbar menu', () => {
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
     await act(async () => {})
-    openActionsMenu(el)
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     expect(btn.disabled).toBe(false)
 
@@ -157,10 +140,6 @@ describe('EpicQueue — Actions toolbar menu', () => {
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
     await act(async () => {})
-    const menu = openActionsMenu(el)
-    const labels = Array.from(menu.querySelectorAll('button')).map((b) => b.textContent)
-    expect(labels).toContain('Open Build in progress')
-
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     act(() => btn.click())
     await act(async () => {})
@@ -185,7 +164,6 @@ describe('EpicQueue — Actions toolbar menu', () => {
     const onSelect = vi.fn()
     const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
     await act(async () => {})
-    openActionsMenu(el)
 
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     expect(btn.disabled).toBe(false)

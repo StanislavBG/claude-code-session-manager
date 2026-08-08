@@ -97,7 +97,7 @@ export function EpicTag({
   if (!epicId) return null
   const known = label != null
   const text = known ? label : shortEpicId(epicId)
-  const title = known ? `Epic · ${label}` : `Epic ${epicId} is not currently loaded`
+  const title = known ? `Session · ${label}` : `Session ${epicId} is not currently loaded`
   const body = (
     <>
       <span className="text-[10px] font-semibold uppercase tracking-wide opacity-70 shrink-0">epic</span>

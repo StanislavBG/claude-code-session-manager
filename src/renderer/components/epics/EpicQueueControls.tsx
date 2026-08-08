@@ -149,6 +149,8 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
   }, [])
   const nowMs = now ?? autoNow
   const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [filter, setFilter] = useState<EpicFilterKey>('open')
   const [closedKeys, setClosedKeys] = useState<Set<string>>(() => new Set(['completed']))
   const [limits, setLimits] = useState<Record<string, number>>({})
@@ -226,13 +228,13 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
     setFilter('all')
   }
 
-  // Distinguish "no Epics exist at all" (EpicQueue's own default empty
-  // state — "No Epics yet" + New Epic CTA) from "the current search/filter
+  // Distinguish "no sessions exist at all" (EpicQueue's own default empty
+  // state — "No sessions yet" + New Epic CTA) from "the current search/filter
   // matched nothing" (this component's job — offer Clear filters).
   const searchNoMatch = epics.length > 0 && sections.length === 0 && pinnedRows.length === 0
   const emptyState = searchNoMatch
     ? {
-        title: search ? `No Epics match "${search}".` : 'No Epics match these filters.',
+        title: search ? `No sessions match "${search}".` : 'No sessions match these filters.',
         hint: (
           <button type="button" onClick={clearFilters} className="mt-1.5 text-accent font-semibold text-xs">
             Clear filters
@@ -241,58 +243,101 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
       }
     : undefined
 
+  // Minimized by default (PRD sessions-actions-menu): the Actions toolbar now
+  // owns the header's vertical space, so filtering collapses to ONE strip
+  // sitting directly above the list it filters. Search and the group/sort/
+  // density controls are behind their own toggles; the status pills stay
+  // visible because they're the control that's actually reached for.
+  // `searchOpen` is forced open while a query is active so a filtered list can
+  // never look unfiltered.
+  const showSearch = searchOpen || !!search
   const filters = (
-    <div className="px-3.5 pb-2.5 border-b border-line flex flex-col gap-2.5">
-      <div className="relative">
-        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint pointer-events-none">
-          <SearchIcon />
-        </span>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={`Search ${epics.length} Epics`}
-          aria-label="Search Epics"
-          className="w-full bg-bg border border-line rounded-md py-1.5 pl-8 pr-7 text-[12.5px] text-fg outline-none focus:border-fg-faint"
-        />
-        {search && (
-          <button
-            type="button"
-            onClick={() => setSearch('')}
-            aria-label="Clear search"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-faint hover:text-fg"
-          >
-            <XIcon />
-          </button>
-        )}
-      </div>
-
-      <FilterPills
-        value={filter}
-        onChange={setFilter}
-        pillPadding="px-2 py-1"
-        options={FILTER_OPTIONS.map((o) => ({
-          value: o.value,
-          label: o.label,
-          count: o.value === 'open' ? counts.open : o.value === 'needs' ? counts.needs : o.value === 'running' ? counts.running : o.value === 'pinned' ? counts.pinned : counts.all,
-        }))}
-      />
-
+    <div className="px-3.5 pb-2 pt-2 border-b border-line flex flex-col gap-1.5" data-testid="epic-queue-filters">
       <div className="flex items-center gap-1.5">
-        <MiniSelect label="group" value={group} onChange={setGroup} options={GROUP_OPTIONS} />
-        <MiniSelect label="sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+        <div className="min-w-0 flex-1">
+          <FilterPills
+            value={filter}
+            onChange={setFilter}
+            pillPadding="px-1.5 py-0.5"
+            options={FILTER_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+              count: o.value === 'open' ? counts.open : o.value === 'needs' ? counts.needs : o.value === 'running' ? counts.running : o.value === 'pinned' ? counts.pinned : counts.all,
+            }))}
+          />
+        </div>
         <button
           type="button"
-          onClick={() => setCompact(!compact)}
-          title={compact ? 'Comfortable rows' : 'Compact rows'}
-          aria-pressed={compact}
-          className={`ml-auto w-7 h-[26px] grid place-items-center rounded-md border ${
-            compact ? 'border-line bg-bg-hi text-accent' : 'border-line text-fg-faint'
+          onClick={() => setSearchOpen((v) => !v)}
+          title="Search sessions"
+          aria-label="Search sessions"
+          aria-pressed={showSearch}
+          data-testid="epic-queue-search-toggle"
+          className={`shrink-0 w-6 h-6 grid place-items-center rounded border ${
+            showSearch ? 'border-line bg-bg-hi text-accent' : 'border-transparent text-fg-faint hover:text-fg'
+          }`}
+        >
+          <SearchIcon />
+        </button>
+        <button
+          type="button"
+          onClick={() => setOptionsOpen((v) => !v)}
+          title="Group, sort and density"
+          aria-label="Group, sort and density"
+          aria-pressed={optionsOpen}
+          data-testid="epic-queue-options-toggle"
+          className={`shrink-0 w-6 h-6 grid place-items-center rounded border ${
+            optionsOpen ? 'border-line bg-bg-hi text-accent' : 'border-transparent text-fg-faint hover:text-fg'
           }`}
         >
           <CompactToggleIcon />
         </button>
       </div>
+
+      {showSearch && (
+        <div className="relative">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint pointer-events-none">
+            <SearchIcon />
+          </span>
+          <input
+            type="text"
+            value={search}
+            autoFocus
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={`Search ${epics.length} sessions`}
+            aria-label="Search sessions"
+            className="w-full bg-bg border border-line rounded-md py-1 pl-8 pr-7 text-[12.5px] text-fg outline-none focus:border-fg-faint"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-faint hover:text-fg"
+            >
+              <XIcon />
+            </button>
+          )}
+        </div>
+      )}
+
+      {optionsOpen && (
+        <div className="flex items-center gap-1.5">
+          <MiniSelect label="group" value={group} onChange={setGroup} options={GROUP_OPTIONS} />
+          <MiniSelect label="sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+          <button
+            type="button"
+            onClick={() => setCompact(!compact)}
+            title={compact ? 'Comfortable rows' : 'Compact rows'}
+            aria-pressed={compact}
+            className={`ml-auto w-7 h-[26px] grid place-items-center rounded-md border ${
+              compact ? 'border-line bg-bg-hi text-accent' : 'border-line text-fg-faint'
+            }`}
+          >
+            <CompactToggleIcon />
+          </button>
+        </div>
+      )}
     </div>
   )
 

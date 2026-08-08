@@ -34,6 +34,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { allProjectCwds, activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
+const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 
 const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-machine.json');
 const LEGACY_QUEUE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json');
@@ -110,9 +111,37 @@ function shapeMachine(raw) {
   };
 }
 
-function shapeJobs(raw) {
+/**
+ * shapeJobs(raw, file) → { jobs, invalid }.
+ *
+ * Every row is validated against ScheduleJobSchema (see that module's header
+ * for why: a row with e.g. `status: 'queued'` — a value outside
+ * `ScheduleJobStatus` — silently vanished from every picker, which is the
+ * exact 2026-08-07 incident this validation exists to catch). A row that
+ * fails is quarantined into `invalid` (never dropped silently, never passed
+ * through as-is) and logged once per slug at error level naming the file,
+ * the slug, and the failing field. One bad row must not affect the others —
+ * this never throws.
+ */
+function shapeJobs(raw, file) {
   const data = JSON.parse(raw);
-  return Array.isArray(data.jobs) ? data.jobs : [];
+  const rows = Array.isArray(data.jobs) ? data.jobs : [];
+  const jobs = [];
+  const invalid = [];
+  for (const row of rows) {
+    const result = ScheduleJobSchema.safeParse(row);
+    if (result.success) {
+      jobs.push(result.data);
+      continue;
+    }
+    const issues = result.error.issues
+      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('; ');
+    const slug = typeof row?.slug === 'string' ? row.slug : '(unknown slug)';
+    console.error(`[queueStore] quarantined invalid job row (file=${file || '(unknown)'}, slug=${slug}): ${issues}`);
+    invalid.push({ slug, file: file || null, issues, row });
+  }
+  return { jobs, invalid };
 }
 
 /**
@@ -125,7 +154,7 @@ function shapeJobs(raw) {
  * consulted so writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, invalidJobs: [] };
   const sourceCwds = [];
   try {
     Object.assign(out, shapeMachine(fs.readFileSync(MACHINE_STATE_PATH, 'utf8')));
@@ -138,7 +167,9 @@ function readMergedSync(opts) {
   for (const cwd of stateCwds(opts)) {
     const file = projectQueuePath(cwd);
     try {
-      out.jobs.push(...shapeJobs(fs.readFileSync(file, 'utf8')));
+      const { jobs, invalid } = shapeJobs(fs.readFileSync(file, 'utf8'), file);
+      out.jobs.push(...jobs);
+      out.invalidJobs.push(...invalid);
       sourceCwds.push(cwd);
     } catch (e) {
       if (e?.code === 'ENOENT') { sourceCwds.push(cwd); continue; }
@@ -152,7 +183,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, invalidJobs: [] };
   const sourceCwds = [];
   try {
     Object.assign(out, shapeMachine(await fsp.readFile(MACHINE_STATE_PATH, 'utf8')));
@@ -165,7 +196,9 @@ async function readMerged(opts) {
   for (const cwd of stateCwds(opts)) {
     const file = projectQueuePath(cwd);
     try {
-      out.jobs.push(...shapeJobs(await fsp.readFile(file, 'utf8')));
+      const { jobs, invalid } = shapeJobs(await fsp.readFile(file, 'utf8'), file);
+      out.jobs.push(...jobs);
+      out.invalidJobs.push(...invalid);
       sourceCwds.push(cwd);
     } catch (e) {
       if (e?.code === 'ENOENT') { sourceCwds.push(cwd); continue; }
@@ -267,7 +300,7 @@ async function migrateLegacyGlobalQueue(defaultCwd) {
   for (const [cwd, jobs] of byCwd) {
     const file = projectQueuePath(cwd);
     let existing = [];
-    try { existing = shapeJobs(await fsp.readFile(file, 'utf8')); } catch { /* fresh shard */ }
+    try { existing = shapeJobs(await fsp.readFile(file, 'utf8'), file).jobs; } catch { /* fresh shard */ }
     const have = new Set(existing.map((j) => j.slug));
     const merged = [...existing, ...jobs.filter((j) => !have.has(j.slug))];
     try {
@@ -293,6 +326,7 @@ module.exports = {
   projectHistoryPath,
   stateCwds,
   bustCwdCache,
+  shapeJobs,
   readMerged,
   readMergedSync,
   writeSplit,

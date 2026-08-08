@@ -227,8 +227,8 @@ describe('NewEpicCard', () => {
 
   it('loads the Agent Library as a button list under "1 · agent", with no "Default" pseudo-agent', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
-      { name: 'debugger', description: 'Diagnoses failures.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
+      { name: 'debugger', description: 'Diagnoses failures.', tools: [], model: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
@@ -244,8 +244,8 @@ describe('NewEpicCard', () => {
 
   it('pre-selects the "architect" persona by default when one exists in the Agent Library', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'architect', description: 'Owns overall plan and decomposition.', tools: [], model: 'opus', color: null, tags: [], path: '', body: '', overridingProjects: [] },
-      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
+      { name: 'architect', description: 'Owns overall plan and decomposition.', tools: [], model: 'opus', color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
@@ -277,7 +277,7 @@ describe('NewEpicCard', () => {
 
   it('threads the selected agent into createPromptSession and grounds the opening prompt with its description', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'builder', description: 'Ships releases end to end.', tools: [], model: null, color: null, tags: [], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases end to end.', tools: [], model: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
@@ -332,9 +332,9 @@ describe('NewEpicCard', () => {
 
   it('derives the Mission pills from the selected persona\'s own tags, and re-derives them when the agent changes', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'architect', description: 'Plans.', tools: [], model: 'opus', color: null, tags: ['feature', 'bug', 'discussion'], path: '', body: '', overridingProjects: [] },
-      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: ['build'], path: '', body: '', overridingProjects: [] },
-      { name: 'project-home-builder', description: 'Generates pages.', tools: [], model: null, color: null, tags: ['project-home-builder'], path: '', body: '', overridingProjects: [] },
+      { name: 'architect', description: 'Plans.', tools: [], model: 'opus', color: null, tags: ['feature', 'bug', 'discussion'], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: ['build'], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
+      { name: 'project-home-builder', description: 'Generates pages.', tools: [], model: null, color: null, tags: ['project-home-builder'], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
@@ -357,7 +357,7 @@ describe('NewEpicCard', () => {
 
   it('sends the tag from the selected agent\'s own tags into createPromptSession', async () => {
     listPersonasSpy.mockResolvedValue([
-      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: ['build'], path: '', body: '', overridingProjects: [] },
+      { name: 'builder', description: 'Ships releases.', tools: [], model: null, color: null, tags: ['build'], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
     ])
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
@@ -452,7 +452,7 @@ describe('NewEpicCard', () => {
         tools: [],
         model: null,
         color: null,
-        tags: [],
+        tags: [], projects: [], action: null, actionLabel: null,
         path: '',
         body: '',
         overridingProjects: [],

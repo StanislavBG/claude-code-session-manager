@@ -134,7 +134,7 @@ describe('EpicQueue', () => {
     const el = mount(
       <EpicQueue epics={[]} snapshots={emptySnapshots()} events={{}} selectedId={null} onSelect={() => {}} onNew={() => {}} now={NOW} />,
     )
-    expect(el.textContent).toContain('No Epics yet')
+    expect(el.textContent).toContain('No sessions yet')
     expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(0)
   })
 

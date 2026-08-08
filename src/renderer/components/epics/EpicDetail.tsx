@@ -655,7 +655,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // would race on the same transcript.
   const chatBusy = running || (chat?.queuedPosition ?? 0) > 0
   const terminalDisabledReason = chatBusy
-    ? 'Chat is running or queued for this Epic — wait for it to finish before switching to Terminal.'
+    ? 'Chat is running or queued for this session — wait for it to finish before switching to Terminal.'
     : null
 
   // Returning to Chat (manual toggle or the pane reporting a PTY exit) records
@@ -704,7 +704,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
       const live = useChat.getState().chats[epicId]
       const liveBusy = Boolean(live?.running) || (live?.queuedPosition ?? 0) > 0
       if (terminalDisabledReason || liveBusy) {
-        toast.info('Chat is running or queued for this Epic — wait for it to finish before switching to Terminal.')
+        toast.info('Chat is running or queued for this session — wait for it to finish before switching to Terminal.')
         return
       }
       setMode(epicId, 'terminal')
@@ -758,7 +758,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   onClick={() => onModeChange('terminal')}
                   aria-pressed={mode === 'terminal'}
                   disabled={Boolean(terminalDisabledReason)}
-                  title={terminalDisabledReason ?? 'Switch to an interactive terminal for this Epic'}
+                  title={terminalDisabledReason ?? 'Switch to an interactive terminal for this session'}
                   data-testid="epic-mode-terminal"
                   className={`rounded px-2.5 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${mode === 'terminal' ? 'bg-bg text-fg shadow-sm' : 'text-fg-faint hover:text-fg-dim'}`}
                 >
@@ -784,7 +784,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 type="button"
                 onClick={onMarkCompleted}
                 disabled={markingCompleted || mode === 'terminal'}
-                title={mode === 'terminal' ? 'Switch back to Chat before marking this Epic completed — it would kill the live Terminal session.' : undefined}
+                title={mode === 'terminal' ? 'Switch back to Chat before marking this session completed — it would kill the live Terminal session.' : undefined}
                 data-testid="epic-mark-completed"
                 className="rounded-md border border-line bg-bg-hi px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-hi disabled:opacity-50"
               >
@@ -1013,7 +1013,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
         {view === 'prds' && (
           <div className="grid max-w-[900px] gap-4" data-testid="epic-prds-placeholder">
             {attachedPrds.length === 0 ? (
-              <EmptyPlaceholder text="No PRD yet for this Epic. Ask Claude in the thread — it will attach here." />
+              <EmptyPlaceholder text="No PRD yet for this session. Ask Claude in the thread — it will attach here." />
             ) : (
               <>
                 <div className="grid gap-2">
@@ -1032,7 +1032,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
         {view === 'runs' && (
           <div className="grid max-w-[900px] gap-2" data-testid="epic-runs-placeholder">
             {epicRuns.length === 0 ? (
-              <EmptyPlaceholder text="No agent runs in this Epic yet." />
+              <EmptyPlaceholder text="No agent runs in this session yet." />
             ) : (
               epicRuns.map((j) => <RunCard key={j.slug} job={j} />)
             )}

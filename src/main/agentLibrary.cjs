@@ -34,6 +34,25 @@ function parseTools(raw) {
 /** Filename-safe persona name: lowercase, hyphenated, matches the `.md` files on disk. */
 const PERSONA_NAME_RE = /^[a-z][a-z0-9-]*$/;
 
+/** Sentinel `projects:` entry meaning "this agent's Action button shows in every project". */
+const ALL_PROJECTS = '*';
+
+/**
+ * Frontmatter values are single-line (see lib/prdFrontmatter.cjs) but an
+ * Action's opening instruction is genuinely multi-line prose (the builder
+ * action is `/builder\n\n<instruction>`). Encode newlines as a literal `\n`
+ * two-char sequence on the way out, decode on the way in — one place, so the
+ * round-trip is structural rather than something each caller remembers.
+ */
+function encodeLine(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n');
+}
+
+function decodeLine(s) {
+  if (!s) return '';
+  return String(s).replace(/\\([\\n])/g, (_m, c) => (c === 'n' ? '\n' : '\\'));
+}
+
 /**
  * Serializes a persona's frontmatter + body back to `.md` file text.
  * `tags` is a Claude-Code-agnostic extension of the frontmatter (Claude Code
@@ -41,14 +60,25 @@ const PERSONA_NAME_RE = /^[a-z][a-z0-9-]*$/;
  * this persona is associated with, so Agent Library and Tag Library can each
  * assign/remove the relationship from either side. Stored the same
  * comma-list way as `tools` for one parser to cover both.
+ *
+ * `projects` / `action` / `actionLabel` are the same kind of extension, for
+ * the Sessions workspace's per-project **Action buttons**: `projects` is the
+ * list of project cwds (or the `*` sentinel = every project) whose Sessions
+ * toolbar shows a one-click button for this agent, `action` is the opening
+ * instruction that button sends into the new session, and `actionLabel`
+ * overrides the button's caption (defaults to the persona name). Claude Code
+ * ignores all three; only this app reads them.
  */
-function serializePersona({ name, description, tools, model, color, tags, title, body }) {
+function serializePersona({ name, description, tools, model, color, tags, projects, action, actionLabel, title, body }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
   if (model && model !== 'inherit') lines.push(`model: ${model}`);
   if (color) lines.push(`color: ${color}`);
   if (tags && tags.length) lines.push(`tags: ${tags.join(', ')}`);
+  if (projects && projects.length) lines.push(`projects: ${projects.join(', ')}`);
+  if (action) lines.push(`action: ${encodeLine(action)}`);
+  if (actionLabel) lines.push(`actionLabel: ${encodeLine(actionLabel)}`);
   if (title) lines.push(`title: ${title}`);
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
@@ -67,6 +97,9 @@ async function savePersona({
   model,
   color,
   tags,
+  projects,
+  action,
+  actionLabel,
   title,
   body,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -77,7 +110,7 @@ async function savePersona({
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
-  const text = serializePersona({ name, description, tools, model, color, tags, title, body });
+  const text = serializePersona({ name, description, tools, model, color, tags, projects, action, actionLabel, title, body });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
@@ -203,6 +236,9 @@ async function listPersonas({
       model: fm.model || null,
       color: fm.color || null,
       tags: parseTools(fm.tags),
+      projects: parseTools(fm.projects),
+      action: decodeLine(fm.action) || null,
+      actionLabel: decodeLine(fm.actionLabel) || null,
       title: fm.title || null,
       path: real,
       body: body.trim(),
@@ -220,5 +256,7 @@ module.exports = {
   savePersona,
   deletePersona,
   removeOverride,
+  serializePersona,
   PERSONA_NAME_RE,
+  ALL_PROJECTS,
 };

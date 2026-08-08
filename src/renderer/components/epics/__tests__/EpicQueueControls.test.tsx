@@ -80,6 +80,14 @@ function baseProps(epics: PromptSession[], snapshots: EpicSnapshots, extra: Part
   }
 }
 
+/** The filter strip is minimized by default (Actions own the header space) —
+ *  the search box is behind its own toggle. */
+function openSearch(el: HTMLElement): HTMLInputElement {
+  const toggle = el.querySelector('[data-testid="epic-queue-search-toggle"]') as HTMLButtonElement
+  act(() => toggle.click())
+  return el.querySelector('input[aria-label="Search sessions"]') as HTMLInputElement
+}
+
 describe('EpicQueueControls', () => {
   it('renders chip counts derived from the full epic list', () => {
     const epics = [
@@ -106,9 +114,9 @@ describe('EpicQueueControls', () => {
     const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
     const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
 
-    const input = el.querySelector('input[aria-label="Search Epics"]') as HTMLInputElement
+    const input = openSearch(el)
     act(() => setInputValue(input, 'zzz-nomatch'))
-    expect(el.textContent).toContain('No Epics match')
+    expect(el.textContent).toContain('No sessions match')
     expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(0)
 
     const clearBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Clear filters') as HTMLButtonElement
@@ -180,7 +188,7 @@ describe('EpicQueueControls', () => {
     expect(onSelect).toHaveBeenCalledWith('e-second')
   })
 
-  it('renders exactly one 352px bordered container, with the Epic queue header above search', () => {
+  it('renders exactly one 352px bordered container, with the Sessions header above the filter strip', () => {
     const epics = [makeEpic({ id: 'e-a' })]
     const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
     const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
@@ -188,12 +196,13 @@ describe('EpicQueueControls', () => {
     const containers = Array.from(el.querySelectorAll('*')).filter((node) => node.className?.toString().includes('w-[352px]'))
     expect(containers).toHaveLength(1)
 
-    const headingText = Array.from(el.querySelectorAll('span')).find((s) => s.textContent === 'Epic queue')
-    const searchInput = el.querySelector('input[aria-label="Search Epics"]')
+    const headingText = Array.from(el.querySelectorAll('span')).find((s) => s.textContent === 'Sessions')
+    const filters = el.querySelector('[data-testid="epic-queue-filters"]')
     expect(headingText).not.toBeNull()
-    expect(searchInput).not.toBeNull()
-    // Header (title row + New Epic) precedes the search/filter block in DOM order.
-    const position = headingText!.compareDocumentPosition(searchInput!)
+    expect(filters).not.toBeNull()
+    // Header (title row + Action buttons) precedes the filter strip, which in
+    // turn sits directly above the list it filters.
+    const position = headingText!.compareDocumentPosition(filters!)
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
@@ -203,7 +212,7 @@ describe('EpicQueueControls', () => {
     const onSelect = vi.fn()
     const el = mount(<EpicQueueControls {...baseProps(epics, snapshots, { selectedId: 'e-a', onSelect })} />)
 
-    const input = el.querySelector('input[aria-label="Search Epics"]') as HTMLInputElement
+    const input = openSearch(el)
     input.focus()
     act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true })))
     expect(onSelect).not.toHaveBeenCalled()

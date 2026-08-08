@@ -27,7 +27,7 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
     try {
       const approved = usePromptSessions.getState().approveProposed(epic.id, 'EpicApprovalBar')
       if (!approved) {
-        toast.error('This Epic is no longer awaiting approval.')
+        toast.error('This session is no longer awaiting approval.')
         return
       }
       useChat.getState().send({

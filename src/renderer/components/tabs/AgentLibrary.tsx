@@ -9,6 +9,8 @@ import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
 import { TAG_LIBRARY } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
+import { useKnownProjects } from '../../lib/useKnownProjects'
+import { ALL_PROJECTS } from '../../lib/projectActions'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
@@ -20,11 +22,19 @@ import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
  * here (`removeOverride`) but never created, since this page has no per-tab
  * cwd context of its own (it's a Home-face, machine-wide surface).
  *
- * The "tags" field assigns/removes Epic intent tags (TAG_LIBRARY) on this
+ * The "tags" field assigns/removes session intent tags (TAG_LIBRARY) on this
  * persona — a `tags:` frontmatter line persisted alongside `tools`/`model`.
  * Tag Library's detail pane reads/writes the same field from the other side
  * (which agents carry a given tag), so the relationship is a single source
  * of truth no matter which page you edit it from.
+ *
+ * An agent is also the unit an **Action** is made of: the "appears in" +
+ * "action" fields turn a persona into a one-click button in a project's
+ * Sessions toolbar (`components/epics/SessionActionsBar.tsx`,
+ * `lib/projectActions.ts`). Pressing it opens a normal session — the persona
+ * supplies the AIM framework's ACTOR line, its tag supplies the MISSION, and
+ * the "action" text is the opening goal. Nothing about an Action bypasses
+ * session creation; it only pre-fills it.
  */
 
 const MODELS = ['inherit', 'haiku', 'sonnet', 'opus'] as const
@@ -42,6 +52,9 @@ interface Draft {
   model: string
   color: string
   tags: string[]
+  projects: string[]
+  action: string
+  actionLabel: string
   body: string
 }
 
@@ -53,11 +66,14 @@ function toDraft(p: AgentPersona): Draft {
     model: p.model ?? 'inherit',
     color: p.color ?? '',
     tags: p.tags,
+    projects: p.projects ?? [],
+    action: p.action ?? '',
+    actionLabel: p.actionLabel ?? '',
     body: p.body,
   }
 }
 
-const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', color: '', tags: [], body: '' }
+const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', color: '', tags: [], projects: [], action: '', actionLabel: '', body: '' }
 
 function AgentLibraryComponent() {
   const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
@@ -144,6 +160,9 @@ function AgentLibraryComponent() {
         model: obj.model,
         color: obj.color,
         tags: obj.tags,
+        projects: obj.projects,
+        action: obj.action,
+        actionLabel: obj.actionLabel,
         body: obj.body,
       }
       await window.api.agents.savePersona(payload)
@@ -411,7 +430,7 @@ function AgentPersonaEditor({
           </div>
         </Field>
 
-        <Field label="tags" hint="Epic intent tags this persona is associated with — shown as the default agent on that tag's own page.">
+        <Field label="tags" hint="Session mission tags this persona is associated with — shown as the default agent on that tag's own page. The first one (in Tag Library order) is the MISSION an Action button's session opens with.">
           <div className="flex flex-wrap gap-1.5">
             {TAG_LIBRARY.map((t) => {
               const on = obj.tags.includes(t.tag)
@@ -430,6 +449,8 @@ function AgentPersonaEditor({
             })}
           </div>
         </Field>
+
+        <ActionScopeFields obj={obj} set={set} />
 
         <Field label="definition" hint="The system prompt this persona runs under.">
           <textarea
@@ -479,6 +500,101 @@ function AgentPersonaEditor({
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * The Action half of a persona: which projects show a one-click button for it,
+ * what that button is called, and the instruction it opens the session with.
+ *
+ * Scope is stored as project cwds (or the `*` sentinel) on the persona file
+ * itself, so there's no separate per-project registry to drift against — see
+ * `lib/projectActions.ts`. A cwd on the persona that no longer resolves to a
+ * known project is still listed (as a raw path) rather than silently dropped,
+ * so a scope set on another machine or a since-moved folder stays visible and
+ * removable instead of vanishing on the next save.
+ */
+function ActionScopeFields({ obj, set }: { obj: Draft; set: (patch: Partial<Draft>) => void }) {
+  const { projects } = useKnownProjects()
+  const known = projects.map((p) => ({ cwd: p.cwd, name: p.name }))
+  const knownCwds = new Set(known.map((p) => p.cwd))
+  const orphans = obj.projects.filter((c) => c !== ALL_PROJECTS && !knownCwds.has(c))
+  const everywhere = obj.projects.includes(ALL_PROJECTS)
+
+  const toggle = (value: string) =>
+    set({ projects: obj.projects.includes(value) ? obj.projects.filter((x) => x !== value) : [...obj.projects, value] })
+
+  const isAction = obj.projects.length > 0
+
+  return (
+    <>
+      <Field
+        label="action — appears in"
+        hint="Projects whose Sessions toolbar gets a one-click button for this agent. Pressing it starts a normal session: this persona is the ACTOR, its first tag is the MISSION, and the action text below is the opening goal. Leave empty for an agent that is only picked by hand in the New Session card."
+      >
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => toggle(ALL_PROJECTS)}
+            className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
+              everywhere ? 'bg-accent/15 text-accent border-accent/40 font-semibold' : 'bg-bg-hi text-fg-faint border-line'
+            }`}
+          >
+            every project
+          </button>
+          {known.map((p) => {
+            const on = obj.projects.includes(p.cwd)
+            return (
+              <button
+                key={p.cwd}
+                title={p.cwd}
+                onClick={() => toggle(p.cwd)}
+                className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
+                  on ? 'bg-sage/15 text-sage-dark border-sage/30' : 'bg-bg-hi text-fg-faint border-line'
+                } ${everywhere && !on ? 'opacity-40' : ''}`}
+              >
+                {p.name}
+              </button>
+            )
+          })}
+          {orphans.map((c) => (
+            <button
+              key={c}
+              title={`${c} — not a known project on this machine`}
+              onClick={() => toggle(c)}
+              className="px-2 py-0.5 rounded-full text-[11px] font-mono border bg-bg-hi text-fg-faint border-dashed border-line"
+            >
+              {c} ×
+            </button>
+          ))}
+        </div>
+      </Field>
+
+      {isAction && (
+        <>
+          <Field label="action — button label" hint="Caption on the Sessions toolbar button. Defaults to the agent name.">
+            <input
+              value={obj.actionLabel}
+              onChange={(e) => set({ actionLabel: e.target.value })}
+              placeholder={obj.name}
+              className="w-full bg-bg border border-line rounded px-2 py-1 text-xs text-fg"
+            />
+          </Field>
+
+          <Field
+            label="action — opening instruction"
+            hint="Sent as the session's first message, under the AIM framing. Falls back to this persona's description when empty; with neither, no button is shown."
+          >
+            <textarea
+              rows={3}
+              value={obj.action}
+              onChange={(e) => set({ action: e.target.value })}
+              placeholder={obj.description || 'e.g. /builder\n\nCheck git vs the published package and publish anything new.'}
+              className="w-full bg-bg border border-line rounded px-2 py-1.5 text-xs text-fg font-mono leading-relaxed resize-y"
+            />
+          </Field>
+        </>
+      )}
+    </>
   )
 }
 

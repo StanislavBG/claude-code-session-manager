@@ -19,6 +19,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chromium } from '@playwright/test';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = join(REPO, 'session-manager-operations', 'manual');
@@ -115,60 +116,89 @@ if (checkOnly) {
   process.exit(0);
 }
 
+// ── Render the offline HTML through headless chromium into a PDF ─────────────
+// The offline edition already inlines all of its CSS, so printing it is the
+// deterministic path to a paginated PDF with no separate stylesheet to keep
+// in sync. Same content in → same content out; page count/layout only moves
+// if the manual's own HTML/CSS changes.
+async function renderPdf(html) {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle' });
+    return await page.pdf({
+      format: 'Letter',
+      printBackground: true,
+      margin: { top: '0.6in', bottom: '0.6in', left: '0.6in', right: '0.6in' },
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
 // ── Write the release bundle ─────────────────────────────────────────────────
 
-const outDir = join(outRoot, src.version);
-// Rebuild from scratch — a stale chapter left behind from a previous build of
-// the same version would ship silently.
-if (existsSync(outDir)) rmSync(outDir, { recursive: true });
-mkdirSync(outDir, { recursive: true });
+async function main() {
+  const outDir = join(outRoot, src.version);
+  // Rebuild from scratch — a stale chapter left behind from a previous build of
+  // the same version would ship silently.
+  if (existsSync(outDir)) rmSync(outDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
 
-for (const c of chapterHtml) {
-  writeFileSync(join(outDir, c.file), c.html, 'utf-8');
-}
-
-const figuresSrc = join(SOURCE, 'figures');
-if (existsSync(figuresSrc)) {
-  cpSync(figuresSrc, join(outDir, 'figures'), { recursive: true });
-}
-
-const assets = [];
-for (const a of src.assets ?? []) {
-  if (a.id === 'offline-html') {
-    writeFileSync(join(outDir, a.file), offlineHtml, 'utf-8');
-  } else if (existsSync(join(SOURCE, 'assets', a.file))) {
-    cpSync(join(SOURCE, 'assets', a.file), join(outDir, a.file));
-  } else {
-    // Declaring an asset the bundle doesn't contain hands buyers a broken
-    // download button — refuse the build rather than ship it.
-    fail(`asset "${a.id}" declares ${a.file} but no source exists at manual/assets/${a.file}`);
+  for (const c of chapterHtml) {
+    writeFileSync(join(outDir, c.file), c.html, 'utf-8');
   }
-  assets.push({
-    id: a.id,
-    label: a.label,
-    file: a.file,
-    mime: a.mime ?? 'application/octet-stream',
-    bytes: statSync(join(outDir, a.file)).size,
-  });
+
+  const figuresSrc = join(SOURCE, 'figures');
+  if (existsSync(figuresSrc)) {
+    cpSync(figuresSrc, join(outDir, 'figures'), { recursive: true });
+  }
+
+  const assets = [];
+  for (const a of src.assets ?? []) {
+    if (a.id === 'offline-html') {
+      writeFileSync(join(outDir, a.file), offlineHtml, 'utf-8');
+    } else if (a.id === 'pdf') {
+      writeFileSync(join(outDir, a.file), await renderPdf(offlineHtml));
+    } else if (existsSync(join(SOURCE, 'assets', a.file))) {
+      cpSync(join(SOURCE, 'assets', a.file), join(outDir, a.file));
+    } else {
+      // Declaring an asset the bundle doesn't contain hands buyers a broken
+      // download button — refuse the build rather than ship it.
+      fail(`asset "${a.id}" declares ${a.file} but no source exists at manual/assets/${a.file}`);
+    }
+    assets.push({
+      id: a.id,
+      label: a.label,
+      file: a.file,
+      mime: a.mime ?? 'application/octet-stream',
+      bytes: statSync(join(outDir, a.file)).size,
+    });
+  }
+
+  const manifest = {
+    version: src.version,
+    releasedAt: src.releasedAt,
+    title: src.title,
+    summary: src.summary,
+    documentsAppVersion: src.documentsAppVersion,
+    chapters: src.chapters.map(c => ({
+      slug: c.slug, title: c.title, blurb: c.blurb,
+      ...(c.free ? { free: true } : {}),
+      file: c.file,
+      ...(c.figures ? { figures: c.figures } : {}),
+    })),
+    assets,
+  };
+
+  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+
+  console.log(`✓ built manual v${src.version} → ${outDir}`);
+  console.log(`  ${manifest.chapters.length} chapters (${manifest.chapters.filter(c => c.free).length} free), ${assets.length} downloadable asset(s)`);
+  for (const a of assets) console.log(`  · ${a.id}: ${a.file} (${a.bytes} bytes)`);
 }
 
-const manifest = {
-  version: src.version,
-  releasedAt: src.releasedAt,
-  title: src.title,
-  summary: src.summary,
-  documentsAppVersion: src.documentsAppVersion,
-  chapters: src.chapters.map(c => ({
-    slug: c.slug, title: c.title, blurb: c.blurb,
-    ...(c.free ? { free: true } : {}),
-    file: c.file,
-    ...(c.figures ? { figures: c.figures } : {}),
-  })),
-  assets,
-};
-
-writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
-
-console.log(`✓ built manual v${src.version} → ${outDir}`);
-console.log(`  ${manifest.chapters.length} chapters (${manifest.chapters.filter(c => c.free).length} free), ${assets.length} downloadable asset(s)`);
-for (const a of assets) console.log(`  · ${a.id}: ${a.file} (${a.bytes} bytes)`);
+main().catch(err => {
+  console.error(`✗ ${err.message}`);
+  process.exitCode = 1;
+});

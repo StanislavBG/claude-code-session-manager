@@ -31,6 +31,12 @@
       "label": "Offline HTML edition",
       "file": "field-manual-1.0.0.html",
       "mime": "text/html"
+    },
+    {
+      "id": "pdf",
+      "label": "PDF edition",
+      "file": "field-manual-1.0.0.pdf",
+      "mime": "application/pdf"
     }
   ]
 }

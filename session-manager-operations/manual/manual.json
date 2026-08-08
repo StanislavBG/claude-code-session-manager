@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
-  "documentsAppVersion": "0.64.0",
+  "documentsAppVersion": "0.65.0",
   "releasedAt": "2026-08-07",
   "chapters": [
     {
@@ -23,6 +23,36 @@
       "title": "Scheduler — author once, run around your token window",
       "blurb": "Writing a PRD that actually completes, how the queue picks work, auto-pause on rate limits, and reading a job parked in needs_review.",
       "file": "scheduler.html"
+    },
+    {
+      "slug": "settings-and-scopes",
+      "title": "Settings & Scopes — editing the substrate, not the conversation",
+      "blurb": "The User/Project/Local scope model, why a Settings edit changes every Epic in scope rather than just the one you're in, and when to reach for a Tag or Agent instead.",
+      "file": "settings-and-scopes.html"
+    },
+    {
+      "slug": "mcp-servers",
+      "title": "MCP Servers — registering tools, and proving they actually connected",
+      "blurb": "Editing ~/.claude.json and .mcp.json safely, and the live-probe workflow that catches a server that looks configured but never actually connects.",
+      "file": "mcp-servers.html"
+    },
+    {
+      "slug": "permissions",
+      "title": "Permissions — stop the interruptions, don't disable the guardrail",
+      "blurb": "Allow/deny/ask rules, the three scopes, the mistake people make with Project scope, and using fewer-permission-prompts to build the allowlist for you.",
+      "file": "permissions.html"
+    },
+    {
+      "slug": "agent-library",
+      "title": "Agent Library — authoring the \"who\" of an Epic",
+      "blurb": "Building focused personas instead of repeating instructions in every prompt, how a persona's model field picks --model, and the project-override mistake that makes an edit look like it did nothing.",
+      "file": "agent-library.html"
+    },
+    {
+      "slug": "skills",
+      "title": "Skills — what auto-fires, what you type, and where it lives",
+      "blurb": "Telling a Skill apart from a Slash Command, why scope matters before you touch Toggle or Remove, and finding this project's own dev skillset in the Library.",
+      "file": "skills.html"
     }
   ],
   "assets": [

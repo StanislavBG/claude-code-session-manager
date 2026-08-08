@@ -1,8 +1,13 @@
 /**
  * AlmanacSidebar — primary navigation. Replaces both the old top Header
- * (action toolbar) and the old LeftNav. Three nav groups (Workspace,
- * Configure, Tools), project caption, persistent recording status in the
- * footer, and a New Session primary button.
+ * (action toolbar) and the old LeftNav. Project caption, persistent recording
+ * status in the footer, and a New Session primary button.
+ *
+ * Two row layouts over the same `getNavItemsForFace(navFace)` list:
+ * the HOME face renders the three collapsible nav groups (Workspace /
+ * Configure / Tools); the PROJECT face — and rail mode on either face —
+ * renders one flat list in NAV_ITEMS order, since a handful of rows doesn't
+ * warrant three section headers.
  *
  * Click handlers come in via props. Workspace + Configure items navigate via
  * `onNavigate(NavKey)` (these render as full pages in MainPane). Tools items
@@ -149,6 +154,9 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   const workspace = items.filter((item) => item.group === 'Workspace')
   const configure = items.filter((item) => item.group === 'Configure')
   const tools = toolItems(items)
+  // Section headers are a HOME-face affordance only. The Project face is a
+  // short flat list; rail mode has never rendered headers either.
+  const sectioned = navFace === 'home' && !rail
 
   // Drag-to-resize. widthRef mirrors width so a new drag starts from the
   // current size; the move/up listeners live on window so the drag keeps
@@ -192,8 +200,38 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
       <ProjectCaption tab={activeTab} navFace={navFace} onNewSession={onNewSession} rail={rail} onToggleRail={toggleRail} />
 
       <div className="flex-1 min-h-0 overflow-auto pb-3" style={{ paddingInline: rail ? '4px' : '8px' }}>
-        <>
-          {!rail && (
+        {!sectioned ? (
+          // Flat list — the Project face (and rail mode) render every row in
+          // NAV_ITEMS order with no section headers and no per-group collapse.
+          // The Project face is down to a handful of rows, so three headers
+          // cost more chrome than they buy; grouping still exists in
+          // navGroups.ts and still drives the page eyebrow.
+          <div className="pt-2">
+            {items.map((item) =>
+              item.group === 'Tools' ? (
+                <ToolRow
+                  key={item.key}
+                  tool={{ key: item.key as ToolKey, label: item.label, icon: item.icon, hint: item.hint }}
+                  active={active === item.key}
+                  onClick={() => onNavigate(item.key)}
+                  rail={rail}
+                />
+              ) : (
+                <NavRow
+                  key={item.key}
+                  item={item}
+                  active={active === item.key}
+                  live={item.liveKind ? indicators[item.liveKind] : false}
+                  onClick={() => onNavigate(item.key)}
+                  rail={rail}
+                />
+              ),
+            )}
+          </div>
+        ) : (
+          // Sectioned list — HOME face, expanded. `sectioned` already excludes
+          // rail mode, so every row here is the full label+hint variant.
+          <>
             <NavGroupHeader
               label="Workspace"
               desc={NAV_GROUP_DESCRIPTIONS.Workspace}
@@ -201,19 +239,17 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               count={workspace.length}
               onToggle={() => toggleGroup('Workspace')}
             />
-          )}
-          {(rail || !collapsed.has('Workspace')) && workspace.map((item) => (
-            <NavRow
-              key={item.key}
-              item={item}
-              active={active === item.key}
-              live={item.liveKind ? indicators[item.liveKind] : false}
-              onClick={() => onNavigate(item.key)}
-              rail={rail}
-            />
-          ))}
+            {!collapsed.has('Workspace') && workspace.map((item) => (
+              <NavRow
+                key={item.key}
+                item={item}
+                active={active === item.key}
+                live={item.liveKind ? indicators[item.liveKind] : false}
+                onClick={() => onNavigate(item.key)}
+                rail={false}
+              />
+            ))}
 
-          {!rail && (
             <NavGroupHeader
               label="Configure"
               desc={NAV_GROUP_DESCRIPTIONS.Configure}
@@ -221,37 +257,37 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
               count={configure.length}
               onToggle={() => toggleGroup('Configure')}
             />
-          )}
-          {(rail || !collapsed.has('Configure')) && configure.map((item) => (
-            <NavRow
-              key={item.key}
-              item={item}
-              active={active === item.key}
-              live={false}
-              onClick={() => onNavigate(item.key)}
-              rail={rail}
-            />
-          ))}
+            {!collapsed.has('Configure') && configure.map((item) => (
+              <NavRow
+                key={item.key}
+                item={item}
+                active={active === item.key}
+                live={false}
+                onClick={() => onNavigate(item.key)}
+                rail={false}
+              />
+            ))}
 
-          {tools.length > 0 && !rail && (
-            <NavGroupHeader
-              label="Tools"
-              desc={NAV_GROUP_DESCRIPTIONS.Tools}
-              collapsed={collapsed.has('Tools')}
-              count={tools.length}
-              onToggle={() => toggleGroup('Tools')}
-            />
-          )}
-          {tools.length > 0 && (rail || !collapsed.has('Tools')) && tools.map((tool) => (
-            <ToolRow
-              key={tool.key}
-              tool={tool}
-              active={active === tool.key}
-              onClick={() => onNavigate(tool.key)}
-              rail={rail}
-            />
-          ))}
-        </>
+            {tools.length > 0 && (
+              <NavGroupHeader
+                label="Tools"
+                desc={NAV_GROUP_DESCRIPTIONS.Tools}
+                collapsed={collapsed.has('Tools')}
+                count={tools.length}
+                onToggle={() => toggleGroup('Tools')}
+              />
+            )}
+            {tools.length > 0 && !collapsed.has('Tools') && tools.map((tool) => (
+              <ToolRow
+                key={tool.key}
+                tool={tool}
+                active={active === tool.key}
+                onClick={() => onNavigate(tool.key)}
+                rail={false}
+              />
+            ))}
+          </>
+        )}
       </div>
 
       <SidebarFooter rail={rail} navFace={navFace} />

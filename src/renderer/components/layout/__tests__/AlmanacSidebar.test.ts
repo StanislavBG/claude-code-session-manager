@@ -85,16 +85,74 @@ describe('AlmanacSidebar', () => {
       // faces now — no per-face labelByFace override.
       expect(text).toContain('Scheduler')
       expect(text).toContain("Global policy + this project's live PRD queue")
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
 
-      // Group headers show their one-line description.
+  // The Project face is a short flat list — three section headers over a
+  // handful of rows was more chrome than signal. Grouping still exists in
+  // navGroups.ts (it drives the page eyebrow), it just isn't rendered here.
+  it('renders the project face flat — no section headers or descriptions', () => {
+    seedActiveTab('/tmp/project')
+    useLayout.setState({ navFace: 'project' })
+    const { container, root } = mount('scheduler')
+    try {
+      const nav = container.querySelector('[data-testid="tour-leftnav"]')
+      const text = nav?.textContent ?? ''
+
+      // NavGroupHeader is the only aria-expanded control in the sidebar.
+      expect(nav?.querySelectorAll('[aria-expanded]').length).toBe(0)
+      expect(text).not.toContain('Where you do the work')
+      expect(text).not.toContain('How Claude behaves')
+      expect(text).not.toContain('One-off utilities')
+
+      // …but every project-face row is still there, in NAV_ITEMS order.
+      for (const label of ['Project Home', 'Sessions', 'File Explorer', 'Scheduler', 'Memory', 'Host on Bilko.run']) {
+        expect(text).toContain(label)
+      }
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  // History is the machine-wide analytics screen; it lives on Home only.
+  it('omits History from the project face and keeps it on the home face', () => {
+    seedActiveTab('/tmp/project')
+    useLayout.setState({ navFace: 'project' })
+    const projectMount = mount('scheduler')
+    try {
+      const text = projectMount.container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
+      expect(text).not.toContain('History')
+      expect(text).not.toContain('Every session, ever')
+    } finally {
+      act(() => projectMount.root.unmount())
+      projectMount.container.remove()
+    }
+
+    useLayout.setState({ navFace: 'home' })
+    const homeMount = mount()
+    try {
+      const text = homeMount.container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
+      expect(text).toContain('History')
+      expect(text).toContain('Every session, ever')
+    } finally {
+      act(() => homeMount.root.unmount())
+      homeMount.container.remove()
+    }
+  })
+
+  it('keeps section headers on the home face', () => {
+    useLayout.setState({ navFace: 'home' })
+    const { container, root } = mount()
+    try {
+      const text = container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
       expect(text).toContain('Workspace')
       expect(text).toContain('Where you do the work — sessions, files, and everything currently running.')
       expect(text).toContain('Configure')
       expect(text).toContain('How Claude behaves — changes here apply to every session you start.')
-
-      // Tools' only item (Voice) is home-face-only, so the group is entirely
-      // absent on the project face — no dangling empty section header.
-      expect(text).not.toContain('Tools')
     } finally {
       act(() => root.unmount())
       container.remove()

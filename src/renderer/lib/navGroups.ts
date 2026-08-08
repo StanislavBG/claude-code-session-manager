@@ -9,6 +9,11 @@ import type { NavFace } from './navFace'
  * one group here, so the sidebar section and the page eyebrow can never
  * disagree.
  *
+ * The grouping is only rendered as section headers on the HOME face — the
+ * PROJECT face is a short flat list (six rows), where three headers cost more
+ * chrome than they buy. `group` still applies on both faces: it drives the
+ * page eyebrow and NAV_ITEMS' ordering, which the flat list preserves.
+ *
  * `NavKey`s that render their own chrome and have no sidebar row (`editor`)
  * are intentionally absent. `overview` (the machine-wide Dashboard) IS a
  * sidebar row now, home-face-only, labeled "Dashboard" to stay distinct from
@@ -51,7 +56,11 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'terminal',   group: 'Workspace', label: 'Sessions',  icon: 'terminal',     hint: 'Independent goal-scoped sessions for this project', faces: PROJECT },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
   { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Global policy + this project\'s live PRD queue', faces: BOTH },
-  { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: BOTH },
+  // History is HOME-only: it is the machine-wide analytics/cost surface
+  // (lib/historyProjectFold.ts folds every project's days together), so a
+  // per-project copy of it was a second door onto the same cross-project
+  // screen. Reachable from the Home face only.
+  { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: HOME },
 
   // Configure
   { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Personality and behavior', faces: HOME },

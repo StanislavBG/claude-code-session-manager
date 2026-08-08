@@ -21,9 +21,10 @@ describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
     'overview', 'plugins', 'voice', 'agent-library', 'tag-library',
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
+    'history',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host']
-  const BOTH = ['scheduler', 'history', 'projects']
+  const BOTH = ['scheduler', 'projects']
 
   it('home face returns home-only + both keys', () => {
     const keys = getNavItemsForFace('home').map((item) => item.key)
@@ -127,6 +128,27 @@ describe('terminal (Epics) is project-only', () => {
   it('project face includes terminal', () => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
     expect(keys).toContain('terminal')
+  })
+})
+
+describe('history is home-only (removed from the Project face)', () => {
+  it('NAV_ITEMS tags history with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'history')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes history', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('history')
+  })
+
+  it('home face includes history', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('history')
+  })
+
+  it('isHomeOnlyNavKey(history) is true, so face-agnostic routes assert the home face', () => {
+    expect(isHomeOnlyNavKey('history')).toBe(true)
   })
 })
 

@@ -1,0 +1,190 @@
+<h1>Voice Input — dictate into any session, offline</h1>
+
+<p class="lede">The mic button turns your microphone into a keyboard for the active Terminal or
+Chat view. Speech never leaves the machine: recognition runs in a Web Worker, in-process, and the
+model downloads once and is cached. It is not a convenience wrapper around a cloud API — it is a
+real local speech pipeline, with its own state machine, its own auto-submit timer, and its own
+failure modes worth understanding before you rely on it mid-session.</p>
+
+<h2>1. What's actually running</h2>
+
+<p>The app's own mic-button tooltip calls this "local Whisper" — that name is legacy. Read the
+worker source (<code>whisperWorker.ts</code>) and the real model is
+<strong>Moonshine Base</strong> (<code>onnx-community/moonshine-base-ONNX</code>), loaded through
+Transformers.js and run on the CPU via <code>onnxruntime-web</code> (<code>dtype: 'fp32'</code>,
+<code>device: 'wasm'</code>). Moonshine was chosen over Whisper deliberately: Whisper zero-pads
+every input to a fixed 30-second window before encoding, so even a two-word command pays a fixed
+latency floor; Moonshine's encoder cost scales with the actual audio length, so a two-second
+utterance transcribes in roughly 150&nbsp;ms once the model is warm.</p>
+
+<p>Speech detection is a second, separate model: <strong>Silero VAD v5</strong> via
+<code>@ricky0123/vad-web</code>, running on every ~32&nbsp;ms audio frame through an
+<code>AudioWorklet</code>. VAD decides when you started and stopped talking; Moonshine only ever
+sees the speech segment VAD hands it — no fixed-length chunking, no silence sent to the model.
+Both the VAD's ONNX weights and the WASM runtime are self-hosted under the app's own
+<code>/vad/</code> assets rather than fetched from a CDN, because a CDN fetch breaks under the
+packaged app's <code>file://</code> origin.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Layer</th><th>What it is</th><th>Runs where</th></tr></thead>
+  <tbody>
+    <tr><td>Endpointing</td><td>Silero VAD v5, <code>@ricky0123/vad-web</code></td><td>AudioWorklet, per 32ms frame</td></tr>
+    <tr><td>Transcription</td><td>Moonshine Base (<code>onnx-community/moonshine-base-ONNX</code>), via <code>@huggingface/transformers</code> + <code>onnxruntime-web</code></td><td>Shared Web Worker (<code>whisperWorker.ts</code>)</td></tr>
+    <tr><td>Language</td><td>English only — the worker's own source comment flags non-English audio as hallucinated English</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<p class="manual-note">First activation downloads the model (tens of MB) and shows a percentage in
+the mic button's tooltip and the Voice modal's progress bar. After that it's cached and loads from
+disk — expect the first click of a session to take longer than every click after it.</p>
+
+<h2>2. Turning it on</h2>
+
+<ol class="manual-steps">
+  <li>Click the mic icon wherever it appears (Terminal toolbar, Chat composer) — or run
+  <strong>Voice — toggle mic</strong> from the command palette (Cmd/Ctrl-K).</li>
+  <li>The very first click on a fresh install opens the first-run mic-check wizard instead of
+  recording — it walks permission → device selection → a 5-second test recording → playback →
+  a real transcription check, so you find out your mic works before you're mid-task depending on
+  it. "Skip &amp; record now" closes the wizard and starts recording immediately.</li>
+  <li>Grant the OS microphone permission when prompted. A denial parks the button in a
+  permission-denied state — the tooltip tells you to fix it in OS settings, not in the app.</li>
+  <li>Speak. Once VAD confirms real speech (not a keyboard click or a chair creak), the mic ring
+  goes solid and a live "Listening…" line shows in the Voice modal.</li>
+</ol>
+
+<p>You can also set a global or in-window hotkey (default <code>Cmd+Option+V</code> on macOS,
+<code>Ctrl+Shift+Space</code> on Linux/Windows — both deliberately chosen as combinations that
+ship unbound in stock GNOME/KDE/macOS) with two modes: <strong>Hold to talk</strong>
+(push-to-talk — release the key to stop) or <strong>Tap on/off</strong> (press once to start,
+again to stop). Configure both from the Voice / Microphone modal.</p>
+
+<figure class="manual-figure" data-figure="voice-modal">
+  <div class="manual-figure__frame" data-capture="Voice / Microphone modal, open, mid-recording with the level meter active"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Live activity line — shows the committed
+    transcript or "Listening…" while VAD has an open speech segment.
+    <span class="callout" data-arrow="up">2</span> Auto-submit countdown bar — the thin strip
+    under the activity line.
+    <span class="callout" data-arrow="down">3</span> Hotkey mode toggle — Hold to talk vs. Tap
+    on/off, plus the mic device picker.
+  </figcaption>
+</figure>
+
+<h2>3. The mistake almost everyone makes: talking over the auto-submit timer</h2>
+
+<p>By default, every time VAD commits a final transcript, Session Manager writes the text into
+the active PTY (or the Chat composer, in Chat view) and arms an <strong>8-second</strong> countdown
+(<code>submitDelayMs</code>, adjustable between 500&nbsp;ms and 13&nbsp;s). When it expires, the
+app sends Enter for you — no second confirmation. That's the whole point: dictate a sentence,
+stop talking, and it submits itself a few seconds later without you touching the keyboard.</p>
+
+<p>The mistake is assuming that countdown is dumb. It isn't — it's actively watching you. Every
+VAD frame's speech probability is checked against the countdown in real time
+(<code>SUBMIT_PRECEDENCE_PROB = 0.3</code>, well below VAD's own 0.5 segment-commit threshold), and
+an RMS amplitude fallback (<code>SUBMIT_PRECEDENCE_RMS = 0.04</code>) covers the case where the VAD
+frame pump stalls. The instant either trips, the countdown is cancelled and the mic stays open — so
+saying "wait, actually—" mid-countdown correctly holds your Enter key hostage rather than firing it
+under your correction. What actually bites people is the opposite case: dictating a full thought,
+going quiet to think about the <em>next</em> sentence, and having Enter fire on the first one before
+they resume talking. The countdown bar under the mic button (a thin strip that turns amber in the
+last 500&nbsp;ms) is the tell — watch it, or click it to cancel outright.</p>
+
+<p>Two other timers run alongside the submit countdown and are easy to conflate with it:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Timer</th><th>Fires after</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Auto-submit</td>
+      <td>8&nbsp;s (default) of silence <em>after a transcript typed</em></td>
+      <td>Sends Enter, then keeps the mic open — this is <em>continuous listening</em>, not
+      one-shot. The session doesn't close after a turn.</td>
+    </tr>
+    <tr>
+      <td>Idle auto-stop</td>
+      <td>40&nbsp;s of silence with no speech at all</td>
+      <td>Closes the mic outright — the real "you walked away" backstop.</td>
+    </tr>
+    <tr>
+      <td>Model-load watchdog</td>
+      <td>90&nbsp;s with no download/warmup progress</td>
+      <td>Flips the button to an error state you can click to retry, instead of hanging forever
+      on a stalled fetch.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note">Auto-submit doesn't end your dictation session — only the idle-stop timer or
+an explicit stop (button click, hotkey, or voice command) does. Say your first sentence, pause,
+think, say your second: both land as separate submitted turns without you touching the mic
+control between them.</p>
+
+<h2>4. Turn continuous dictation off, or don't submit at all</h2>
+
+<p>Two dials worth knowing about beyond the button and the hotkey:</p>
+
+<ul>
+  <li><strong>Cancel a single countdown</strong> — click the thin progress bar, or run
+  <strong>Voice — cancel auto-submit</strong> from the command palette. The typed text stays in the
+  PTY; you press Enter yourself when ready.</li>
+  <li><strong>Turn auto-submit off entirely</strong> — the store's <code>autoSubmit</code> flag
+  (default <code>true</code>) makes dictation type-only: text lands, no Enter is ever sent, no
+  countdown ever arms. Use this if you dictate multi-line prompts you want to review before
+  sending.</li>
+</ul>
+
+<h2>5. Where transcripts go, per view</h2>
+
+<p>Voice input targets whichever tab is active when you start recording, and the destination
+depends on that tab's kind:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Active view</th><th>Final transcript goes to</th></tr></thead>
+  <tbody>
+    <tr><td>Terminal (live PTY)</td><td>Written straight into the PTY via <code>pty.write</code>, exactly like typed keystrokes — including voice commands.</td></tr>
+    <tr><td>Chat / dormant tab</td><td>Buffered as the tab's pending voice text and handed to the Chat composer's own <code>send()</code> path when the auto-submit countdown fires — there's no PTY to write into on a headless <code>claude -p</code> tab.</td></tr>
+  </tbody>
+</table>
+
+<p>A handful of spoken phrases are matched as <strong>voice commands</strong> before they're treated
+as literal text (Terminal view only — dormant/Chat tabs always treat a transcript as literal, since
+terminal control sequences have no meaning in a headless run). A recognized command sends its
+control sequence directly and skips the submit countdown outright, since the command <em>is</em>
+the submission.</p>
+
+<h2>6. What "offline" actually means here</h2>
+
+<p>Nothing about a spoken phrase leaves your machine at any point in this pipeline — VAD, encoder,
+and decoder all run in-process in a renderer Web Worker. The privacy corollary is enforced, not
+just promised: whenever <code>isRecording</code> is true (or an external, non-terminal capture like
+the Document Experience's own dictation is active), a fixed red banner —
+<strong>"Recording — speech is being captured locally"</strong> — is pinned to the very top of the
+window, above every dialog, toast, and menu in the app's z-order. There's no code path that starts
+a recording without that banner in front of you.</p>
+
+<figure class="manual-figure" data-figure="voice-recording-banner">
+  <div class="manual-figure__frame" data-capture="app window with the top-of-window red recording banner visible during an active mic session"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> The privacy banner — always the topmost layer
+    in the app while recording, on every platform, with no way to dismiss it short of stopping the
+    mic.
+  </figcaption>
+</figure>
+
+<h2>7. If the mic button won't cooperate</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Button state / tooltip</th><th>Meaning</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>Grey, spinning, "loading… N percent"</td><td>Model still downloading or warming up.</td><td>Wait. If it sits past ~90s with no percent movement, it self-flips to an error you can click to retry.</td></tr>
+    <tr><td>Amber, "permission denied"</td><td>OS denied microphone access.</td><td>Fix it in OS privacy settings, then click the button again — this isn't an app-level toggle.</td></tr>
+    <tr><td>Red, "model error" / "load timed out"</td><td>Download or warmup failed, or the 90s watchdog tripped.</td><td>Click the button — clicking an error/timeout state retries the load instead of trying to record.</td></tr>
+    <tr><td>Grey, disabled, "not supported"</td><td>The runtime lacks <code>Worker</code>, <code>getUserMedia</code>, or <code>AudioWorkletNode</code>.</td><td>Not fixable in-app — this build/environment can't run the pipeline at all.</td></tr>
+  </tbody>
+</table>
+
+<p class="manual-note">The workflow that actually pays off: leave auto-submit on, trust the
+countdown bar as your only feedback loop, and use "Hold to talk" if you'd rather a released key be
+the unambiguous stop signal than a silence timer. Once that's second nature, voice stops being a
+novelty input and becomes a genuinely faster way to drive a Terminal or Chat session than typing.</p>

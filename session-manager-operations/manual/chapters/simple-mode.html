@@ -1,0 +1,138 @@
+<h1>Simple Mode — the chrome-free single-terminal cockpit</h1>
+
+<p class="lede">Everything else in this manual is about the full app: tabs, Epics, the Scheduler,
+two dozen config surfaces. Simple Mode throws all of that away on purpose. It boots one terminal
+running <code>claude --dangerously-skip-permissions</code> in the directory you launched from, and
+nothing else.</p>
+
+<h2>1. What it actually is</h2>
+
+<p>Add <code>--simple</code> to the launch command:</p>
+
+<pre><code>npx claude-code-session-manager@latest --simple</code></pre>
+
+<p><code>bin/cli.cjs</code> doesn't do anything special with the flag — it forwards
+<code>process.argv.slice(2)</code> straight through to the spawned Electron binary, the same way
+every other CLI argument reaches the app. The main process reads it back on an IPC handler,
+<code>app:launch-mode</code>:</p>
+
+<pre><code>ipcMain.handle('app:launch-mode', () => ({
+  simple: process.argv.includes('--simple'),
+  cwd: process.cwd(),
+}));</code></pre>
+
+<p><code>cwd</code> is whatever directory your shell was sitting in when you ran the command —
+<code>cli.cjs</code> never changes it, so it's inherited straight through to Electron. The
+renderer calls this once on mount (<code>window.api.app.launchMode()</code>, wired in
+<code>src/preload/index.cjs</code>) and, if <code>simple</code> comes back true,
+<code>App.tsx</code> takes an early return before any of the normal boot path runs:</p>
+
+<pre><code>if (simpleMode === true) return &lt;SimpleShell /&gt;</code></pre>
+
+<p class="manual-note"><strong>There is no ambiguity about scope here.</strong> The flag is
+read once, at boot, from <code>process.argv</code>. There is no in-app toggle that flips a running
+window into Simple Mode or back — you choose it on the command line, or you don't.</p>
+
+<h2>2. What's missing, and why that's the point</h2>
+
+<p><code>SimpleShell.tsx</code> renders exactly four things: the privacy recording banner, a thin
+one-line status strip showing the launch directory, one full-window <code>Terminal</code>, and the
+toast layer. No left nav, no tab bar, no New Epic card, no Scheduler, no Settings — none of the
+surfaces this manual otherwise spends most of its pages on.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Present</th><th>Absent</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>One live terminal running <code>claude --dangerously-skip-permissions</code></td>
+      <td>Left nav, tab bar, all Configure/Observability tabs</td>
+    </tr>
+    <tr>
+      <td><code>RecordingStatus</code> — the privacy banner still mounts here</td>
+      <td>Epics, Scheduler, PRDs, queue, history</td>
+    </tr>
+    <tr>
+      <td><code>Toast</code> — errors still surface</td>
+      <td>Any persisted multi-tab state from a previous normal-mode session</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note"><strong>The common mistake:</strong> launching with <code>--simple</code>
+and then going looking for the Scheduler tab, or expecting a New Epic button to queue a PRD. None
+of it is there. Simple Mode isn't a smaller version of the full app's UI with some panels
+collapsed — it's a different component tree entirely (<code>SimpleShell</code>, not the normal
+<code>App.tsx</code> layout), and it was built to have nothing to click except the terminal.</p>
+
+<figure class="manual-figure" data-figure="simple-mode-cockpit">
+  <div class="manual-figure__frame" data-capture="app launched with --simple, single terminal filling the window"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> The one-line status strip — "simple mode" plus
+    the launch directory, nothing else.
+    <span class="callout" data-arrow="left">2</span> The terminal fills the rest of the window.
+    <span class="callout" data-arrow="down">3</span> No left nav, no tab bar, no Almanac footer.
+  </figcaption>
+</figure>
+
+<h2>3. How the session gets started</h2>
+
+<p>Simple Mode doesn't reuse a saved preset selection or wait for you to press anything — it spawns
+one session immediately, from the same preset the full app calls <code>sm-dangerous</code>:</p>
+
+<ol class="manual-steps">
+  <li><code>App.tsx</code> takes <code>DEFAULT_PRESETS[0]</code> — the
+  <code>claude --dangerously-skip-permissions --session-id &lt;id&gt;</code> preset — regardless of
+  which mode you're in.</li>
+  <li>When <code>launchMode()</code> resolves with <code>simple: true</code>, it calls a
+  live-spawn path (<code>spawnLiveTabInCwd</code>) that creates one tab in <code>status: 'spawning'</code>
+  rooted at the launch <code>cwd</code>, and skips straight to running the command — there's no
+  dormant tab waiting for you to click into it.</li>
+  <li>Persisted-tab hydration (<code>hydrateSessions()</code>) — the step that restores your normal
+  app's tabs from a previous run — is skipped entirely in this path. Simple Mode never shows you
+  yesterday's tabs; it starts one fresh session every time.</li>
+</ol>
+
+<p>Practically: every <code>--simple</code> launch is a brand-new <code>claude</code> session in
+whatever directory you ran the command from, with permission prompts already skipped. There's no
+picker, no resume, no session history to browse — if you want a specific project or a resumed
+session, <code>cd</code> there first, or don't use <code>--simple</code>.</p>
+
+<h2>4. When to reach for it vs. the full app</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Situation</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>You want the observability/config cockpit — Epics, Scheduler running PRDs overnight,
+      Settings, Permissions, Agent Library, and so on</td>
+      <td>The full app: <code>npx claude-code-session-manager@latest</code></td>
+    </tr>
+    <tr>
+      <td>You just want <code>claude --dangerously-skip-permissions</code> in the current directory,
+      as fast as possible, with none of the app's other surfaces in the way</td>
+      <td><code>--simple</code></td>
+    </tr>
+    <tr>
+      <td>You're demoing or screen-sharing the terminal and don't want the rest of the UI in frame</td>
+      <td><code>--simple</code></td>
+    </tr>
+    <tr>
+      <td>You need to queue work to run unattended (Scheduler, PRDs) or track more than one Epic in
+      the same project</td>
+      <td>The full app — Simple Mode has no queue and no second session</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note">Simple Mode still honors the same privacy invariant as the full app —
+<code>RecordingStatus</code> is mounted unconditionally, so if voice recording is active the banner
+shows here too. That's the one piece of chrome that's never optional, in either mode.</p>
+
+<h2>5. What it isn't</h2>
+
+<p>Simple Mode is not a lighter-weight settings profile, not a "safe mode" for troubleshooting the
+full app, and not a separate installation — it's the same npm package, the same Electron binary,
+booting a different renderer component tree based on one command-line flag. Nothing about your
+<code>~/.claude/</code> config, skills, or MCP servers changes between the two modes; the CLI
+session itself behaves identically either way. The only thing Simple Mode strips out is Session
+Manager's own UI around it.</p>

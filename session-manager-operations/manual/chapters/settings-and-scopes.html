@@ -1,0 +1,167 @@
+<h1>Settings &amp; Scopes — editing the substrate, not the conversation</h1>
+
+<p class="lede">The Settings tab is a scoped editor over the three files the <code>claude</code> CLI
+itself reads on every launch. It looks like a normal per-project config screen, and that similarity
+is exactly what causes the most common mistake in this app: reaching for Settings when what you
+actually wanted was a Tag or an Agent persona. This chapter covers the scope model, the one field
+that legitimately crosses the line into per-Epic territory, and how to stop yourself before you
+edit the wrong layer.</p>
+
+<h2>The three scopes</h2>
+
+<p>Settings, Permissions, Hooks, MCP Servers and Skills all share one shape — <strong>ScopeSwitcher +
+SaveBar + JsonEditor</strong> — over the same three on-disk files, resolved by
+<code>lib/scopes.ts</code>'s <code>SETTINGS_SCOPES</code>:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Scope</th><th>File</th><th>Applies to</th></tr></thead>
+  <tbody>
+    <tr><td><strong>User</strong></td><td><code>~/.claude/settings.json</code></td>
+    <td>Every project on the machine.</td></tr>
+    <tr><td><strong>Project</strong></td><td><code>&lt;cwd&gt;/.claude/settings.json</code></td>
+    <td>This project only — meant to be checked into git and shared with collaborators.</td></tr>
+    <tr><td><strong>Local</strong></td><td><code>&lt;cwd&gt;/.claude/settings.local.json</code></td>
+    <td>This project, this machine only — gitignored, for machine-specific overrides.</td></tr>
+  </tbody>
+</table>
+
+<p>Permissions is the same three files under the hood — it's a structured UI over the
+<code>permissions</code> subtree of the identical <code>settings.json</code>, not a separate file. The
+tab defaults to <strong>Project</strong> scope when you're looking at an open project tab and
+<strong>User</strong> scope on the Home face, but that's a starting point, not a boundary — you can
+switch scope at any time, and the toolbar always tells you which file is active
+(<code>overrides → &lt;path&gt;</code> in Guided view, the raw path in Tree/Raw view).</p>
+
+<figure class="manual-figure" data-figure="settings-scope-switcher">
+  <div class="manual-figure__frame" data-capture="Settings tab, Guided view, ScopeSwitcher showing User/Project/Local with one dirty scope"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Guided / Tree / Raw — three views of the same
+    merged config.
+    <span class="callout" data-arrow="up">2</span> Scope switcher — User, Project, Local, each
+    annotated with exists/dirty state.
+    <span class="callout" data-arrow="right">3</span> The active file path, so you always know
+    exactly what you're about to save.
+  </figcaption>
+</figure>
+
+<p>Guided view (<code>EffectiveCards</code>) and Tree view (<code>EffectiveTree</code>) both show the
+<strong>merged, effective</strong> config across all three scopes — editing a value there writes an
+override into whichever scope is currently selected. Raw view is the literal JSON of the one active
+scope's file, through Monaco with schemastore.org validation. Switching to Raw and saving directly
+is the fastest path when you already know the exact key you want; Guided is the safer path when
+you're not sure what's already set somewhere else.</p>
+
+<h2>Settings is machine/project substrate — not per-conversation curation</h2>
+
+<div class="manual-note">
+  <p><strong>The rule that matters most in this chapter:</strong> every file Settings edits is a file
+  the <code>claude</code> CLI reads fresh on <em>every single invocation it launches</em> — every
+  Epic, every Terminal tab, every scheduled PRD job, in that project (Project/Local scope) or on the
+  machine (User scope). Settings is not scoped to one conversation, one Epic, or one task. There is
+  no "just for this chat" checkbox, because the file underneath has no concept of "this chat."</p>
+</div>
+
+<p>That means a Project-scope edit changes behaviour for <strong>every current and future Epic in
+that project</strong>, and a User-scope edit changes it for <strong>every project on the
+machine</strong> — retroactively, for sessions that already exist and ones you haven't created yet.
+If you only wanted one Epic to behave differently, you just changed the wrong number of things.</p>
+
+<table class="manual-table">
+  <thead><tr><th>You want…</th><th>Wrong lever</th><th>Right lever</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>"This one Epic should follow a different process / think about the problem differently"</td>
+      <td>Editing Settings for the duration of the task, then editing it back</td>
+      <td>A Tag (Tag Library, <code>initialPromptTemplate</code>) or an Agent persona (Agent Library)
+      chosen when you create the Epic</td>
+    </tr>
+    <tr>
+      <td>"This kind of task should always run with a particular persona/model"</td>
+      <td>Flipping the Settings model default before starting, back after</td>
+      <td>An Agent persona with its own <code>model</code> frontmatter field, selected as that Epic's
+      Agent</td>
+    </tr>
+    <tr>
+      <td>"Every project on this machine should allow a tool / set an env var / register an MCP
+      server"</td>
+      <td>—</td>
+      <td>Settings, User scope. This one <em>is</em> the right lever — it's genuinely
+      machine-wide, task-independent config.</td>
+    </tr>
+    <tr>
+      <td>"This project's hooks/permissions/MCP servers should be the same for anyone who clones the
+      repo"</td>
+      <td>—</td>
+      <td>Settings, Project scope, committed to git. Also correct — it's project-wide substrate, not
+      task curation.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Put another way: Settings holds what's legitimately identical <em>regardless of what task you're
+about to run</em> — permissions, hooks, MCP servers, env vars, output style. If a value should
+differ depending on <em>what kind of work</em> an Epic is doing, it doesn't belong in Settings at
+all; it belongs on the Epic's Tag or Agent, chosen fresh at that Epic's creation and folded into its
+opening prompt.</p>
+
+<h2>The one field that's carved out per-Epic: <code>model</code></h2>
+
+<p>There is exactly one exception, and it's deliberately narrow. An Agent persona
+(<code>~/.claude/agents/&lt;name&gt;.md</code>, edited from Agent Library) can carry its own
+<code>model</code> frontmatter field. When an Epic is created with that persona as its Agent,
+<code>src/main/lib/agentModelResolve.cjs</code>'s <code>resolveEpicModel</code> looks up the persona's
+<code>model</code> field first — and only falls back to Settings' "Model &amp; Reasoning" default
+(<code>sonnet</code>) when the persona has no <code>model</code> set, or it's explicitly
+<code>'inherit'</code>. This is the same resolution both views of that Epic's session use: Chat
+(<code>chatRunner.cjs</code>) and Terminal (<code>EpicTerminalPane.tsx</code>'s own mirrored
+resolver) agree on which model an Epic launches with, because they're two views over the same
+session.</p>
+
+<p>Every <em>other</em> field in Settings' "Model &amp; Reasoning" group —
+<code>effortLevel</code>, <code>fastMode</code>, <code>alwaysThinkingEnabled</code>, and the rest —
+has no per-Epic override today. Editing them changes the default for every Epic that doesn't specify
+otherwise, and there's currently no per-Epic escape hatch for them the way there is for
+<code>model</code>.</p>
+
+<div class="manual-note">
+  <p><strong>Rule of thumb:</strong> if you're about to open Settings to change how one Epic behaves,
+  stop — open Agent Library or Tag Library instead. If you're about to open Agent Library or Tag
+  Library to change something for every project on the machine, stop — that's Settings, User scope.</p>
+</div>
+
+<h2>What lives outside the three scoped files</h2>
+
+<p>Settings' toolbar has two more views that aren't scoped at all — <strong>Telemetry</strong> and
+<strong>Session Manager</strong> — visible only on the Home face, because both are genuinely
+machine-wide with no cwd or scope input:</p>
+
+<ul>
+  <li><strong>Telemetry</strong> (<code>SettingsTelemetry.tsx</code>) — opt-in OTEL export of
+  classified transcript events, persisted to <code>~/.config/session-manager/otel.json</code>. Not a
+  Claude Code file at all; this is Session Manager's own instrumentation, off by default. An
+  "Include content" toggle controls whether tool inputs/plan text/agent prompts are exported, mirroring
+  upstream Claude Code's own <code>OTEL_LOG_USER_PROMPTS</code> opt-in — structural metadata (tool
+  names, todo counts, usage tokens) goes out either way.</li>
+  <li><strong>Session Manager</strong> (<code>SettingsAppPrefs.tsx</code>) — native app preferences
+  stored in <code>localStorage</code>, applied immediately with no save/revert cycle. Today this is
+  one setting: the default model for a <em>raw</em> interactive session (one opened without going
+  through an Epic at all) — separate from <code>resolveEpicModel</code>'s persona-first resolution,
+  since a raw session has no Agent to read a <code>model</code> field from.</li>
+</ul>
+
+<p>Both switch away automatically if you flip from the Home face to a Project tab while one is open —
+they have nothing project-scoped to show, so the toolbar never displays a tab that no longer applies.</p>
+
+<h2>Reading the merged view before you touch a scope</h2>
+
+<p>Guided and Tree views compute one merged object across User → Project → Local (precedence rising
+in that order, plus Managed and CLI-flag layers the app doesn't edit) via <code>mergeScopes</code>.
+Before overriding a key, check <em>which</em> scope already holds it — the Guided view's reset-to-default
+button targets the most-specific scope currently holding that key, not blindly the scope you happen
+to have selected. Writing an override at User scope when Project scope already sets the same key
+does nothing observable until someone deletes the Project-scope value — a quiet trap if you're
+debugging "why didn't my setting take effect."</p>
+
+<p class="manual-note">The schema-reference link in the toolbar (<code>code.claude.com/docs/en/settings</code>)
+is the authoritative field list. Monaco's own <code>jsonDefaults</code> validates against
+schemastore.org as you type in Raw view — there's no hand-rolled validation layer to fight with.</p>

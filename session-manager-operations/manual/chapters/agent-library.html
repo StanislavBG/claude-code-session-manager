@@ -1,0 +1,163 @@
+<h1>Agent Library — authoring the "who" of an Epic</h1>
+
+<p class="lede">Agent Library is a full CRUD editor over <code>~/.claude/agents/*.md</code> — the
+same persona files the <code>claude</code> CLI already reads. It is not a viewer bolted onto the
+filesystem; New, Duplicate, Save, Revert, and Delete all write straight through to disk, and every
+persona you author here becomes a pickable <em>Agent</em> in the New Epic card's "who is working"
+column.</p>
+
+<h2>What a persona actually controls</h2>
+
+<p>An Epic is always grounded by two independent choices: an <strong>Agent</strong> (this page —
+the "who") and a <strong>Mission</strong> tag (Tag Library — the "what"). Picking a persona in the
+New Epic card does three concrete things, and only three:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Field</th><th>Where it lands</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>description</code></td>
+      <td>Folded into the Epic's opening prompt as an Actor framing line, before the grounding
+      summary and the Mission template.</td>
+      <td>Read once, at Epic creation. Editing the persona afterward does not rewrite an existing
+      Epic's opening prompt.</td>
+    </tr>
+    <tr>
+      <td><code>model</code></td>
+      <td>Sets the <code>--model</code> the Epic's session launches with, for <strong>both</strong>
+      the Terminal view and the headless Chat view.</td>
+      <td>Only fires when set to something other than <code>inherit</code>. Otherwise each view
+      falls back to its own default (Chat: <code>sonnet</code>; Terminal: the raw-session-model
+      toggle).</td>
+    </tr>
+    <tr>
+      <td><code>tools</code>, <code>color</code>, <code>tags</code>, definition body</td>
+      <td>Written verbatim into the persona's frontmatter/body — read by the <code>claude</code>
+      CLI or Tag Library, not re-interpreted by session-manager.</td>
+      <td><code>tags</code> is a session-manager-only extension; the CLI itself never reads it.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note">Beyond those, <code>agentType</code> stays display-only. Picking a persona
+does not change which <code>claude</code> binary spawns, and it does not swap out permissions,
+hooks, or MCP servers — that substrate is Settings, not Agent Library. See the domain-model rule
+in this manual's project reference: if you want a task to run under different settings, that's a
+Settings edit; if you want it to run as a different <em>persona</em>, that's this page.</p>
+
+<figure class="manual-figure" data-figure="agent-library-editor">
+  <div class="manual-figure__frame" data-capture="Agent Library tab, a persona selected in the list, detail pane open showing model/tools/tags fields"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> The persona list — filterable, each row shows
+    its color swatch and override count.
+    <span class="callout" data-arrow="up">2</span> <strong>default model</strong> — sets
+    <code>--model</code> for this persona's Epics.
+    <span class="callout" data-arrow="right">3</span> <strong>tags</strong> — the many-to-many link
+    to Tag Library, editable from either side.
+  </figcaption>
+</figure>
+
+<h2>The fields, in the order you'll fill them</h2>
+
+<ol class="manual-steps">
+  <li><strong>name</strong> — the filename on disk (<code>~/.claude/agents/&lt;name&gt;.md</code>).
+  Must be lowercase and hyphenated (<code>^[a-z][a-z0-9-]*$</code>); the app rejects anything else
+  before it ever hits disk.</li>
+  <li><strong>description</strong> — shown in the persona list and in every Agent picker. This is
+  the line that gets folded into an Epic's opening prompt, so write it as a sentence about what
+  this persona does, not a label.</li>
+  <li><strong>default model</strong> — one of <code>inherit</code> / <code>haiku</code> /
+  <code>sonnet</code> / <code>opus</code>. Leave it <code>inherit</code> only if you genuinely
+  want this persona to ride whatever the launching view's own default is; otherwise pin it.</li>
+  <li><strong>tools</strong> — a checklist of the tools this persona is granted
+  (<code>Read</code>, <code>Grep</code>, <code>Glob</code>, <code>Bash</code>, <code>Write</code>,
+  <code>Edit</code>, <code>WebFetch</code>, <code>WebSearch</code>, <code>Task</code>). Anything not
+  ticked is refused at call time by the CLI, not by session-manager.</li>
+  <li><strong>color</strong> — cosmetic only; shows as a swatch dot in the persona list.</li>
+  <li><strong>tags</strong> — which Tag Library missions this persona is associated with. Purely a
+  many-to-many bookkeeping field (see below), not a restriction on which Mission an Epic can pair
+  it with.</li>
+  <li><strong>definition</strong> — the system prompt body this persona runs under.</li>
+</ol>
+
+<h2>Model resolution: how <code>--model</code> actually gets picked</h2>
+
+<p>Both launch paths — <code>chatRunner.cjs</code>'s headless Chat run and
+<code>EpicTerminalPane.tsx</code>'s interactive Terminal — resolve the same way, mirrored so the
+two views of one Epic session never disagree on which model they're running:</p>
+
+<ol class="manual-steps">
+  <li>Look up the Epic's <code>agentType</code> (the persona it was created with).</li>
+  <li>Read that persona's own <code>model</code> frontmatter field from
+  <code>~/.claude/agents/&lt;agentType&gt;.md</code>.</li>
+  <li>If it's set and isn't <code>inherit</code>, use it.</li>
+  <li>Otherwise fall back — Chat falls back to the hardcoded <code>sonnet</code> floor; Terminal
+  falls back to its own raw-session-model toggle.</li>
+</ol>
+
+<p>Any failure in that chain — no matching Epic, no persona file, an unreadable file — falls back
+silently rather than throwing. The lookup never blocks a launch; the worst case is you get the
+fallback model instead of the one you thought you set.</p>
+
+<h2>Tags: the same relationship, editable from two pages</h2>
+
+<p>A persona's <code>tags</code> field records which of Tag Library's missions it's associated
+with. This is a genuine many-to-many relationship with one source of truth: assigning a tag from
+this page's chip row and assigning an agent from Tag Library's own detail pane both write through
+the identical <code>savePersona</code> call, to the identical frontmatter line. There is no second
+copy to drift.</p>
+
+<h2>Project overrides — the mistake that costs the most time</h2>
+
+<p>Claude Code itself resolves a project-local agent file
+(<code>&lt;project-cwd&gt;/.claude/agents/&lt;name&gt;.md</code>) ahead of the global one at
+<code>~/.claude/agents/&lt;name&gt;.md</code>, for any project that has one. Agent Library shows
+you this directly: a persona row with an <strong>override</strong> badge names every currently-open
+project shadowing it, and the detail pane's "project overrides" field lists them with a one-click
+<strong>×</strong> to drop a project's local copy.</p>
+
+<div class="manual-incident">
+  <h3>Editing the global persona and wondering why nothing changed</h3>
+  <p>You open a persona, tighten its tool grants or rewrite its definition, save — and the next
+  Epic launched from a specific project behaves exactly as before. The project has its own
+  <code>.claude/agents/&lt;name&gt;.md</code> silently winning every time, and Agent Library's edit
+  form never touches it — this page only creates and edits the <em>global</em> copy.</p>
+  <p><strong>Rule:</strong> before editing a misbehaving persona, check the "project overrides"
+  field for that name. If a project you're testing against is listed, either edit that project's
+  local file directly or drop the override from here first.</p>
+</div>
+
+<p class="manual-note">Agent Library itself can only create the global definition — it has no
+per-tab cwd context of its own, so there is no "create an override" button here. Overrides are
+created by Claude Code's own file-discovery, or by hand; this page can only read and delete them.</p>
+
+<h2>The workflow that pays off: focused personas instead of repeated instructions</h2>
+
+<p>The failure mode this page exists to fix is retyping the same paragraph of constraints into
+every prompt — "only read, never edit," "use opus for this, it needs judgement," "stick to these
+three tools." Every one of those is a one-time persona edit instead of a recurring tax on your
+attention:</p>
+
+<ul>
+  <li>A read-only research persona: tools trimmed to <code>Read</code>/<code>Grep</code>/<code>Glob</code>,
+  model left cheap. Reuse it for every "just look and report" Epic without re-explaining the
+  constraint each time.</li>
+  <li>A judgement-call persona: <code>model</code> pinned to <code>opus</code>, tagged against the
+  Mission it's meant to pair with in Tag Library, so it surfaces as the suggested default there.</li>
+  <li><strong>Duplicate</strong> an existing persona that's 90% right rather than authoring from
+  scratch — it clones the full draft (name suffixed <code>-copy</code>) so you're editing, not
+  retyping.</li>
+</ul>
+
+<p>The description field is the lever most people under-use: because it's folded into the Epic's
+opening prompt ahead of the Mission template, a well-written description does real framing work —
+it is read by the model as the first line of context, not just displayed in a list.</p>
+
+<h2>Deleting a persona</h2>
+
+<p>Delete removes the global <code>.md</code> file — it asks for confirmation once (inline, not a
+modal) and is otherwise unconditional: there is no "in use by a running Epic" guard on this action,
+so double-check the "project overrides" list and any Epics you know reference this persona by name
+before confirming. A persona referenced by <code>agentType</code> on an existing Epic that no
+longer resolves simply falls back through the same chain described above — the Epic keeps running,
+just under the fallback model instead of a deleted persona's pinned one.</p>

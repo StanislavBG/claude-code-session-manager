@@ -1,0 +1,115 @@
+<h1>Plans &amp; Tasks — reading what the agent already told you</h1>
+
+<p class="lede">Session Manager does not run a second task manager next to Claude Code. Every
+checklist and every plan you see in the app is read straight out of the same transcript JSONL the
+CLI already writes to <code>~/.claude/projects/&lt;encoded-cwd&gt;/&lt;sessionUuid&gt;.jsonl</code>.
+There is no separate place to "add a task" — if it isn't in the transcript, it doesn't exist here
+either.</p>
+
+<h2>Where this data actually comes from</h2>
+
+<p>Two Claude Code tool calls carry the whole feature. <code>src/main/lib/classifyTranscriptLine.cjs</code>
+watches every <code>tool_use</code> block in the tail and reclassifies exactly two of them:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Tool call the CLI made</th><th>Transcript event kind</th><th>What it means</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>TodoWrite</code></td>
+      <td><code>todo_write</code></td>
+      <td>The agent replaced its whole to-do list. Session Manager stores the <em>latest</em> list only —
+      each new <code>TodoWrite</code> call overwrites the previous one, it doesn't append.</td>
+    </tr>
+    <tr>
+      <td><code>ExitPlanMode</code> / <code>EnterPlanMode</code></td>
+      <td><code>plan</code></td>
+      <td>The agent proposed or revised a plan while in plan mode. The plan text itself comes from the
+      tool call's <code>plan</code> input field.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Both events are folded into <code>state/live.ts</code>'s per-tab <code>LiveTab</code> object as the
+transcript streams in — <code>todos: TodoItem[]</code> (the current list, each item a
+<code>content</code>/<code>status</code>/<code>activeForm</code> triple, status one of
+<code>pending</code> / <code>in_progress</code> / <code>completed</code>) and
+<code>plans: PlanEntry[]</code> (a ring buffer of up to 50 revisions, newest first, each an
+<code>{ at, content }</code> pair). This is why Plans &amp; Tasks tracking is read-only in the app:
+you're looking at a live mirror of what the agent already committed to, not a UI you edit.</p>
+
+<h2>Where you actually see it: the footer to-do chip</h2>
+
+<p>The one place tasks surface today is the Almanac footer at the bottom of the window — a small
+<code>✓ N</code> / <code>● N</code> / <code>○ N</code> chip (completed / in-progress / pending)
+that only appears once the active session's session has called <code>TodoWrite</code> at least
+once. Click it to expand the full checklist in a popover: completed items are struck through,
+the in-progress item shows its <code>activeForm</code> text with a pulsing dot, everything else
+sits dim and unchecked.</p>
+
+<p class="manual-note">This chip replaced an earlier, dedicated "Tasks" tab in the left nav. There
+is no standalone Tasks screen any more — the footer chip is scoped to whichever tab is active, so
+switching tabs switches whose checklist you're looking at.</p>
+
+<figure class="manual-figure" data-figure="footer-todo-chip">
+  <div class="manual-figure__frame" data-capture="Almanac footer, todo chip expanded, mixed completed/in-progress/pending items"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Counts at a glance — done / active / waiting.
+    <span class="callout" data-arrow="up">2</span> Click to expand; click outside to close.
+    <span class="callout" data-arrow="right">3</span> The in-progress row shows the agent's own
+    <code>activeForm</code> wording, not the static task text.
+  </figcaption>
+</figure>
+
+<h2>Plans and tasks inside an Epic's Discussion feed</h2>
+
+<p>Every <code>todo_write</code> and <code>plan</code> event is also a turn in the Epic's chat
+transcript, rendered as a compact tool-family chip — the same chip style as any other tool call
+(labelled <strong>TodoWrite</strong> or <strong>Plan</strong>). This is governed by the same
+five-level verbosity dial that controls the rest of the Discussion feed
+(<code>lib/chatVerbosity.ts</code>): tool-family events, todo updates and plan revisions included,
+only render at dial levels <strong>1 · raw</strong> and <strong>2 · detail</strong>. Turn the dial
+up to <strong>3 · standard</strong> or quieter and they disappear from the feed entirely — you're
+left with the interactive back-and-forth, not the bookkeeping.</p>
+
+<p>That's a deliberate trade, not a bug: if you want to audit exactly when the plan changed or the
+checklist got rewritten, drop to <em>detail</em>. If you're skimming a long-running Epic for what
+the agent said and asked, stay at <em>standard</em> or above and let the chips stay hidden.</p>
+
+<h2>The common mistake</h2>
+
+<p>Treating the to-do chip as a place to track work <em>you</em> assign. It isn't — it's a readout
+of what the agent itself decided to track via <code>TodoWrite</code>. If an Epic's session never
+calls <code>TodoWrite</code>, the chip never appears, no matter how much work is actually
+happening; conversely, an agent that keeps its own list current gives you the chip for free. You
+don't drive this surface, the agent does — the lever you actually have is asking the agent (in
+your prompt) to track its steps, not editing a checklist in the app.</p>
+
+<p>The second mistake is expecting a dedicated Plans browser. The codebase does contain a plan
+history viewer (a revision list with diff-against-previous), but as of this edition it isn't wired
+into any navigation tab — nothing in the app links to it. Plan revisions are still captured and
+still visible as chips in the Discussion feed at <em>raw</em>/<em>detail</em>, they're just not
+browsable as a standalone timeline yet.</p>
+
+<h2>The workflow that pays off</h2>
+
+<ol class="manual-steps">
+  <li>When you kick off an Epic with real multi-step scope, ask for a to-do list explicitly in the
+  opening prompt (or trust that Claude Code's own habits will produce one on nontrivial work) —
+  that's what makes the footer chip populate in the first place.</li>
+  <li>Glance at the chip's counts, not the popover, for the common case: <code>✓3 ●1 ○2</code> tells
+  you the agent is mid-flight on one item with two queued, without opening anything.</li>
+  <li>Open the popover only when you need the actual wording — e.g. deciding whether the
+  in-progress item matches what you expected the agent to be doing right now.</li>
+  <li>If you need the audit trail (what changed, when, in what order), switch the Epic's Discussion
+  feed to <em>detail</em> or <em>raw</em> rather than hunting for a separate log — the
+  <code>TodoWrite</code>/<code>Plan</code> chips are already there, in order, with the rest of the
+  session's activity around them for context.</li>
+  <li>Don't fight the read-only nature of it. If the agent's plan is wrong, say so in your next
+  message — that's a new <code>ExitPlanMode</code>/<code>TodoWrite</code> call, and the chip and
+  the feed both pick it up automatically.</li>
+</ol>
+
+<p class="manual-note">One session, one checklist. Because <code>todos</code> is overwritten (not
+appended) on every <code>TodoWrite</code> call, the chip always shows the agent's <em>current</em>
+plan for that Epic — there's nothing to reconcile between the app's view and the agent's actual
+state, because they're the same read.</p>

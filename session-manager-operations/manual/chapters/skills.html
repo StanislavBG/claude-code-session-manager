@@ -1,0 +1,136 @@
+<h1>Skills — what auto-fires, what you type, and where it lives</h1>
+
+<p class="lede">The Skills tab is a list+detail editor over the same two folders the
+<code>claude</code> CLI already reads on every launch: your Skills and your Slash Commands. It does
+not invent a parallel system — it edits <code>SKILL.md</code> and command <code>.md</code> files
+directly, at whichever scope you're pointed at, and lets you browse a catalog of skills and plugins
+you don't have installed yet.</p>
+
+<h2>What you're actually looking at</h2>
+
+<p>Open the tab and you get one panel split into a filterable sidebar and a Monaco-backed markdown
+editor — the same "list+detail" shape as Hooks and MCP Servers. The sidebar groups everything into
+two sections, <strong>Skills</strong> and <strong>Slash Commands</strong>, sorted skills-first. A
+<strong>Library</strong> view switcher next to the scope picker swaps the whole panel for a
+searchable catalog instead of your installed items.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Scope</th><th>Skills live at</th><th>Commands live at</th></tr></thead>
+  <tbody>
+    <tr><td><strong>user</strong></td><td><code>~/.claude/skills/</code></td><td><code>~/.claude/commands/</code></td></tr>
+    <tr><td><strong>project</strong></td><td><code>&lt;cwd&gt;/.claude/skills/</code></td><td><code>&lt;cwd&gt;/.claude/commands/</code></td></tr>
+  </tbody>
+</table>
+
+<p>A skill is discovered by walking each scope's <code>skills/</code> root: either a direct subdir
+containing a <code>SKILL.md</code>, or one level deeper under a namespace directory (e.g.
+<code>~/.claude/skills/user/&lt;name&gt;/SKILL.md</code>) — the same walk a plugin's installed skills
+use. A command is simpler: every <code>.md</code> file directly under <code>commands/</code> is one
+command, named after the file.</p>
+
+<figure class="manual-figure" data-figure="skills-installed-view">
+  <div class="manual-figure__frame" data-capture="Skills tab, Installed view, User scope, a skill selected in the sidebar with its SKILL.md open in the editor and the enable toggle visible"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Skills and Slash Commands, listed separately —
+    only Skills get the enable toggle and the remove button.
+    <span class="callout" data-arrow="up">2</span> Scope switcher — <code>user</code> vs
+    <code>project</code>. Defaults to whichever matches the nav face you came from, but you can
+    override it.
+    <span class="callout" data-arrow="right">3</span> Provenance badge — confirms exactly which
+    scope and kind you're editing before you touch Save.
+  </figcaption>
+</figure>
+
+<h2>The mistake almost everyone makes: treating a Skill like a Slash Command</h2>
+
+<p>They sit in the same list, they're both markdown files, and it's easy to assume they work the
+same way. They don't:</p>
+
+<table class="manual-table">
+  <thead><tr><th></th><th>Skill</th><th>Slash Command</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>How it runs</td>
+      <td>Auto-invoked by the model, based on matching its own <code>description</code>
+      frontmatter against what you're doing. You don't type anything to trigger it.</td>
+      <td>Only runs when you explicitly type <code>/name</code>. Never fires on its own.</td>
+    </tr>
+    <tr>
+      <td>Can you turn it off?</td>
+      <td>Yes — the Toggle in the Skills tab. It writes
+      <code>disable-model-invocation: true</code> into the skill's own frontmatter, the actual flag
+      the CLI reads to stop auto-invoking it. Nothing is deleted; toggling back on removes the key.</td>
+      <td>No toggle exists for commands — there's nothing to auto-invoke, so there's nothing to
+      disable. Delete the file if you don't want it.</td>
+    </tr>
+    <tr>
+      <td>Can you remove it from the tab?</td>
+      <td>Yes — the <code>✕</code> button moves the skill's whole directory to the trash
+      (recoverable) and re-listing it means reinstalling from the Library.</td>
+      <td>Not from this tab — commands are single files; edit or delete them directly.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note">If a skill keeps firing when you don't want it to, you want the
+<strong>Toggle</strong>, not the <code>✕</code>. Disabling is instant and reversible; removing
+trashes the folder and makes you reinstall it. Confusing the two is how people end up
+re-downloading a skill they only meant to quiet down for a week.</p>
+
+<h2>The second mistake: forgetting which scope you're in</h2>
+
+<p>The scope switcher isn't cosmetic. Disabling or editing a skill at <strong>user</strong> scope
+changes it for every project on the machine; doing the same at <strong>project</strong> scope only
+affects the repo the active tab is pointed at. The tab defaults its scope from which nav face you
+arrived from — but it only re-applies that default on an actual face transition, and never once
+you've manually changed it — so it's worth glancing at the scope pill before you toggle anything,
+especially since Skills lives in the Home section of the left nav rather than under a specific
+project.</p>
+
+<h2>The Library: finding skills and plugins worth installing</h2>
+
+<p>Switch to <strong>Library</strong> and the same panel becomes a searchable catalog instead of
+your installed set. It has two halves reached from the same view switcher:</p>
+
+<ul>
+  <li><strong>Skills</strong> — mostly official skills from <code>anthropics/skills</code>
+  (PDF, DOCX, XLSX, PPTX, Webapp Testing, Frontend Design, Skill Creator, and more), each with a
+  copy-pasteable <code>git clone --sparse</code> one-liner that drops it straight into
+  <code>~/.claude/skills/</code>. A handful of entries (the Playwright testing/visual/accessibility/
+  API/debug skills) are marked <strong>local</strong> — bundled already, nothing to install.</li>
+  <li><strong>Plugins</strong> — a much bigger catalog, and this is where this repo's own dev
+  skillset lives: <strong>session-manager-dev</strong>. Unlike catalog Skills, Plugins get a real
+  in-app <strong>Install</strong> button that runs <code>claude plugin install &lt;slug&gt;</code> in
+  a hidden terminal (streamed into the panel) rather than handing you a command to paste.</li>
+</ul>
+
+<p>That distinction matters in practice: if you go looking for <code>/develop</code>,
+<code>/builder</code>, <code>/explain-to-me</code>, <code>/find-opportunity</code>, or
+<code>/local-project-health</code> in the Skills catalog, you won't find them individually — they
+ship together as the <strong>session-manager-dev</strong> plugin (installed from its own bundled
+marketplace, no GitHub round-trip required), and only appear as individual Skills in the Installed
+view <em>after</em> you install that one plugin.</p>
+
+<h2>The workflow that pays off</h2>
+
+<ol class="manual-steps">
+  <li>Before hunting for a skill by name, check the <strong>Plugins</strong> half of the Library
+  first — most useful skillsets (including this project's own) ship as a plugin, not a standalone
+  skill.</li>
+  <li>Install once, then switch back to <strong>Installed</strong> at the matching scope to confirm
+  it landed — new skills show up with their <code>description</code> frontmatter right in the
+  sidebar, so you can tell at a glance what will auto-fire and when.</li>
+  <li>If a skill is noisy but you might want it later, <strong>toggle it off</strong> rather than
+  removing it — it's a one-line frontmatter edit, not a filesystem operation.</li>
+  <li>If you're genuinely done with it, <strong>remove</strong> it — the folder goes to the trash,
+  so a change of mind a week later is still recoverable, but your Installed list stops lying to you
+  about what's actually active.</li>
+  <li>Edit a <code>SKILL.md</code> directly in the tab when you want to narrow its
+  <code>description</code> so it stops firing on the wrong prompts — that's usually a better fix
+  than disabling it outright.</li>
+</ol>
+
+<p class="manual-note">The Skills tab never talks to a server and never fabricates what's
+installed — everything it shows is a live read of the same files <code>claude</code> loads on its
+next launch. If a skill isn't behaving the way the tab says it should, the tab is telling you the
+truth about the file; the mismatch is almost always scope.</p>

@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
   "documentsAppVersion": "0.65.0",
@@ -53,19 +53,73 @@
       "title": "Skills — what auto-fires, what you type, and where it lives",
       "blurb": "Telling a Skill apart from a Slash Command, why scope matters before you touch Toggle or Remove, and finding this project's own dev skillset in the Library.",
       "file": "skills.html"
+    },
+    {
+      "slug": "home-and-project-brief",
+      "title": "Home & Project Brief — the cockpit's dashboard",
+      "blurb": "How the Home tab's cross-project dashboard and a project's self-maintaining Brief document actually work, and the daily workflow that gets the most out of both.",
+      "file": "home-and-project-brief.html"
+    },
+    {
+      "slug": "hooks",
+      "title": "Hooks — edit the CLI's own shell-outs, safely",
+      "blurb": "A guide to the Hooks tab's event editor, scope merging, and the test-fire workflow for safely verifying a hook command before it runs for real.",
+      "file": "hooks.html"
+    },
+    {
+      "slug": "tag-library",
+      "title": "Tag Library — the mission that ships with every Epic",
+      "blurb": "How a tag's opening framing and /develop eagerness shape every Epic that carries it, and the one relationship on this page you can actually edit.",
+      "file": "tag-library.html"
+    },
+    {
+      "slug": "history-analytics",
+      "title": "History — where your Claude time and money went",
+      "blurb": "How to read the History dashboard's cost/token/tool analytics and catch a runaway-spend project before the bill does — it's not a session browser.",
+      "file": "history-analytics.html"
+    },
+    {
+      "slug": "memory-clusters",
+      "title": "Memory Clusters — what an agent has actually been remembering",
+      "blurb": "How the Memory tab's Clusters view groups a project's saved memory notes into themes, why it's a cost-gated periodic report rather than a live view, and how to read an empty result.",
+      "file": "memory-clusters.html"
+    },
+    {
+      "slug": "usage",
+      "title": "Usage — reading the 5-hour window before it reads you",
+      "blurb": "How the 5-hour and weekly usage meters work, where the numbers come from, and tuning the session slot pool so the Scheduler pausing on a rate limit never surprises you.",
+      "file": "usage.html"
+    },
+    {
+      "slug": "voice",
+      "title": "Voice Input — dictate into any session, offline",
+      "blurb": "How the local Silero VAD + Moonshine speech pipeline actually works, the auto-submit timer people talk over, and the workflow that makes dictation faster than typing.",
+      "file": "voice.html"
+    },
+    {
+      "slug": "plans-and-tasks",
+      "title": "Plans & Tasks — reading what the agent already told you",
+      "blurb": "How Session Manager surfaces an agent's live to-do list and plan revisions straight from the transcript, and the footer chip that replaced the old Tasks tab.",
+      "file": "plans-and-tasks.html"
+    },
+    {
+      "slug": "simple-mode",
+      "title": "Simple Mode — the chrome-free single-terminal cockpit",
+      "blurb": "What --simple actually boots (one skip-perms terminal, no nav or config surface), why persisted tabs and Epics never appear there, and when to reach for it instead of the full app.",
+      "file": "simple-mode.html"
     }
   ],
   "assets": [
     {
       "id": "offline-html",
       "label": "Offline HTML edition",
-      "file": "field-manual-1.0.0.html",
+      "file": "field-manual-1.1.0.html",
       "mime": "text/html"
     },
     {
       "id": "pdf",
       "label": "PDF edition",
-      "file": "field-manual-1.0.0.pdf",
+      "file": "field-manual-1.1.0.pdf",
       "mime": "application/pdf"
     }
   ]

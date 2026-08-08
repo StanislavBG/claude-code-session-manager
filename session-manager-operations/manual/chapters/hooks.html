@@ -1,0 +1,141 @@
+<h1>Hooks — edit the CLI's own shell-outs, safely</h1>
+
+<p class="lede">Hooks are shell commands (or HTTP calls, prompts, sub-agents, MCP tool calls) that
+the <code>claude</code> CLI fires on its own lifecycle events — before a tool runs, after the model
+stops, when a session starts. The Hooks tab is a structured editor over the exact <code>hooks</code>
+key in <code>settings.json</code> the CLI already reads; it doesn't add a parallel hook system, and
+it doesn't change what the CLI does with what you write there.</p>
+
+<h2>What you're actually editing</h2>
+
+<p>Like Settings, Hooks operates at the three file-level scopes the CLI itself resolves in order —
+user (<code>~/.claude/settings.json</code>), project (<code>&lt;cwd&gt;/.claude/settings.json</code>),
+and local (<code>&lt;cwd&gt;/.claude/settings.local.json</code>). The tab defaults to whichever scope
+matches where you are (Home face → user, Project face → project) but you can switch freely with the
+scope switcher. Two views sit on top of the same underlying file:</p>
+
+<table class="manual-table">
+  <thead><tr><th>View</th><th>What it shows</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Effective</strong></td>
+      <td>The merged result across all three scopes for the <code>hooks</code> key, with an
+      override control per node. This is what actually fires — read it before assuming a hook you
+      wrote at project scope is the one that runs, if a local override shadows it.</td>
+    </tr>
+    <tr>
+      <td><strong>Events</strong></td>
+      <td>A per-event editor for the currently selected scope's file. Pick an event on the left,
+      add matcher groups and hook rules on the right, save.</td>
+    </tr>
+    <tr>
+      <td><strong>Library</strong> <span class="manual-note" style="display:inline;border:none;background:none;padding:0">(Home face only)</span></td>
+      <td>A static reference catalog — no cwd or scope input, identical everywhere. Not an editor.</td>
+    </tr>
+  </tbody>
+</table>
+
+<figure class="manual-figure" data-figure="hooks-events-view">
+  <div class="manual-figure__frame" data-capture="Hooks tab, Events view, PreToolUse selected with one hook group configured"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Event sidebar — one row per lifecycle event,
+    with a live count of configured hooks and a hover tooltip explaining when it fires.
+    <span class="callout" data-arrow="right">2</span> Matcher + hook-rule editor for the selected event.
+    <span class="callout" data-arrow="down">3</span> <strong>test fire</strong> — run the command
+    against a fake payload before you trust it in production.
+  </figcaption>
+</figure>
+
+<h2>The event list</h2>
+
+<p>The sidebar lists the current documented event set (verified against
+<a href="https://code.claude.com/docs/en/hooks" target="_blank" rel="noreferrer">code.claude.com/docs/en/hooks</a>):
+lifecycle events (<code>UserPromptSubmit</code>, <code>UserPromptExpansion</code>,
+<code>PreToolUse</code>, <code>PostToolUse</code>, <code>PostToolUseFailure</code>,
+<code>PostToolBatch</code>, <code>Stop</code>, <code>StopFailure</code>, <code>SessionStart</code>,
+<code>SessionEnd</code>, <code>Setup</code>, <code>PreCompact</code>, <code>PostCompact</code>,
+<code>InstructionsLoaded</code>, <code>Notification</code>), permission events
+(<code>PermissionRequest</code>, <code>PermissionDenied</code>), subagent/team events
+(<code>SubagentStart</code>, <code>SubagentStop</code>, <code>TeammateIdle</code>), task events
+(<code>TaskCreated</code>, <code>TaskCompleted</code>), state-change events (<code>ConfigChange</code>,
+<code>CwdChanged</code>, <code>FileChanged</code>), worktree events (<code>WorktreeCreate</code>,
+<code>WorktreeRemove</code>), and elicitation events (<code>Elicitation</code>,
+<code>ElicitationResult</code>).</p>
+
+<p class="manual-note">Older tool-specific event names from the 2025 era (<code>PreBash</code>,
+<code>PreEdit</code>, and similar) are no longer read by the CLI. If your <code>settings.json</code>
+still has hooks registered under one of those, the tab shows a single warning chip counting them —
+it does not silently keep rendering a dead UI for them. Edit <code>settings.json</code> directly to
+remove or rename them; the fix is on you, not the tab.</p>
+
+<h2>Hook rule shape</h2>
+
+<p>Each event holds an array of matcher groups, and each group holds an array of hook rules. A rule
+has a <code>type</code> — <code>command</code>, <code>http</code>, <code>prompt</code>,
+<code>agent</code>, or <code>mcp_tool</code> — and the field that goes with it
+(<code>command</code>, <code>url</code>, <code>prompt</code>, <code>agent</code>, or
+<code>mcpTool</code>), plus an optional <code>timeout</code> in milliseconds. Two fields are recent
+additions the editor already understands: <code>args</code> (an argv array for the no-shell exec
+form of a <code>command</code> rule) and <code>terminalSequence</code> (a terminal escape sequence,
+e.g. a bell, emitted alongside a notification).</p>
+
+<h2>The common mistake: assuming a hook works because it's saved</h2>
+
+<p>Saving a hook to <code>settings.json</code> only proves the JSON is well-formed — it proves
+nothing about whether the command runs, whether its matcher actually matches the tool you think it
+does, or whether it exits cleanly. The failure mode that bites people: a hook with a typo'd path or
+a matcher that never matches sits there silently, doing nothing, until the day you needed it to
+block something and it didn't.</p>
+
+<p>The fix is the <strong>test fire</strong> button next to every <code>command</code>-type rule.
+It sends the rule's resolved command a fake JSON payload on stdin and shows you the real exit code,
+stdout, and stderr — before you ever let the live CLI invoke it for real.</p>
+
+<h3>What test fire actually does</h3>
+
+<ol class="manual-steps">
+  <li>Pick a payload. The modal pre-fills a plausible fake event body per event type (for example
+  <code>PreToolUse</code> defaults to <code>{ tool_name: "Bash", tool_input: { command: "ls" } }</code>) —
+  edit it freely; it's just JSON in a textarea.</li>
+  <li>The tab evaluates your matcher against the payload's <code>tool_name</code> client-side first,
+  so you see whether the rule would even fire before spending a real process launch on it.</li>
+  <li>Press <strong>run</strong>. Session Manager shows a confirmation dialog naming the exact
+  command before executing anything — nothing fires without that click.</li>
+  <li>The command runs for real, with your fake payload piped to its stdin, capped at a 30-second
+  timeout (5 s default) and a 1 MiB buffer per stream. You get back exit code, duration, stdout,
+  and stderr.</li>
+</ol>
+
+<div class="manual-incident">
+  <h3>Why this asks you to confirm every time</h3>
+  <p>Test fire spawns your command with <code>shell: true</code> — deliberately, because a hook's
+  <code>command</code> field in Claude Code is itself a shell string, so the test has to run it the
+  same way the CLI would. That makes it the single riskiest IPC call in the app after the Watchers
+  tab's own shell spawn. Session Manager narrows the blast radius three ways: the main window must
+  be focused, you get a native OS confirmation dialog naming the command before it runs, and the
+  process is hard-killed with <code>SIGKILL</code> on a timer if it wedges — <code>spawn</code>'s
+  built-in timeout only sends <code>SIGTERM</code>, which a stuck shell can ignore.</p>
+  <p><strong>Rule:</strong> never paste a hook command you didn't write yourself into test fire
+  without reading it first. The confirmation dialog exists to make you look, not to be reflexively
+  clicked through.</p>
+</div>
+
+<h2>Workflow: authoring a hook that actually holds</h2>
+
+<ol class="manual-steps">
+  <li>Pick the event. Hover it in the sidebar first — every documented event has a one-line
+  "when this fires" tooltip plus its payload shape, so you're not guessing at field names.</li>
+  <li>Write the matcher. Leave it empty to match every call, or scope it to a tool name/regex — an
+  empty matcher on <code>PreToolUse</code> means your command runs before <em>every</em> tool call,
+  which is rarely what you want.</li>
+  <li>Write the command, then <strong>test fire it</strong> against the default payload before
+  saving anything that could block a real session.</li>
+  <li>Check the <strong>Effective</strong> view for that event afterward. If you're editing at
+  project scope but a local-scope override already exists for the same event, the effective merge —
+  not your unsaved draft — is what the CLI will actually run.</li>
+  <li>Save. Nothing fires until you do; drafts are just draft JSON in the editor.</li>
+</ol>
+
+<p class="manual-note">The Effective view is also where cross-scope conflicts hide. A hook that
+"isn't firing" is more often shadowed by a local override than actually broken — check there before
+you start debugging the command itself.</p>

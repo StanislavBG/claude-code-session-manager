@@ -29,5 +29,17 @@
       { "arrow": "right", "selector": "[data-testid=\"epic-verbosity-dial\"]" },
       { "arrow": "left", "selector": "[data-testid=\"epic-detail-body\"]" }
     ]
+  },
+  "permissions-rules": {
+    "navKey": "permissions",
+    "steps": [
+      { "action": "click", "selector": "button:has-text(\"Rules\")" }
+    ],
+    "waitForSelector": "text=Additional Directories",
+    "callouts": [
+      { "arrow": "left", "selector": "button:has-text(\"Rules\")" },
+      { "arrow": "up", "selector": "button:has-text(\"Project\")" },
+      { "arrow": "down", "selector": "text=allow" }
+    ]
   }
 }

@@ -1,0 +1,179 @@
+<h1>Home &amp; Project Brief — the cockpit's dashboard</h1>
+
+<p class="lede">Home is not a landing page you pass through on the way to work — it is the one
+screen that answers "what does this machine need from me right now?" across every project you've
+ever opened. Project Brief is its sibling on the other side of a Terminal tab: a synthesized,
+editable document about the one project you're currently in. Neither one runs anything by itself;
+both exist to keep you from having to click through five tabs to find out what's true.</p>
+
+<h2>1. What Home actually shows, top to bottom</h2>
+
+<p>Home is assembled from existing zustand stores — nothing on this screen is a second copy of
+data another tab already owns. Read top to bottom, it is a fixed stack of six sections:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Section</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Hero</strong></td><td>"This machine · N projects", a live "<em>X</em> of
+    <em>Y</em> slots busy" line from the session-slot pool, and a "<em>N</em> things need you"
+    jump-link that scrolls straight to Needs you.</td></tr>
+    <tr><td><strong>Grid</strong></td><td>Three cards side by side: the 5-hour/weekly billing
+    meters, known Projects, and pending scheduler jobs (Queued).</td></tr>
+    <tr><td><strong>Needs you</strong></td><td>Real signals only — a <code>proposed</code> Epic
+    awaiting Approve/Discard, a chat run stopped on <code>needs-input</code>, or a scheduler job
+    the queue itself flagged <code>failed</code>/<code>needs_review</code>.</td></tr>
+    <tr><td><strong>Active sessions</strong></td><td>The machine session-slot pool's current
+    holders, joined against running scheduler jobs and chat runs for context.</td></tr>
+    <tr><td><strong>Recent sessions</strong></td><td>The five most-recently-touched transcripts
+    under <code>~/.claude/projects/</code> — the same source History reads.</td></tr>
+    <tr><td><strong>Agents</strong></td><td>A read-only reference card listing each of the five
+    Epic tags and the exact <code>initialPromptTemplate</code> text it seeds into a session —
+    not a picker, just "what does this tag actually do".</td></tr>
+  </tbody>
+</table>
+
+<figure class="manual-figure" data-figure="home-overview">
+  <div class="manual-figure__frame" data-capture="Home tab, full scroll, with at least one Needs-you row and one Active session"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> Hero — slots busy + needs-you jump link.
+    <span class="callout" data-arrow="left">2</span> Billing / Projects / Queued grid.
+    <span class="callout" data-arrow="down">3</span> Needs you — click a row to expand its real actions.
+  </figcaption>
+</figure>
+
+<h2>2. Needs you is a triage inbox, not a notification feed</h2>
+
+<p>Every row in this section corresponds to something that already gates on a human somewhere else
+in the app — Home just surfaces it in one place instead of making you go find it. Click a row to
+expand it inline:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Row kind</th><th>Source</th><th>Actions</th></tr></thead>
+  <tbody>
+    <tr><td>Proposed Epic</td><td>An Epic sitting in <code>status: 'proposed'</code> — asked for,
+    not yet started.</td><td><strong>Approve &amp; start</strong> (sends the opening prompt) or
+    <strong>Discard</strong>.</td></tr>
+    <tr><td>Session asking a question</td><td>A chat run's most recent ticket is
+    <code>needs-input</code> — the composer's stop-signal protocol fired mid-run.</td>
+    <td><strong>Open session</strong> jumps to that Epic's Terminal view.</td></tr>
+    <tr><td>Scheduler job failed / needs review</td><td>The queue's own status verdict on a
+    PRD run.</td><td><strong>Retry now</strong> resets the job to pending, or <strong>View in
+    Scheduler</strong>.</td></tr>
+  </tbody>
+</table>
+
+<p class="manual-note">A job in <code>needs_review</code> is a question, not a failure — treat it
+the same as a chat run asking you something, not as broken work. (See the Scheduler chapter for
+how the root-cause report behind it gets written.)</p>
+
+<h2>3. The mistake people make: treating the slot slider as per-project</h2>
+
+<p>The "Max slots" control on Active sessions looks like it belongs to whichever project you're
+looking at. It doesn't. It is one number for the whole machine — the same pool the Scheduler and
+every Chat-view Epic draw <code>claude -p</code> processes from. Defaults to 5, dragged anywhere
+from 0 (pauses new launches without touching what's already running) to 10. An environment override
+(<code>SM_SESSION_SLOTS</code>) disables the slider entirely and shows why on hover.</p>
+
+<p>Drop it to 1–2 while you're actively driving a Terminal session yourself and don't want a
+scheduler burst competing with you for tokens; push it back up before you queue a batch of PRDs and
+walk away. There is no per-project equivalent — if two projects are both hammering the pool, the
+lever that fixes it lives on this one screen regardless of which project's tab is active.</p>
+
+<p>Active sessions also explains itself when the queue is running narrower than the pool: a
+<code>memory gate</code>, <code>slots-exhausted</code>, <code>held</code> (behind
+<code>dependsOn</code>), or <code>paused</code> reason string appears next to the slot count,
+sourced straight from the scheduler's own last tick — it stays silent when the queue is simply
+idle, so an empty queue never reads as a blocked one.</p>
+
+<h2>4. New Epic from Home is a project picker, not a form</h2>
+
+<p>The <strong>New epic</strong> button in the Hero doesn't open the New Epic card directly — it
+opens a drawer listing your known projects (the same rows the Projects card renders) as a radio
+list. Confirming activates that project's tab if it's already open, or opens a dormant one, and
+hands you into its Epics workspace to actually start the Epic. This exists because "New Epic" is
+scoped to one project's Terminal tab; Home's version is the cross-project entry point into that
+flow, not a second way to create one.</p>
+
+<ol class="manual-steps">
+  <li>Click <strong>New epic</strong> in the Hero.</li>
+  <li>Pick the project from the radio list — this is real known-cwd data, not a text field.</li>
+  <li>Confirm. The matching Terminal tab activates (or opens) and the Epics workspace opens on
+  top of it.</li>
+  <li>From there, proceed exactly as described in Getting Started: pick an Agent, pick a Mission,
+  type your goal, submit.</li>
+</ol>
+
+<h2>5. Project Brief: a document that maintains itself, cheaply</h2>
+
+<p>Switch to a project's <strong>Project Home</strong> surface and you're looking at something
+different from Home: one project's own synthesized brief, not a cross-project dashboard. Above the
+document sits a thin live strip that changes underneath the static content:</p>
+
+<ul>
+  <li><strong>What is in flight</strong> — cards for the project's current Epics, computed live
+  from the Epic queue every render. The card copy explicitly says "this block is never
+  hand-written" for a reason: it can't drift out of sync with what's actually running.</li>
+  <li><strong>Waiting on you</strong> — open questions the last run couldn't resolve on its own,
+  each with an <strong>Answer in Epic →</strong> button that jumps straight to that Epic's Terminal
+  view. Hidden entirely when there are none.</li>
+</ul>
+
+<p>Below that strip is the generated document itself, rendered in the same sandboxed iframe the
+Project Pages feature uses, with one button above it: <strong>Generate My Project Home</strong>.</p>
+
+<figure class="manual-figure" data-figure="project-brief-overview">
+  <div class="manual-figure__frame" data-capture="Project Home tab for an active project, showing the in-flight strip and generated document"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> What is in flight — live, never hand-written.
+    <span class="callout" data-arrow="left">2</span> Generate My Project Home.
+    <span class="callout" data-arrow="down">3</span> Provenance line — generated timestamp or
+    "shipped default".
+  </figcaption>
+</figure>
+
+<h2>6. What "Generate" actually does, and why it's cost-gated</h2>
+
+<p>Pressing Generate fires exactly one <code>claude -p</code> pass, pinned to
+<code>sonnet</code>, with a 3-minute hard timeout — the same spawn pattern the Memory Clusters
+feature uses (stdin closed, cost-gated so it only runs on your explicit click, never on a timer).
+It acquires a slot from the same machine-wide session-slot pool described above before it launches,
+so a Generate click competes with your scheduler queue and your other chat runs for the same 5 (or
+however many you've set) slots — if the pool is exhausted, the request simply fails with "no
+session slot free — try again shortly" rather than queuing invisibly.</p>
+
+<p>What goes into the prompt is deliberately narrow and real: your project's <code>CLAUDE.md</code>
+text, every active and archived Epic's tag + goal text (archived ones capped at the 200 most
+recent), the last 50 lines of <code>git log --oneline</code>, and a depth-2 listing of
+<code>src/</code>. The synthesizer is instructed to treat all of that purely as data to analyze,
+never as instructions to follow — it returns one JSON object and nothing else, which is then
+persisted to <code>&lt;project&gt;/session-manager-operations/project-brief/brief.json</code>.</p>
+
+<h2>7. The brief is a file you're meant to hand-edit</h2>
+
+<p>This is the detail most people miss: the brief is not a cache you regenerate and discard — it's
+a real, versioned document with a maintain loop built in. Certain blocks are "pinnable". Hand-edit
+one (zero LLM cost, no session slot involved) and it is automatically pinned, which means the next
+Generate pass feeds your edited text back in as an input instead of silently overwriting it with a
+fresh synthesis. Un-pin a block explicitly if you want the next refresh to regenerate it from
+scratch.</p>
+
+<p class="manual-note">Practical rule: generate once when a project is unfamiliar to skim its shape,
+then treat the brief the way you'd treat a README you maintain by hand — edit the parts that are
+wrong or stale, regenerate the parts you haven't touched, and don't re-run Generate reflexively
+just because time has passed. The provenance line under the title tells you exactly how stale the
+generated portion is.</p>
+
+<h2>8. The workflow that pays off</h2>
+
+<ol class="manual-steps">
+  <li>Open Home first, every session. Check Needs you before you check anything else — it's the
+  one place a proposed Epic, a stalled chat, and a failed job all surface together.</li>
+  <li>Glance at the slot count and the billing meters before deciding whether to queue more work or
+  start something interactively yourself — they share the same budget.</li>
+  <li>Use the New Epic drawer to jump into a project rather than opening a second tab for a second
+  conversation in it; a second tab on the same cwd never activates a new project, it just re-focuses
+  the one you already have.</li>
+  <li>The first time you land in an unfamiliar project's Project Home, press Generate once to get
+  oriented, then switch to hand-editing the brief as your understanding of the project firms up —
+  don't keep paying for full re-synthesis of blocks you already know are right.</li>
+</ol>

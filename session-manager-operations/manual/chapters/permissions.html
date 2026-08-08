@@ -1,0 +1,107 @@
+<h1>Permissions — stop the interruptions, don't disable the guardrail</h1>
+
+<p class="lede">The Permissions tab edits the same <code>permissions</code> block the <code>claude</code>
+CLI itself reads out of <code>settings.json</code> — allow, deny, and ask rules, plus a default
+mode and a list of additional directories. It is a scoped editor over real config, not a
+session-manager-only feature: every rule you write here is exactly what the CLI enforces on its
+own, with or without this app open.</p>
+
+<h2>What it's actually for</h2>
+
+<p>The honest framing is <strong>reducing prompt interruptions</strong>, not building a security
+boundary. Claude Code already asks before anything destructive by default — the Permissions tab
+exists so you stop re-approving the same handful of safe, read-only commands every session. <code>deny</code>
+rules are a real hard stop and worth using for genuinely dangerous patterns, but the tab's daily
+value is in <code>allow</code>: tell the CLI once that <code>Bash(ls:*)</code> or
+<code>Read(~/.claude/**)</code> never needs a prompt, and it stops asking.</p>
+
+<h2>The three lists, and the mode</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Field</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>allow</code></td><td>Rules that auto-approve without a prompt — the one you'll edit most.</td></tr>
+    <tr><td><code>deny</code></td><td>Rules that hard-block, no prompt, no override at run time.</td></tr>
+    <tr><td><code>ask</code></td><td>Rules that force an explicit prompt even if something else would allow it.</td></tr>
+    <tr><td><code>defaultMode</code></td><td>One of <code>default</code>, <code>acceptEdits</code>, <code>plan</code>, or <code>bypassPermissions</code> — the CLI's baseline posture before any rule list is consulted.</td></tr>
+    <tr><td><code>additionalDirectories</code></td><td>Extra paths the session may touch beyond its own working directory.</td></tr>
+  </tbody>
+</table>
+
+<p>Rules use the CLI's own syntax (<code>Tool(pattern)</code>, e.g. <code>Bash(ls:*)</code>,
+<code>Write(/etc/**)</code>) — the tab links straight to the CLI's own rule-syntax docs rather than
+re-documenting it, and this manual won't either. Get the pattern right there, not by guessing here.</p>
+
+<figure class="manual-figure" data-figure="permissions-rules">
+  <div class="manual-figure__frame" data-capture="Permissions tab, Rules view, Project scope, an allow rule being added"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Effective / Rules / Presets — three views over
+    the same scope.
+    <span class="callout" data-arrow="up">2</span> Scope switcher: User / Project / Local.
+    <span class="callout" data-arrow="down">3</span> Allow / Deny / Ask — add a rule, hit Enter.
+  </figcaption>
+</figure>
+
+<h2>Effective vs. Rules — read before you write</h2>
+
+<p>The tab opens on <strong>Effective</strong>, not Rules, and that ordering is deliberate: it shows
+the merged result of every scope stacked together, so you can see what the CLI will actually do
+before you go add a rule that's already covered — or that a higher scope already blocks. Switching
+to <strong>Rules</strong> edits the raw list for whichever single scope is selected. From Effective,
+clicking an inherited value can push an override straight into the active scope instead of
+retyping it by hand.</p>
+
+<h2>Scope: the mistake people make</h2>
+
+<p>Permissions has the same three scopes as Settings — <strong>User</strong>
+(<code>~/.claude/</code>, every project on the machine), <strong>Project</strong>
+(<code>&lt;cwd&gt;/.claude/settings.json</code>, checked into git, shared with the team),
+<strong>Local</strong> (<code>&lt;cwd&gt;/.claude/settings.local.json</code>, gitignored,
+per-machine). The common mistake is adding a personal convenience rule — allowlisting a command you
+happen to trust on your own machine — at <strong>Project</strong> scope, where it ships to every
+teammate who pulls the repo and silently changes what their sessions auto-approve too.</p>
+
+<div class="manual-note"><strong>The workflow that pays off:</strong> allowlist genuinely safe,
+read-only commands (status checks, linters, <code>git diff</code>, read-only greps) at
+<strong>User</strong> scope so they stop interrupting you everywhere. Reserve <strong>Project</strong>
+scope for rules the whole team should share — a build step everyone runs, a deploy command the
+team has agreed is safe. Keep anything machine-specific or experimental in <strong>Local</strong>,
+where it never leaves your disk.</p></div>
+
+<h2>Presets</h2>
+
+<p>The Home face adds a fourth view, <strong>Presets</strong> — a static reference library of rule
+bundles, distinct from Rules/Effective in that it has no scope or cwd input of its own. It isn't
+offered on the Project face; landing there with Presets selected bounces you back to Effective.
+Use it to see or copy a starting bundle, not to edit a live scope directly.</p>
+
+<h2>The default-mode buttons</h2>
+
+<p>Above the rule lists sits one more control: <code>defaultMode</code>, a single choice among
+<code>default</code>, <code>acceptEdits</code>, <code>plan</code>, and <code>bypassPermissions</code>.
+This is the CLI's baseline stance before any allow/deny/ask rule is even consulted — the widest,
+bluntest lever on the tab. Set it at the scope where it belongs: a personal <code>acceptEdits</code>
+habit belongs in User or Local, not pushed into the Project file everyone inherits.</p>
+
+<h2>Automating the allowlist</h2>
+
+<p>You don't have to build the allow list by hand. The <code>fewer-permission-prompts</code> skill
+scans your own transcripts for the read-only Bash and MCP calls you keep re-approving, and writes a
+prioritized allowlist straight into <code>.claude/settings.json</code> — the same file this tab
+edits. Run it, then open Permissions → Rules to review what landed before you save; it's a
+generator for the list, not a replacement for looking at it.</p>
+
+<ol class="manual-steps">
+  <li>Work normally for a session or two — approve prompts as they come.</li>
+  <li>Run the <code>fewer-permission-prompts</code> skill to mine those approvals into a candidate
+  allowlist.</li>
+  <li>Open the Permissions tab, switch to <strong>Rules</strong> at the scope the skill wrote to,
+  and read what it added.</li>
+  <li>Move anything personal-only down to Local; leave anything genuinely team-safe at Project.</li>
+  <li>Save. The next session with a matching command runs without a prompt.</li>
+</ol>
+
+<p class="manual-note">Permissions is a friction dial, not a lockbox. If you actually need to stop
+an agent from doing something, write a <code>deny</code> rule — but most of what people reach for
+this tab to do is just "stop asking me," and <code>allow</code> at the right scope is the whole
+answer.</p>

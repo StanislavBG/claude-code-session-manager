@@ -1,0 +1,120 @@
+<h1>Memory Clusters — what an agent has actually been remembering</h1>
+
+<p class="lede">Memory Clusters is a read-mostly report over one project's saved memory notes — it
+groups them into named themes so you can see, at a glance, what Claude has decided is worth
+remembering about your codebase. It replaced the old Knowledge Graph tab. It is not live, it is
+not this conversation's context, and it costs a real <code>claude -p</code> call every time you ask
+it to regroup.</p>
+
+<h2>Where the memories actually live</h2>
+
+<p>The Memory tab (Configure nav) has two scopes — Workspace and Subagent — plus, inside
+Workspace, three views: <strong>Editor</strong>, <strong>Natural</strong>, and
+<strong>Clusters</strong>. All three read the same on-disk store:
+<code>~/.claude/projects/&lt;encodedCwd&gt;/memory/*.md</code> — Claude's own native auto-memory
+location for that project, not something Session Manager invented. Editor is a plain list+detail
+CRUD over those files; Clusters is a report generated <em>from</em> them. Nothing you do in
+Clusters writes back to a memory file — it only reads and summarizes.</p>
+
+<p>Each memory is a markdown file with optional frontmatter (<code>type</code>,
+<code>description</code>) and a body that may contain <code>[[wikilink]]</code>-style references to
+other memory slugs. Claude writes these during ordinary sessions when you ask it to remember
+something; you can also create one by hand from the Editor view's <strong>+ New memory</strong>
+button.</p>
+
+<h2>The one thing people get wrong</h2>
+
+<p>Memory Clusters does <strong>not</strong> update as a session runs, and it is <strong>not</strong>
+a view into the current conversation. Two separate confusions come from that one fact:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Expectation</th><th>Reality</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>"It'll update live while my agent works."</td>
+      <td>It's cache-only until you press <strong>Aggregate</strong>/<strong>Refresh</strong>.
+      Opening the Clusters view (or switching workspaces) only re-reads the last cached result —
+      it never spends a token on its own.</td>
+    </tr>
+    <tr>
+      <td>"This shows what we've been talking about in this Epic."</td>
+      <td>It shows the persisted memory <em>files</em> for the project — durable notes an agent
+      chose to write down — not the transcript of any one session. A long conversation that
+      produced zero <code>memory</code> writes shows up as nothing here.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>What actually happens when you press Refresh</h2>
+
+<p>The button is the cost gate, by design. Pressing it sends every memory file for the active
+workspace — slug, type, description, body — into a single <code>claude -p</code> call pinned to
+the <code>sonnet</code> model, with a system prompt that explicitly tells the model to treat memory
+bodies as inert data to analyze, never as instructions to follow (a memory file is user-writable
+text; without that framing, a maliciously or accidentally instruction-shaped memory body could
+otherwise hijack the clustering pass). The model returns 2–8 named clusters, a one-line summary
+per cluster, member slugs, any <code>[[wikilink]]</code>-derived links between them, and a list of
+orphans — memories that fit no cluster.</p>
+
+<ol class="manual-steps">
+  <li>You open the <strong>Clusters</strong> view. Session Manager reads the cached result only —
+  no spend.</li>
+  <li>You press <strong>Aggregate</strong> (first run) or <strong>Refresh</strong> (subsequent
+  runs). This is the only action that fires the LLM pass.</li>
+  <li>Every workspace memory file is read and sent as data, wrapped in an explicit
+  do-not-follow-instructions framing.</li>
+  <li>The result is parsed defensively — any cluster member, link endpoint, or orphan that isn't
+  a real memory slug on disk is dropped, so the report can never reference a memory that doesn't
+  exist.</li>
+  <li>The result is cached to <code>~/.claude/session-manager/memory-clusters/&lt;workspace&gt;.json</code>
+  and rendered as cluster cards plus an "Unclustered" strip for orphans.</li>
+  <li>Clicking any slug — in a cluster or in Unclustered — jumps you to that memory in the Editor
+  view.</li>
+</ol>
+
+<figure class="manual-figure" data-figure="memory-clusters-view">
+  <div class="manual-figure__frame" data-capture="Memory tab, Workspace scope, Clusters view, after a refresh with at least two clusters and one orphan"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> "generated &lt;time&gt; ago" — the cache
+    timestamp, not a live status.
+    <span class="callout" data-arrow="right">2</span> Aggregate / Refresh — the only button that
+    spends a <code>claude -p</code> call.
+    <span class="callout" data-arrow="down">3</span> A cluster card: name, one-line summary,
+    member slugs, and any wikilink-derived links between them.
+  </figcaption>
+</figure>
+
+<h2>If the tab looks empty</h2>
+
+<p>An empty Clusters view almost always means one of two things, in order of likelihood:</p>
+
+<ul>
+  <li><strong>You haven't pressed Aggregate yet.</strong> A fresh workspace with no cached result
+  shows "not yet aggregated" and an empty state — this is expected, not a bug.</li>
+  <li><strong>This project genuinely has no memory files yet.</strong> If Claude hasn't been asked
+  to remember anything for this cwd, <code>~/.claude/projects/&lt;encodedCwd&gt;/memory/</code> is
+  empty or doesn't exist, and there is nothing to cluster. Check the Editor view's entry count in
+  the toolbar — that's the ground truth for how many memory files actually exist.</li>
+</ul>
+
+<div class="manual-incident">
+  <h3>A slow prior workspace can't clobber a fast current one</h3>
+  <p>Switching workspaces (i.e. switching the active project tab) while a Refresh is still
+  in-flight used to risk the old workspace's slower response landing after the new workspace's
+  faster one, showing the wrong project's clusters. Each load request is tagged with a request id,
+  and a response is only applied if its id still matches the latest request — a stale response is
+  silently discarded rather than painted over the current workspace.</p>
+</div>
+
+<h2>The workflow that pays off</h2>
+
+<p>Treat Clusters as a periodic audit, not a live dashboard: refresh it every so often — after a
+long Epic, or before starting a new one on a project you haven't touched in a while — and read
+what an agent decided was worth writing down. It's a fast way to catch two things: memories that
+drifted into duplicating something already in a CLAUDE.md (a candidate for
+<code>/memory-sanitation</code>), and orphaned notes that never got tied into anything, which
+often means they were written once and never referenced again.</p>
+
+<p class="manual-note">Clusters is read-only reporting layered on top of the Editor view's real
+CRUD. If a cluster's grouping looks wrong, the fix is editing or deleting the underlying memory
+file in Editor, then pressing Refresh again — not fighting the clustering prompt.</p>

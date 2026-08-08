@@ -1,0 +1,157 @@
+<h1>History — where your Claude time and money went</h1>
+
+<p class="lede">History is an analytics dashboard, full stop. It answers "how many tokens, how
+much money, which project, which model, which tool" over a date range. It does not list your past
+Claude sessions, and it cannot reopen one — that used to be true, and the app was deliberately
+cut in half to stop it being true.</p>
+
+<h2>The mistake almost everyone makes once</h2>
+
+<p>The instinct is to open History looking for a session you had last week — "what did I ask Claude
+to do in that project on Tuesday?" — expecting a searchable log with a resume button. History does
+not do that, and it used to: a session-browsing "Log" view with a per-row <strong>resume</strong>
+button lived inside this tab until it was surgically split out into its own component and left
+unrendered, pending a future relocation onto the Projects or Terminal surface where session
+browsing actually belongs. The History tab you see today renders only the analytics dashboard —
+the browse/resume UI was ruled out of its charter, not merely hidden behind a toggle.</p>
+
+<p class="manual-note">If you're hunting for an old conversation to resume, this is the wrong tab.
+Nothing currently in the app exposes that browse-and-resume flow — it's parked, not shipped.</p>
+
+<h2>What it's actually a browser over</h2>
+
+<p>History reads from a durable rollup store built and maintained on disk — it never re-scans your
+raw transcript files to render. That's what lets the dashboard open instantly no matter how many
+sessions you've accumulated. Every row it aggregates carries: prompt count, input/output/cache
+tokens, tool-call count, session count, error count, active minutes, and an estimated dollar cost
+per model, bucketed per project per day.</p>
+
+<p>Cost is an <em>estimate</em>, not a billed figure — computed from a per-million-token pricing
+table keyed by model family (Opus, Sonnet, Haiku), matched against the raw model id by a
+case-insensitive substring check. A model id that doesn't match any known family still gets priced
+(falling back to the Sonnet rate) but is flagged internally as an estimate rather than an exact
+figure, since cache-read tokens are billed far below a fresh input token and the fallback can't know
+the real family's ratio.</p>
+
+<h2>Seven measures, one dial</h2>
+
+<p>Every panel in the dashboard reads off the same measure — you change it once, in the control bar,
+and every chart re-renders against it:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Measure</th><th>What it counts</th></tr></thead>
+  <tbody>
+    <tr><td><strong>In tokens</strong></td><td>Input + cache-read + cache-creation tokens — everything submitted to the model.</td></tr>
+    <tr><td><strong>Out tokens</strong></td><td>Output tokens only.</td></tr>
+    <tr><td><strong>Total tokens</strong></td><td>In + Out.</td></tr>
+    <tr><td><strong>Prompts</strong></td><td>Number of prompts sent.</td></tr>
+    <tr><td><strong>Sessions</strong></td><td>Number of distinct sessions.</td></tr>
+    <tr><td><strong>Time</strong></td><td>Active minutes.</td></tr>
+    <tr><td><strong>Spend</strong></td><td>Estimated dollar cost. The default measure on first open.</td></tr>
+  </tbody>
+</table>
+
+<p>Range is a separate dial next to it: 30, 60, 90 days, or "All time". Both choices persist to
+local storage, so History reopens the way you left it.</p>
+
+<h2>Two faces, one dashboard</h2>
+
+<p>History is one of the surfaces that respects the app's Home/Project split. Which face you're on
+changes what "project" means on screen:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Face</th><th>Scope</th><th>Project facet</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Home</strong></td>
+      <td>Every project the app has ever recorded activity for.</td>
+      <td>A full chip row — toggle individual projects, isolate one, or show all.</td>
+    </tr>
+    <tr>
+      <td><strong>Project</strong></td>
+      <td>Force-scoped to the active tab's cwd. No override, no escape hatch.</td>
+      <td>Not shown — there's only one project to facet against, so the chip row doesn't render.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Switching from Project back to Home always resets the filter to "show all" — there's no
+manual-touch state to carry over, since the Project face never offered a filter to touch in the
+first place.</p>
+
+<h2>Reading the panels top to bottom</h2>
+
+<ol class="manual-steps">
+  <li><strong>Headline</strong> — the current measure's total for the range, with a delta against
+  the equivalent prior period and a small trend series.</li>
+  <li><strong>Budget strip</strong> — month-to-date spend against a cap you set (defaults to $50,
+  persisted locally), projected out to end-of-month from the days elapsed so far. This one is
+  deliberately unfaceted — a budget is a real-money figure for the whole account, not scoped to
+  whatever projects you're currently filtering.</li>
+  <li><strong>Project facet</strong> (Home face only) — chip row to toggle/isolate projects before
+  the rest of the panels compute.</li>
+  <li><strong>Stacked trend</strong> — the measure over time, stacked by project. Click a project's
+  band to drill into it.</li>
+  <li><strong>Ranking</strong> — every project in range, sorted by the current measure, with its
+  share of the total and a first-half-vs-second-half trend arrow.</li>
+  <li><strong>Project drill-in</strong> — appears once you select a project from the trend or the
+  ranking table. Breaks that one project's totals down by model (sorted by cost) and by tool call
+  count.</li>
+  <li><strong>Model mix, Concentration, Cache, Rhythm</strong> — four smaller cards: spend/tokens
+  by model family, how much of total spend the top 3 projects account for, your prompt-cache hit
+  rate, and which day of the week you actually work on.</li>
+</ol>
+
+<h2>The workflow that pays off: catching a runaway project before the bill does</h2>
+
+<p>The dashboard exists to answer one operator question fast: <em>is something quietly burning
+tokens I didn't budget for?</em> The path that actually catches it:</p>
+
+<ol class="manual-steps">
+  <li>Switch to the Home face and set the measure to <strong>Spend</strong>.</li>
+  <li>Check the <strong>Budget strip</strong> first — if the projected month-end figure is already
+  over your cap, something changed recently.</li>
+  <li>Look at <strong>Concentration</strong>. If the top-3 share is unusually high, one or two
+  projects are doing the damage, not a broad increase across everything.</li>
+  <li>Open the <strong>Ranking</strong> table and click into the top row's <strong>drill-in</strong>.
+  The by-model breakdown will usually tell the story on its own — an Epic accidentally pinned to
+  Opus instead of Sonnet shows up here as a cost-per-token outlier long before it shows up on an
+  invoice.</li>
+  <li>If the cache-hit percentage in the <strong>Cache</strong> card is low for that project, that's
+  often the actual lever — a session re-sending large context on every turn instead of hitting the
+  prompt cache costs real money at input-token rates.</li>
+  <li>Fix it at the source: change the offending Agent persona's <code>model</code> field, or split
+  an overgrown Epic into smaller ones. History only tells you where the money went — it has no
+  control to throttle or gate spend itself.</li>
+</ol>
+
+<figure class="manual-figure" data-figure="history-dashboard">
+  <div class="manual-figure__frame" data-capture="History tab, Home face, Spend measure, 30d range, at least two projects with a visible Ranking table and Budget strip"></div>
+  <figcaption>
+    <span class="callout" data-arrow="up">1</span> Measure / range control bar.
+    <span class="callout" data-arrow="left">2</span> Budget strip — month-to-date vs. your cap.
+    <span class="callout" data-arrow="right">3</span> Ranking table — click a row to drill in.
+  </figcaption>
+</figure>
+
+<h2>When a project silently goes missing from the totals</h2>
+
+<p>The underlying store keys every day's data by the encoded <code>~/.claude/projects/&lt;dir&gt;</code>
+transcript folder name — a transcript-store identity, not a project identity, since the CLI mints a
+folder for every path it was ever launched from, including throwaway <code>/tmp</code> directories
+and test fixtures. History resolves each folder back to a real working directory and merges folders
+that resolve to the same project (their token counts, tool breakdowns, and per-model figures all
+combine into one row) before anything renders. A folder whose cwd can't be resolved at all is
+excluded from every chart's project axis — but never silently: its totals are summed and shown in a
+dedicated exclusion note beneath the headline ("Excluded: N transcript folders with no resolvable
+working directory · … sessions · … prompts · $…"), so an unrecognized dollar amount is always stated
+rather than dropped. If you ever see that note, it means History deliberately declined to guess
+which project the folder belonged to — it will never fold unrecognized activity into a project you
+didn't actually run it from.</p>
+
+<h2>Exporting the raw numbers</h2>
+
+<p>The <strong>Export CSV</strong> button in the control bar writes exactly what's on screen — the
+currently filtered range, faceted to whichever projects are shown — as a per-day CSV with per-model
+token and cost breakdowns, named after the range's start and end date. Useful for feeding a
+spreadsheet or an expense report; there is no other export path out of History.</p>

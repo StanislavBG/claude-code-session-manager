@@ -1,0 +1,111 @@
+<h1>MCP Servers — registering tools, and proving they actually connected</h1>
+
+<p class="lede">The MCP Servers tab edits the same JSON the <code>claude</code> CLI reads on every
+launch — <code>~/.claude.json</code> at User scope, <code>.mcp.json</code> at Project scope — and
+adds one thing raw JSON editing can't give you: a live probe that tells you whether a registered
+server actually connected, before you build an Epic that assumes its tools exist.</p>
+
+<h2>Where a server definition lives</h2>
+
+<p>There is no session-manager-owned server registry. The tab is a scoped editor over two files,
+switched with the same <strong>User / Project</strong> scope switcher used elsewhere in the app:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Scope</th><th>File</th><th>Applies to</th></tr></thead>
+  <tbody>
+    <tr><td>User</td><td><code>~/.claude.json</code></td><td>Every project, every session, on this machine.</td></tr>
+    <tr><td>Project</td><td><code>&lt;project cwd&gt;/.mcp.json</code></td><td>This project only — checked into the repo if you commit it.</td></tr>
+  </tbody>
+</table>
+
+<p>Both files share the same shape: a top-level <code>mcpServers</code> object keyed by server
+name. This repo's own <code>.mcp.json</code> is a real example — it registers two servers,
+<code>session-manager-scheduler</code> (<code>node scripts/scheduler-mcp-server.cjs</code>, a
+wrapper that exposes the admin API's <code>scheduler_list_jobs</code>/<code>scheduler_reset_job</code>
+tools) and <code>bilko-host</code> (<code>node</code> against a path in the sibling
+<code>Bilko</code> repo) — both plain <code>stdio</code> servers with no <code>type</code> field
+set, since <code>stdio</code> is the default transport.</p>
+
+<figure class="manual-figure" data-figure="mcp-servers-list">
+  <div class="manual-figure__frame" data-capture="MCP Servers tab, User scope, several servers with mixed connection states"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Scope switcher — User vs Project, same file the
+    CLI reads.
+    <span class="callout" data-arrow="up">2</span> Status dot per server: live probe result, not a
+    guess from the config alone.
+    <span class="callout" data-arrow="right">3</span> <strong>⟳ test connections</strong> — re-runs the
+    probe on demand.
+  </figcaption>
+</figure>
+
+<h2>The field you'll actually touch, per server</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>type</code></td><td><code>stdio</code> (default) · <code>http</code> · <code>streamable-http</code> · <code>sse</code> (deprecated — the editor flags it) · <code>ws</code>.</td></tr>
+    <tr><td><code>command</code> / <code>args</code></td><td>For <code>stdio</code> servers — the process the CLI spawns.</td></tr>
+    <tr><td><code>url</code> / <code>headers</code></td><td>For the HTTP-family transports.</td></tr>
+    <tr><td><code>env</code></td><td>Environment variables passed to a <code>stdio</code> server's process.</td></tr>
+    <tr><td><code>alwaysLoad</code></td><td>Bypasses tool-search deferral (Claude Code v2.1.121+) — the server's tools are always in context instead of loaded on demand.</td></tr>
+    <tr><td><code>enabled</code></td><td>Session-Manager-editable toggle: unchecking it sets <code>enabled: false</code> so the server is skipped in new sessions without deleting its definition.</td></tr>
+    <tr><td><code>disabledTools</code></td><td>Per-server tool denylist — same list <code>/mcp</code> surfaces inside a Claude session.</td></tr>
+    <tr><td><code>permissions.tools</code></td><td><code>inherit</code> (default) · <code>allow</code> all · <code>deny</code> all · an explicit allowlist array.</td></tr>
+    <tr><td><code>description</code></td><td>Not a Claude Code config field — a Session-Manager-only purpose note, so a server list of ten names isn't ten mystery strings later.</td></tr>
+  </tbody>
+</table>
+
+<p class="manual-note">One name is off-limits: Claude Code refuses to load a server named
+<code>workspace</code> (reserved as of CLI v2.1.128). The editor blocks it with a hard warning.
+<code>ide</code> and <code>tasks</code> aren't reserved, just commonly used by other tooling — the
+editor flags those as a caution, not a block.</p>
+
+<h2>The common mistake: registering a server and trusting it works</h2>
+
+<p>Adding an entry to <code>mcpServers</code> only proves the JSON is well-formed — it says nothing
+about whether the CLI can actually reach the server. A <code>stdio</code> command that's misspelled,
+an HTTP server that needs an OAuth flow you haven't completed, or a plugin-provided server still
+waiting on your approval all look identical in the raw file: present, and untested. The mistake
+is starting an Epic that assumes a server's tools are available, discovering three turns in that
+the agent silently has none of them.</p>
+
+<h2>The workflow that pays off</h2>
+
+<ol class="manual-steps">
+  <li>Add or edit the server entry, then <strong>Save</strong> — it writes straight to
+  <code>~/.claude.json</code> or <code>.mcp.json</code>, whichever scope is active.</li>
+  <li>Press <strong>⟳ test connections</strong>. This shells out to <code>claude mcp list</code> —
+  a plain subcommand, no model call — and matches each configured server name against what came
+  back.</li>
+  <li>Read the status dot before relying on the server anywhere:
+    <table class="manual-table">
+      <thead><tr><th>Status</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td>Ready</td><td>Connected. Safe to build an Epic around its tools.</td></tr>
+        <tr><td>Failed</td><td>The CLI tried and couldn't connect — check the command/URL first.</td></tr>
+        <tr><td>Needs auth</td><td>An OAuth-style server waiting on you to authorize it.</td></tr>
+        <tr><td>Pending approval</td><td>A plugin-registered server waiting on a trust decision.</td></tr>
+        <tr><td>Not checked</td><td>No probe result yet for this name — press test connections, don't assume.</td></tr>
+      </tbody>
+    </table>
+  </li>
+  <li>Only then start (or resume) the Epic that depends on this server's tools. A session started
+  before the server was reachable won't retroactively pick it up — the tools are discovered at
+  launch, not mid-conversation.</li>
+</ol>
+
+<p>The probe has a 30-second ceiling and coalesces concurrent requests onto one in-flight
+<code>claude mcp list</code> call, so mashing the button doesn't fan out into parallel CLI
+processes — but it also means the result can lag a few seconds behind a config change you just
+saved. Re-test after every edit that touches connectivity (command, URL, env, headers), not just
+once at the start of a session.</p>
+
+<h2>The Library view: catalog, not installer state</h2>
+
+<p>The view switcher next to the scope switcher flips between <strong>Installed</strong> (the
+editor above) and <strong>Library</strong> — a browsable catalog of known MCP servers you can add
+with one click. The Library only ever reads <code>~/.claude.json</code>'s <code>mcpServers</code>
+keys to mark which catalog entries are already installed; it has no separate connection state of
+its own. Installing from the Library still lands you back in the same "unprobed until you test it"
+situation above — a catalog entry existing doesn't mean the server it describes is reachable on
+your machine.</p>

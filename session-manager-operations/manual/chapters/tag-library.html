@@ -1,0 +1,171 @@
+<h1>Tag Library — the mission that ships with every Epic</h1>
+
+<p class="lede">Every Epic carries exactly one tag — <code>feature</code>, <code>bug</code>,
+<code>discussion</code>, or one of three scripted-only tags. The tag is not a label you glance at in
+a queue row. Its <code>initialPromptTemplate</code> is the first framing line the agent reads,
+before your own goal text, and its <code>developEagerness</code> silently decides how hard
+<code>/develop</code> pushes toward writing PRDs inside that Epic. Tag Library is where you go to
+see — and, for one specific relationship, edit — what each tag actually does.</p>
+
+<h2>What you're looking at</h2>
+
+<p>Tag Library follows the same list+detail shape as Skills and Agent Library: a left rail of tags,
+a detail pane for whichever one is selected. Click a tag and the detail pane shows four things,
+straight from source — nothing here is summarized or paraphrased on the way to the screen:</p>
+
+<ul>
+  <li>the tag's <strong>description</strong> (<code>lib/tagLibrary.ts</code>'s <code>TAG_LIBRARY</code>)</li>
+  <li>its <strong><code>/develop</code> eagerness</strong> — <code>expected-default</code> or
+  <code>available-not-assumed</code></li>
+  <li>which mechanism actually <strong>develops via</strong> — most tags route through
+  <code>/develop</code>, three don't</li>
+  <li>the exact <strong>opening framing</strong> text — <code>agentTagDefs.ts</code>'s
+  <code>initialPromptTemplate</code>, quoted verbatim, under the heading "opening framing — sent
+  before the human's goal"</li>
+</ul>
+
+<p>The six tags, and what each one really does:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Tag</th><th><code>/develop</code> eagerness</th><th>Develops via</th><th>Where it's created</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>feature</code></td>
+      <td><code>expected-default</code></td>
+      <td><code>/develop</code></td>
+      <td>New Epic card</td>
+    </tr>
+    <tr>
+      <td><code>bug</code></td>
+      <td><code>expected-default</code></td>
+      <td><code>/develop</code></td>
+      <td>New Epic card</td>
+    </tr>
+    <tr>
+      <td><code>discussion</code></td>
+      <td><code>available-not-assumed</code></td>
+      <td><code>/develop</code></td>
+      <td>New Epic card</td>
+    </tr>
+    <tr>
+      <td><code>build</code></td>
+      <td><code>expected-default</code></td>
+      <td><code>/builder</code> (not <code>/develop</code>)</td>
+      <td>Scripted only (EpicQueue's 'build' Epic)</td>
+    </tr>
+    <tr>
+      <td><code>project-home-builder</code></td>
+      <td><code>expected-default</code></td>
+      <td>project-home-builder agent protocol (falls back to <code>/develop</code> only as a
+      one-time bootstrap)</td>
+      <td>Project Home's "Generate Now" / "Regenerate" buttons</td>
+    </tr>
+    <tr>
+      <td><code>bilko-host-publisher</code></td>
+      <td><code>expected-default</code></td>
+      <td>bilko-host-publisher agent protocol (not <code>/develop</code>)</td>
+      <td>Scripted only</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="manual-note">Only three of the six show up as pills in the New Epic card —
+<code>feature</code>, <code>bug</code>, <code>discussion</code>. The other three are a closed set
+too, but they're wired to a specific scripted flow (a release build, a Project Pages generation,
+a bilko.run publish) rather than a human picking a mission for an open-ended Epic. Tag Library
+lists all six regardless, because all six ground a real session the same way.</p>
+
+<figure class="manual-figure" data-figure="tag-library-detail">
+  <div class="manual-figure__frame" data-capture="Tag Library tab, discussion tag selected, detail pane showing eagerness/develops-via/opening-framing"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> The tag rail — six tags, agent count per tag.
+    <span class="callout" data-arrow="up">2</span> <code>/develop</code> eagerness and develops-via,
+    read straight from code.
+    <span class="callout" data-arrow="right">3</span> The opening framing text — exactly what the
+    agent reads first.
+  </figcaption>
+</figure>
+
+<h2>What's actually editable here — and what isn't</h2>
+
+<p>It's easy to assume "Library" means the whole page is a CRUD editor, the way Agent Library and
+Skills are. It isn't, and the distinction matters:</p>
+
+<ul>
+  <li><strong>The agent↔tag relationship is editable, right here.</strong> Each Agent Library
+  persona carries its own <code>tags</code> frontmatter field. The "agents carrying this tag" row
+  in the detail pane lets you assign or remove a persona from a tag with one click — it writes
+  through the same <code>savePersona</code> call Agent Library's own tag-assignment chips use, so
+  there's exactly one source of truth for that relationship no matter which page you edit it from.</li>
+  <li><strong>The tag taxonomy itself is not editable from the UI.</strong> The six tags, their
+  descriptions, and their <code>initialPromptTemplate</code> text are a closed TypeScript union
+  (<code>EpicTag</code> in <code>lib/tagLibrary.ts</code>) threaded through
+  <code>composeEpicIntake</code>, <code>ticketDisplayStatus</code>, and the Scheduler's group
+  ordering. Changing what a tag says, or adding a seventh tag, is a source edit to
+  <code>lib/tagLibrary.ts</code> and <code>lib/agentTagDefs.ts</code>, not a form on this page.</li>
+</ul>
+
+<p>In practice this means: if you want a specific agent to always pick up <code>bug</code> Epics,
+do it here. If you want <code>discussion</code> itself to phrase its framing differently, that's a
+code change to <code>agentTagDefs.ts</code>'s <code>initialPromptTemplate</code> for that tag — Tag
+Library will show you the result the moment it lands, but it won't let you type it in.</p>
+
+<h2>The mistake: treating the tag as decoration</h2>
+
+<p>The tag's <code>initialPromptTemplate</code> is not a description shown somewhere in a sidebar —
+it is composed directly into the Epic's opening prompt, before the human's own goal text.
+<code>lib/epicIntake.ts</code>'s <code>composeEpicIntake</code> builds every Epic's first message in
+a fixed order — Actor, then any Context Injections, then Input, then <strong>Mission</strong> (the
+tag's <code>initialPromptTemplate</code>), then the human's own goal, then references. Every single
+Epic tagged <code>discussion</code>, for example, opens with:</p>
+
+<pre><code>You are in an open-ended discussion. The goal is a decision or shared understanding,
+not a code change — do not start editing files unless the human explicitly asks you to
+after the discussion lands somewhere.</code></pre>
+
+<p>That's not cosmetic. It's the sentence standing between "the agent explores the codebase and
+tells you what it thinks" and "the agent starts refactoring files because the goal text sounded
+actionable." A vague or missing framing line does the same damage a vague PRD does in the
+Scheduler — it pushes the interpretation burden onto every future Epic that inherits the tag,
+instead of settling it once in the template.</p>
+
+<p>The second half of the same mistake is ignoring <code>developEagerness</code>. It isn't just
+informational text in the detail pane — the <code>session-manager-dev:develop</code> skill reads it
+to decide how hard to push toward PRD decomposition inside that Epic's session.
+<code>feature</code>/<code>bug</code> (and <code>build</code>/<code>project-home-builder</code>/
+<code>bilko-host-publisher</code>) treat decomposition as the expected next step;
+<code>discussion</code> keeps <code>/develop</code> available but never assumed until whether-to-
+build is actually settled. Picking <code>feature</code> for what's really an open-ended discussion
+gets you an agent that's eager to start writing PRDs before you've decided anything is worth
+building.</p>
+
+<h2>The workflow that pays off</h2>
+
+<p>Because <code>composeEpicIntake</code> pulls the Mission section fresh from
+<code>agentTagDefs.ts</code> every time an Epic is created, a template edit is retroactive in effect
+for every <em>future</em> Epic without touching a single Epic record — you author the tag once and
+every Epic with that mission inherits it from that point on. That makes tightening a tag's template
+one of the highest-leverage edits in the whole app: fix a template's ambiguity once, and you've
+fixed the framing for every discussion/bug/feature Epic you'll ever open with it, not just the one
+in front of you.</p>
+
+<ol class="manual-steps">
+  <li>Open Tag Library and read the tag's <strong>opening framing</strong> block exactly as an
+  agent would — as the first thing it's told, with no context yet about your actual goal.</li>
+  <li>If it's vague enough that two different agents could read it two different ways, that's the
+  bug. Tighten <code>initialPromptTemplate</code> in <code>agentTagDefs.ts</code> — state the one
+  behavior you always want for that mission (reproduce before fixing, no file edits until a decision
+  lands, treat the goal as the full objective) rather than a generic description of the tag's name.</li>
+  <li>Check <code>developEagerness</code> against what you actually want that mission to do by
+  default. If a tag's Epics keep spinning up premature PRDs, or conversely never seem to reach
+  <code>/develop</code> when they should, this field — not the goal text you type per-Epic — is the
+  lever.</li>
+  <li>Use the agent↔tag assignment in the detail pane to make sure the personas you actually run
+  under a given mission are the ones associated with it — it's the one relationship this page will
+  let you change without leaving it.</li>
+</ol>
+
+<p class="manual-note">The taxonomy stays deliberately small and closed. Before reaching for a
+seventh tag, check whether what you actually want is a different <em>Agent</em> (the "who") rather
+than a new <em>Mission</em> (the "what") — Agent Library is the other half of this axis, and it's
+usually the cheaper edit.</p>

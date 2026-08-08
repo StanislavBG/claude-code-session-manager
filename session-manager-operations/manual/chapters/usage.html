@@ -1,0 +1,130 @@
+<h1>Usage — reading the 5-hour window before it reads you</h1>
+
+<p class="lede">Every <code>claude</code> invocation this app makes — your interactive Terminal, a Chat
+run, a Scheduler job — draws against the same rolling billing windows Anthropic tracks for your
+account. Session Manager surfaces those windows in three places and gives you one lever to react
+to them: the machine-wide session slot pool. This chapter is about noticing the ceiling before you
+hit it, not after.</p>
+
+<h2>Where usage is shown</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Surface</th><th>What it shows</th><th>Where to find it</th></tr></thead>
+  <tbody>
+    <tr><td>Home — usage meters</td><td>Session (5-hour), Weekly (all models / Opus / Sonnet /
+    OAuth apps), and extra pay-as-you-go usage if enabled — each with a percentage, a progress
+    bar, and a reset countdown.</td><td>Home tab, billing card</td></tr>
+    <tr><td>Almanac footer — 5h pill</td><td>A single number: <code>N% of 5h window used</code>.
+    Click it to jump to Home.</td><td>Bottom status strip, every tab</td></tr>
+    <tr><td>Almanac footer — scheduler-paused pill</td><td>Appears only while the Scheduler is
+    paused; states the reason (<code>rate_limit</code>, <code>auth</code>, <code>network</code>,
+    …). Click it to jump to Scheduler.</td><td>Bottom status strip, conditional</td></tr>
+    <tr><td>Home — session slot control</td><td>The machine-wide concurrency pool: how many
+    <code>claude -p</code> processes may run at once, and how many are busy right now.</td>
+    <td>Home tab, Active sessions card</td></tr>
+  </tbody>
+</table>
+
+<figure class="manual-figure" data-figure="home-usage-meters">
+  <div class="manual-figure__frame" data-capture="Home tab, billing card, Session meter above the Weekly rows"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Session — the 5-hour rolling window,
+    rendered larger than the rest.
+    <span class="callout" data-arrow="up">2</span> Weekly rows — all models, Opus, Sonnet, OAuth
+    apps, each independent.
+    <span class="callout" data-arrow="right">3</span> Reset countdown — relative time plus the
+    absolute wall-clock time in Pacific.
+  </figcaption>
+</figure>
+
+<h2>What the numbers mean</h2>
+
+<p>Every meter is a <code>{ utilization, resets_at }</code> pair read from the same endpoint the
+CLI's own <code>/usage</code> command hits. Utilization is a percentage that can exceed 100 — the
+UI keeps the bar clamped at full width but still prints the real number and marks the row
+<strong>over limit</strong> once it crosses 100.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Threshold</th><th>Color</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>&lt; 70%</td><td>sage (calm)</td><td>Plenty of headroom.</td></tr>
+    <tr><td>70–89%</td><td>honey (caution)</td><td>Getting close — a good moment to check what's
+    queued.</td></tr>
+    <tr><td>≥ 90%</td><td>accent (alert)</td><td>About to be rate-limited, or already over.</td></tr>
+  </tbody>
+</table>
+
+<p>Reset times are shown two ways: a relative countdown (<code>2h 14m</code>, or
+<code>4d 3h</code> once it's more than a day out) and an absolute wall-clock time in Pacific
+(<code>3:00 PM PT</code>, or <code>Tue 3:00 PM PT</code> for a multi-day reset) — so you don't have
+to do timezone math to know when a paused Scheduler will pick back up.</p>
+
+<h2>Where the numbers come from</h2>
+
+<p>The main process polls <code>GET https://api.anthropic.com/api/oauth/usage</code> — the same
+endpoint the CLI's own <code>/usage</code> slash command reads — authenticated with the OAuth
+bearer token from <code>~/.claude/.credentials.json</code> (written by <code>claude login</code>;
+no separate API key needed). One renderer-side poller ticks every 60 seconds and every tab reads
+from the same cached result, rather than each surface hitting the endpoint on its own timer. A
+successful fetch is cached for 30 seconds so a burst of reads doesn't re-hit the network; a
+transient failure backs off to 5s then 30s, and an auth failure backs off to 30s.</p>
+
+<p>If your account authenticates through an enterprise gateway — Bedrock, Vertex, a raw API key, a
+custom <code>ANTHROPIC_BASE_URL</code>, or an <code>apiKeyHelper</code> script — this meter simply
+doesn't exist for you, and Session Manager detects that rather than treating a 404 as a real
+outage: the Scheduler does not pause waiting on a signal that will never arrive.</p>
+
+<h2>The session slot pool</h2>
+
+<p>Every <code>claude -p</code> process this app launches — a Scheduler job or a headless Chat
+run — first has to acquire a slot from one machine-wide pool. It exists because Scheduler and Chat
+used to enforce their own private caps (3 and 2) that could add up past what the machine could
+actually hold; the 2026-06-10 OOM was exactly that. Now there's one number, and one place to change
+it.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Default</td><td>5 concurrent <code>claude -p</code> processes</td></tr>
+    <tr><td>Adjustable range</td><td>0–10, from the slider on Home's Active sessions card</td></tr>
+    <tr><td>0</td><td>Pauses new launches without touching processes already running</td></tr>
+    <tr><td><code>SM_SESSION_SLOTS</code></td><td>Env var override for scripted/CI use — pins the
+    pool size and disables the slider (clamped to the same 0–10 range)</td></tr>
+  </tbody>
+</table>
+
+<p>The slot pool and the 5-hour billing window are two different ceilings and it's worth keeping
+them straight: the slot pool caps how many processes run <em>at once</em> on this machine; the
+billing window caps how much you can send <em>in a rolling five hours</em>, machine-independent.
+Turning the slot pool down does not buy you more billing headroom — it only slows how fast you
+spend the headroom you have.</p>
+
+<h2>The common mistake</h2>
+
+<p>The failure mode isn't that the app hides rate-limiting — it's that nothing forces you to look.
+The Scheduler auto-pauses cleanly on a rate limit and auto-resumes at the next window reset, which
+is exactly the point: you're not supposed to have to babysit it. But that same quiet handling means
+a queue can sit paused for hours with nothing on screen demanding attention unless you're on the
+Scheduler tab or you happen to glance at the footer. The scheduler-paused pill only appears in the
+footer while paused, and it's easy to miss if you're heads-down in a Terminal tab that isn't the
+active one.</p>
+
+<h2>The workflow that pays off</h2>
+
+<ol class="manual-steps">
+  <li>Treat the footer's 5h pill as a peripheral gauge, not something you check on a timer — it's
+  visible from every tab, so glancing at it costs nothing.</li>
+  <li>When it crosses into honey (70%+), open Home and look at which Weekly row is also climbing —
+  a Session window resets in hours, but a Weekly window doesn't.</li>
+  <li>If the scheduler-paused pill appears, click straight through to Scheduler rather than
+  wondering why nothing's moving — the reason is stated on the pill itself.</li>
+  <li>Size the session slot pool to your plan, not to your machine's core count. A higher plan
+  tier with more 5-hour headroom benefits from more slots running in parallel; a lower tier just
+  burns through the window faster for no extra throughput once jobs start queuing behind the
+  rate limit anyway.</li>
+  <li>Leave <code>SM_SESSION_SLOTS</code> for scripted/CI contexts only — setting it also disables
+  the Home slider, which is easy to forget you did.</li>
+</ol>
+
+<p class="manual-note">The 5-hour window is the same meter across Terminal, Chat, and every
+Scheduler job — there's no per-surface budget. Watching it in one place covers all three.</p>

@@ -95,13 +95,20 @@ const TOOLS = [
       + 'within ~1 minute); the response has `enqueued: false` for exactly this reason. Every '
       + 'PRD must join an EXISTING, already-human-approved Epic (pass sourcePromptId) — this '
       + 'tool never mints a new one, and refuses the write if no Epic can be resolved. '
-      + 'Hand-authoring the PRD file directly on disk is a DEGRADED, LAST-RESORT fallback for '
-      + 'the single case where this tool is unreachable (app not running) — never a plain '
-      + 'alternative to reach for by preference. A caller that falls back to hand-authoring '
-      + 'MUST say so explicitly and visibly in its report to the human (which file, why the '
-      + 'tool was unreachable, and that it needs verification) — the server-side validation, '
-      + 'atomic NN allocation, and Epic-existence check this tool performs did not run for '
-      + 'that file. See /develop.',
+      + 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
+      + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '
+      + 'API unreachable — that is the ONLY case where hand-authoring the PRD file directly on '
+      + 'disk is an acceptable DEGRADED, LAST-RESORT fallback; the caller MUST say so explicitly '
+      + 'and visibly in its report (which file, why the tool was unreachable, that it needs '
+      + 'verification) since the server-side validation, atomic NN allocation, and '
+      + 'Epic-existence check this tool performs did not run for that file. '
+      + '(b) this tool is ABSENT from your tool list entirely — you were never offered it, so '
+      + 'there is no error to catch. That means the session-manager-scheduler MCP server is not '
+      + 'registered for this project: a MISCONFIGURATION, not an offline app. In that case DO '
+      + 'NOT hand-write any PRD file — stop and tell the human the MCP server is not registered '
+      + '(fix: `claude mcp add session-manager-scheduler --scope user -- node '
+      + '<session-manager-repo>/scripts/scheduler-mcp-server.cjs`, once at user scope covers '
+      + 'every project). See /develop.',
     inputSchema: {
       type: 'object',
       properties: {

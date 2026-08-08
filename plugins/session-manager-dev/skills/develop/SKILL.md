@@ -210,11 +210,20 @@ can't load skills.
      separate PRDs into one oversized one; if the sub-task groups would each take real time on
      their own, that's a signal to split into a chain link instead of one bloated PRD.
 
+   **Preflight — confirm the tool is even in your tool list before you start composing PRDs.**
+   Check for `mcp__session-manager-scheduler__scheduler_create_prd` in your available tools as
+   the very first thing you do in this step, before any drafting — catching a missing tool here
+   costs nothing; catching it after you've already composed and written PRD bodies means
+   discarding that work. If it's absent, see "Two failure modes" immediately below — case (b),
+   not the reachable-but-erroring fallback.
+
    **`scheduler_create_prd` is the ONLY sanctioned way to author a PRD — not a preference, a
    rule.** Every PRD reaches disk through the MCP tool
    (`mcp__session-manager-scheduler__scheduler_create_prd`). Hand-writing the file directly is a
-   degraded, LAST-RESORT fallback (below) reserved for the single case where the tool itself is
-   unreachable — never a co-equal alternative to reach for out of habit or convenience. Its input
+   degraded, LAST-RESORT fallback (below) reserved for the single case where the tool is present
+   but errors as unreachable — never a co-equal alternative to reach for out of habit or
+   convenience, and never applicable when the tool isn't in your list at all (see "Two failure
+   modes" below). Its input
    (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
    `outOfScope[]`) maps directly onto the sections below — pass them straight through. **Always
    pass `sourcePromptId` explicitly, set to the `<epic-id>` resolved in the Epic-gated step
@@ -227,18 +236,37 @@ can't load skills.
    `parallelGroup` is DEPRECATED and ignored — express ordering with the `dependsOn` input
    (slugs that must complete first); independent PRDs simply omit it and may run in parallel.
 
-   **Fallback — only when the tool errors with "app not running" / admin API unreachable**
-   (the session-manager Electron app must be running for this MCP tool to work; if it isn't,
-   don't block on it). This is a deliberate bypass of the service boundary, not a shortcut:
-   using it means the frontmatter validation, atomic `NN` allocation, standards-pointer
+   **Two failure modes — do not conflate them. They have opposite correct responses.**
+
+   - **(a) Tool PRESENT but ERRORS as "app not running" / admin API unreachable.** The tool
+     shows up in your tool list (`mcp__session-manager-scheduler__scheduler_create_prd` is
+     callable), but calling it fails because the session-manager Electron app that hosts the
+     admin API isn't running right now. This is the ONLY case the manual-write fallback below
+     covers. Do not use this path when the tool is reachable but merely returned a validation
+     error (bad frontmatter, unresolvable Epic, etc.) — fix the input and retry the tool; a
+     validation error is not "the app is not running."
+   - **(b) Tool ABSENT from your tool list entirely.** You never see
+     `mcp__session-manager-scheduler__scheduler_create_prd` offered at all — there is no error to
+     catch, because the tool call is never attempted. This means the `session-manager-scheduler`
+     MCP server is not registered for the project you're running against — a **misconfiguration**,
+     not "the app is offline." **STOP. Do not write any PRD file, hand-authored or otherwise.**
+     Report to the human, by name: "the `session-manager-scheduler` MCP tool is not available in
+     this session — the server isn't registered for this project." Point them at the fix: it
+     should be registered once at USER scope (`claude mcp add session-manager-scheduler --scope
+     user -- node <path-to-session-manager-repo>/scripts/scheduler-mcp-server.cjs`, or run
+     `scripts/install-scheduler-mcp-user-scope.sh` from the session-manager repo) so every
+     project gets the tool without a per-repo `.mcp.json` edit — do not work around a missing
+     tool by hand-writing the file, and do not add a project-local `.mcp.json` entry yourself as
+     a substitute; that's the human's call and re-introduces the per-repo drift this fix removes.
+
+   **Fallback for case (a) only.** This is a deliberate bypass of the service boundary, not a
+   shortcut: using it means the frontmatter validation, atomic `NN` allocation, standards-pointer
    insertion, and Epic-existence check that `scheduler_create_prd` normally performs did not
    run. **You MUST call this out, visibly, in your report** — state plainly that the app wasn't
    running, that you hand-authored the PRD file directly instead of using the tool, name the
    exact file, and flag it for human verification (this bypass is also what
    `scripts/audit-ops-hygiene.cjs` and the `ops-sweep` skill look for and report as a hygiene
-   finding, independent of your own report). Do not use this path when the tool is reachable but
-   merely returned a validation error (bad frontmatter, unresolvable Epic, etc.) — fix the input
-   and retry the tool; a validation error is not "the app is not running."
+   finding, independent of your own report).
    When you do use it: compute the highest in-use number deterministically yourself — never
    eyeball or narrow-grep the `ls` (a narrowed pattern like `'^10[0-9]'` silently misses `110+`
    and collides). PRDs are stored per-project, so `NN` allocation for a given PRD only needs
@@ -448,8 +476,10 @@ single definition of "tracked to done" for both entry paths.
 ## Notes
 
 - Submit each PRD through `scheduler_create_prd`, then confirm — don't draft them inline in chat
-  for review first, and don't hand-write the file yourself unless the tool is unreachable (app
-  not running); see the fallback note above, including its mandatory bypass warning.
+  for review first. Only hand-write the file when the tool is PRESENT but ERRORS as unreachable
+  (app not running) — see the "Two failure modes" note above, including its mandatory bypass
+  warning. If the tool is ABSENT from your tool list, that's a misconfiguration, not an offline
+  app: stop and tell the human, never hand-write the file.
 - Don't combine unrelated features into one PRD. One focused, completable unit each.
 - Don't add a `parallelGroup` frontmatter key — the filename `NN-` prefix drives grouping.
 - Don't write a PRD to `data/prds/`, `docs/prds/`, the project's own folder, or anywhere outside

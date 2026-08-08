@@ -37,6 +37,32 @@
  *     }
  *   }
  *
+ * ── Adopting this hook in a DIFFERENT (non-session-manager) project ──────
+ * This file lives in the session-manager repo, so a relative
+ * `node scripts/hooks/guard-prd-writes.cjs` command only resolves when the
+ * hook runs with THIS repo as cwd. Any other project's `.claude/settings.json`
+ * (that project's own `scheduler/` folder still gets the same single-writer
+ * protection) must reference this file by its ABSOLUTE path instead:
+ *
+ *   {
+ *     "hooks": {
+ *       "PreToolUse": [
+ *         {
+ *           "matcher": "Write|Edit|NotebookEdit",
+ *           "hooks": [
+ *             {
+ *               "type": "command",
+ *               "command": "node /home/bilko/Projects/session-manager/scripts/hooks/guard-prd-writes.cjs"
+ *             }
+ *           ]
+ *         }
+ *       ]
+ *     }
+ *   }
+ *
+ * This is still opt-in per project, same as above — never auto-install this
+ * into every project's settings without the human choosing to add it there.
+ *
  * Roll out to another project by copying this file + the same settings.json
  * entry into that project — deliberately not published as a global/user-
  * scoped hook so a project can opt in individually (see this PRD's

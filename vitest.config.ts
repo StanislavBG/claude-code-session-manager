@@ -36,6 +36,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-heal-refusal.test.cjs',
       'src/main/__tests__/chat-dead-channels.test.cjs',
       'src/main/__tests__/chat-preamble-anchors.test.cjs',
+      'src/main/__tests__/develop-skill-failure-modes.test.cjs',
       'src/main/__tests__/promptSessionEvents.test.cjs',
       'src/main/__tests__/scheduler-sigterm-commit.test.cjs',
       'src/main/__tests__/queueOps-interactive-ac-lint.test.cjs',

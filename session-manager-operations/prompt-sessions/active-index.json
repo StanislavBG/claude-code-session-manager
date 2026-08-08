@@ -1,47 +1,5 @@
 {
   "sessions": {
-    "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60": {
-      "id": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-      "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Marketing Home Page the 19.99$\n\nLets improve more on the Bilko.run hosted page. This is where we need to create a digital product, sell for 19.99$ that product will be a information guide on how to use the Session Manager. Each tab will be detailed explained with screen-shots and arrows. \n\nYou will work on the framework. On Bilko.run users can log-in. We need to come up with a way of charging 19.99$ for the user and allowing them access to the latest run-book. We will also create a skill or more-like enhance the Build skill for this project to also maintain the book separately. This is the overall plan. You only worry about the framwork of how users will buy, download the manal and we can collect payment. Create a sample PRF and call it the manual, this is what we sell and maintain. The product sku is already wired",
-      "claudeSessionId": "6d66ec03-a8ce-43b6-a481-91ec69308fe1",
-      "status": "active",
-      "createdAt": "2026-08-07T23:40:54.328Z",
-      "completedAt": null,
-      "tag": "feature",
-      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 79)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: Marketing Home Page the 19.99$\n\nLets improve more on the Bilko.run hosted page. This is where we need to create a digital product, sell for 19.99$ that product will be a information guide on how to use the Session Manager. Each tab will be detailed explained with screen-shots and arrows. \n\nYou will work on the framework. On Bilko.run users can log-in. We need to come up with a way of charging 19.99$ for the user and allowing them access to the latest run-book. We will also create a skill or more-like enhance the Build skill for this project to also maintain the book separately. This is the overall plan. You only worry about the framwork of how users will buy, download the manal and we can collect payment. Create a sample PRF and call it the manual, this is what we sell and maintain. The product sku is already wired",
-      "agentType": "architect",
-      "sections": [
-        {
-          "kind": "actor",
-          "label": "Actor",
-          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
-          "source": "architect"
-        },
-        {
-          "kind": "injection",
-          "label": "General behaviour",
-          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
-          "source": "general-behavior"
-        },
-        {
-          "kind": "input",
-          "label": "Input",
-          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 79)"
-        },
-        {
-          "kind": "mission",
-          "label": "Mission",
-          "text": "You are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).",
-          "source": "feature"
-        },
-        {
-          "kind": "goal",
-          "label": "Goal",
-          "text": "Goal: Marketing Home Page the 19.99$\n\nLets improve more on the Bilko.run hosted page. This is where we need to create a digital product, sell for 19.99$ that product will be a information guide on how to use the Session Manager. Each tab will be detailed explained with screen-shots and arrows. \n\nYou will work on the framework. On Bilko.run users can log-in. We need to come up with a way of charging 19.99$ for the user and allowing them access to the latest run-book. We will also create a skill or more-like enhance the Build skill for this project to also maintain the book separately. This is the overall plan. You only worry about the framwork of how users will buy, download the manal and we can collect payment. Create a sample PRF and call it the manual, this is what we sell and maintain. The product sku is already wired"
-        }
-      ]
-    },
     "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f": {
       "id": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
       "cwd": "/home/bilko/Projects/session-manager",
@@ -84,213 +42,19 @@
         }
       ]
     },
-    "epics-menu-project-favorites-we-started-some-of--99a286d8": {
-      "id": "epics-menu-project-favorites-we-started-some-of--99a286d8",
+    "builder-check-git-vs-the-published-package-for-t-7fe0df63": {
+      "id": "builder-check-git-vs-the-published-package-for-t-7fe0df63",
       "cwd": "/home/bilko/Projects/session-manager",
-      "goalText": "Epics Menu - Project Favorites\n\nWe started some of this as part of \"Actions\", under the cover Action initialize specific agents or Epic creates a new one. We want to be able to dynamically, per project create Agents and One button involke them from the UI as shortcuts around the EPIC area. \n\nLets also rename Epics to what it is, Sessions, we manage sessions here, thats why they start with the AIM framework aways, all of them. The hotkey buttons will not be exception. So we will eb creating the Agents inside the library and giving them Project tags so we know where they appear and we can modify them. I believe the current \"Builder\" agents works on the same principle so we are just extending. \n\nShow each action as separate menu button for now. We do not need the \"Sessions/EPIC\" filtering for now or minimize it and move it a section right above the actula list. Use the space the expand the Action buttons as one button each and make them also project dynamic so that each spawns an agent. \n\nAgent Library must be clear that Agents are part of Actions and that they provice the ACTOR description of the AIM initialization framework for the session",
-      "claudeSessionId": "76bd0e90-9435-4ec1-ba6f-1c21c252d2db",
+      "goalText": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new.",
+      "claudeSessionId": "efb7ece3-bed8-459d-a728-015c4fafeb29",
       "status": "active",
-      "createdAt": "2026-08-08T04:13:53.088Z",
+      "createdAt": "2026-08-08T22:57:32.921Z",
       "completedAt": null,
-      "tag": "feature",
-      "openingPrompt": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 82)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: Epics Menu - Project Favorites\n\nWe started some of this as part of \"Actions\", under the cover Action initialize specific agents or Epic creates a new one. We want to be able to dynamically, per project create Agents and One button involke them from the UI as shortcuts around the EPIC area. \n\nLets also rename Epics to what it is, Sessions, we manage sessions here, thats why they start with the AIM framework aways, all of them. The hotkey buttons will not be exception. So we will eb creating the Agents inside the library and giving them Project tags so we know where they appear and we can modify them. I believe the current \"Builder\" agents works on the same principle so we are just extending. \n\nShow each action as separate menu button for now. We do not need the \"Sessions/EPIC\" filtering for now or minimize it and move it a section right above the actula list. Use the space the expand the Action buttons as one button each and make them also project dynamic so that each spawns an agent. \n\nAgent Library must be clear that Agents are part of Actions and that they provice the ACTOR description of the AIM initialization framework for the session",
-      "agentType": "architect",
-      "sections": [
-        {
-          "kind": "actor",
-          "label": "Actor",
-          "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
-          "source": "architect"
-        },
-        {
-          "kind": "injection",
-          "label": "General behaviour",
-          "text": "Work concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.",
-          "source": "general-behavior"
-        },
-        {
-          "kind": "input",
-          "label": "Input",
-          "text": "Grounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 82)"
-        },
-        {
-          "kind": "mission",
-          "label": "Mission",
-          "text": "You are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).",
-          "source": "feature"
-        },
-        {
-          "kind": "goal",
-          "label": "Goal",
-          "text": "Goal: Epics Menu - Project Favorites\n\nWe started some of this as part of \"Actions\", under the cover Action initialize specific agents or Epic creates a new one. We want to be able to dynamically, per project create Agents and One button involke them from the UI as shortcuts around the EPIC area. \n\nLets also rename Epics to what it is, Sessions, we manage sessions here, thats why they start with the AIM framework aways, all of them. The hotkey buttons will not be exception. So we will eb creating the Agents inside the library and giving them Project tags so we know where they appear and we can modify them. I believe the current \"Builder\" agents works on the same principle so we are just extending. \n\nShow each action as separate menu button for now. We do not need the \"Sessions/EPIC\" filtering for now or minimize it and move it a section right above the actula list. Use the space the expand the Action buttons as one button each and make them also project dynamic so that each spawns an agent. \n\nAgent Library must be clear that Agents are part of Actions and that they provice the ACTOR description of the AIM initialization framework for the session"
-        }
-      ]
+      "tag": "build",
+      "agentType": "builder"
     }
   },
   "events": {
-    "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60": [
-      {
-        "id": "pevt-msjl8rzv-173",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-07T23:40:54.328Z",
-        "text": "Marketing Home Page the 19.99$\n\nLets improve more on the Bilko.run hosted page. This is where we need to create a digital product, sell for 19.99$ that product will be a information guide on how to use the Session Manager. Each tab will be detailed explained with screen-shots and arrows. \n\nYou will work on the framework. On Bilko.run users can log-in. We need to come up with a way of charging 19.99$ for the user and allowing them access to the latest run-book. We will also create a skill or more-like enhance the Build skill for this project to also maintain the book separately. This is the overall plan. You only worry about the framwork of how users will buy, download the manal and we can collect payment. Create a sample PRF and call it the manual, this is what we sell and maintain. The product sku is already wired"
-      },
-      {
-        "id": "9072e7b8-6751-476f-be09-9e39af8cfc90",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-07T23:40:54.328Z",
-        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 79)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: Marketing Home Page the 19.99$\n\nLets improve more on the Bilko.run hosted page. This is where we need to create a digital product, sell for 19.99$ that product will be a information guide on how to use the Session Manager. Each tab will be detailed explained with screen-shots and arrows. \n\nYou will work on the framework. On Bilko.run users can log-in. We need to come up with a way of charging 19.99$ for the user and allowing them access to the latest run-book. We will also create a skill or more-like enhance the Build skill for this project to also maintain the book separately. This is the overall plan. You only worry about the framwork of how users will buy, download the manal and we can collect payment. Create a sample PRF and call it the manual, this is what we sell and maintain. The product sku is already wired"
-      },
-      {
-        "id": "72e81e9c-7e1b-49be-8d81-25a04ad1b18e",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "prd_created",
-        "causedByEventId": "9072e7b8-6751-476f-be09-9e39af8cfc90",
-        "at": "2026-08-07T23:54:12.131Z",
-        "prdSlug": "1018-manual-figure-capture-pipeline"
-      },
-      {
-        "id": "fe9b19dc-88c2-42a4-8e16-0f708b648453",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "prd_created",
-        "causedByEventId": "72e81e9c-7e1b-49be-8d81-25a04ad1b18e",
-        "at": "2026-08-07T23:54:31.908Z",
-        "prdSlug": "1019-manual-complete-chapter-set"
-      },
-      {
-        "id": "a6e9b32c-1f5a-485e-82a8-5e7d2e891810",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "prd_created",
-        "causedByEventId": "fe9b19dc-88c2-42a4-8e16-0f708b648453",
-        "at": "2026-08-07T23:55:12.922Z",
-        "prdSlug": "1020-manual-pdf-and-entitled-e2e"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "9072e7b8-6751-476f-be09-9e39af8cfc90",
-        "text": "The framework is built, verified, and committed. Both repos are committed locally, nothing pushed.\n\n## What ships now\n\n**The product** — `session-manager-operations/manual/` in this repo is the authoring source for *The Session Manager Field Manual*. v1.0.0 has 3 real chapters (Getting Started · Epics & Sessions · Scheduler), one free as the marketing sample. `npm run manual:build` emits the release into `~/Projects/Bilko/data/manual/releases/1.0.0/` plus a generated offline HTML edition.\n\n**The money** — I reused the **already-live `session_manager` SKU** rather than minting a second one. The app is free on npm, so what $19.99 buys *is* the manual — and every past buyer already owns it. A new price would have stranded them.\n\n**The routes** (`~/Projects/Bilko/server/routes/manual.ts`):\n\n| Route | Gate |\n|---|---|\n| `GET /api/manual/toc` | public — TOC for the sales page |\n| `GET /api/manual/status` | Clerk auth → `{ entitled, toc }` |\n| `GET /api/manual/chapter/:slug` | free chapter public; rest **402 + paywall payload** |\n| `POST /api/manual/download-token` | auth + entitlement → 5-min signed URL |\n| `GET /api/manual/download/:ver/:id` | HMAC token → streams the file |\n| `GET /my-manual` | email recovery, mirrors `/my-license` |\n\nTwo decisions worth flagging: paid chapters return **402 with price/title/blurb**, not a bare 401, so a signed-out visitor gets something actionable. And downloads use HMAC tokens bound to `(email, version, assetId)` because a browser download can't carry an `Authorization` header — the bundle sits under `data/manual/`, never `dist/`, so the static plugin can't serve a paid chapter by guessed URL.\n\n`/manual` is the buy+read page; `/checkout/success` now routes buyers there; the marketing buy section states honestly that the app is free and the manual is the product.\n\n**Maintenance** — `builder` gains step 4, `builder:manual`. After a publish it maps released commits onto the chapter list, revises what's now wrong, bumps the manual's own ve…",
-        "id": "pevt-msjlrn3z-179",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-07T23:55:34.463Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjlrn3z-179",
-        "text": "Confirmed — that's exactly the model, and the marketing now says it out loud rather than leaving buyers to infer it.\n\n## What changed\n\nThe page led with **\"Buy Now — $19.99\"** for software that's free on npm. That was the wrong offer and, worse, the wrong impression. Rewritten around the split:\n\n**Hero** — primary CTA is now the install command itself, click-to-copy, under *\"The app is free. One command, no account.\"* The manual is a secondary labelled link, not the headline ask.\n\n**New \"How this is licensed\" section** — two side-by-side cards, `Free / the app` and `$19.99 / the Field Manual`, with the claim stated plainly:\n\n> The tool is free. The knowledge of how to run it isn't. Same arrangement plenty of open-source projects run on: ship the software to everyone, sell the manual to the people who want to get good at it fast. The app is never crippled, trial-limited, or feature-gated to push the book — there is no \"pro tier\" hiding behind the paywall, because there is no paywall in the app.\n\n**Elsewhere** — sticky header reads \"Field Manual — $19.99\" with a `Free` badge on the product name; the feature list is introduced as *\"What the free app does\"* so it doesn't scan as a paid feature matrix; the buy section lists what the manual actually contains before asking for money. `/manual` repeats the split at the point of checkout. Both registries (`tools.ts`, `packages.ts`) now describe the app as free — and I fixed a stale \"17 config tabs\" that should have said 25+.\n\n## Locked down so it can't drift back\n\n`tests/open-core-positioning.test.ts` asserts the marketing page shows the install command and states the app is free, that no price-quoting CTA reads as buying the software, and that both registries call the app free. **I verified the guard actually fails** — reverted the hero line, watched it go red, restored it, green again. A test that can't fail isn't a guard.\n\nSame rule now lives in `CLAUDE.md`: no license check, entitlement gate, trial limit, nag, or pro tie…",
-        "id": "pevt-msjm3nh2-182",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T00:04:54.806Z"
-      },
-      {
-        "id": "pevt-msjm8tht-56",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "response",
-        "causedByEventId": "pevt-msjm3nh2-182",
-        "at": "2026-08-08T00:08:55.889Z",
-        "text": "PRD 1018-manual-figure-capture-pipeline finished: completed. Check Scheduler for details.",
-        "prdSlug": "1018-manual-figure-capture-pipeline",
-        "outcome": "completed",
-        "validation": "unvalidated"
-      },
-      {
-        "id": "pevt-msjm9djm-57",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "response",
-        "causedByEventId": "pevt-msjm8tht-56",
-        "at": "2026-08-08T00:09:21.874Z",
-        "text": "PRD 1020-manual-pdf-and-entitled-e2e finished: completed. Check Scheduler for details.",
-        "prdSlug": "1020-manual-pdf-and-entitled-e2e",
-        "outcome": "completed",
-        "validation": "unvalidated"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjm9djm-57",
-        "text": "**VERIFIED** — with one material caveat you should read first.\n\n## ⚠️ Caveat before the evidence\n\n**The pipeline has never produced a single screenshot.** `session-manager-operations/manual/figures/` contains only `.gitkeep`. The queue guard (AC9) blocks the script while any scheduler job runs, and jobs have run continuously since it was built — so the Electron-drive → capture → composite path has never executed end-to-end. Every AC as *written* is satisfied (they describe building the pipeline, not populating figures), but the manual still ships 19 placeholder slots and zero real figures. I could not close that gap this turn without launching a second Electron against the live `1019` job, which is the exact damage AC9 exists to prevent.\n\n## Diff landed — not the empty-diff failure mode\n\n```\n6cad5d1 feat(manual): build a real screenshot+callout capture pipeline for Field Manual figures\n scripts/capture-manual-figures.mjs                 | 379 ++++++++++\n session-manager-operations/manual/figure-captures.json | 33 +\n package.json / package-lock.json (sharp ^0.35.3)\n```\n\n## Per-criterion evidence\n\n**1. Script exists, wired as `npm run manual:figures`** ✓\n`scripts/capture-manual-figures.mjs` (15406 bytes); `package.json:45` → `\"manual:figures\": \"xvfb-run -a node scripts/capture-manual-figures.mjs\"`\n\n**2. Parses every chapter, extracts id / capture instruction / ordered callouts + arrows** ✓ *(run against the real tree)*\nFound **19 figures across 17 chapters**, e.g.:\n```\nscheduler.html [{\"id\":\"scheduler-queue\",\"capture\":\"Scheduler tab, Queue view, at least one \",\n                 \"callouts\":[{\"arrow\":\"left\",\"num\":1},{\"arrow\":\"up\",\"num\":2},{\"arrow\":\"right\",\"num\":3}]}]\nvoice.html     [{\"id\":\"voice-modal\",...},{\"id\":\"voice-recording-banner\",\"callouts\":[{\"arrow\":\"up\",\"num\":1}]}]\n```\n\n**3. Drives the real app via the existing Playwright-Electron + xvfb pattern, writes `figures/<id>.png`** — code present, **never executed**\n`capture-manual-figures.mjs:139-156` (`electron.laun…",
-        "id": "pevt-msjmhdyl-187",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T00:15:35.661Z"
-      },
-      {
-        "id": "pevt-msjmi1cm-58",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "kind": "response",
-        "causedByEventId": "pevt-msjmhdyl-187",
-        "at": "2026-08-08T00:16:05.974Z",
-        "text": "PRD 1019-manual-complete-chapter-set finished: completed. Check Scheduler for details.",
-        "prdSlug": "1019-manual-complete-chapter-set",
-        "outcome": "completed",
-        "validation": "unvalidated"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjmi1cm-58",
-        "text": "**VERIFIED** — with one deviation on the final criterion that isn't PRD 1020's fault, flagged below.\n\n## Diff landed — not the empty-diff failure mode\n\n```\nsession-manager  9b692f5 feat(manual): generate a PDF edition alongside the offline HTML build\n   scripts/build-manual.mjs                      | 128 ++++++++++++-------\n   session-manager-operations/manual/README.md   |  27 +++++-\n   session-manager-operations/manual/manual.json |   6 ++\n\nBilko           a95bee1 test(manual): cover the entitled path end-to-end, document MANUAL_DOWNLOAD_SECRET\n```\n\n## Per-criterion evidence\n\n**1. Build emits a PDF deterministically; `manual.json` declares it with `application/pdf`** ✓\n`build-manual.mjs:124-137` (`renderPdf` → `page.pdf({format:'Letter', printBackground:true, ...})`), dispatched at `:161-162` (`else if (a.id === 'pdf')`). No manual step, no new dependency — `@playwright/test` was already present. `manual.json` assets:\n```json\n{\"id\":\"pdf\",\"label\":\"PDF edition\",\"file\":\"field-manual-1.1.0.pdf\",\"mime\":\"application/pdf\"}\n```\n\n**2. Build still refuses an asset with no resolvable source** ✓ *(tested by injecting a bogus `epub` asset, then restoring)*\n```\nREAL_EXIT=1\n✗ asset \"epub\" declares nope.epub but no source exists at manual/assets/nope.epub\n--- partial bundle left behind? ---   (html/pdf/figures written, but:)\nmanifest.json present: ls: cannot access '.../manifest.json': No such file or directory\n```\n`manifest.json` is never written on refusal, so `readManifest()` returns null and a half-built release cannot be served. `manual.json` restored byte-identical afterwards.\n\n**3. `manual:check` + `manual:build` succeed; bundle PDF byte count matches its manifest entry** ✓\n```\n✓ manual v1.1.0: 17 chapters, sources valid       CHECK_EXIT=0\n✓ built manual v1.1.0 → .../releases/1.1.0        BUILD_EXIT=0\n  · offline-html: field-manual-1.1.0.html (145592 bytes)\n  · pdf: field-manual-1.1.0.pdf (714264 bytes)\n\noffline-html manifest=145592 ondisk=145592 MATCH text/html\npdf       …",
-        "id": "pevt-msjml1u3-188",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T00:18:26.571Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjml1u3-188",
-        "text": "You've hit your session limit · resets 5:30pm (America/Los_Angeles)",
-        "id": "pevt-msjmp9rr-191",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T00:21:43.479Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjmp9rr-191",
-        "text": "",
-        "id": "pevt-msjng18p-192",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T00:42:32.137Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjng18p-192",
-        "text": "**Yes — and more than I told you last turn. Correction: part of it is already live on bilko.run right now.**\n\n## What is LIVE on bilko.run (deployed, serving traffic)\n\nI verified against the real site just now:\n\n```\nGET https://bilko.run/api/manual/toc              → 200, v1.0.0, 3 chapters, $19.99\nGET https://bilko.run/api/manual/chapter/getting-started  → 200  (free sample)\nGET https://bilko.run/api/manual/chapter/scheduler        → 402  (paywall, correct)\n```\n\nThe whole entitlement framework is on `origin/main` and deployed: `server/routes/manual.ts`, `server/services/manual.ts`, `shared/manual-catalog.ts`, `src/lib/manualClient.ts`, `src/pages/ManualPage.tsx`, and the **v1.0.0 release bundle**.\n\nI did not push it. An automated commit — `885d27c social-signals-trader: publish dashboard snapshot 2026-08-08T00:00:02Z` — landed on top of my commit and pushed, sweeping it to origin, and Render auto-deployed. Same mechanism that swept session-manager to npm via the `/builder` release. **I was wrong last turn when I said \"Bilko is clean, nothing pushed\"** — I read `ahead 4` and concluded nothing had gone up, without checking whether the earlier commit was already below the origin pointer.\n\n## What is still LOCAL (4 unpushed commits)\n\n```\n69d1d17 docs(manual): ship Field Manual v1.1.0 release bundle\n7b586da fix(docs): un-splice the Turso rotation steps\na95bee1 test(manual): entitled-path coverage + MANUAL_DOWNLOAD_SECRET docs\ndbd143d feat(marketing): reposition session-manager as open-core\n\n src/pages/SessionManagerPage.tsx    | 183 ++++++---   ← the free-tool/paid-manual rewrite\n tests/manual.test.ts                | 159 ++++++\n tests/open-core-positioning.test.ts |  70 +++\n src/config/tools.ts                 |  21 +-\n src/data/packages.ts                |   2 +-\n src/pages/ManualPage.tsx            |   7 +\n docs/secrets-rotation.md            |  16 +\n .env.example                        |   5 +\n data/manual/releases/1.1.0/…        | 4,862 +   (17-chapter edition + PD…",
-        "id": "pevt-msjnl05a-3",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T00:46:23.998Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjnl05a-3",
-        "text": "Published and verified live.\n\n## Your instinct was right — but the variable wasn't what it looked like\n\nEntitlement was **already** persisted, in exactly one place: the `stripe_one_time_purchases` row that `hasPurchased(email, 'session_manager')` reads. That never needed a secret.\n\n`MANUAL_DOWNLOAD_SECRET` existed for one narrow reason: a browser navigation can't send an `Authorization` header, so I signed a short-lived URL instead of using Clerk on the download route. That workaround bought a secret you'd have to set on Render, rotate, and keep identical across instances — and it silently degrades to a per-process random key when unset, breaking a buyer's link after any restart.\n\nSo rather than persist another variable, I deleted the need for one. The client now fetches the asset **with** its bearer token and saves the blob. The header problem disappears, and `GET /api/manual/download/:assetId` re-checks entitlement against the purchase row on the request that serves the bytes — the same check every other route makes.\n\nGone: `mintDownloadToken`, `verifyDownloadToken`, `DOWNLOAD_TOKEN_TTL_MS`, the signing-secret fallback, the `POST /download-token` route, and the env var from both `.env.example` and `secrets-rotation.md`. **The URL is no longer a credential**, so there's nothing to expire, leak, or configure. Assets are 145 KB and 714 KB, so buffering one client-side is free.\n\n## Live on bilko.run right now\n\n```\n/api/manual/toc          → v1.1.0 · documents app v0.65.0\n                           17 chapters · free: getting-started\n                           assets: offline-html 145,592 B · pdf 714,264 B\n/api/manual/chapter/getting-started      → 200   (free sample)\n/api/manual/chapter/settings-and-scopes  → 402   (paywall)\n/api/manual/download/pdf  (no auth)      → 401\nPOST /api/manual/download-token          → 404   (retired route gone)\n/manual  → 200      /my-manual → 200\n```\n\nAnd the marketing chunk, fetched from the live CDN:\n```\nLIVE OK: \"The tool is free\"\nLIVE…",
-        "id": "pevt-msjr84jh-10",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T02:28:21.629Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjr84jh-10",
-        "text": "All live and verified. Here are your three answers.\n\n## 1. Home page — now a single viewport\n\nRebuilt as one screen, measured in a real browser rather than assumed:\n\n```\n1440×900  → scrollHeight 900,  scrollable: false\n1366×768  → scrollHeight 768,  scrollable: false,  buy panel: fully visible\n```\n\nDepth is **opt-in, not vertical**. The 8 features are pills that swap a detail panel *in place* — you get the full feature copy without the page ever growing. Layout is pitch + install command on the left, buy card on the right, feature explorer below.\n\nOne deliberate exception: below `md` it falls back to normal document flow. A hard `100dvh` lock on a 600px-tall phone clips the buy button, which is a worse outcome than a scroll.\n\n## 2. Testing the flow — don't set the price to $0\n\nSetting the price to $0.00 would **not** test what you need. Stripe skips payment collection entirely for a zero-amount line item, so `payment_intent` never fires, the `checkout.session.completed` webhook takes a different path, and the attribution logic that writes `stripe_one_time_purchases` goes completely untested. You'd prove the happy path works for a case that never happens in production.\n\nI enabled `allow_promotion_codes: true` instead (live and verified — the endpoint returns a real `cs_live_…` session). To test:\n\n1. Stripe Dashboard → Coupons → **100% off**, then create a promotion code (e.g. `MANUALTEST`), limit it to 1 redemption.\n2. Sign in on bilko.run, click Get the manual, enter the code at checkout.\n3. Everything downstream runs exactly as for a paying buyer: payment intent, webhook, purchase row, `/manual` unlocking, download.\n\nThe one thing this leaves untested is the card charge itself. If you want that too, use Stripe **test mode** keys with card `4242 4242 4242 4242` on a staging deploy.\n\n## 3. The passcode — there isn't one, and that's the point\n\n**The manual has never issued a passcode.** You're thinking of the `CG-XXXX-XXXX` license keys, which exist only for ContentGr…",
-        "id": "pevt-msjtksci-12",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T03:34:11.586Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjtksci-12",
-        "text": "I did not run the capture — and stopping was the right call.\n\n## Why\n\nThe Session Manager app is **open right now** (PID 3004700), with two queued jobs. Launching a second Electron would have rewritten `~/.claude/session-manager/admin-api.json` out from under it — breaking the scheduler MCP tooling *this very session* is using — and any queued job the live instance picked up mid-capture would have become a running job the second instance's boot reconciliation then SIGTERMs.\n\n**The guard would not have stopped me.** It only checked `status === 'running'`, and the queue was idle. That's narrower than the actual hazard, and today was exactly the case it misses.\n\n## What I did instead\n\nFixed the guard so this can't bite next time. It now probes the admin API port before launching — that file *is* the resource a second instance clobbers, so asking whether something still answers on its port is the most direct signal available, and more reliable than scanning `ps` for an electron path that differs between npx, a global install, and a dev checkout.\n\nVerified both directions:\n\n```\nreal app port 46339 -> true   (guard fires)\ndead port 59999     -> false  (legitimate run not blocked)\n\n$ npm run manual:figures\n✗ refusing to launch a second Electron instance: Session Manager is already running\n  (its admin API is answering on 127.0.0.1). … It also has 2 queued job(s)\n  (1022-spread-margin-aware-deployment-cap, 1021-spread-post-fill-reconciliation)\n  it may start at any moment. Quit the app and re-run.\nEXIT=1\n```\n\nTypecheck clean, both linters pass. Pushed as `df48783`; README updated so the documented rule matches the enforced one.\n\n## To actually get the screenshots\n\n**Quit Session Manager, then run `npm run manual:figures`.** That's the only blocker — the pipeline is built and the recipes for all 19 figures exist. After it succeeds:\n\n```bash\nnpm run manual:build                     # re-emits the bundle with figures/\ncd ~/Projects/Bilko && git add data/manual && git commit &&…",
-        "id": "pevt-msjusb02-14",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T04:08:01.970Z"
-      },
-      {
-        "kind": "response",
-        "causedByEventId": "pevt-msjusb02-14",
-        "text": "Yes — everything I did is on git and live.\n\n## Git\n\n**All 5 of my session-manager commits are on `origin/main`** (which sits at `df48783`, my last one):\n\n```\nPUSHED  4aae7af  Field Manual as a maintained paid product\nPUSHED  b9452ec  CLAUDE.md open-core rule\nPUSHED  9b692f5  PDF edition\nPUSHED  a4f841d  14 tab chapters for v1.1.0\nPUSHED  df48783  figure-capture guard fix\n```\n\n**Bilko is fully in sync** — `## main...origin/main`, nothing ahead. My work is `7ca18d3` (token removal) and `4515f30` (single-viewport page + checkout binding).\n\n## Live on bilko.run\n\n```\n/api/manual/toc → version 1.1.0 | chapters 17 | assets: offline-html, pdf\n\nmarketing chunk SessionManagerPage-DAEwHqIE.js:\n  LIVE OK: \"The tool is free\"\n  LIVE OK: \"Sign in to buy\"\n  LIVE OK: \"npx claude-code-session-manager@latest\"\n```\n\n## One thing you should know\n\n`session-manager` is now **9 commits ahead of origin — and none of them are mine.** Another session has been landing scheduler work since I last pushed:\n\n```\n133f37c feat(scheduler): enforce PRD-authoring lockdown with a PreToolUse hook + provenance gate\n0f91fd9 fix(scheduler): make scheduler_create_prd the sole sanctioned PRD-authoring path\n310c4e0 feat(scheduler): admin API routes for PRD list/read/edit/archive/cancel/retag\nbd1486c fix(scheduler): make transitionJob the sole chokepoint for a job's status field\ncf9df01 fix(scheduler): carry originSessionId through the invalid-row repair path\n6f906f5 test(scheduler): drop unused queueHistory binding\ncdec71e fix(scheduler): honest PRD creation + self-healing reconcile\n4f977f7 test(scheduler): register ScheduleJob validation tests\n1e80643 feat(sessions): per-project Agent Actions; rename Epics → Sessions in UI\n```\n\nI deliberately haven't pushed those — they aren't my work, I haven't reviewed or gate-tested them, and pushing another session's commits under the cover of \"did you update git\" isn't a call I should make silently. Say the word and I'll run typecheck/tests and push them.\n\n**Summary:** ve…",
-        "id": "pevt-msjy8fua-37",
-        "promptSessionId": "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60",
-        "at": "2026-08-08T05:44:33.586Z"
-      }
-    ],
     "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f": [
       {
         "id": "pevt-msjurmwh-13",
@@ -493,32 +257,110 @@
         "id": "pevt-msjy6stq-36",
         "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
         "at": "2026-08-08T05:43:17.102Z"
-      }
-    ],
-    "epics-menu-project-favorites-we-started-some-of--99a286d8": [
-      {
-        "id": "pevt-msjuztxf-16",
-        "promptSessionId": "epics-menu-project-favorites-we-started-some-of--99a286d8",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-08T04:13:53.088Z",
-        "text": "Epics Menu - Project Favorites\n\nWe started some of this as part of \"Actions\", under the cover Action initialize specific agents or Epic creates a new one. We want to be able to dynamically, per project create Agents and One button involke them from the UI as shortcuts around the EPIC area. \n\nLets also rename Epics to what it is, Sessions, we manage sessions here, thats why they start with the AIM framework aways, all of them. The hotkey buttons will not be exception. So we will eb creating the Agents inside the library and giving them Project tags so we know where they appear and we can modify them. I believe the current \"Builder\" agents works on the same principle so we are just extending. \n\nShow each action as separate menu button for now. We do not need the \"Sessions/EPIC\" filtering for now or minimize it and move it a section right above the actula list. Use the space the expand the Action buttons as one button each and make them also project dynamic so that each spawns an agent. \n\nAgent Library must be clear that Agents are part of Actions and that they provice the ACTOR description of the AIM initialization framework for the session"
-      },
-      {
-        "id": "8601c04b-4b3b-47d8-8646-409c49471bbf",
-        "promptSessionId": "epics-menu-project-favorites-we-started-some-of--99a286d8",
-        "kind": "prompt",
-        "causedByEventId": null,
-        "at": "2026-08-08T04:13:53.088Z",
-        "text": "You are acting as the \"architect\" agent: The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.\n\nWork concisely: lead with the answer or the result, skip preamble, and don't recap what you just did unless asked. Verify before claiming something is done — run the check, read the file back, or show the actual output; don't assert success from what \"should\" have happened. Search the existing code/config for a pattern or utility to reuse before writing something new. Ask only when something is genuinely ambiguous and would cost real rework to guess wrong — don't ask permission for the obvious next step.\n\nGrounding: System (CLAUDE.md, settings.json, agents/architect.md) · Project (CLAUDE.md, mcp servers · 5, Project brief) · Local (working tree, open Terminal tabs · 1, other Epics · 82)\n\nYou are building new functionality. Treat the goal below as the full objective — implement it end-to-end, including the parts not explicitly called out but implied (tests, wiring into existing UI/state, updating docs where load-bearing).\n\nGoal: Epics Menu - Project Favorites\n\nWe started some of this as part of \"Actions\", under the cover Action initialize specific agents or Epic creates a new one. We want to be able to dynamically, per project create Agents and One button involke them from the UI as shortcuts around the EPIC area. \n\nLets also rename Epics to what it is, Sessions, we manage sessions here, thats why they start with the AIM framework aways, all of them. The hotkey buttons will not be exception. So we will eb creating the Agents inside the library and giving them Project tags so we know where they appear and we can modify them. I believe the current \"Builder\" agents works on the same principle so we are just extending. \n\nShow each action as separate menu button for now. We do not need the \"Sessions/EPIC\" filtering for now or minimize it and move it a section right above the actula list. Use the space the expand the Action buttons as one button each and make them also project dynamic so that each spawns an agent. \n\nAgent Library must be clear that Agents are part of Actions and that they provice the ACTOR description of the AIM initialization framework for the session"
       },
       {
         "kind": "response",
-        "causedByEventId": "pevt-msjuztxf-16",
-        "text": "Done and committed (`1e80643`). Typecheck, lint, and build are green; 2436/2438 unit tests pass.\n\n**What shipped**\n\n*Actions are Agent personas with a project scope* — no new concept. `~/.claude/agents/<name>.md` gains three fields, owned by `agentLibrary.cjs`:\n- `projects:` — cwds (or `*` = every project) whose Sessions toolbar shows a button for this agent\n- `action:` — the opening instruction (newline-escaped; the frontmatter parser is line-based)\n- `actionLabel:` — button caption, defaults to the agent name\n\nPressing one goes through the *same* path as \"+ New Session\" — the IPC handler holding `MINT_AUTHORITY_NEW_EPIC_UI`, `composeEpicIntake` (persona = **Actor**, its first `TAG_LIBRARY`-ordered tag = **Mission**, the action text = goal), approve out of `proposed`, send. Single-creator law untouched: a human still presses it.\n\n- `src/renderer/lib/projectActions.ts` — pure resolution (13 tests)\n- `src/renderer/lib/useProjectActions.ts` — live off `agents:changed`, so scoping an agent makes its button appear without a reload\n- `src/renderer/components/epics/SessionActionsBar.tsx` — the dropdown is gone; every Action is its own button (5 tests)\n\n`builder` is excluded from the dynamic list — `Run Build` already *is* its Action, with publish-target gating and in-flight dedup a generic Action can't express.\n\n**Layout** — the header row now belongs to the Action buttons; search/group/sort/density collapsed behind two toggles in a single strip sitting directly above the list (status pills stay visible, search force-opens while a query is active).\n\n**Agent Library** — Action scope chips (known projects + \"every project\", with unresolvable cwds shown as removable dashed chips rather than silently dropped), label and instruction fields, and page copy stating agents are the ACTOR of the AIM framework every session opens with.\n\n**Rename** — \"Epics\" → \"Sessions\" across user-facing copy only (nav, queue header, New Session card, empty states, row menu, Home, Scheduler glossary…",
-        "id": "pevt-msjvlzmo-20",
-        "promptSessionId": "epics-menu-project-favorites-we-started-some-of--99a286d8",
-        "at": "2026-08-08T04:31:06.912Z"
+        "causedByEventId": "pevt-msjy6stq-36",
+        "text": "Committed as `53b0d93` — 28 files, +1161/−566. Working tree is clean apart from the three artifacts I deliberately left out.\n\n**What was committed:** the operations state for this Epic — the six archived PRDs (1021–1026), PRDs 1018–1020 from the Field Manual Epic, session transcripts, `active-index.json`, `history.jsonl`, and the `NN` reservation markers. Ops epics dirs are tracked in this repo by convention (157 files already), so this follows it.\n\n**Nothing source-side needed committing** — all six PRDs' code was already committed by their own executors across `cdec71e..133f37c`, and I verified each in the validation passes.\n\n## Three things I did not commit, and why\n\nTwo of them are a real bug, not noise:\n\n```\nplugins/session-manager-dev/skills/builder/session-manager-operations/scheduler/state/queue.json\nsession-manager-operations/manual/chapters/session-manager-operations/scheduler/state/queue.json\n```\n\nBoth contain `{\"jobs\": []}`. A `session-manager-operations/` root is only supposed to exist at a **project cwd** — that's the TAB=cwd=project identity rule. These sit inside a *skill directory* and inside the *manual's chapters output*, which means something called `queueStore`'s write path with a cwd that was a plugin/output subdirectory rather than a project root. It's harmless today (empty queues, and `stateCwds` won't resolve them as projects), but it's evidence that a scheduler or skill process resolved its cwd wrongly, and committing it would bless the mistake as structure. Worth tracing where those cwds came from — the manual one has an mtime consistent with tonight's figure-capture work.\n\nThird is `sm-noscroll-1366.png`, a 109 KB screenshot at the repo root from 20:27, almost certainly a stray from the manual figure pipeline.\n\nI left all three on disk rather than deleting them — they're evidence for the cwd question, and deleting files you haven't asked me to delete isn't mine to decide.\n\n## One correction to flag\n\nI committed to `main` directly. My defa…",
+        "id": "pevt-msjy9uea-38",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "at": "2026-08-08T05:45:39.106Z"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msjy9uea-38",
+        "text": "## It means the lockdown caught 7 hand-written PRDs — and it's working correctly\n\n`quarantined` is a status that shipped **last night** (PRD 1026, commit `133f37c`, 22:40 PDT). It means: *this PRD file has no proof it came from the scheduler API, so the scheduler will not execute it.* Nothing is lost or deleted — the files are intact and one click makes each runnable.\n\n### What actually happened\n\nThe audit log records it precisely:\n\n```json\n{\"at\":\"2026-08-08T17:00:17.213Z\",\"kind\":\"prd_quarantined\",\n \"slug\":\"1024-help-calc-primitive\",\n \"cwd\":\"/home/bilko/Projects/social-signals-trader\",\n \"reason\":\"missing createdVia provenance frontmatter\"}\n```\n\nThree facts pin the cause:\n\n1. **The files were written this morning, 10:00–10:06 AM** — *after* the app booted at 23:53 last night with the lockdown active. So these are not old PRDs the rollout migration missed; the migration ran before they existed.\n2. **Zero `prd_create` audit records exist for social-signals-trader.** Not one of the 7 went through `scheduler_create_prd`.\n3. **Their frontmatter proves hand-authoring** — no `createdVia`, no `sourcePromptId`, `tags: []`, and `cwd: ~/Projects/social-signals-trader` written with a tilde. The MCP tool requires an absolute path and would have rejected that; the parser's tilde fallback (`prdParser.cjs:32`) is what quietly rescued it into a valid cwd.\n\nAn agent working in that project composed 7 PRDs and wrote the `.md` files straight to disk instead of calling the MCP tool. The provenance gate caught every one.\n\n### Why the deny hook didn't stop it first\n\n```\n$ social-signals-trader/.claude/settings.json → PreToolUse: []\n```\n\nThe `guard-prd-writes.cjs` hook is installed in **session-manager's** `.claude/settings.json` only — deliberately per-project, not machine-wide, so each project adopts it explicitly. That project never adopted it, so layer 1 didn't apply.\n\nThis is defence in depth doing its job: the harness-level hook was absent, and the scheduler-level provenance gate — wh…",
+        "id": "pevt-mskms609-16",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "at": "2026-08-08T17:11:44.745Z"
+      },
+      {
+        "id": "565e3702-b52e-425a-b69b-0b2e1492903f",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mskms609-16",
+        "at": "2026-08-08T17:57:54.515Z",
+        "prdSlug": "1027-make-the-scheduler-mcp-reachable-everywhere-and-teach-develo"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mskms609-16",
+        "text": "## Answering your three questions\n\n### Why did the session write directly? — It didn't choose to. The tool wasn't there.\n\nThis is a clean natural experiment:\n\n| Time | State | Result |\n|---|---|---|\n| **10:00–10:06** | `session-manager-scheduler` **not registered** in that project | 7 PRDs hand-written, no provenance → quarantined |\n| **10:56** | MCP added to `.mcp.json` (mtime) | — |\n| after | tool available | `1031`/`1032` carry `createdVia: scheduler-api`, with real `prd_create` audit records |\n\n```\n$ git show HEAD:.mcp.json   # social-signals-trader\ncommitted servers: ['burrow', 'quotes', 'hedgefund', 'bilko-host']\n$ git status --porcelain .mcp.json\n M .mcp.json          ← session-manager-scheduler added at 10:56, still uncommitted\n```\n\n`scheduler_create_prd` was **not in that session's tool list**. It couldn't have called it. Your instinct that \"some context was not provided correctly\" is right, but sharper than context — the *capability* was absent.\n\n### Is the develop skill using the MCPs? — Yes, but its fallback trigger has a hole\n\nPRD 1025 rewrote it correctly: *\"`scheduler_create_prd` is the ONLY sanctioned way to author a PRD — not a preference, a rule.\"*\n\nThe flaw is at **`SKILL.md:230`**:\n\n> **Fallback — only when the tool errors with \"app not running\" / admin API unreachable**\n\nThat gates on the tool **returning an error**. An agent whose tool list simply lacks the tool gets *no error to match on* — there's nothing to fail. So the condition is unfalsifiable, and \"unreachable\" reads naturally as covering \"doesn't exist.\" The agent followed the skill correctly and still ended up hand-writing.\n\n**A missing tool is a misconfiguration, not an offline app.** They demand opposite responses: an offline app justifies the degraded fallback; a missing tool should **stop and tell you**, because writing the file papers over a config error you'd never otherwise see.\n\n### What prevents recurrence\n\nQueued as **PRD 1027** into this Epic:\n\n1. **Register the scheduler MC…",
+        "id": "pevt-mskog36t-33",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "at": "2026-08-08T17:58:20.453Z"
+      },
+      {
+        "id": "pevt-mskoszj9-7",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "kind": "response",
+        "causedByEventId": "pevt-mskog36t-33",
+        "at": "2026-08-08T18:08:22.245Z",
+        "text": "PRD 1027-make-the-scheduler-mcp-reachable-everywhere-and-teach-develo finished: completed. Check Scheduler for details.",
+        "prdSlug": "1027-make-the-scheduler-mcp-reachable-everywhere-and-teach-develo",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mskoszj9-7",
+        "text": "# VERIFIED\n\nWork landed in `3eeb7bf` (11:08:15 PDT today, +198 lines across 6 files). Not an empty diff.\n\n## Per-criterion evidence\n\n**1. User-scope MCP registration — ✅**\n```json\n$ ~/.claude.json → top-level mcpServers\n['fetch','sqlite','playwright','google-workspace','n8n','session-manager-scheduler']\n\n\"session-manager-scheduler\": { \"type\":\"stdio\", \"command\":\"node\",\n  \"args\":[\"/home/bilko/Projects/session-manager/scripts/scheduler-mcp-server.cjs\"], \"env\":{} }\n```\nRegistered alongside the pre-existing five, with an absolute path, exactly as specified. The five existing servers are untouched.\n\n**2. Idempotent installer — ✅ (with a caveat below)**\n`scripts/install-scheduler-mcp-user-scope.sh` (46 lines). Resolves `SERVER_JS` from its own location rather than hardcoding, preflights both the server file and the `claude` CLI, and its header documents the why — including the 1024–1030 incident by name and the \"user scope is additive, project entries keep working\" rollout property.\n\n**3. Two failure modes named explicitly — ✅**\n`develop/SKILL.md:239-261` — *\"Two failure modes — do not conflate them. They have opposite correct responses.\"* Branch (a) is tool-present-but-erroring (and re-states that a validation error is not \"app not running\"). Branch (b):\n> *\"**(b) Tool ABSENT from your tool list entirely.** You never see … offered at all — there is no error to catch, because the tool call is never attempted… a **misconfiguration**, not 'the app is offline.' **STOP. Do not write any PRD file, hand-authored or otherwise.**\"*\n\nIt also closes a loophole I hadn't specified: *\"do not add a project-local `.mcp.json` entry yourself as a substitute; that's the human's call and re-introduces the per-repo drift this fix removes.\"*\n\n**4. The old line-230 wording is disambiguated — ✅**\nThe fallback header is now **\"Fallback for case (a) only\"** (`:262`). \"Unreachable\" can no longer be read as covering absence, because absence is a separately named branch that forbids writing.\n\n**5. Sa…",
+        "id": "pevt-mskow268-36",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "at": "2026-08-08T18:10:45.632Z"
+      },
+      {
+        "id": "673af130-e14e-4899-bf04-daa148e1dab4",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "kind": "prd_created",
+        "causedByEventId": "pevt-mskow268-36",
+        "at": "2026-08-08T19:44:56.613Z",
+        "prdSlug": "1028-make-health-monitoring-per-project-unmask-stalled-projects-a"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-mskow268-36",
+        "text": "## The engine is machine-wide. The monitoring isn't. That's the gap.\n\n### What already works across every project\n\nThe scheduler never became per-project — only its *storage* did. `queueStore.cjs`'s `stateCwds()` unions **every project holding a `queue.json` plus every currently-active project**, and every engine path reads that merged view:\n\n| Mechanism | Scope | Cadence |\n|---|---|---|\n| `reconcile()` — discover PRDs, repair invalid rows | all projects | every tick + on completion + on IPC |\n| Dead-process reaper | all projects | every poll (60 s) |\n| `selectAutoFixTargets` → `spawnInvestigation` | all projects | on drain / after reverify |\n| `reverifyNeedsReview` | all projects | boot + every 10 min |\n| DoD drain gate | all projects | at queue drain |\n| Session slot pool | machine-wide | continuous |\n\nSo a `needs_review` job in a project whose tab is closed **is** still picked up, re-verified against the current verifier, and auto-fix-planned. That part of your concern is covered.\n\n### Three gaps — one is live right now\n\n**1. `quarantined` gets no attention at all.** It shipped last night with the lockdown, and nothing was taught to watch it:\n- `homeNeedsYou.ts:96` — `if (job.status !== 'failed' && job.status !== 'needs_review') continue`\n- `scheduler.cjs:4938` — the 10-min pass only fires `if (s.jobs.some(j => j.status === 'needs_review'))`\n\n**Live right now, the `burrow` project holds four stranded PRDs:**\n```\nburrow  821-ops-feedback-guard-silent-green   quarantined\nburrow  822-ops-skill-graph-output-path       quarantined\nburrow  823-ops-claudemd-catalog-entry        quarantined\nburrow  824-ops-index-generator-versioned     quarantined\n```\nNothing will ever look at these. They don't appear on Home, no timer covers them, and burrow's Scheduler tab is the only place they exist.\n\n**2. The stall detector's verdict is global, so a dead project is masked.**\n```js\nscheduler.cjs:991\nconst stalled = total > 0 && running === 0 && pending === 0 && !state?.paused;\n```\nCo…",
+        "id": "pevt-msks9q8a-40",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "at": "2026-08-08T19:45:22.186Z"
+      },
+      {
+        "id": "pevt-msktapmi-8",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "kind": "response",
+        "causedByEventId": "pevt-msks9q8a-40",
+        "at": "2026-08-08T20:14:07.674Z",
+        "text": "PRD 1028-make-health-monitoring-per-project-unmask-stalled-projects-a finished: completed. Check Scheduler for details.",
+        "prdSlug": "1028-make-health-monitoring-per-project-unmask-stalled-projects-a",
+        "outcome": "completed",
+        "validation": "unvalidated"
+      },
+      {
+        "kind": "response",
+        "causedByEventId": "pevt-msktapmi-8",
+        "text": "# REFUTED\n\nTo be unambiguous up front: **the implementation landed and I verified it empirically — 8 of 9 criteria pass.** The verdict turns on AC8, where the regression guard this PRD was supposed to install does not exist in any run of the test suite.\n\n## What passes (verified, several empirically)\n\n**1. Per-project stall verdict — ✅** I ran `computeStallSummary` against the exact burrow-vs-others shape:\n```\nmachine-wide stalled: false\n{ \"/home/bilko/Projects/burrow\":     { \"quarantined\": 2, \"stalled\": true  },\n  \"/home/bilko/Projects/social-signals-trader\": { \"running\": 1, \"pending\": 1, \"stalled\": false } }\n```\nThe masking bug is fixed — burrow reads stalled while the machine-wide roll-up correctly stays false.\n\n**2. Per-cwd rate limiting — ✅** `scheduler.cjs:1780-1781` — `stallSince`/`stallToasted` are now `Map`s keyed by cwd; `:5095-5104` clears and arms per project, so one stalled project can't suppress another's alert. This was the specific trap I flagged in the PRD.\n\n**3. `quarantined` on Home, never Retry — ✅** `homeNeedsYou.ts:48` adds `'job-quarantined'` to `NeedsYouKind`; `:124` — *\"it must never offer Retry (re-running an unstamped PRD…)\"*; `:61-68` tracks staleness from the `statusHistory` entry where `to === 'quarantined'`.\n\n**4. 10-min pass no longer gates solely on `needs_review` — ✅** `scheduler.cjs:5021-5027`, with the reasoning that a quarantined row is re-checked within 10 minutes regardless.\n\n**5. Configurable escalation — ✅** `schedulerConfig.cjs:45` `QUARANTINE_ESCALATE_MS: 24h`, overridable via `SM_QUARANTINE_ESCALATE_HOURS` (`scheduler.cjs:80`); warn-log by project + slug + age at `:5034`.\n\n**6. Per-project health rollup — ✅** Live run of `npm run health`:\n```\n\"issues\": [ \"Project fully stalled: /home/bilko/Projects/burrow — 0 running, 0 pending,\n             only problem jobs (failed=0 needs_review=0 quarantined=4),\n             no scheduler tick in ~15m (threshold 3m)\" ]\n```\nAll three statuses counted, broken down by project, naming the r…",
+        "id": "pevt-msktfxvb-41",
+        "promptSessionId": "scheduler-is-stuck-as-session-manager-admin-inve-9a80d87f",
+        "at": "2026-08-08T20:18:11.639Z"
+      }
+    ],
+    "builder-check-git-vs-the-published-package-for-t-7fe0df63": [
+      {
+        "id": "pevt-mskz4vem-42",
+        "promptSessionId": "builder-check-git-vs-the-published-package-for-t-7fe0df63",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-08T22:57:32.921Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
+      },
+      {
+        "id": "3b0d24de-d0a6-4cc6-aeea-81d2553e0810",
+        "promptSessionId": "builder-check-git-vs-the-published-package-for-t-7fe0df63",
+        "kind": "prompt",
+        "causedByEventId": null,
+        "at": "2026-08-08T22:57:32.921Z",
+        "text": "/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there's anything new."
       }
     ]
   },
@@ -560,6 +402,11 @@
     "in-the-aggregation-logic-for-home-project-shoud--cf4e62f0": "2026-08-08T00:43:21.725Z",
     "settings-home-the-settings-left-navigation-conta-cf9b46d3": "2026-08-08T00:43:21.725Z",
     "builder-check-git-vs-the-published-package-for-t-3f5a414a": "2026-08-08T00:45:44.605Z",
-    "performance-identiy-why-session-manager-is-feeli-24e0a0ae": "2026-08-08T00:45:48.143Z"
+    "performance-identiy-why-session-manager-is-feeli-24e0a0ae": "2026-08-08T00:45:48.143Z",
+    "builder-check-git-vs-the-published-package-for-t-54d4eb34": "2026-08-08T15:31:03.974Z",
+    "crud-operations-on-the-left-navigation-items-the-cb77bbe6": "2026-08-08T17:55:38.392Z",
+    "explain-grounding-elements-explain-each-element--d25a2353": "2026-08-08T17:55:56.872Z",
+    "epics-menu-project-favorites-we-started-some-of--99a286d8": "2026-08-08T19:42:11.137Z",
+    "marketing-home-page-the-19-99-lets-improve-more--ae3a6f60": "2026-08-08T19:42:17.668Z"
   }
 }

@@ -4,6 +4,8 @@ cwd: /home/bilko/Projects/session-manager
 estimateMinutes: 15
 sourcePromptId: psess-ms9x7241-9
 sourceTabId: epic-scheduler-integration-audit-follow-ups-sour-bf812a26
+createdVia: legacy-adopted
+issuedAt: 2026-08-08T06:53:47.667Z
 ---
 # Goal
 

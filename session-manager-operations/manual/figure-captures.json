@@ -1,0 +1,33 @@
+{
+  "$comment": "Per-figure capture recipes consumed by scripts/capture-manual-figures.mjs. Every <figure data-figure=\"...\"> declared in session-manager-operations/manual/chapters/*.html must have a matching entry here, keyed by that id. navKey is a CommandPalette 'nav:<key>' id (see src/renderer/components/CommandPalette.tsx). steps run in order before the screenshot; each callout selector is resolved to a live DOM bounding box at capture time — never a hardcoded pixel guess.",
+  "first-launch": {
+    "navKey": "project-home",
+    "waitForSelector": "[data-testid=\"tour-statusbar\"]",
+    "callouts": [
+      { "arrow": "left", "selector": "[data-testid=\"tour-leftnav\"]" },
+      { "arrow": "up", "selector": "[data-testid=\"tour-new-session\"]" },
+      { "arrow": "down", "selector": "[data-testid=\"tour-statusbar\"]" }
+    ]
+  },
+  "scheduler-queue": {
+    "navKey": "scheduler",
+    "waitForSelector": "[role=\"status\"][aria-label^=\"Status:\"]",
+    "callouts": [
+      { "arrow": "left", "selector": "button:has-text(\"Queue\")" },
+      { "arrow": "up", "selector": "select[title^=\"when-available:\"]" },
+      { "arrow": "right", "selector": "[role=\"status\"][aria-label^=\"Status:\"]" }
+    ]
+  },
+  "epic-views": {
+    "navKey": "terminal",
+    "steps": [
+      { "action": "click", "selector": "[data-testid=\"epic-queue-row\"]" }
+    ],
+    "waitForSelector": "[data-testid=\"epic-detail\"]",
+    "callouts": [
+      { "arrow": "up", "selector": "[data-testid=\"epic-mode-toggle\"]" },
+      { "arrow": "right", "selector": "[data-testid=\"epic-verbosity-dial\"]" },
+      { "arrow": "left", "selector": "[data-testid=\"epic-detail-body\"]" }
+    ]
+  }
+}

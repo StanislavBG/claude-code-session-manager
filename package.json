@@ -42,6 +42,7 @@
     "health": "node src/main/health.cjs",
     "manual:check": "node scripts/build-manual.mjs --check",
     "manual:build": "node scripts/build-manual.mjs",
+    "manual:figures": "xvfb-run -a node scripts/capture-manual-figures.mjs",
     "lint:selectors": "node scripts/check-unstable-selectors.cjs",
     "lint:hooks": "node scripts/check-conditional-hooks.cjs",
     "lint": "npm run lint:selectors && npm run lint:hooks"
@@ -113,6 +114,7 @@
     "node-pty": "^1.2.0-beta.12",
     "onnxruntime-web": "^1.24.3",
     "react-force-graph-2d": "^1.29.1",
+    "sharp": "^0.35.3",
     "tiptap-markdown": "^0.9.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8",

@@ -184,6 +184,63 @@ describe('Settings NavFace-driven default scope', () => {
   })
 })
 
+describe('Settings scope note states which real file is being edited', () => {
+  // Settings is substrate, not per-session curation (CLAUDE.md): each scope is
+  // a direct view of the on-disk file the claude CLI reads on every session it
+  // launches. That has to be visible on screen, not just a switcher tooltip.
+  const note = (el: HTMLElement) => el.querySelector('[data-testid="settings-scope-note"]')?.textContent ?? ''
+
+  it('names the global file and its machine-wide reach at user scope', async () => {
+    const el = await mount()
+    expect(activeScope(el)).toBe('User')
+    expect(note(el)).toContain('Global settings')
+    expect(note(el)).toContain('~/.claude/settings.json')
+    expect(note(el)).toContain('every project and every session')
+    // The resolved absolute path, not just the ~ shorthand.
+    expect(note(el)).toContain(`${HOME}/.claude/settings.json`)
+  })
+
+  it('switches to the project file and its per-project reach at project scope', async () => {
+    const el = await mount()
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      clickScope(el, 'Project')
+      await Promise.resolve()
+    })
+    expect(note(el)).toContain('Project settings')
+    expect(note(el)).toContain('checked into git')
+    expect(note(el)).toContain(`${PROJECT_CWD}/.claude/settings.json`)
+    expect(note(el)).not.toContain('Global settings')
+  })
+
+  it('marks local scope as gitignored and this-machine-only', async () => {
+    const el = await mount()
+    await act(async () => {
+      useSessions.setState({ tabs: [PROJECT_TAB], activeTabId: PROJECT_TAB.id })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      clickScope(el, 'Local')
+      await Promise.resolve()
+    })
+    expect(note(el)).toContain('Local settings')
+    expect(note(el)).toContain('gitignored')
+    expect(note(el)).toContain(`${PROJECT_CWD}/.claude/settings.local.json`)
+  })
+
+  it('is absent on Telemetry and Session Manager, which are not claude CLI settings files', async () => {
+    const el = await mount()
+    await act(async () => {
+      clickViewTab(el, 'Telemetry')
+      await Promise.resolve()
+    })
+    expect(el.querySelector('[data-testid="settings-scope-note"]')).toBeNull()
+  })
+})
+
 function viewTabLabels(el: HTMLElement): string[] {
   const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
   return Array.from(toolbar?.querySelectorAll('button') ?? []).map((b) => b.textContent?.trim() ?? '')

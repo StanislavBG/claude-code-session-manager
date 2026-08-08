@@ -19,6 +19,35 @@ import { settingsSchema } from '../../lib/settingsSchema'
 import { SettingsTelemetry } from './SettingsTelemetry'
 import { SettingsAppPrefs } from './SettingsAppPrefs'
 
+/**
+ * Per-scope statement of WHAT FILE this screen is editing and HOW WIDELY it
+ * applies. Settings is not a session preference panel and not a
+ * session-manager-owned store: each scope is a direct, byte-level view of the
+ * on-disk file the `claude` CLI itself reads on every invocation it launches
+ * (see SETTINGS_SCOPES in lib/scopes.ts — the same resolver the New Session
+ * grounding board reads with). CLAUDE.md's "Settings is substrate, not
+ * per-Epic curation" rule is the reason this is stated on screen rather than
+ * left to a tooltip: an edit here changes every current and future session in
+ * that scope, which is invisible now that one TAB hosts many sessions.
+ */
+export const SETTINGS_SCOPE_NOTES: Record<Scope, { title: string; body: string }> = {
+  user: {
+    title: 'Global settings',
+    body:
+      'This is the real ~/.claude/settings.json on disk — the same file the claude CLI reads on every session it starts. Edits apply machine-wide, to every project and every session.',
+  },
+  project: {
+    title: 'Project settings',
+    body:
+      'This is the real <project>/.claude/settings.json on disk, checked into git. Edits apply to every current and future session in this project, for anyone who clones it.',
+  },
+  local: {
+    title: 'Local settings',
+    body:
+      'This is the real <project>/.claude/settings.local.json on disk, gitignored. Edits apply to every current and future session in this project, on this machine only.',
+  },
+}
+
 function SettingsComponent() {
   const home = useHomeDir()
   const tabs = useSessions((s) => s.tabs)
@@ -190,36 +219,51 @@ function SettingsComponent() {
         <SettingsTelemetry />
       ) : view === 'app' ? (
         <SettingsAppPrefs />
-      ) : scopeNeedsCwd(scope) ? (
-        <EmptyState
-          title="no active project"
-          hint="open a tab in a project directory to edit project or local settings"
-        />
-      ) : view === 'effective' ? (
-        <EffectiveCards
-          node={effective}
-          targetScope={scope}
-          onOverride={overrideInto}
-          schema={settingsSchema()}
-        />
-      ) : view === 'tree' ? (
-        <EffectiveTree
-          node={effective}
-          targetScope={scope}
-          onOverride={overrideInto}
-          schema={settingsSchema()}
-        />
-      ) : activePath && file ? (
-        <JsonEditor
-          path={activePath}
-          value={file.draftRaw}
-          onChange={(v) => {
-            setSaveError(null)
-            setDraft(activePath, v)
-          }}
-        />
       ) : (
-        <EmptyState title="resolving…" />
+        <>
+          <div
+            data-testid="settings-scope-note"
+            className="sticky top-0 z-10 border-b border-line bg-bg-elev px-3 py-2 text-[11.5px] leading-snug"
+          >
+            <span className="font-semibold text-fg">{SETTINGS_SCOPE_NOTES[scope].title}</span>
+            <span className="mx-1.5 text-fg-faint">·</span>
+            <span className="text-fg-dim">{SETTINGS_SCOPE_NOTES[scope].body}</span>
+            {activePath && (
+              <span className="ml-1.5 font-mono text-fg-faint">{activePath}</span>
+            )}
+          </div>
+          {scopeNeedsCwd(scope) ? (
+            <EmptyState
+              title="no active project"
+              hint="open a tab in a project directory to edit project or local settings"
+            />
+          ) : view === 'effective' ? (
+            <EffectiveCards
+              node={effective}
+              targetScope={scope}
+              onOverride={overrideInto}
+              schema={settingsSchema()}
+            />
+          ) : view === 'tree' ? (
+            <EffectiveTree
+              node={effective}
+              targetScope={scope}
+              onOverride={overrideInto}
+              schema={settingsSchema()}
+            />
+          ) : activePath && file ? (
+            <JsonEditor
+              path={activePath}
+              value={file.draftRaw}
+              onChange={(v) => {
+                setSaveError(null)
+                setDraft(activePath, v)
+              }}
+            />
+          ) : (
+            <EmptyState title="resolving…" />
+          )}
+        </>
       )}
     </Panel>
   )

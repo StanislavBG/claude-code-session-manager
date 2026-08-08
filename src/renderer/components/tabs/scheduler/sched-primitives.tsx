@@ -31,6 +31,7 @@ const BADGE_CLASSES: Record<ScheduleJobStatus, string> = {
   completed:     'bg-sage/20 text-sage',
   needs_review:  'bg-butter/25 text-fg-dim',
   failed:        'bg-accent/15 text-accent',
+  quarantined:   'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40',
 }
 
 const BADGE_MARKS: Partial<Record<ScheduleJobStatus, string>> = {
@@ -38,6 +39,7 @@ const BADGE_MARKS: Partial<Record<ScheduleJobStatus, string>> = {
   completed:    '✓',
   needs_review: '!',
   failed:       '✕',
+  quarantined:  '⚑',
 }
 
 export function SchBadge({ status }: { status: ScheduleJobStatus }) {

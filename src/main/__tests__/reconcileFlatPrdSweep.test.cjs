@@ -96,7 +96,7 @@ test('reconcile() still onboards a PRD written to the canonical Epic-scoped dir 
   fs.mkdirSync(epicPrdsDir, { recursive: true });
   fs.writeFileSync(
     path.join(epicPrdsDir, '1501-canonical.md'),
-    `---\ntitle: Canonical\ncwd: ${cwd}\nestimateMinutes: 10\nsourcePromptId: ${epicId}\n---\n\n# Goal\n\nSomething.\n`,
+    `---\ntitle: Canonical\ncwd: ${cwd}\nestimateMinutes: 10\nsourcePromptId: ${epicId}\ncreatedVia: scheduler-api\nissuedAt: 2026-08-07T00:00:00.000Z\n---\n\n# Goal\n\nSomething.\n`,
     'utf8',
   );
 

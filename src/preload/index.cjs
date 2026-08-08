@@ -245,6 +245,10 @@ contextBridge.exposeInMainWorld('api', {
     lintQueue: () => ipcRenderer.invoke('schedule:lint-queue'),
     archivePrds: (slugs) => ipcRenderer.invoke('schedule:archive-prd', { slugs }),
     retagPrds: (items) => ipcRenderer.invoke('schedule:retag-prd', { items }),
+    // Stamps a quarantined PRD's provenance (createdVia: legacy-adopted) via
+    // the same update-prd API path the admin route/MCP tool use, then
+    // reconciles so the row promotes to 'pending' on the very same call.
+    adoptPrd: (slug) => ipcRenderer.invoke('schedule:adopt-prd', { slug }),
     // History — last N completed/failed jobs from queue.json.
     getHistory: (limit) => ipcRenderer.invoke('schedule:get-history', limit !== undefined ? { limit } : {}),
   },

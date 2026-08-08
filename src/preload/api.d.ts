@@ -366,7 +366,7 @@ export interface ScheduleConfig {
  *  so this union is a manually-kept copy; drift from JOB_STATUSES (and from
  *  the renderer's own mirrors in StatusBadge.tsx/SchedulePanel.tsx) is
  *  caught by src/main/__tests__/scheduleJobStatusDrift.test.cjs. */
-export type ScheduleJobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review';
+export type ScheduleJobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review' | 'quarantined';
 
 export interface ScheduleJobRuntime {
   pid: number;
@@ -1468,6 +1468,8 @@ export interface SessionManagerAPI {
     archivePrds: (slugs: string[]) => Promise<ArchivePrdResult>;
     /** Bundle D — bulk retag parallelGroup and/or estimateMinutes. */
     retagPrds: (items: RetagPrdItem[]) => Promise<RetagPrdResult>;
+    /** Stamps a 'quarantined' PRD (no createdVia provenance) as legacy-adopted via the update-prd API, then reconciles it to 'pending'. */
+    adoptPrd: (slug: string) => Promise<ActionOutcome>;
     /** Return the last N completed/failed jobs from queue.json (newest first). */
     getHistory: (limit?: number) => Promise<ScheduleHistoryResult>;
   };

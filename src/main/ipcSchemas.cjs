@@ -358,6 +358,12 @@ const adminPrdFrontmatterPatch = z.object({
   // parsePrdFile, which never parses that value for a PRD's tag key (a
   // discussion-tagged Epic never reaches PRD authoring).
   tag: z.enum(['feature', 'bug', 'build']).optional(),
+  // Provenance stamp (PRD-authoring lockdown). Free-text rather than an enum
+  // — 'scheduler-api' (create-time) and 'legacy-adopted' (migration/manual
+  // adopt) are the two values this codebase writes today, but the field
+  // itself is descriptive, not a closed set.
+  createdVia: z.string().min(1).max(64).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  issuedAt: z.string().min(1).max(64).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
 });
 
 const adminUpdatePrd = z.object({

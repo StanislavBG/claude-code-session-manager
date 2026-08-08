@@ -58,6 +58,11 @@ const STATUS_HISTORY_CAP = 20;
  *  - completed->pending (force-only reset, gated separately by
  *    resetJobFields' own guard — this table only says the edge is
  *    structurally legal, not that every caller may take it unconditionally)
+ *  - quarantined->pending (reconcile()'s adopt path, PRD-authoring lockdown:
+ *    a PRD discovered with no `createdVia` provenance stamp is queued
+ *    'quarantined' instead of 'pending'; the ONLY way out is the PRD being
+ *    stamped via the update-prd API — reconcile() detects the stamp on its
+ *    next pass and promotes the row)
  */
 const LEGAL_TRANSITIONS = {
   pending: ['running', 'completed', 'failed'],
@@ -66,6 +71,7 @@ const LEGAL_TRANSITIONS = {
   failed: ['investigating', 'pending', 'completed'],
   needs_review: ['investigating', 'pending', 'completed'],
   completed: ['pending'],
+  quarantined: ['pending'],
 };
 
 let refusedTransitionCount = 0;

@@ -35,10 +35,10 @@ function truncateLabel(text: string, max = 60): string {
   return `${trimmed.slice(0, max - 1)}…`
 }
 
-type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'needs_review' | 'failed'
+type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'needs_review' | 'failed' | 'quarantined'
 interface QueueFilter { text: string; status: FilterStatus }
 
-const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'investigating', 'pending', 'completed', 'needs_review', 'failed']
+const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'investigating', 'pending', 'completed', 'needs_review', 'failed', 'quarantined']
 
 function loadFilter(): QueueFilter {
   try {
@@ -1098,7 +1098,20 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
                   view log →
                 </button>
               )}
-              {job.status !== 'pending' && job.status !== 'running' && (
+              {job.status === 'quarantined' && (
+                <button
+                  type="button"
+                  data-testid="job-row-adopt-prd"
+                  title="Stamp this PRD's provenance so the scheduler will run it — no unstamped PRD runs automatically."
+                  onClick={() => {
+                    window.api.schedule.adoptPrd(job.slug).then(toast.fromOutcome).catch(() => toast.error('Failed to adopt PRD'))
+                  }}
+                  className="text-[13px] font-semibold text-accent hover:text-accent/80 bg-transparent border-0 cursor-pointer p-0"
+                >
+                  adopt PRD →
+                </button>
+              )}
+              {job.status !== 'pending' && job.status !== 'running' && job.status !== 'quarantined' && (
                 <button
                   type="button"
                   onClick={() => window.api.schedule.resetJob(job.slug)}
@@ -1137,6 +1150,7 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
     { label: 'Completed', value: 'completed' },
     { label: 'Needs review', value: 'needs_review' },
     { label: 'Failed', value: 'failed' },
+    { label: 'Quarantined', value: 'quarantined' },
   ]
   return (
     <div className="flex items-center gap-3 flex-wrap">

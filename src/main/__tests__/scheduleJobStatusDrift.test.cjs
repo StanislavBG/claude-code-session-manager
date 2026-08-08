@@ -39,7 +39,7 @@ function extractQuotedList(source, anchorRegex) {
 }
 
 test('JOB_STATUSES is the expected canonical list', () => {
-  expect(JOB_STATUSES).toEqual(['pending', 'running', 'investigating', 'completed', 'failed', 'needs_review']);
+  expect(JOB_STATUSES).toEqual(['pending', 'running', 'investigating', 'completed', 'failed', 'needs_review', 'quarantined']);
 });
 
 function sorted(list) {

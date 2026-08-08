@@ -114,7 +114,7 @@ const sessionSlots = require('./lib/sessionSlots.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
-const { migratePrds, consolidateFlatPrds } = require('./lib/prdMigration.cjs');
+const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
 // Captured once at module load so every run's meta sidecar can record how
@@ -834,6 +834,25 @@ async function runPrdMigration() {
   // still reports the initial sweep — see consolidateAllFlatPrds's own
   // comment for why reconcile() is the load-bearing call site.)
   await consolidateAllFlatPrds(allProjectCwds());
+
+  // Rollout migration for the PRD-authoring-lockdown feature: stamp every
+  // pre-existing PRD as legacy-adopted BEFORE reconcile() ever runs its
+  // provenance gate against it. Must run every boot (idempotent, cheap
+  // scan-and-skip) rather than once — a project opened for the first time
+  // after this shipped still has pre-existing unstamped PRDs the very first
+  // time reconcile() sees them.
+  try {
+    const adopted = await legacyAdoptExistingPrds();
+    if (adopted.stamped > 0) {
+      console.log(`[scheduler] legacy-adopt migration: stamped ${adopted.stamped} pre-existing PRD(s) as createdVia=legacy-adopted`);
+    }
+    for (const f of adopted.failed) {
+      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'legacy-adopt migration: could not stamp PRD', meta: f });
+    }
+  } catch (e) {
+    logs.writeLine({ level: 'error', scope: 'scheduler', message: 'legacy-adopt migration failed', meta: { error: e?.message } });
+  }
+
   return result;
 }
 
@@ -1282,13 +1301,16 @@ async function reconcile(state) {
       // file may be unreadable, on a project whose dir failed to enumerate,
       // or mid-move. "I can't see it" is not "the user deleted it", so the
       // row survives — worst case it re-resolves on the next pass.
-      if (job.status === 'pending' || job.status === 'running') {
+      if (job.status === 'pending' || job.status === 'running' || job.status === 'quarantined') {
         // Exception: a PENDING row whose PRD has an archived twin was
         // retired on purpose (work landed by other means — e.g. implemented
         // inline — and the source .md moved to prds-archived/). Keeping it
         // would show a phantom "scheduled" job forever; firing it would just
         // hit executeJob's archived-twin skip anyway. Running rows are left
-        // alone — the reaper owns their lifecycle.
+        // alone — the reaper owns their lifecycle. A quarantined row's file
+        // going merely-not-visible must survive too — quarantine is meant to
+        // be loud and reversible, never a silent drop (see this function's
+        // header comment on the 2026-08-01 outage a silent skip caused).
         if (job.status === 'pending' && (await archivedTwinExists(job))) {
           console.log(`[scheduler] reconcile: retiring pending job ${job.slug} — PRD already archived (work landed elsewhere)`);
           continue;
@@ -1302,7 +1324,7 @@ async function reconcile(state) {
       continue;
     }
     seen.add(job.slug);
-    next.push({
+    const updatedJob = {
       ...job,
       title: p.title,
       cwd: p.cwd,
@@ -1318,7 +1340,23 @@ async function reconcile(state) {
       originSessionId: job.originSessionId
         ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
-    });
+    };
+    // Adopt path: a row parked 'quarantined' (no createdVia provenance when
+    // discovered) whose PRD file now carries a stamp — written via the
+    // update-prd API's adopt patch, either the Scheduler tab's one-click
+    // "adopt PRD" action or a manual scheduler_update_prd call — promotes to
+    // 'pending' the very next reconcile pass. This is the ONLY way a
+    // quarantined row becomes runnable; nothing else in reconcile() clears
+    // that status.
+    if (updatedJob.status === 'quarantined' && p.createdVia) {
+      transitionJob(updatedJob, 'pending', {
+        reason: `adopted via API (createdVia=${p.createdVia})`,
+        source: 'reconcile-adopt',
+      });
+      console.log(`[scheduler] reconcile: adopted quarantined PRD ${job.slug} — createdVia=${p.createdVia}`);
+      appendAuditEvent('scheduler_prd_adopted', { slug: job.slug, cwd: p.cwd, createdVia: p.createdVia, source: 'reconcile' });
+    }
+    next.push(updatedJob);
   }
   // Slugs on disk with no matching state.jobs row are normally brand-new
   // PRDs — but once queueHistory.partitionJobs (above, later this same
@@ -1531,6 +1569,29 @@ async function reconcile(state) {
     if (isFixPlanSlug(slug)) {
       const parent = healTargetForFix(slug, state.jobs);
       entry.investigationDepth = parent ? (parent.investigationDepth ?? 1) + 1 : 2;
+    }
+    // Provenance gate (PRD-authoring lockdown): a PRD discovered with no
+    // `createdVia` stamp was never written through scheduler_create_prd/
+    // chat:create-prd (prdCreate.cjs always stamps 'scheduler-api') or the
+    // legacy-adopt boot migration ('legacy-adopted') — it bypassed the
+    // sanctioned API, most likely via a raw Write/Edit tool call the
+    // guard-prd-writes.cjs PreToolUse hook should have denied. Fix-plan PRDs
+    // are exempt: spawnInvestigation's own probe writes them directly by
+    // design (a trusted, scheduler-spawned internal loop, not an
+    // agent/human authoring a PRD), matching the isFixPlanSlug convention
+    // used everywhere else this distinction matters.
+    //
+    // Quarantine is loud and reversible, never a silent skip (see the
+    // 2026-08-01 23-PRD outage this file's header references for what a
+    // SILENT skip costs): logged at warn, audited, and surfaced in the
+    // Scheduler tab's Quarantined filter with a one-click adopt action
+    // (schedule:adopt-prd) that stamps the file via the same update-prd API
+    // route the MCP tool uses — reconcile()'s adopt path above promotes it
+    // to 'pending' on the very next pass, within one tick of being stamped.
+    if (!p.createdVia && !isFixPlanSlug(slug)) {
+      entry.status = 'quarantined';
+      console.warn(`[scheduler] reconcile: quarantining unstamped PRD ${slug} (${p.path}) — no createdVia provenance; adopt it from the Scheduler tab's Quarantined filter or via scheduler_update_prd to make it runnable`);
+      appendAuditEvent('prd_quarantined', { slug, cwd: p.cwd, path: p.path, reason: 'missing createdVia provenance frontmatter' });
     }
     // A PRD with no queue row and no terminal record is normally a
     // brand-new file — but one whose mtime already predates a full poll
@@ -4536,6 +4597,36 @@ function registerScheduleHandlers() {
     return { ok: true };
   }));
 
+  // Renderer-facing counterpart to prdCreate.cjs's chat:create-prd handler
+  // (index.cjs): calls the SAME remote.updatePrd the admin HTTP route/MCP
+  // tool use, so "stamps it through the API" holds for the Scheduler tab's
+  // one-click adopt action too, not just a direct fs write. Only a
+  // 'quarantined' row is eligible — see reconcile()'s provenance gate.
+  ipcMain.handle('schedule:adopt-prd', validated(schemas.scheduleSlug, async ({ slug }) => {
+    if (!(await safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
+    const state = await readQueue();
+    const job = state.jobs.find((j) => j.slug === slug);
+    if (!job) return { ok: false, kind: 'error', message: 'not found' };
+    if (job.status !== 'quarantined') {
+      return { ok: false, kind: 'error', message: `job status is "${job.status}" — only a quarantined PRD may be adopted` };
+    }
+    const result = await remote.updatePrd({
+      slug,
+      cwd: job.cwd,
+      frontmatter: { createdVia: 'legacy-adopted', issuedAt: new Date().toISOString() },
+    });
+    if (!result.ok) return { ok: false, kind: 'error', message: result.error ?? 'adopt failed' };
+    appendAuditEvent('scheduler_prd_adopted', { slug, cwd: job.cwd ?? null, source: 'ipc:schedule:adopt-prd' });
+    // Promote the row to 'pending' immediately rather than waiting for the
+    // next poll tick — the Scheduler tab's "adopt PRD" click should be
+    // visibly effective within this one round-trip.
+    const freshState = await readQueue();
+    await reconcile(freshState);
+    await writeQueue(freshState);
+    await broadcast({ flush: true });
+    return { ok: true, kind: 'info', message: `Adopted ${slug} — it will run as a normal pending job` };
+  }));
+
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
@@ -5266,6 +5357,8 @@ const remote = {
           sourceTabId: parsed.sourceTabId,
           epicId: parsed.epicId,
           dependsOn: parsed.dependsOn,
+          createdVia: parsed.createdVia,
+          issuedAt: parsed.issuedAt,
         },
         body: parsed.body,
         raw,
@@ -5284,8 +5377,11 @@ const remote = {
   // keys' original line formatting survive unchanged.
   async updatePrd({ slug, cwd, frontmatter, body }) {
     const job = await this.getJob(slug);
-    if (job && job.status !== 'pending') {
-      return { ok: false, error: `job status is "${job.status}" — only a not-yet-running PRD (status "pending", or no queue row yet) may be edited` };
+    // 'quarantined' is also editable: it's the ONLY way a quarantined PRD's
+    // createdVia stamp gets written (the adopt action below), so refusing it
+    // here would make quarantine irreversible through the API.
+    if (job && job.status !== 'pending' && job.status !== 'quarantined') {
+      return { ok: false, error: `job status is "${job.status}" — only a not-yet-running PRD (status "pending"/"quarantined", or no queue row yet) may be edited` };
     }
 
     let dir = null;

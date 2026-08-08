@@ -16,8 +16,8 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { splitFrontmatter } = require('./prdFrontmatter.cjs');
-const { resolvePrdWriteDir } = require('./prdLocations.cjs');
+const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./prdFrontmatter.cjs');
+const { resolvePrdWriteDir, resolvePrdsDirs } = require('./prdLocations.cjs');
 const { projectQueuePath } = require('./queueStore.cjs');
 const { expandHome } = require('./expandHome.cjs');
 
@@ -213,4 +213,67 @@ async function consolidateFlatPrds(cwd, opts = {}) {
   return { moved, failed, skipped };
 }
 
-module.exports = { migratePrds, consolidateFlatPrds, LIVE_JOB_STATUSES };
+/**
+ * legacyAdoptExistingPrds() — one-time (per file), idempotent rollout
+ * migration for the PRD-authoring-lockdown feature: every PRD source .md
+ * already on disk when this ships has no `createdVia` frontmatter (that
+ * field didn't exist yet), and reconcile()'s new provenance gate would
+ * otherwise quarantine every single one of them the very first boot after
+ * this lands. Runs at every boot (see scheduler.cjs's runPrdMigration,
+ * BEFORE reconcile() ever gets a chance to see these files) and stamps
+ * `createdVia: legacy-adopted` + `issuedAt: <this run's timestamp>` on any
+ * `.md` under a project's PRD dirs (flat + every Epic's, live only — never
+ * the retired prds-archived/ dirs, since an archived PRD isn't reconciled
+ * again and stamping it would just be needless churn) that doesn't already
+ * carry a `createdVia` value.
+ *
+ * Idempotent by construction: a file already stamped (by this migration on
+ * a prior boot, or by prdCreate.cjs at create time) is skipped outright, so
+ * a repeat run across every subsequent boot is a cheap scan-and-skip.
+ * Failures are per-file and non-fatal — one unreadable/unwritable PRD must
+ * never abort the sweep for every other project.
+ */
+async function legacyAdoptExistingPrds() {
+  let dirs;
+  try {
+    dirs = resolvePrdsDirs();
+  } catch (e) {
+    return { stamped: 0, failed: [{ file: '(resolvePrdsDirs)', reason: e?.message ?? 'failed to enumerate PRD dirs' }] };
+  }
+
+  let stamped = 0;
+  const failed = [];
+  const issuedAt = new Date().toISOString();
+
+  for (const dir of dirs) {
+    let entries;
+    try {
+      entries = await fsp.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.md') || name.startsWith('.')) continue;
+      const filePath = path.join(dir, name);
+      try {
+        const raw = await fsp.readFile(filePath, 'utf8');
+        const { frontmatter: fm, body } = parsePrdFile(raw);
+        if (fm.createdVia) continue; // already stamped — nothing to do
+        fm.createdVia = 'legacy-adopted';
+        fm.issuedAt = issuedAt;
+        const newRaw = serializePrdFile(fm, body);
+        const tmp = `${filePath}.tmp-${process.pid}`;
+        await fsp.writeFile(tmp, newRaw, 'utf8');
+        await fsp.rename(tmp, filePath);
+        stamped += 1;
+      } catch (e) {
+        if (e?.code === 'ENOENT') continue; // raced with a concurrent mover/archiver
+        failed.push({ file: filePath, reason: e?.message ?? 'stamp failed' });
+      }
+    }
+  }
+
+  return { stamped, failed };
+}
+
+module.exports = { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds, LIVE_JOB_STATUSES };

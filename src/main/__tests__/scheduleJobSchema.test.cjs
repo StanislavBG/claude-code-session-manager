@@ -44,7 +44,7 @@ function validJob(overrides = {}) {
 }
 
 test('JOB_STATUSES matches ScheduleJobStatus', () => {
-  expect(JOB_STATUSES).toEqual(['pending', 'running', 'investigating', 'completed', 'failed', 'needs_review']);
+  expect(JOB_STATUSES).toEqual(['pending', 'running', 'investigating', 'completed', 'failed', 'needs_review', 'quarantined']);
 });
 
 test('a valid full job record parses', () => {

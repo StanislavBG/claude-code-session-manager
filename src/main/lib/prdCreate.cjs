@@ -57,6 +57,15 @@ function buildPrdBody(input) {
   // filename prefix is the single source of truth for grouping; adding a
   // second one here would let the two drift out of sync.
   const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`, `estimateMinutes: ${estimateMinutes}`];
+  // Provenance stamp (PRD-authoring lockdown): every PRD written through this
+  // function — the sole in-process implementation behind both the admin
+  // HTTP create-prd route and the renderer's chat:create-prd IPC handler —
+  // carries proof it was authored via the API, not a bare Write/Edit tool
+  // call. scheduler.cjs's reconcile() refuses to run a discovered PRD with no
+  // `createdVia` (quarantines it instead); this line is why every
+  // API-created PRD is exempt. Stamped here, not left to a caller, so the
+  // guarantee can't be forgotten by a future route.
+  fmLines.push('createdVia: scheduler-api', `issuedAt: ${new Date().toISOString()}`);
   // Optional, additive: traces this PRD back to the PromptTicket (PRD 748)
   // that was classified 'develop' and spawned it (PRD 749).
   if (sourcePromptId) fmLines.push(`sourcePromptId: ${sourcePromptId}`);

@@ -92,6 +92,13 @@ async function parsePrdRaw(filePath) {
     // queue row is completed (a slug with no row is treated as already
     // done/archived, matching retireCompletedSlugs semantics).
     dependsOn: parseDependsOn(fm.dependsOn),
+    // Provenance stamp (PRD-authoring lockdown): set only by prdCreate.cjs's
+    // buildPrdBody (create) or the update-prd route's legacy-adopt patch
+    // (migration/manual adopt). A PRD discovered on disk with no value here
+    // was never written through the sanctioned API path — reconcile()
+    // quarantines it instead of queuing it to run.
+    createdVia: fm.createdVia || null,
+    issuedAt: fm.issuedAt || null,
     body: body.trim(),
   };
 }

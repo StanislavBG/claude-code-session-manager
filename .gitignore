@@ -14,6 +14,11 @@ playwright-report
 .claude/agents/*
 !.claude/agents/builder.md
 !.claude/agents/project-home-builder.md
+# Tracked deliberately (unlike settings.local.json): the guard-prd-writes
+# PreToolUse hook must be active for every clone/worktree/headless scheduler
+# run against this repo, not just this machine's local config — see
+# scripts/hooks/guard-prd-writes.cjs's header for the install/uninstall note.
+!.claude/settings.json
 .research/
 <path>
 

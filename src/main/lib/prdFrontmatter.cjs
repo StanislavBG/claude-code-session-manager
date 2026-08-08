@@ -57,13 +57,19 @@ function splitFrontmatter(raw) {
  * guarantee the renderer's PRD editor already relies on — an edit through
  * either surface never reorders or drops a key it didn't touch. Recognized
  * key set intentionally mirrors the TS module exactly (title, cwd,
- * estimateMinutes, parallelGroup, sourcePromptId, sourceTabId, tag); every
- * other frontmatter key (e.g. dependsOn) round-trips via `extras`, same as
- * the renderer's editor today.
+ * estimateMinutes, parallelGroup, sourcePromptId, sourceTabId, tag,
+ * createdVia, issuedAt); every other frontmatter key (e.g. dependsOn)
+ * round-trips via `extras`, same as the renderer's editor today.
+ *
+ * `createdVia`/`issuedAt` (PRD provenance-lockdown) are recognized here so
+ * the update-prd route (the only sanctioned way to stamp a PRD's provenance
+ * after creation — see prdCreate.cjs's buildPrdBody for the create-time
+ * stamp) round-trips them like any other known key rather than shunting them
+ * into `extras`.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -117,6 +123,12 @@ function applyKey(fm, key, after) {
       // here even if present in a hand-edited file — see this file's header
       // comment.
       if (v === 'feature' || v === 'bug' || v === 'build') fm.tag = v;
+      return;
+    case 'createdVia':
+      fm.createdVia = String(v);
+      return;
+    case 'issuedAt':
+      fm.issuedAt = String(v);
       return;
   }
 }

@@ -96,38 +96,39 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       ],
     },
   'system-prompt': {
-      headline: 'Edit the CLAUDE.md files that shape Claude\'s house rules',
+      headline: 'Edit ~/.claude/CLAUDE.md — the house rules every session on this machine starts with',
       intro:
-        'CLAUDE.md is a plain-text file Claude reads at the start of every session. Whatever you write here is added to its instructions — so it\'s where you put coding standards, communication preferences, project context, and “always do X / never do Y” rules. Up to three files combine at runtime: User (global, applies everywhere), Project (this repo), and Local (your personal overrides for this repo, gitignored by convention). This tab is a markdown editor over whichever scope you pick.',
+        'CLAUDE.md is a plain-text file Claude reads at the start of every session. Whatever you write here is added to its instructions — so it\'s where you put coding standards, communication preferences, and “always do X / never do Y” rules. This tab edits exactly ONE of them: the User file at ~/.claude/CLAUDE.md, which applies everywhere, in every project. A project can also carry its own <repo>/CLAUDE.md and <repo>/CLAUDE.local.md — those are contextual to that project and are read by the CLI from the session\'s own directory when it launches there, so they are edited with the project\'s files, not from this machine-wide screen.',
       sections: [
         {
           title: 'Editor / Presets toggle',
           items: [
-            { term: 'Editor', body: 'Edit the actual CLAUDE.md file at the selected scope. Save writes it to disk; Claude picks it up on its next session start.' },
+            { term: 'Editor', body: 'Edit the real ~/.claude/CLAUDE.md. Save writes it to disk; Claude picks it up on its next session start.' },
             { term: 'Presets', body: 'Browse a library of starter prompts. Use one as a starting point, then refine it in the editor.' },
           ],
         },
         {
-          title: 'Scope (User / Project / Local)',
+          title: 'What this file reaches — and what it doesn\'t',
           items: [
-            { term: 'User', body: 'Lives at ~/.claude/CLAUDE.md. Applies to every session you start, in every repo. Best for personal style: communication tone, default tooling preferences, things you always want.' },
-            { term: 'Project', body: 'Lives at <repo>/CLAUDE.md. Applies only when working in this repo. Best for shared team context: stack, architecture, do/don\'t lists, conventions. Commit it to git.' },
-            { term: 'Local', body: 'Lives at <repo>/CLAUDE.local.md. Applies only in this repo, only on your machine. Best for personal overrides that shouldn\'t reach teammates. Gitignore it.' },
-            { body: 'Project and Local scopes need an open project — if no tab has a working directory, those scopes are unavailable and the editor prompts you to open one. At runtime all present files combine; more-specific wins: Local > Project > User.' },
+            { term: 'User (edited here)', body: 'Lives at ~/.claude/CLAUDE.md. Applies to every session you start, in every repo. Best for personal style: communication tone, default tooling preferences, things you always want.' },
+            { term: 'Project (not edited here)', body: 'Lives at <repo>/CLAUDE.md, checked into git — shared team context: stack, architecture, do/don\'t lists. It only means anything relative to a project directory, so it is picked up when a session launches in that repo; open it from the project\'s own files.' },
+            { term: 'Local (not edited here)', body: 'Lives at <repo>/CLAUDE.local.md, gitignored — personal overrides that shouldn\'t reach teammates. Same story as Project: contextual to one repo, applied at session launch.' },
+            { body: 'At runtime every file that is present combines; more-specific wins: Local > Project > User. This screen only owns the base layer.' },
           ],
         },
         {
           title: 'What\'s shown in the header',
           items: [
             { term: 'chars / tokens', body: 'A rough size estimate (~4 chars per token). The bigger the file, the more of Claude\'s context window it consumes before your real prompt — keep it tight.' },
-            { term: 'dirty marker (•) on a scope', body: 'You have unsaved edits at that scope. Switching scope does NOT auto-save; use Save in the bottom bar (or Revert to discard).' },
-            { body: 'If a file doesn\'t exist yet, the bottom bar notes it will be created on save.' },
+            { term: 'unsaved edits', body: 'Save and Revert live in the bottom bar; navigating away does NOT auto-save.' },
+            { body: 'If the file doesn\'t exist yet, the bottom bar notes it will be created on save.' },
           ],
         },
       ],
       tips: [
-        'New users: start with 3–5 bullets at User scope (“be concise”, “use Python type hints”, “always run tests after changes”). That alone changes Claude\'s behavior noticeably.',
+        'New users: start with 3–5 bullets here (“be concise”, “use Python type hints”, “always run tests after changes”). That alone changes Claude\'s behavior noticeably.',
         'Don\'t write essays. Claude reads CLAUDE.md before every reply, so every word costs tokens. One-line rules beat paragraphs.',
+        'Rule of thumb for what belongs here: if it would still be true in a repo you haven\'t created yet, it is a User rule. If it names this stack, this architecture, or this team, it belongs in that project\'s own CLAUDE.md.',
       ],
     },
   'settings': {

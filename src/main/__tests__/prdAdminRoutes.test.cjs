@@ -1,0 +1,311 @@
+/**
+ * prdAdminRoutes.test.cjs — unit tests for PRD 1024's admin HTTP routes
+ * (list/get/update/archive/cancel/retag) and the scheduler.cjs `remote`
+ * methods they delegate to. Exercises real HTTP round-trips against a real
+ * (temp-HOME) filesystem, matching prdCreate.test.cjs's pattern for the
+ * create-prd route.
+ *
+ * Run: timeout 120 npx vitest run src/main/__tests__/prdAdminRoutes.test.cjs
+ */
+
+'use strict';
+
+import { test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+
+let tmpHome;
+let originalHome;
+let scheduler;
+let prdAdminRoutes;
+let config;
+let createAdminHttp;
+
+beforeAll(() => {
+  originalHome = process.env.HOME;
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-admin-prd-routes-'));
+  process.env.HOME = tmpHome;
+
+  // Load AFTER HOME is stubbed — scheduler.cjs/config.cjs snapshot
+  // os.homedir() into module-level constants at load time, not lazily.
+  scheduler = require('../scheduler.cjs');
+  prdAdminRoutes = require('../lib/prdAdminRoutes.cjs');
+  config = require('../config.cjs');
+  ({ createAdminHttp } = require('../lib/localAdminHttp.cjs'));
+
+  if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
+    throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);
+  }
+
+  // allProjectCwds()/activeProjectCwds() (queueStore.cjs's stateCwds, and
+  // prdLocations.cjs's resolvePrdsDirs) discover project cwds by scanning
+  // ~/.claude/projects/*/*.jsonl for a `cwd` field — fake one project
+  // transcript pointing at the real on-disk fixture cwd this file uses,
+  // same pattern as scheduler-verify-prd-path.test.cjs.
+  const projDir = path.join(tmpHome, '.claude', 'projects', 'fake-project-slug');
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projDir, 'session.jsonl'),
+    `${JSON.stringify({ cwd: path.join(tmpHome, 'fake-project-cwd') })}\n`,
+    'utf8',
+  );
+});
+
+afterAll(() => {
+  process.env.HOME = originalHome;
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
+
+function projectCwd() {
+  const cwd = path.join(tmpHome, 'fake-project-cwd');
+  fs.mkdirSync(cwd, { recursive: true });
+  config.addAllowedRoot(cwd);
+  return cwd;
+}
+
+function uniqueSlug(prefix) {
+  return `${prefix}-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+}
+
+async function writePrdFixture({ cwd, epicId, slug, extra = '' }) {
+  const prdsDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId, 'prds');
+  await fsp.mkdir(prdsDir, { recursive: true });
+  const filePath = path.join(prdsDir, `${slug}.md`);
+  const body = `---\ntitle: fixture title\ncwd: ${cwd}\nestimateMinutes: 10\n${extra}---\n\n# Goal\n\ndo the thing\n`;
+  await fsp.writeFile(filePath, body, 'utf8');
+  return filePath;
+}
+
+function request(port, { method = 'GET', path: reqPath, token, body }) {
+  return new Promise((resolve, reject) => {
+    const headers = {};
+    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+    let payload;
+    if (body !== undefined) {
+      payload = JSON.stringify(body);
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(payload);
+    }
+    const req = http.request({ hostname: '127.0.0.1', port, method, path: reqPath, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* leave null */ }
+        resolve({ status: res.statusCode, json, text });
+      });
+    });
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function startAdmin() {
+  const prevE2e = process.env.SM_E2E;
+  process.env.SM_E2E = '1';
+  const admin = createAdminHttp();
+  prdAdminRoutes.registerAdminRoute(admin, scheduler.remote);
+  const { port, token } = await admin.start();
+  if (prevE2e === undefined) delete process.env.SM_E2E; else process.env.SM_E2E = prevE2e;
+  return { admin, port, token };
+}
+
+test('GET /admin/scheduler/prds without token returns 401', async () => {
+  const { admin, port } = await startAdmin();
+  try {
+    const res = await request(port, { path: '/admin/scheduler/prds' });
+    expect(res.status).toBe(401);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prds lists a live PRD with status null (no queue row yet), filterable by cwd', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-list';
+  const slug = uniqueSlug('list-prds');
+  await writePrdFixture({ cwd, epicId, slug });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prds?cwd=${encodeURIComponent(cwd)}`, token });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    const entry = res.json.prds.find((p) => p.slug === slug);
+    expect(entry).toBeTruthy();
+    expect(entry.status).toBe(null);
+    expect(entry.epicId).toBe(epicId);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prd?slug=&cwd= returns parsed frontmatter + body', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-get';
+  const slug = uniqueSlug('get-prd');
+  await writePrdFixture({ cwd, epicId, slug });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prd?slug=${slug}&cwd=${encodeURIComponent(cwd)}`, token });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.frontmatter.title).toBe('fixture title');
+    expect(res.json.body).toMatch(/do the thing/);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prd for a nonexistent slug returns 404', async () => {
+  const cwd = projectCwd();
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prd?slug=${uniqueSlug('nope')}&cwd=${encodeURIComponent(cwd)}`, token });
+    expect(res.status).toBe(404);
+    expect(res.json.ok).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/update-prd edits a not-yet-queued PRD and preserves unrecognized frontmatter keys', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-update';
+  const slug = uniqueSlug('update-prd');
+  await writePrdFixture({ cwd, epicId, slug, extra: 'dependsOn: [some-other-slug]\n' });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/update-prd', token,
+      body: { slug, cwd, frontmatter: { title: 'edited title', estimateMinutes: 25 } },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+
+    const raw = await fsp.readFile(path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId, 'prds', `${slug}.md`), 'utf8');
+    expect(raw).toMatch(/title: edited title/);
+    expect(raw).toMatch(/estimateMinutes: 25/);
+    // Unrecognized key round-trips verbatim.
+    expect(raw).toMatch(/dependsOn: \[some-other-slug\]/);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/update-prd refuses a slug whose job is running, naming the current status', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-update-running';
+  const slug = uniqueSlug('update-prd-running');
+  await writePrdFixture({ cwd, epicId, slug });
+
+  await scheduler.writeQueue({
+    jobs: [{ slug, title: 'x', cwd, status: 'running', runtime: {} }],
+    config: {},
+    paused: null,
+  });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/update-prd', token,
+      body: { slug, cwd, frontmatter: { title: 'should not land' } },
+    });
+    expect(res.status).toBe(409);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).toMatch(/running/);
+  } finally {
+    await admin.stop();
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('POST /admin/scheduler/cancel-job cancels a pending job (no cancelled status exists — lands as failed)', async () => {
+  const cwd = projectCwd();
+  const slug = uniqueSlug('cancel-pending');
+  await scheduler.writeQueue({
+    jobs: [{ slug, title: 'x', cwd, status: 'pending' }],
+    config: {},
+    paused: null,
+  });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { method: 'POST', path: '/admin/scheduler/cancel-job', token, body: { slug } });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.status).toBe('failed');
+    expect(res.json.wasRunning).toBe(false);
+  } finally {
+    await admin.stop();
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('POST /admin/scheduler/cancel-job refuses an already-terminal job', async () => {
+  const cwd = projectCwd();
+  const slug = uniqueSlug('cancel-terminal');
+  await scheduler.writeQueue({
+    jobs: [{ slug, title: 'x', cwd, status: 'completed' }],
+    config: {},
+    paused: null,
+  });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { method: 'POST', path: '/admin/scheduler/cancel-job', token, body: { slug } });
+    expect(res.status).toBe(409);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).toMatch(/terminal/);
+  } finally {
+    await admin.stop();
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('POST /admin/scheduler/archive-prd moves a PRD to prds-archived/', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-archive';
+  const slug = uniqueSlug('archive-prd');
+  const filePath = await writePrdFixture({ cwd, epicId, slug });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { method: 'POST', path: '/admin/scheduler/archive-prd', token, body: { slugs: [slug] } });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.archived).toBe(1);
+    expect(fs.existsSync(filePath)).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/retag-prd rewrites estimateMinutes frontmatter', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-retag';
+  const slug = uniqueSlug('retag-prd');
+  const filePath = await writePrdFixture({ cwd, epicId, slug });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/retag-prd', token,
+      body: { items: [{ slug, estimateMinutes: 42 }] },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.retagged).toBe(1);
+    const raw = await fsp.readFile(filePath, 'utf8');
+    expect(raw).toMatch(/estimateMinutes: 42/);
+  } finally {
+    await admin.stop();
+  }
+});

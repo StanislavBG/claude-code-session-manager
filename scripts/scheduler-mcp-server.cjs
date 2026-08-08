@@ -167,7 +167,7 @@ const TOOLS = [
             parallelGroup: { type: 'number' },
             sourcePromptId: { type: 'string' },
             sourceTabId: { type: 'string' },
-            tag: { type: 'string', enum: ['feature', 'bug', 'discussion', 'build'] },
+            tag: { type: 'string', enum: ['feature', 'bug', 'build'] },
           },
         },
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter)' },

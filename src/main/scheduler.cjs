@@ -3378,6 +3378,15 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     const newlyCompletedPrds = [];
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
+      // A job already moved off 'running' by someone else (namely
+      // remote.cancelJob, PRD 1024 — it SIGTERMs the process then finalizes
+      // the row to 'failed' before this exit handler necessarily runs) is
+      // not this run's to finalize: doing so anyway could re-legalize the
+      // row via a legal failed->completed/needs_review edge (see
+      // scheduleJobTransitions.cjs's LEGAL_TRANSITIONS) and silently
+      // undo the cancellation. Skip — the row already reflects its real
+      // terminal state.
+      if (i2 >= 0 && s.jobs[i2].status !== 'running') return;
       if (i2 >= 0) {
         const treatAsPending = res.rateLimited || (s.paused && s.paused.reason === 'rate_limit');
         if (treatAsPending) {
@@ -5260,8 +5269,15 @@ const remote = {
 
     let raw;
     try {
+      // Symlink defense, matching writePrd's comment: safeSlugPathIn is
+      // lexical and does not resolve symlinks. updatePrd is a WRITE path
+      // (unlike getPrdParsed's read-only realpath check), so also reject a
+      // target that is itself already a symlink — a rogue job could plant
+      // one inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
       if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const existing = await fsp.lstat(filePath).catch(() => null);
+      if (existing && existing.isSymbolicLink()) return { ok: false, error: 'invalid slug' };
       raw = await fsp.readFile(real, 'utf8');
     } catch (e) {
       return { ok: false, error: e?.message ?? 'read failed' };
@@ -5318,7 +5334,7 @@ const remote = {
       delete j.runtime;
     });
     await broadcast({ flush: true });
-    return { ok: true, slug, status: 'failed', wasRunning };
+    return { ok: true, slug, status: 'failed', wasRunning, cwd: job.cwd ?? null };
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that

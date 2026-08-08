@@ -327,6 +327,56 @@ const scheduleRetagPrd = z.object({
   items: z.array(scheduleRetagItem).min(1).max(500),
 });
 
+// ──────────────────────────────────────────── Admin API — PRD lifecycle (PRD 1024)
+//
+// GET routes parse their input from URLSearchParams (all values arrive as
+// strings), so numeric/array fields aren't accepted here — only slug/cwd/
+// epicId/status, matching what a query string can actually carry.
+const adminListPrdsQuery = z.object({
+  cwd: z.string().min(1).max(4096).optional(),
+  epicId: z.string().min(1).max(200).optional(),
+  status: z.string().min(1).max(40).optional(),
+});
+
+const adminGetPrdQuery = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  cwd: z.string().min(1).max(4096).optional(),
+});
+
+// Partial frontmatter patch for update-prd — same recognized-key set as
+// prdFrontmatter.cjs's parsePrdFile/serializePrdFile round-trip pair. Every
+// field optional; the route refuses an empty patch+no-body request via the
+// top-level .refine below.
+const adminPrdFrontmatterPatch = z.object({
+  title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  estimateMinutes: z.number().int().min(1).max(100000).optional(),
+  parallelGroup: z.number().int().min(0).max(999999).optional(),
+  sourcePromptId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  sourceTabId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  // 'discussion' deliberately excluded: matches prdFrontmatter.cjs's
+  // parsePrdFile, which never parses that value for a PRD's tag key (a
+  // discussion-tagged Epic never reaches PRD authoring).
+  tag: z.enum(['feature', 'bug', 'build']).optional(),
+});
+
+const adminUpdatePrd = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  cwd: z.string().min(1).max(4096).optional(),
+  frontmatter: adminPrdFrontmatterPatch.optional(),
+  body: z.string().refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= PRD_WRITE_MAX_BYTES,
+    `body must be ≤ ${PRD_WRITE_MAX_BYTES} bytes`,
+  ).optional(),
+}).refine(
+  (it) => (it.frontmatter && Object.keys(it.frontmatter).length > 0) || it.body !== undefined,
+  'at least one of frontmatter or body is required',
+);
+
+const adminCancelJob = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+});
+
 // ──────────────────────────────────────────── Projects
 const ENCODED_SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -812,6 +862,10 @@ module.exports = {
     schedulerCreatePrd,
     scheduleArchivePrd,
     scheduleRetagPrd,
+    adminListPrdsQuery,
+    adminGetPrdQuery,
+    adminUpdatePrd,
+    adminCancelJob,
     setConfigSchema,
     setSessionSlotsSchema,
     shellOpen,

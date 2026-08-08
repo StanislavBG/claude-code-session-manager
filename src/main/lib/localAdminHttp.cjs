@@ -151,17 +151,24 @@ function createAdminHttp() {
       sendJson(res, 401, { ok: false, error: 'unauthorized' });
       return;
     }
-    if (req.method === 'GET' && req.url === HEALTH_PATH) {
+    // Route lookup is keyed by pathname only — req.url carries the raw query
+    // string too, which would otherwise never match a registered route (every
+    // route before PRD 1024 was query-free, so this was a latent gap, not a
+    // behavior change for them). `query` is handed to the route handler as a
+    // third argument (URLSearchParams) for routes that need it (e.g. GET
+    // /admin/scheduler/prds?cwd=&epicId=&status=).
+    const urlObj = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'GET' && urlObj.pathname === HEALTH_PATH) {
       sendJson(res, 200, { ok: true });
       return;
     }
     try {
-      const handler = routes.get(`${req.method} ${req.url}`);
+      const handler = routes.get(`${req.method} ${urlObj.pathname}`);
       if (!handler) {
         sendJson(res, 404, { ok: false, error: 'not found' });
         return;
       }
-      await handler(req, res);
+      await handler(req, res, urlObj.searchParams);
     } catch (e) {
       sendJson(res, 500, { ok: false, error: e?.message ?? 'internal error' });
     }

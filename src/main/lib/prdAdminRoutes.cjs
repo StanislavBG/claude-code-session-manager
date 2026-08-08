@@ -1,0 +1,175 @@
+/**
+ * prdAdminRoutes.cjs — admin HTTP routes closing the PRD-lifecycle capability
+ * gap (PRD 1024, step 1 of locking the PRD entity behind the scheduler
+ * service boundary — see that PRD's Goal). Before this file, the admin API
+ * exposed only create-prd/jobs/reset-job/send-prompt: there was no way to
+ * READ, LIST, EDIT, ARCHIVE, or CANCEL a PRD/job over HTTP, which is exactly
+ * why direct filesystem access to session-manager-operations/scheduler/ was
+ * still sanctioned. This file plumbs those operations to HTTP; it adds no
+ * enforcement/denial of direct access — that's the dependent PRD's job (see
+ * this PRD's "Out of scope").
+ *
+ * Every route here reuses an existing verified implementation rather than
+ * reimplementing it:
+ *   - list/get/update/cancel delegate to scheduler.cjs's `remote` object
+ *     (job-status-aware; remote already owns the PRD-dir search + symlink
+ *     defense patterns these need)
+ *   - archive/retag delegate to queueOps.cjs's archiveMany/retagMany
+ *     directly (job-status-agnostic bulk file ops; already used by the
+ *     renderer's schedule:archive-prd/schedule:retag-prd IPC handlers)
+ *
+ * Registered against the same injected localAdminHttp.cjs transport as
+ * scheduler.cjs's registerAdminRoutes and prdCreate.cjs's registerAdminRoute
+ * (see index.cjs) — auth, loopback-only binding, and the bearer-token
+ * lifecycle are all the transport's job, not this file's.
+ */
+'use strict';
+
+const { schemas } = require('../ipcSchemas.cjs');
+const { readBody, sendJson } = require('./localAdminHttp.cjs');
+const { appendAuditEvent } = require('./auditLog.cjs');
+const queueOps = require('../queueOps.cjs');
+
+function parseJsonBody(raw) {
+  try {
+    return { ok: true, value: raw ? JSON.parse(raw) : {} };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * registerAdminRoute(adminHttp, remote) — `remote` is scheduler.cjs's
+ * `remote` object, injected (not required directly) so this file stays
+ * testable without booting Electron, matching prdCreate.cjs's and
+ * scheduler.cjs's own registerAdminRoute(s) pattern.
+ */
+function registerAdminRoute(adminHttp, remote) {
+  adminHttp.registerRoute('GET', '/admin/scheduler/prds', async (req, res, query) => {
+    let input;
+    try {
+      input = schemas.adminListPrdsQuery.parse(Object.fromEntries(query ?? []));
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid query', details: e?.issues ?? e?.message });
+      return;
+    }
+    const prds = await remote.listPrds(input);
+    sendJson(res, 200, { ok: true, prds });
+  });
+
+  adminHttp.registerRoute('GET', '/admin/scheduler/prd', async (req, res, query) => {
+    let input;
+    try {
+      input = schemas.adminGetPrdQuery.parse(Object.fromEntries(query ?? []));
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid query', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = await remote.getPrdParsed(input.slug, input.cwd);
+    if (!result.ok) {
+      sendJson(res, 404, result);
+      return;
+    }
+    sendJson(res, 200, result);
+  });
+
+  adminHttp.registerRoute('POST', '/admin/scheduler/update-prd', async (req, res) => {
+    const raw = await readBody(req);
+    const parsedBody = parseJsonBody(raw);
+    if (!parsedBody.ok) {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    let input;
+    try {
+      input = schemas.adminUpdatePrd.parse(parsedBody.value);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = await remote.updatePrd(input);
+    if (!result.ok) {
+      const status = /not found/i.test(result.error ?? '') ? 404 : /status is/i.test(result.error ?? '') ? 409 : 400;
+      sendJson(res, status, result);
+      return;
+    }
+    appendAuditEvent('admin_prd_update', { route: '/admin/scheduler/update-prd', slug: input.slug, cwd: input.cwd ?? null });
+    sendJson(res, 200, result);
+  });
+
+  adminHttp.registerRoute('POST', '/admin/scheduler/archive-prd', async (req, res) => {
+    const raw = await readBody(req);
+    const parsedBody = parseJsonBody(raw);
+    if (!parsedBody.ok) {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    let input;
+    try {
+      input = schemas.scheduleArchivePrd.parse(parsedBody.value);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = await queueOps.archiveMany(input.slugs);
+    // Audit only the slugs that actually archived — archiveMany's `results`
+    // array carries the real per-slug outcome; logging every requested slug
+    // regardless of whether it succeeded would misrepresent a partial-failure
+    // batch as a clean one in audit-log.jsonl.
+    for (const r of result.results ?? []) {
+      if (!r.ok) continue;
+      appendAuditEvent('admin_prd_archive', { route: '/admin/scheduler/archive-prd', slug: r.slug, cwd: null });
+    }
+    sendJson(res, result.ok ? 200 : 500, result);
+  });
+
+  adminHttp.registerRoute('POST', '/admin/scheduler/cancel-job', async (req, res) => {
+    const raw = await readBody(req);
+    const parsedBody = parseJsonBody(raw);
+    if (!parsedBody.ok) {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    let input;
+    try {
+      input = schemas.adminCancelJob.parse(parsedBody.value);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = await remote.cancelJob(input.slug);
+    if (!result.ok) {
+      const status = /not found/i.test(result.error ?? '') ? 404 : 409;
+      sendJson(res, status, result);
+      return;
+    }
+    appendAuditEvent('admin_job_cancel', { route: '/admin/scheduler/cancel-job', slug: input.slug, cwd: result.cwd ?? null });
+    sendJson(res, 200, result);
+  });
+
+  adminHttp.registerRoute('POST', '/admin/scheduler/retag-prd', async (req, res) => {
+    const raw = await readBody(req);
+    const parsedBody = parseJsonBody(raw);
+    if (!parsedBody.ok) {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    let input;
+    try {
+      input = schemas.scheduleRetagPrd.parse(parsedBody.value);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = await queueOps.retagMany(input.items);
+    // Audit only the items that actually retagged (see the archive-prd route
+    // above for why this must read result.results rather than the request).
+    for (const r of result.results ?? []) {
+      if (!r.ok) continue;
+      appendAuditEvent('admin_prd_retag', { route: '/admin/scheduler/retag-prd', slug: r.newSlug ?? r.slug, cwd: null });
+    }
+    sendJson(res, result.ok ? 200 : 500, result);
+  });
+}
+
+module.exports = { registerAdminRoute };

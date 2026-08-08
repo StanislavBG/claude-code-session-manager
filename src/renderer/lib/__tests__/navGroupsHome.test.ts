@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NAV_ITEMS, getNavItemsForFace, isHomeOnlyNavKey } from '../navGroups'
+import { NAV_ITEMS, getNavItemsForFace, isHomeOnlyNavKey, isProjectOnlyNavKey } from '../navGroups'
 import type { NavFace } from '../navFace'
 
 const VALID_FACES: NavFace[] = ['home', 'project']
@@ -23,8 +23,8 @@ describe('getNavItemsForFace', () => {
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
     'history',
   ]
-  const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host']
-  const BOTH = ['scheduler', 'projects']
+  const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host', 'scheduler']
+  const BOTH = ['projects']
 
   it('home face returns home-only + both keys', () => {
     const keys = getNavItemsForFace('home').map((item) => item.key)
@@ -172,15 +172,23 @@ describe('memory is project-only', () => {
 // ('remote' nav row retired with the web-remote feature removal, 2026-08-06 —
 // the NavKey literal no longer exists, so absence is enforced by the type system.)
 
-describe('scheduler — one combined screen on both faces, retired standalone sm-config folded in here', () => {
-  it('NAV_ITEMS tags scheduler with faces: [home, project] and no per-face label override', () => {
+describe('scheduler is project-only (removed from the Home face), retired standalone sm-config folded in here', () => {
+  // Every Scheduler route is cwd-scoped (PRDs under
+  // `<cwd>/session-manager-operations/scheduler/`, per-project queue shards);
+  // the Home face could only ever have shown the federated all-projects view,
+  // which is postponed.
+  it('NAV_ITEMS tags scheduler with faces: [project] and no per-face label override', () => {
     const item = NAV_ITEMS.find((i) => i.key === 'scheduler')
-    expect(item?.faces).toEqual(['home', 'project'])
+    expect(item?.faces).toEqual(['project'])
     expect(item?.labelByFace).toBeUndefined()
   })
 
-  it('getNavItemsForFace resolves the same "Scheduler" label on both faces', () => {
-    expect(getNavItemsForFace('home').find((i) => i.key === 'scheduler')?.label).toBe('Scheduler')
+  it('home face excludes scheduler', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).not.toContain('scheduler')
+  })
+
+  it('project face keeps the "Scheduler" label', () => {
     expect(getNavItemsForFace('project').find((i) => i.key === 'scheduler')?.label).toBe('Scheduler')
   })
 
@@ -238,11 +246,42 @@ describe('settings-shaped editors are HOME-only (consolidated from BOTH)', () =>
 
 describe('isHomeOnlyNavKey', () => {
   it('is false for a BOTH-face key', () => {
+    expect(isHomeOnlyNavKey('projects')).toBe(false)
+  })
+
+  it('is false for a PROJECT-only key', () => {
     expect(isHomeOnlyNavKey('scheduler')).toBe(false)
   })
 
   it('is false for a NavKey absent from NAV_ITEMS', () => {
     expect(isHomeOnlyNavKey('editor')).toBe(false)
+  })
+})
+
+describe('isProjectOnlyNavKey', () => {
+  it.each(['project-home', 'terminal', 'scheduler', 'memory', 'bilko-host'] as const)(
+    'is true for %s', (key) => {
+      expect(isProjectOnlyNavKey(key)).toBe(true)
+    },
+  )
+
+  it('is false for a BOTH-face key', () => {
+    expect(isProjectOnlyNavKey('projects')).toBe(false)
+  })
+
+  it('is false for a HOME-only key', () => {
+    expect(isProjectOnlyNavKey('history')).toBe(false)
+    expect(isProjectOnlyNavKey('settings')).toBe(false)
+  })
+
+  it('is false for a NavKey absent from NAV_ITEMS', () => {
+    expect(isProjectOnlyNavKey('editor')).toBe(false)
+  })
+
+  it('is mutually exclusive with isHomeOnlyNavKey for every NAV_ITEMS key', () => {
+    for (const item of NAV_ITEMS) {
+      expect(isHomeOnlyNavKey(item.key) && isProjectOnlyNavKey(item.key)).toBe(false)
+    }
   })
 })
 

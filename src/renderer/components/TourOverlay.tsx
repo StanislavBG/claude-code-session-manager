@@ -73,11 +73,14 @@ export const TOUR_STEPS: ReadonlyArray<TourStep> = [
     position: 'right',
   },
   {
+    // No `target`: the Scheduler row is PROJECT-face-only (navGroups.ts), so on
+    // a first launch with no project tab open there is no element to spotlight.
+    // Renders as the documented centered, spotlight-less tooltip instead —
+    // deliberate here, not the silent degradation this file's e2e guards.
     id: 'scheduler',
     title: 'PRD scheduler',
-    body: "Drop a Markdown plan in this project's session-manager-operations/scheduler/prds/ and the scheduler runs it as a token-budget-managed claude -p job.",
-    target: '[data-testid="tour-scheduler"]',
-    position: 'right',
+    body: "Open a project tab and pick Scheduler in its sidebar: every PRD under that project's session-manager-operations/scheduler/ runs there as a token-budget-managed claude -p job. It is project-scoped — there is no machine-wide queue view.",
+    position: 'center',
   },
   {
     id: 'mainpane-actions',

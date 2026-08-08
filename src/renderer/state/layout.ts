@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 import { readAppPrefs } from '../lib/appPrefs'
 import type { NavFace } from '../lib/navFace'
-import { isHomeOnlyNavKey } from '../lib/navGroups'
+import { isHomeOnlyNavKey, isProjectOnlyNavKey } from '../lib/navGroups'
 import type { NavKey } from '../components/LeftNav'
 
 /**
@@ -83,11 +83,16 @@ interface LayoutState {
    * Servers, Hooks, Permissions, Settings — consolidated onto Home; see
    * that file's top-of-file precedent note) — this covers face-agnostic
    * entry points like CommandPalette's `nav:*` commands, which don't know
-   * or assert a face themselves. `openProjectPanel` flips it to 'project'
-   * and is used exclusively by the top-tab-selection call sites (TabBar tab
-   * click, tab-switch effect, new-session flows). Plain `openPanel` calls
-   * for every other (BOTH-face or PROJECT-only) id leave it untouched, so
-   * browsing the Home nav list stays on the Home face end to end. See
+   * or assert a face themselves. `openPanel` applies the MIRROR
+   * rule for a PROJECT-only NavKey (`isProjectOnlyNavKey`: Project Home,
+   * Sessions, Scheduler, Memory, Host on Bilko.run) and flips to 'project' —
+   * otherwise a face-agnostic route onto one of those (Home's "Open Scheduler
+   * →" buttons, the footer's paused-scheduler pill, `nav:scheduler` in the
+   * palette) would render a cwd-scoped screen beside the Home sidebar with no
+   * row lit. `openProjectPanel` flips to 'project' unconditionally and is used
+   * by the top-tab-selection call sites (TabBar tab click, tab-switch effect,
+   * new-session flows). Only a BOTH-face id (File Explorer) leaves the face
+   * untouched, so browsing either nav list stays on that face end to end. See
    * navFace.spec.ts's regression coverage.
    */
   navFace: NavFace
@@ -131,6 +136,18 @@ interface LayoutState {
   hydrateOpenToHomePref: () => Promise<void>
 }
 
+/**
+ * The one place `openPanel`/`focusPanel` decide whether routing to `id` also
+ * asserts a sidebar face. Home-only key (or 'overview') → 'home'; project-only
+ * key → 'project'; BOTH-face key → no patch, the current face is preserved.
+ * Returns a spreadable partial so a `set()` can apply it inline.
+ */
+function navFacePatch(id: string): { navFace?: NavFace } {
+  if (id === 'overview' || isHomeOnlyNavKey(id as NavKey)) return { navFace: 'home' }
+  if (isProjectOnlyNavKey(id as NavKey)) return { navFace: 'project' }
+  return {}
+}
+
 export const useLayout = create<LayoutState>((set, get) => ({
   panels: [...DEFAULT_LAYOUT],
   focusedPanelId: DEFAULT_LAYOUT[0]?.id ?? null,
@@ -146,7 +163,7 @@ export const useLayout = create<LayoutState>((set, get) => ({
     set((s) => ({
       focusedPanelId: id,
       focusToken: s.focusToken + 1,
-      ...(id === 'overview' || isHomeOnlyNavKey(id as NavKey) ? { navFace: 'home' as const } : null),
+      ...navFacePatch(id),
     }))
   },
   openProjectPanel: (id: string) => {
@@ -159,7 +176,7 @@ export const useLayout = create<LayoutState>((set, get) => ({
     if (!exists) return
     set({
       focusedPanelId: id,
-      ...(id === 'overview' || isHomeOnlyNavKey(id as NavKey) ? { navFace: 'home' as const } : null),
+      ...navFacePatch(id),
     })
   },
   resetLayout: () => {

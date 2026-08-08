@@ -55,7 +55,12 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'project-home', group: 'Workspace', label: 'Project Home', icon: 'home',     hint: 'What this project is, and what is in flight', faces: PROJECT },
   { key: 'terminal',   group: 'Workspace', label: 'Sessions',  icon: 'terminal',     hint: 'Independent goal-scoped sessions for this project', faces: PROJECT },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
-  { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'Global policy + this project\'s live PRD queue', faces: BOTH },
+  // Scheduler is PROJECT-only: every route and view it renders is scoped to a
+  // cwd (PRDs live in `<cwd>/session-manager-operations/scheduler/`, the queue
+  // shards are per-project). A Home-face copy could only show the federated
+  // all-projects view — cross-project queue monitoring we've deliberately
+  // postponed rather than build a federation layer for.
+  { key: 'scheduler',  group: 'Workspace', label: 'Scheduler',  icon: 'scheduler',    liveKind: 'scheduler', hint: 'This project\'s live PRD queue + scheduler policy', faces: PROJECT },
   // History is HOME-only: it is the machine-wide analytics/cost surface
   // (lib/historyProjectFold.ts folds every project's days together), so a
   // per-project copy of it was a second door onto the same cross-project
@@ -110,6 +115,19 @@ export const NAV_GROUP_BY_KEY: Partial<Record<NavKey, NavGroupLabel>> = Object.f
 export function isHomeOnlyNavKey(key: NavKey): boolean {
   const item = NAV_ITEMS.find((i) => i.key === key)
   return item != null && item.faces.length === 1 && item.faces[0] === 'home'
+}
+
+/**
+ * Mirror of `isHomeOnlyNavKey` for `faces: PROJECT` entries (Project Home,
+ * Sessions, Scheduler, Memory, Host on Bilko.run). Same purpose, opposite
+ * face: a face-agnostic route (CommandPalette's `nav:*`, the footer's
+ * scheduler pill, Home's "Open Scheduler →" buttons) that lands on one of
+ * these screens must assert `navFace: 'project'`, or the user ends up reading
+ * a project-scoped screen with the Home sidebar beside it and no row lit.
+ */
+export function isProjectOnlyNavKey(key: NavKey): boolean {
+  const item = NAV_ITEMS.find((i) => i.key === key)
+  return item != null && item.faces.length === 1 && item.faces[0] === 'project'
 }
 
 export const NAV_GROUP_DESCRIPTIONS: Record<NavGroupLabel, string> = {

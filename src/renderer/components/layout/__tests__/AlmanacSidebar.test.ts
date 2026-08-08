@@ -2,7 +2,7 @@
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { describe, expect, it, afterEach } from 'vitest'
+import { describe, expect, it, afterEach, beforeEach } from 'vitest'
 import { AlmanacSidebar } from '../AlmanacSidebar'
 import { useScheduleState } from '../../../state/scheduleState'
 import { useSessions } from '../../../state/sessions'
@@ -81,10 +81,9 @@ describe('AlmanacSidebar', () => {
       const text = nav?.textContent ?? ''
 
       // Workspace row: label + its navGroups.ts hint should both be visible
-      // text. Scheduler renders the same "Scheduler" label + hint on both
-      // faces now — no per-face labelByFace override.
+      // text. Scheduler is a PROJECT-face row with no labelByFace override.
       expect(text).toContain('Scheduler')
-      expect(text).toContain("Global policy + this project's live PRD queue")
+      expect(text).toContain("This project's live PRD queue + scheduler policy")
     } finally {
       act(() => root.unmount())
       container.remove()
@@ -141,6 +140,35 @@ describe('AlmanacSidebar', () => {
     } finally {
       act(() => homeMount.root.unmount())
       homeMount.container.remove()
+    }
+  })
+
+  // Scheduler is cwd-scoped end to end (per-project PRD dirs + queue shards),
+  // so it lives on the Project face only — the Home face would have needed a
+  // federated all-projects view we've postponed.
+  it('omits Scheduler from the home face and keeps it on the project face', () => {
+    useLayout.setState({ navFace: 'home' })
+    const homeMount = mount()
+    try {
+      const text = homeMount.container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
+      expect(text).not.toContain('Scheduler')
+      expect(text).not.toContain('live PRD queue')
+      expect(homeMount.container.querySelector('[data-testid="tour-scheduler"]')).toBeNull()
+    } finally {
+      act(() => homeMount.root.unmount())
+      homeMount.container.remove()
+    }
+
+    seedActiveTab('/tmp/project')
+    useLayout.setState({ navFace: 'project' })
+    const projectMount = mount('scheduler')
+    try {
+      const text = projectMount.container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
+      expect(text).toContain('Scheduler')
+      expect(projectMount.container.querySelector('[data-testid="tour-scheduler"]')).not.toBeNull()
+    } finally {
+      act(() => projectMount.root.unmount())
+      projectMount.container.remove()
     }
   })
 
@@ -203,6 +231,12 @@ describe('AlmanacSidebar', () => {
   // PRD domain model) — a job running in a different project must not light up
   // this project's row.
   describe('scheduler live dot project scoping', () => {
+    // The Scheduler row is PROJECT-face-only now, so every case here mounts
+    // the project face — on Home there is no row to light up at all.
+    beforeEach(() => {
+      useLayout.setState({ navFace: 'project' })
+    })
+
     it('lights up when a running job belongs to the active tab\'s project', () => {
       seedActiveTab('/home/u/Projects/alpha')
       seedRunningJobs(['/home/u/Projects/alpha'])

@@ -46,11 +46,12 @@ describe('TabBar Home pill', () => {
     act(() => {
       root.render(<TabBar />)
     })
-    // Simulate navigating to a BOTH-face screen (e.g. Scheduler) from the
-    // Home sidebar: openPanel leaves navFace untouched for non-'overview'
-    // ids, so it stays 'home'.
+    // Simulate navigating to a BOTH-face screen (File Explorer) from the Home
+    // sidebar: openPanel leaves navFace untouched for a BOTH-face id, so it
+    // stays 'home'. (Scheduler used to serve as this example — it is
+    // PROJECT-only now and would legitimately flip the face.)
     act(() => {
-      useLayout.getState().openPanel('scheduler')
+      useLayout.getState().openPanel('projects')
     })
     const homeButton = container.querySelector('[data-testid="tabbar-machine-home"]')
     expect(homeButton?.getAttribute('aria-current')).toBe('true')

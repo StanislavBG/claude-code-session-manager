@@ -153,10 +153,37 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
     expect(useLayout.getState().navFace).toBe('home')
   })
 
-  it('openPanel to a non-overview BOTH-face id never changes navFace either way (project stays project too)', () => {
+  it('openPanel to a BOTH-face id never changes navFace either way', () => {
     useLayout.setState({ navFace: 'project' })
-    useLayout.getState().openPanel('scheduler')
+    useLayout.getState().openPanel('projects')
     expect(useLayout.getState().navFace).toBe('project')
+    useLayout.setState({ navFace: 'home' })
+    useLayout.getState().openPanel('projects')
+    expect(useLayout.getState().navFace).toBe('home')
+  })
+
+  // Mirror of the HOME-only rule below. Scheduler is the case that forced it:
+  // it is PROJECT-only now (every route is cwd-scoped), and Home still links
+  // to it from the "Queued" card, the Needs-you "View in Scheduler" button and
+  // the footer's paused pill. Without this, those land on a project-scoped
+  // screen with the Home sidebar beside it and no row lit.
+  it.each(['project-home', 'terminal', 'scheduler', 'memory', 'bilko-host'])(
+    'openPanel("%s") asserts navFace "project" even from "home"',
+    (key) => {
+      useLayout.setState({ navFace: 'home' })
+      useLayout.getState().openPanel(key)
+      expect(useLayout.getState().navFace).toBe('project')
+    },
+  )
+
+  it('openPanel to every Project-face NavKey keeps navFace at "project"', () => {
+    const projectItems = getNavItemsForFace('project')
+    expect(projectItems.length).toBeGreaterThan(0)
+    for (const item of projectItems) {
+      useLayout.setState({ navFace: 'project' })
+      useLayout.getState().openPanel(item.key)
+      expect(useLayout.getState().navFace, `openPanel('${item.key}') flipped navFace away from project`).toBe('project')
+    }
   })
 
   // PRD 963: system-prompt/skills/mcp/hooks/permissions/settings moved to
@@ -173,7 +200,7 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
     },
   )
 
-  it('openProjectPanel asserts navFace "project" — the only path that should', () => {
+  it('openProjectPanel asserts navFace "project" unconditionally', () => {
     useLayout.getState().openProjectPanel('terminal')
     expect(useLayout.getState().navFace).toBe('project')
     expect(useLayout.getState().focusedPanelId).toBe('terminal')
@@ -186,11 +213,16 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
 
   it('focusPanel mirrors the same rule: "overview" and HOME-only ids assert home, other ids are untouched', () => {
     useLayout.setState({ navFace: 'project' })
-    // 'scheduler' is a BOTH-face key — focusing it must leave navFace alone.
-    useLayout.getState().focusPanel('scheduler')
+    // 'projects' (File Explorer) is the BOTH-face key — focusing it must leave
+    // navFace alone.
+    useLayout.getState().focusPanel('projects')
     expect(useLayout.getState().navFace).toBe('project')
     useLayout.getState().focusPanel('overview')
     expect(useLayout.getState().navFace).toBe('home')
+
+    // 'scheduler' is PROJECT-only — focusing it asserts 'project' from 'home'.
+    useLayout.getState().focusPanel('scheduler')
+    expect(useLayout.getState().navFace).toBe('project')
 
     // 'skills' is now HOME-only (navGroups.ts, PRD 963) — focusing it must
     // assert navFace: 'home' even from 'project', same as 'overview'.

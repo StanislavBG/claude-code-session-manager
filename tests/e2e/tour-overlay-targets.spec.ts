@@ -9,7 +9,7 @@
 import { test, expect } from '@playwright/test'
 import { launchApp } from './_helpers/launchApp'
 
-test('tour: scheduler step spotlights the sidebar Scheduler row', async () => {
+test('tour: scheduler step renders (centered — the row is project-face-only)', async () => {
   const { app, win } = await launchApp()
   try {
     // Restart the tour via the command palette's 'tour:start' command — this
@@ -33,9 +33,12 @@ test('tour: scheduler step spotlights the sidebar Scheduler row', async () => {
       await win.waitForTimeout(150)
     }
     await expect(win.locator('#tour-title')).toHaveText('PRD scheduler')
-    // The spotlight only renders (non-null rect) when the target resolves —
-    // confirm the sidebar's Scheduler row now carries the testid the tour looks for.
-    await expect(win.locator('[data-testid="tour-scheduler"]')).toBeVisible()
+    // This step deliberately carries no `target` now: Scheduler is a
+    // PROJECT-face-only sidebar row, so on a Home-face launch there is nothing
+    // to spotlight. Assert the step still renders its copy — the failure this
+    // file guards is a step pointing at a testid that no longer exists, and a
+    // step with no target at all can't hit it.
+    await expect(win.locator('[data-testid="tour-overlay"]')).toContainText('project-scoped')
 
     await win.locator('[data-testid="tour-close"]').click()
     await overlay.waitFor({ state: 'hidden', timeout: 3_000 })

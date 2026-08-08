@@ -1364,6 +1364,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId ?? inv.row?.sourceTabId ?? null,
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
+      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;

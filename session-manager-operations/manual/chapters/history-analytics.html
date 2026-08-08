@@ -54,30 +54,17 @@ and every chart re-renders against it:</p>
 <p>Range is a separate dial next to it: 30, 60, 90 days, or "All time". Both choices persist to
 local storage, so History reopens the way you left it.</p>
 
-<h2>Two faces, one dashboard</h2>
+<h2>One entry point: the Home face</h2>
 
-<p>History is one of the surfaces that respects the app's Home/Project split. Which face you're on
-changes what "project" means on screen:</p>
+<p>History lives on the Home face only — there is no per-project nav row for it any more. That's
+deliberate, not a missing feature: the dashboard already folds every project together on disk (the
+same rollup store underlies every view), so a per-project copy of History was a second door onto
+the identical cross-project screen. Reach it from the Home sidebar or the command palette; both
+always land you on the full, every-project dashboard.</p>
 
-<table class="manual-table">
-  <thead><tr><th>Face</th><th>Scope</th><th>Project facet</th></tr></thead>
-  <tbody>
-    <tr>
-      <td><strong>Home</strong></td>
-      <td>Every project the app has ever recorded activity for.</td>
-      <td>A full chip row — toggle individual projects, isolate one, or show all.</td>
-    </tr>
-    <tr>
-      <td><strong>Project</strong></td>
-      <td>Force-scoped to the active tab's cwd. No override, no escape hatch.</td>
-      <td>Not shown — there's only one project to facet against, so the chip row doesn't render.</td>
-    </tr>
-  </tbody>
-</table>
-
-<p>Switching from Project back to Home always resets the filter to "show all" — there's no
-manual-touch state to carry over, since the Project face never offered a filter to touch in the
-first place.</p>
+<p>Once you're there, the <strong>Project facet</strong> chip row does the narrowing a per-project
+tab used to do — toggle individual projects, isolate one, or show all. It's a filter you set inside
+the one dashboard, not a different scope you navigate to.</p>
 
 <h2>Reading the panels top to bottom</h2>
 

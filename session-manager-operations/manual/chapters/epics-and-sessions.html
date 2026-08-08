@@ -1,11 +1,11 @@
-<h1>Epics &amp; Sessions — Terminal and Chat are one session</h1>
+<h1>Sessions — Terminal and Chat are one session</h1>
 
-<p class="lede">An Epic <em>is</em> a tagged Claude session. Not a folder of sessions, not a wrapper
+<p class="lede">A Session <em>is</em> a tagged Claude session. Not a folder of sessions, not a wrapper
 around one — a 1:1 relationship. Once that clicks, the two views over it stop being confusing.</p>
 
 <h2>One session, two views</h2>
 
-<p>Every Epic mints exactly one <code>claudeSessionId</code> when it is created. Both ways of
+<p>Every Session mints exactly one <code>claudeSessionId</code> when it is created. Both ways of
 talking to it attach to that same id:</p>
 
 <table class="manual-table">
@@ -13,7 +13,7 @@ talking to it attach to that same id:</p>
   <tbody>
     <tr>
       <td><strong>Terminal</strong></td>
-      <td>An interactive PTY: <code>claude --resume &lt;sessionId&gt;</code> in the Epic's cwd.</td>
+      <td>An interactive PTY: <code>claude --resume &lt;sessionId&gt;</code> in the Session's cwd.</td>
       <td>Anything needing approvals, interruptions, or you watching closely.</td>
     </tr>
     <tr>
@@ -30,17 +30,17 @@ across the switch is the whole point, so if you ever see a fresh empty session a
 that's a bug worth reporting, not expected behaviour.</p>
 
 <figure class="manual-figure" data-figure="epic-views">
-  <div class="manual-figure__frame" data-capture="Epic detail with the Terminal/Chat view toggle visible"></div>
+  <div class="manual-figure__frame" data-capture="Session detail with the Terminal/Chat view toggle visible"></div>
   <figcaption>
     <span class="callout" data-arrow="up">1</span> The view toggle — one session, two renderings.
     <span class="callout" data-arrow="right">2</span> The verbosity dial (1 loudest → 5 quietest).
-    <span class="callout" data-arrow="left">3</span> The Epic's event chain: prompt → PRD → response.
+    <span class="callout" data-arrow="left">3</span> The Session's event chain: prompt → PRD → response.
   </figcaption>
 </figure>
 
-<h2>Creating an Epic: two independent choices</h2>
+<h2>Creating a Session: two independent choices</h2>
 
-<p>The New Epic card asks two separate questions, and it is worth being deliberate about both:</p>
+<p>The New Session card asks two separate questions, and it is worth being deliberate about both:</p>
 
 <ol class="manual-steps">
   <li><strong>Agent — who is working.</strong> A persona from your Agent Library
@@ -53,14 +53,14 @@ that's a bug worth reporting, not expected behaviour.</p>
 
 <p>Those two, plus a one-line summary of what's actually grounding the session, compose the
 opening prompt in a fixed order — <strong>Actor, Input, Mission</strong>, then your own goal text.
-That's the AIM framework, and it's why an Epic tends to start productively instead of spending
+That's the AIM framework, and it's why a Session tends to start productively instead of spending
 three turns establishing context.</p>
 
 <h3>The "advanced" flip: the grounding board</h3>
 
-<p>Flip the New Epic card and you get an inventory of what this session will really load —
+<p>Flip the New Session card and you get an inventory of what this session will really load —
 the CLAUDE.md files, skills, MCP servers, and hooks it will discover on disk, plus your git branch
-and the other Epics in the project. It is an <strong>inspector, not a control panel</strong>: there
+and the other Sessions in the project. It is an <strong>inspector, not a control panel</strong>: there
 is no toggle to make the CLI skip a file it would otherwise find. Read it to understand why an
 agent behaved a certain way.</p>
 
@@ -70,22 +70,22 @@ agent behaved a certain way.</p>
 
 <ul>
   <li><strong>proposed</strong> — reserved but not started. <em>Nothing has been spent yet.</em>
-  Every Epic is born here.</li>
+  Every Session is born here.</li>
   <li><strong>active</strong> — the session is running, authoring PRDs, receiving scheduler updates.</li>
   <li><strong>completed</strong> — archived to its own JSON file. The session id is dead; resuming
   mints a new one that traces back.</li>
 </ul>
 
-<p class="manual-note"><strong>Don't repurpose an Epic.</strong> Its title and objective are fixed
+<p class="manual-note"><strong>Don't repurpose a Session.</strong> Its title and objective are fixed
 for the life of its session — that objective <em>is</em> the first prompt. Iterate in follow-up
-messages; when the unit of work changes, start a new Epic. The rename action in the row menu is for
-fixing a typo, not for changing what an Epic is about.</p>
+messages; when the unit of work changes, start a new Session. The rename action in the row menu is for
+fixing a typo, not for changing what a Session is about.</p>
 
 <h2>Where per-task behaviour belongs (and where it doesn't)</h2>
 
 <p>This is the most common architectural mistake users make. Settings — including Permissions,
 Hooks, MCP Servers — edits <em>on-disk files that the CLI reads on every single invocation</em>.
-A Project-scope Settings change alters the substrate for every current and future Epic in that
+A Project-scope Settings change alters the substrate for every current and future Session in that
 project. It is not per-conversation curation and never was.</p>
 
 <table class="manual-table">
@@ -96,6 +96,15 @@ project. It is not per-conversation curation and never was.</p>
     <tr><td>Different permissions, hooks, env vars, MCP servers</td><td><strong>Settings</strong> — genuinely substrate</td></tr>
   </tbody>
 </table>
+
+<h2>Actions: a one-click shortcut, not a fourth concept</h2>
+
+<p>Every project's Sessions toolbar can carry its own row of <strong>Action</strong> buttons —
+one per Agent Library persona that declares a project scope. Pressing one is exactly the same act
+as pressing <strong>+ New Session</strong>: it goes through the same mint → approve → send path,
+with that persona as the Actor, its first Tag Library mission as the Mission, and the persona's own
+<code>action:</code> instruction as the goal. There is no second creation path and no per-project
+registry — scope lives on the persona file itself. See Agent Library for how to author one.</p>
 
 <h2>Reading a session without drowning</h2>
 

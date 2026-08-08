@@ -1,10 +1,10 @@
-<h1>Tag Library — the mission that ships with every Epic</h1>
+<h1>Tag Library — the mission that ships with every Session</h1>
 
-<p class="lede">Every Epic carries exactly one tag — <code>feature</code>, <code>bug</code>,
+<p class="lede">Every Session carries exactly one tag — <code>feature</code>, <code>bug</code>,
 <code>discussion</code>, or one of three scripted-only tags. The tag is not a label you glance at in
 a queue row. Its <code>initialPromptTemplate</code> is the first framing line the agent reads,
 before your own goal text, and its <code>developEagerness</code> silently decides how hard
-<code>/develop</code> pushes toward writing PRDs inside that Epic. Tag Library is where you go to
+<code>/develop</code> pushes toward writing PRDs inside that Session. Tag Library is where you go to
 see — and, for one specific relationship, edit — what each tag actually does.</p>
 
 <h2>What you're looking at</h2>
@@ -33,25 +33,25 @@ straight from source — nothing here is summarized or paraphrased on the way to
       <td><code>feature</code></td>
       <td><code>expected-default</code></td>
       <td><code>/develop</code></td>
-      <td>New Epic card</td>
+      <td>New Session card</td>
     </tr>
     <tr>
       <td><code>bug</code></td>
       <td><code>expected-default</code></td>
       <td><code>/develop</code></td>
-      <td>New Epic card</td>
+      <td>New Session card</td>
     </tr>
     <tr>
       <td><code>discussion</code></td>
       <td><code>available-not-assumed</code></td>
       <td><code>/develop</code></td>
-      <td>New Epic card</td>
+      <td>New Session card</td>
     </tr>
     <tr>
       <td><code>build</code></td>
       <td><code>expected-default</code></td>
       <td><code>/builder</code> (not <code>/develop</code>)</td>
-      <td>Scripted only (EpicQueue's 'build' Epic)</td>
+      <td>Scripted only (EpicQueue's 'build' Session)</td>
     </tr>
     <tr>
       <td><code>project-home-builder</code></td>
@@ -69,10 +69,10 @@ straight from source — nothing here is summarized or paraphrased on the way to
   </tbody>
 </table>
 
-<p class="manual-note">Only three of the six show up as pills in the New Epic card —
+<p class="manual-note">Only three of the six show up as pills in the New Session card —
 <code>feature</code>, <code>bug</code>, <code>discussion</code>. The other three are a closed set
 too, but they're wired to a specific scripted flow (a release build, a Project Pages generation,
-a bilko.run publish) rather than a human picking a mission for an open-ended Epic. Tag Library
+a bilko.run publish) rather than a human picking a mission for an open-ended Session. Tag Library
 lists all six regardless, because all six ground a real session the same way.</p>
 
 <figure class="manual-figure" data-figure="tag-library-detail">
@@ -105,7 +105,7 @@ Skills are. It isn't, and the distinction matters:</p>
   <code>lib/tagLibrary.ts</code> and <code>lib/agentTagDefs.ts</code>, not a form on this page.</li>
 </ul>
 
-<p>In practice this means: if you want a specific agent to always pick up <code>bug</code> Epics,
+<p>In practice this means: if you want a specific agent to always pick up <code>bug</code> Sessions,
 do it here. If you want <code>discussion</code> itself to phrase its framing differently, that's a
 code change to <code>agentTagDefs.ts</code>'s <code>initialPromptTemplate</code> for that tag — Tag
 Library will show you the result the moment it lands, but it won't let you type it in.</p>
@@ -113,11 +113,11 @@ Library will show you the result the moment it lands, but it won't let you type 
 <h2>The mistake: treating the tag as decoration</h2>
 
 <p>The tag's <code>initialPromptTemplate</code> is not a description shown somewhere in a sidebar —
-it is composed directly into the Epic's opening prompt, before the human's own goal text.
-<code>lib/epicIntake.ts</code>'s <code>composeEpicIntake</code> builds every Epic's first message in
+it is composed directly into the Session's opening prompt, before the human's own goal text.
+<code>lib/epicIntake.ts</code>'s <code>composeEpicIntake</code> builds every Session's first message in
 a fixed order — Actor, then any Context Injections, then Input, then <strong>Mission</strong> (the
 tag's <code>initialPromptTemplate</code>), then the human's own goal, then references. Every single
-Epic tagged <code>discussion</code>, for example, opens with:</p>
+Session tagged <code>discussion</code>, for example, opens with:</p>
 
 <pre><code>You are in an open-ended discussion. The goal is a decision or shared understanding,
 not a code change — do not start editing files unless the human explicitly asks you to
@@ -126,12 +126,12 @@ after the discussion lands somewhere.</code></pre>
 <p>That's not cosmetic. It's the sentence standing between "the agent explores the codebase and
 tells you what it thinks" and "the agent starts refactoring files because the goal text sounded
 actionable." A vague or missing framing line does the same damage a vague PRD does in the
-Scheduler — it pushes the interpretation burden onto every future Epic that inherits the tag,
+Scheduler — it pushes the interpretation burden onto every future Session that inherits the tag,
 instead of settling it once in the template.</p>
 
 <p>The second half of the same mistake is ignoring <code>developEagerness</code>. It isn't just
 informational text in the detail pane — the <code>session-manager-dev:develop</code> skill reads it
-to decide how hard to push toward PRD decomposition inside that Epic's session.
+to decide how hard to push toward PRD decomposition inside that Session.
 <code>feature</code>/<code>bug</code> (and <code>build</code>/<code>project-home-builder</code>/
 <code>bilko-host-publisher</code>) treat decomposition as the expected next step;
 <code>discussion</code> keeps <code>/develop</code> available but never assumed until whether-to-
@@ -142,11 +142,11 @@ building.</p>
 <h2>The workflow that pays off</h2>
 
 <p>Because <code>composeEpicIntake</code> pulls the Mission section fresh from
-<code>agentTagDefs.ts</code> every time an Epic is created, a template edit is retroactive in effect
-for every <em>future</em> Epic without touching a single Epic record — you author the tag once and
-every Epic with that mission inherits it from that point on. That makes tightening a tag's template
+<code>agentTagDefs.ts</code> every time a Session is created, a template edit is retroactive in effect
+for every <em>future</em> Session without touching a single Session record — you author the tag once and
+every Session with that mission inherits it from that point on. That makes tightening a tag's template
 one of the highest-leverage edits in the whole app: fix a template's ambiguity once, and you've
-fixed the framing for every discussion/bug/feature Epic you'll ever open with it, not just the one
+fixed the framing for every discussion/bug/feature Session you'll ever open with it, not just the one
 in front of you.</p>
 
 <ol class="manual-steps">
@@ -157,8 +157,8 @@ in front of you.</p>
   behavior you always want for that mission (reproduce before fixing, no file edits until a decision
   lands, treat the goal as the full objective) rather than a generic description of the tag's name.</li>
   <li>Check <code>developEagerness</code> against what you actually want that mission to do by
-  default. If a tag's Epics keep spinning up premature PRDs, or conversely never seem to reach
-  <code>/develop</code> when they should, this field — not the goal text you type per-Epic — is the
+  default. If a tag's Sessions keep spinning up premature PRDs, or conversely never seem to reach
+  <code>/develop</code> when they should, this field — not the goal text you type per-Session — is the
   lever.</li>
   <li>Use the agent↔tag assignment in the detail pane to make sure the personas you actually run
   under a given mission are the ones associated with it — it's the one relationship this page will

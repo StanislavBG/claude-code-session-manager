@@ -3,7 +3,7 @@
 <p class="lede">The MCP Servers tab edits the same JSON the <code>claude</code> CLI reads on every
 launch — <code>~/.claude.json</code> at User scope, <code>.mcp.json</code> at Project scope — and
 adds one thing raw JSON editing can't give you: a live probe that tells you whether a registered
-server actually connected, before you build an Epic that assumes its tools exist.</p>
+server actually connected, before you build a Session that assumes its tools exist.</p>
 
 <h2>Where a server definition lives</h2>
 
@@ -66,7 +66,7 @@ editor flags those as a caution, not a block.</p>
 about whether the CLI can actually reach the server. A <code>stdio</code> command that's misspelled,
 an HTTP server that needs an OAuth flow you haven't completed, or a plugin-provided server still
 waiting on your approval all look identical in the raw file: present, and untested. The mistake
-is starting an Epic that assumes a server's tools are available, discovering three turns in that
+is starting a Session that assumes a server's tools are available, discovering three turns in that
 the agent silently has none of them.</p>
 
 <h2>The workflow that pays off</h2>
@@ -81,7 +81,7 @@ the agent silently has none of them.</p>
     <table class="manual-table">
       <thead><tr><th>Status</th><th>What it means</th></tr></thead>
       <tbody>
-        <tr><td>Ready</td><td>Connected. Safe to build an Epic around its tools.</td></tr>
+        <tr><td>Ready</td><td>Connected. Safe to build a Session around its tools.</td></tr>
         <tr><td>Failed</td><td>The CLI tried and couldn't connect — check the command/URL first.</td></tr>
         <tr><td>Needs auth</td><td>An OAuth-style server waiting on you to authorize it.</td></tr>
         <tr><td>Pending approval</td><td>A plugin-registered server waiting on a trust decision.</td></tr>
@@ -89,7 +89,7 @@ the agent silently has none of them.</p>
       </tbody>
     </table>
   </li>
-  <li>Only then start (or resume) the Epic that depends on this server's tools. A session started
+  <li>Only then start (or resume) the Session that depends on this server's tools. A session started
   before the server was reachable won't retroactively pick it up — the tools are discovered at
   launch, not mid-conversation.</li>
 </ol>

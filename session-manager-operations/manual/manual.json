@@ -1,14 +1,14 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
-  "documentsAppVersion": "0.65.0",
+  "documentsAppVersion": "0.66.0",
   "releasedAt": "2026-08-07",
   "chapters": [
     {
       "slug": "getting-started",
       "title": "Getting Started — the 10-minute setup",
-      "blurb": "Install, open your first project tab, and understand the one idea the whole app is built on: a TAB is a project, an EPIC is a unit of work.",
+      "blurb": "Install, open your first project tab, and understand the one idea the whole app is built on: a TAB is a project, a SESSION is a unit of work.",
       "free": true,
       "file": "getting-started.html"
     },
@@ -113,13 +113,13 @@
     {
       "id": "offline-html",
       "label": "Offline HTML edition",
-      "file": "field-manual-1.1.0.html",
+      "file": "field-manual-1.2.0.html",
       "mime": "text/html"
     },
     {
       "id": "pdf",
       "label": "PDF edition",
-      "file": "field-manual-1.1.0.pdf",
+      "file": "field-manual-1.2.0.pdf",
       "mime": "application/pdf"
     }
   ]

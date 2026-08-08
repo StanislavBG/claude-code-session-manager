@@ -11,12 +11,12 @@ window resets.</p>
 default ("All projects" is the explicit escape hatch):</p>
 
 <pre><code>TAB (project)
-└── EPIC (unit of work)
+└── SESSION (unit of work)
     └── PRD (one scheduled job)</code></pre>
 
 <p>On disk, PRDs live at
 <code>&lt;project&gt;/session-manager-operations/scheduler/epics/&lt;epic-id&gt;/prds/</code>, with the
-queue and history sharded alongside in <code>scheduler/state/</code>. Every PRD belongs to an Epic —
+queue and history sharded alongside in <code>scheduler/state/</code>. Every PRD belongs to a Session —
 there is no such thing as a free-floating PRD.</p>
 
 <figure class="manual-figure" data-figure="scheduler-queue">
@@ -80,11 +80,17 @@ hardcoded job count, which is what makes running five parallel agents on a lapto
   <li>Never reuse a PRD number.</li>
 </ol>
 
+<p class="manual-note"><strong>PRD authoring is API-only.</strong> The <code>scheduler_create_prd</code>
+MCP tool is the sole sanctioned way to write a PRD file — a hook blocks any other tool from writing
+directly into a project's <code>scheduler/epics/&lt;epic-id&gt;/prds/</code> folder. It validates
+frontmatter, atomically allocates the PRD number, and enforces that every PRD joins an existing
+Session rather than floating free. You will never need to hand-write a PRD file yourself.</p>
+
 <h2>When a job parks in <code>needs_review</code></h2>
 
 <p><code>needs_review</code> is <strong>a question, not a result</strong>. When a job lands there,
 Session Manager writes a deterministic root-cause report next to that run's own log and appends it
-as a response on the Epic that authored the PRD — so the question comes back to the conversation
+as a response on the Session that authored the PRD — so the question comes back to the conversation
 that asked it, not to a global inbox you'll never check.</p>
 
 <p>This is also the strongest argument for writing tight PRDs: the clearer the PRD, the less there

@@ -1,30 +1,30 @@
-<h1>Agent Library — authoring the "who" of an Epic</h1>
+<h1>Agent Library — authoring the "who" of a Session</h1>
 
 <p class="lede">Agent Library is a full CRUD editor over <code>~/.claude/agents/*.md</code> — the
 same persona files the <code>claude</code> CLI already reads. It is not a viewer bolted onto the
 filesystem; New, Duplicate, Save, Revert, and Delete all write straight through to disk, and every
-persona you author here becomes a pickable <em>Agent</em> in the New Epic card's "who is working"
+persona you author here becomes a pickable <em>Agent</em> in the New Session card's "who is working"
 column.</p>
 
 <h2>What a persona actually controls</h2>
 
-<p>An Epic is always grounded by two independent choices: an <strong>Agent</strong> (this page —
+<p>A Session is always grounded by two independent choices: an <strong>Agent</strong> (this page —
 the "who") and a <strong>Mission</strong> tag (Tag Library — the "what"). Picking a persona in the
-New Epic card does three concrete things, and only three:</p>
+New Session card does three concrete things, and only three:</p>
 
 <table class="manual-table">
   <thead><tr><th>Field</th><th>Where it lands</th><th>Notes</th></tr></thead>
   <tbody>
     <tr>
       <td><code>description</code></td>
-      <td>Folded into the Epic's opening prompt as an Actor framing line, before the grounding
+      <td>Folded into the Session's opening prompt as an Actor framing line, before the grounding
       summary and the Mission template.</td>
-      <td>Read once, at Epic creation. Editing the persona afterward does not rewrite an existing
-      Epic's opening prompt.</td>
+      <td>Read once, at Session creation. Editing the persona afterward does not rewrite an existing
+      Session's opening prompt.</td>
     </tr>
     <tr>
       <td><code>model</code></td>
-      <td>Sets the <code>--model</code> the Epic's session launches with, for <strong>both</strong>
+      <td>Sets the <code>--model</code> the Session launches with, for <strong>both</strong>
       the Terminal view and the headless Chat view.</td>
       <td>Only fires when set to something other than <code>inherit</code>. Otherwise each view
       falls back to its own default (Chat: <code>sonnet</code>; Terminal: the raw-session-model
@@ -51,7 +51,7 @@ Settings edit; if you want it to run as a different <em>persona</em>, that's thi
     <span class="callout" data-arrow="left">1</span> The persona list — filterable, each row shows
     its color swatch and override count.
     <span class="callout" data-arrow="up">2</span> <strong>default model</strong> — sets
-    <code>--model</code> for this persona's Epics.
+    <code>--model</code> for this persona's Sessions.
     <span class="callout" data-arrow="right">3</span> <strong>tags</strong> — the many-to-many link
     to Tag Library, editable from either side.
   </figcaption>
@@ -64,7 +64,7 @@ Settings edit; if you want it to run as a different <em>persona</em>, that's thi
   Must be lowercase and hyphenated (<code>^[a-z][a-z0-9-]*$</code>); the app rejects anything else
   before it ever hits disk.</li>
   <li><strong>description</strong> — shown in the persona list and in every Agent picker. This is
-  the line that gets folded into an Epic's opening prompt, so write it as a sentence about what
+  the line that gets folded into a Session's opening prompt, so write it as a sentence about what
   this persona does, not a label.</li>
   <li><strong>default model</strong> — one of <code>inherit</code> / <code>haiku</code> /
   <code>sonnet</code> / <code>opus</code>. Leave it <code>inherit</code> only if you genuinely
@@ -75,7 +75,7 @@ Settings edit; if you want it to run as a different <em>persona</em>, that's thi
   ticked is refused at call time by the CLI, not by session-manager.</li>
   <li><strong>color</strong> — cosmetic only; shows as a swatch dot in the persona list.</li>
   <li><strong>tags</strong> — which Tag Library missions this persona is associated with. Purely a
-  many-to-many bookkeeping field (see below), not a restriction on which Mission an Epic can pair
+  many-to-many bookkeeping field (see below), not a restriction on which Mission a Session can pair
   it with.</li>
   <li><strong>definition</strong> — the system prompt body this persona runs under.</li>
 </ol>
@@ -84,10 +84,10 @@ Settings edit; if you want it to run as a different <em>persona</em>, that's thi
 
 <p>Both launch paths — <code>chatRunner.cjs</code>'s headless Chat run and
 <code>EpicTerminalPane.tsx</code>'s interactive Terminal — resolve the same way, mirrored so the
-two views of one Epic session never disagree on which model they're running:</p>
+two views of one Session never disagree on which model they're running:</p>
 
 <ol class="manual-steps">
-  <li>Look up the Epic's <code>agentType</code> (the persona it was created with).</li>
+  <li>Look up the Session's <code>agentType</code> (the persona it was created with).</li>
   <li>Read that persona's own <code>model</code> frontmatter field from
   <code>~/.claude/agents/&lt;agentType&gt;.md</code>.</li>
   <li>If it's set and isn't <code>inherit</code>, use it.</li>
@@ -95,7 +95,7 @@ two views of one Epic session never disagree on which model they're running:</p>
   falls back to its own raw-session-model toggle.</li>
 </ol>
 
-<p>Any failure in that chain — no matching Epic, no persona file, an unreadable file — falls back
+<p>Any failure in that chain — no matching Session, no persona file, an unreadable file — falls back
 silently rather than throwing. The lookup never blocks a launch; the worst case is you get the
 fallback model instead of the one you thought you set.</p>
 
@@ -106,6 +106,28 @@ with. This is a genuine many-to-many relationship with one source of truth: assi
 this page's chip row and assigning an agent from Tag Library's own detail pane both write through
 the identical <code>savePersona</code> call, to the identical frontmatter line. There is no second
 copy to drift.</p>
+
+<h2>Turning a persona into an Action button</h2>
+
+<p>Any persona can carry a project scope, which promotes it to its own button in that project's
+Sessions toolbar — a shortcut around the New Session card, never a second creation path. Three
+frontmatter fields, all editable from this page's detail pane:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Field</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>projects</code></td><td>Which project cwds show this Action, or <code>*</code> for every project.</td></tr>
+    <tr><td><code>action</code></td><td>The opening instruction — becomes the Session's goal, the way your own typed goal does from the New Session card.</td></tr>
+    <tr><td><code>actionLabel</code></td><td>The button's text. Defaults to the persona name if left blank.</td></tr>
+  </tbody>
+</table>
+
+<p class="manual-note">Pressing an Action button composes a Session exactly the way New Session does:
+this persona is the Actor, its first Tag Library mission is the Mission, and <code>action</code> is
+the goal text — same mint → approve → send path, same single-creator rule. The one built-in
+exception is the <code>builder</code> persona, which is deliberately excluded from the dynamic
+Action list because its own <strong>Run Build</strong> button already covers publish-target gating
+and in-flight dedup that a generic Action can't express.</p>
 
 <h2>Project overrides — the mistake that costs the most time</h2>
 
@@ -119,7 +141,7 @@ project shadowing it, and the detail pane's "project overrides" field lists them
 <div class="manual-incident">
   <h3>Editing the global persona and wondering why nothing changed</h3>
   <p>You open a persona, tighten its tool grants or rewrite its definition, save — and the next
-  Epic launched from a specific project behaves exactly as before. The project has its own
+  Session launched from a specific project behaves exactly as before. The project has its own
   <code>.claude/agents/&lt;name&gt;.md</code> silently winning every time, and Agent Library's edit
   form never touches it — this page only creates and edits the <em>global</em> copy.</p>
   <p><strong>Rule:</strong> before editing a misbehaving persona, check the "project overrides"
@@ -140,7 +162,7 @@ attention:</p>
 
 <ul>
   <li>A read-only research persona: tools trimmed to <code>Read</code>/<code>Grep</code>/<code>Glob</code>,
-  model left cheap. Reuse it for every "just look and report" Epic without re-explaining the
+  model left cheap. Reuse it for every "just look and report" Session without re-explaining the
   constraint each time.</li>
   <li>A judgement-call persona: <code>model</code> pinned to <code>opus</code>, tagged against the
   Mission it's meant to pair with in Tag Library, so it surfaces as the suggested default there.</li>
@@ -149,15 +171,15 @@ attention:</p>
   retyping.</li>
 </ul>
 
-<p>The description field is the lever most people under-use: because it's folded into the Epic's
+<p>The description field is the lever most people under-use: because it's folded into the Session's
 opening prompt ahead of the Mission template, a well-written description does real framing work —
 it is read by the model as the first line of context, not just displayed in a list.</p>
 
 <h2>Deleting a persona</h2>
 
 <p>Delete removes the global <code>.md</code> file — it asks for confirmation once (inline, not a
-modal) and is otherwise unconditional: there is no "in use by a running Epic" guard on this action,
-so double-check the "project overrides" list and any Epics you know reference this persona by name
-before confirming. A persona referenced by <code>agentType</code> on an existing Epic that no
-longer resolves simply falls back through the same chain described above — the Epic keeps running,
+modal) and is otherwise unconditional: there is no "in use by a running Session" guard on this action,
+so double-check the "project overrides" list and any Sessions you know reference this persona by name
+before confirming. A persona referenced by <code>agentType</code> on an existing Session that no
+longer resolves simply falls back through the same chain described above — the Session keeps running,
 just under the fallback model instead of a deleted persona's pinned one.</p>

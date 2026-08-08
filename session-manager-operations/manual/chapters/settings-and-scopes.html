@@ -4,7 +4,7 @@
 itself reads on every launch. It looks like a normal per-project config screen, and that similarity
 is exactly what causes the most common mistake in this app: reaching for Settings when what you
 actually wanted was a Tag or an Agent persona. This chapter covers the scope model, the one field
-that legitimately crosses the line into per-Epic territory, and how to stop yourself before you
+that legitimately crosses the line into per-Session territory, and how to stop yourself before you
 edit the wrong layer.</p>
 
 <h2>The three scopes</h2>
@@ -56,29 +56,29 @@ you're not sure what's already set somewhere else.</p>
 <div class="manual-note">
   <p><strong>The rule that matters most in this chapter:</strong> every file Settings edits is a file
   the <code>claude</code> CLI reads fresh on <em>every single invocation it launches</em> — every
-  Epic, every Terminal tab, every scheduled PRD job, in that project (Project/Local scope) or on the
-  machine (User scope). Settings is not scoped to one conversation, one Epic, or one task. There is
+  Session, every Terminal tab, every scheduled PRD job, in that project (Project/Local scope) or on the
+  machine (User scope). Settings is not scoped to one conversation, one Session, or one task. There is
   no "just for this chat" checkbox, because the file underneath has no concept of "this chat."</p>
 </div>
 
-<p>That means a Project-scope edit changes behaviour for <strong>every current and future Epic in
+<p>That means a Project-scope edit changes behaviour for <strong>every current and future Session in
 that project</strong>, and a User-scope edit changes it for <strong>every project on the
 machine</strong> — retroactively, for sessions that already exist and ones you haven't created yet.
-If you only wanted one Epic to behave differently, you just changed the wrong number of things.</p>
+If you only wanted one Session to behave differently, you just changed the wrong number of things.</p>
 
 <table class="manual-table">
   <thead><tr><th>You want…</th><th>Wrong lever</th><th>Right lever</th></tr></thead>
   <tbody>
     <tr>
-      <td>"This one Epic should follow a different process / think about the problem differently"</td>
+      <td>"This one Session should follow a different process / think about the problem differently"</td>
       <td>Editing Settings for the duration of the task, then editing it back</td>
       <td>A Tag (Tag Library, <code>initialPromptTemplate</code>) or an Agent persona (Agent Library)
-      chosen when you create the Epic</td>
+      chosen when you create the Session</td>
     </tr>
     <tr>
       <td>"This kind of task should always run with a particular persona/model"</td>
       <td>Flipping the Settings model default before starting, back after</td>
-      <td>An Agent persona with its own <code>model</code> frontmatter field, selected as that Epic's
+      <td>An Agent persona with its own <code>model</code> frontmatter field, selected as that Session's
       Agent</td>
     </tr>
     <tr>
@@ -100,31 +100,31 @@ If you only wanted one Epic to behave differently, you just changed the wrong nu
 
 <p>Put another way: Settings holds what's legitimately identical <em>regardless of what task you're
 about to run</em> — permissions, hooks, MCP servers, env vars, output style. If a value should
-differ depending on <em>what kind of work</em> an Epic is doing, it doesn't belong in Settings at
-all; it belongs on the Epic's Tag or Agent, chosen fresh at that Epic's creation and folded into its
+differ depending on <em>what kind of work</em> a Session is doing, it doesn't belong in Settings at
+all; it belongs on the Session's Tag or Agent, chosen fresh at that Session's creation and folded into its
 opening prompt.</p>
 
-<h2>The one field that's carved out per-Epic: <code>model</code></h2>
+<h2>The one field that's carved out per-Session: <code>model</code></h2>
 
 <p>There is exactly one exception, and it's deliberately narrow. An Agent persona
 (<code>~/.claude/agents/&lt;name&gt;.md</code>, edited from Agent Library) can carry its own
-<code>model</code> frontmatter field. When an Epic is created with that persona as its Agent,
+<code>model</code> frontmatter field. When a Session is created with that persona as its Agent,
 <code>src/main/lib/agentModelResolve.cjs</code>'s <code>resolveEpicModel</code> looks up the persona's
 <code>model</code> field first — and only falls back to Settings' "Model &amp; Reasoning" default
 (<code>sonnet</code>) when the persona has no <code>model</code> set, or it's explicitly
-<code>'inherit'</code>. This is the same resolution both views of that Epic's session use: Chat
+<code>'inherit'</code>. This is the same resolution both views of that Session use: Chat
 (<code>chatRunner.cjs</code>) and Terminal (<code>EpicTerminalPane.tsx</code>'s own mirrored
-resolver) agree on which model an Epic launches with, because they're two views over the same
+resolver) agree on which model a Session launches with, because they're two views over the same
 session.</p>
 
 <p>Every <em>other</em> field in Settings' "Model &amp; Reasoning" group —
 <code>effortLevel</code>, <code>fastMode</code>, <code>alwaysThinkingEnabled</code>, and the rest —
-has no per-Epic override today. Editing them changes the default for every Epic that doesn't specify
-otherwise, and there's currently no per-Epic escape hatch for them the way there is for
+has no per-Session override today. Editing them changes the default for every Session that doesn't specify
+otherwise, and there's currently no per-Session escape hatch for them the way there is for
 <code>model</code>.</p>
 
 <div class="manual-note">
-  <p><strong>Rule of thumb:</strong> if you're about to open Settings to change how one Epic behaves,
+  <p><strong>Rule of thumb:</strong> if you're about to open Settings to change how one Session behaves,
   stop — open Agent Library or Tag Library instead. If you're about to open Agent Library or Tag
   Library to change something for every project on the machine, stop — that's Settings, User scope.</p>
 </div>
@@ -145,7 +145,7 @@ machine-wide with no cwd or scope input:</p>
   <li><strong>Session Manager</strong> (<code>SettingsAppPrefs.tsx</code>) — native app preferences
   stored in <code>localStorage</code>, applied immediately with no save/revert cycle. Today this is
   one setting: the default model for a <em>raw</em> interactive session (one opened without going
-  through an Epic at all) — separate from <code>resolveEpicModel</code>'s persona-first resolution,
+  through a Session at all) — separate from <code>resolveEpicModel</code>'s persona-first resolution,
   since a raw session has no Agent to read a <code>model</code> field from.</li>
 </ul>
 

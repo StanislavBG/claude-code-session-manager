@@ -1,6 +1,6 @@
 <h1>Simple Mode — the chrome-free single-terminal cockpit</h1>
 
-<p class="lede">Everything else in this manual is about the full app: tabs, Epics, the Scheduler,
+<p class="lede">Everything else in this manual is about the full app: tabs, Sessions, the Scheduler,
 two dozen config surfaces. Simple Mode throws all of that away on purpose. It boots one terminal
 running <code>claude --dangerously-skip-permissions</code> in the directory you launched from, and
 nothing else.</p>
@@ -37,7 +37,7 @@ window into Simple Mode or back — you choose it on the command line, or you do
 
 <p><code>SimpleShell.tsx</code> renders exactly four things: the privacy recording banner, a thin
 one-line status strip showing the launch directory, one full-window <code>Terminal</code>, and the
-toast layer. No left nav, no tab bar, no New Epic card, no Scheduler, no Settings — none of the
+toast layer. No left nav, no tab bar, no New Session card, no Scheduler, no Settings — none of the
 surfaces this manual otherwise spends most of its pages on.</p>
 
 <table class="manual-table">
@@ -49,7 +49,7 @@ surfaces this manual otherwise spends most of its pages on.</p>
     </tr>
     <tr>
       <td><code>RecordingStatus</code> — the privacy banner still mounts here</td>
-      <td>Epics, Scheduler, PRDs, queue, history</td>
+      <td>Sessions, Scheduler, PRDs, queue, history</td>
     </tr>
     <tr>
       <td><code>Toast</code> — errors still surface</td>
@@ -59,7 +59,7 @@ surfaces this manual otherwise spends most of its pages on.</p>
 </table>
 
 <p class="manual-note"><strong>The common mistake:</strong> launching with <code>--simple</code>
-and then going looking for the Scheduler tab, or expecting a New Epic button to queue a PRD. None
+and then going looking for the Scheduler tab, or expecting a New Session button to queue a PRD. None
 of it is there. Simple Mode isn't a smaller version of the full app's UI with some panels
 collapsed — it's a different component tree entirely (<code>SimpleShell</code>, not the normal
 <code>App.tsx</code> layout), and it was built to have nothing to click except the terminal.</p>
@@ -103,7 +103,7 @@ session, <code>cd</code> there first, or don't use <code>--simple</code>.</p>
   <thead><tr><th>Situation</th><th>Use</th></tr></thead>
   <tbody>
     <tr>
-      <td>You want the observability/config cockpit — Epics, Scheduler running PRDs overnight,
+      <td>You want the observability/config cockpit — Sessions, Scheduler running PRDs overnight,
       Settings, Permissions, Agent Library, and so on</td>
       <td>The full app: <code>npx claude-code-session-manager@latest</code></td>
     </tr>
@@ -117,7 +117,7 @@ session, <code>cd</code> there first, or don't use <code>--simple</code>.</p>
       <td><code>--simple</code></td>
     </tr>
     <tr>
-      <td>You need to queue work to run unattended (Scheduler, PRDs) or track more than one Epic in
+      <td>You need to queue work to run unattended (Scheduler, PRDs) or track more than one Session in
       the same project</td>
       <td>The full app — Simple Mode has no queue and no second session</td>
     </tr>

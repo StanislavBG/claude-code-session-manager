@@ -60,9 +60,9 @@ switching tabs switches whose checklist you're looking at.</p>
   </figcaption>
 </figure>
 
-<h2>Plans and tasks inside an Epic's Discussion feed</h2>
+<h2>Plans and tasks inside a Session's Discussion feed</h2>
 
-<p>Every <code>todo_write</code> and <code>plan</code> event is also a turn in the Epic's chat
+<p>Every <code>todo_write</code> and <code>plan</code> event is also a turn in the Session's chat
 transcript, rendered as a compact tool-family chip — the same chip style as any other tool call
 (labelled <strong>TodoWrite</strong> or <strong>Plan</strong>). This is governed by the same
 five-level verbosity dial that controls the rest of the Discussion feed
@@ -72,13 +72,13 @@ up to <strong>3 · standard</strong> or quieter and they disappear from the feed
 left with the interactive back-and-forth, not the bookkeeping.</p>
 
 <p>That's a deliberate trade, not a bug: if you want to audit exactly when the plan changed or the
-checklist got rewritten, drop to <em>detail</em>. If you're skimming a long-running Epic for what
+checklist got rewritten, drop to <em>detail</em>. If you're skimming a long-running Session for what
 the agent said and asked, stay at <em>standard</em> or above and let the chips stay hidden.</p>
 
 <h2>The common mistake</h2>
 
 <p>Treating the to-do chip as a place to track work <em>you</em> assign. It isn't — it's a readout
-of what the agent itself decided to track via <code>TodoWrite</code>. If an Epic's session never
+of what the agent itself decided to track via <code>TodoWrite</code>. If a Session never
 calls <code>TodoWrite</code>, the chip never appears, no matter how much work is actually
 happening; conversely, an agent that keeps its own list current gives you the chip for free. You
 don't drive this surface, the agent does — the lever you actually have is asking the agent (in
@@ -93,14 +93,14 @@ browsable as a standalone timeline yet.</p>
 <h2>The workflow that pays off</h2>
 
 <ol class="manual-steps">
-  <li>When you kick off an Epic with real multi-step scope, ask for a to-do list explicitly in the
+  <li>When you kick off a Session with real multi-step scope, ask for a to-do list explicitly in the
   opening prompt (or trust that Claude Code's own habits will produce one on nontrivial work) —
   that's what makes the footer chip populate in the first place.</li>
   <li>Glance at the chip's counts, not the popover, for the common case: <code>✓3 ●1 ○2</code> tells
   you the agent is mid-flight on one item with two queued, without opening anything.</li>
   <li>Open the popover only when you need the actual wording — e.g. deciding whether the
   in-progress item matches what you expected the agent to be doing right now.</li>
-  <li>If you need the audit trail (what changed, when, in what order), switch the Epic's Discussion
+  <li>If you need the audit trail (what changed, when, in what order), switch the Session's Discussion
   feed to <em>detail</em> or <em>raw</em> rather than hunting for a separate log — the
   <code>TodoWrite</code>/<code>Plan</code> chips are already there, in order, with the rest of the
   session's activity around them for context.</li>
@@ -111,5 +111,5 @@ browsable as a standalone timeline yet.</p>
 
 <p class="manual-note">One session, one checklist. Because <code>todos</code> is overwritten (not
 appended) on every <code>TodoWrite</code> call, the chip always shows the agent's <em>current</em>
-plan for that Epic — there's nothing to reconcile between the app's view and the agent's actual
+plan for that Session — there's nothing to reconcile between the app's view and the agent's actual
 state, because they're the same read.</p>

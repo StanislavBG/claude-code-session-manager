@@ -19,7 +19,7 @@ data another tab already owns. Read top to bottom, it is a fixed stack of six se
     jump-link that scrolls straight to Needs you.</td></tr>
     <tr><td><strong>Grid</strong></td><td>Three cards side by side: the 5-hour/weekly billing
     meters, known Projects, and pending scheduler jobs (Queued).</td></tr>
-    <tr><td><strong>Needs you</strong></td><td>Real signals only — a <code>proposed</code> Epic
+    <tr><td><strong>Needs you</strong></td><td>Real signals only — a <code>proposed</code> Session
     awaiting Approve/Discard, a chat run stopped on <code>needs-input</code>, or a scheduler job
     the queue itself flagged <code>failed</code>/<code>needs_review</code>.</td></tr>
     <tr><td><strong>Active sessions</strong></td><td>The machine session-slot pool's current
@@ -27,7 +27,7 @@ data another tab already owns. Read top to bottom, it is a fixed stack of six se
     <tr><td><strong>Recent sessions</strong></td><td>The five most-recently-touched transcripts
     under <code>~/.claude/projects/</code> — the same source History reads.</td></tr>
     <tr><td><strong>Agents</strong></td><td>A read-only reference card listing each of the five
-    Epic tags and the exact <code>initialPromptTemplate</code> text it seeds into a session —
+    Session tags and the exact <code>initialPromptTemplate</code> text it seeds into a session —
     not a picker, just "what does this tag actually do".</td></tr>
   </tbody>
 </table>
@@ -50,12 +50,12 @@ expand it inline:</p>
 <table class="manual-table">
   <thead><tr><th>Row kind</th><th>Source</th><th>Actions</th></tr></thead>
   <tbody>
-    <tr><td>Proposed Epic</td><td>An Epic sitting in <code>status: 'proposed'</code> — asked for,
+    <tr><td>Proposed Session</td><td>A Session sitting in <code>status: 'proposed'</code> — asked for,
     not yet started.</td><td><strong>Approve &amp; start</strong> (sends the opening prompt) or
     <strong>Discard</strong>.</td></tr>
     <tr><td>Session asking a question</td><td>A chat run's most recent ticket is
     <code>needs-input</code> — the composer's stop-signal protocol fired mid-run.</td>
-    <td><strong>Open session</strong> jumps to that Epic's Terminal view.</td></tr>
+    <td><strong>Open session</strong> jumps to that Session's Terminal view.</td></tr>
     <tr><td>Scheduler job failed / needs review</td><td>The queue's own status verdict on a
     PRD run.</td><td><strong>Retry now</strong> resets the job to pending, or <strong>View in
     Scheduler</strong>.</td></tr>
@@ -70,7 +70,7 @@ how the root-cause report behind it gets written.)</p>
 
 <p>The "Max slots" control on Active sessions looks like it belongs to whichever project you're
 looking at. It doesn't. It is one number for the whole machine — the same pool the Scheduler and
-every Chat-view Epic draw <code>claude -p</code> processes from. Defaults to 5, dragged anywhere
+every Chat-view Session draw <code>claude -p</code> processes from. Defaults to 5, dragged anywhere
 from 0 (pauses new launches without touching what's already running) to 10. An environment override
 (<code>SM_SESSION_SLOTS</code>) disables the slider entirely and shows why on hover.</p>
 
@@ -85,19 +85,19 @@ lever that fixes it lives on this one screen regardless of which project's tab i
 sourced straight from the scheduler's own last tick — it stays silent when the queue is simply
 idle, so an empty queue never reads as a blocked one.</p>
 
-<h2>4. New Epic from Home is a project picker, not a form</h2>
+<h2>4. New Session from Home is a project picker, not a form</h2>
 
-<p>The <strong>New epic</strong> button in the Hero doesn't open the New Epic card directly — it
+<p>The <strong>New epic</strong> button in the Hero doesn't open the New Session card directly — it
 opens a drawer listing your known projects (the same rows the Projects card renders) as a radio
 list. Confirming activates that project's tab if it's already open, or opens a dormant one, and
-hands you into its Epics workspace to actually start the Epic. This exists because "New Epic" is
+hands you into its Sessions workspace to actually start the Session. This exists because "New Session" is
 scoped to one project's Terminal tab; Home's version is the cross-project entry point into that
 flow, not a second way to create one.</p>
 
 <ol class="manual-steps">
   <li>Click <strong>New epic</strong> in the Hero.</li>
   <li>Pick the project from the radio list — this is real known-cwd data, not a text field.</li>
-  <li>Confirm. The matching Terminal tab activates (or opens) and the Epics workspace opens on
+  <li>Confirm. The matching Terminal tab activates (or opens) and the Sessions workspace opens on
   top of it.</li>
   <li>From there, proceed exactly as described in Getting Started: pick an Agent, pick a Mission,
   type your goal, submit.</li>
@@ -110,11 +110,11 @@ different from Home: one project's own synthesized brief, not a cross-project da
 document sits a thin live strip that changes underneath the static content:</p>
 
 <ul>
-  <li><strong>What is in flight</strong> — cards for the project's current Epics, computed live
-  from the Epic queue every render. The card copy explicitly says "this block is never
+  <li><strong>What is in flight</strong> — cards for the project's current Sessions, computed live
+  from the Session queue every render. The card copy explicitly says "this block is never
   hand-written" for a reason: it can't drift out of sync with what's actually running.</li>
   <li><strong>Waiting on you</strong> — open questions the last run couldn't resolve on its own,
-  each with an <strong>Answer in Epic →</strong> button that jumps straight to that Epic's Terminal
+  each with an <strong>Answer in Session →</strong> button that jumps straight to that Session's Terminal
   view. Hidden entirely when there are none.</li>
 </ul>
 
@@ -142,7 +142,7 @@ however many you've set) slots — if the pool is exhausted, the request simply 
 session slot free — try again shortly" rather than queuing invisibly.</p>
 
 <p>What goes into the prompt is deliberately narrow and real: your project's <code>CLAUDE.md</code>
-text, every active and archived Epic's tag + goal text (archived ones capped at the 200 most
+text, every active and archived Session's tag + goal text (archived ones capped at the 200 most
 recent), the last 50 lines of <code>git log --oneline</code>, and a depth-2 listing of
 <code>src/</code>. The synthesizer is instructed to treat all of that purely as data to analyze,
 never as instructions to follow — it returns one JSON object and nothing else, which is then
@@ -167,10 +167,10 @@ generated portion is.</p>
 
 <ol class="manual-steps">
   <li>Open Home first, every session. Check Needs you before you check anything else — it's the
-  one place a proposed Epic, a stalled chat, and a failed job all surface together.</li>
+  one place a proposed Session, a stalled chat, and a failed job all surface together.</li>
   <li>Glance at the slot count and the billing meters before deciding whether to queue more work or
   start something interactively yourself — they share the same budget.</li>
-  <li>Use the New Epic drawer to jump into a project rather than opening a second tab for a second
+  <li>Use the New Session drawer to jump into a project rather than opening a second tab for a second
   conversation in it; a second tab on the same cwd never activates a new project, it just re-focuses
   the one you already have.</li>
   <li>The first time you land in an unfamiliar project's Project Home, press Generate once to get

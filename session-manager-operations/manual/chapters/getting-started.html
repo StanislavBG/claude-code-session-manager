@@ -30,7 +30,7 @@ runtime, so give it a minute. Linux and macOS only.</p>
   </figcaption>
 </figure>
 
-<h2>2. The one idea to internalise: TAB = project, EPIC = unit of work</h2>
+<h2>2. The one idea to internalise: TAB = project, SESSION = unit of work</h2>
 
 <p>Almost every mistake new users make comes from missing this. Session Manager has exactly two
 levels of scope, and they are not interchangeable:</p>
@@ -45,22 +45,22 @@ levels of scope, and they are not interchangeable:</p>
       <td>One per project. Picking an already-open project re-activates its tab; it never opens a second.</td>
     </tr>
     <tr>
-      <td><strong>EPIC</strong></td>
+      <td><strong>SESSION</strong></td>
       <td>One small unit of work inside that project, backed by its own tagged Claude session.</td>
-      <td>Many per tab. Short-lived by design — one Epic per thing you're doing.</td>
+      <td>Many per tab. Short-lived by design — one Session per thing you're doing.</td>
     </tr>
   </tbody>
 </table>
 
 <p class="manual-note"><strong>The rule that follows:</strong> if you want a second conversation in
-the same project, you want a second <em>Epic</em>, not a second tab. Tabs are for switching projects.</p>
+the same project, you want a second <em>Session</em>, not a second tab. Tabs are for switching projects.</p>
 
 <h2>3. Where your data lives</h2>
 
 <p>When a tab first opens on a directory, Session Manager creates one folder inside it:</p>
 
 <pre><code>&lt;your-project&gt;/session-manager-operations/
-├── prompt-sessions/   # your Epics — active index + archived Epics
+├── prompt-sessions/   # your Sessions — active index + archived Sessions
 ├── scheduler/         # PRDs, queue, and run state
 ├── project-brief/     # the Home tab's project brief
 └── logs/</code></pre>
@@ -76,7 +76,7 @@ app — the marketing page's "local-first" claim is literal.</p>
   A native folder picker opens; "New Folder" starts a fresh one.</li>
   <li>The Terminal tab boots a real <code>claude</code> session in that directory. This is the same
   CLI you already use — same settings, same skills, same MCP servers.</li>
-  <li>Press <strong>New Epic</strong>. Pick an <em>Agent</em> (who works) and a <em>Mission</em>
+  <li>Press <strong>New Session</strong>. Pick an <em>Agent</em> (who works) and a <em>Mission</em>
   (feature / bug / discussion), type what you want, and submit.</li>
   <li>Watch it run. That's the loop. Everything else in this manual is about doing that loop
   faster, cheaper, and unattended.</li>
@@ -84,6 +84,6 @@ app — the marketing page's "local-first" claim is literal.</p>
 
 <h2>5. What to read next</h2>
 
-<p>If you only read two more chapters, read <a href="#epics-and-sessions">Epics &amp; Sessions</a>
+<p>If you only read two more chapters, read <a href="#epics-and-sessions">Sessions</a>
 (so you stop losing context) and <a href="#scheduler">Scheduler</a> (so the app starts working
 while you don't).</p>

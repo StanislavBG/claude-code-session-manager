@@ -26,6 +26,7 @@ export const useScheduleState = create<ScheduleState>(() => ({ snapshot: null, l
 
 let started = false
 let offSubscription: (() => void) | null = null
+let offStallSubscription: (() => void) | null = null
 let toastedFailure = false
 // undefined = not yet seeded; null = no pause; string = pause reason
 let prevPauseReason: string | null | undefined = undefined
@@ -70,12 +71,22 @@ export async function startSchedulePolling(): Promise<void> {
     prevPauseReason = incoming
     useScheduleState.setState({ snapshot: s, loaded: true })
   })
+  // Heartbeat-driven stall alert — main process rate-limits this to one push
+  // per stall episode, so surfacing every push as a toast is correct here
+  // (no additional de-dup needed on the renderer side).
+  offStallSubscription = window.api.schedule.onStall((event) => {
+    toast.error(event.message)
+  })
 }
 
 export function stopSchedulePolling(): void {
   if (offSubscription) {
     offSubscription()
     offSubscription = null
+  }
+  if (offStallSubscription) {
+    offStallSubscription()
+    offStallSubscription = null
   }
   started = false
   prevPauseReason = undefined

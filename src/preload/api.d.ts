@@ -425,6 +425,19 @@ export interface ScheduleJob {
    *  intent-carrying `sourcePromptId`/`sourceTabId`, which can disagree.
    *  Authoritative source for "which Epic is this from" in every UI. */
   epicId?: string | null;
+  /** Bounded trail of accepted status transitions (scheduleJobTransitions.cjs's
+   *  transitionJob), oldest-first, capped at ~20 entries. Lets a status
+   *  change be reviewed after the fact instead of only inferred from a
+   *  heartbeat count. */
+  statusHistory?: ScheduleJobStatusHistoryEntry[];
+}
+
+export interface ScheduleJobStatusHistoryEntry {
+  from: string | null;
+  to: string;
+  reason: string | null;
+  source: string | null;
+  at: string;
 }
 
 export interface SchedulePaths {
@@ -540,6 +553,12 @@ export interface ScheduleEffectiveConcurrency {
   /** 'env' when SM_SESSION_SLOTS pins the pool; 'pool' when the persisted
    *  Home-tab value governs. */
   source: 'env' | 'pool';
+}
+
+export interface ScheduleStallEvent {
+  message: string;
+  total: number;
+  byProject: Record<string, Record<string, number>>;
 }
 
 export interface ScheduleStateSnapshot {
@@ -1148,7 +1167,16 @@ export interface ChatCreatePrdPayload {
 }
 
 export type ChatCreatePrdResult =
-  | { ok: true; nn: number; filename: string }
+  | {
+      ok: true;
+      nn: number;
+      filename: string;
+      prdPath: string | null;
+      epicId: string | null;
+      /** Always false — this call only writes the PRD file; the queue row is derived by the next scheduler reconcile pass, never created here. */
+      enqueued: false;
+      note: string;
+    }
   | { ok: false; status: number; error: string };
 
 export interface ChatRunQueuedEvent {
@@ -1432,6 +1460,8 @@ export interface SessionManagerAPI {
     listPrds: () => Promise<PrdListItem[]>;
     health: () => Promise<ScheduleHealthSnapshot>;
     onState: (handler: (snapshot: ScheduleStateSnapshot) => void) => () => void;
+    /** Heartbeat-driven stall alert: queue holds jobs but 0 running / 0 pending / not paused for a full poll interval. Fires at most once per stall episode. */
+    onStall: (handler: (event: ScheduleStallEvent) => void) => () => void;
     /** Bundle D — scan all PRDs for unbounded loops + missing frontmatter. */
     lintQueue: () => Promise<LintQueueResult>;
     /** Bundle D — move PRDs to prds-archived/<ISO>/. Never deletes. */

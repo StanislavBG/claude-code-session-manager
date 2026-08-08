@@ -233,6 +233,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('schedule:state', listener);
       return () => ipcRenderer.removeListener('schedule:state', listener);
     },
+    // Heartbeat-driven stall alert (PRD: queue holds jobs but 0 running / 0
+    // pending / not paused for a full poll interval) — rate-limited to one
+    // push per stall episode by the main-process heartbeat, not per-tick.
+    onStall: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('schedule:stall', listener);
+      return () => ipcRenderer.removeListener('schedule:stall', listener);
+    },
     // Bundle D — queue ops (queueOps.cjs).
     lintQueue: () => ipcRenderer.invoke('schedule:lint-queue'),
     archivePrds: (slugs) => ipcRenderer.invoke('schedule:archive-prd', { slugs }),

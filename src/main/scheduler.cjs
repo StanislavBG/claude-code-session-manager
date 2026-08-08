@@ -88,7 +88,10 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
+const { transitionJob } = require('./lib/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
+const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
+const { appendAuditEvent } = require('./lib/auditLog.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -110,7 +113,7 @@ function resolveOriginSessionId(cwd, epicId) {
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
+const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { migratePrds, consolidateFlatPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -720,7 +723,7 @@ async function retireCompletedSlugs(slugs) {
     for (const j of s.jobs) {
       if (!j || !slugSet.has(j.slug)) continue;
       if (j.status !== 'pending' && j.status !== 'running') continue;
-      j.status = 'completed';
+      if (!transitionJob(j, 'completed', { reason: 'manual archive of an already-shipped PRD', source: 'retireCompletedSlugs' })) continue;
       j.finishedAt = new Date().toISOString();
       j.exitCode = 0;
       j.error = null;
@@ -911,6 +914,41 @@ function appendHeartbeat(entry) {
   } catch (e) {
     console.warn('[scheduler] heartbeat write failed', e?.message);
   }
+}
+
+/**
+ * computeStallSummary(state) → { stalled, total, running, pending, byProject }
+ *
+ * Pure, no IO. `state` is a merged queue-store read ({ jobs, invalidJobs,
+ * paused }). "Stalled" = the queue holds work — valid rows OR rows
+ * quarantined for an invalid status — but nothing is running or pending and
+ * the scheduler isn't paused. The 2026-08-07 incident sat exactly in this
+ * state for 4+ hours: 2 jobs, 0 running, 0 pending, and the only visible
+ * symptom was a heartbeat `counts` object that had silently minted a
+ * `queued` bucket instead of reporting anything actionable. `byProject`
+ * breaks the stalled rows down by cwd for the log line / toast.
+ */
+function computeStallSummary(state) {
+  const jobs = Array.isArray(state?.jobs) ? state.jobs : [];
+  const invalidJobs = Array.isArray(state?.invalidJobs) ? state.invalidJobs : [];
+  let running = 0;
+  let pending = 0;
+  const byProject = {};
+  for (const j of jobs) {
+    if (j.status === 'running') running += 1;
+    if (j.status === 'pending') pending += 1;
+    const key = j.cwd || '(unknown)';
+    byProject[key] = byProject[key] || {};
+    byProject[key][j.status] = (byProject[key][j.status] || 0) + 1;
+  }
+  for (const inv of invalidJobs) {
+    const key = inv.row?.cwd || '(unknown)';
+    byProject[key] = byProject[key] || {};
+    byProject[key].invalid = (byProject[key].invalid || 0) + 1;
+  }
+  const total = jobs.length + invalidJobs.length;
+  const stalled = total > 0 && running === 0 && pending === 0 && !state?.paused;
+  return { stalled, total, running, pending, byProject };
 }
 
 // An empty queue and an unreadable queue are NOT the same thing, and
@@ -1264,7 +1302,11 @@ async function reconcile(state) {
   for (const [slug] of onDisk) {
     if (!seen.has(slug)) unmatchedSlugs.push(slug);
   }
-  const historyBySlug = (unmatchedSlugs.length > 0 || terminalDroppedNeedingHistoryCheck.length > 0)
+  // Rows quarantined by queueStore.shapeJobs because their `status` failed
+  // ScheduleJobSchema (e.g. the 1021/1022 incident's `"status": "queued"`) —
+  // see the repair pass below, right after historyBySlug is available.
+  const invalidJobs = Array.isArray(state.invalidJobs) ? state.invalidJobs : [];
+  const historyBySlug = (unmatchedSlugs.length > 0 || terminalDroppedNeedingHistoryCheck.length > 0 || invalidJobs.length > 0)
     ? await queueHistory.historyTerminalBySlug()
     : new Map();
 
@@ -1280,6 +1322,78 @@ async function reconcile(state) {
       await queueHistory.appendHistory(missing);
       console.log(`[scheduler] reconcile: backfilled ${missing.length} completed/failed job(s) into history.jsonl (PRD file already archived, row about to drop)`);
     }
+  }
+
+  // Repair pass: an invalid row must self-heal within this one tick, not
+  // wait for its slug to also drop out of `seen` via some unrelated code
+  // path. Before this pass, reconcile was add-only (`if (seen.has(slug))
+  // continue` below) — a quarantined row simply vanished from state.jobs
+  // with no log of what its bad status actually was and no repair, which is
+  // how the 1021/1022 rows sat invisible for 4+ hours (2026-08-07).
+  let repairedInvalidCount = 0;
+  for (const inv of invalidJobs) {
+    if (seen.has(inv.slug)) continue; // a valid row for this slug already exists
+    const oldStatus = inv.row?.status;
+    const hist = historyBySlug.get(inv.slug) ?? latestTerminalOutcomeForSlug(inv.slug, { runsDir: RUNS_DIR });
+    if (hist) {
+      // Never resurrect: this slug already has a durable terminal record
+      // elsewhere (history.jsonl or a run sidecar) — repairing its corrupted
+      // row back to 'pending' would re-execute already-shipped work. Drop
+      // the row (its real outcome is recorded elsewhere), loudly.
+      console.warn(`[scheduler] reconcile: dropping invalid queue row ${inv.slug} (status was ${JSON.stringify(oldStatus)}) — already terminal (${hist.status}) in history/run sidecar, not resurrecting`);
+      appendAuditEvent('scheduler_row_repaired', {
+        slug: inv.slug, cwd: inv.row?.cwd ?? null, oldStatus: oldStatus ?? null,
+        action: 'dropped-already-terminal', terminalStatus: hist.status, issues: inv.issues,
+      });
+      continue;
+    }
+    const p = onDisk.get(inv.slug);
+    if (!p) {
+      // PRD file also gone with no terminal record anywhere — nothing to
+      // repair against. queueStore already logged the quarantine once.
+      continue;
+    }
+    const job = {
+      ...inv.row,
+      slug: inv.slug,
+      title: p.title,
+      cwd: p.cwd,
+      parallelGroup: p.parallelGroup,
+      estimateMinutes: p.estimateMinutes,
+      sourcePromptId: p.sourcePromptId ?? inv.row?.sourcePromptId ?? null,
+      sourceTabId: p.sourceTabId ?? inv.row?.sourceTabId ?? null,
+      epicId: p.epicId ?? inv.row?.epicId ?? null,
+      dependsOn: p.dependsOn,
+      bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
+    };
+    const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
+    // A repair is not a lifecycle transition — the corrupted `status` was
+    // never a legal predecessor to check against LEGAL_TRANSITIONS, so this
+    // goes through transitionJob's allowAnyFrom escape hatch (still gets the
+    // normal mutation/statusHistory/audit trail, just skips the legality
+    // gate on `from`) rather than a bare field assignment.
+    transitionJob(job, 'pending', { reason, source: 'reconcile-repair', allowAnyFrom: true });
+    if (job.runId || job.startedAt || job.runtime) {
+      // This row had actually begun executing before its status got
+      // corrupted.
+      job.runId = null;
+      job.startedAt = null;
+      job.finishedAt = null;
+      job.exitCode = null;
+      delete job.runtime;
+      delete job.verifierVerdict;
+    }
+    job.error = null;
+    seen.add(inv.slug);
+    next.push(job);
+    repairedInvalidCount += 1;
+    console.warn(`[scheduler] reconcile: repaired invalid queue row ${inv.slug} — status was ${JSON.stringify(oldStatus)}, reset to 'pending' (${inv.issues})`);
+    appendAuditEvent('scheduler_row_repaired', {
+      slug: inv.slug, cwd: p.cwd, oldStatus: oldStatus ?? null, newStatus: 'pending', issues: inv.issues,
+    });
+  }
+  if (repairedInvalidCount > 0) {
+    console.warn(`[scheduler] reconcile: repaired ${repairedInvalidCount} invalid queue row(s) this pass`);
   }
 
   // Terminal-in-history slugs whose .md file is still on disk: fed into the
@@ -1302,6 +1416,7 @@ async function reconcile(state) {
     return idx.sessions[epicId]?.status ?? null;
   }
 
+  let staleNewDiscoveryCount = 0;
   for (const [slug, p] of onDisk) {
     if (seen.has(slug)) continue;
     // Security gate: a PRD's file location IS its Epic membership
@@ -1385,7 +1500,23 @@ async function reconcile(state) {
       const parent = healTargetForFix(slug, state.jobs);
       entry.investigationDepth = parent ? (parent.investigationDepth ?? 1) + 1 : 2;
     }
+    // A PRD with no queue row and no terminal record is normally a
+    // brand-new file — but one whose mtime already predates a full poll
+    // interval means it sat unpicked (a prior reconcile pass should have
+    // caught it, or it's arriving from a source that bypassed the app's
+    // normal write path). Report it rather than silently treating "first
+    // seen this pass" as "just created".
+    try {
+      const ageMs = Date.now() - fs.statSync(p.path).mtimeMs;
+      if (ageMs > POLL_INTERVAL_MS) {
+        staleNewDiscoveryCount += 1;
+        console.warn(`[scheduler] reconcile: discovered PRD ${slug} with no queue row and no terminal record — file is ${Math.round(ageMs / 1000)}s old, only first seen this pass`);
+      }
+    } catch { /* stat is best-effort reporting only */ }
     next.push(entry);
+  }
+  if (staleNewDiscoveryCount > 0) {
+    console.warn(`[scheduler] reconcile: ${staleNewDiscoveryCount} PRD(s) discovered this pass were already older than one poll interval with no prior queue row`);
   }
   const sorted = next.sort((a, b) => b.slug.localeCompare(a.slug));
 
@@ -1467,6 +1598,13 @@ let resumeTimer = null;
 let pollLoopTimer = null;
 let rescheduleInterval = null;
 let heartbeatInterval = null;
+// Stall-detector state (computeStallSummary), read/written only inside the
+// heartbeat interval below. stallSince: wall-clock ms the stalled condition
+// was first observed, null when clear. stallToasted: rate-limits the
+// error-log + toast to once per stall episode (cleared the moment the queue
+// stops being stalled) rather than every 60s heartbeat tick.
+let stallSince = null;
+let stallToasted = false;
 // (The 5-minute feedback sweep that used to piggyback on this heartbeat is
 // gone: it scanned each active project's session-manager-operations/feedback/
 // and auto-queued a /process-feedback PRD. Both the folder and that skill are
@@ -1738,7 +1876,7 @@ async function clearPause(source) {
  */
 function resetJobFields(job, errorMsg, opts = {}) {
   if (job.status === 'completed' && opts.force !== true) return false;
-  job.status = 'pending';
+  if (!transitionJob(job, 'pending', { reason: errorMsg ?? 'reset to pending', source: opts.source ?? 'resetJobFields' })) return false;
   job.runId = null;
   job.startedAt = null;
   job.finishedAt = null;
@@ -1799,13 +1937,13 @@ function partitionBootOrphans(jobs, isAlive = claudePidAlive) {
 function applyOrphanOutcome(job, outcome, killNote = '') {
   const now = new Date().toISOString();
   if (outcome === 'success') {
-    job.status = 'completed';
+    transitionJob(job, 'completed', { reason: 'boot orphan reconciliation: run succeeded', source: 'applyOrphanOutcome' });
     job.exitCode = 0;
     job.error = null;
     job.finishedAt = now;
     delete job.runtime;
   } else if (outcome === 'failed') {
-    job.status = 'failed';
+    transitionJob(job, 'failed', { reason: `orphaned: app restarted while running${killNote}`, source: 'applyOrphanOutcome' });
     job.exitCode = job.exitCode ?? 1;
     job.error = `orphaned: app restarted while running${killNote}`;
     job.finishedAt = now;
@@ -1813,10 +1951,10 @@ function applyOrphanOutcome(job, outcome, killNote = '') {
   } else {
     const tries = job.orphanRetries ?? 0;
     if (tries < ORPHAN_REQUEUE_CAP) {
-      resetJobFields(job, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`);
+      resetJobFields(job, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`, { source: 'applyOrphanOutcome' });
       job.orphanRetries = tries + 1;
     } else {
-      job.status = 'failed';
+      transitionJob(job, 'failed', { reason: `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`, source: 'applyOrphanOutcome' });
       job.exitCode = job.exitCode ?? 1;
       job.error = `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`;
       job.finishedAt = now;
@@ -2860,7 +2998,7 @@ async function spawnInvestigation(failedJob, runDir) {
   // "nothing is happening" even though an Opus process was actively running.
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === failedJob.slug);
-    if (j) j.status = 'investigating';
+    if (j) transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
   });
   await broadcast({ flush: true });
 
@@ -2905,7 +3043,7 @@ async function spawnInvestigation(failedJob, runDir) {
       // 'investigating' must never be the job's resting state.
       mutate((s) => {
         const j = s.jobs.find((x) => x.slug === failedJob.slug);
-        if (j && j.status === 'investigating') j.status = failedJob.status || 'failed';
+        if (j && j.status === 'investigating') transitionJob(j, failedJob.status || 'failed', { reason: 'investigation probe exited — restoring prior status', source: 'spawnInvestigation:onExit' });
       })
         .then(() => broadcast({ flush: true }))
         .catch(() => {});
@@ -2960,7 +3098,7 @@ async function spawnInvestigation(failedJob, runDir) {
     releaseSlot();
     mutate((s) => {
       const j = s.jobs.find((x) => x.slug === failedJob.slug);
-      if (j && j.status === 'investigating') j.status = failedJob.status || 'failed';
+      if (j && j.status === 'investigating') transitionJob(j, failedJob.status || 'failed', { reason: 'investigation spawn threw before exiting — restoring prior status', source: 'spawnInvestigation:catch' });
     })
       .then(() => broadcast({ flush: true }))
       .catch(() => {});
@@ -2982,7 +3120,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
-        s.jobs[idx].status = 'running';
+        transitionJob(s.jobs[idx], 'running', { reason: 'dispatched for execution', source: 'spawnJob:dispatch' });
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
       }
@@ -3069,7 +3207,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       await mutate((s) => {
         const idx = s.jobs.findIndex((x) => x.slug === job.slug);
         if (idx >= 0) {
-          s.jobs[idx].status = 'completed';
+          transitionJob(s.jobs[idx], 'completed', { reason: res.note ?? 'PRD archived or missing — treated as already-shipped', source: 'spawnJob:skip-archived' });
           s.jobs[idx].finishedAt = new Date().toISOString();
           s.jobs[idx].exitCode = 0;
           s.jobs[idx].error = null;
@@ -3242,7 +3380,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       if (i2 >= 0) {
         const treatAsPending = res.rateLimited || (s.paused && s.paused.reason === 'rate_limit');
         if (treatAsPending) {
-          resetJobFields(s.jobs[i2], res.rateLimited ? 'paused: rate limit' : 'paused: queue halted');
+          resetJobFields(s.jobs[i2], res.rateLimited ? 'paused: rate limit' : 'paused: queue halted', { source: 'spawnJob:halt-reset' });
         } else {
           // Determine effective status, applying the verifier verdict for exit=0 runs.
           let effectiveStatus;
@@ -3262,14 +3400,14 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             effectiveStatus = 'completed';
           } else if (verifyResult.downgradeTo === 'pending') {
             // HALT or deps_unmet: reset to pending so the job re-fires.
-            resetJobFields(s.jobs[i2], verifyResult.reason);
+            resetJobFields(s.jobs[i2], verifyResult.reason, { source: 'spawnJob:verify-downgrade' });
             return; // job already mutated by resetJobFields; skip the rest
           } else {
             // transcript_errors or verify_unavailable: escalate to needs_review.
             effectiveStatus = 'needs_review';
           }
 
-          s.jobs[i2].status = effectiveStatus;
+          transitionJob(s.jobs[i2], effectiveStatus, { reason: sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`, source: 'spawnJob:finalize' });
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
           s.jobs[i2].error = effectiveStatus === 'needs_review'
@@ -3356,7 +3494,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             if (orig) {
               const priorStatus = orig.status;
               console.log(`[scheduler] auto-promote: ${orig.slug} (${priorStatus}) → completed because ${job.slug} succeeded`);
-              orig.status = 'completed';
+              transitionJob(orig, 'completed', { reason: `auto-promoted: fix plan ${job.slug} succeeded`, source: 'spawnJob:auto-promote' });
               orig.exitCode = 0;
               orig.error = null;
               orig.completedBy = job.slug;
@@ -3444,7 +3582,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         await mutate((s) => {
           const i = s.jobs.findIndex((x) => x.slug === job.slug);
           if (i >= 0) {
-            resetJobFields(s.jobs[i], null);
+            resetJobFields(s.jobs[i], null, { source: 'spawnJob:transient-retry' });
             s.jobs[i].transientRetries = decision.retries + 1;
           }
         });
@@ -3454,7 +3592,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         await mutate((s) => {
           const i = s.jobs.findIndex((x) => x.slug === job.slug);
           if (i >= 0) {
-            s.jobs[i].status = 'failed';
+            transitionJob(s.jobs[i], 'failed', { reason: `transient failure (${decision.transientKind}) left uncommitted work — not auto-requeued`, source: 'spawnJob:fail-dirty' });
             s.jobs[i].error = `transient failure (${decision.transientKind}) left ${newlyDirtyCount} uncommitted file(s) in working tree (e.g. ${dirtySample}) — not auto-requeued to avoid overwriting partial work; review and commit or discard manually`;
           }
         });
@@ -3702,7 +3840,7 @@ async function reapDeadRunningJobs() {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const success = outcome === 'success';
-        s.jobs[idx].status = success ? 'completed' : 'failed';
+        transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: `reaped: process gone (outcome=${outcome})`, source: 'reapDeadRunningJobs' });
         s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
         s.jobs[idx].finishedAt = new Date().toISOString();
         s.jobs[idx].error = success ? null : `reaped: process gone, no success result in log (${outcome})`;
@@ -4125,7 +4263,7 @@ async function reverifyNeedsReview() {
     await mutate((s) => {
       for (const j of s.jobs) {
         if (j.status === 'needs_review' && healSet.has(j.slug)) {
-          j.status = 'completed';
+          transitionJob(j, 'completed', { reason: 'boot reverify: stale needs_review healed', source: 'reverifyNeedsReview:heal' });
           j.error = null;
           delete j.verifierVerdict;
           healedPrds.push({ slug: j.slug, cwd: j.cwd });
@@ -4163,7 +4301,7 @@ async function reverifyNeedsReview() {
       const orig = healTargetForFix(job.slug, s.jobs);
       if (!orig) continue;
       const priorStatus = orig.status;
-      orig.status = 'completed';
+      transitionJob(orig, 'completed', { reason: `auto-promoted: fix plan ${job.slug} already completed`, source: 'reverifyNeedsReview:auto-promote' });
       orig.exitCode = 0;
       orig.error = null;
       orig.completedBy = job.slug;
@@ -4341,7 +4479,7 @@ function registerScheduleHandlers() {
       // Guard is in resetJobFields: refuses to reset an already-'completed'
       // job, which would otherwise re-fire a PRD whose deliverable already
       // landed (see resetJobFields' doc comment for the incident).
-      return resetJobFields(state.jobs[idx]) ? 'ok' : 'refused';
+      return resetJobFields(state.jobs[idx], null, { source: 'ipc:schedule:reset-job' }) ? 'ok' : 'refused';
     });
     if (outcome === 'not-found') return { ok: false, error: 'not found' };
     if (outcome === 'refused') {
@@ -4483,85 +4621,7 @@ function registerScheduleHandlers() {
     }
   }));
 
-  ipcMain.handle('schedule:list-prds', async () => {
-    ensureDirs();
-    const out = [];
-    const seenSlugs = new Set();
-
-    async function readDirInto(dir, { archived }) {
-      let entries;
-      try {
-        entries = await fsp.readdir(dir);
-      } catch (e) {
-        if (e?.code !== 'ENOENT') {
-          logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: readdir failed', meta: { dir, error: e?.message } });
-        }
-        return;
-      }
-      for (const name of entries) {
-        if (!name.endsWith('.md') || name.startsWith('.')) continue;
-        const filePath = path.join(dir, name);
-        try {
-          const parsed = await parsePrd(filePath);
-          // A slug can't be both live and archived at once, but a duplicate
-          // slug found in two archive dirs (shouldn't happen — archiving is
-          // a single rename — but is cheap to guard) is skipped rather than
-          // double-counted.
-          if (seenSlugs.has(parsed.slug)) continue;
-          seenSlugs.add(parsed.slug);
-          const stat = await fsp.stat(filePath);
-          const entry = {
-            slug: parsed.slug,
-            parallelGroup: parsed.parallelGroup,
-            title: parsed.title,
-            cwd: parsed.cwd || '',
-            estimateMinutes: parsed.estimateMinutes,
-            sourcePromptId: parsed.sourcePromptId,
-            epicId: parsed.epicId ?? null,
-            mtimeMs: stat.mtimeMs,
-            archived,
-          };
-          out.push(entry);
-        } catch (e) {
-          logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
-        }
-      }
-    }
-
-    // Live PRDs first, so an archived duplicate (shouldn't exist, but a
-    // stale rename copy is possible) never shadows the still-runnable live
-    // entry.
-    for (const dir of candidatePrdsDirs()) {
-      await readDirInto(dir, { archived: false });
-    }
-
-    const archivedStart = out.length;
-    for (const dir of candidateArchivedPrdsDirs()) {
-      await readDirInto(dir, { archived: true });
-    }
-
-    // Archived PRDs need a status: archiveCompletedPrd (scheduler.cjs) only
-    // ever archives a job whose effective status is 'completed' — a 'failed'
-    // job's PRD source stays in the live prds/ dir (still visible/countable
-    // there already). Still resolve the real job status defensively (live
-    // queue row, falling back to history.jsonl) rather than hard-coding
-    // 'completed', so this stays correct if that archiving invariant ever
-    // changes.
-    if (out.length > archivedStart) {
-      const [state, histBySlug] = await Promise.all([
-        readQueue(),
-        queueHistory.historyTerminalBySlug().catch(() => new Map()),
-      ]);
-      const liveStatusBySlug = new Map(state.jobs.map((j) => [j.slug, j.status]));
-      for (let i = archivedStart; i < out.length; i++) {
-        const entry = out[i];
-        entry.archivedStatus = resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug);
-      }
-    }
-
-    out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
-    return out;
-  });
+  ipcMain.handle('schedule:list-prds', async () => listPrdsInternal());
 
   // Return last N completed/failed jobs from queue.json, newest first.
   // Purely additive: no schema change, no archive-folder read needed.
@@ -4766,12 +4826,54 @@ async function init() {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
     const s = readQueueSync();
-    const counts = { pending: 0, running: 0, completed: 0, failed: 0 };
-    for (const j of s.jobs) counts[j.status] = (counts[j.status] || 0) + 1;
+    // Initialise from the real status union (scheduleJobSchema.cjs) rather
+    // than a hand-maintained subset — the old `{ pending, running, completed,
+    // failed }` literal silently minted a NEW key for any other value
+    // (`counts[j.status] = (counts[j.status]||0)+1`), which is exactly how a
+    // heartbeat with a `queued: 2` bucket looked like "normal" 24h
+    // visibility instead of the alarm it should have been. Any row whose
+    // status isn't in JOB_STATUSES (shouldn't happen post-quarantine, but
+    // this is the last line of defence) routes into `unknown`, never a
+    // freshly-minted key.
+    const counts = Object.fromEntries(JOB_STATUSES.map((st) => [st, 0]));
+    counts.unknown = 0;
+    for (const j of s.jobs) {
+      if (Object.prototype.hasOwnProperty.call(counts, j.status) && j.status !== 'unknown') {
+        counts[j.status] += 1;
+      } else {
+        counts.unknown += 1;
+      }
+    }
+
+    const stall = computeStallSummary(s);
+    if (stall.stalled) {
+      if (stallSince === null) stallSince = Date.now();
+      if (!stallToasted && Date.now() - stallSince >= POLL_INTERVAL_MS) {
+        stallToasted = true;
+        console.error(
+          `[scheduler] STALL DETECTED: ${stall.total} job(s) queued, 0 running, 0 pending, not paused, `
+          + `for >= ${Math.round(POLL_INTERVAL_MS / 1000)}s`,
+          stall.byProject,
+        );
+        appendAuditEvent('scheduler_stall_detected', { total: stall.total, byProject: stall.byProject });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          sendIfAlive(mainWindow, 'schedule:stall', {
+            message: `Scheduler stall: ${stall.total} job(s) queued but none running or pending. Check the Scheduler tab.`,
+            total: stall.total,
+            byProject: stall.byProject,
+          });
+        }
+      }
+    } else {
+      stallSince = null;
+      stallToasted = false;
+    }
+
     appendHeartbeat({
       ts: Date.now(),
       pid: process.pid,
       counts,
+      stall: { stalled: stall.stalled, total: stall.total },
       paused: s.paused ? { reason: s.paused.reason, resumeAt: s.paused.resumeAt } : null,
       nextReset: cachedNextReset,
       utilization: cachedUtilization,
@@ -4800,6 +4902,102 @@ async function init() {
   } catch (e) {
     console.warn('[scheduler] powerMonitor unavailable', e?.message);
   }
+}
+
+/**
+ * listPrdsInternal() → every live + archived PRD across every project,
+ * with each entry's real job status folded in (`status`: the live queue
+ * row's status, or the resolved terminal status for an archived entry, or
+ * null when no queue row exists yet — e.g. a PRD just written and not yet
+ * picked up by reconcile()). Single source of truth for both the renderer's
+ * `schedule:list-prds` IPC handler and the admin HTTP `GET
+ * /admin/scheduler/prds` route (PRD 1024) — neither re-implements this scan.
+ */
+async function listPrdsInternal() {
+  ensureDirs();
+  const out = [];
+  const seenSlugs = new Set();
+
+  async function readDirInto(dir, { archived }) {
+    let entries;
+    try {
+      entries = await fsp.readdir(dir);
+    } catch (e) {
+      if (e?.code !== 'ENOENT') {
+        logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: readdir failed', meta: { dir, error: e?.message } });
+      }
+      return;
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.md') || name.startsWith('.')) continue;
+      const filePath = path.join(dir, name);
+      try {
+        const parsed = await parsePrd(filePath);
+        // A slug can't be both live and archived at once, but a duplicate
+        // slug found in two archive dirs (shouldn't happen — archiving is
+        // a single rename — but is cheap to guard) is skipped rather than
+        // double-counted.
+        if (seenSlugs.has(parsed.slug)) continue;
+        seenSlugs.add(parsed.slug);
+        const stat = await fsp.stat(filePath);
+        const entry = {
+          slug: parsed.slug,
+          parallelGroup: parsed.parallelGroup,
+          title: parsed.title,
+          cwd: parsed.cwd || '',
+          estimateMinutes: parsed.estimateMinutes,
+          sourcePromptId: parsed.sourcePromptId,
+          epicId: parsed.epicId ?? null,
+          mtimeMs: stat.mtimeMs,
+          archived,
+        };
+        out.push(entry);
+      } catch (e) {
+        logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'list-prds: skipping unparseable file', meta: { name, error: e?.message } });
+      }
+    }
+  }
+
+  // Live PRDs first, so an archived duplicate (shouldn't exist, but a
+  // stale rename copy is possible) never shadows the still-runnable live
+  // entry.
+  for (const dir of candidatePrdsDirs()) {
+    await readDirInto(dir, { archived: false });
+  }
+
+  const archivedStart = out.length;
+  for (const dir of candidateArchivedPrdsDirs()) {
+    await readDirInto(dir, { archived: true });
+  }
+
+  // Every entry (live and archived) gets a real job status folded in.
+  // Archived PRDs need one resolved defensively (live queue row, falling
+  // back to history.jsonl) rather than hard-coded 'completed', so this
+  // stays correct if the archive-only-completed invariant ever changes; a
+  // live entry with no queue row yet (just written, not yet reconciled)
+  // gets `status: null`.
+  const [state, histBySlug] = await Promise.all([
+    readQueue(),
+    queueHistory.historyTerminalBySlug().catch(() => new Map()),
+  ]);
+  const liveStatusBySlug = new Map(state.jobs.map((j) => [j.slug, j.status]));
+  for (let i = 0; i < out.length; i++) {
+    const entry = out[i];
+    // `entry` is a freshly-synthesized PRD-listing row, not a persisted
+    // ScheduleJob — assigning its `status` here is not a queue-job status
+    // transition (no queue.json row is mutated, no statusHistory/audit
+    // trail applies), so it is intentionally exempt from the
+    // transitionJob-only rule enforced by scheduleJobTransitionsGrep.test.cjs.
+    if (i < archivedStart) {
+      entry.status = liveStatusBySlug.get(entry.slug) ?? null;
+    } else {
+      entry.archivedStatus = resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug);
+      entry.status = entry.archivedStatus;
+    }
+  }
+
+  out.sort((a, b) => a.slug.localeCompare(b.slug, undefined, { numeric: true }));
+  return out;
 }
 
 // remote — in-process (non-IPC) scheduler accessors, used by prdCreate.cjs
@@ -4921,7 +5119,7 @@ const remote = {
         // Best-effort: record the dispatch on the Epic's event chain.
         try { await appendPrdCreatedEvent(cwd, epicTrace, slug); } catch { /* trace only */ }
       }
-      return { ok: true, bytesWritten: stat.size };
+      return { ok: true, bytesWritten: stat.size, path: resolved, epicId: epicTrace };
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };
     }
@@ -4934,7 +5132,7 @@ const remote = {
       if (idx < 0) return { kind: 'not-found' };
       // Terminal-status guard lives in resetJobFields itself; force:true
       // threads through to override it.
-      if (!resetJobFields(state.jobs[idx], null, { force: opts.force === true })) {
+      if (!resetJobFields(state.jobs[idx], null, { force: opts.force === true, source: 'remote:resetJob' })) {
         return { kind: 'refused' };
       }
       return { kind: 'ok' };
@@ -4953,6 +5151,173 @@ const remote = {
   async listJobs() {
     const state = await readQueue();
     return state.jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd }));
+  },
+
+  // Single queue row lookup, used by cancelJob/updatePrd's status guards and
+  // the admin GET /admin/scheduler/prds?slug= route (PRD 1024).
+  async getJob(slug) {
+    const state = await readQueue();
+    const job = state.jobs.find((j) => j.slug === slug);
+    return job ? { slug: job.slug, title: job.title, status: job.status, cwd: job.cwd, error: job.error ?? null } : null;
+  },
+
+  // Every live+archived PRD across every project (listPrdsInternal, shared
+  // with the renderer's schedule:list-prds IPC handler), filtered by the
+  // admin route's cwd/epicId/status query params.
+  async listPrds(filter = {}) {
+    const all = await listPrdsInternal();
+    return all.filter((entry) => {
+      if (filter.cwd && entry.cwd !== filter.cwd) return false;
+      if (filter.epicId && entry.epicId !== filter.epicId) return false;
+      if (filter.status && entry.status !== filter.status) return false;
+      return true;
+    });
+  },
+
+  // Full body + parsed frontmatter for one PRD, live or archived. Mirrors
+  // readPrd's dir-search + symlink-defense pattern (see that method's
+  // comment) rather than sharing code with it, since readPrd intentionally
+  // returns raw text only and is a much narrower/hotter path (executeJob's
+  // PRD re-reads) that shouldn't grow a second return shape.
+  async getPrdParsed(slug, cwd) {
+    let dir = null;
+    let filePath = null;
+    if (cwd) {
+      for (const d of [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
+        const p = safeSlugPathIn(d, slug);
+        if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
+      }
+      if (!filePath) {
+        for (const d of listArchivedPrdDirs(cwd)) {
+          const p = safeSlugPathIn(d, slug);
+          if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
+        }
+      }
+    } else {
+      dir = await findPrdDir(slug);
+      filePath = dir ? safeSlugPathIn(dir, slug) : null;
+      if (!filePath) {
+        for (const d of candidateArchivedPrdsDirs()) {
+          const p = safeSlugPathIn(d, slug);
+          if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
+        }
+      }
+    }
+    if (!filePath) return { ok: false, error: 'invalid slug' };
+    try {
+      // Symlink defense, matching readPrd/writePrd's comment: safeSlugPathIn
+      // is lexical and does not resolve symlinks.
+      const real = await fsp.realpath(filePath);
+      if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const [raw, parsed] = await Promise.all([fsp.readFile(real, 'utf8'), prdParser.parsePrdRaw(real)]);
+      return {
+        ok: true,
+        slug: parsed.slug,
+        frontmatter: {
+          title: parsed.title,
+          cwd: parsed.cwd,
+          estimateMinutes: parsed.estimateMinutes,
+          parallelGroup: parsed.parallelGroup,
+          sourcePromptId: parsed.sourcePromptId,
+          sourceTabId: parsed.sourceTabId,
+          epicId: parsed.epicId,
+          dependsOn: parsed.dependsOn,
+        },
+        body: parsed.body,
+        raw,
+      };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? 'read failed' };
+    }
+  },
+
+  // Edits a NOT-yet-running PRD's frontmatter and/or body in place, refusing
+  // once a queue row exists for it and that row is anything but 'pending'
+  // (running/completed/failed/needs_review — editing the spec under a live
+  // or already-finished executor would silently rewrite history). Reuses
+  // prdFrontmatter.cjs's parsePrdFile/serializePrdFile round-trip pair (PRD
+  // 1024) so unrecognized keys (e.g. dependsOn) and untouched recognized
+  // keys' original line formatting survive unchanged.
+  async updatePrd({ slug, cwd, frontmatter, body }) {
+    const job = await this.getJob(slug);
+    if (job && job.status !== 'pending') {
+      return { ok: false, error: `job status is "${job.status}" — only a not-yet-running PRD (status "pending", or no queue row yet) may be edited` };
+    }
+
+    let dir = null;
+    let filePath = null;
+    if (cwd) {
+      for (const d of [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
+        const p = safeSlugPathIn(d, slug);
+        if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
+      }
+    } else {
+      dir = await findPrdDir(slug);
+      filePath = dir ? safeSlugPathIn(dir, slug) : null;
+    }
+    if (!filePath) return { ok: false, error: 'PRD not found' };
+
+    let raw;
+    try {
+      const real = await fsp.realpath(filePath);
+      if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      raw = await fsp.readFile(real, 'utf8');
+    } catch (e) {
+      return { ok: false, error: e?.message ?? 'read failed' };
+    }
+
+    const { frontmatter: fm, body: origBody } = parsePrdFile(raw);
+    if (frontmatter) {
+      for (const key of Object.keys(frontmatter)) {
+        if (frontmatter[key] === undefined) continue;
+        fm[key] = frontmatter[key];
+      }
+    }
+    const newBody = body !== undefined ? body : origBody;
+    const newRaw = serializePrdFile(fm, newBody);
+
+    try {
+      await config.writeTextAtomic(filePath, newRaw, { writer: 'scheduler' });
+      const stat = await fsp.stat(filePath);
+      return { ok: true, slug, bytesWritten: stat.size };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? 'write failed' };
+    }
+  },
+
+  // Cancels a job that hasn't finished yet. A 'running' job's process group
+  // is SIGTERM'd (reusing killOrphanClaudePid — the same kill path boot
+  // reconciliation uses for an orphaned running job) before its queue row is
+  // finalized; a 'pending' job has no process to kill. There is no
+  // 'cancelled' status in the closed job-status set (pending/running/
+  // completed/failed/needs_review — see CLAUDE.md's domain model), so a
+  // cancelled job lands in 'failed' with an error naming the cause,
+  // consistent with every other non-success terminal outcome. Refuses a
+  // slug that's already terminal — nothing left to cancel.
+  async cancelJob(slug) {
+    const state = await readQueue();
+    const job = state.jobs.find((j) => j.slug === slug);
+    if (!job) return { ok: false, error: 'not found' };
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review') {
+      return { ok: false, error: `job already terminal (status: "${job.status}") — nothing to cancel` };
+    }
+    const wasRunning = job.status === 'running';
+    const pid = job.runtime?.pid;
+    if (wasRunning && pid) {
+      killOrphanClaudePid(pid);
+    }
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((j) => j.slug === slug);
+      if (idx < 0) return;
+      const j = s.jobs[idx];
+      transitionJob(j, 'failed', { reason: 'cancelled via admin API', source: 'remote:cancelJob' });
+      j.error = 'cancelled via admin API';
+      j.finishedAt = new Date().toISOString();
+      j.exitCode = j.exitCode ?? null;
+      delete j.runtime;
+    });
+    await broadcast({ flush: true });
+    return { ok: true, slug, status: 'failed', wasRunning };
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that
@@ -4995,4 +5360,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary };

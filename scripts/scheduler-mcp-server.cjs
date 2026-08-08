@@ -87,9 +87,12 @@ const TOOLS = [
   {
     name: 'scheduler_create_prd',
     description:
-      "Queue a new scheduled PRD via the session-manager app's admin API. Server-side "
+      "Write a new PRD file via the session-manager app's admin API. Server-side "
       + 'validates the frontmatter, atomically allocates the NN parallel-group number, '
-      + 'appends the engineering standards, and writes the PRD file. Every PRD must join an '
+      + 'appends the engineering standards, and writes the PRD file to disk. This tool ONLY '
+      + "writes the file — it does not create a scheduler queue row. The queue row is derived "
+      + 'automatically by the scheduler\'s next reconcile pass (typically within ~1 minute); '
+      + 'the response has `enqueued: false` for exactly this reason. Every PRD must join an '
       + 'EXISTING, already-human-approved Epic (pass sourcePromptId) — this tool never mints '
       + 'a new one, and refuses the write if no Epic can be resolved. Falls back: if the '
       + 'app is not running, author the PRD file by hand instead (see /develop).',
@@ -113,6 +116,113 @@ const TOOLS = [
         sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
       },
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
+    },
+  },
+  {
+    name: 'scheduler_list_prds',
+    description: "THE ONLY SUPPORTED WAY to list scheduled PRDs (live + archived) via the session-manager app's admin API. "
+      + 'Each entry includes its real job status (pending/running/completed/failed/needs_review, or null if not yet '
+      + 'queued/reconciled). Optionally filter by project cwd, Epic id, and/or status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Optional: only PRDs targeting this project cwd' },
+        epicId: { type: 'string', description: 'Optional: only PRDs belonging to this Epic id' },
+        status: { type: 'string', description: 'Optional: only PRDs whose job status equals this value' },
+      },
+    },
+  },
+  {
+    name: 'scheduler_get_prd',
+    description: "THE ONLY SUPPORTED WAY to read one PRD's full body + parsed frontmatter (live or archived) via the "
+      + "session-manager app's admin API.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'PRD slug to read' },
+        cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
+      },
+      required: ['slug'],
+    },
+  },
+  {
+    name: 'scheduler_update_prd',
+    description: "THE ONLY SUPPORTED WAY to edit a NOT-yet-running PRD's frontmatter and/or body via the session-manager "
+      + 'app\'s admin API. Refuses once a queue row exists for the slug and its status is anything but "pending" '
+      + '(running/completed/failed/needs_review) — editing the spec under a live or already-finished executor is refused, '
+      + 'not silently applied. Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
+      + 'sourcePromptId, sourceTabId, tag) may be patched; unrecognized keys (e.g. dependsOn) round-trip unchanged.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'PRD slug to edit' },
+        cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
+        frontmatter: {
+          type: 'object',
+          description: 'Partial frontmatter patch — only the keys to change',
+          properties: {
+            title: { type: 'string' },
+            cwd: { type: 'string' },
+            estimateMinutes: { type: 'number' },
+            parallelGroup: { type: 'number' },
+            sourcePromptId: { type: 'string' },
+            sourceTabId: { type: 'string' },
+            tag: { type: 'string', enum: ['feature', 'bug', 'discussion', 'build'] },
+          },
+        },
+        body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter)' },
+      },
+      required: ['slug'],
+    },
+  },
+  {
+    name: 'scheduler_archive_prd',
+    description: "THE ONLY SUPPORTED WAY to archive one or more PRDs (move to prds-archived/) via the session-manager "
+      + "app's admin API.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slugs: { type: 'array', items: { type: 'string' }, description: 'Slugs to archive' },
+      },
+      required: ['slugs'],
+    },
+  },
+  {
+    name: 'scheduler_cancel_job',
+    description: "THE ONLY SUPPORTED WAY to cancel a not-yet-terminal scheduler job via the session-manager app's admin "
+      + 'API. A running job is SIGTERM\'d; a pending job is simply retired. There is no "cancelled" job status, so a '
+      + 'cancelled job lands as "failed" with an error naming the cause. Refuses a slug whose job is already terminal '
+      + '(completed/failed/needs_review) — nothing to cancel.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'PRD slug of the job to cancel' },
+      },
+      required: ['slug'],
+    },
+  },
+  {
+    name: 'scheduler_retag_prd',
+    description: "THE ONLY SUPPORTED WAY to rewrite a PRD's parallelGroup and/or estimateMinutes frontmatter (and, if "
+      + "parallelGroup changes, its NN- filename prefix) via the session-manager app's admin API.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'One or more retag operations',
+          items: {
+            type: 'object',
+            properties: {
+              slug: { type: 'string' },
+              parallelGroup: { type: 'number' },
+              estimateMinutes: { type: 'number' },
+            },
+            required: ['slug'],
+          },
+        },
+      },
+      required: ['items'],
     },
   },
   {
@@ -155,6 +265,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const result = await adminRequest('GET', '/admin/scheduler/jobs');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
+    if (name === 'scheduler_list_prds') {
+      const qs = new URLSearchParams();
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      if (args?.epicId) qs.set('epicId', args.epicId);
+      if (args?.status) qs.set('status', args.status);
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      const result = await adminRequest('GET', `/admin/scheduler/prds${suffix}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_get_prd') {
+      const slug = args && typeof args.slug === 'string' ? args.slug : null;
+      if (!slug) {
+        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+      }
+      const qs = new URLSearchParams({ slug });
+      if (args?.cwd) qs.set('cwd', args.cwd);
+      const result = await adminRequest('GET', `/admin/scheduler/prd?${qs.toString()}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_update_prd') {
+      const slug = args && typeof args.slug === 'string' ? args.slug : null;
+      if (!slug) {
+        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+      }
+      const result = await adminRequest('POST', '/admin/scheduler/update-prd', args);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_archive_prd') {
+      const slugs = Array.isArray(args?.slugs) ? args.slugs : null;
+      if (!slugs || slugs.length === 0) {
+        return { content: [{ type: 'text', text: 'missing required argument: slugs' }], isError: true };
+      }
+      const result = await adminRequest('POST', '/admin/scheduler/archive-prd', { slugs });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_cancel_job') {
+      const slug = args && typeof args.slug === 'string' ? args.slug : null;
+      if (!slug) {
+        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+      }
+      const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_retag_prd') {
+      const items = Array.isArray(args?.items) ? args.items : null;
+      if (!items || items.length === 0) {
+        return { content: [{ type: 'text', text: 'missing required argument: items' }], isError: true };
+      }
+      const result = await adminRequest('POST', '/admin/scheduler/retag-prd', { items });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
     if (name === 'scheduler_create_prd') {
       // If the caller (the model) didn't pass sourcePromptId, forward this
       // process's own SM_CHAT_SESSION_ID (set by chatRunner.cjs on the
@@ -167,7 +328,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
       }
       const result = await adminRequest('POST', '/admin/scheduler/create-prd', payload);
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      // Never say "queued" — this tool only writes the PRD file; the queue
+      // row is derived by the scheduler's next reconcile pass, not by this
+      // call. Say so plainly alongside the raw JSON.
+      const note = result?.ok !== false
+        ? ' — PRD file written; the queue row is derived on the next scheduler reconcile pass, not by this call.'
+        : '';
+      return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
     }
     if (name === 'chat_send_prompt') {
       const tabId = args && typeof args.tabId === 'string' ? args.tabId : null;

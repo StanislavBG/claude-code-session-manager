@@ -221,7 +221,7 @@ test('POST /admin/scheduler/create-prd without token returns 401', async () => {
   }
 });
 
-test('POST /admin/scheduler/create-prd with a valid payload writes a file with frontmatter + standards appended, returns {nn, filename, status}', async () => {
+test('POST /admin/scheduler/create-prd with a valid payload writes a file with frontmatter + standards appended, returns {nn, filename, enqueued:false}', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
   const { admin, port, token } = await startWithRemote(remote);
@@ -230,7 +230,12 @@ test('POST /admin/scheduler/create-prd with a valid payload writes a file with f
       method: 'POST', path: '/admin/scheduler/create-prd', token, body: validCreateBody(),
     });
     expect(res.status).toBe(200);
-    expect(res.json.status).toBe('queued');
+    // Never a 'status' field, and never the literal 'queued' — this route
+    // only writes the PRD file; the queue row is derived by the next
+    // reconcile() pass, not created here. See prdCreate.cjs's createPrd.
+    expect(res.json.status).toBeUndefined();
+    expect(res.json.enqueued).toBe(false);
+    expect(typeof res.json.note).toBe('string');
     expect(typeof res.json.nn).toBe('number');
     expect(res.json.filename).toMatch(/^\d+-add-widget-frobnication\.md$/);
 

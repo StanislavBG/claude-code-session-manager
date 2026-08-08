@@ -204,7 +204,24 @@ async function createPrd(input, remote) {
     sourceTabId: input.sourceTabId ?? null,
   });
 
-  return { ok: true, nn, filename: `${filenameSlug}.md` };
+  // No `status` field here, and never one named 'queued' — that string was
+  // handed straight to callers as if it were a real ScheduleJob status, and
+  // is exactly how the 1021/1022 incident's invalid `"status": "queued"`
+  // rows got onto disk (this route's own response was the most likely
+  // source). A PRD is a queue row's SOURCE, not the row itself: writePrd
+  // only ever joins an Epic and writes the .md file — the queue row is
+  // created separately, by the next reconcile() pass. `enqueued: false` is
+  // true by construction (this function never touches queue.json), so no
+  // caller can copy a fake job status out of this response again.
+  return {
+    ok: true,
+    nn,
+    filename: `${filenameSlug}.md`,
+    prdPath: writeResult.path ?? null,
+    epicId: writeResult.epicId ?? null,
+    enqueued: false,
+    note: 'PRD file written; the queue row is derived by the next scheduler reconcile pass, not created here',
+  };
 }
 
 /**
@@ -240,7 +257,16 @@ function registerAdminRoute(adminHttp, remote) {
       return;
     }
 
-    sendJson(res, 200, { nn: result.nn, filename: result.filename, status: 'queued' });
+    // Mirror createPrd()'s own honest shape verbatim — never re-add a
+    // 'status' field here. See createPrd's return above for why.
+    sendJson(res, 200, {
+      nn: result.nn,
+      filename: result.filename,
+      prdPath: result.prdPath ?? null,
+      epicId: result.epicId ?? null,
+      enqueued: false,
+      note: result.note,
+    });
   });
 }
 

@@ -87,15 +87,21 @@ const TOOLS = [
   {
     name: 'scheduler_create_prd',
     description:
-      "Write a new PRD file via the session-manager app's admin API. Server-side "
-      + 'validates the frontmatter, atomically allocates the NN parallel-group number, '
-      + 'appends the engineering standards, and writes the PRD file to disk. This tool ONLY '
-      + "writes the file — it does not create a scheduler queue row. The queue row is derived "
-      + 'automatically by the scheduler\'s next reconcile pass (typically within ~1 minute); '
-      + 'the response has `enqueued: false` for exactly this reason. Every PRD must join an '
-      + 'EXISTING, already-human-approved Epic (pass sourcePromptId) — this tool never mints '
-      + 'a new one, and refuses the write if no Epic can be resolved. Falls back: if the '
-      + 'app is not running, author the PRD file by hand instead (see /develop).',
+      "THE ONLY SANCTIONED WAY to author a PRD. Write a new PRD file via the session-manager "
+      + "app's admin API. Server-side validates the frontmatter, atomically allocates the NN "
+      + 'parallel-group number, appends the engineering standards, and writes the PRD file to '
+      + "disk. This tool ONLY writes the file — it does not create a scheduler queue row. The "
+      + 'queue row is derived automatically by the scheduler\'s next reconcile pass (typically '
+      + 'within ~1 minute); the response has `enqueued: false` for exactly this reason. Every '
+      + 'PRD must join an EXISTING, already-human-approved Epic (pass sourcePromptId) — this '
+      + 'tool never mints a new one, and refuses the write if no Epic can be resolved. '
+      + 'Hand-authoring the PRD file directly on disk is a DEGRADED, LAST-RESORT fallback for '
+      + 'the single case where this tool is unreachable (app not running) — never a plain '
+      + 'alternative to reach for by preference. A caller that falls back to hand-authoring '
+      + 'MUST say so explicitly and visibly in its report to the human (which file, why the '
+      + 'tool was unreachable, and that it needs verification) — the server-side validation, '
+      + 'atomic NN allocation, and Epic-existence check this tool performs did not run for '
+      + 'that file. See /develop.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -36,6 +36,16 @@ etc.), this skill makes **no assumption about the target project's namespace
 names, its OWNERS table shape, or whether it has a CLAUDE.md at all**. It
 re-derives the source-of-truth hierarchy from what that specific project has:
 
+**Hand-authored-PRD detection stays out of this generic script on purpose.**
+`audit-ops-hygiene.cjs`'s Pattern E (cross-referencing a live PRD `.md` file
+against the machine-wide `prd_create` audit log to flag a PRD that bypassed
+`scheduler_create_prd`) requires session-manager's own scheduler/PRD/audit-log
+concepts, which a swept project may not even have — adding it here would break
+the "no assumption about vocabulary" guarantee above. When sweeping
+session-manager's own repo, run `node scripts/audit-ops-hygiene.cjs` alongside
+this skill and fold its Pattern C/D/E findings into the same report; when
+sweeping a different project, Pattern E simply doesn't apply.
+
 1. That project's own `CLAUDE.md` (if present) — the declared architecture.
 2. Each namespace's own `README.md` under its `session-manager-operations/<namespace>/`.
 3. On-disk content — folder names, and archived/processed subfolders.

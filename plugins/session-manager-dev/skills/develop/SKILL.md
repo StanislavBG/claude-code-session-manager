@@ -57,11 +57,15 @@ scheduler isn't decomposition need, it's model economics: keep the interactive m
 (an expensive planner-tier model) focused on discussion and decisions, and let a cheaper executor
 model do the implementing as a headless `claude -p` job.
 
-**Only execution is delegated — authoring never is.** Write every PRD's markdown yourself, in
-the main loop: the thinking, decomposition, scope, and acceptance criteria are the planner's
-job. Do not spawn a subagent to draft a PRD or otherwise hand off the writing/thinking — that
-defeats the point of keeping planning on the expensive model. The scheduled `claude -p` job is
-the only step that runs on the cheaper executor.
+**Only execution is delegated — authoring never is.** Do the thinking — decomposition, scope,
+title, goal, and acceptance criteria — yourself, in the main loop; that's what "authoring" means
+here, and it's non-negotiable regardless of which mechanism ends up putting bytes on disk. Do
+not spawn a subagent to draft a PRD or otherwise hand off the writing/thinking — that defeats the
+point of keeping planning on the expensive model. Once you've composed the PRD yourself, submit
+it through `scheduler_create_prd` (the MCP tool — see step 4's "PRD structure and location"
+below): that tool call is the sanctioned path from your own composed content to a file on disk,
+not a second author. The scheduled `claude -p` job remains the only step that runs on the
+cheaper executor.
 
 ## Standards (single source of truth)
 
@@ -206,8 +210,11 @@ can't load skills.
      separate PRDs into one oversized one; if the sub-task groups would each take real time on
      their own, that's a signal to split into a chain link instead of one bloated PRD.
 
-   **Prefer creating each PRD via the `scheduler_create_prd` MCP tool**
-   (`mcp__session-manager-scheduler__scheduler_create_prd`) over hand-writing the file. Its input
+   **`scheduler_create_prd` is the ONLY sanctioned way to author a PRD — not a preference, a
+   rule.** Every PRD reaches disk through the MCP tool
+   (`mcp__session-manager-scheduler__scheduler_create_prd`). Hand-writing the file directly is a
+   degraded, LAST-RESORT fallback (below) reserved for the single case where the tool itself is
+   unreachable — never a co-equal alternative to reach for out of habit or convenience. Its input
    (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
    `outOfScope[]`) maps directly onto the sections below — pass them straight through. **Always
    pass `sourcePromptId` explicitly, set to the `<epic-id>` resolved in the Epic-gated step
@@ -222,7 +229,17 @@ can't load skills.
 
    **Fallback — only when the tool errors with "app not running" / admin API unreachable**
    (the session-manager Electron app must be running for this MCP tool to work; if it isn't,
-   don't block on it): compute the highest in-use number deterministically yourself — never
+   don't block on it). This is a deliberate bypass of the service boundary, not a shortcut:
+   using it means the frontmatter validation, atomic `NN` allocation, standards-pointer
+   insertion, and Epic-existence check that `scheduler_create_prd` normally performs did not
+   run. **You MUST call this out, visibly, in your report** — state plainly that the app wasn't
+   running, that you hand-authored the PRD file directly instead of using the tool, name the
+   exact file, and flag it for human verification (this bypass is also what
+   `scripts/audit-ops-hygiene.cjs` and the `ops-sweep` skill look for and report as a hygiene
+   finding, independent of your own report). Do not use this path when the tool is reachable but
+   merely returned a validation error (bad frontmatter, unresolvable Epic, etc.) — fix the input
+   and retry the tool; a validation error is not "the app is not running."
+   When you do use it: compute the highest in-use number deterministically yourself — never
    eyeball or narrow-grep the `ls` (a narrowed pattern like `'^10[0-9]'` silently misses `110+`
    and collides). PRDs are stored per-project, so `NN` allocation for a given PRD only needs
    *that project's own* prds directory scanned — not every project's:
@@ -268,9 +285,16 @@ can't load skills.
    **Anywhere else doesn't get scheduled or gets retired.** `data/prds/`, `docs/prds/`, and the
    old global `prds/` dir under `~/.claude/session-manager/scheduled-plans/` are invisible to
    the scheduler; the legacy flat `session-manager-operations/scheduler/prds/` dir is RETIRED —
-   anything written there is auto-consolidated into `prds-archived/` at the next app boot
-   without being executed. PRD *source* files are per-project and per-Epic, resolved at runtime
-   via `src/main/lib/prdLocations.cjs`.
+   anything written there is auto-consolidated into `prds-archived/` and never executed. This
+   consolidation runs at the top of every `reconcile()` call (`consolidateAllFlatPrds`, called
+   from inside `reconcile()` itself in `src/main/scheduler.cjs`, before `reconcile` scans that
+   dir for PRD sources) — not only at app boot, and not just from the tick-queue poll:
+   `reconcile()` also runs from job completion, the `schedule:state`/`schedule:rescan` IPC
+   handlers, and `rescheduleTimer()`, so the sweep is guaranteed regardless of which of those
+   triggers the next pass. A file landing in the flat dir while the app is already running is
+   swept out before it could ever be turned into a job, closing the window a boot-only pass left
+   open. PRD *source* files are per-project and per-Epic, resolved at runtime via
+   `src/main/lib/prdLocations.cjs`.
 
    **Filename rules.** `NN` is the PRD's unique per-project number (always next free =
    max+1 per the `ls` command above; ordering via `dependsOn` frontmatter, never via shared
@@ -423,11 +447,15 @@ single definition of "tracked to done" for both entry paths.
 
 ## Notes
 
-- Write PRD files directly, then confirm — don't draft them inline in chat for review first.
+- Submit each PRD through `scheduler_create_prd`, then confirm — don't draft them inline in chat
+  for review first, and don't hand-write the file yourself unless the tool is unreachable (app
+  not running); see the fallback note above, including its mandatory bypass warning.
 - Don't combine unrelated features into one PRD. One focused, completable unit each.
 - Don't add a `parallelGroup` frontmatter key — the filename `NN-` prefix drives grouping.
 - Don't write a PRD to `data/prds/`, `docs/prds/`, the project's own folder, or anywhere outside
-  the canonical path. The user has explicitly flagged this as a recurring problem.
+  the canonical path — and don't reach for a hand-written file at the canonical path either, when
+  `scheduler_create_prd` is reachable. The user has explicitly flagged this as a recurring
+  problem.
 - Don't leave `cwd` unset hoping for the default. Be explicit.
 - Don't skip a step-3 lens silently and don't force every request into a chain — most asks are
   still an independent set of small PRDs; reach for the 3-5-PRD evolving chain only when the

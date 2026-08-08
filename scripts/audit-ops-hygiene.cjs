@@ -18,12 +18,31 @@
  * `scheduler/` for a `sourcePromptId:` frontmatter match before concluding
  * anything is actually lost.
  *
+ * Pattern E — PRDs authored outside the sanctioned `scheduler_create_prd` MCP
+ * tool (the /develop skill's manual-write fallback is meant to be a rare,
+ * flagged last resort — see CLAUDE.md's "PRD authoring is API-only"). Every
+ * API-created PRD gets a `prd_create` record in the machine-wide audit log
+ * (`~/.claude/session-manager/audit-log.jsonl`, `src/main/lib/auditLog.cjs`)
+ * keyed by cwd+slug. This check is deliberately narrow: it only inspects PRD
+ * `.md` files `git status` reports as UNTRACKED (never committed yet) — a
+ * PRD's file mtime is USELESS as a "recently authored" signal because these
+ * files are committed to the target repo, so any `git clone`/`checkout`/
+ * `git clean` resets every tracked PRD's mtime to "now" regardless of when it
+ * was actually authored (a first draft of this check used mtime and would
+ * have false-positived on nearly every already-committed PRD after a fresh
+ * checkout). An untracked file, by contrast, really was just created in this
+ * working tree. A cwd that isn't a git repo, or has no untracked PRDs, is
+ * reported clean — this check simply doesn't apply there. Reported as a
+ * hygiene finding, never blocked, exactly like Patterns C/D.
+ *
  * Usage: node scripts/audit-ops-hygiene.cjs [cwd]   (defaults to cwd)
  */
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const projectCwd = process.argv[2] || process.cwd();
 const OPS_ROOT = path.join(projectCwd, 'session-manager-operations');
@@ -33,6 +52,9 @@ const EPICS_DIR = path.join(SCHEDULER_DIR, 'epics');
 const FLAT_PRDS_DIR = path.join(SCHEDULER_DIR, 'prds');
 const ARCHIVED_PRDS_DIR = path.join(SCHEDULER_DIR, 'prds-archived');
 const QUEUE_PATH = path.join(SCHEDULER_DIR, 'state', 'queue.json');
+// Override hook for tests only — production always uses the real path.
+const AUDIT_LOG_PATH = process.env.SM_AUDIT_LOG_PATH_OVERRIDE
+  || path.join(os.homedir(), '.claude', 'session-manager', 'audit-log.jsonl');
 
 function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
@@ -134,9 +156,88 @@ function auditPatternD() {
   };
 }
 
+/** Every `prd_create` audit event's `${cwd}::${slug}` key. */
+function readPrdCreateAuditKeys() {
+  const keys = new Set();
+  let lines;
+  try { lines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').split('\n'); } catch { return keys; }
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (rec?.kind === 'prd_create' && rec?.cwd && rec?.slug) {
+      keys.add(`${rec.cwd}::${rec.slug}`);
+    }
+  }
+  return keys;
+}
+
+/**
+ * PRD `.md` files `git status --porcelain` reports as untracked (`??`),
+ * scoped to `session-manager-operations/scheduler/**\/prds/`. Returns null
+ * when `projectCwd` isn't a git repo (or `git` isn't available) — the
+ * caller then reports "not applicable" rather than a false CLEAN, since an
+ * already-committed bypass wouldn't show up here at all.
+ */
+function listUntrackedPrdFiles() {
+  let out;
+  try {
+    out = execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'session-manager-operations/scheduler'], {
+      cwd: projectCwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
+  const hits = [];
+  for (const line of out.split('\n')) {
+    if (!line.startsWith('?? ')) continue;
+    const rel = line.slice(3).trim();
+    if (!rel.endsWith('.md')) continue;
+    if (path.basename(path.dirname(rel)) !== 'prds') continue; // excludes prds-archived/
+    hits.push(path.join(projectCwd, rel));
+  }
+  return hits;
+}
+
+function auditPatternE() {
+  const untracked = listUntrackedPrdFiles();
+  if (untracked === null) {
+    return {
+      applicable: false,
+      checkedCount: 0,
+      unattributedCount: 0,
+      unattributed: [],
+      verdict: 'NOT APPLICABLE: target cwd is not a git repo (or git is unavailable) — cannot distinguish freshly-authored PRDs from committed history.',
+    };
+  }
+
+  const keys = readPrdCreateAuditKeys();
+  const unattributed = [];
+  for (const file of untracked) {
+    const slug = path.basename(file, '.md');
+    const key = `${projectCwd}::${slug}`;
+    if (!keys.has(key)) {
+      unattributed.push({ file: path.relative(SCHEDULER_DIR, file), slug });
+    }
+  }
+
+  return {
+    applicable: true,
+    checkedCount: untracked.length,
+    unattributedCount: unattributed.length,
+    unattributed,
+    verdict: unattributed.length === 0
+      ? 'CLEAN: every untracked (not-yet-committed) PRD has a matching prd_create record.'
+      : 'INVESTIGATE: untracked PRD(s) with no matching prd_create audit event — likely hand-authored via the /develop manual-write fallback (bypassing scheduler_create_prd). Confirm the bypass was reported and verify the file by hand.',
+  };
+}
+
 function main() {
   const c = auditPatternC();
   const d = auditPatternD();
+  const e = auditPatternE();
 
   console.log('=== Pattern C: flat scheduler/prds/ ===');
   console.log(`  top-level .md files: ${c.flatTopLevelMdCount}`);
@@ -153,8 +254,16 @@ function main() {
     for (const r of d.dataLoss) console.log(`    ESCALATE: ${r.id} (${r.prdCreatedCount} prd_created event(s))`);
   }
   if (d.unreadable.length > 0) console.log(`  unreadable: ${d.unreadable.join(', ')}`);
+  console.log();
+  console.log('=== Pattern E: hand-authored PRDs (bypassed scheduler_create_prd) ===');
+  console.log(`  PRDs checked: ${e.checkedCount}`);
+  console.log(`  unattributed (no matching prd_create audit event): ${e.unattributedCount}`);
+  if (e.unattributed.length > 0) {
+    for (const u of e.unattributed) console.log(`    FLAG: ${u.file}`);
+  }
+  console.log(`  verdict: ${e.verdict}`);
 
-  return { patternC: c, patternD: d };
+  return { patternC: c, patternD: d, patternE: e };
 }
 
 if (require.main === module) {
@@ -164,4 +273,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { auditPatternC, auditPatternD };
+module.exports = { auditPatternC, auditPatternD, auditPatternE };

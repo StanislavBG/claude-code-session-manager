@@ -759,33 +759,22 @@ function ensureDirs() {
  * unparseable cwd, cwd not on disk) are left in place and logged as a
  * warning — never silently dropped — so a human can fix the frontmatter.
  */
-async function runPrdMigration() {
-  let result;
-  try {
-    result = await migratePrds(PRDS_DIR);
-  } catch (e) {
-    logs.writeLine({ level: 'error', scope: 'scheduler', message: 'PRD migration failed', meta: { error: e?.message } });
-    return null;
-  }
-  console.log(`[scheduler] PRD migration: moved ${result.moved}, skipped ${result.skipped}`);
-  if (result.unresolved.length > 0) {
-    logs.writeLine({
-      level: 'warn',
-      scope: 'scheduler',
-      message: `PRD migration: ${result.unresolved.length} file(s) left in legacy dir`,
-      meta: { legacyDir: PRDS_DIR, unresolved: result.unresolved },
-    });
-    for (const u of result.unresolved) {
-      console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
-    }
-  }
-
-  // Phase 2 (2026-07-31 domain-model decision): the flat per-project
-  // `scheduler/prds/` dir is retired — new PRDs are epic-scoped, and anything
-  // still sitting flat consolidates into `prds-archived/` for later special
-  // processing. Queue rows for moved files are reaped by the archived-twin
-  // retirement. Idempotent per project; failures are logged, never fatal.
-  for (const cwd of allProjectCwds()) {
+/**
+ * consolidateAllFlatPrds(cwds) — run consolidateFlatPrds() over every given
+ * project cwd, logging outcomes. Called from TWO places: once at boot (over
+ * every historical project, via runPrdMigration below) AND at the top of
+ * every reconcile() call (over every project reconcile itself would
+ * otherwise scan), BEFORE reconcile scans the flat dir for PRD sources. The
+ * reconcile()-level call is what makes "anything written to the retired flat
+ * prds/ dir is swept into prds-archived/ without being executed" actually
+ * true regardless of which of reconcile's several callers (tickQueue's poll,
+ * job completion, the schedule:state/schedule:rescan IPC handlers,
+ * rescheduleTimer) triggers the pass: a PRD dropped in the flat dir has no
+ * queue row yet at that point, so it is never in LIVE_JOB_STATUSES and this
+ * sweep archives it before reconcile can ever turn it into a pending job.
+ */
+async function consolidateAllFlatPrds(cwds) {
+  for (const cwd of cwds) {
     try {
       const c = await consolidateFlatPrds(cwd);
       if (c.moved > 0) {
@@ -812,6 +801,39 @@ async function runPrdMigration() {
       logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'flat-PRD consolidation failed', meta: { cwd, error: e?.message } });
     }
   }
+}
+
+async function runPrdMigration() {
+  let result;
+  try {
+    result = await migratePrds(PRDS_DIR);
+  } catch (e) {
+    logs.writeLine({ level: 'error', scope: 'scheduler', message: 'PRD migration failed', meta: { error: e?.message } });
+    return null;
+  }
+  console.log(`[scheduler] PRD migration: moved ${result.moved}, skipped ${result.skipped}`);
+  if (result.unresolved.length > 0) {
+    logs.writeLine({
+      level: 'warn',
+      scope: 'scheduler',
+      message: `PRD migration: ${result.unresolved.length} file(s) left in legacy dir`,
+      meta: { legacyDir: PRDS_DIR, unresolved: result.unresolved },
+    });
+    for (const u of result.unresolved) {
+      console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
+    }
+  }
+
+  // Phase 2 (2026-07-31 domain-model decision): the flat per-project
+  // `scheduler/prds/` dir is retired — new PRDs are epic-scoped, and anything
+  // still sitting flat consolidates into `prds-archived/` for later special
+  // processing. Queue rows for moved files are reaped by the archived-twin
+  // retirement. Idempotent per project; failures are logged, never fatal.
+  // (This boot-time pass is redundant with the one reconcile() now also runs
+  // on every pass, but stays here so a fresh boot's very first log line
+  // still reports the initial sweep — see consolidateAllFlatPrds's own
+  // comment for why reconcile() is the load-bearing call site.)
+  await consolidateAllFlatPrds(allProjectCwds());
   return result;
 }
 
@@ -1210,6 +1232,15 @@ async function reconcile(state) {
   if (state && state.unreadable) {
     throw new Error(`reconcile skipped: queue.json unreadable (${state.unreadable})`);
   }
+  // Sweep the retired flat prds/ dir BEFORE scanning it below. reconcile()
+  // has several callers besides tickQueue's ~60s poll (broadcast,
+  // rescheduleTimer, the schedule:state IPC handler, schedule:rescan) — this
+  // lives here, not in any one caller, so the "a hand-written PRD in the flat
+  // dir is swept before it can become a job" guarantee holds regardless of
+  // which caller triggers this reconcile pass. A freshly hand-written file
+  // has no queue row yet, so it is never "live" and gets archived here
+  // instead of ever reaching the onDisk scan below.
+  await consolidateAllFlatPrds(allProjectCwds());
   const files = await listPrdFiles();
   const onDisk = new Map();
   for (const f of files) {
@@ -3663,6 +3694,9 @@ function tickQueue() {
     }
     if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
+    // The retired-flat-dir sweep now lives inside reconcile() itself (see its
+    // own comment) so every caller of reconcile — not just this tick — gets
+    // the guarantee.
     await reconcile(state);
     // Session-Manager's machine-wide slot pool is the ONLY concurrency limit
     // the picker answers to (plus the memory gate below). The scheduler used
@@ -5377,4 +5411,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary };
+module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary };

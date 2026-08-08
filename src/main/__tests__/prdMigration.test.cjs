@@ -250,6 +250,23 @@ test('consolidateFlatPrds archives a file with no job at all', async () => {
   expect(fs.existsSync(path.join(opsRoot(root), 'prds-archived', '701-orphan.md'))).toBe(true);
 });
 
+// PRD 1024: an UNRECOGNIZED/invalid status (the exact 2026-08-07 1021/1022
+// incident shape) must protect the file, not archive it — reconcile() is
+// what repairs such a row back to 'pending', and this consolidation must
+// never race that repair by moving the row's only source out from under it.
+for (const invalidStatus of ['queued', 'cancelled', 'bogus-status', '']) {
+  test(`consolidateFlatPrds does NOT archive a file whose job has the unrecognized status "${invalidStatus}"`, async () => {
+    const root = newRoot();
+    const flat = await makeFlatProject(root, ['950-invalid-status.md']);
+    await writeQueue(root, [{ slug: '950-invalid-status', status: invalidStatus }]);
+
+    const r = await consolidateFlatPrds(root);
+
+    expect(r.moved).toBe(0);
+    expect(fs.existsSync(path.join(flat, '950-invalid-status.md'))).toBe(true);
+  });
+}
+
 test('consolidateFlatPrds mixed dir: only the live one survives', async () => {
   const root = newRoot();
   const flat = await makeFlatProject(root, ['800-live.md', '801-done.md', '802-none.md']);

@@ -114,7 +114,21 @@ async function migratePrds(legacyPrdsDir) {
 const LIVE_JOB_STATUSES = new Set(['pending', 'running', 'needs_review', 'investigating']);
 
 /**
- * Slugs with a live job in this project's own queue shard.
+ * Statuses that mean a job is genuinely finished and its source may be
+ * archived. Anything else — including an UNRECOGNIZED/invalid status string
+ * (e.g. the 2026-08-07 1021/1022 incident's `"status": "queued"`, which is
+ * outside ScheduleJobStatus entirely) — protects the file. reconcile() is
+ * what repairs a corrupted row back to `pending` (scheduleJobTransitions.cjs
+ * / the invalid-row-repair path); this consolidation must never race that
+ * repair by archiving the row's only source out from under it first. A slug
+ * with NO row at all (never queued, or already reaped from history) is not
+ * covered by this set and falls through to "archive" in liveSlugsForCwd.
+ */
+const TERMINAL_ARCHIVABLE_STATUSES = new Set(['completed', 'failed']);
+
+/**
+ * Slugs with a live (i.e. not safely archivable) job in this project's own
+ * queue shard.
  *
  * Returns null when liveness cannot be determined (unreadable/unparseable
  * queue.json) — the caller then FAILS CLOSED and archives nothing, since it
@@ -139,7 +153,7 @@ async function liveSlugsForCwd(cwd) {
   const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
   const live = new Set();
   for (const job of jobs) {
-    if (job && typeof job.slug === 'string' && LIVE_JOB_STATUSES.has(job.status)) {
+    if (job && typeof job.slug === 'string' && !TERMINAL_ARCHIVABLE_STATUSES.has(job.status)) {
       live.add(job.slug);
     }
   }

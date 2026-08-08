@@ -91,9 +91,12 @@ at capture time, never a hardcoded pixel guess. A figure whose recipe is missing
 never appears on screen, fails the whole run loudly (naming the figure) and leaves that figure's
 existing placeholder/image untouched — it never emits a blank, cropped, or synthesized image.
 
-The script refuses to run while any project's scheduler queue has a `running` job — a second
-Electron instance's boot reconciliation SIGTERMs live jobs and clobbers
-`~/.claude/session-manager/admin-api.json`. Let the queue go idle first.
+The script refuses to run if **Session Manager is open at all** (it probes the admin API named in
+`~/.claude/session-manager/admin-api.json`), or if any project's scheduler queue has a `running`
+job. An idle queue is not sufficient on its own: a second Electron instance rewrites
+`admin-api.json` out from under the running app — breaking its scheduler tooling — and any *queued*
+job the live instance starts mid-capture becomes a running job that the second instance's boot
+reconciliation would SIGTERM. **Quit the app before running this.**
 
 `scripts/build-manual.mjs` copies `figures/` verbatim into the release bundle, so re-run
 `npm run manual:figures` before `npm run manual:build` whenever a captured surface's UI changes.

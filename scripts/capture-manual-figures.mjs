@@ -8,9 +8,10 @@
  * data-capture="..."></div> ... <span class="callout" data-arrow="...">N</span>
  * ... </figure>, this script:
  *
- *   1. Refuses to run if any scheduler job is live (see the memory note below)
- *      — a second Electron instance's boot reconciliation SIGTERMs running
- *      jobs and clobbers ~/.claude/session-manager/admin-api.json.
+ *   1. Refuses to run if Session Manager is already open, or if any scheduler
+ *      job is live — a second Electron instance rewrites
+ *      ~/.claude/session-manager/admin-api.json out from under the running app
+ *      and its boot reconciliation SIGTERMs running jobs.
  *   2. Launches the real app under Playwright's Electron driver (same pattern
  *      as tests/e2e/_helpers/launchApp.ts / npm run test:e2e — run this under
  *      `xvfb-run` on Linux).
@@ -32,6 +33,8 @@
 import { _electron as electron } from '@playwright/test';
 import sharp from 'sharp';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs';
+import net from 'node:net';
+import { homedir } from 'node:os';
 import { readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,9 +63,47 @@ class FigureCaptureError extends Error {
   }
 }
 
-// ── 1. Guard: refuse to run while a scheduler job is live ────────────────────
+// ── 1. Guard: refuse to run alongside an existing app instance ───────────────
 
-function assertQueueIdle() {
+/**
+ * Is a Session Manager Electron instance already up?
+ *
+ * Probes the admin API named in ~/.claude/session-manager/admin-api.json. That
+ * file IS the resource a second instance clobbers, so asking whether something
+ * is still answering on its port is the most direct possible signal — more
+ * reliable than scanning `ps` output for an electron binary path that varies
+ * between npx, a global install, and a dev checkout.
+ *
+ * A stale file whose port no longer answers means the app is gone; the connect
+ * attempt fails fast and we proceed.
+ */
+async function appInstanceIsLive() {
+  const adminPath = join(homedir(), '.claude', 'session-manager', 'admin-api.json');
+  if (!existsSync(adminPath)) return false;
+
+  let port;
+  try {
+    port = JSON.parse(readFileSync(adminPath, 'utf-8')).port;
+  } catch {
+    return false; // unreadable/corrupt — treat as no live instance
+  }
+  if (!Number.isInteger(port)) return false;
+
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port });
+    const done = (live) => {
+      socket.destroy();
+      resolve(live);
+    };
+    socket.setTimeout(1000);
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false));
+  });
+}
+
+async function assertSafeToLaunch() {
+  // (a) A second instance's boot reconciliation SIGTERMs running jobs.
   const { readMergedSync } = require(join(ROOT, 'src', 'main', 'lib', 'queueStore.cjs'));
   const merged = readMergedSync();
   const live = merged.jobs.filter((j) => j.status === 'running');
@@ -72,6 +113,27 @@ function assertQueueIdle() {
         `still running (${live.map((j) => j.slug).join(', ')}). A second instance's boot ` +
         `reconciliation SIGTERMs live jobs and clobbers admin-api.json. Wait for the queue ` +
         `to go idle and re-run.`
+    );
+    process.exit(1);
+  }
+
+  // (b) An idle queue is NOT sufficient. If the app is open at all, launching a
+  // second instance rewrites admin-api.json out from under it — breaking the
+  // scheduler MCP tools of whatever session is using it — and any QUEUED job
+  // the live instance picks up mid-capture becomes a running job we already
+  // decided we must not kill. Checking only for `running` missed this entirely.
+  if (await appInstanceIsLive()) {
+    const queued = merged.jobs.filter((j) => j.status === 'queued');
+    console.error(
+      `✗ refusing to launch a second Electron instance: Session Manager is already ` +
+        `running (its admin API is answering on 127.0.0.1). A second instance rewrites ` +
+        `~/.claude/session-manager/admin-api.json, which breaks the running app's own ` +
+        `scheduler tooling.` +
+        (queued.length
+          ? ` It also has ${queued.length} queued job(s) (${queued.map((j) => j.slug).join(', ')}) ` +
+            `it may start at any moment.`
+          : '') +
+        ` Quit the app and re-run.`
     );
     process.exit(1);
   }
@@ -300,7 +362,7 @@ async function captureOneFigure(app, win, figure, recipe) {
 // ── main ───────────────────────────────────────────────────────────────────
 
 async function main() {
-  assertQueueIdle();
+  await assertSafeToLaunch();
 
   if (!existsSync(RECIPES_PATH)) {
     console.error(`✗ no capture recipes at ${RECIPES_PATH}`);

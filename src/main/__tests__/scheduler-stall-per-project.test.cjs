@@ -8,12 +8,16 @@
  * has running + pending work — the machine-wide `stalled` boolean reads
  * false (masking burrow), but burrow's own byProject entry must read true.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-stall-per-project.test.cjs
+ * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-stall-per-project.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+// vitest, NOT node:test — this repo's suite is vitest-only (see CLAUDE.md:
+// "This repo does not use `node --test`"). A node:test file loads under
+// vitest as "No test suite found" and contributes zero tests, so the guard
+// silently doesn't exist. node:assert works fine inside a vitest run.
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS } = require('../scheduler.cjs');
 

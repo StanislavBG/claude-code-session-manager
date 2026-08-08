@@ -6,12 +6,14 @@
  * (which requires actual pending work) — the exact way the burrow project's
  * four quarantined PRDs went dark.
  *
- * Run: timeout 120 node --test src/main/__tests__/health-per-project-stall.test.cjs
+ * Run: timeout 120 npx vitest run src/main/__tests__/health-per-project-stall.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+// vitest, NOT node:test — see the sibling note in
+// scheduler-stall-per-project.test.cjs. node:assert works inside vitest.
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const {
   computeProjectProblemCounts,

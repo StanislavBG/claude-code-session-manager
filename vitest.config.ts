@@ -108,6 +108,8 @@ export default defineConfig({
       'src/main/__tests__/scheduler-reconcile-quarantine.test.cjs',
       'src/main/__tests__/prdMigrationLegacyAdopt.test.cjs',
       'scripts/hooks/__tests__/guard-prd-writes.test.cjs',
+      'src/main/__tests__/scheduler-stall-per-project.test.cjs',
+      'src/main/__tests__/health-per-project-stall.test.cjs',
     ],
     globals: true,
   },

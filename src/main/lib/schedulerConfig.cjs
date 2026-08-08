@@ -43,4 +43,19 @@ module.exports = {
   // findStaleQuarantinedJobs in scheduler.cjs. Overridable via
   // SM_QUARANTINE_ESCALATE_HOURS for testing/tuning.
   QUARANTINE_ESCALATE_MS: 24 * 60 * 60_000,
+
+  // A RUNNING job that has overrun its own PRD's `estimateMinutes` by this
+  // factor is escalated. Distinct from MAX_JOB_DURATION_MS (4h), which is a
+  // deadman kill: a 20-minute PRD still running at 3h is 9x over estimate but
+  // comfortably under the deadman, and if it keeps writing to its log the
+  // 20-minute IDLE_OUTPUT_KILL_MS watchdog never fires either — so before
+  // this, the ONLY signal was a human happening to notice. This escalates,
+  // it does NOT kill: overrunning is evidence of trouble, not proof of it,
+  // and killing on an estimate would murder legitimately-slow work.
+  // Override with SM_JOB_OVERRUN_FACTOR.
+  JOB_OVERRUN_FACTOR: 3,
+  // Floor so a tiny estimate can't escalate almost immediately — a 5-minute
+  // PRD at 3x is 15 minutes, which is noise. Override with
+  // SM_JOB_OVERRUN_FLOOR_MINUTES.
+  JOB_OVERRUN_FLOOR_MS: 45 * 60_000,
 };

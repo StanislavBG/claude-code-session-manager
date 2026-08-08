@@ -110,6 +110,7 @@ export default defineConfig({
       'scripts/hooks/__tests__/guard-prd-writes.test.cjs',
       'src/main/__tests__/scheduler-stall-per-project.test.cjs',
       'src/main/__tests__/health-per-project-stall.test.cjs',
+      'src/main/__tests__/scheduler-job-overrun.test.cjs',
     ],
     globals: true,
   },

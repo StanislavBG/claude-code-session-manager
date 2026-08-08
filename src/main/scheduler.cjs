@@ -76,10 +76,18 @@ const {
   MAX_JOB_DURATION_MS,
   BROADCAST_COALESCE_MS,
   QUARANTINE_ESCALATE_MS: QUARANTINE_ESCALATE_MS_DEFAULT,
+  JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
+  JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
 } = require('./lib/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
   : QUARANTINE_ESCALATE_MS_DEFAULT;
+const JOB_OVERRUN_FACTOR = process.env.SM_JOB_OVERRUN_FACTOR
+  ? Number(process.env.SM_JOB_OVERRUN_FACTOR)
+  : JOB_OVERRUN_FACTOR_DEFAULT;
+const JOB_OVERRUN_FLOOR_MS = process.env.SM_JOB_OVERRUN_FLOOR_MINUTES
+  ? Number(process.env.SM_JOB_OVERRUN_FLOOR_MINUTES) * 60_000
+  : JOB_OVERRUN_FLOOR_MS_DEFAULT;
 const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
@@ -1041,6 +1049,52 @@ function findStaleQuarantinedJobs(jobs, now, thresholdMs) {
     if (ageMs >= thresholdMs) stale.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs });
   }
   return stale;
+}
+
+/**
+ * findOverrunningJobs(jobs, now, { factor, floorMs }) → [{ slug, cwd, estimateMinutes, ranMs, ratio }]
+ *
+ * Pure, no IO. A RUNNING job whose elapsed time exceeds
+ * `max(estimateMinutes * factor, floorMs)` is overrunning its own PRD's
+ * declared estimate.
+ *
+ * This closes the gap between the two existing kill paths, which a
+ * long-running-but-chatty job slips straight through:
+ *  - MAX_JOB_DURATION_MS (4h) is a deadman — a 20-minute PRD at 3h is 9x
+ *    over estimate and still an hour away from it.
+ *  - IDLE_OUTPUT_KILL_MS (20m) only fires when the log mtime STALLS; an
+ *    agent stuck in a productive-looking loop keeps writing and never trips it.
+ * `estimateMinutes` was parsed, stored and displayed but never once compared
+ * against actual runtime, so the only thing standing between a runaway job
+ * and the 4h ceiling was a human noticing. (2026-08-08: a PRD ran 3h+ and was
+ * caught only because the operator opened a second session to look.)
+ *
+ * Escalation only — see JOB_OVERRUN_FACTOR's note on why this must not kill.
+ * A job with no usable estimate is skipped rather than guessed at.
+ */
+function findOverrunningJobs(jobs, now, { factor, floorMs } = {}) {
+  const f = typeof factor === 'number' && factor > 0 ? factor : JOB_OVERRUN_FACTOR;
+  const floor = typeof floorMs === 'number' && floorMs >= 0 ? floorMs : JOB_OVERRUN_FLOOR_MS;
+  const out = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'running') continue;
+    const est = Number(j.estimateMinutes);
+    if (!Number.isFinite(est) || est <= 0) continue; // no estimate to overrun
+    const startedAt = Date.parse(j.startedAt ?? '');
+    if (Number.isNaN(startedAt)) continue;
+    const ranMs = now - startedAt;
+    if (ranMs <= 0) continue;
+    const thresholdMs = Math.max(est * 60_000 * f, floor);
+    if (ranMs < thresholdMs) continue;
+    out.push({
+      slug: j.slug,
+      cwd: j.cwd ?? null,
+      estimateMinutes: est,
+      ranMs,
+      ratio: ranMs / (est * 60_000),
+    });
+  }
+  return out;
 }
 
 // An empty queue and an unreadable queue are NOT the same thing, and
@@ -5042,6 +5096,24 @@ async function init() {
       );
       appendAuditEvent('prd_quarantine_stale', { slug: stale.slug, cwd: stale.cwd, ageMs: stale.ageMs });
     }
+
+    // Estimate-relative overrun escalation. Sits in the blind spot between
+    // the 4h deadman and the 20-minute idle-output watchdog: a job that keeps
+    // producing output while looping trips neither, so nothing noticed a PRD
+    // running 9x its own estimate until a human went looking. Escalate loudly;
+    // never kill on an estimate (see JOB_OVERRUN_FACTOR).
+    for (const over of findOverrunningJobs(s.jobs, Date.now())) {
+      console.warn(
+        `[scheduler] JOB OVERRUNNING ESTIMATE: project=${over.cwd ?? '(unknown)'} slug=${over.slug} `
+        + `ran=${Math.round(over.ranMs / 60_000)}m vs estimate=${over.estimateMinutes}m `
+        + `(${over.ratio.toFixed(1)}x, threshold ${JOB_OVERRUN_FACTOR}x floor ${Math.round(JOB_OVERRUN_FLOOR_MS / 60_000)}m) — `
+        + `still running; the ${Math.round(MAX_JOB_DURATION_MS / 3_600_000)}h deadman has NOT fired yet. `
+        + `Check the run log, then let it finish or cancel it via scheduler_cancel_job`,
+      );
+      appendAuditEvent('job_overrunning_estimate', {
+        slug: over.slug, cwd: over.cwd, estimateMinutes: over.estimateMinutes, ranMs: over.ranMs, ratio: over.ratio,
+      });
+    }
   }, 10 * 60_000);
 
   // Self-rescheduling poll loop with exponential backoff. Replaces the
@@ -5626,4 +5698,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };

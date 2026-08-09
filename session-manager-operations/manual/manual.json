@@ -1,8 +1,8 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
-  "documentsAppVersion": "0.67.0",
+  "documentsAppVersion": "0.69.0",
   "releasedAt": "2026-08-08",
   "chapters": [
     {
@@ -113,13 +113,13 @@
     {
       "id": "offline-html",
       "label": "Offline HTML edition",
-      "file": "field-manual-1.3.0.html",
+      "file": "field-manual-1.4.0.html",
       "mime": "text/html"
     },
     {
       "id": "pdf",
       "label": "PDF edition",
-      "file": "field-manual-1.3.0.pdf",
+      "file": "field-manual-1.4.0.pdf",
       "mime": "application/pdf"
     }
   ]

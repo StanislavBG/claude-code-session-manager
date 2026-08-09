@@ -6,6 +6,7 @@
  */
 import type { PromptSession } from '../../state/promptSessions'
 import type { EpicDisplayStatus } from '../../lib/epicDerive'
+import type { InboundFeedbackOrigin } from '../../lib/epicOrigin'
 
 // ─── EpicStatusChip ──────────────────────────────────────────────────────────
 const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: string; ring?: boolean; label: string }> = {
@@ -116,6 +117,30 @@ export function EpicKindTag({ kind, small }: { kind: PromptSession['tag']; small
       } ${tone.text} ${tone.ring}`}
     >
       {tone.label}
+    </span>
+  )
+}
+
+/**
+ * "Proposed by another project" chip. Rendered next to EpicKindTag on any
+ * Epic that arrived through the cross-project feedback conduit
+ * (src/main/lib/crossProjectFeedback.cjs), so the human deciding whether to
+ * press Approve & start can see the claim came from an agent that has never
+ * read this codebase. Returns null for every locally-created Epic, so callers
+ * render it unconditionally on `inboundFeedbackOrigin(epic)`.
+ */
+export function EpicInboundTag({ origin, small }: { origin: InboundFeedbackOrigin | null; small?: boolean }) {
+  if (!origin) return null
+  return (
+    <span
+      title={origin.title}
+      data-testid="epic-inbound-tag"
+      className={`inline-flex items-center gap-1 font-mono font-semibold uppercase tracking-wide rounded ring-1 ring-inset whitespace-nowrap max-w-[10rem] ${
+        small ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-[7px] py-[3px] text-[10.5px]'
+      } text-amber-300 ring-amber-400/40`}
+    >
+      <span aria-hidden="true">↘</span>
+      <span className="truncate">{origin.label}</span>
     </span>
   )
 }

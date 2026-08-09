@@ -45,6 +45,33 @@ const promptSessionSchema = require('./promptSessionSchema.cjs');
 // deliberate domain-model change, not a convenience.
 const MINT_AUTHORITY_NEW_EPIC_UI = 'new-epic-ui';
 
+// The SECOND (and only other) mint authority — a deliberate domain-model
+// change, argued for here rather than discovered later.
+//
+// PROJECT-TO-PROJECT FEEDBACK. With `/process-feedback`, `/my-feedback` and
+// the `feedback/` folder retired (2026-08-02) and the scheduler correctly
+// locked down to join-only, an agent working in Project-A had NO way to hand
+// a finding to Project-B — the finding either died in a transcript or the
+// human had to relay it by hand. `lib/crossProjectFeedback.cjs` restores that
+// conduit, and it is the sole holder of this token.
+//
+// What makes it safe is the part of the SINGLE-CREATOR LAW that actually
+// guards spend: every Epic is born 'proposed', and NOTHING runs until a human
+// in the RECEIVING project presses "Approve & start". This authority cannot
+// change that — the BORN-PROPOSED check below still applies to it verbatim,
+// and `crossProjectFeedback.cjs` additionally pins tag/source before minting.
+// So this is not a re-opening of the agent-facing proposal channel that was
+// removed: an agent may deposit a proposal into another project's inbox, and
+// that is all it may do. The removed channel let an agent file work into the
+// project it was already running in, which is what /develop-inside-your-own-
+// Epic replaced and which stays refused.
+const MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK = 'cross-project-feedback';
+
+const MINT_AUTHORITIES = Object.freeze([
+  MINT_AUTHORITY_NEW_EPIC_UI,
+  MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+]);
+
 function activeIndexPath(cwd) {
   return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
 }
@@ -175,13 +202,15 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       });
     }
 
-    // SINGLE-CREATOR LAW (see this file's header). Only the New Epic UI may
-    // mint; every other caller reaching this line was trying to JOIN an Epic
-    // that isn't there, which is a bug in the caller, not a cue to create one.
-    if (mintAuthority !== MINT_AUTHORITY_NEW_EPIC_UI) {
-      const reason = 'no open Epic to join — an Epic is created in exactly one place, the New Epic UI '
-        + '(mintAuthority). Agents that are sure the work is needed run /develop inside the Epic they are '
-        + 'already in; a PRD-authoring path may never conjure one';
+    // SINGLE-CREATOR LAW (see this file's header). Only the New Epic UI —
+    // or, for an inbound cross-project feedback proposal, lib/
+    // crossProjectFeedback.cjs — may mint; every other caller reaching this
+    // line was trying to JOIN an Epic that isn't there, which is a bug in the
+    // caller, not a cue to create one.
+    if (!MINT_AUTHORITIES.includes(mintAuthority)) {
+      const reason = 'no open Epic to join — an Epic is created in exactly two places, the New Epic UI and an '
+        + 'inbound cross-project feedback proposal (mintAuthority). Agents that are sure the work is needed run '
+        + '/develop inside the Epic they are already in; a PRD-authoring path may never conjure one';
       appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason });
       throw new Error(`ensureEpic: ${reason} (epicId=${explicitEpicId ?? 'none'})`);
     }
@@ -323,6 +352,8 @@ function removeEpic(cwd, epicId) {
 module.exports = {
   ensureEpic,
   MINT_AUTHORITY_NEW_EPIC_UI,
+  MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+  MINT_AUTHORITIES,
   appendPrdCreatedEvent,
   removeEpic,
   activeIndexPath,

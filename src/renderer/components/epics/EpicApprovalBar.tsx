@@ -16,10 +16,15 @@ import { useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
-import { EpicKindTag } from './epic-primitives'
+import { EpicKindTag, EpicInboundTag } from './epic-primitives'
+import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 
 export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
   const [busy, setBusy] = useState(false)
+  // A proposal from ANOTHER project (src/main/lib/crossProjectFeedback.cjs).
+  // This is the exact moment that fact matters: the sender's agent has never
+  // read this codebase, so the claim below is unverified here.
+  const inbound = inboundFeedbackOrigin(epic)
 
   const onApprove = () => {
     if (busy) return
@@ -59,11 +64,21 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
           proposed — not started
         </span>
         <EpicKindTag kind={epic.tag} small />
+        <EpicInboundTag origin={inbound} small />
       </div>
       <p className="mb-2.5 max-w-[760px] text-[12.5px] leading-relaxed text-fg-dim">
         Filed for you to decide on. Nothing has run and nothing has been spent. Approving sends the objective
         above as this Epic&apos;s first prompt.
       </p>
+      {inbound && (
+        <p
+          data-testid="epic-approval-inbound-note"
+          className="mb-2.5 max-w-[760px] text-[12.5px] leading-relaxed text-amber-300/90"
+        >
+          Proposed by another project — <span className="font-mono">{inbound.fromCwd}</span>. That agent has not
+          read this codebase, so verify the claim here before approving.
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <button
           type="button"

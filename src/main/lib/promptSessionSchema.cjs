@@ -32,10 +32,16 @@ const EpicTagSchema = z.enum([
 
 // Mirrors EpicSource (src/renderer/state/promptSessions.ts:22-27).
 const EpicSourceSchema = z.object({
-  producer: z.enum(['new-epic-ui', 'scheduler-dispatch']),
+  producer: z.enum(['new-epic-ui', 'scheduler-dispatch', 'cross-project-feedback']),
   prdSlug: z.string().optional(),
   runId: z.string().optional(),
   sourceTabId: z.string().optional(),
+  // Cross-project provenance ('cross-project-feedback' only): which project,
+  // and which Epic inside it, sent this proposal. Kept on the Epic itself so
+  // the receiving human can see who is asking without a second lookup table —
+  // there is no cross-project registry anywhere else.
+  fromCwd: z.string().optional(),
+  fromEpicId: z.string().optional(),
 });
 
 // Mirrors EpicIntakeSection (src/renderer/lib/epicIntake.ts) — the labeled

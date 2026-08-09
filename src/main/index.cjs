@@ -35,11 +35,16 @@ const promptSessionsCreateEpic = require('./lib/promptSessionsCreateEpic.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
+const crossProjectFeedback = require('./lib/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
 prdAdminRoutes.registerAdminRoute(adminHttp, scheduler.remote);
 chatRunner.registerAdminRoute(adminHttp);
+// Project-to-project feedback conduit — the app is the only process holding
+// several projects' operations roots open, so it performs the cross-folder
+// write (lib/crossProjectFeedback.cjs).
+crossProjectFeedback.registerAdminRoute(adminHttp);
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const teams = require('./teams.cjs');

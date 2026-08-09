@@ -1,6 +1,6 @@
 {
   "name": "session-manager-dev",
-  "description": "The default end-to-end development skillset for the Claude Code Session Manager: decompose work into scheduler PRDs (/develop), triage cross-project feedback (/process-feedback, /my-feedback), rank what to work on next in a shared repo (/find-opportunity), roll up operational status and optimize the North-Star KPI (/project-status, /optimize-kpi, /local-project-health), gate with review (/requesting-code-review, /security-review), document how the project works (/explain-to-me), and keep the auto-memory store clean (/memory-sanitation). Together with the session-manager scheduler these form a closed develop → queue → track → review → status → improve loop.",
+  "description": "The default end-to-end development skillset for the Claude Code Session Manager: decompose work into scheduler PRDs (/develop), hand a finding to another project on this machine (/send-feedback), rank what to work on next in a shared repo (/find-opportunity), roll up operational status and optimize the North-Star KPI (/project-status, /optimize-kpi, /local-project-health), gate with review (/requesting-code-review, /security-review), document how the project works (/explain-to-me), and keep the auto-memory store clean (/memory-sanitation). Together with the session-manager scheduler these form a closed develop → queue → track → review → status → improve loop.",
   "version": "0.1.0",
   "author": {
     "name": "Stanislav Georgiev",

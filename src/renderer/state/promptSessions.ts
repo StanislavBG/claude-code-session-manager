@@ -19,12 +19,19 @@ import type { EpicIntakeSection } from '../lib/epicIntake'
  *  info as markdown frontmatter text inside openingPrompt. An Epic is only
  *  ever created by a human pressing New Epic ('new-epic-ui', epicMint.cjs's
  *  SINGLE-CREATOR LAW); 'scheduler-dispatch' appears only on join-only calls
- *  kept for audit symmetry. */
+ *  kept for audit symmetry. 'cross-project-feedback' is the one other minting
+ *  producer: a session in ANOTHER project deposited this Epic here as a
+ *  'proposed' feedback proposal (src/main/lib/crossProjectFeedback.cjs). It
+ *  still runs nothing until a human here presses Approve & start. */
 export interface EpicSource {
-  producer: 'new-epic-ui' | 'scheduler-dispatch'
+  producer: 'new-epic-ui' | 'scheduler-dispatch' | 'cross-project-feedback'
   prdSlug?: string
   runId?: string
   sourceTabId?: string
+  /** 'cross-project-feedback' only — the sending project's cwd. */
+  fromCwd?: string
+  /** 'cross-project-feedback' only — the sending Epic's id, if it had one. */
+  fromEpicId?: string
 }
 
 export interface PromptSession {

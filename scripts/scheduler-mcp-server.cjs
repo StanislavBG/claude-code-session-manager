@@ -8,6 +8,9 @@
  *
  *   scheduler_create_prd({ ... })  -> POST /admin/scheduler/create-prd
  *
+ *   feedback_list_projects()       -> GET  /admin/feedback/targets
+ *   feedback_open_session({ ... }) -> POST /admin/feedback/open-session
+ *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
  * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin server IS the
@@ -253,6 +256,67 @@ const TOOLS = [
       required: ['tabId', 'prompt'],
     },
   },
+  {
+    name: 'feedback_list_projects',
+    description:
+      'List the OTHER projects on this machine that can receive feedback (i.e. that Session Manager '
+      + 'already manages — they have a session-manager-operations/ directory). Call this FIRST when you '
+      + 'need the exact `toCwd` for feedback_open_session and are not certain of it — never guess a path. '
+      + 'A project missing from this list has simply never been opened in Session Manager; ask the human '
+      + 'to open it once rather than inventing a path.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'feedback_open_session',
+    description:
+      'THE ONLY SANCTIONED WAY to hand a finding from THIS project to a DIFFERENT project. Opens a new '
+      + "PROPOSED session in the receiving project's own Sessions queue, carrying your report as its "
+      + 'opening prompt and stamped with where it came from. Session Manager performs the cross-folder '
+      + 'write; you never write another project\'s files yourself. '
+      + 'WHAT THIS DOES NOT DO: it does not start anything, queue a PRD, or spend a token. The session '
+      + 'lands as `proposed` and runs only if a human in the RECEIVING project presses "Approve & start". '
+      + 'There is no callback and no reply channel — do not wait for an answer, and do not tell the user '
+      + 'the other project has "been fixed" or "is working on it". Report only that the proposal was '
+      + 'delivered. '
+      + 'WHEN NOT TO USE IT: for work in the project you are ALREADY in, run /develop inside the Epic you '
+      + 'are already in — this tool refuses toCwd === fromCwd outright. '
+      + 'Write the report for a reader who has never seen your project: state the symptom, where you '
+      + 'observed it, what you expected, and (if you know) the file in THEIR repo that looks responsible. '
+      + 'Never assume they can see your code.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        toCwd: {
+          type: 'string',
+          description: 'Absolute cwd of the RECEIVING project. Must already be a Session Manager project — use feedback_list_projects if unsure.',
+        },
+        fromCwd: {
+          type: 'string',
+          description: 'Absolute cwd of YOUR project (the sender). Must differ from toCwd.',
+        },
+        title: { type: 'string', description: 'One line naming the finding — becomes the receiving queue row' },
+        body: {
+          type: 'string',
+          description: 'The report itself: symptom, where observed, expected behavior, suspected cause. Self-contained — the reader cannot see your project.',
+        },
+        tag: {
+          type: 'string',
+          enum: ['bug', 'feature', 'discussion'],
+          description: "Mission tag for the receiving session. Defaults to 'discussion' — the tag that keeps /develop available but never assumed, correct for a finding the receiving project has not yet agreed with.",
+        },
+        fromEpicId: {
+          type: 'string',
+          description: 'Optional: your own Epic/session id, so a receipt is chained onto your session and the receiving human can see which session is asking. Auto-filled from this process when omitted.',
+        },
+        agentType: { type: 'string', description: "Optional persona for the receiving session. Defaults to 'architect'." },
+        referencePaths: {
+          type: 'array', items: { type: 'string' },
+          description: 'Optional absolute paths worth reading, appended as Reference lines',
+        },
+      },
+      required: ['toCwd', 'fromCwd', 'title', 'body'],
+    },
+  },
 ];
 
 const server = new Server(
@@ -346,6 +410,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // call. Say so plainly alongside the raw JSON.
       const note = result?.ok !== false
         ? ' — PRD file written; the queue row is derived on the next scheduler reconcile pass, not by this call.'
+        : '';
+      return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
+    }
+    if (name === 'feedback_list_projects') {
+      const result = await adminRequest('GET', '/admin/feedback/targets');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'feedback_open_session') {
+      for (const key of ['toCwd', 'fromCwd', 'title', 'body']) {
+        if (!args || typeof args[key] !== 'string' || !args[key].trim()) {
+          return { content: [{ type: 'text', text: `missing required argument: ${key}` }], isError: true };
+        }
+      }
+      // Same fallback shape as scheduler_create_prd: forward this process's
+      // inherited claude session id so the server can resolve the SENDING
+      // Epic and chain a receipt onto it. Never invents an Epic — an
+      // unresolvable id just means no receipt.
+      const payload = { ...args };
+      if (!payload.fromEpicId && process.env.SM_CHAT_SESSION_ID) {
+        payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
+      }
+      const result = await adminRequest('POST', '/admin/feedback/open-session', payload);
+      // Never say "sent", "filed" or "fixed" — this call delivers a PROPOSAL
+      // that a human in the other project must still approve.
+      const note = result?.ok !== false
+        ? ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. No reply channel.'
         : '';
       return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
     }

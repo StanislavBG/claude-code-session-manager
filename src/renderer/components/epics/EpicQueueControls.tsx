@@ -1,9 +1,20 @@
 /**
- * Control layer on top of PRD 827's `EpicQueue` — search, counted filter
- * chips, group/sort selects, per-section paging, pin-to-top, compact
- * toggle, and j/k keyboard navigation. Filtering/sorting/paging/grouping
- * logic itself lives in `lib/epicQueueControls.ts` (pure, unit-testable);
- * this component is the thin wiring layer + persistence (`state/epicsPrefs.ts`).
+ * Control layer on top of PRD 827's `EpicQueue` — search, the three filter
+ * dropdowns, per-section paging, pin-to-top, row density, and j/k keyboard
+ * navigation. Filtering/sorting/paging/grouping logic itself lives in
+ * `lib/epicQueueControls.ts` (pure, unit-testable); this component is the thin
+ * wiring layer + persistence (`state/epicsPrefs.ts`).
+ *
+ * What it renders is the sessions widget's **head bar**, handed to EpicQueue as
+ * `filters` and drawn as the top row of the widget itself. The left pane is
+ * deliberately two sections — Hot keys, then this widget — so filtering is
+ * chrome belonging to the tiles, not a third band of pane furniture above them.
+ *
+ * Status/group/sort are three PEER dropdowns ("show / group / sort"). Status
+ * used to be five counted pills that wrapped to two lines in a 352px pane for a
+ * control that only ever holds one value; the counts moved into the option
+ * labels so nothing was lost. Only search (input) and density (icon) stay
+ * behind toggles.
  *
  * Built from session-manager-operations/design-mocks/epics/DESIGN_SPEC.md
  * ("Left pane") + epics-mock.jsx's EpicQueue state machine.
@@ -13,7 +24,6 @@ import type { PromptSession, PromptSessionEvent } from '../../state/promptSessio
 import type { EpicDisplayStatus, EpicSnapshots } from '../../lib/epicDerive'
 import { epicKindDotClass, epicKindLabel, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
 import { EpicQueue, type EpicQueueSection } from './EpicQueue'
-import { FilterPills } from '../ui/FilterPills'
 import { useEpicsPrefs } from '../../state/epicsPrefs'
 import {
   PAGE,
@@ -150,7 +160,6 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
   const nowMs = now ?? autoNow
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [optionsOpen, setOptionsOpen] = useState(false)
   const [filter, setFilter] = useState<EpicFilterKey>('open')
   const [closedKeys, setClosedKeys] = useState<Set<string>>(() => new Set(['completed']))
   const [limits, setLimits] = useState<Record<string, number>>({})
@@ -243,29 +252,35 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
       }
     : undefined
 
-  // Minimized by default (PRD sessions-actions-menu): the Actions toolbar now
-  // owns the header's vertical space, so filtering collapses to ONE strip
-  // sitting directly above the list it filters. Search and the group/sort/
-  // density controls are behind their own toggles; the status pills stay
-  // visible because they're the control that's actually reached for.
+  // The HEAD BAR of the sessions widget (EpicQueue renders it as the widget's
+  // top row, above the tiles). The pane above it is Hot keys and nothing else.
+  //
+  // Status is ONE dropdown, defaulting to Open — it used to be five counted
+  // pills that wrapped onto two lines inside a 352px pane and pushed the tiles
+  // down by a whole row for a control that only ever holds one value at a
+  // time. Counts ride in the option labels, so nothing is lost, and it now
+  // matches group and sort instead of being a third kind of control: three
+  // peer dropdowns reading "show / group / sort".
+  //
   // `searchOpen` is forced open while a query is active so a filtered list can
   // never look unfiltered.
   const showSearch = searchOpen || !!search
+  const filterOptionsWithCounts = FILTER_OPTIONS.map((o) => ({
+    value: o.value,
+    label: `${o.label} ${
+      o.value === 'open' ? counts.open
+      : o.value === 'needs' ? counts.needs
+      : o.value === 'running' ? counts.running
+      : o.value === 'pinned' ? counts.pinned
+      : counts.all
+    }`,
+  }))
   const filters = (
-    <div className="px-3.5 pb-2 pt-2 border-b border-line flex flex-col gap-1.5" data-testid="epic-queue-filters">
-      <div className="flex items-center gap-1.5">
-        <div className="min-w-0 flex-1">
-          <FilterPills
-            value={filter}
-            onChange={setFilter}
-            pillPadding="px-1.5 py-0.5"
-            options={FILTER_OPTIONS.map((o) => ({
-              value: o.value,
-              label: o.label,
-              count: o.value === 'open' ? counts.open : o.value === 'needs' ? counts.needs : o.value === 'running' ? counts.running : o.value === 'pinned' ? counts.pinned : counts.all,
-            }))}
-          />
-        </div>
+    <div className="px-3 pb-2 pt-2 border-b border-line bg-bg-elev flex flex-col gap-1.5" data-testid="epic-queue-filters">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Sessions</span>
+        <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
+        <div className="flex-1" />
         <button
           type="button"
           onClick={() => setSearchOpen((v) => !v)}
@@ -281,17 +296,23 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
         </button>
         <button
           type="button"
-          onClick={() => setOptionsOpen((v) => !v)}
-          title="Group, sort and density"
-          aria-label="Group, sort and density"
-          aria-pressed={optionsOpen}
-          data-testid="epic-queue-options-toggle"
+          onClick={() => setCompact(!compact)}
+          title={compact ? 'Comfortable rows' : 'Compact rows'}
+          aria-label="Row density"
+          aria-pressed={compact}
+          data-testid="epic-queue-density-toggle"
           className={`shrink-0 w-6 h-6 grid place-items-center rounded border ${
-            optionsOpen ? 'border-line bg-bg-hi text-accent' : 'border-transparent text-fg-faint hover:text-fg'
+            compact ? 'border-line bg-bg-hi text-accent' : 'border-transparent text-fg-faint hover:text-fg'
           }`}
         >
           <CompactToggleIcon />
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <MiniSelect label="show" value={filter} onChange={setFilter} options={filterOptionsWithCounts} />
+        <MiniSelect label="group" value={group} onChange={setGroup} options={GROUP_OPTIONS} />
+        <MiniSelect label="sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
       </div>
 
       {showSearch && (
@@ -321,23 +342,6 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
         </div>
       )}
 
-      {optionsOpen && (
-        <div className="flex items-center gap-1.5">
-          <MiniSelect label="group" value={group} onChange={setGroup} options={GROUP_OPTIONS} />
-          <MiniSelect label="sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
-          <button
-            type="button"
-            onClick={() => setCompact(!compact)}
-            title={compact ? 'Comfortable rows' : 'Compact rows'}
-            aria-pressed={compact}
-            className={`ml-auto w-7 h-[26px] grid place-items-center rounded-md border ${
-              compact ? 'border-line bg-bg-hi text-accent' : 'border-line text-fg-faint'
-            }`}
-          >
-            <CompactToggleIcon />
-          </button>
-        </div>
-      )}
     </div>
   )
 

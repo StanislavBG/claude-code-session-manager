@@ -694,10 +694,13 @@ export interface EpicQueueProps {
   /** Controlled collapse state, keyed by section key — lets a caller (e.g. keyboard nav) read it. Falls back to internal state when omitted. */
   closedKeys?: ReadonlySet<string>
   onToggleSection?: (key: string) => void
-  /** Search/chips/group-sort controls, rendered inside this component's own
-   *  header block (below the title row, above the scrollable list) — keeps
-   *  the 352px/border-r container single-owned instead of a caller nesting
-   *  a second one around this component. */
+  /** The sessions widget's HEAD BAR — its title/count and the search + filter
+   *  controls. Rendered as the top row of the widget itself (inside the same
+   *  flex column as the scrolling tiles), not as a third slab of pane chrome:
+   *  the left pane is deliberately two sections only, Hot keys and this
+   *  widget. Kept as a prop so the 352px/border-r container stays
+   *  single-owned instead of a caller nesting a second one around this
+   *  component. */
   filters?: ReactNode
   /** Rendered below the scrollable list, inside this component's own container. */
   footer?: ReactNode
@@ -760,17 +763,30 @@ export function EpicQueue({
 
   return (
     <aside className="w-[352px] h-full shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
-      {/* Actions get the full width of the header now that each one is its own
-          button — the filter strip below them is deliberately the compact half
-          of this header, sitting directly on top of the list it filters. */}
-      <div className="px-3.5 pt-3 pb-2.5 flex flex-col gap-2 border-b border-line">
+      {/* ── Section 1 · HOT KEYS ──────────────────────────────────────────
+          One button per Action, the whole width. "Per project" is literal and
+          already real: besides + New Session and Build, the list is one button
+          per Agent Library persona scoped to this cwd (`projects:` in
+          ~/.claude/agents/<name>.md → lib/projectActions.ts), so a project
+          customizes its hot keys by editing personas, not a pane-local list. */}
+      <div className="px-3.5 pt-3 pb-2.5 flex flex-col gap-2 border-b border-line" data-testid="epic-queue-hotkeys">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Sessions</span>
-          <span className="font-mono text-[10.5px] text-fg-faint">{epics.length}</span>
+          <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Hot keys</span>
+          <span
+            className="font-mono text-[10px] text-fg-faint"
+            title="Per project: each Agent Library persona scoped to this project with an action: line gets its own button here."
+          >
+            per project
+          </span>
         </div>
         <ActionsToolbar onNew={onNew} onSelect={onSelect} />
       </div>
 
+      {/* ── Section 2 · THE SESSIONS WIDGET ───────────────────────────────
+          Its own head bar (title/count + filters, passed in) sitting on the
+          tiles it governs, in one flex column — NOT a third band of pane
+          chrome. The pane is two sections; that's the whole point. */}
+      <div className="flex-1 min-h-0 flex flex-col" data-testid="epic-queue-widget">
       {filters}
 
       <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1.5">
@@ -820,7 +836,7 @@ export function EpicQueue({
               const closed = closedSections.has(section.key)
               const hidden = section.total - section.items.length
               return (
-                <div key={section.key} className="mb-1.5">
+                <div key={section.key} data-section-key={section.key} className="mb-1.5">
                   <button
                     type="button"
                     onClick={() => toggleSection(section.key)}
@@ -867,6 +883,7 @@ export function EpicQueue({
             })}
           </>
         )}
+      </div>
       </div>
 
       {footer}

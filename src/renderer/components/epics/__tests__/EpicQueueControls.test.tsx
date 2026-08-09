@@ -188,7 +188,7 @@ describe('EpicQueueControls', () => {
     expect(onSelect).toHaveBeenCalledWith('e-second')
   })
 
-  it('renders exactly one 352px bordered container, with the Sessions header above the filter strip', () => {
+  it('renders exactly one 352px container holding TWO sections: Hot keys, then the sessions widget', () => {
     const epics = [makeEpic({ id: 'e-a' })]
     const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
     const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
@@ -196,14 +196,73 @@ describe('EpicQueueControls', () => {
     const containers = Array.from(el.querySelectorAll('*')).filter((node) => node.className?.toString().includes('w-[352px]'))
     expect(containers).toHaveLength(1)
 
-    const headingText = Array.from(el.querySelectorAll('span')).find((s) => s.textContent === 'Sessions')
-    const filters = el.querySelector('[data-testid="epic-queue-filters"]')
-    expect(headingText).not.toBeNull()
-    expect(filters).not.toBeNull()
-    // Header (title row + Action buttons) precedes the filter strip, which in
-    // turn sits directly above the list it filters.
-    const position = headingText!.compareDocumentPosition(filters!)
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const hotkeys = el.querySelector('[data-testid="epic-queue-hotkeys"]')
+    const widget = el.querySelector('[data-testid="epic-queue-widget"]')
+    expect(hotkeys).not.toBeNull()
+    expect(widget).not.toBeNull()
+    // Hot keys first, the widget after it — the pane's only two sections.
+    expect(hotkeys!.compareDocumentPosition(widget!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(hotkeys!.textContent).toContain('Hot keys')
+    // Both Actions live in the Hot keys section, not loose in the pane.
+    expect(hotkeys!.querySelector('[data-testid="session-actions-bar"]')).not.toBeNull()
+  })
+
+  it('makes the filter strip the widget\'s head bar — inside it, above the tiles', () => {
+    const epics = [makeEpic({ id: 'e-a' })]
+    const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
+    const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
+
+    const widget = el.querySelector('[data-testid="epic-queue-widget"]') as HTMLElement
+    const filters = el.querySelector('[data-testid="epic-queue-filters"]') as HTMLElement
+    // The head bar belongs to the widget, not to the pane header above it.
+    expect(widget.contains(filters)).toBe(true)
+    expect((el.querySelector('[data-testid="epic-queue-hotkeys"]') as HTMLElement).contains(filters)).toBe(false)
+    // ...and it precedes the tiles it governs.
+    const firstRow = el.querySelector('[data-testid="epic-queue-row"]') as HTMLElement
+    expect(filters.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The pane's title + count moved onto that head bar.
+    expect(filters.textContent).toContain('Sessions')
+  })
+
+  it('collapses the five status pills into ONE dropdown defaulting to Open, peer to group and sort', () => {
+    const epics = [makeEpic({ id: 'e-a' }), makeEpic({ id: 'e-done', status: 'completed' })]
+    const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
+    const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
+
+    const filters = el.querySelector('[data-testid="epic-queue-filters"]') as HTMLElement
+    const selects = Array.from(filters.querySelectorAll('select')) as HTMLSelectElement[]
+    // Three peer dropdowns — show / group / sort — and no pill row.
+    expect(selects).toHaveLength(3)
+    expect(filters.textContent).toContain('show')
+    expect(filters.textContent).toContain('group')
+    expect(filters.textContent).toContain('sort')
+
+    const status = selects[0]
+    expect(status.value).toBe('open')
+    // Every status is still reachable, and still counted.
+    expect(Array.from(status.options).map((o) => o.value)).toEqual(['open', 'needs', 'running', 'pinned', 'all'])
+    expect(Array.from(status.options).map((o) => o.textContent)).toContain('All 2')
+
+    // Switching it actually filters: under Open the completed session has no
+    // section at all; under All its (collapsed-by-default) section appears.
+    const completedSection = () => el.querySelector('[data-section-key="completed"]')
+    expect(completedSection()).toBeNull()
+    act(() => {
+      status.value = 'all'
+      status.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(completedSection()).not.toBeNull()
+  })
+
+  it('keeps row density reachable without a second options menu', () => {
+    const epics = [makeEpic({ id: 'e-a' })]
+    const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
+    const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
+
+    expect(el.querySelector('[data-testid="epic-queue-options-toggle"]')).toBeNull()
+    const density = el.querySelector('[data-testid="epic-queue-density-toggle"]') as HTMLButtonElement
+    act(() => density.click())
+    expect(useEpicsPrefs.getState().compact).toBe(true)
   })
 
   it('suppresses j/k when focus is inside a text input', () => {

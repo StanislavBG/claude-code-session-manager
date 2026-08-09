@@ -23,6 +23,7 @@ const {
   composeFeedbackIntake,
   validateFeedbackInput,
   openFeedbackSession,
+  listFeedbackTargets,
   isSessionManagerProject,
   MAX_BODY_CHARS,
 } = require('../lib/crossProjectFeedback.cjs');
@@ -244,6 +245,78 @@ test('this authority cannot mint an already-active Epic — BORN-PROPOSED still 
       mintAuthority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
     }),
   ).rejects.toThrow(/born\s+'proposed'|born 'proposed'/);
+});
+
+// ---------------------------------------------------------------------------
+// Target discovery — a PROJECT IS A CWD, resolved from transcript CONTENT
+// ---------------------------------------------------------------------------
+
+/** Build a fake ~/.claude/projects/ root: one encoded folder per entry, each
+ *  holding a transcript whose first line carries the real cwd. */
+async function mkProjectsRoot(entries) {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-xproj-root-'));
+  tmpDirs.push(root);
+  for (const [folder, firstLine] of Object.entries(entries)) {
+    const dir = path.join(root, folder);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'session-a.jsonl'), `${firstLine}\n`);
+  }
+  return root;
+}
+
+test('resolves a target from transcript content, not from decoding the folder name', async () => {
+  const real = await mkProject();
+  // The folder name is deliberately NOT a decodable version of `real` — if
+  // the scan ever regressed to the naive '-' -> '/' decode, this would miss.
+  const root = await mkProjectsRoot({ 'l2mclS-SrR7IF-garbage': JSON.stringify({ cwd: real, type: 'user' }) });
+  const { projects } = await listFeedbackTargets({ projectsDir: root });
+  expect(projects.map((p) => p.cwd)).toEqual([real]);
+});
+
+test('drops a folder whose cwd never resolved rather than guessing a path', async () => {
+  const root = await mkProjectsRoot({
+    'no-cwd-field': JSON.stringify({ type: 'user', message: 'hi' }),
+    'not-even-json': 'this is not json at all',
+  });
+  const { projects } = await listFeedbackTargets({ projectsDir: root });
+  expect(projects).toEqual([]);
+});
+
+test('drops a resolved cwd that is not a Session Manager project', async () => {
+  const bare = await mkProject({ managed: false });
+  const root = await mkProjectsRoot({ enc: JSON.stringify({ cwd: bare }) });
+  const { projects } = await listFeedbackTargets({ projectsDir: root });
+  expect(projects).toEqual([]);
+});
+
+test('folds several transcript folders that resolve to ONE cwd into a single entry', async () => {
+  const real = await mkProject();
+  const root = await mkProjectsRoot({
+    'enc-one': JSON.stringify({ cwd: real }),
+    'enc-two': JSON.stringify({ cwd: real }),
+    'enc-three': JSON.stringify({ cwd: real }),
+  });
+  const { projects } = await listFeedbackTargets({ projectsDir: root });
+  expect(projects).toHaveLength(1);
+  expect(projects[0].cwd).toBe(real);
+});
+
+test('a missing projects root yields an empty list, never a throw', async () => {
+  await expect(
+    listFeedbackTargets({ projectsDir: path.join(os.tmpdir(), 'sm-xproj-nonexistent-root') }),
+  ).resolves.toEqual({ projects: [], scanned: 0, truncated: 0 });
+});
+
+test('reports truncation instead of silently covering a subset', async () => {
+  const real = await mkProject();
+  const root = await mkProjectsRoot({
+    a: JSON.stringify({ cwd: real }),
+    b: JSON.stringify({ cwd: real }),
+    c: JSON.stringify({ cwd: real }),
+  });
+  const res = await listFeedbackTargets({ projectsDir: root, limit: 2 });
+  expect(res.scanned).toBe(2);
+  expect(res.truncated).toBe(1);
 });
 
 test('isSessionManagerProject is the only definition of a valid target', async () => {

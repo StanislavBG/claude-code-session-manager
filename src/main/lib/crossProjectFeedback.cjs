@@ -92,6 +92,20 @@ const TARGET_SCAN_LIMIT = 300;
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
+/**
+ * Where listFeedbackTargets scans for transcript folders. Injectable rather
+ * than hardcoded to `os.homedir()` for a reason that bit immediately: the
+ * transcripts tests seed and then delete folders under the REAL
+ * `~/.claude/projects/` in their own afterEach, so a test that scanned the
+ * live directory raced their teardown and failed intermittently under the
+ * full suite while passing in isolation. A module whose only I/O root is
+ * baked into a constant can't be tested without touching the developer's
+ * actual home directory — so the root is a parameter, defaulted.
+ */
+function resolveProjectsDir(override) {
+  return override || process.env.SM_PROJECTS_DIR || PROJECTS_DIR;
+}
+
 function singleLine(s) {
   return String(s ?? '').replace(/\r?\n/g, ' ').trim();
 }
@@ -401,10 +415,11 @@ async function openFeedbackSession(input, deps = {}) {
  * an operations root — exactly `openFeedbackSession`'s own precondition, so
  * this list can't offer a target that would then be refused.
  */
-async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT } = {}) {
+async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir } = {}) {
+  const root = resolveProjectsDir(projectsDir);
   let entries;
   try {
-    entries = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
+    entries = await fsp.readdir(root, { withFileTypes: true });
   } catch {
     return { projects: [], scanned: 0, truncated: 0 };
   }
@@ -414,7 +429,7 @@ async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT } = {}) {
   // use rather than an arbitrary alphabetical slice.
   const stamped = [];
   for (const d of dirs) {
-    const full = path.join(PROJECTS_DIR, d.name);
+    const full = path.join(root, d.name);
     try {
       stamped.push({ full, mtimeMs: (await fsp.stat(full)).mtimeMs });
     } catch { /* raced away */ }
@@ -501,8 +516,13 @@ function registerAdminRoute(adminHttp) {
     sendJson(res, 200, result);
   });
 
-  adminHttp.registerRoute('GET', '/admin/feedback/targets', async (req, res) => {
-    const result = await listFeedbackTargets();
+  adminHttp.registerRoute('GET', '/admin/feedback/targets', async (req, res, query) => {
+    // `projectsDir` is a test seam only — production callers never pass it,
+    // and it can only narrow WHICH transcript folders are scanned, never
+    // where a feedback session may be written (that stays governed by
+    // openFeedbackSession's own validatePath + ops-root checks).
+    const projectsDir = query?.get('projectsDir') || undefined;
+    const result = await listFeedbackTargets({ projectsDir });
     sendJson(res, 200, { ok: true, ...result });
   });
 }
@@ -514,6 +534,8 @@ module.exports = {
   MAX_TITLE_CHARS,
   MAX_BODY_CHARS,
   MAX_REFERENCES,
+  PROJECTS_DIR,
+  resolveProjectsDir,
   isSessionManagerProject,
   composeFeedbackIntake,
   validateFeedbackInput,

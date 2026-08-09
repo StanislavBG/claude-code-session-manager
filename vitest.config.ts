@@ -112,6 +112,7 @@ export default defineConfig({
       'src/main/__tests__/health-per-project-stall.test.cjs',
       'src/main/__tests__/scheduler-job-overrun.test.cjs',
       'src/main/__tests__/crossProjectFeedback.test.cjs',
+      'src/main/__tests__/crossProjectFeedbackRoutes.test.cjs',
     ],
     globals: true,
   },

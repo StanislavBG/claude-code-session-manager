@@ -29,6 +29,8 @@ interface Props {
   onReady?: (ed: editor.IStandaloneCodeEditor | null) => void
   /** Cursor position + selected-char count, for the status bar. */
   onCursor?: (info: { line: number; col: number; selected: number }) => void
+  /** Render the buffer but refuse edits (a file the host screen only peeks at). */
+  readOnly?: boolean
 }
 
 // Extension → Monaco language id. Anything unlisted falls back to plaintext.
@@ -80,7 +82,7 @@ function defineThemes(monaco: typeof import('monaco-editor')) {
   })
 }
 
-export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, onCursor }: Props) {
+export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, onCursor, readOnly }: Props) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
   const onSaveRef = useRef(onSave)
@@ -145,6 +147,7 @@ export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, o
       onMount={onMount}
       theme={theme === 'dark' ? 'sm-dark' : 'sm-paper'}
       options={{
+        readOnly: !!readOnly,
         minimap: { enabled: minimap },
         fontSize: isProse ? fontSize + 2 : fontSize,
         fontFamily: isProse

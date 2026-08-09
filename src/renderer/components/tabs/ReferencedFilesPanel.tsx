@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { MarkdownEditor } from '../ui/MarkdownEditor'
 import { toast } from '../../state/toast'
 import type { ImportRef } from '../../../preload/api'
 
 interface Props {
-  /** The CLAUDE.md-like file whose `@`-imports this panel lists; null = nothing to show. */
+  /** The CLAUDE.md-like file whose `@`-imports this rail lists; null = nothing to show. */
   activePath: string | null
-}
-
-interface ExpandedFile {
-  loading: boolean
-  text: string | null
-  error: string | null
+  /** Which document the host screen is currently showing (the root file, or one import). */
+  selectedPath: string | null
+  /** A row was picked. `null` means the root document (`activePath`) itself. */
+  onSelect: (ref: ImportRef | null) => void
 }
 
 function basename(path: string): string {
@@ -19,27 +16,42 @@ function basename(path: string): string {
 }
 
 /**
- * Lists the flattened `@path` import chain of `activePath` (via PRD 800's
- * config:parse-imports IPC) above the CLAUDE.md editor, and lets any entry be
- * expanded inline to a read-only peek at that file's content. Renders nothing
- * when there are zero imports, so unaffected files look exactly as before.
+ * The document rail beside the CLAUDE.md editor: the root file itself, then
+ * every file it pulls in through the flattened `@path` import chain (via PRD
+ * 800's `config:parse-imports` IPC).
+ *
+ * It used to be a horizontal accordion stacked *above* the editor, where each
+ * row expanded into its own second Monaco instance squeezed into 16rem of
+ * height. That read as a list of attachments rather than what it is — the set
+ * of documents that together make up the system prompt — and it stole vertical
+ * space from the editor that was the point of the screen. Now it is a rail:
+ * one row per document, selection only, and the chosen document opens in the
+ * host's single shared `DocumentEditorPane` at full height with the same
+ * preview / outline / metrics chrome the Editor tab gives any other file.
+ *
+ * Renders nothing when there are zero imports, so a CLAUDE.md that imports
+ * nothing gets the whole width for its own text instead of a one-item rail.
  */
-export function ReferencedFilesPanel({ activePath }: Props) {
+export function ReferencedFilesPanel({ activePath, selectedPath, onSelect }: Props) {
   const [imports, setImports] = useState<ImportRef[]>([])
-  const [expandedPath, setExpandedPath] = useState<string | null>(null)
-  const [expandedFiles, setExpandedFiles] = useState<Record<string, ExpandedFile>>({})
   // Monotonic generation counter, bumped every time activePath changes.
-  // In-flight readText() fetches capture the generation they were issued
-  // under and compare against the current one on resolve — unlike comparing
-  // raw activePath values, this can't false-positive on an A->B->A round
-  // trip (a stale A-fetch resolving after the user has navigated back to A
-  // would otherwise pass a same-path check and resurrect stale content).
+  // In-flight fetches capture the generation they were issued under and
+  // compare against the current one on resolve — unlike comparing raw
+  // activePath values, this can't false-positive on an A->B->A round trip (a
+  // stale A-fetch resolving after the user has navigated back to A would
+  // otherwise pass a same-path check and resurrect stale content).
   const generationRef = useRef(0)
+  // Held in a ref so re-parsing is driven by activePath alone; a caller that
+  // passes an inline arrow for onSelect must not retrigger the IPC.
+  const onSelectRef = useRef(onSelect)
+  onSelectRef.current = onSelect
 
   useEffect(() => {
     generationRef.current += 1
-    setExpandedPath(null)
-    setExpandedFiles({})
+    // The previously-selected import belongs to the previous root file; drop
+    // back to the root document rather than leaving the host pointed at a
+    // document that may not be in the new chain at all.
+    onSelectRef.current(null)
     if (!activePath) {
       setImports([])
       return
@@ -60,71 +72,66 @@ export function ReferencedFilesPanel({ activePath }: Props) {
     }
   }, [activePath])
 
-  if (imports.length === 0) return null
+  if (imports.length === 0 || !activePath) return null
 
-  function toggle(path: string) {
-    if (expandedPath === path) {
-      setExpandedPath(null)
-      return
-    }
-    setExpandedPath(path)
-    if (!expandedFiles[path]) {
-      const generation = generationRef.current
-      setExpandedFiles((prev) => ({ ...prev, [path]: { loading: true, text: null, error: null } }))
-      window.api.config.readText(path).then((res) => {
-        if (generationRef.current !== generation) return
-        setExpandedFiles((prev) => ({
-          ...prev,
-          [path]: { loading: false, text: res.text, error: res.error },
-        }))
-      })
-    }
-  }
+  const rootSelected = selectedPath === activePath || selectedPath === null
 
   return (
-    <div className="shrink-0 border-b border-line bg-bg-elev text-xs max-h-64 overflow-auto">
+    <div
+      className="w-64 shrink-0 border-r border-line bg-bg-elev overflow-auto"
+      data-testid="referenced-files-rail"
+    >
+      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-fg-faint border-b border-line">
+        Documents · {imports.length + 1}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onSelect(null)}
+        aria-current={rootSelected}
+        data-testid="referenced-file-root"
+        className={`w-full text-left px-3 py-2 border-b border-line ${
+          rootSelected ? 'bg-bg-hi text-fg' : 'text-fg-dim hover:bg-bg'
+        }`}
+      >
+        <div className="text-[11.5px] font-medium truncate">{basename(activePath)}</div>
+        <div className="text-[10px] text-fg-faint truncate" title={activePath}>
+          this system prompt
+        </div>
+      </button>
+
       {imports.map((ref) => {
         const broken = !ref.ok || !ref.exists
-        const expanded = expandedPath === ref.path
-        const state = expandedFiles[ref.path]
+        const selected = selectedPath === ref.path
         return (
-          <div key={ref.path} className="border-b border-line last:border-b-0" data-testid="referenced-file-row">
-            <button
-              type="button"
-              onClick={() => toggle(ref.path)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg"
-            >
-              <span className={`shrink-0 text-fg-faint transition-transform ${expanded ? 'rotate-90' : ''}`}>
-                ›
-              </span>
-              <span className="shrink-0 font-medium">{basename(ref.path)}</span>
-              <span className="text-fg-faint truncate flex-1" title={ref.path}>
-                {ref.path}
-              </span>
-              <span className="text-fg-faint shrink-0">
-                {ref.sizeBytes.toLocaleString()} bytes · ~{ref.tokenEstimate.toLocaleString()} tokens
-              </span>
-              {broken ? (
+          <button
+            key={ref.path}
+            type="button"
+            onClick={() => onSelect(ref)}
+            aria-current={selected}
+            data-testid="referenced-file-row"
+            className={`w-full text-left px-3 py-2 border-b border-line last:border-b-0 ${
+              selected ? 'bg-bg-hi text-fg' : 'text-fg-dim hover:bg-bg'
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11.5px] font-medium truncate flex-1">{basename(ref.path)}</span>
+              {broken && (
                 <span
-                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide text-amber-400/90 border border-amber-400/30"
+                  className="shrink-0 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wide text-amber-400/90 border border-amber-400/30"
                   data-testid="referenced-file-missing"
                 >
                   missing
                 </span>
-              ) : null}
-            </button>
-            {expanded ? (
-              <div className="h-64 border-t border-line">
-                {!state || state.loading ? (
-                  <div className="px-3 py-2 text-fg-faint">loading…</div>
-                ) : state.error ? (
-                  <div className="px-3 py-2 text-amber-400/90">{state.error}</div>
-                ) : (
-                  <MarkdownEditor path={ref.path} value={state.text ?? ''} onChange={() => {}} readOnly />
-                )}
-              </div>
-            ) : null}
-          </div>
+              )}
+            </div>
+            <div className="text-[10px] text-fg-faint truncate" title={ref.path}>
+              {ref.path}
+            </div>
+            <div className="text-[10px] text-fg-faint">
+              {ref.sizeBytes.toLocaleString()} bytes · ~{ref.tokenEstimate.toLocaleString()} tokens
+            </div>
+          </button>
         )
       })}
     </div>

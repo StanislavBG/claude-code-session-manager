@@ -7,20 +7,12 @@ import { ReferencedFilesPanel } from '../ReferencedFilesPanel'
 import type { ImportRef } from '../../../../preload/api'
 import { flushAsync } from '../../../testUtils/domFlush'
 
-// MarkdownEditor wraps @monaco-editor/react, which doesn't render in jsdom —
-// stub it with a plain element so the expanded-content assertions can look
-// at the value/readOnly props without booting real Monaco.
-vi.mock('../../ui/MarkdownEditor', () => ({
-  MarkdownEditor: ({ value, readOnly }: { value: string; readOnly?: boolean }) =>
-    createElement('div', { 'data-testid': 'markdown-editor', 'data-readonly': String(!!readOnly) }, value),
-}))
-
 const toastError = vi.fn()
 vi.mock('../../../state/toast', () => ({
   toast: { error: (...args: unknown[]) => toastError(...args) },
 }))
 
-function installApi(overrides: { parseImports: any; readText: any }) {
+function installApi(overrides: { parseImports: any }) {
   ;(globalThis as any).window.api = { config: overrides }
 }
 
@@ -38,16 +30,22 @@ function ref(overrides: Partial<ImportRef> = {}): ImportRef {
 let container: HTMLDivElement | null = null
 let root: Root | null = null
 
-function mount(activePath: string | null) {
+interface MountProps {
+  activePath: string | null
+  selectedPath?: string | null
+  onSelect?: (r: ImportRef | null) => void
+}
+
+function render({ activePath, selectedPath = activePath, onSelect = () => {} }: MountProps) {
+  act(() => root!.render(createElement(ReferencedFilesPanel, { activePath, selectedPath, onSelect })))
+}
+
+function mount(props: MountProps) {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  act(() => root!.render(createElement(ReferencedFilesPanel, { activePath })))
+  render(props)
   return container
-}
-
-function rerender(activePath: string | null) {
-  act(() => root!.render(createElement(ReferencedFilesPanel, { activePath })))
 }
 
 const flush = () => flushAsync(2)
@@ -63,124 +61,115 @@ describe('ReferencedFilesPanel', () => {
 
   it('renders zero DOM output when there are no imports', async () => {
     const parseImports = vi.fn().mockResolvedValue({ ok: true, imports: [] })
-    installApi({ parseImports, readText: vi.fn() })
+    installApi({ parseImports })
 
-    const el = mount('/home/user/.claude/CLAUDE.md')
+    const el = mount({ activePath: '/home/user/.claude/CLAUDE.md' })
     await flush()
 
     expect(el.innerHTML).toBe('')
   })
 
-  it('renders one row per ImportRef, flags missing/broken entries distinctly', async () => {
+  it('lists the root document plus one row per ImportRef, flagging missing entries', async () => {
     const healthy = ref({ path: '/a/healthy.md' })
     const missing = ref({ path: '/a/missing.md', exists: false, ok: false })
-    const parseImports = vi.fn().mockResolvedValue({ ok: true, imports: [healthy, missing] })
-    installApi({ parseImports, readText: vi.fn() })
+    installApi({ parseImports: vi.fn().mockResolvedValue({ ok: true, imports: [healthy, missing] }) })
 
-    const el = mount('/home/user/.claude/CLAUDE.md')
+    const el = mount({ activePath: '/a/CLAUDE.md' })
     await flush()
 
+    expect(el.querySelector('[data-testid="referenced-file-root"]')?.textContent).toContain('CLAUDE.md')
     const rows = el.querySelectorAll('[data-testid="referenced-file-row"]')
     expect(rows).toHaveLength(2)
     expect(rows[0].querySelector('[data-testid="referenced-file-missing"]')).toBeNull()
     expect(rows[1].querySelector('[data-testid="referenced-file-missing"]')).not.toBeNull()
+    // Weight is stated per row so the reader can see what each import costs.
+    expect(rows[0].textContent).toContain('300')
   })
 
-  it('clicking a row expands it and reads that file via config.readText; collapsing hides content without re-fetching', async () => {
+  it('is selection-only — clicking a row reports it upward and never reads the file itself', async () => {
     const healthy = ref({ path: '/a/healthy.md' })
     const parseImports = vi.fn().mockResolvedValue({ ok: true, imports: [healthy] })
-    const readText = vi.fn().mockResolvedValue({ exists: true, text: 'hello world', mtimeMs: 0, error: null })
-    installApi({ parseImports, readText })
+    const readText = vi.fn()
+    installApi({ parseImports, readText } as any)
+    const onSelect = vi.fn()
 
-    const el = mount('/home/user/.claude/CLAUDE.md')
+    const el = mount({ activePath: '/a/CLAUDE.md', onSelect })
     await flush()
 
-    const row = el.querySelector('[data-testid="referenced-file-row"] button') as HTMLButtonElement
+    const row = el.querySelector('[data-testid="referenced-file-row"]') as HTMLButtonElement
     act(() => row.click())
+    expect(onSelect).toHaveBeenLastCalledWith(healthy)
+
+    const rootRow = el.querySelector('[data-testid="referenced-file-root"]') as HTMLButtonElement
+    act(() => rootRow.click())
+    expect(onSelect).toHaveBeenLastCalledWith(null)
+
+    // The rail never fetches content — the host's document view does.
+    expect(readText).not.toHaveBeenCalled()
+  })
+
+  it('marks the selected row, defaulting to the root document', async () => {
+    const healthy = ref({ path: '/a/healthy.md' })
+    installApi({ parseImports: vi.fn().mockResolvedValue({ ok: true, imports: [healthy] }) })
+
+    const el = mount({ activePath: '/a/CLAUDE.md' })
+    await flush()
+    expect(el.querySelector('[data-testid="referenced-file-root"]')?.getAttribute('aria-current')).toBe('true')
+
+    render({ activePath: '/a/CLAUDE.md', selectedPath: '/a/healthy.md' })
+    expect(el.querySelector('[data-testid="referenced-file-root"]')?.getAttribute('aria-current')).toBe('false')
+    expect(el.querySelector('[data-testid="referenced-file-row"]')?.getAttribute('aria-current')).toBe('true')
+  })
+
+  it('resets the host back to the root document when the root file changes', async () => {
+    const parseImports = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, imports: [ref({ path: '/a/one.md' })] })
+      .mockResolvedValueOnce({ ok: true, imports: [ref({ path: '/b/two.md' })] })
+    installApi({ parseImports })
+    const onSelect = vi.fn()
+
+    mount({ activePath: '/a/CLAUDE.md', onSelect })
+    await flush()
+    onSelect.mockClear()
+
+    render({ activePath: '/b/CLAUDE.md', selectedPath: '/a/one.md', onSelect })
     await flush()
 
-    expect(readText).toHaveBeenCalledWith('/a/healthy.md')
-    expect(readText).toHaveBeenCalledTimes(1)
-    expect(el.querySelector('[data-testid="markdown-editor"]')?.textContent).toBe('hello world')
-    expect(el.querySelector('[data-testid="markdown-editor"]')?.getAttribute('data-readonly')).toBe('true')
-
-    // Collapse.
-    act(() => row.click())
-    await flush()
-    expect(el.querySelector('[data-testid="markdown-editor"]')).toBeNull()
-
-    // Re-expand within the same mount — no second fetch.
-    act(() => row.click())
-    await flush()
-    expect(readText).toHaveBeenCalledTimes(1)
-    expect(el.querySelector('[data-testid="markdown-editor"]')?.textContent).toBe('hello world')
+    // An import of the OLD root must not stay selected against the new one.
+    expect(onSelect).toHaveBeenCalledWith(null)
   })
 
   it('surfaces a parseImports failure via toast rather than throwing', async () => {
-    const parseImports = vi.fn().mockResolvedValue({ ok: false, error: 'ipc boom' })
-    installApi({ parseImports, readText: vi.fn() })
+    installApi({ parseImports: vi.fn().mockResolvedValue({ ok: false, error: 'ipc boom' }) })
 
-    const el = mount('/home/user/.claude/CLAUDE.md')
+    const el = mount({ activePath: '/home/user/.claude/CLAUDE.md' })
     await flush()
 
     expect(toastError).toHaveBeenCalledWith('ipc boom')
     expect(el.innerHTML).toBe('')
   })
 
-  it('renders a readText failure inline instead of a blank expanded panel', async () => {
-    const healthy = ref({ path: '/a/healthy.md' })
-    const parseImports = vi.fn().mockResolvedValue({ ok: true, imports: [healthy] })
-    const readText = vi.fn().mockResolvedValue({ exists: false, text: null, mtimeMs: 0, error: 'permission denied' })
-    installApi({ parseImports, readText })
-
-    const el = mount('/home/user/.claude/CLAUDE.md')
-    await flush()
-
-    const row = el.querySelector('[data-testid="referenced-file-row"] button') as HTMLButtonElement
-    act(() => row.click())
-    await flush()
-
-    expect(el.querySelector('[data-testid="markdown-editor"]')).toBeNull()
-    expect(el.textContent).toContain('permission denied')
-  })
-
-  it('does not resurrect a stale readText response after an A -> B -> A activePath round trip', async () => {
-    const rowA = ref({ path: '/a/from-a.md' })
-    const rowBackToA = ref({ path: '/a/from-a.md' })
+  it('does not resurrect a stale imports response after an A -> B -> A round trip', async () => {
+    let resolveStale: (v: unknown) => void = () => {}
     const parseImports = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, imports: [rowA] }) // initial mount on A
-      .mockResolvedValueOnce({ ok: true, imports: [] }) // switch to B
-      .mockResolvedValueOnce({ ok: true, imports: [rowBackToA] }) // switch back to A
+      .mockImplementationOnce(() => new Promise((r) => { resolveStale = r })) // A, kept pending
+      .mockResolvedValueOnce({ ok: true, imports: [] }) // B
+      .mockResolvedValueOnce({ ok: true, imports: [ref({ path: '/a/fresh.md' })] }) // back to A
+    installApi({ parseImports })
 
-    let resolveStaleReadText: (v: unknown) => void = () => {}
-    const readText = vi.fn().mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveStaleReadText = resolve
-        })
-    )
-    installApi({ parseImports, readText })
-
-    const el = mount('/a/CLAUDE.md')
+    const el = mount({ activePath: '/a/CLAUDE.md' })
+    await flush()
+    render({ activePath: '/b/CLAUDE.md' })
+    await flush()
+    render({ activePath: '/a/CLAUDE.md' })
     await flush()
 
-    // Expand the row on A — kicks off a readText() that we'll keep pending.
-    const row = el.querySelector('[data-testid="referenced-file-row"] button') as HTMLButtonElement
-    act(() => row.click())
+    act(() => resolveStale({ ok: true, imports: [ref({ path: '/a/STALE.md' })] }))
     await flush()
 
-    // Navigate away to B, then back to A, before the stale readText resolves.
-    rerender('/b/CLAUDE.md')
-    await flush()
-    rerender('/a/CLAUDE.md')
-    await flush()
-
-    // Now the stale fetch from the first visit to A resolves.
-    act(() => resolveStaleReadText({ exists: true, text: 'STALE CONTENT', mtimeMs: 0, error: null }))
-    await flush()
-
-    // The stale content must not appear anywhere in the freshly re-mounted A view.
-    expect(el.textContent).not.toContain('STALE CONTENT')
+    expect(el.textContent).not.toContain('STALE.md')
+    expect(el.textContent).toContain('fresh.md')
   })
 })

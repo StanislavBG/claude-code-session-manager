@@ -1,5 +1,4 @@
 import { Terminal } from './Terminal'
-import { TerminalControls } from './TerminalControls'
 import { LiveTranscript } from './LiveTranscript'
 import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { useSessions } from '../state/sessions'
@@ -50,10 +49,11 @@ export function TerminalStage({ visible = true }: TerminalStageProps) {
         <EpicsWorkspace />
       )}
       <LiveTranscript />
-      {/* Terminal settings overlay — theme + font-size. Anchored to the
-       *  terminal viewport (not MainPane) so the gear sits well below the
-       *  TabBar's "v{__APP_VERSION__}" text. */}
-      {visible && <TerminalControls />}
+      {/* No settings overlay here on purpose. The terminal theme + font size
+       *  are ONE app-wide preference (lib/terminalSettings.ts) shared by every
+       *  xterm in the app; a gear pinned inside this pane framed it as a
+       *  property of the session you were looking at. It is edited from Home's
+       *  "Terminal appearance" card instead. */}
     </div>
   )
 }

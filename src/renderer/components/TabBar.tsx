@@ -15,6 +15,15 @@ import { useDocumentVisible } from '../lib/useDocumentVisible'
  * shown in AlmanacFooter and made the strip do two jobs; app identity lives in
  * the native window title and the footer's version chip. Don't re-add branding,
  * status, or usage here — status belongs to the footer.
+ *
+ * The tab row still scrolls horizontally when the open projects outrun the
+ * width, but its scrollbar is hidden (`.no-scrollbar` in styles.css). The app's
+ * global scrollbar is 10px, which inside a fixed-height bar showed up as a
+ * permanent grey sliver under the tabs — read as a stray widget, not an
+ * affordance. The bar is `h-12` rather than `h-11` to pay back the room that
+ * sliver was taking, so an active tab's bottom edge still meets the content
+ * area cleanly. Scrolling itself is unchanged: wheel, drag-reorder, and
+ * keyboard all still reach an off-screen tab.
  */
 const ACTIVITY_WINDOW_MS = 30_000
 
@@ -88,7 +97,7 @@ export function TabBar() {
 
   return (
     <div
-      className="h-11 bg-bg-elev border-b border-line flex items-end px-3 gap-0 shrink-0 relative"
+      className="h-12 bg-bg-elev border-b border-line flex items-end px-3 gap-0 shrink-0 relative"
       data-testid="tour-tabbar"
     >
       <button
@@ -108,7 +117,7 @@ export function TabBar() {
       <span className="w-px self-stretch my-1.5 bg-line" />
       <div
         ref={containerRef}
-        className={`flex items-end gap-0.5 overflow-x-auto min-w-0 flex-1 select-none ${isDragging ? 'cursor-grabbing' : ''}`}
+        className={`flex items-end gap-0.5 overflow-x-auto no-scrollbar min-w-0 flex-1 select-none ${isDragging ? 'cursor-grabbing' : ''}`}
       >
         {tabs.map((t, index) => {
           const active = t.id === activeTabId

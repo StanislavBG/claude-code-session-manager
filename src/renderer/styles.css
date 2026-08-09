@@ -125,3 +125,16 @@ html, body, #root {
 ::-webkit-scrollbar-thumb:hover {
   background: #c8b88f;
 }
+
+/* Opt a scroll container out of the 10px scrollbar above while keeping it
+ * scrollable (wheel, drag, keyboard). For strips of chrome — the TabBar's tab
+ * row — where the bar's own height is fixed and a horizontal scrollbar would
+ * eat a tenth of it and read as a stray UI element rather than an affordance. */
+.no-scrollbar {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* legacy Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

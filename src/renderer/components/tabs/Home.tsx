@@ -44,6 +44,7 @@ import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
 import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopover'
+import { TerminalAppearanceCard } from './home/TerminalAppearanceCard'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
 import { ticketTagTone } from '../../lib/ticketDisplay'
@@ -101,6 +102,10 @@ function HomeComponent({ onNavigate }: HomeProps) {
         <ActiveSessionsCard onNavigate={onNavigate} />
         <RecentSessionsCard onNavigate={onNavigate} />
         <AgentsCard />
+        {/* App-wide terminal theme + font size. Lives here, not in a gear
+         *  popover inside a Terminal pane, because it is machine-wide state —
+         *  see lib/terminalSettings.ts for exactly what it reaches. */}
+        <TerminalAppearanceCard />
       </div>
       <NewEpicProjectDrawer
         open={newEpicOpen}

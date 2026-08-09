@@ -36,7 +36,7 @@ describe('ProjectPagesSection', () => {
     expect(Array.from(el.querySelectorAll('button')).some((b) => /generate/i.test(b.textContent ?? ''))).toBe(false)
   })
 
-  it('renders the iframe display with the marketing html as srcDoc by default when output is present', () => {
+  it('renders the iframe display with the HOME html as srcDoc by default when output is present', () => {
     const el = mount(
       <ProjectPagesSection
         output={{
@@ -52,7 +52,9 @@ describe('ProjectPagesSection', () => {
     )
     const iframe = el.querySelector('iframe') as HTMLIFrameElement
     expect(iframe).toBeTruthy()
-    expect(iframe.getAttribute('srcdoc')).toContain('MARKETING')
+    // Home is the default lens now that ProjectHome no longer renders a
+    // second copy of home.html above this section.
+    expect(iframe.getAttribute('srcdoc')).toContain('HOME')
     expect(el.textContent).toContain('Full screen')
     expect(el.textContent).toContain('About these templates')
     const fullscreenBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Full screen') as HTMLButtonElement
@@ -123,7 +125,7 @@ describe('ProjectPagesSection', () => {
     }
   })
 
-  it('Home is a real lens tab — same html as the primary document above, and it says so', () => {
+  it('Marketing stays reachable as its own tab', () => {
     const el = mount(
       <ProjectPagesSection
         output={{
@@ -138,14 +140,12 @@ describe('ProjectPagesSection', () => {
         loaded
       />,
     )
-    const homeTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Home') as HTMLButtonElement
-    act(() => homeTab.click())
-    expect((el.querySelector('iframe') as HTMLIFrameElement).getAttribute('srcdoc')).toContain('HOME')
-    // The duplication with the block above is stated, not hidden.
-    expect(el.textContent).toContain('primary document')
+    const marketingTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Marketing') as HTMLButtonElement
+    act(() => marketingTab.click())
+    expect((el.querySelector('iframe') as HTMLIFrameElement).getAttribute('srcdoc')).toContain('MARKETING')
   })
 
-  it('Home renders even for the shipped default, where every other lens is missing', () => {
+  it('Home renders for the shipped default, where every other lens is legitimately missing', () => {
     const el = mount(
       <ProjectPagesSection
         output={{
@@ -156,8 +156,6 @@ describe('ProjectPagesSection', () => {
         loaded
       />,
     )
-    const homeTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Home') as HTMLButtonElement
-    act(() => homeTab.click())
     expect((el.querySelector('iframe') as HTMLIFrameElement).getAttribute('srcdoc')).toContain('SHIPPED DEFAULT')
   })
 
@@ -179,6 +177,8 @@ describe('ProjectPagesSection', () => {
         loaded
       />,
     )
+    const marketingTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Marketing') as HTMLButtonElement
+    act(() => marketingTab.click())
     expect(el.querySelector('iframe')).toBeNull()
     expect(el.textContent).toContain('Marketing page not generated yet')
     expect(el.textContent).toContain('Generate My Project Home')

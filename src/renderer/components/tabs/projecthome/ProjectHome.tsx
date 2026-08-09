@@ -1,15 +1,28 @@
 /**
  * ProjectHome — the hosted Project Home document for the active project
- * (NavKey `project-home`). Per Epic "Project Home Layout": the page's
- * primary content is the generated (or shipped-default) `home.html`
- * document, displayed via the same sandboxed iframe ProjectPagesSection
- * already uses, with a single "Generate My Project Home" action above it.
- * A thin live strip (PhNow / PhOpenQuestions) sits above the document —
- * those two show state that changes underneath a static document, so they
- * stay live React rather than being folded into the generated HTML. The
- * synthesized purpose/what/areas/scope/conventions blocks this file used to
- * hand-render are now the `brief` lens (ProjectPagesSection), generated
- * from the same `ProjectBrief` data instead of drawn twice.
+ * (NavKey `project-home`).
+ *
+ * Layout, top to bottom, and it is deliberately ONE document viewer, not two:
+ *
+ *   1. a thin live strip (PhNow / PhOpenQuestions) — state that changes
+ *      underneath a static document, so it stays live React rather than being
+ *      folded into the generated HTML;
+ *   2. the identity + provenance card holding the page's single
+ *      "Generate My Project Home" action;
+ *   3. `ProjectPagesSection` — every generated template, Home included,
+ *      selected by tab.
+ *
+ * This file used to ALSO render `home.html` in its own iframe between (2) and
+ * (3). Once Home became a tab in the Pages strip (five templates, matching
+ * `LENS_ORDER` and the generator), that block was the same document painted
+ * twice on one screen, one viewer directly on top of the other — the top one
+ * with no tab strip and no full-screen affordance. Removed 2026-08-09; the
+ * Pages widget now opens on Home by default so the screen still leads with it.
+ * Don't reintroduce a second hosted iframe here.
+ *
+ * The synthesized purpose/what/areas/scope/conventions blocks this file used
+ * to hand-render are the `brief` lens (ProjectPagesSection), generated from
+ * the same `ProjectBrief` data instead of drawn twice — the same rule.
  */
 
 import { memo, useEffect, useMemo } from 'react'
@@ -30,7 +43,6 @@ import { AlmanacIcon } from '../../layout/AlmanacIcon'
 import { EmptyState } from '../../ui/EmptyState'
 import { toast } from '../../../state/toast'
 import { PhBlock, PhCard } from './ph-primitives'
-import { HtmlFrame } from './projectpages/HtmlFrame'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
 
 const EMPTY_JOBS: ScheduleJob[] = []
@@ -174,12 +186,6 @@ function ProjectHomeComponent() {
             </button>
           </div>
         </div>
-
-        {loaded && output?.home && (
-          <PhCard className="overflow-hidden mb-7" style={{ height: 'calc(100vh - 380px)', minHeight: 480 }}>
-            <HtmlFrame title="Project Home" html={output.home} />
-          </PhCard>
-        )}
 
         <ProjectPagesSection output={output} loaded={loaded} />
       </div>

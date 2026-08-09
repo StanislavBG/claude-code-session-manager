@@ -386,6 +386,7 @@ export const useChat = create<ChatState>((set, get) => ({
   dropTab: (tabId) => {
     if (!(tabId in get().chats) && !(tabId in get().hydratedTabs)) return
     feedIngest.delete(tabId)
+    feedBacked.delete(tabId)
     const chats = { ...get().chats }
     delete chats[tabId]
     const hydratedTabs = { ...get().hydratedTabs }
@@ -958,12 +959,31 @@ function applyNotice(tabId: string, _sessionId: string, message: string): void {
 // line lands: an ingested assistant/user text event appends the turn and
 // excises its own text from `stream` (so the same text never shows twice as
 // turn + live tap), and whichever source arrives SECOND with identical
-// (role, identity text) within the last DEDUP_WINDOW turns is folded into the
+// (role, identity text) ANYWHERE in the live `turns` array is folded into the
 // first — ingestTranscriptEvent folds a text event already pushed by
 // chatRunner's complete/needs-input handlers (upgrading that turn in place so
 // the JSONL's byte-exact text + `ref` win), and pushTurn merges a completion
 // into an already-landed feed turn (attaching outcome/toolUses) instead of
 // appending. Either arrival order renders the text exactly once.
+//
+// The two sources are separated by every EVENT of the run (tool_use,
+// tool_result, usage, …), NOT by conversation turns — a single run can put
+// hundreds of 'event' turns between the streamed copy and the JSONL line for
+// the same assistant reply. findRecentDuplicateTurn therefore scans the
+// WHOLE live `turns` array (bounded by FEED_TURNS_CAP, currently 1000), never
+// a small trailing window — an earlier fixed-size window (20) missed a
+// measured 35/98 real replies whose separation exceeded it.
+//
+// Reconciliation is NOT gated on whether a Chat view is currently attached.
+// A run can complete while the Epic is on Terminal, another Epic is open, or
+// the app is elsewhere — detachTranscriptFeed only tears down the live IPC
+// listener; it deliberately never un-marks the tab as feed-backed (see
+// feedBacked below). Gating dedupe on "attached right now" let an in-between
+// completion append with no dedupe at all, so the next re-attach's replay
+// landed the JSONL twin unmolested. The only case where two same-text
+// assistant turns are legitimate is a tab that has NEVER had a transcript
+// feed at all (no `claudeSessionId`/JSONL backing it) — there, two genuinely
+// separate runs may both answer "Done." and both must render.
 //
 // "Identity text" is NOT the raw string for a user turn: the optimistic turn
 // beginRun pushes holds what the human typed, while the JSONL holds what
@@ -985,11 +1005,6 @@ function applyNotice(tabId: string, _sessionId: string, message: string): void {
 // Terminal-tab live views combined), where a new subscribe is rejected —
 // surfaced via toast here, and the view renders empty-but-valid.
 
-/** Dedup window: how many trailing turns are scanned for a same-(role, text)
- *  twin. Small on purpose — the two sources land within one run of each
- *  other, never hundreds of turns apart. */
-const DEDUP_WINDOW = 20
-
 /** Bound on `turns` growth for a feed-backed tab — the main-side ring buffer
  *  already caps replay at 500 events; this caps live accumulation over a
  *  long session (paged reads are a separate PRD). */
@@ -1000,6 +1015,15 @@ const FEED_TURNS_CAP = 1000
  *  equivalents (refs/unsubs) are store-internal bookkeeping too. */
 const feedRefs = new Map<string, number>()
 const feedUnsubs = new Map<string, () => void>()
+
+/** "This tab is fed by a real JSONL transcript" — set on first attach and
+ *  deliberately NOT cleared by detachTranscriptFeed (only feedRefs/feedUnsubs
+ *  are, since those track the LIVE IPC listener). A tab that has ever been
+ *  attached stays feed-backed while merely detached (Chat view switched away
+ *  from), which is exactly the state reconciliation must keep working in:
+ *  see hasTranscriptFeed and the RECONCILIATION comment above. Cleared only
+ *  by dropTab, when the tab itself goes away. */
+const feedBacked = new Set<string>()
 
 /** Per-tab replay/rotation guard: `${byteOffset}:${indexWithinLine}` keys of
  *  every ingested event. A re-attach's buffer replay (the main-side LRU cache
@@ -1034,11 +1058,14 @@ function turnIdentity(role: ChatTurnRole, text: string): string {
   return role === 'user' ? splitInjectedPreamble(t).body.trim() : t
 }
 
+/** Scans the WHOLE live `turns` array (bounded only by FEED_TURNS_CAP) for a
+ *  same-(role, identity text) twin — see the RECONCILIATION comment above for
+ *  why a small trailing window is wrong: the two sources are separated by
+ *  every event of a run, not by conversation turns. */
 function findRecentDuplicateTurn(turns: ChatTurn[], role: ChatTurnRole, text: string): number {
   const needle = turnIdentity(role, text)
   if (!needle) return -1
-  const from = Math.max(0, turns.length - DEDUP_WINDOW)
-  for (let i = turns.length - 1; i >= from; i--) {
+  for (let i = turns.length - 1; i >= 0; i--) {
     if (turns[i].role === role && turnIdentity(role, turns[i].text) === needle) return i
   }
   return -1
@@ -1048,8 +1075,17 @@ function capTurns(turns: ChatTurn[]): ChatTurn[] {
   return turns.length > FEED_TURNS_CAP ? turns.slice(turns.length - FEED_TURNS_CAP) : turns
 }
 
+/** "This tab is (or has been) fed by a real JSONL transcript" — the gate for
+ *  streamed-then-persisted dedupe reconciliation. Backed by `feedBacked`,
+ *  NOT `feedRefs`: `feedRefs` tracks only the currently-attached IPC
+ *  listener and goes to zero the instant the Chat view is switched away
+ *  from, which would wrongly disable dedupe for a run that completes while
+ *  detached. A tab that has never been feed-backed at all (no real
+ *  `claudeSessionId`/transcript) correctly returns false, so two genuinely
+ *  separate completions with identical text both render — see the
+ *  RECONCILIATION comment above. */
 export function hasTranscriptFeed(tabId: string): boolean {
-  return feedRefs.has(tabId)
+  return feedBacked.has(tabId)
 }
 
 /**
@@ -1199,6 +1235,7 @@ export function attachTranscriptFeed(args: { tabId: string; cwd: string; session
   const next = (feedRefs.get(tabId) ?? 0) + 1
   feedRefs.set(tabId, next)
   if (next > 1) return
+  feedBacked.add(tabId)
   useChat.setState({ hydratedTabs: { ...useChat.getState().hydratedTabs, [tabId]: true } })
   const off = window.api.transcripts.onEvent(tabId, (events) => ingestTranscriptEvents(tabId, events))
   feedUnsubs.set(tabId, off)
@@ -1211,6 +1248,7 @@ export function attachTranscriptFeed(args: { tabId: string; cwd: string; session
         off()
         feedUnsubs.delete(tabId)
         feedRefs.delete(tabId)
+        feedBacked.delete(tabId)
         const hydratedTabs = { ...useChat.getState().hydratedTabs }
         delete hydratedTabs[tabId]
         useChat.setState({ hydratedTabs })
@@ -1230,7 +1268,9 @@ export function attachTranscriptFeed(args: { tabId: string; cwd: string; session
  * main-side sub is release()d (transcript:unsubscribe) — NOT closed — so it
  * parks in the LRU cache and a revisit resumes from the persisted offset.
  * feedIngest's seen-set is kept: the replay served on re-attach is deduped
- * against it (see FeedIngestState).
+ * against it (see FeedIngestState). `feedBacked` is likewise kept — this tab
+ * stays reconciliation-eligible while merely detached, only dropTab clears
+ * it (see hasTranscriptFeed).
  */
 export function detachTranscriptFeed(tabId: string): void {
   const cur = feedRefs.get(tabId)

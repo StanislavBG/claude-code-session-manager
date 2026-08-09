@@ -204,6 +204,75 @@ describe('chat.ts transcript feed (PRD chat-feed-from-jsonl)', () => {
     expect(users).toHaveLength(2)
   })
 
+  // DEFECT A (PRD 1029): DEDUP_WINDOW=20 only scanned the last 20 turns, but
+  // the two sources are separated by every EVENT of a run (tool_use,
+  // tool_result, usage…), not by conversation turns — measured up to a
+  // median gap of 104 in real transcripts. findRecentDuplicateTurn must scan
+  // the whole live `turns` array so a twin is still found past 100+
+  // intervening event turns.
+  it('finds the JSONL twin after 60+ intervening non-text event turns (DEFECT A)', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-gap', cwd: '/proj', sessionUuid: 'sess-uuid-gap' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    // chatRunner's completion lands first.
+    mock.getCompleteHandler()?.({ tabId: 'epic-gap', sessionId: 'sess-uuid-gap', finalMessage: 'Deep answer.' })
+    expect(useChat.getState().get('epic-gap').turns.filter((t) => t.role === 'assistant')).toHaveLength(1)
+
+    // 60 intervening non-text transcript events — far more than the old
+    // fixed 20-turn window could ever see past.
+    for (let i = 0; i < 60; i++) {
+      mock.emit('epic-gap', makeEv('tool_use', { name: 'Bash', input: {} }, { byteOffset: 10000 + i }))
+    }
+
+    // The JSONL line for the same reply lands last, well outside the old window.
+    mock.emit('epic-gap', makeEv('assistant', 'Deep answer.', { byteOffset: 20000 }))
+
+    const assistants = useChat.getState().get('epic-gap').turns.filter((t) => t.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    // The JSONL record wins the merge (upgrade-in-place rule): it carries `ref`.
+    expect(assistants[0].ref).toBeTruthy()
+    expect(assistants[0].text).toBe('Deep answer.')
+  })
+
+  // DEFECT B (PRD 1029): dedupe used to be gated on `feedRefs` (the currently
+  // -attached IPC listener), which detachTranscriptFeed clears — so a run
+  // completing while the Chat view was switched away appended with NO
+  // dedupe, and the next re-attach's replay landed the JSONL twin unfolded.
+  // Reconciliation must stay gated on "this tab has ever been feed-backed"
+  // (feedBacked / feedIngest), which survives detach.
+  it('still dedupes a run that completes entirely while the feed is detached (DEFECT B)', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed, detachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-detached', cwd: '/proj', sessionUuid: 'sess-uuid-detached' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    detachTranscriptFeed('epic-detached')
+    expect(mock.unsubscribe).toHaveBeenCalledWith('epic-detached')
+
+    // A run completes entirely while detached (Epic switched to Terminal /
+    // another Epic open) — chatRunner's completion is the only thing that
+    // lands, with no live feed turn to merge into yet.
+    mock.getCompleteHandler()?.({
+      tabId: 'epic-detached',
+      sessionId: 'sess-uuid-detached',
+      finalMessage: 'While you were away.',
+    })
+    expect(useChat.getState().get('epic-detached').turns.filter((t) => t.role === 'assistant')).toHaveLength(1)
+
+    // Re-attach and replay the run's events, including the JSONL assistant text.
+    attachTranscriptFeed({ tabId: 'epic-detached', cwd: '/proj', sessionUuid: 'sess-uuid-detached' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalledTimes(2))
+    mock.emit('epic-detached', makeEv('assistant', 'While you were away.', { byteOffset: 30000 }))
+
+    const assistants = useChat.getState().get('epic-detached').turns.filter((t) => t.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0].ref).toBeTruthy()
+  })
+
   it('does NOT de-dupe identical completions on a tab with no transcript feed (plain dormant tab)', async () => {
     const mock = installWindowApiMock()
     const { useChat } = await import('../chat')

@@ -10,6 +10,20 @@
  * `config.cjs`'s `validatePath` allowedRoots — callers must pass a trusted
  * TAB cwd (the same invariant `prdLocations.cjs` relies on), not a raw
  * renderer-supplied string.
+ *
+ * This resolver is deliberately DUMB, and must stay that way: it answers
+ * "does a build target config exist for this project?" and nothing else. It
+ * does not sniff `pyproject.toml` / `Cargo.toml` / `go.mod` / `Dockerfile`,
+ * because (a) that hardcodes an ecosystem list into the main process that will
+ * always lag reality, (b) knowing a file exists still yields no publish
+ * commands — plenty of local-first projects have a pyproject.toml and never
+ * touch PyPI — and (c) it cannot reach the right answer for e.g. a cron-driven
+ * daemon whose "release" is bump VERSION, write the changelog, tag, and flag
+ * that the live server needs a restart. That requires reading CLAUDE.md and
+ * git history and exercising judgment, so discovery lives in the agent: a
+ * `null` here means **not configured yet**, and the UI turns it into a
+ * "Set Up Build" bootstrap session (`src/renderer/lib/buildAction.ts`) that
+ * probes the project and writes the config, rather than a disabled button.
  */
 'use strict';
 
@@ -29,6 +43,7 @@ function readJson(filePath) {
 /**
  * resolveBuildTarget(cwd) → the project's build target config, or null if
  * neither an explicit config nor an auto-discoverable package.json exists.
+ * `null` means "not configured yet", never "this project cannot be built".
  */
 function resolveBuildTarget(cwd) {
   if (!cwd || typeof cwd !== 'string') return null;

@@ -26,15 +26,21 @@ import {
   type EpicDisplayStatus,
   type EpicSnapshots,
 } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicInboundTag, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
+import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useBuildTarget } from '../../lib/useBuildTarget'
+import {
+  BUILD_RELEASE_GOAL_TEXT,
+  BUILD_SETUP_GOAL_TEXT,
+  buildActionDisabled,
+  buildActionLabel,
+  buildActionMode,
+  buildActionTooltip,
+} from '../../lib/buildAction'
 import { SessionActionsBar } from './SessionActionsBar'
-
-const BUILD_GOAL_TEXT =
-  '/builder\n\nCheck git vs the published package for this project, decide the right version bump, and publish if there\'s anything new.'
 
 /** Any other 'build'-tagged Epic for this cwd that hasn't been marked
  *  completed yet — used to stop "Build Project" from spawning a second,
@@ -55,13 +61,19 @@ function useInFlightBuildEpic(cwd: string | null): PromptSession | null {
 /** Toolbar action (not per-row — Builder isn't scoped to one Epic): creates a
  *  brand-new 'build'-tagged Epic via the same creation path NewEpicCard's
  *  submit uses, and auto-sends its opening prompt so a fresh, isolated agent
- *  session starts the git-diff -> publish loop immediately. Disabled when
- *  the active project has no resolvable publish target. If a build Epic for
+ *  session starts immediately.
+ *
+ *  Two goals, one button (`lib/buildAction.ts` owns the decision): with a
+ *  resolved target it's a release run; with none it's **Set Up Build**, a
+ *  bootstrap Epic that probes the project read-only, writes build-target.json
+ *  plus the `.claude/agents/builder.md` overlay and stops for a human. Only a
+ *  missing project tab (or an unfinished lookup) actually disables it — "no
+ *  target" is a bootstrap state, not a capability denial. If a build Epic for
  *  this cwd is already in flight, both entry points open it instead of
  *  minting a second one. */
 function useBuildAction(onSelect: (id: string) => void) {
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
-  const target = useBuildTarget(activeTabCwd)
+  const { target, resolving } = useBuildTarget(activeTabCwd)
   const [creating, setCreating] = useState(false)
   const inFlight = useInFlightBuildEpic(activeTabCwd)
   // Actor for the 'build' Epic — same lookup-by-name pattern HostBilko.tsx
@@ -88,17 +100,22 @@ function useBuildAction(onSelect: (id: string) => void) {
   // Reaching an in-flight build Epic must stay possible even when the
   // project currently has no resolvable publish target — the guard's whole
   // point is getting the user back to that Epic, not blocking them.
-  const disabled = !activeTabCwd || (!target && !inFlight) || creating
+  const mode = buildActionMode({ cwd: activeTabCwd, resolving, target, inFlight, creating })
+  const disabled = buildActionDisabled(mode)
+  const label = buildActionLabel(mode)
+  const tooltip = buildActionTooltip(mode)
 
   /** Shared creation sequence for both entry points: mints the fresh
    *  'build'-tagged Epic and approves it out of `proposed`. Callers decide
    *  what happens to `openingPrompt` next (auto-send vs. leave in the
-   *  composer as a draft). */
+   *  composer as a draft). The goal is the release protocol when the project
+   *  has a target and the bootstrap protocol when it doesn't — same Epic
+   *  shape, same `build` tag, so the in-flight guard covers both. */
   const createBuildEpic = async () => {
-    if (!activeTabCwd || !target) return null
+    if (!activeTabCwd) return null
     const { goalText, openingPrompt } = composeEpicIntake({
       title: '',
-      goal: BUILD_GOAL_TEXT,
+      goal: target ? BUILD_RELEASE_GOAL_TEXT : BUILD_SETUP_GOAL_TEXT,
       tag: 'build',
       agentName: builderPersona?.name,
       agentDescription: builderPersona?.description ?? undefined,
@@ -117,7 +134,7 @@ function useBuildAction(onSelect: (id: string) => void) {
       toast.info('A Build session is already in flight for this project — opening it.')
       return
     }
-    if (!target) return
+    if (disabled) return
     setCreating(true)
     try {
       const created = await createBuildEpic()
@@ -137,15 +154,7 @@ function useBuildAction(onSelect: (id: string) => void) {
     }
   }
 
-  const tooltip = !activeTabCwd
-    ? 'No active project tab — open a project to use Build'
-    : !target
-      ? 'No publish target found for this project — add session-manager-operations/architecture/build-target.json or a publishable package.json'
-      : inFlight
-        ? 'A Build session is already in flight for this project — opens it instead of starting a new one'
-        : 'Start a fresh Build session that checks git vs the published package and publishes if there\'s anything new'
-
-  return { disabled, inFlight, tooltip, handleClick }
+  return { disabled, inFlight, label, tooltip, handleClick }
 }
 
 const STATUS_ORDER: EpicDisplayStatus[] = ['proposed', 'failed', 'attention', 'running', 'needs', 'queued', 'active', 'completed']
@@ -532,6 +541,9 @@ function ActionsToolbar({ onNew, onSelect }: { onNew: () => void; onSelect: (id:
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
   const [editing, setEditing] = useState<'title' | 'goal' | null>(null)
   const age = activityAgeLabel(epic.id, epic, events, now)
+  // Non-null only for an Epic another project proposed into this queue — the
+  // receiving human should see that before pressing Approve & start.
+  const inbound = inboundFeedbackOrigin(epic)
   const queuedDetail =
     status === 'queued' || status === 'failed' || status === 'attention'
       ? epicQueuedDetail(epic.id, snapshots)
@@ -558,6 +570,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           <span className="min-w-0 flex items-center gap-1.5">
             {pinned && <span className="text-accent shrink-0" aria-hidden="true"><PinIcon filled /></span>}
             <span className={`min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-fg' : 'text-fg-dim'}`}>{epic.goalText}</span>
+            <EpicInboundTag origin={inbound} small />
           </span>
           <span className="font-mono text-[10px] text-fg-faint shrink-0">{age}</span>
         </button>
@@ -607,6 +620,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
         <span className="flex items-center gap-1.5">
           <EpicStatusChip status={status} small detail={queuedDetail} />
           <EpicKindTag kind={epic.tag} small />
+          <EpicInboundTag origin={inbound} small />
           <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-9">{age}</span>
         </span>
         <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1">{epic.goalText}</span>

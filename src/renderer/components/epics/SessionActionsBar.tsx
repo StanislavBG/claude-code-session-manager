@@ -16,9 +16,12 @@
  * a shortcut around the New Session card, never a second creation path.
  *
  * `builder` is deliberately excluded from the dynamic list: it already has a
- * dedicated "Run Build" button whose publish-target gating and in-flight
- * dedup a generic Action can't express, and two buttons for one agent would
- * only be confusing.
+ * dedicated Build button whose publish-target gating and in-flight dedup a
+ * generic Action can't express, and two buttons for one agent would only be
+ * confusing. That button's label is decided by the caller (`lib/buildAction.ts`)
+ * rather than here, because it has three faces — "Run Build" when the project
+ * has a target, "Set Up Build" when it doesn't yet, "Open Build" when a build
+ * session is already in flight.
  */
 import { useState } from 'react'
 import { usePromptSessions } from '../../state/promptSessions'
@@ -80,7 +83,7 @@ export interface SessionActionsBarProps {
   onSelect: (id: string) => void
   /** The dedicated Build action, wired by EpicQueue (publish-target gating +
    *  in-flight dedup live there). Omitted in contexts with no build concept. */
-  build?: { disabled: boolean; inFlight: unknown; tooltip: string; handleClick: () => void | Promise<void> }
+  build?: { disabled: boolean; inFlight: unknown; label: string; tooltip: string; handleClick: () => void | Promise<void> }
 }
 
 export function SessionActionsBar({ onNew, onSelect, build }: SessionActionsBarProps) {
@@ -107,7 +110,7 @@ export function SessionActionsBar({ onNew, onSelect, build }: SessionActionsBarP
           data-testid="epic-queue-build"
           className={`${BTN} bg-bg-hi text-fg-dim border-line hover:text-fg`}
         >
-          {build.inFlight ? 'Open Build' : 'Run Build'}
+          {build.label}
         </button>
       )}
 

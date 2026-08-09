@@ -86,13 +86,57 @@ describe('EpicQueue — Actions toolbar', () => {
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 
-  it('Run Build is disabled with a tooltip when resolveBuildTarget returns null', async () => {
+  it('a null build target reads "Set Up Build" and stays enabled — unconfigured is not disabled', async () => {
     resolveBuildTargetMock.mockResolvedValue(null)
     const el = mount(<EpicQueue {...baseProps()} />)
     await act(async () => {})
     const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+    expect(btn.textContent).toBe('Set Up Build')
+    expect(btn.disabled).toBe(false)
+    expect(btn.title).toContain('build-target.json')
+  })
+
+  it('clicking Set Up Build mints a build-tagged Epic on the BOOTSTRAP goal — probe + write config + stop, never /builder', async () => {
+    resolveBuildTargetMock.mockResolvedValue(null)
+    const onSelect = vi.fn()
+    const el = mount(<EpicQueue {...baseProps()} onSelect={onSelect} />)
+    await act(async () => {})
+    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
+
+    act(() => btn.click())
+    await act(async () => {})
+
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    const [cwd, goalText, tag] = createPromptSessionSpy.mock.calls[0]
+    expect(cwd).toBe('/home/bilko/Projects/alpha')
+    expect(tag).toBe('build')
+    // It names `.claude/agents/builder.md`, but never INVOKES the /builder
+    // release skill — that would be the accidental publish this flow prevents.
+    expect(goalText.startsWith('/builder')).toBe(false)
+    expect(goalText).not.toContain('/builder\n')
+    expect(goalText).toContain('session-manager-operations/architecture/build-target.json')
+    expect(goalText).toContain('.claude/agents/builder.md')
+
+    const created = Object.values(usePromptSessions.getState().sessions)[0]
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ tabId: created.id }))
+    expect(onSelect).toHaveBeenCalledWith(created.id)
+  })
+
+  it('Build is disabled only while the target lookup has not answered yet', async () => {
+    let settle: (v: unknown) => void = () => {}
+    resolveBuildTargetMock.mockReturnValue(new Promise((res) => { settle = res }))
+    const el = mount(<EpicQueue {...baseProps()} />)
+    await act(async () => {})
+    const btn = el.querySelector('[data-testid="epic-queue-build"]') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
-    expect(btn.title.length).toBeGreaterThan(0)
+    // ...and it does NOT flash "Set Up Build" before the answer arrives.
+    expect(btn.textContent).toBe('Run Build')
+
+    await act(async () => {
+      settle(null)
+    })
+    expect(btn.disabled).toBe(false)
+    expect(btn.textContent).toBe('Set Up Build')
   })
 
   it('is enabled once resolveBuildTarget resolves a target, and clicking Run Build creates a build-tagged Epic via createPromptSession + approveProposed + chat send, then selects it', async () => {

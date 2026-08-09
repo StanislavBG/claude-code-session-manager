@@ -53,7 +53,7 @@ test.skip('mic button transcribes fake audio into the active terminal', async ()
     if (process.env.SM_E2E_DEBUG) console.log(line)
   })
 
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 20_000 })
+  await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 20_000 })
 
   // Default tab auto-creates on fresh launch (App.tsx:37-64).
   await win.waitForSelector('.bg-green-500', { timeout: 20_000 })

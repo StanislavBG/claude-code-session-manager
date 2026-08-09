@@ -84,7 +84,7 @@ test.afterEach(() => {
 // force 'queue' BEFORE navigating — the Scheduler reads it in a mount-time
 // useState initializer.
 async function expandSchedulerSection(win: import('@playwright/test').Page) {
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+  await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15_000 })
   await win.evaluate(() => localStorage.setItem('sm.schedulerTab.subView', 'queue'))
   await navigateToTab(win, 'scheduler')
   // Belt-and-suspenders: if the tab was already mounted, click the Queue subtab.

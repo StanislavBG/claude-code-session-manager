@@ -6,6 +6,16 @@ import { AlmanacIcon } from './layout/AlmanacIcon'
 import { useTabDragReorder } from './useTabDragReorder'
 import { useDocumentVisible } from '../lib/useDocumentVisible'
 
+/**
+ * TabBar — the TOP information bar.
+ *
+ * Deliberately limited to navigation only: the machine "Home" pill plus one
+ * tab per open project (TAB = cwd = Main Project). It used to also carry an
+ * app-name + version block on the right, which duplicated the version already
+ * shown in AlmanacFooter and made the strip do two jobs; app identity lives in
+ * the native window title and the footer's version chip. Don't re-add branding,
+ * status, or usage here — status belongs to the footer.
+ */
 const ACTIVITY_WINDOW_MS = 30_000
 
 export function TabBar() {
@@ -152,10 +162,6 @@ export function TabBar() {
             </div>
           )
         })}
-      </div>
-      <div className="flex items-center gap-2 pb-2 pl-3 text-[12px] text-fg-faint shrink-0">
-        <span className="font-semibold text-fg-dim">Claude Session Manager</span>
-        <span className="font-mono text-[11px] text-fg-faint">v{__APP_VERSION__}</span>
       </div>
     </div>
   )

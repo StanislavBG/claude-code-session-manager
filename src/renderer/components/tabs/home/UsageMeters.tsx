@@ -1,5 +1,6 @@
 import type { BillingData, UsageWindow } from '../../../../preload/api'
 import { tierTone } from './usage-primitives'
+import { formatReset } from '../../../lib/usageWindow'
 
 function prettyPlan(s: string | null): string | null {
   if (!s) return null
@@ -7,24 +8,6 @@ function prettyPlan(s: string | null): string | null {
     .split('_')
     .map((p) => (/^\d/.test(p) ? p : p.charAt(0).toUpperCase() + p.slice(1)))
     .join(' ')
-}
-
-/** Reset as { rel: "2h 14m" / "4d 3h", abs: "3:00 PM PT" / "Tue 3:00 PM PT" }. */
-function formatReset(iso: string | null): { rel: string; abs: string } | null {
-  if (!iso) return null
-  const t = new Date(iso)
-  if (Number.isNaN(t.getTime())) return null
-  const diff = t.getTime() - Date.now()
-  if (diff <= 0) return { rel: 'now', abs: '' }
-  const days = Math.floor(diff / 86_400_000)
-  const h = Math.floor((diff % 86_400_000) / 3_600_000)
-  const m = Math.floor((diff % 3_600_000) / 60_000)
-  const rel = days > 0 ? `${days}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`
-  const abs =
-    days >= 1
-      ? t.toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', hour: 'numeric', minute: '2-digit' })
-      : t.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' })
-  return { rel, abs: `${abs} PT` }
 }
 
 function Meter({

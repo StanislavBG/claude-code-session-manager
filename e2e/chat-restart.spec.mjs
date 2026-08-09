@@ -134,7 +134,7 @@ async function launch({ withEpic = false } = {}) {
   const win = await app.firstWindow()
   const errors = []
   win.on('pageerror', (e) => errors.push(e.message))
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 20_000 })
+  await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 20_000 })
   await win.waitForTimeout(2500)
   return { app, win, errors, epic }
 }

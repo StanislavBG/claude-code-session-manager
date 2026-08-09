@@ -53,7 +53,7 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<{
     if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
   })
   if (opts.waitForReady !== false) {
-    await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+    await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15_000 })
     await win.waitForTimeout(300)
   }
   return { app, win, errors }

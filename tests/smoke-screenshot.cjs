@@ -35,7 +35,7 @@ async function main() {
     if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
   })
 
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+  await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15_000 })
   await win.waitForTimeout(1200)
   await snap(app, win, '/tmp/almanac-home.png')
   console.log('OK home')

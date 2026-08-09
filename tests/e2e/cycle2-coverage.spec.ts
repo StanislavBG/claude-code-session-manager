@@ -200,7 +200,7 @@ test('Density toggle persists across reload', async () => {
       localStorage.setItem('sm.density', 'compact')
     })
     await win.reload()
-    await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+    await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15_000 })
 
     const persisted = await win.evaluate(() => localStorage.getItem('sm.density'))
     expect(persisted).toBe('compact')

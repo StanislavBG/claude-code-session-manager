@@ -207,7 +207,7 @@ test.skip('supervisor tick kills wedged bash subprocess and logs kill-bash', asy
 
     try {
       const win = await app.firstWindow()
-      await win.waitForSelector('text=Claude Session Manager', { timeout: 15000 })
+      await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15000 })
       // Let the main process fully initialize.
       await sleep(3000)
 
@@ -263,7 +263,7 @@ test('SM_SUPERVISOR_DISABLE=1 prevents supervisor from starting', async () => {
   })
 
   const win = await app.firstWindow()
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15000 })
+  await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15000 })
   await sleep(2000)
 
   // Scheduler state should be accessible (no regression).

@@ -1,9 +1,14 @@
 /**
  * AlmanacFooter — paper-warm window footer that replaces StatusBar.
- * One 30px strip: connected dot · 5h window state · prompts/cost · branch · version.
+ * One 30px strip: connected dot · session (5h) + weekly (7d) usage · branch ·
+ * last activity · todos · version.
+ *
+ * Both usage pills read the same windows Home's UsageMeters render
+ * (`five_hour` = "Session", `seven_day` = "Weekly · all models") and share its
+ * formatting via lib/usageWindow.ts, so the two surfaces can't drift.
  *
  * Click handlers route through props rather than navigate-directly so the
- * App owns routing — clicking the 5h pill opens Home (where the billing
+ * App owns routing — either usage pill opens Home (where the full billing
  * meters live), branch opens nothing (informational), connected dot opens
  * Settings.
  */
@@ -16,6 +21,7 @@ import type { TodoItem } from '../../state/live'
 import { useBilling, getBillingData } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useBranch } from '../../lib/useBranch'
+import { usageTitle, utilPercent } from '../../lib/usageWindow'
 import type { NavKey } from '../LeftNav'
 
 interface AlmanacFooterProps {
@@ -55,7 +61,9 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
 
   const data = getBillingData(billing)
   const fiveHour = data?.usage.five_hour ?? null
-  const util = fiveHour ? Math.round(fiveHour.utilization) : null
+  const sevenDay = data?.usage.seven_day ?? null
+  const util = utilPercent(fiveHour)
+  const weeklyUtil = utilPercent(sevenDay)
   const isConnected = billing?.kind === 'ok' || billing?.kind === 'ok-stale'
 
   const lastTxt = lastEventAt > 0 ? relSeconds(Date.now() - lastEventAt) : '—'
@@ -77,9 +85,19 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       <button
         onClick={() => onNavigate?.('overview')}
         className="hover:text-fg transition-colors"
-        title="Open Home"
+        title={usageTitle('Session (5h window)', fiveHour)}
+        data-testid="footer-usage-session"
       >
-        {util != null ? `${util}% of 5h window used` : '5h —'}
+        session <span className="text-fg">{util != null ? `${util}%` : '—'}</span>
+      </button>
+
+      <button
+        onClick={() => onNavigate?.('overview')}
+        className="hover:text-fg transition-colors"
+        title={usageTitle('Weekly window (all models)', sevenDay)}
+        data-testid="footer-usage-weekly"
+      >
+        weekly <span className="text-fg">{weeklyUtil != null ? `${weeklyUtil}%` : '—'}</span>
       </button>
 
       {schedPaused && (

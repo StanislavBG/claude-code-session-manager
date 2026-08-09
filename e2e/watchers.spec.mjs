@@ -59,7 +59,7 @@ async function launchApp() {
   win.on('pageerror', (err) => errors.push(err.message))
   const logs = []
   win.on('console', (msg) => logs.push(`[${msg.type()}] ${msg.text()}`))
-  await win.waitForSelector('text=Claude Session Manager', { timeout: 15_000 })
+  await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15_000 })
   await win.waitForTimeout(3000)
   return { app, win, errors, logs }
 }

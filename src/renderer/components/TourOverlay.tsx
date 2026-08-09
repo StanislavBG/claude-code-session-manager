@@ -2,10 +2,15 @@
  * First-run guided tour overlay.
  *
  * Adapted from Unleashed's WelcomeTour but trimmed to our actual UI surface
- * (TabBar / LeftNav / StatusBar / mic / scheduler) and rewired to the zustand
- * tour store rather than per-instance state. Triggered automatically on first
- * launch (App.tsx checks localStorage `sm.tour.completedAt`) and re-runnable
- * via the command palette (`tour:start`).
+ * (TabBar / LeftNav / StatusBar / mic / sessions / scheduler) and rewired to
+ * the zustand tour store rather than per-instance state. Triggered
+ * automatically on first launch (App.tsx checks localStorage
+ * `sm.tour.completedAt`) and re-runnable via the command palette
+ * (`tour:start`).
+ *
+ * The step CONTENT lives in `lib/tourSteps.ts` — a JSX-free module so tests
+ * can import it — and is re-exported here for existing importers. This file
+ * owns only the rendering/positioning.
  *
  * Rendering model: full-screen fixed overlay with a CSS box-shadow "spotlight"
  * cutout around the active step's target element. We measure the target via
@@ -19,90 +24,16 @@
  * Privacy: no data leaves the renderer; tour completion is purely localStorage.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Z } from '../lib/zLayers'
 import { createPortal } from 'react-dom'
 import { useTour } from '../state/tour'
 import { log } from '../lib/logger'
 
-type Position = 'center' | 'top' | 'bottom' | 'left' | 'right'
+import { TOUR_STEPS, type TourPosition as Position, type TourStep } from '../lib/tourSteps'
 
-interface TourStep {
-  id: string
-  title: string
-  body: string
-  /** CSS selector — typically `[data-testid="…"]`. Omit for centered intro. */
-  target?: string
-  position: Position
-}
-
-/**
- * Ordered tour steps. Each step's `target` MUST exist in the DOM when its
- * step is active OR the step must declare `position: 'center'` and omit
- * `target` to render as a plain centered tooltip.
- *
- * The selectors below are real testids added to existing components — see
- * the patch list in the PR description for exact files.
- */
-export const TOUR_STEPS: ReadonlyArray<TourStep> = [
-  {
-    id: 'welcome',
-    title: 'Welcome to Session Manager',
-    body: "A 30-second tour so you know where everything lives. You can re-run this any time from the command palette.",
-    position: 'center',
-  },
-  {
-    id: 'tabs',
-    title: 'Session tabs',
-    body: "Each tab is a separate Claude session with its own working directory. Click + new to open another, drag to reorder.",
-    target: '[data-testid="tour-tabbar"]',
-    position: 'bottom',
-  },
-  {
-    id: 'leftnav',
-    title: 'Left navigation',
-    body: "Switch between Terminal, Settings, Skills, MCP servers, History and more. Live dots show which sections are active right now.",
-    target: '[data-testid="tour-leftnav"]',
-    position: 'right',
-  },
-  {
-    id: 'voice',
-    title: 'Push-to-talk dictation',
-    body: "Hold the configured hotkey (F1 by default) to dictate into the terminal. You can also click the mic.",
-    target: '[data-testid="mic-button"]',
-    position: 'right',
-  },
-  {
-    // No `target`: the Scheduler row is PROJECT-face-only (navGroups.ts), so on
-    // a first launch with no project tab open there is no element to spotlight.
-    // Renders as the documented centered, spotlight-less tooltip instead —
-    // deliberate here, not the silent degradation this file's e2e guards.
-    id: 'scheduler',
-    title: 'PRD scheduler',
-    body: "Open a project tab and pick Scheduler in its sidebar: every PRD under that project's session-manager-operations/scheduler/ runs there as a token-budget-managed claude -p job. It is project-scoped — there is no machine-wide queue view.",
-    position: 'center',
-  },
-  {
-    id: 'mainpane-actions',
-    title: 'Session actions',
-    body: "Press ⌘K / Ctrl+K to open the command palette — restart this session, broadcast a prompt to multiple tabs, or attach a long-running watcher command whose stdout streams back as toasts.",
-    position: 'center',
-  },
-  {
-    id: 'statusbar',
-    title: 'Status bar',
-    body: "Model, 5-hour usage, branch, last activity, and the active working directory. Click restart-app to reload the whole app.",
-    target: '[data-testid="tour-statusbar"]',
-    position: 'top',
-  },
-  {
-    id: 'new-session',
-    title: 'Start a new session',
-    body: "Pick any project directory to spin up another claude session. Tabs persist across reboots — they auto-resume on next launch.",
-    target: '[data-testid="tour-new-session"]',
-    position: 'top',
-  },
-]
+export { TOUR_STEPS }
+export type { TourStep }
 
 const TOOLTIP_W = 360
 const TOOLTIP_H = 220

@@ -566,8 +566,8 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
 
 const GUIDE_STEPS: Array<{ title: string; body: string }> = [
   {
-    title: 'Create a session',
-    body: "Describe the outcome you want in the Sessions tab. Its thread writes the PRD files into the session's folder.",
+    title: 'Start a session',
+    body: "In Sessions, pick an Agent and a Mission, describe the outcome you want, then Approve & start. Its thread writes the PRD files into that session's own folder.",
   },
   {
     title: 'Queue what it wrote',
@@ -580,7 +580,7 @@ const GUIDE_STEPS: Array<{ title: string; body: string }> = [
 ]
 
 const GUIDE_GLOSSARY: Array<{ term: string; def: string }> = [
-  { term: 'Session', def: 'A goal, and the folder of PRDs written to reach it.' },
+  { term: 'Session', def: 'One goal, one Claude session, and the folder of PRDs written to reach it.' },
   { term: 'PRD', def: 'One markdown file = one job. Authored by the session.' },
   { term: '5-hour window', def: 'Your Claude billing window, on a rolling clock.' },
   { term: 'Session pool', def: '5 slots shared with terminal and session chats.' },
@@ -589,8 +589,9 @@ const GUIDE_GLOSSARY: Array<{ term: string; def: string }> = [
 /**
  * Shown instead of the job table when this scope has zero PRDs anywhere —
  * not a filtered-to-empty view. Nothing here writes a PRD: that happens in
- * an Epic's session, so the only real action is "go create one." A "New
- * PRD" button would offer a capability this screen doesn't have.
+ * a session, so the only real action is "go create one." A "New PRD" button
+ * would offer a capability this screen doesn't have. Copy uses "session",
+ * the user-facing name for an Epic (see CLAUDE.md's domain model).
  */
 function FirstRunGuide({ navigate }: { navigate?: (k: NavKey) => void }) {
   return (
@@ -598,10 +599,10 @@ function FirstRunGuide({ navigate }: { navigate?: (k: NavKey) => void }) {
       <div className="px-9 py-6 max-w-[900px] mx-auto">
         <div className="bg-bg-hi border border-line rounded-2xl px-9 py-8">
           <h2 className="m-0 font-serif text-[25px] font-semibold text-fg">
-            Nothing to run yet — the scheduler needs an Epic.
+            Nothing to run yet — the scheduler needs a session.
           </h2>
           <p className="mt-2 mb-6 text-[14.5px] text-fg-dim leading-relaxed max-w-[580px]">
-            You don't write PRDs here. An Epic breaks its goal into numbered PRD files, and this
+            You don't write PRDs here. A session breaks its goal into numbered PRD files, and this
             page runs them in order. Two steps, once.
           </p>
 
@@ -630,7 +631,7 @@ function FirstRunGuide({ navigate }: { navigate?: (k: NavKey) => void }) {
                       onClick={() => navigate?.('terminal')}
                       className="self-start bg-accent text-white rounded-lg px-3.5 py-1.5 text-[13px] font-semibold mt-1"
                     >
-                      Go to Epics →
+                      Go to Sessions →
                     </button>
                   )}
                 </div>

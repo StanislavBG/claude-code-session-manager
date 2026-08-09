@@ -22,13 +22,19 @@ runtime, so give it a minute. Linux and macOS only.</p>
 <figure class="manual-figure" data-figure="first-launch">
   <div class="manual-figure__frame" data-capture="app boot, Home tab, empty project list"></div>
   <figcaption>
-    <span class="callout" data-arrow="left">1</span> The left nav — every surface lives here.
+    <span class="callout" data-arrow="left">1</span> The left nav — every surface lives here. It
+    swaps content with the tab you're on: machine-wide screens on <strong>Home</strong>, that
+    project's screens on a project tab.
     <span class="callout" data-arrow="up">2</span> <strong>Open / Start Project</strong> — the only
     way a project enters the app.
     <span class="callout" data-arrow="down">3</span> The Almanac footer: connection dot, session (5h)
-    and weekly (7d) usage, active branch, app version.
+    and weekly (7d) usage, active project + branch, live to-dos, app version.
   </figcaption>
 </figure>
+
+<p>The strip along the top is navigation and nothing else: a <strong>Home</strong> pill for this
+machine, then one tab per open project. It carries no status and no app branding — those live in
+the footer.</p>
 
 <h2>2. The one idea to internalise: TAB = project, SESSION = unit of work</h2>
 
@@ -74,13 +80,25 @@ app — the marketing page's "local-first" claim is literal.</p>
 <ol class="manual-steps">
   <li><strong>Open / Start Project</strong> in the left nav, and pick a repo you actually work in.
   A native folder picker opens; "New Folder" starts a fresh one.</li>
-  <li>The Terminal tab boots a real <code>claude</code> session in that directory. This is the same
-  CLI you already use — same settings, same skills, same MCP servers.</li>
-  <li>Press <strong>New Session</strong>. Pick an <em>Agent</em> (who works) and a <em>Mission</em>
-  (feature / bug / discussion), type what you want, and submit.</li>
-  <li>Watch it run. That's the loop. Everything else in this manual is about doing that loop
-  faster, cheaper, and unattended.</li>
+  <li>The tab opens on that project, and the sidebar switches to its screens: <strong>Project
+  Home</strong>, <strong>Sessions</strong>, <strong>Scheduler</strong>, <strong>Memory</strong>.
+  Everything runs the same <code>claude</code> CLI you already use — same settings, same skills,
+  same MCP servers.</li>
+  <li>Go to <strong>Sessions</strong> and press <strong>+ New Session</strong>. Pick an
+  <em>Agent</em> (who works — a persona from your Agent Library) and a <em>Mission</em>
+  (feature / bug / discussion), type the outcome you want, and submit.</li>
+  <li>Every session is born <em>proposed</em> and costs nothing until you press <strong>Approve
+  &amp; start</strong>. That press sends the composed opening prompt and the session begins.</li>
+  <li>Watch it run — in <strong>Chat</strong> or in <strong>Terminal</strong>. They are two views
+  of the <em>same</em> Claude session, so switching never loses context. That's the loop;
+  everything else in this manual is about doing it faster, cheaper, and unattended.</li>
 </ol>
+
+<p class="manual-note"><strong>Two shortcuts worth knowing on day one.</strong> The row of buttons
+above the session list is <em>Hot keys</em> — each one is an Agent persona scoped to this project,
+and pressing it opens a pre-composed session in a single click (the <strong>Build</strong> button is
+the built-in example). And the guided tour that ran on first launch is re-runnable any time:
+<kbd>⌘K</kbd> / <kbd>Ctrl+K</kbd> → <em>Restart guided tour</em>.</p>
 
 <h2>5. What to read next</h2>
 

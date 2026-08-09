@@ -458,7 +458,14 @@ function NavRow({
     <button
       onClick={onClick}
       title={item.hint}
-      data-testid={item.key === 'scheduler' ? 'tour-scheduler' : undefined}
+      data-testid={
+        // Tour targets (lib/tourSteps.ts). Both rows are PROJECT-face-only, so
+        // on a first-run Home-face pass the tour degrades them to centered
+        // tooltips — see TourOverlay's fallback.
+        item.key === 'scheduler' ? 'tour-scheduler'
+          : item.key === 'terminal' ? 'tour-sessions'
+            : undefined
+      }
       className={`relative w-full flex items-center rounded-[10px] text-left mb-0.5 transition-colors ${
         rail ? 'justify-center px-0 py-[9px]' : 'gap-3 px-3.5 py-[9px] text-[14px]'
       } ${

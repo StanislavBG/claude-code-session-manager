@@ -1057,7 +1057,7 @@ app.whenReady().then(async () => {
       label: 'Session Manager',
       submenu: [
         {
-          label: 'New Session',
+          label: 'Open / Start Project…',
           accelerator: 'CmdOrCtrl+N',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1066,12 +1066,12 @@ app.whenReady().then(async () => {
           },
         },
         {
-          label: 'Restart App',
+          label: 'Restart Session Manager App',
           accelerator: 'CmdOrCtrl+Shift+R',
           click: rebootApp,
         },
         {
-          label: 'Reboot Session',
+          label: 'Restart Terminal in Active Tab',
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1080,14 +1080,14 @@ app.whenReady().then(async () => {
           },
         },
         { type: 'separator' },
-        { label: 'Quit', accelerator: 'CmdOrCtrl+Q', role: 'quit' },
+        { label: 'Quit Session Manager', accelerator: 'CmdOrCtrl+Q', role: 'quit' },
       ],
     },
     {
       label: 'Dev',
       submenu: [
-        { label: 'Toggle DevTools', accelerator: 'F12', role: 'toggleDevTools' },
-        { label: 'Reload', accelerator: 'CmdOrCtrl+R', role: 'reload' },
+        { label: 'Toggle Developer Tools', accelerator: 'F12', role: 'toggleDevTools' },
+        { label: 'Reload App Window', accelerator: 'CmdOrCtrl+R', role: 'reload' },
         // Diagnostic-only; absent unless SM_HEAP_SNAPSHOT=1 (see heapSnapshot.cjs).
         ...(heapSnapshotMenuItem ? [heapSnapshotMenuItem] : []),
       ],

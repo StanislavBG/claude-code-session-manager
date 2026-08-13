@@ -361,10 +361,14 @@ export function App() {
       })
     })
 
-    // Menu → Reboot Session: kill active tab's PTY, respawn with fresh session.
+    // Menu → Restart Terminal in Active Tab: kill active tab's PTY, respawn with fresh session.
     const offReboot = window.api.app.onRebootSession(() => {
       const { activeTabId } = useSessions.getState()
-      if (activeTabId) useSessions.getState().restartTab(activeTabId)
+      if (activeTabId) {
+        useSessions.getState().restartTab(activeTabId)
+      } else {
+        toast.error('No active tab to restart. Open a project tab first.')
+      }
     })
 
     useWatchers.getState().init()

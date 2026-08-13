@@ -99,6 +99,64 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.querySelector('[data-testid="epic-resume"]')).toBeNull()
   })
 
+  describe('editable title (full view)', () => {
+    async function mountEpic() {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { EpicDetail } = await import('../EpicDetail')
+      const proposed = await usePromptSessions
+        .getState()
+        .createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
+      const session = usePromptSessions.getState().approveProposed(proposed.id)!
+      return { el: mount(createElement(EpicDetail, { promptSession: session })), session, usePromptSessions }
+    }
+
+    function typeTitle(input: HTMLInputElement, value: string) {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setter.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+
+    it('Save calls renameEpic with the new title and the UNCHANGED goal', async () => {
+      const { el, session, usePromptSessions } = await mountEpic()
+      const renameEpic = vi.spyOn(usePromptSessions.getState(), 'renameEpic').mockResolvedValue(undefined)
+
+      act(() => (el.querySelector('[data-testid="epic-detail-title-edit"]') as HTMLButtonElement).click())
+      const input = el.querySelector('[data-testid="epic-detail-title-input"]') as HTMLInputElement
+      expect(input.value).toBe('Ship it')
+      const save = el.querySelector('[data-testid="epic-detail-title-save"]') as HTMLButtonElement
+      expect(save.disabled).toBe(true)
+
+      typeTitle(input, 'Renamed')
+      expect(save.disabled).toBe(false)
+      act(() => save.click())
+      await flushAsync(2)
+
+      expect(renameEpic).toHaveBeenCalledWith(session.id, 'Renamed', 'Get it out the door.')
+    })
+
+    it('Cancel discards the edit and restores the heading', async () => {
+      const { el, usePromptSessions } = await mountEpic()
+      const renameEpic = vi.spyOn(usePromptSessions.getState(), 'renameEpic').mockResolvedValue(undefined)
+
+      act(() => (el.querySelector('[data-testid="epic-detail-title-edit"]') as HTMLButtonElement).click())
+      typeTitle(el.querySelector('[data-testid="epic-detail-title-input"]') as HTMLInputElement, 'Renamed')
+      act(() => (el.querySelector('[data-testid="epic-detail-title-cancel"]') as HTMLButtonElement).click())
+
+      expect(renameEpic).not.toHaveBeenCalled()
+      expect(el.querySelector('[data-testid="epic-detail-title-input"]')).toBeNull()
+      expect(el.querySelector('h1')?.textContent).toBe('Ship it')
+    })
+
+    it('offers no editor for the goal paragraph — it is the already-sent first prompt', async () => {
+      const { el } = await mountEpic()
+      expect(el.textContent).toContain('Get it out the door.')
+      expect(el.querySelector('textarea[data-testid*="goal"]')).toBeNull()
+    })
+  })
+
   it('renders the Agent+model chip with the persona name and pretty-formatted model when the persona has an explicit model', async () => {
     installWindowApiMock({ personas: [{ name: 'architect', model: 'claude-sonnet-4-5' }] })
     const { usePromptSessions } = await import('../../../state/promptSessions')

@@ -120,7 +120,7 @@ describe('EpicQueue row menu', () => {
     expect(el.querySelector('[data-testid="epic-queue-row-menu"]')).toBeNull()
   })
 
-  it('lists all 8 actions for an active Epic, hiding Reopen', () => {
+  it('lists all 6 actions for an active Epic, hiding Reopen', () => {
     const epic = makeEpic({ status: 'active' })
     const el = mount(createElement(EpicQueue, baseProps(epic)))
     const menu = openMenu(el)
@@ -129,7 +129,6 @@ describe('EpicQueue row menu', () => {
     expect(labels).toEqual([
       'Copy session ID',
       'Rename title',
-      'Edit goal / first prompt',
       'Resume in terminal',
       'Mark completed',
       'Duplicate as new session',
@@ -146,7 +145,6 @@ describe('EpicQueue row menu', () => {
     expect(labels).toEqual([
       'Copy session ID',
       'Rename title',
-      'Edit goal / first prompt',
       'Reopen',
       'Duplicate as new session',
       'Delete session',
@@ -185,7 +183,7 @@ describe('EpicQueue row menu', () => {
     expect(setMode).toHaveBeenCalledWith(epic.id, 'terminal')
   })
 
-  describe('RowEditor (Rename / Edit goal)', () => {
+  describe('RowEditor (Rename title — title only)', () => {
     it('Rename title opens the inline editor prefilled with the title, Save is disabled until dirty + non-empty', () => {
       const epic = makeEpic()
       const el = mount(createElement(EpicQueue, baseProps(epic)))
@@ -213,18 +211,17 @@ describe('EpicQueue row menu', () => {
       expect(saveBtn.disabled).toBe(true)
     })
 
-    it('Edit goal / first prompt opens the inline editor prefilled with the goal, focused on the goal textarea', () => {
+    it('offers no goal editor — the goal is the already-sent first prompt', () => {
       const epic = makeEpic()
       const el = mount(createElement(EpicQueue, baseProps(epic)))
       const menu = openMenu(el)
-      clickMenuItem(menu, 'Edit goal / first prompt')
+      expect(menuItemButtons(menu).map((b) => b.textContent)).not.toContain('Edit goal / first prompt')
+      clickMenuItem(menu, 'Rename title')
 
-      const goalTextarea = el.querySelector('[data-testid="epic-queue-row-editor-goal"]') as HTMLTextAreaElement
-      expect(goalTextarea).not.toBeNull()
-      expect(goalTextarea.value).toBe('Get it out the door.')
+      expect(el.querySelector('[data-testid="epic-queue-row-editor-goal"]')).toBeNull()
     })
 
-    it('Save calls renameEpic with the id, title, and goal', async () => {
+    it('Save calls renameEpic with the id, the new title, and the UNCHANGED goal', async () => {
       const renameEpic = vi.spyOn(usePromptSessions.getState(), 'renameEpic').mockResolvedValue(undefined)
       const epic = makeEpic()
       const el = mount(createElement(EpicQueue, baseProps(epic)))

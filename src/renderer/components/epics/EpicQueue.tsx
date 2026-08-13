@@ -292,17 +292,16 @@ function RowMenu({ anchor, items, onClose }: { anchor: HTMLElement; items: MenuI
   )
 }
 
-/** Replaces a QueueRow in place while renaming/editing its goal — title
- *  input + goal textarea prefilled via EpicDetail's splitTitleAndGoal, Save
+/** Replaces a QueueRow in place while renaming it — a TITLE input only, Save
  *  disabled until dirty + title non-empty, ⌘/Ctrl+Enter saves, Escape
- *  cancels. Save calls promptSessions' renameEpic(id, title, goal). */
-function RowEditor({ epic, mode, onCancel }: { epic: PromptSession; mode: 'title' | 'goal'; onCancel: () => void }) {
+ *  cancels. Save calls promptSessions' renameEpic(id, title, goal) with the
+ *  Epic's existing goal passed straight through: the goal IS the session's
+ *  first prompt, already sent to the agent, so it is never editable here. */
+function RowEditor({ epic, onCancel }: { epic: PromptSession; onCancel: () => void }) {
   const initial = useMemo(() => splitTitleAndGoal(epic.goalText), [epic.goalText])
   const [title, setTitle] = useState(initial.title)
-  const [goal, setGoal] = useState(initial.goal)
   const [saving, setSaving] = useState(false)
   const titleRef = useRef<HTMLInputElement | null>(null)
-  const goalRef = useRef<HTMLTextAreaElement | null>(null)
   // Cancel unmounts this RowEditor before an in-flight save() settles — guard
   // the post-await state updates so a stale save from a since-abandoned edit
   // can't clobber a freshly reopened editor for the same epic.
@@ -312,18 +311,17 @@ function RowEditor({ epic, mode, onCancel }: { epic: PromptSession; mode: 'title
   }, [])
 
   useEffect(() => {
-    if (mode === 'title') titleRef.current?.focus()
-    else goalRef.current?.focus()
-  }, [mode])
+    titleRef.current?.focus()
+  }, [])
 
-  const dirty = title.trim() !== initial.title.trim() || goal.trim() !== initial.goal.trim()
+  const dirty = title.trim() !== initial.title.trim()
   const canSave = title.trim().length > 0 && dirty && !saving
 
   const save = async () => {
     if (!canSave) return
     setSaving(true)
     try {
-      await usePromptSessions.getState().renameEpic(epic.id, title, goal)
+      await usePromptSessions.getState().renameEpic(epic.id, title, initial.goal)
       if (liveRef.current) onCancel()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -354,15 +352,6 @@ function RowEditor({ epic, mode, onCancel }: { epic: PromptSession; mode: 'title
         placeholder="Title"
         data-testid="epic-queue-row-editor-title"
         className="w-full rounded-md border border-rule bg-bg-elev px-2 py-1 text-[12.5px] font-semibold text-fg outline-none focus:border-accent"
-      />
-      <textarea
-        ref={goalRef}
-        value={goal}
-        onChange={(ev) => setGoal(ev.target.value)}
-        placeholder="Goal / first prompt"
-        rows={3}
-        data-testid="epic-queue-row-editor-goal"
-        className="w-full resize-none rounded-md border border-rule bg-bg-elev px-2 py-1 text-[12px] text-fg-dim outline-none focus:border-accent"
       />
       <div className="flex items-center justify-end gap-1.5">
         <button
@@ -412,13 +401,14 @@ interface QueueRowProps {
 /** Row actions available from every Epic's overflow menu — built from store
  *  actions that already exist: copy the claude session id, mark completed
  *  (mirrors EpicDetail's own button), jump straight into the Epic's Terminal
- *  view, rename/edit-goal (opens the in-place RowEditor), duplicate as a new
- *  Epic, reopen a completed Epic, and delete (with an in-menu confirm step). */
+ *  view, rename the title (opens the in-place RowEditor — title only; the
+ *  goal is the already-sent first prompt and is never editable), duplicate as
+ *  a new Epic, reopen a completed Epic, and delete (in-menu confirm step). */
 function useRowMenuItems(
   epic: PromptSession,
   status: EpicDisplayStatus,
   onSelect: (id: string) => void,
-  onEdit: (mode: 'title' | 'goal') => void,
+  onEdit: () => void,
 ): MenuItem[] {
   const items: MenuItem[] = [
     {
@@ -430,8 +420,7 @@ function useRowMenuItems(
         )
       },
     },
-    { label: 'Rename title', onSelect: () => onEdit('title') },
-    { label: 'Edit goal / first prompt', onSelect: () => onEdit('goal') },
+    { label: 'Rename title', onSelect: () => onEdit() },
   ]
   if (epic.status === 'active') {
     items.push({
@@ -501,7 +490,7 @@ function RowMenuButton({
   epic: PromptSession
   status: EpicDisplayStatus
   onSelect: (id: string) => void
-  onEdit: (mode: 'title' | 'goal') => void
+  onEdit: () => void
   className: string
 }) {
   const [open, setOpen] = useState(false)
@@ -517,7 +506,7 @@ function RowMenuButton({
           setOpen((v) => !v)
         }}
         title="Session actions"
-        aria-label={`Actions for ${epic.goalText}`}
+        aria-label={`Actions for ${splitTitleAndGoal(epic.goalText).title}`}
         data-testid="epic-queue-row-menu-trigger"
         className={className}
       >
@@ -539,8 +528,12 @@ function ActionsToolbar({ onNew, onSelect }: { onNew: () => void; onSelect: (id:
 }
 
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
-  const [editing, setEditing] = useState<'title' | 'goal' | null>(null)
+  const [editing, setEditing] = useState(false)
   const age = activityAgeLabel(epic.id, epic, events, now)
+  // The card shows the TITLE only. goalText is `${title}\n\n${goal}` and the
+  // goal half is the session's whole first prompt — several sentences of it
+  // spilling into a 352px rail is noise, and it's read in full in EpicDetail.
+  const { title } = splitTitleAndGoal(epic.goalText)
   // Non-null only for an Epic another project proposed into this queue — the
   // receiving human should see that before pressing Approve & start.
   const inbound = inboundFeedbackOrigin(epic)
@@ -550,7 +543,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
       : undefined
 
   if (editing) {
-    return <RowEditor epic={epic} mode={editing} onCancel={() => setEditing(null)} />
+    return <RowEditor epic={epic} onCancel={() => setEditing(false)} />
   }
 
   if (compact) {
@@ -569,7 +562,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           <span className={`w-1.5 h-1.5 rounded-full ${epicStatusDotClass(status)} ${status === 'completed' ? 'opacity-45' : ''}`} aria-hidden="true" />
           <span className="min-w-0 flex items-center gap-1.5">
             {pinned && <span className="text-accent shrink-0" aria-hidden="true"><PinIcon filled /></span>}
-            <span className={`min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-fg' : 'text-fg-dim'}`}>{epic.goalText}</span>
+            <span className={`min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-fg' : 'text-fg-dim'}`}>{title}</span>
             <EpicInboundTag origin={inbound} small />
           </span>
           <span className="font-mono text-[10px] text-fg-faint shrink-0">{age}</span>
@@ -582,7 +575,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
               onPin(epic.id)
             }}
             title={pinned ? 'Unpin' : 'Pin to top'}
-            aria-label={pinned ? `Unpin ${epic.goalText}` : `Pin ${epic.goalText} to top`}
+            aria-label={pinned ? `Unpin ${title}` : `Pin ${title} to top`}
             data-testid="epic-queue-row-pin"
             className={`absolute top-1/2 -translate-y-1/2 right-6 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
           >
@@ -593,7 +586,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           epic={epic}
           status={status}
           onSelect={onSelect}
-          onEdit={setEditing}
+          onEdit={() => setEditing(true)}
           className="absolute top-1/2 -translate-y-1/2 right-1 p-0.5 text-fg-faint opacity-60 hover:opacity-100 hover:text-fg"
         />
       </div>
@@ -623,7 +616,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           <EpicInboundTag origin={inbound} small />
           <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-9">{age}</span>
         </span>
-        <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1">{epic.goalText}</span>
+        <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1" title={title}>{title}</span>
         <span className="flex items-center gap-3 font-mono text-[10.5px] text-fg-faint">
           {prds.length > 0 && (
             <span>
@@ -642,7 +635,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
             onPin(epic.id)
           }}
           title={pinned ? 'Unpin' : 'Pin to top'}
-          aria-label={pinned ? `Unpin ${epic.goalText}` : `Pin ${epic.goalText} to top`}
+          aria-label={pinned ? `Unpin ${title}` : `Pin ${title} to top`}
           data-testid="epic-queue-row-pin"
           className={`absolute top-2 right-7 p-0.5 ${pinned ? 'text-accent' : 'text-fg-faint opacity-40 hover:opacity-100'}`}
         >
@@ -653,7 +646,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
         epic={epic}
         status={status}
         onSelect={onSelect}
-        onEdit={setEditing}
+        onEdit={() => setEditing(true)}
         className="absolute top-2 right-2 p-0.5 text-fg-faint opacity-60 hover:opacity-100 hover:text-fg"
       />
     </div>

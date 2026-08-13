@@ -101,6 +101,124 @@ function MetaItem({ label, value }: { label: string; value: string }) {
 }
 
 /**
+ * The Epic's h1, editable in place — the ONE surface where a session's title
+ * can be corrected in its full view (the queue row's menu offers the same
+ * rename against the same `renameEpic`). Deliberately title-only: the goal
+ * paragraph below it is the session's first prompt, already sent to the
+ * agent, so editing it would rewrite history without changing what ran.
+ * Save is disabled until dirty + non-empty; ⌘/Ctrl+Enter saves, Escape cancels.
+ */
+function EpicTitle({ epicId, title, goal }: { epicId: string; title: string; goal: string }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(title)
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  // Cancel/unmount can beat an in-flight save — guard the post-await setState.
+  const liveRef = useRef(true)
+  useEffect(() => () => {
+    liveRef.current = false
+  }, [])
+
+  const open = () => {
+    setDraft(title)
+    setEditing(true)
+    // focus after the input actually mounts
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+
+  const canSave = draft.trim().length > 0 && draft.trim() !== title.trim() && !saving
+
+  const save = async () => {
+    if (!canSave) return
+    setSaving(true)
+    try {
+      await usePromptSessions.getState().renameEpic(epicId, draft, goal)
+      if (liveRef.current) {
+        setEditing(false)
+        setSaving(false)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      if (liveRef.current) setSaving(false)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="group flex items-start gap-1.5">
+        <h1 className="m-0 font-serif text-2xl font-semibold leading-tight text-fg" data-testid="epic-detail-title">
+          {title}
+        </h1>
+        <button
+          type="button"
+          onClick={open}
+          title="Rename this session"
+          aria-label="Rename this session"
+          data-testid="epic-detail-title-edit"
+          className="mt-1 shrink-0 rounded p-0.5 text-fg-faint opacity-0 transition-opacity hover:text-fg focus:opacity-100 group-hover:opacity-100"
+        >
+          <svg viewBox="0 0 16 16" width={13} height={13} aria-hidden="true">
+            <path
+              d="M11.5 2.5l2 2L6 12l-3 1 1-3 7.5-7.5z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1.5"
+      onKeyDown={(ev) => {
+        if (ev.key === 'Escape') {
+          ev.stopPropagation()
+          setEditing(false)
+        } else if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+          ev.stopPropagation()
+          void save()
+        }
+      }}
+    >
+      <input
+        ref={inputRef}
+        autoFocus
+        type="text"
+        value={draft}
+        onChange={(ev) => setDraft(ev.target.value)}
+        placeholder="Title"
+        aria-label="Session title"
+        data-testid="epic-detail-title-input"
+        className="w-full min-w-0 max-w-[700px] rounded-md border border-rule bg-bg-elev px-2 py-1 font-serif text-2xl font-semibold leading-tight text-fg outline-none focus:border-accent"
+      />
+      <button
+        type="button"
+        onClick={() => setEditing(false)}
+        disabled={saving}
+        data-testid="epic-detail-title-cancel"
+        className="shrink-0 rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-fg-faint hover:text-fg disabled:opacity-40"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        onClick={() => void save()}
+        disabled={!canSave}
+        data-testid="epic-detail-title-save"
+        className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[11.5px] font-semibold text-white disabled:opacity-40"
+      >
+        Save
+      </button>
+    </div>
+  )
+}
+
+/**
  * Renders a 'response' PromptSessionEvent — a bounded preview by default
  * (the in-memory event carries at most RESPONSE_EVENT_PREVIEW_MAX chars,
  * chat.ts). When the preview looks truncated (ends in the '…' chat.ts
@@ -735,7 +853,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 </span>
               )}
             </div>
-            <h1 className="m-0 font-serif text-2xl font-semibold leading-tight text-fg">{title}</h1>
+            <EpicTitle epicId={epicId} title={title} goal={goal} />
+            {/* Read-only by design: this paragraph is the session's first
+                prompt, already sent — see EpicTitle's header comment. */}
             {goal && <p className="m-0 mt-1.5 max-w-[700px] text-[13.5px] leading-relaxed text-fg-dim">{goal}</p>}
           </div>
           <div className="ml-auto flex shrink-0 gap-1.5">

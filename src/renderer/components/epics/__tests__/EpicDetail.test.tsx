@@ -349,6 +349,53 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.textContent).not.toMatch(/done — here is the result.*done — here is the result/s)
   })
 
+  it('does not double-render a long stop-signal assistant reply as both a Turn and a duplicate ResponseEvent', async () => {
+    // The surviving assistant Turn may hold the JSONL feed's FULL text
+    // (sentinel + questions-JSON tail included, per state/chat.ts's
+    // reconciliation rule), while appendResponseEvent persists the
+    // stop-signal-stripped `answerBody`, truncated to RESPONSE_EVENT_PREVIEW_MAX
+    // (2000) chars with a trailing '…' for a long reply. isDuplicateResponseEvent
+    // must match the truncated, stripped ResponseEvent text against the
+    // stop-signal-stripped form of the Turn's text, not the raw Turn text.
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const initialEvent = usePromptSessions.getState().events[session.id][0]
+
+    const longBody = 'Here is a very long answer. '.repeat(100) // > 2000 chars
+    const fullText = `${longBody}\n\n<<<SM_NEEDS_INPUT>>>\n${JSON.stringify({ questions: ['Deploy to prod now?'] })}`
+    const truncatedPreview = `${longBody.slice(0, 2000)}…`
+
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            { id: 't-user', role: 'user', text: 'do the thing', at: 1000 },
+            { id: 't-assistant', role: 'assistant', text: fullText, at: 2000 },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+      kind: 'response',
+      causedByEventId: initialEvent.id,
+      text: truncatedPreview,
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const turnBubbles = el.querySelectorAll('[id^="epic-detail-turn-"]')
+    expect(turnBubbles).toHaveLength(2)
+    const responseEvents = el.querySelectorAll('[data-testid="epic-response-event"]')
+    expect(responseEvents).toHaveLength(0)
+  })
+
   it('tones a response event\'s accessible text by outcome, and falls back to neutral when outcome is absent', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

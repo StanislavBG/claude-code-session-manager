@@ -203,3 +203,61 @@ describe('Turn — clampBodyChars', () => {
     expect(hidden.textContent).toContain('done')
   })
 })
+
+// PRD chat-stop-signal-duplicate-turn — the surviving assistant turn after
+// reconciliation may hold the JSONL feed's byte-exact text, sentinel block
+// and all (state/chat.ts's turnIdentity is now stop-signal-insensitive). The
+// bubble must show only the body; the raw `<<<SM_NEEDS_INPUT>>>` + questions
+// JSON must never render as message prose (the separate 'question' turn
+// already renders those questions as its own card).
+describe('Turn — stop-signal render-time strip', () => {
+  beforeEach(() => installWindowApiMock())
+  afterEach(() => {
+    if (root && container) {
+      act(() => root!.unmount())
+      container.remove()
+    }
+    container = null
+    root = null
+    delete (window as unknown as { api?: unknown }).api
+  })
+
+  const STOP_BODY = 'Here is what I found and what I still need from you.'
+  const stopSignalTurn = () => ({
+    id: 't-stop',
+    role: 'assistant' as const,
+    text: `${STOP_BODY}\n\n<<<SM_NEEDS_INPUT>>>\n${JSON.stringify({ questions: ['Deploy to prod now?'] })}`,
+    at: Date.now(),
+  })
+
+  it('CORE: renders only the body, never the sentinel line or the questions JSON', async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const el = mount(createElement(Turn, { turn: stopSignalTurn(), ...base } as any))
+    expect(el.textContent).toContain(STOP_BODY)
+    expect(el.textContent).not.toContain('<<<SM_NEEDS_INPUT>>>')
+    expect(el.textContent).not.toContain('Deploy to prod now?')
+  })
+
+  it('EDGE: turn.text itself stays byte-exact — Show raw still yields the sentinel block', async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const turn = stopSignalTurn()
+    mount(createElement(Turn, { turn, ...base } as any))
+    expect(turn.text).toContain('<<<SM_NEEDS_INPUT>>>')
+    expect(turn.text).toContain('Deploy to prod now?')
+  })
+
+  it('EDGE: a plain assistant reply with no sentinel renders unchanged', async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const turn = { id: 't-plain', role: 'assistant' as const, text: 'Just a normal reply.', at: Date.now() }
+    const el = mount(createElement(Turn, { turn, ...base } as any))
+    expect(el.textContent).toContain('Just a normal reply.')
+  })
+
+  it('EDGE: Quote sends the stripped body, not the raw sentinel block', async () => {
+    const { Turn } = await import('../ChatTranscriptTurn')
+    const quoted: string[] = []
+    const el = mount(createElement(Turn, { turn: stopSignalTurn(), ...base, onQuote: (t: string) => quoted.push(t) } as any))
+    act(() => (el.querySelector('[data-testid="chat-turn-quote"]') as HTMLButtonElement).click())
+    expect(quoted).toEqual([STOP_BODY])
+  })
+})

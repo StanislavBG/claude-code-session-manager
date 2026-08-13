@@ -34,6 +34,9 @@ function installWindowApiMock(opts: {
 } = {}) {
   const onEventHandlers = new Map<string, (events: TranscriptEvent[]) => void>()
   let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
+  let needsInputHandler:
+    | ((e: { tabId: string; sessionId: string; questions: string[]; answerBody?: string }) => void)
+    | null = null
   const subscribe = vi.fn().mockResolvedValue(opts.subscribeResult ?? { ok: true, path: '/tmp/fake.jsonl' })
   const buffer = vi.fn().mockResolvedValue(opts.bufferEvents ?? [])
   const unsubscribe = vi.fn().mockResolvedValue({ ok: true })
@@ -51,7 +54,12 @@ function installWindowApiMock(opts: {
           completeHandler = null
         }
       }),
-      onNeedsInput: vi.fn(),
+      onNeedsInput: vi.fn((handler) => {
+        needsInputHandler = handler
+        return () => {
+          needsInputHandler = null
+        }
+      }),
       onError: vi.fn(),
       onNotice: vi.fn(),
       onExternalSend: vi.fn(),
@@ -87,6 +95,7 @@ function installWindowApiMock(opts: {
       onEventHandlers.get(tabId)?.(Array.isArray(evOrEvents) ? evOrEvents : [evOrEvents]),
     hasListener: (tabId: string) => onEventHandlers.has(tabId),
     getCompleteHandler: () => completeHandler,
+    getNeedsInputHandler: () => needsInputHandler,
   }
 }
 
@@ -329,6 +338,73 @@ describe('chat.ts transcript feed (PRD chat-feed-from-jsonl)', () => {
     await vi.waitFor(() => expect(useChat.getState().hydratedTabs['epic-cap']).toBeUndefined())
     // Slice is still valid and empty — never errors or spins.
     expect(useChat.getState().get('epic-cap').turns).toEqual([])
+  })
+
+  // PRD chat-stop-signal-duplicate-turn: a run ending via the
+  // `<<<SM_NEEDS_INPUT>>>` stop-signal protocol used to double-render — the
+  // JSONL feed carries the reply VERBATIM (sentinel + questions-JSON tail
+  // included), while chat:run:needs-input pushes `answerBody`, the same
+  // reply with that tail already stripped by chatRunner.cjs. Raw text
+  // equality never matched, so both landed. Covers both arrival orders.
+  it('de-dupes a stop-signal assistant reply: JSONL (with sentinel) lands first, needs-input answerBody merges', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-stop-1', cwd: '/proj', sessionUuid: 'sess-uuid-stop-1' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    const body = 'Here is what I found and what I still need from you.'
+    const full = `${body}\n\n<<<SM_NEEDS_INPUT>>>\n${JSON.stringify({ questions: ['Deploy to prod now?'] })}`
+
+    // JSONL assistant line lands verbatim first, sentinel and all.
+    mock.emit('epic-stop-1', makeEv('assistant', full, { byteOffset: 1000 }))
+    expect(useChat.getState().get('epic-stop-1').turns.filter((t) => t.role === 'assistant')).toHaveLength(1)
+
+    // chatRunner's needs-input handler fires with the sentinel already stripped.
+    mock.getNeedsInputHandler()?.({
+      tabId: 'epic-stop-1',
+      sessionId: 'sess-uuid-stop-1',
+      questions: ['Deploy to prod now?'],
+      answerBody: body,
+    })
+
+    const assistants = useChat.getState().get('epic-stop-1').turns.filter((t) => t.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    // The feed turn already carried `ref` — it wins, so the surviving turn
+    // still holds the full JSONL text (byte-exact Show raw contract).
+    expect(assistants[0].ref).toBeTruthy()
+    expect(assistants[0].text).toBe(full)
+    // Exactly one 'question' turn too — not duplicated by this merge.
+    expect(useChat.getState().get('epic-stop-1').turns.filter((t) => t.role === 'question')).toHaveLength(1)
+  })
+
+  it('de-dupes a stop-signal assistant reply in the reverse order: needs-input answerBody lands first, JSONL upgrades it', async () => {
+    const mock = installWindowApiMock()
+    const { useChat, attachTranscriptFeed } = await import('../chat')
+
+    attachTranscriptFeed({ tabId: 'epic-stop-2', cwd: '/proj', sessionUuid: 'sess-uuid-stop-2' })
+    await vi.waitFor(() => expect(mock.buffer).toHaveBeenCalled())
+
+    const body = 'Here is what I found and what I still need from you.'
+    const full = `${body}\n\n<<<SM_NEEDS_INPUT>>>\n${JSON.stringify({ questions: ['Deploy to prod now?'] })}`
+
+    mock.getNeedsInputHandler()?.({
+      tabId: 'epic-stop-2',
+      sessionId: 'sess-uuid-stop-2',
+      questions: ['Deploy to prod now?'],
+      answerBody: body,
+    })
+    expect(useChat.getState().get('epic-stop-2').turns.filter((t) => t.role === 'assistant')).toHaveLength(1)
+
+    // The JSONL line for the same reply lands after, sentinel and all — must
+    // upgrade the existing turn in place, not append a second bubble.
+    mock.emit('epic-stop-2', makeEv('assistant', full, { byteOffset: 1100 }))
+
+    const assistants = useChat.getState().get('epic-stop-2').turns.filter((t) => t.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0].ref).toBeTruthy()
+    expect(assistants[0].text).toBe(full)
+    expect(useChat.getState().get('epic-stop-2').turns.filter((t) => t.role === 'question')).toHaveLength(1)
   })
 
   it('excises the matching streamed prefix from the live tap when the authoritative JSONL line lands mid-run', async () => {

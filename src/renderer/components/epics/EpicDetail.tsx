@@ -22,6 +22,7 @@ import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { useBranch } from '../../lib/useBranch'
 import type { ScheduleJob } from '../../../preload/api'
 import { parseTranscriptTurns, selectNewTurns } from '../../lib/terminalHandoffTranscript'
+import { splitStopSignal } from '../../lib/stopSignal'
 import { useChatPrefs, resolveEpicVerbosity } from '../../state/chatPrefs'
 import {
   filterTurnsByVerbosity,
@@ -677,7 +678,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // line is a pure duplicate, not a distinct raw/summary pairing. Drop only
   // the events that duplicate an already-rendered turn; genuine out-of-band
   // ones (no matching live turn, e.g. a scheduler PRD reply) still render.
-  const assistantTurnTexts = new Set(turns.filter((t) => t.role === 'assistant').map((t) => t.text))
+  // appendResponseEvent persists `answerBody` (chat.ts's onComplete/
+  // onNeedsInput both call it with the stop-signal-stripped text), but the
+  // surviving assistant turn may hold the JSONL feed's FULL text — sentinel
+  // block and all, per the reconciliation rule in state/chat.ts. Compare on
+  // the stop-signal-stripped form of each turn's text so a response event
+  // still matches its turn regardless of which copy won.
+  const assistantTurnTexts = new Set(
+    turns.filter((t) => t.role === 'assistant').map((t) => (splitStopSignal(t.text)?.body ?? t.text)),
+  )
   const isDuplicateResponseEvent = (e: PromptSessionEvent): boolean => {
     if (!e.text) return false
     if (assistantTurnTexts.has(e.text)) return true

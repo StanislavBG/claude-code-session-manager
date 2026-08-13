@@ -10,6 +10,7 @@ import { useEpicTerminal } from './epicTerminal'
 import { summarizeSignal, type ChatSignal } from '../lib/chatSignals'
 import { extractAttribution, type Attribution } from '../lib/chatAttribution'
 import { splitInjectedPreamble } from '../lib/promptPreamble'
+import { splitStopSignal } from '../lib/stopSignal'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -1051,11 +1052,22 @@ const feedIngest = new Map<string, FeedIngestState>()
  * rendered twice in the Discussion: once bare, once with the `≡` preamble
  * glyph. Compare the human body so the two forms of one message collapse.
  *
- * Assistant turns are unaffected — nothing is injected into those.
+ * Assistant turns have the mirror-image asymmetry: when a run ends via the
+ * `<<<SM_NEEDS_INPUT>>>` stop-signal protocol, the JSONL transcript feed
+ * records the reply verbatim INCLUDING the trailing sentinel + questions-JSON
+ * block, while the `chat:run:needs-input` handler (below) pushes a turn
+ * holding only `signal.answerBody` — the same reply with that block already
+ * stripped by chatRunner.cjs's `splitStopSignal`. Compare the stop-signal-
+ * stripped body here too (stopSignal.ts's renderer-side mirror of that
+ * function), so the two forms of one long assistant reply collapse into a
+ * single turn instead of both landing (previously the reason very long
+ * replies with questions rendered TWICE in the Discussion).
  */
 function turnIdentity(role: ChatTurnRole, text: string): string {
   const t = text.trim()
-  return role === 'user' ? splitInjectedPreamble(t).body.trim() : t
+  if (role === 'user') return splitInjectedPreamble(t).body.trim()
+  if (role === 'assistant') return (splitStopSignal(t)?.body ?? t).trim()
+  return t
 }
 
 /** Scans the WHOLE live `turns` array (bounded only by FEED_TURNS_CAP) for a

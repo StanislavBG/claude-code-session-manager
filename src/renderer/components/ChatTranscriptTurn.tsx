@@ -11,6 +11,7 @@ import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } fro
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { clampTurnText } from '../lib/chatVerbosity'
 import { splitInjectedPreamble, describeInjectedBlocks } from '../lib/promptPreamble'
+import { splitStopSignal } from '../lib/stopSignal'
 import { formatAgo } from '../lib/formatTime'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 import { InlineConsentTerminal } from './InlineConsentTerminal'
@@ -1296,10 +1297,19 @@ function TurnComponent({
   // session-manager-operations/feedback/2026-07-21-chat-empty-assistant-bubble.md).
   if (presentation === 'suppress') return null
 
+  // A stop-signal-ended turn (see stopSignal.ts) may still carry its trailing
+  // `<<<SM_NEEDS_INPUT>>>` + questions-JSON block when this is the JSONL feed
+  // copy — the separate 'question' turn already renders those questions as
+  // its own card, so showing raw protocol JSON here too would be noise (and
+  // was the third rendering of the same content before the identity fix in
+  // state/chat.ts). `turn.text` itself is untouched — Quote/Show-raw still
+  // yield the byte-exact record — only this local display copy is stripped.
+  const bodyText = splitStopSignal(turn.text)?.body ?? turn.text
+
   // Clamped bodies extract their callouts from the SHOWN text only — a URL or
   // file path that lives in the withheld tail would otherwise render a callout
   // for something not on screen.
-  const clamped = clampTurnText(turn.text, bodyExpanded ? null : clampBodyChars)
+  const clamped = clampTurnText(bodyText, bodyExpanded ? null : clampBodyChars)
   const shownText = clamped.body
   const urls = extractUrls(shownText)
   const filePaths = extractFilePaths(shownText)
@@ -1333,7 +1343,7 @@ function TurnComponent({
           {onQuote && presentation === 'text' && (
             <button
               type="button"
-              onClick={() => onQuote(turn.text)}
+              onClick={() => onQuote(bodyText)}
               data-testid="chat-turn-quote"
               title="Quote this message in your reply"
               aria-label="Quote this message"

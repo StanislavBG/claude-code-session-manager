@@ -55,6 +55,17 @@ const EpicIntakeSectionSchema = z.object({
   source: z.string().optional(),
 });
 
+// Mirrors PromptSession's `worktree` field (src/renderer/state/
+// promptSessions.ts) — this Epic's isolated `git worktree` checkout, when
+// one exists. `baseCwd` is always the Epic's real owning-project cwd, never
+// the worktree dir itself (see gitWorktree.cjs's "ops-root hazard" comment).
+const EpicWorktreeSchema = z.object({
+  dir: z.string(),
+  branch: z.string(),
+  baseCwd: z.string(),
+  status: z.enum(['active', 'needs_merge_resolution', 'merged', 'disabled']),
+});
+
 // Mirrors PromptSession (src/renderer/state/promptSessions.ts:29-76).
 const PromptSessionSchema = z.object({
   id: z.string(),
@@ -73,6 +84,9 @@ const PromptSessionSchema = z.object({
   // rendering the flat `openingPrompt` as a single block (see
   // ChatTranscriptTurn.tsx's EpicIntakeCard).
   sections: z.array(EpicIntakeSectionSchema).optional(),
+  // Passthrough only as of PRD 1032 — nothing populates this yet; the next
+  // PRD in this chain wires Epic worktree minting.
+  worktree: EpicWorktreeSchema.optional(),
 });
 
 /**
@@ -97,5 +111,6 @@ module.exports = {
   EpicSourceSchema,
   EpicTagSchema,
   EpicIntakeSectionSchema,
+  EpicWorktreeSchema,
   assertValidPromptSession,
 };

@@ -93,6 +93,21 @@ export interface PromptSession {
    *  Epic) — those fall back to rendering `openingPrompt`/`goalText` as a
    *  single block. */
   sections?: EpicIntakeSection[]
+  /** This Epic's isolated `git worktree` checkout, when one was created for
+   *  it (`sm-epic/<id>` branch, src/main/lib/gitWorktree.cjs's
+   *  createEpicWorktree). Absent when the project isn't a git repo, worktree
+   *  isolation is disabled, or (until the next PRD in this chain wires
+   *  minting) simply not created yet — this field is a passthrough read/write
+   *  only as of PRD 1032; nothing populates it yet. `baseCwd` is always the
+   *  Epic's real owning-project cwd (this.cwd), never the worktree dir
+   *  itself — see gitWorktree.cjs's "ops-root hazard" header comment for why
+   *  that distinction must never blur. */
+  worktree?: {
+    dir: string
+    branch: string
+    baseCwd: string
+    status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled'
+  }
 }
 
 /** On-disk archive shape written by markCompleted and read back by any

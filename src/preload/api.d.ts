@@ -1654,6 +1654,11 @@ export interface SessionManagerAPI {
      *  (lib/epicWorktreeMint.cjs) — resolves to the `worktree` field shape on
      *  success, or null on any failure (never rejects). */
     createWorktree: (payload: PromptSessionsCreateWorktreePayload) => Promise<PromptSessionsCreateWorktreeResult | null>;
+    /** Folds an Epic's isolated git worktree branch back into its owning
+     *  project's main tree (lib/epicWorktreeMerge.cjs) — the ONLY point
+     *  where PRD 1033's per-Epic isolation resolves back into the shared
+     *  tree. Never rejects. */
+    mergeToMain: (payload: PromptSessionsMergeToMainPayload) => Promise<PromptSessionsMergeToMainResult>;
   };
 }
 
@@ -1711,6 +1716,21 @@ export interface PromptSessionsCreateWorktreeResult {
   branch: string;
   baseCwd: string;
   status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled';
+}
+
+// ─────────────────────────────────── PromptSessions merge-to-main (main-side integrateEpicBranch)
+export interface PromptSessionsMergeToMainPayload {
+  cwd: string;
+  epicId: string;
+  branch: string;
+  dir: string;
+}
+
+export interface PromptSessionsMergeToMainResult {
+  ok: boolean;
+  status: 'merged' | 'needs_merge_resolution';
+  integrated?: boolean;
+  reason?: string;
 }
 
 // ─────────────────────────────────── PromptSession event-appended broadcast

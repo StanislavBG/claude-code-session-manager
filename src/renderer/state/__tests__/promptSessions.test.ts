@@ -45,6 +45,9 @@ function installWindowApiMock() {
       // own "never rejects, null on any failure" contract. Tests that care
       // about the success path override this per-call.
       createWorktree: vi.fn().mockResolvedValue(null),
+      // Defaults to a clean merge — tests that care about the conflict path
+      // override this per-call.
+      mergeToMain: vi.fn().mockResolvedValue({ ok: true, status: 'merged', integrated: true }),
     },
     auditLog: {
       append: vi.fn().mockResolvedValue({ ok: true }),
@@ -1705,5 +1708,112 @@ describe('approveProposed epic worktree creation (PRD 1033)', () => {
     await Promise.resolve()
 
     expect(usePromptSessions.getState().sessions[proposed.id].worktree).toBeUndefined()
+  })
+})
+
+describe('merge-to-main checkpoint (PRD 1034)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  async function approvedEpicWithWorktree(api: ReturnType<typeof installWindowApiMock>) {
+    const { usePromptSessions, promptSessionArchivePath } = await import('../promptSessions')
+    const worktree = { dir: '/tmp/sm-epic-worktrees/abc/epic-1', branch: 'sm-epic/placeholder', baseCwd: '/proj', status: 'active' as const }
+    api.promptSessions.createWorktree.mockResolvedValueOnce(worktree)
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    usePromptSessions.getState().approveProposed(proposed.id)
+    await vi.waitFor(() => {
+      expect(usePromptSessions.getState().sessions[proposed.id].worktree).toBeDefined()
+    })
+    return { usePromptSessions, promptSessionArchivePath, epicId: proposed.id }
+  }
+
+  it('markCompleted merges an unmerged active worktree before archiving, and the archive carries status "merged"', async () => {
+    const api = installWindowApiMock()
+    api.promptSessions.mergeToMain.mockResolvedValue({ ok: true, status: 'merged', integrated: true })
+    const { usePromptSessions, promptSessionArchivePath, epicId } = await approvedEpicWithWorktree(api)
+    const worktreeBefore = usePromptSessions.getState().sessions[epicId].worktree!
+
+    await usePromptSessions.getState().markCompleted(epicId)
+
+    expect(api.promptSessions.mergeToMain).toHaveBeenCalledWith({
+      cwd: '/proj',
+      epicId,
+      branch: worktreeBefore.branch,
+      dir: worktreeBefore.dir,
+    })
+    const archiveCall = api.config.writeJson.mock.calls.find((c: unknown[]) => c[0] === promptSessionArchivePath('/proj', epicId))
+    expect(archiveCall).toBeDefined()
+    const [, archive] = archiveCall as [string, { session: { worktree?: { status: string } } }]
+    expect(archive.session.worktree?.status).toBe('merged')
+  })
+
+  it('markCompleted still archives on a merge conflict, preserving the conflict status + branch + dir instead of dropping it', async () => {
+    const api = installWindowApiMock()
+    api.promptSessions.mergeToMain.mockResolvedValue({ ok: false, status: 'needs_merge_resolution', reason: 'merge failed (likely a real content conflict)' })
+    const { usePromptSessions, promptSessionArchivePath, epicId } = await approvedEpicWithWorktree(api)
+    const worktreeBefore = usePromptSessions.getState().sessions[epicId].worktree!
+
+    await expect(usePromptSessions.getState().markCompleted(epicId)).resolves.toBeUndefined()
+
+    const updated = usePromptSessions.getState().sessions[epicId]
+    expect(updated.status).toBe('completed')
+    expect(updated.worktree?.status).toBe('needs_merge_resolution')
+    expect(updated.worktree?.branch).toBe(worktreeBefore.branch)
+    expect(updated.worktree?.dir).toBe(worktreeBefore.dir)
+
+    const archiveCall = api.config.writeJson.mock.calls.find((c: unknown[]) => c[0] === promptSessionArchivePath('/proj', epicId))
+    const [, archive] = archiveCall as [string, { session: { worktree?: { status: string; branch: string; dir: string } } }]
+    expect(archive.session.worktree?.status).toBe('needs_merge_resolution')
+    expect(archive.session.worktree?.branch).toBe(worktreeBefore.branch)
+    expect(archive.session.worktree?.dir).toBe(worktreeBefore.dir)
+  })
+
+  it('markCompleted is a no-op merge attempt when the Epic has no worktree', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+
+    await usePromptSessions.getState().markCompleted(session.id)
+
+    expect(api.promptSessions.mergeToMain).not.toHaveBeenCalled()
+  })
+
+  it('mergeEpicToMain calls the IPC with the Epic worktree branch/dir and patches status to "merged" on success', async () => {
+    const api = installWindowApiMock()
+    api.promptSessions.mergeToMain.mockResolvedValue({ ok: true, status: 'merged', integrated: true })
+    const { usePromptSessions, epicId } = await approvedEpicWithWorktree(api)
+
+    const result = await usePromptSessions.getState().mergeEpicToMain(epicId)
+
+    expect(result).toEqual({ ok: true, reason: undefined })
+    expect(usePromptSessions.getState().sessions[epicId].worktree?.status).toBe('merged')
+  })
+
+  it('mergeEpicToMain patches status to "needs_merge_resolution" and surfaces the reason on conflict, without touching branch/dir', async () => {
+    const api = installWindowApiMock()
+    api.promptSessions.mergeToMain.mockResolvedValue({ ok: false, status: 'needs_merge_resolution', reason: 'merge failed (likely a real content conflict)' })
+    const { usePromptSessions, epicId } = await approvedEpicWithWorktree(api)
+    const worktreeBefore = usePromptSessions.getState().sessions[epicId].worktree!
+
+    const result = await usePromptSessions.getState().mergeEpicToMain(epicId)
+
+    expect(result).toEqual({ ok: false, reason: 'merge failed (likely a real content conflict)' })
+    const worktreeAfter = usePromptSessions.getState().sessions[epicId].worktree!
+    expect(worktreeAfter.status).toBe('needs_merge_resolution')
+    expect(worktreeAfter.branch).toBe(worktreeBefore.branch)
+    expect(worktreeAfter.dir).toBe(worktreeBefore.dir)
+  })
+
+  it('mergeEpicToMain no-ops when the Epic has no worktree', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+
+    const result = await usePromptSessions.getState().mergeEpicToMain(session.id)
+
+    expect(result).toEqual({ ok: false, reason: undefined })
+    expect(api.promptSessions.mergeToMain).not.toHaveBeenCalled()
   })
 })

@@ -263,6 +263,15 @@ interface PromptSessionsState {
    *  status to 'completed', and persists the full event chain + transcript
    *  to session-manager-operations/prompt-sessions/<id>.json. */
   markCompleted: (promptSessionId: string, source?: string) => Promise<void>
+  /** Explicit "merge to main" action (PRD 1034) — folds this Epic's isolated
+   *  git worktree branch back into its owning project's main tree via the
+   *  same integrateEpicBranch checkpoint markCompleted uses. No-ops (returns
+   *  `{ ok: true }`) when the Epic has no worktree. On a real conflict, the
+   *  worktree's status is patched to 'needs_merge_resolution' and the branch
+   *  + worktree dir are left intact (never deleted) so a Terminal opened
+   *  against this Epic can still resolve it manually before this is called
+   *  again. */
+  mergeEpicToMain: (promptSessionId: string) => Promise<{ ok: boolean; reason?: string }>
   /** Mints a brand-new independent PromptSession (fresh claudeSessionId —
    *  the archived one is dead) that carries a traceability link back to the
    *  archived session it follows on from. */
@@ -342,6 +351,38 @@ const pendingWriteCounts = new Map<string, number>()
 
 function hasPendingWrite(path: string): boolean {
   return (pendingWriteCounts.get(path) ?? 0) > 0
+}
+
+/** Shared merge-to-main attempt (PRD 1034) used by both the explicit
+ *  `mergeEpicToMain` action and markCompleted's merge-before-archive
+ *  checkpoint — the ONLY point where an Epic's per-Epic git isolation
+ *  (PRD 1032/1033) resolves back into its owning project's main tree.
+ *  No-ops when the Epic has no worktree, or its worktree isn't `'active'`
+ *  (already merged/disabled/already flagged — nothing to (re-)attempt here;
+ *  a conflicted worktree is only ever retried via an explicit
+ *  `mergeEpicToMain` call, never auto-retried). Never throws: an IPC failure
+ *  (main process down, etc.) leaves the worktree exactly as it was rather
+ *  than guessing a status. */
+async function attemptMergeToMainInternal(
+  session: PromptSession,
+): Promise<{ worktree: PromptSession['worktree']; reason?: string }> {
+  const worktree = session.worktree
+  if (!worktree || worktree.status !== 'active') return { worktree }
+  if (typeof window === 'undefined' || !window.api?.promptSessions?.mergeToMain) return { worktree }
+  try {
+    const result = await window.api.promptSessions.mergeToMain({
+      cwd: session.cwd,
+      epicId: session.id,
+      branch: worktree.branch,
+      dir: worktree.dir,
+    })
+    return {
+      worktree: { ...worktree, status: result.ok ? 'merged' : 'needs_merge_resolution' },
+      reason: result.ok ? undefined : result.reason,
+    }
+  } catch {
+    return { worktree }
+  }
 }
 
 // Ids hydrate() has assigned into the store FROM the active-index disk read
@@ -550,6 +591,14 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     await window.api.chat.cancel(promptSessionId)
     window.api.pty.kill(session.claudeSessionId)
 
+    // Merge-to-main checkpoint (PRD 1034) — the ONLY point where this Epic's
+    // isolated git worktree (PRD 1032/1033) resolves back into its owning
+    // project's main tree; conflicts are only ever surfaced here, never
+    // mid-session. A conflict never blocks archival — completed below still
+    // runs either way — but the conflict flag/branch/dir carry onto the
+    // archived record via `completed.worktree` so it isn't silently lost.
+    const { worktree: mergedWorktree } = await attemptMergeToMainInternal(session)
+
     const priorSession = session
     const priorEvents = get().events[promptSessionId] ?? []
     const { title } = splitTitleAndGoal(session.goalText)
@@ -567,7 +616,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const eventsWithClosed = { ...get().events, [promptSessionId]: closedEventList }
 
     const now = new Date().toISOString()
-    const completed: PromptSession = { ...session, status: 'completed', completedAt: now }
+    const completed: PromptSession = { ...session, worktree: mergedWorktree, status: 'completed', completedAt: now }
     const sessions = { ...get().sessions, [promptSessionId]: completed }
     set({ sessions })
 
@@ -642,6 +691,23 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       persistActiveIndex(priorSession.cwd, get().sessions, get().events).catch(() => {})
       throw err
     }
+  },
+  mergeEpicToMain: async (promptSessionId) => {
+    const session = get().sessions[promptSessionId]
+    if (!session) {
+      throw new Error(`mergeEpicToMain: no PromptSession with id "${promptSessionId}"`)
+    }
+    const { worktree, reason } = await attemptMergeToMainInternal(session)
+    // Only settle onto a session that's still the same one we started
+    // against — a concurrent markCompleted/deleteEpic/another merge call
+    // must never have its outcome overwritten by a stale one landing late.
+    const current = get().sessions[promptSessionId]
+    if (current && current.worktree === session.worktree) {
+      const patched = { ...current, worktree }
+      set({ sessions: { ...get().sessions, [promptSessionId]: patched } })
+      persistActiveIndex(session.cwd, get().sessions, get().events).catch(() => {})
+    }
+    return { ok: worktree?.status === 'merged', reason }
   },
   resumeArchived: async (archivedId, source) => {
     const archived = get().sessions[archivedId]

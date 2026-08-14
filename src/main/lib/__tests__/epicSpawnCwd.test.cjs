@@ -70,6 +70,28 @@ test('falls back to cwd unchanged when cwd or claudeSessionId is missing', () =>
   expect(resolveEpicSpawnCwd({})).toBeUndefined();
 });
 
+test('returns worktree.dir for a conflicted (needs_merge_resolution) Epic too — same PTY-into-worktree path a human uses to resolve it manually (PRD 1034)', () => {
+  const result = resolveEpicSpawnCwd({
+    cwd: '/projects/foo',
+    claudeSessionId: 'sess-1',
+    deps: {
+      readActiveIndex: stubReadActiveIndex({
+        'epic-1': {
+          id: 'epic-1',
+          claudeSessionId: 'sess-1',
+          worktree: {
+            dir: '/tmp/sm-epic-worktrees/abc/epic-1',
+            branch: 'sm-epic/epic-1',
+            baseCwd: '/projects/foo',
+            status: 'needs_merge_resolution',
+          },
+        },
+      }),
+    },
+  });
+  expect(result).toBe('/tmp/sm-epic-worktrees/abc/epic-1');
+});
+
 test('never throws when the active-index read itself throws — falls back to cwd', () => {
   const result = resolveEpicSpawnCwd({
     cwd: '/projects/foo',

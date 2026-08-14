@@ -423,5 +423,14 @@ contextBridge.exposeInMainWorld('api', {
      *  `worktree` field shape on success, or null (not a repo / dirty base
      *  tree / disabled / cap reached) — never rejects. */
     createWorktree: (payload) => ipcRenderer.invoke('promptSessions:create-worktree', payload),
+    /** Folds an Epic's isolated git worktree branch back into its owning
+     *  project's main tree (main-side gitWorktree.cjs's integrateEpicBranch,
+     *  via lib/epicWorktreeMerge.cjs) — the ONLY point where PRD 1033's
+     *  per-Epic isolation resolves back into the shared tree. Never rejects:
+     *  resolves `{ ok: true, status: 'merged', integrated }` on a clean
+     *  merge (worktree cleaned up), or `{ ok: false, status:
+     *  'needs_merge_resolution', reason }` on a real conflict (branch +
+     *  worktree dir left intact for manual resolution). */
+    mergeToMain: (payload) => ipcRenderer.invoke('promptSessions:merge-to-main', payload),
   },
 });

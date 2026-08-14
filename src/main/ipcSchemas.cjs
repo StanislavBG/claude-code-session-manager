@@ -210,6 +210,20 @@ const promptSessionsCreateWorktree = z.object({
   epicId: z.string().regex(PROMPT_SESSION_ID_RE),
 });
 
+// Renderer entry point for folding an Epic's isolated git worktree branch
+// back into its owning project's main tree (lib/epicWorktreeMerge.cjs) — PRD
+// 1034, the ONLY point where the per-Epic isolation PRD 1033 wires resolves.
+// `branch`/`dir` are supplied by the caller (the renderer's own in-memory
+// `session.worktree`) rather than re-derived from active-index.json, since
+// markCompleted calls this while the Epic's row is about to leave that index
+// entirely for its archive.
+const promptSessionsMergeToMain = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_ID_RE),
+  branch: z.string().regex(/^sm-epic\/[A-Za-z0-9_-]{1,64}$/),
+  dir: z.string().min(1).max(4096),
+});
+
 // ──────────────────────────────────────────── Sessions
 const sessionsPayload = z.object({
   tabs: z.array(z.object({
@@ -917,6 +931,7 @@ module.exports = {
     promptSessionsMergeActiveIndex,
     promptSessionsCreateEpic,
     promptSessionsCreateWorktree,
+    promptSessionsMergeToMain,
     auditLogAppend,
     agentMemoryList,
     agentMemoryGet,

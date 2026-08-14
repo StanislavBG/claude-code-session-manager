@@ -104,8 +104,21 @@ function worktreeRootFor(kind) {
   return configFor(kind).root;
 }
 
-function isWorktreeDisabled(kind) {
-  return process.env[configFor(kind).disableEnv] === '1';
+/**
+ * `cwd` is optional (job-kind callers never pass it — the per-project toggle
+ * only exists for the epic kind, PRD 1035) and, when passed, additionally
+ * consults epicWorktreeProjectConfig.cjs's per-project UI toggle — the
+ * env var still wins machine-wide regardless of what any project has set.
+ * Lazily required to avoid a load-order cycle (neither module needs the
+ * other at require time, only at call time).
+ */
+function isWorktreeDisabled(kind, cwd) {
+  if (process.env[configFor(kind).disableEnv] === '1') return true;
+  if (kind === 'epic' && cwd) {
+    const { isEpicWorktreeDisabledForProject } = require('./epicWorktreeProjectConfig.cjs');
+    if (isEpicWorktreeDisabledForProject(cwd)) return true;
+  }
+  return false;
 }
 
 function getMaxConcurrentWorktrees(kind) {
@@ -194,9 +207,9 @@ async function removeWorktreeDir(cwd, dir) {
  */
 async function createWorktree({ kind, cwd, key }) {
   configFor(kind); // throws on an unknown kind before anything else runs
-  if (isWorktreeDisabled(kind)) return { ok: false, reason: `disabled via ${configFor(kind).disableEnv}=1` };
   if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
   if (!key || typeof key !== 'string') return { ok: false, reason: 'no key provided' };
+  if (isWorktreeDisabled(kind, cwd)) return { ok: false, reason: `disabled via ${configFor(kind).disableEnv}=1 or the project's isolation toggle` };
 
   if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
 

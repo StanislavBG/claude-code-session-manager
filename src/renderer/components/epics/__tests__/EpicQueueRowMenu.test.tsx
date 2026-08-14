@@ -339,4 +339,68 @@ describe('EpicQueue row menu', () => {
 
     expect(resumeArchived).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
   })
+
+  describe('Epic worktree isolation (PRD 1035)', () => {
+    it('shows a "shared tree" chip on the row for an Epic with no worktree', () => {
+      const epic = makeEpic()
+      const el = mount(createElement(EpicQueue, baseProps(epic)))
+      const chip = el.querySelector('[data-testid="epic-worktree-chip"]')
+      expect(chip).not.toBeNull()
+      expect(chip!.textContent).toBe('shared tree')
+    })
+
+    it('shows the isolated branch chip for an Epic with an active worktree', () => {
+      const epic = makeEpic({
+        worktree: { dir: '/tmp/wt', branch: 'sm-epic/epic-1', baseCwd: '/proj', status: 'active' },
+      })
+      const el = mount(createElement(EpicQueue, baseProps(epic)))
+      const chip = el.querySelector('[data-testid="epic-worktree-chip"]')
+      expect(chip!.textContent).toContain('sm-epic/epic-1')
+    })
+
+    it('adds "Merge to main" to the row menu only when worktree.status is active', () => {
+      const activeEpic = makeEpic({
+        worktree: { dir: '/tmp/wt', branch: 'sm-epic/epic-1', baseCwd: '/proj', status: 'active' },
+      })
+      const el = mount(createElement(EpicQueue, baseProps(activeEpic)))
+      const menu = openMenu(el)
+      expect(menuItemButtons(menu).map((b) => b.textContent)).toContain('Merge to main')
+    })
+
+    it('does not add "Merge to main" when the Epic has no worktree', () => {
+      const epic = makeEpic()
+      const el = mount(createElement(EpicQueue, baseProps(epic)))
+      const menu = openMenu(el)
+      expect(menuItemButtons(menu).map((b) => b.textContent)).not.toContain('Merge to main')
+    })
+
+    it('"Merge to main" calls mergeEpicToMain and toasts success', async () => {
+      const mergeEpicToMain = vi.spyOn(usePromptSessions.getState(), 'mergeEpicToMain').mockResolvedValue({ ok: true })
+      const toastInfo = vi.spyOn(toast, 'info')
+      const epic = makeEpic({
+        worktree: { dir: '/tmp/wt', branch: 'sm-epic/epic-1', baseCwd: '/proj', status: 'active' },
+      })
+      const el = mount(createElement(EpicQueue, baseProps(epic)))
+      const menu = openMenu(el)
+      clickMenuItem(menu, 'Merge to main')
+      await flushAsync(2)
+
+      expect(mergeEpicToMain).toHaveBeenCalledWith(epic.id)
+      expect(toastInfo).toHaveBeenCalledWith('Merged to main')
+    })
+
+    it('"Merge to main" toasts the conflict reason on failure', async () => {
+      vi.spyOn(usePromptSessions.getState(), 'mergeEpicToMain').mockResolvedValue({ ok: false, reason: 'both edited README.md' })
+      const toastError = vi.spyOn(toast, 'error')
+      const epic = makeEpic({
+        worktree: { dir: '/tmp/wt', branch: 'sm-epic/epic-1', baseCwd: '/proj', status: 'active' },
+      })
+      const el = mount(createElement(EpicQueue, baseProps(epic)))
+      const menu = openMenu(el)
+      clickMenuItem(menu, 'Merge to main')
+      await flushAsync(2)
+
+      expect(toastError).toHaveBeenCalledWith('Merge conflict — resolve in Terminal (both edited README.md)')
+    })
+  })
 })

@@ -145,6 +145,52 @@ export function EpicInboundTag({ origin, small }: { origin: InboundFeedbackOrigi
   )
 }
 
+// ─── EpicWorktreeChip ────────────────────────────────────────────────────────
+/**
+ * Isolation-state readout for the per-Epic `git worktree` checkpoint (PRDs
+ * 1032-1034) — mirrors EpicStatusChip's dot+pill shape rather than
+ * inventing new CSS. Reads only the Epic's real `worktree` field: no
+ * "N ahead of main" count is shown, since that would need a new IPC call
+ * (`worktree` only carries dir/branch/baseCwd/status/conflictReason) and
+ * this app's own convention is real data only, never a fabricated number.
+ */
+const WORKTREE_TONE: Record<
+  NonNullable<PromptSession['worktree']>['status'],
+  { bg: string; text: string; dot: string; label: string }
+> = {
+  active: { bg: 'transparent', text: 'text-fg-faint', dot: 'bg-fg-faint', label: 'isolated' },
+  needs_merge_resolution: { bg: 'bg-delta-bad/15', text: 'text-delta-bad', dot: 'bg-delta-bad', label: 'merge conflict' },
+  merged: { bg: 'bg-sage/20', text: 'text-sage', dot: 'bg-sage', label: 'merged' },
+  disabled: { bg: 'bg-muteband/60', text: 'text-fg-dim', dot: 'bg-muteband', label: 'isolation disabled' },
+}
+
+export function EpicWorktreeChip({ worktree, small }: { worktree: PromptSession['worktree']; small?: boolean }) {
+  const sizeClass = small ? 'px-2 py-0.5 text-[10.5px]' : 'px-2.5 py-1 text-xs'
+  if (!worktree) {
+    return (
+      <span
+        title="This session runs directly in the project's shared working tree — no isolated git worktree."
+        data-testid="epic-worktree-chip"
+        className={`inline-flex items-center gap-1.5 shrink-0 rounded-full font-semibold tracking-wide whitespace-nowrap ring-1 ring-inset ring-line text-fg-faint ${sizeClass}`}
+      >
+        shared tree
+      </span>
+    )
+  }
+  const tone = WORKTREE_TONE[worktree.status]
+  const label = worktree.status === 'active' ? `isolated · ${worktree.branch}` : tone.label
+  return (
+    <span
+      title={worktree.status === 'needs_merge_resolution' && worktree.conflictReason ? worktree.conflictReason : `${worktree.branch} · ${worktree.dir}`}
+      data-testid="epic-worktree-chip"
+      className={`inline-flex items-center gap-1.5 shrink-0 rounded-full font-semibold tracking-wide whitespace-nowrap ${sizeClass} ${tone.bg} ${tone.text}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tone.dot}`} aria-hidden="true" />
+      {label}
+    </span>
+  )
+}
+
 // ─── EpicAgentTag ────────────────────────────────────────────────────────────
 /**
  * Read-only readout of "which Agent (and, when resolved, which model) is

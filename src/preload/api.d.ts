@@ -1659,6 +1659,10 @@ export interface SessionManagerAPI {
      *  where PRD 1033's per-Epic isolation resolves back into the shared
      *  tree. Never rejects. */
     mergeToMain: (payload: PromptSessionsMergeToMainPayload) => Promise<PromptSessionsMergeToMainResult>;
+    /** Reads the per-project "disable Epic worktree isolation" UI toggle. */
+    getWorktreeDisabled: (payload: PromptSessionsGetWorktreeDisabledPayload) => Promise<PromptSessionsGetWorktreeDisabledResult>;
+    /** Writes the per-project "disable Epic worktree isolation" UI toggle. */
+    setWorktreeDisabled: (payload: PromptSessionsSetWorktreeDisabledPayload) => Promise<PromptSessionsSetWorktreeDisabledResult>;
   };
 }
 
@@ -1731,6 +1735,24 @@ export interface PromptSessionsMergeToMainResult {
   status: 'merged' | 'needs_merge_resolution';
   integrated?: boolean;
   reason?: string;
+}
+
+// ─────────────────────────────────── PromptSessions per-project worktree-isolation toggle
+export interface PromptSessionsGetWorktreeDisabledPayload {
+  cwd: string;
+}
+
+export interface PromptSessionsGetWorktreeDisabledResult {
+  disabled: boolean;
+}
+
+export interface PromptSessionsSetWorktreeDisabledPayload {
+  cwd: string;
+  disabled: boolean;
+}
+
+export interface PromptSessionsSetWorktreeDisabledResult {
+  disabled: boolean;
 }
 
 // ─────────────────────────────────── PromptSession event-appended broadcast

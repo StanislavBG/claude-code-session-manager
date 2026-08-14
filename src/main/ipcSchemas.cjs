@@ -224,6 +224,16 @@ const promptSessionsMergeToMain = z.object({
   dir: z.string().min(1).max(4096),
 });
 
+// Renderer entry points for the per-project "disable Epic worktree
+// isolation" UI toggle (lib/epicWorktreeProjectConfig.cjs) — PRD 1035.
+const promptSessionsGetWorktreeDisabled = z.object({
+  cwd: z.string().min(1).max(4096),
+});
+const promptSessionsSetWorktreeDisabled = z.object({
+  cwd: z.string().min(1).max(4096),
+  disabled: z.boolean(),
+});
+
 // ──────────────────────────────────────────── Sessions
 const sessionsPayload = z.object({
   tabs: z.array(z.object({
@@ -932,6 +942,8 @@ module.exports = {
     promptSessionsCreateEpic,
     promptSessionsCreateWorktree,
     promptSessionsMergeToMain,
+    promptSessionsGetWorktreeDisabled,
+    promptSessionsSetWorktreeDisabled,
     auditLogAppend,
     agentMemoryList,
     agentMemoryGet,

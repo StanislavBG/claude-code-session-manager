@@ -107,6 +107,13 @@ export interface PromptSession {
     branch: string
     baseCwd: string
     status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled'
+    /** Set alongside `status: 'needs_merge_resolution'` — the reason
+     *  gitWorktree.cjs's `integrateEpicBranch` returned for the real
+     *  conflict (PRD 1034/lib/epicWorktreeMerge.cjs), so a conflict banner
+     *  reopened later (not just right after the button click that produced
+     *  it) still has real data to show, never a placeholder. Cleared
+     *  (omitted) whenever status moves off `needs_merge_resolution`. */
+    conflictReason?: string
   }
 }
 
@@ -357,17 +364,25 @@ function hasPendingWrite(path: string): boolean {
  *  `mergeEpicToMain` action and markCompleted's merge-before-archive
  *  checkpoint — the ONLY point where an Epic's per-Epic git isolation
  *  (PRD 1032/1033) resolves back into its owning project's main tree.
- *  No-ops when the Epic has no worktree, or its worktree isn't `'active'`
- *  (already merged/disabled/already flagged — nothing to (re-)attempt here;
- *  a conflicted worktree is only ever retried via an explicit
- *  `mergeEpicToMain` call, never auto-retried). Never throws: an IPC failure
- *  (main process down, etc.) leaves the worktree exactly as it was rather
- *  than guessing a status. */
+ *  No-ops when the Epic has no worktree, or its worktree is already
+ *  `'merged'`/`'disabled'` — nothing to (re-)attempt there. A worktree
+ *  flagged `'needs_merge_resolution'` only re-attempts when `allowRetry` is
+ *  set: markCompleted's own automatic checkpoint passes nothing (so a
+ *  conflicted worktree is never silently retried mid-archive), while the
+ *  explicit `mergeEpicToMain` action (EpicDetail/EpicQueue's own "Merge to
+ *  main"/"Retry merge" buttons — PRD 1035) passes `true`, since a human
+ *  pressing that button IS the explicit retry this module's contract always
+ *  described. Never throws: an IPC failure (main process down, etc.) leaves
+ *  the worktree exactly as it was rather than guessing a status. */
 async function attemptMergeToMainInternal(
   session: PromptSession,
+  allowRetry = false,
 ): Promise<{ worktree: PromptSession['worktree']; reason?: string }> {
   const worktree = session.worktree
-  if (!worktree || worktree.status !== 'active') return { worktree }
+  if (!worktree) return { worktree }
+  if (worktree.status !== 'active' && !(allowRetry && worktree.status === 'needs_merge_resolution')) {
+    return { worktree }
+  }
   if (typeof window === 'undefined' || !window.api?.promptSessions?.mergeToMain) return { worktree }
   try {
     const result = await window.api.promptSessions.mergeToMain({
@@ -377,7 +392,11 @@ async function attemptMergeToMainInternal(
       dir: worktree.dir,
     })
     return {
-      worktree: { ...worktree, status: result.ok ? 'merged' : 'needs_merge_resolution' },
+      worktree: {
+        ...worktree,
+        status: result.ok ? 'merged' : 'needs_merge_resolution',
+        conflictReason: result.ok ? undefined : result.reason,
+      },
       reason: result.ok ? undefined : result.reason,
     }
   } catch {
@@ -697,7 +716,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (!session) {
       throw new Error(`mergeEpicToMain: no PromptSession with id "${promptSessionId}"`)
     }
-    const { worktree, reason } = await attemptMergeToMainInternal(session)
+    const { worktree, reason } = await attemptMergeToMainInternal(session, true)
     // Only settle onto a session that's still the same one we started
     // against — a concurrent markCompleted/deleteEpic/another merge call
     // must never have its outcome overwritten by a stale one landing late.

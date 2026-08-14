@@ -5,7 +5,7 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, EpicAgentTag } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicAgentTag, EpicWorktreeChip } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
@@ -564,6 +564,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const sessionEvents = usePromptSessions((s) => s.events[epicId]) ?? EMPTY_EVENTS
   const markCompleted = usePromptSessions((s) => s.markCompleted)
   const resumeArchived = usePromptSessions((s) => s.resumeArchived)
+  const mergeEpicToMain = usePromptSessions((s) => s.mergeEpicToMain)
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
 
@@ -574,6 +575,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const [view, setView] = useState<ViewKey>('discussion')
   const prds = useScheduledPrds()
   const [markingCompleted, setMarkingCompleted] = useState(false)
+  const [mergingToMain, setMergingToMain] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -776,6 +778,23 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
       .finally(() => setMarkingCompleted(false))
   }
 
+  // Explicit "Merge to main" (available whenever worktree.status === 'active')
+  // and its "Retry merge" twin from the conflict banner below both funnel
+  // through the same store action markCompleted's own checkpoint uses (PRD
+  // 1034) — toast is the sole error-surfacing channel per CLAUDE.md, success
+  // and conflict both toast since a conflict here is an expected, recoverable
+  // outcome rather than a thrown error.
+  const onMergeToMain = () => {
+    setMergingToMain(true)
+    mergeEpicToMain(epicId)
+      .then((result) => {
+        if (result.ok) toast.info('Merged to main')
+        else toast.error(`Merge conflict — resolve in Terminal (${result.reason ?? 'unknown reason'})`)
+      })
+      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
+      .finally(() => setMergingToMain(false))
+  }
+
   // Mutual exclusion: a chatRunner run in flight (or queued behind one) for
   // this Epic must finish before Terminal mode can attach the same
   // claudeSessionId — otherwise a headless resume and an interactive resume
@@ -848,6 +867,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             <div className="mb-1.5 flex items-center gap-2" data-testid="epic-detail-tags">
               <EpicStatusChip status={status} />
               <EpicKindTag kind={promptSession.tag} />
+              {!isCompleted && <EpicWorktreeChip worktree={promptSession.worktree} />}
               {agentType && (
                 <EpicAgentTag
                   agentType={agentType}
@@ -909,19 +929,64 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                 Resume
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={onMarkCompleted}
-                disabled={markingCompleted || mode === 'terminal'}
-                title={mode === 'terminal' ? 'Switch back to Chat before marking this session completed — it would kill the live Terminal session.' : undefined}
-                data-testid="epic-mark-completed"
-                className="rounded-md border border-line bg-bg-hi px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-hi disabled:opacity-50"
-              >
-                {markingCompleted ? 'Marking…' : 'Mark completed'}
-              </button>
+              <>
+                {promptSession.worktree?.status === 'active' && (
+                  <button
+                    type="button"
+                    onClick={onMergeToMain}
+                    disabled={mergingToMain}
+                    title={`Fold ${promptSession.worktree.branch} back into main — the only point this Epic's isolation resolves into the shared tree.`}
+                    data-testid="epic-merge-to-main"
+                    className="rounded-md border border-line bg-bg-hi px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-hi disabled:opacity-50"
+                  >
+                    {mergingToMain ? 'Merging…' : 'Merge to main'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onMarkCompleted}
+                  disabled={markingCompleted || mode === 'terminal'}
+                  title={mode === 'terminal' ? 'Switch back to Chat before marking this session completed — it would kill the live Terminal session.' : undefined}
+                  data-testid="epic-mark-completed"
+                  className="rounded-md border border-line bg-bg-hi px-3 py-1.5 text-xs font-semibold text-fg-dim hover:bg-hi disabled:opacity-50"
+                >
+                  {markingCompleted ? 'Marking…' : 'Mark completed'}
+                </button>
+              </>
             )}
           </div>
         </div>
+
+        {promptSession.worktree?.status === 'needs_merge_resolution' && (
+          <div
+            data-testid="epic-worktree-conflict-banner"
+            className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-delta-bad/40 bg-delta-bad/10 px-3 py-2 text-xs text-delta-bad"
+          >
+            <span className="font-semibold">Merge conflict</span>
+            <span className="text-fg-dim">
+              {promptSession.worktree.conflictReason ?? 'Automatic merge failed — resolve manually in the worktree.'}
+            </span>
+            <div className="ml-auto flex shrink-0 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onModeChange('terminal')}
+                data-testid="epic-worktree-resolve-in-terminal"
+                className="rounded-md border border-delta-bad/40 bg-bg px-2.5 py-1 text-xs font-semibold text-delta-bad hover:bg-delta-bad/10"
+              >
+                Resolve in Terminal
+              </button>
+              <button
+                type="button"
+                onClick={onMergeToMain}
+                disabled={mergingToMain}
+                data-testid="epic-worktree-retry-merge"
+                className="rounded-md border border-delta-bad/40 bg-bg px-2.5 py-1 text-xs font-semibold text-delta-bad hover:bg-delta-bad/10 disabled:opacity-50"
+              >
+                {mergingToMain ? 'Retrying…' : 'Retry merge'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-line pb-2.5 pt-2.5" data-testid="epic-meta">
           <MetaItem label="opened" value={formatWhen(promptSession.createdAt)} />

@@ -432,5 +432,12 @@ contextBridge.exposeInMainWorld('api', {
      *  'needs_merge_resolution', reason }` on a real conflict (branch +
      *  worktree dir left intact for manual resolution). */
     mergeToMain: (payload) => ipcRenderer.invoke('promptSessions:merge-to-main', payload),
+    /** Reads the per-project "disable Epic worktree isolation" UI toggle
+     *  (main-side epicWorktreeProjectConfig.cjs). */
+    getWorktreeDisabled: (payload) => ipcRenderer.invoke('promptSessions:get-worktree-disabled', payload),
+    /** Writes the per-project "disable Epic worktree isolation" UI toggle —
+     *  the UI-reachable equivalent of setting SM_EPIC_WORKTREE_DISABLE=1 for
+     *  just this one project rather than machine-wide. */
+    setWorktreeDisabled: (payload) => ipcRenderer.invoke('promptSessions:set-worktree-disabled', payload),
   },
 });

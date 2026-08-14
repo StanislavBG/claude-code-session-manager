@@ -86,6 +86,7 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
     briefPresent,
     localClaudeMd,
     branch,
+    worktreeIsolationDisabled,
   ] = await Promise.all([
     fileItem(userClaudeMdPath, 'CLAUDE.md', (n) => `global preferences · ${n} lines`),
     window.api.config.readText(userSettingsPath),
@@ -98,6 +99,17 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
     window.api.config.exists(`${cwd}/session-manager-operations/project-brief/brief.json`),
     fileItem(localClaudeMdPath, 'CLAUDE.local.md', (n) => `personal notes · ${n} lines`),
     window.api.app.gitBranch(cwd),
+    // Isolation not yet created for THIS Epic (it doesn't exist yet at
+    // grounding-board render time — see the header comment) — this only
+    // reports whether the capability is available/enabled for the project.
+    // Optional-chained + caught: older test/mock harnesses stub only the
+    // `config`/`app` slices of window.api, and a missing IPC surface here
+    // must degrade to "enabled" (this item's real fallback below), never
+    // throw and take the whole board down with it.
+    Promise.resolve(window.api.promptSessions?.getWorktreeDisabled?.({ cwd })).then(
+      (r) => r?.disabled ?? false,
+      () => false,
+    ),
   ])
 
   const mcpServers = (userClaudeJson.data as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
@@ -148,6 +160,15 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
       otherEpicsInProject > 0
         ? { name: `other Epics · ${otherEpicsInProject}`, detail: 'proposed/active in this project', tokK: 0, present: true }
         : { name: 'other Epics', detail: 'none yet in this project', tokK: 0, present: false },
+      // Real project-level state (branch presence + the per-project toggle),
+      // never this-specific-Epic's own worktree — that doesn't exist yet at
+      // New Epic time (see gitWorktree.cjs's createEpicWorktree, called only
+      // at the proposed->active transition).
+      worktreeIsolationDisabled
+        ? { name: 'Epic isolation', detail: 'disabled for this project', tokK: 0, present: false }
+        : branch
+          ? { name: 'Epic isolation', detail: 'git worktree per session (sm-epic/<id>)', tokK: 0, present: true }
+          : { name: 'Epic isolation', detail: 'not available — not a git repo', tokK: 0, present: false },
     ],
   }
 

@@ -18,6 +18,7 @@ import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { SettingsTelemetry } from './SettingsTelemetry'
 import { SettingsAppPrefs } from './SettingsAppPrefs'
+import { SettingsEpicIsolation } from './SettingsEpicIsolation'
 
 /**
  * Per-scope statement of WHAT FILE this screen is editing and HOW WIDELY it
@@ -232,6 +233,7 @@ function SettingsComponent() {
               <span className="ml-1.5 font-mono text-fg-faint">{activePath}</span>
             )}
           </div>
+          {scope === 'project' && cwd && <SettingsEpicIsolation cwd={cwd} />}
           {scopeNeedsCwd(scope) ? (
             <EmptyState
               title="no active project"

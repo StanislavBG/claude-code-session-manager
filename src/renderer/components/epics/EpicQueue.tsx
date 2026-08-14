@@ -26,7 +26,7 @@ import {
   type EpicDisplayStatus,
   type EpicSnapshots,
 } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, EpicInboundTag, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicInboundTag, EpicWorktreeChip, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
 import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
@@ -440,6 +440,21 @@ function useRowMenuItems(
       })
     }
   }
+  if (epic.worktree?.status === 'active') {
+    items.push({
+      label: 'Merge to main',
+      onSelect: () => {
+        usePromptSessions
+          .getState()
+          .mergeEpicToMain(epic.id)
+          .then((result) => {
+            if (result.ok) toast.info('Merged to main')
+            else toast.error(`Merge conflict — resolve in Terminal (${result.reason ?? 'unknown reason'})`)
+          })
+          .catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
+      },
+    })
+  }
   if (epic.status === 'completed') {
     items.push({
       label: 'Reopen',
@@ -614,6 +629,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           <EpicStatusChip status={status} small detail={queuedDetail} />
           <EpicKindTag kind={epic.tag} small />
           <EpicInboundTag origin={inbound} small />
+          {status !== 'completed' && <EpicWorktreeChip worktree={epic.worktree} small />}
           <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-9">{age}</span>
         </span>
         <span className="text-[13px] font-semibold text-fg leading-snug line-clamp-1" title={title}>{title}</span>

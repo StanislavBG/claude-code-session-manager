@@ -8,6 +8,8 @@ function installApi(overrides: {
   readJson?: Record<string, unknown>
   exists?: Record<string, boolean>
   branch?: string | null
+  worktreeDisabled?: boolean
+  omitPromptSessions?: boolean
 } = {}) {
   const readText = vi.fn(async (path: string) => {
     const hit = overrides.readText?.[path]
@@ -24,6 +26,13 @@ function installApi(overrides: {
   ;(window as unknown as { api: unknown }).api = {
     config: { readText, listDir, readJson, exists },
     app: { gitBranch: vi.fn(async () => overrides.branch ?? null) },
+    ...(overrides.omitPromptSessions
+      ? {}
+      : {
+          promptSessions: {
+            getWorktreeDisabled: vi.fn(async () => ({ disabled: overrides.worktreeDisabled ?? false })),
+          },
+        }),
   }
 }
 
@@ -99,5 +108,67 @@ describe('computeGroundingBoard', () => {
     const local = groups.find((g) => g.key === 'local')!
     expect(local.items.find((i) => i.name.startsWith('open Terminal tabs'))?.name).toBe('open Terminal tabs · 2')
     expect(local.items.find((i) => i.name.startsWith('other Epics'))?.name).toBe('other Epics · 3')
+  })
+
+  it('reports Epic isolation as present when the project is a git repo and the toggle is off', async () => {
+    installApi({ branch: 'main', worktreeDisabled: false })
+    const groups = await computeGroundingBoard({
+      home: '/home/bilko',
+      cwd: '/home/bilko/Projects/alpha',
+      agentPersonaPath: null,
+      agentPersonaName: null,
+      openTerminalTabsInProject: 0,
+      otherEpicsInProject: 0,
+    })
+    const local = groups.find((g) => g.key === 'local')!
+    const item = local.items.find((i) => i.name === 'Epic isolation')!
+    expect(item.present).toBe(true)
+    expect(item.detail).toContain('sm-epic')
+  })
+
+  it('reports Epic isolation as not present when the per-project toggle disables it', async () => {
+    installApi({ branch: 'main', worktreeDisabled: true })
+    const groups = await computeGroundingBoard({
+      home: '/home/bilko',
+      cwd: '/home/bilko/Projects/alpha',
+      agentPersonaPath: null,
+      agentPersonaName: null,
+      openTerminalTabsInProject: 0,
+      otherEpicsInProject: 0,
+    })
+    const local = groups.find((g) => g.key === 'local')!
+    const item = local.items.find((i) => i.name === 'Epic isolation')!
+    expect(item.present).toBe(false)
+    expect(item.detail).toBe('disabled for this project')
+  })
+
+  it('reports Epic isolation as not present when the project is not a git repo', async () => {
+    installApi({ branch: null })
+    const groups = await computeGroundingBoard({
+      home: '/home/bilko',
+      cwd: '/home/bilko/Projects/alpha',
+      agentPersonaPath: null,
+      agentPersonaName: null,
+      openTerminalTabsInProject: 0,
+      otherEpicsInProject: 0,
+    })
+    const local = groups.find((g) => g.key === 'local')!
+    const item = local.items.find((i) => i.name === 'Epic isolation')!
+    expect(item.present).toBe(false)
+    expect(item.detail).toContain('not a git repo')
+  })
+
+  it('degrades to "enabled" without throwing when window.api has no promptSessions surface at all', async () => {
+    installApi({ branch: 'main', omitPromptSessions: true })
+    const groups = await computeGroundingBoard({
+      home: '/home/bilko',
+      cwd: '/home/bilko/Projects/alpha',
+      agentPersonaPath: null,
+      agentPersonaName: null,
+      openTerminalTabsInProject: 0,
+      otherEpicsInProject: 0,
+    })
+    const local = groups.find((g) => g.key === 'local')!
+    expect(local.items.find((i) => i.name === 'Epic isolation')?.present).toBe(true)
   })
 })

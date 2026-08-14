@@ -179,9 +179,18 @@ export function EpicWorktreeChip({ worktree, small }: { worktree: PromptSession[
   }
   const tone = WORKTREE_TONE[worktree.status]
   const label = worktree.status === 'active' ? `isolated · ${worktree.branch}` : tone.label
+  // Branch/dir is only still meaningful while the checkout is live (active or
+  // conflicted, never deleted); a merged/disabled worktree's dir is already
+  // torn down (cleanupEpicWorktree), so showing it would be stale.
+  const title =
+    worktree.status === 'needs_merge_resolution' && worktree.conflictReason
+      ? worktree.conflictReason
+      : worktree.status === 'active' || worktree.status === 'needs_merge_resolution'
+        ? `${worktree.branch} · ${worktree.dir}`
+        : tone.label
   return (
     <span
-      title={worktree.status === 'needs_merge_resolution' && worktree.conflictReason ? worktree.conflictReason : `${worktree.branch} · ${worktree.dir}`}
+      title={title}
       data-testid="epic-worktree-chip"
       className={`inline-flex items-center gap-1.5 shrink-0 rounded-full font-semibold tracking-wide whitespace-nowrap ${sizeClass} ${tone.bg} ${tone.text}`}
     >

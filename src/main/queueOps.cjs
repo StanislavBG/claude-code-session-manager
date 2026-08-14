@@ -287,19 +287,44 @@ async function lintAll() {
 // ────────────────────────────────────────────── archive
 
 /**
- * Move PRDS_DIR/<slug>.md → PRDS_ARCHIVE_DIR/<ISO>/<slug>.md.
+ * Move <srcDir>/<slug>.md → <srcDir>/../prds-archived/<ISO>/<slug>.md.
  * Atomic rename. Path containment checks both source and destination.
  * Never deletes — always reversible from prds-archived/.
  */
-async function archiveOne(slug, archiveDir) {
+/**
+ * The archive directory a PRD found in `srcDir` belongs in: `prds-archived/`
+ * SIBLING to its own `prds/`, which for a per-project PRD is
+ * `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds-archived/`.
+ *
+ * PRD sources are per-project and per-Epic (CLAUDE.md's TAB → EPIC → PRD
+ * model); the machine-level `~/.claude/session-manager/scheduled-plans/` tree
+ * holds only run logs and PRD_AUTHORING.md. Archiving therefore has to follow
+ * the source, not a fixed global constant — otherwise a manual archive yanks a
+ * PRD out of its Epic and strands it in the retired global tree, splitting one
+ * Epic's history across two locations (observed 2026-08-13 with
+ * 1035-epic-worktree-ui-surfacing, whose three chain siblings sat in the Epic's
+ * own prds-archived/ while it landed under scheduled-plans/). A PRD still in
+ * the legacy flat `PRDS_DIR` resolves to `ROOT/prds-archived` here, which is
+ * exactly the old behavior — so that case is unchanged.
+ */
+function archiveDirForSource(srcDir, ts) {
+  return path.join(path.dirname(srcDir), 'prds-archived', ts);
+}
+
+async function archiveOne(slug, ts) {
   if (!SLUG_RE.test(slug)) return { ok: false, slug, error: 'invalid slug' };
   const srcDir = await findPrdDir(slug);
   if (!srcDir) return { ok: false, slug, error: 'not found in any PRDs dir' };
   const src = path.resolve(path.join(srcDir, `${slug}.md`));
   if (!src.startsWith(srcDir + path.sep)) return { ok: false, slug, error: 'path escape (src)' };
+  // Destination is derived per-slug (not once for the whole batch): a single
+  // archive call can span several projects/Epics, and each PRD has to land
+  // beside its own source.
+  const archiveDir = archiveDirForSource(srcDir, ts);
   const dst = path.resolve(path.join(archiveDir, `${slug}.md`));
-  if (!dst.startsWith(PRDS_ARCHIVE_DIR + path.sep)) return { ok: false, slug, error: 'path escape (dst)' };
+  if (!dst.startsWith(path.resolve(archiveDir) + path.sep)) return { ok: false, slug, error: 'path escape (dst)' };
   try {
+    await fsp.mkdir(archiveDir, { recursive: true });
     await fsp.rename(src, dst);
     return { ok: true, slug, archivedTo: dst };
   } catch (e) {
@@ -321,17 +346,14 @@ async function archiveMany(slugs) {
   if (!Array.isArray(slugs) || slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
   }
+  // One timestamp for the whole batch (so a multi-slug archive reads as one
+  // event), but each slug's destination DIRECTORY is resolved from its own
+  // source inside archiveOne — see archiveDirForSource. mkdir moved in there
+  // for the same reason: there is no single batch-wide dir to pre-create.
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
-  try {
-    await fsp.mkdir(archiveDir, { recursive: true });
-  } catch (e) {
-    logs.writeLine({ level: 'error', scope: 'queueOps', message: 'archiveMany: mkdir failed', meta: { error: e?.message } });
-    return { ok: false, archived: 0, archivedTo: null, results: [], error: e?.message ?? 'mkdir failed' };
-  }
   const results = [];
   for (const slug of slugs) {
-    results.push(await archiveOne(slug, archiveDir));
+    results.push(await archiveOne(slug, ts));
   }
   const archived = results.filter((r) => r.ok).length;
   const archivedSlugs = results.filter((r) => r.ok).map((r) => r.slug);
@@ -340,7 +362,12 @@ async function archiveMany(slugs) {
       logs.writeLine({ level: 'warn', scope: 'queueOps', message: 'archiveMany: retireCompletedSlugs failed', meta: { error: e?.message } });
     });
   }
-  return { ok: true, archived, archivedTo: archiveDir, results };
+  // archivedTo reports where the batch actually landed. With per-source
+  // destinations that is only well-defined when every move agreed on one dir
+  // (the common single-project case); a genuinely cross-project batch reports
+  // null rather than naming one project's dir as if it covered them all.
+  const dirs = new Set(results.filter((r) => r.ok).map((r) => path.dirname(r.archivedTo)));
+  return { ok: true, archived, archivedTo: dirs.size === 1 ? [...dirs][0] : null, results };
 }
 
 // ────────────────────────────────────────────── auto-archive completed PRDs
@@ -597,6 +624,7 @@ module.exports = {
   retagMany,
   PRDS_DIR,
   PRDS_ARCHIVE_DIR,
+  archiveDirForSource,
   candidatePrdsDirs,
   findPrdDir,
 };

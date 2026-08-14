@@ -40,8 +40,26 @@ const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager',
 const LEGACY_QUEUE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json');
 const STATE_SUBPATH = ['session-manager-operations', 'scheduler', 'state'];
 
+/**
+ * A project's `session-manager-operations/scheduler/state/` directory.
+ *
+ * The cwd MUST be absolute. `path.join()` happily accepts a relative one and
+ * silently resolves it against `process.cwd()`, which turns a bad caller into
+ * a whole ops root materialized in the wrong place — observed live on
+ * 2026-08-13 as five stray `session-manager-operations/scheduler/state/
+ * queue.json` trees under source directories (`src/main/lib/`,
+ * `src/renderer/state/`, …), each created by a caller that passed a
+ * repo-relative path like `src/main/lib`. That is the same ops-root hazard
+ * gitWorktree.cjs's header comment describes, reached from the other end: not
+ * a worktree dir substituted for a project cwd, but a relative fragment
+ * accepted as one. Fail closed — a caller that cannot name an absolute
+ * project cwd has no business writing that project's queue.
+ */
 function projectStateDir(cwd) {
   if (!cwd || typeof cwd !== 'string') throw new Error('projectStateDir: cwd is required');
+  if (!path.isAbsolute(cwd)) {
+    throw new Error(`projectStateDir: cwd must be an absolute path, got "${cwd}"`);
+  }
   return path.join(cwd, ...STATE_SUBPATH);
 }
 

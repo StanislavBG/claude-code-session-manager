@@ -112,6 +112,7 @@ export default defineConfig({
       'src/main/lib/__tests__/epicWorktreeMint.test.cjs',
       'src/main/lib/__tests__/epicWorktreeBoot.test.cjs',
       'src/main/lib/__tests__/epicWorktreeMerge.test.cjs',
+      'src/main/lib/__tests__/opsRootAbsoluteCwd.test.cjs',
       'src/main/lib/__tests__/epicWorktreeProjectConfig.test.cjs',
       'src/main/__tests__/pty-epic-worktree-spawn-cwd.test.cjs',
       'src/main/__tests__/chatRunner-epic-worktree-execcwd.test.cjs',

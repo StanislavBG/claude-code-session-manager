@@ -72,8 +72,17 @@ function activeProjectCwds(maxAgeMin = 90, {
 
   function addCwd(cwd) {
     if (!cwd || typeof cwd !== 'string') return;
+    // Must be ABSOLUTE. A relative fragment would pass the statSync below
+    // whenever it happens to resolve against THIS process's own cwd, and
+    // every consumer (queueStore.projectStateDir, prdLocations) then joins
+    // it into an ops-root path that lands somewhere arbitrary. Callers key
+    // whole per-project state off these strings — a project is a cwd, and a
+    // cwd is an absolute path.
+    if (!path.isAbsolute(cwd)) return;
     if (seen.has(cwd) || result.length >= maxCwds) return;
-    try { fs.statSync(cwd); } catch { return; } // must exist on disk
+    // Must exist AND be a directory — a transcript naming a since-deleted
+    // path, or a file, is not a project.
+    try { if (!fs.statSync(cwd).isDirectory()) return; } catch { return; }
     seen.add(cwd);
     result.push(cwd);
   }

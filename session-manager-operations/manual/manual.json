@@ -2,7 +2,7 @@
   "version": "1.4.1",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
-  "documentsAppVersion": "0.72.0",
+  "documentsAppVersion": "0.73.0",
   "releasedAt": "2026-08-08",
   "chapters": [
     {

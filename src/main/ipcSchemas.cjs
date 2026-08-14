@@ -203,6 +203,13 @@ const promptSessionsCreateEpic = z.object({
   sections: z.array(EpicIntakeSectionSchema).max(200).optional(),
 });
 
+// Renderer entry point for creating an Epic's isolated git worktree
+// (lib/epicWorktreeMint.cjs) at the proposed->active transition — PRD 1033.
+const promptSessionsCreateWorktree = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_ID_RE),
+});
+
 // ──────────────────────────────────────────── Sessions
 const sessionsPayload = z.object({
   tabs: z.array(z.object({
@@ -909,6 +916,7 @@ module.exports = {
     promptSessionTranscriptRead,
     promptSessionsMergeActiveIndex,
     promptSessionsCreateEpic,
+    promptSessionsCreateWorktree,
     auditLogAppend,
     agentMemoryList,
     agentMemoryGet,

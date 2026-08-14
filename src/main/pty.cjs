@@ -21,6 +21,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
+const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
 // the remediation message so the user can cd there and rebuild.
@@ -159,6 +160,15 @@ class PtyManager {
 
     const shell = process.env.SHELL || '/bin/bash';
     console.log('[pty] spawning shell', shell);
+    // Tab ID = claudeSessionId (see CLAUDE.md), so for an Epic-attached tab
+    // this resolves the Epic's own record in `cwd`'s active-index.json and
+    // returns its isolated worktree dir when one exists — `cwd` itself is
+    // NEVER repointed; only this actual PTY spawn option is. See
+    // epicSpawnCwd.cjs's header comment (the ops-root hazard) for why.
+    const spawnCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: tabId });
+    if (spawnCwd !== cwd) {
+      console.log(`[pty] tabId=${tabId} isolated in worktree ${spawnCwd}`);
+    }
     let proc;
     try {
       // Interactive login shell so aliases / nvm / PATH resolve correctly.
@@ -166,7 +176,7 @@ class PtyManager {
         name: 'xterm-256color',
         cols,
         rows,
-        cwd,
+        cwd: spawnCwd,
         env,
       });
     } catch (err) {

@@ -124,6 +124,7 @@ function resolveOriginSessionId(cwd, epicId) {
 }
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
+const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
@@ -4965,6 +4966,19 @@ async function init() {
       await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds]);
     } catch (e) {
       console.error('[scheduler] boot worktree reconciliation failed', e?.message);
+    }
+
+    // Epic worktree boot reconciliation (PRD 1033): same sweep, epic kind —
+    // reaps only a worktree whose owning Epic is no longer 'active' in that
+    // project's own active-index.json (see epicWorktreeBoot.cjs). Reuses the
+    // same known-cwd set as the job sweep above; best-effort, never blocks
+    // the rest of boot.
+    try {
+      const worktreeCwds = new Set(bootSnap.jobs.map((j) => j.cwd).filter(Boolean));
+      worktreeCwds.add(DEFAULT_PROJECT_CWD);
+      await reconcileEpicWorktreesOnBoot([...worktreeCwds]);
+    } catch (e) {
+      console.error('[scheduler] boot epic-worktree reconciliation failed', e?.message);
     }
 
     const { immediate: immediateSlugs, deferred: deferredSlugs } = partitionBootOrphans(bootSnap.jobs);

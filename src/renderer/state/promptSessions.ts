@@ -475,6 +475,29 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       toast.error(`Could not start "${title}" — ${msg}. Reopened for review.`)
     })
     emitAuditEvent('epic_approve', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
+    // Fire-and-forget: creates this Epic's isolated git worktree (main-side
+    // gitWorktree.cjs's createEpicWorktree, PRD 1033) so its Terminal/Chat
+    // spawn can run isolated from every sibling Epic on this project. Never
+    // awaited and never blocks the transition above — approveProposed must
+    // stay synchronous (see its own comment). Resolves to null on any
+    // failure (not a repo / dirty base tree / disabled / cap reached), which
+    // simply leaves `worktree` unset and the Epic proceeds exactly as today.
+    if (typeof window !== 'undefined' && window.api?.promptSessions?.createWorktree) {
+      window.api.promptSessions
+        .createWorktree({ cwd: session.cwd, epicId: promptSessionId })
+        .then((worktree) => {
+          if (!worktree) return
+          // Only settle onto a session that's still 'active' under this same
+          // id — a completed/deleted Epic (or one a concurrent call already
+          // patched) must never have a worktree grafted back onto it.
+          const current = get().sessions[promptSessionId]
+          if (!current || current.status !== 'active') return
+          const withWorktree = { ...current, worktree }
+          set({ sessions: { ...get().sessions, [promptSessionId]: withWorktree } })
+          persistActiveIndex(session.cwd, get().sessions, get().events).catch(() => {})
+        })
+        .catch(() => {})
+    }
     return approved
   },
   appendPromptSessionEvent: (promptSessionId, event) => {

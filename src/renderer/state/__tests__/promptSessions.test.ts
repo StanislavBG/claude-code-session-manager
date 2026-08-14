@@ -41,6 +41,10 @@ function installWindowApiMock() {
       onEventAppended: vi.fn(),
       mergeActiveIndex: vi.fn().mockResolvedValue({ sessions: {}, events: {} }),
       create: fakePromptSessionsCreate(),
+      // Defaults to null (no worktree) — matches createEpicWorktreeViaIpc's
+      // own "never rejects, null on any failure" contract. Tests that care
+      // about the success path override this per-call.
+      createWorktree: vi.fn().mockResolvedValue(null),
     },
     auditLog: {
       append: vi.fn().mockResolvedValue({ ok: true }),
@@ -1624,5 +1628,82 @@ describe('audit log emission (PRD 940)', () => {
       )
     })
     warnSpy.mockRestore()
+  })
+})
+
+describe('approveProposed epic worktree creation (PRD 1033)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('fires createWorktree with the Epic cwd/id and patches worktree onto the session once it resolves — never blocking the sync transition', async () => {
+    const api = installWindowApiMock()
+    let resolveCreate!: (v: unknown) => void
+    api.promptSessions.createWorktree.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve }))
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    const approved = usePromptSessions.getState().approveProposed(proposed.id, 'EpicApprovalBar')
+
+    // The transition itself is synchronous and unblocked by the still-pending IPC call.
+    expect(approved?.status).toBe('active')
+    expect(approved?.worktree).toBeUndefined()
+    expect(api.promptSessions.createWorktree).toHaveBeenCalledWith({ cwd: '/proj', epicId: proposed.id })
+
+    const worktree = { dir: '/tmp/sm-epic-worktrees/abc/epic-1', branch: `sm-epic/${proposed.id}`, baseCwd: '/proj', status: 'active' as const }
+    resolveCreate(worktree)
+
+    await vi.waitFor(() => {
+      expect(usePromptSessions.getState().sessions[proposed.id].worktree).toEqual(worktree)
+    })
+  })
+
+  it('leaves worktree unset when createWorktree resolves null (not a repo / dirty / disabled / cap reached)', async () => {
+    const api = installWindowApiMock()
+    api.promptSessions.createWorktree.mockResolvedValue(null)
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    usePromptSessions.getState().approveProposed(proposed.id)
+
+    await vi.waitFor(() => {
+      expect(api.promptSessions.createWorktree).toHaveBeenCalled()
+    })
+    expect(usePromptSessions.getState().sessions[proposed.id].worktree).toBeUndefined()
+  })
+
+  it('never throws or blocks approveProposed when createWorktree rejects', async () => {
+    const api = installWindowApiMock()
+    api.promptSessions.createWorktree.mockRejectedValue(new Error('ipc down'))
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    expect(() => usePromptSessions.getState().approveProposed(proposed.id)).not.toThrow()
+
+    // Give the rejected promise's .catch(() => {}) a tick to settle quietly.
+    await vi.waitFor(() => {
+      expect(api.promptSessions.createWorktree).toHaveBeenCalled()
+    })
+    expect(usePromptSessions.getState().sessions[proposed.id].worktree).toBeUndefined()
+    expect(usePromptSessions.getState().sessions[proposed.id].status).toBe('active')
+  })
+
+  it('does not graft a worktree back onto an Epic that was completed while creation was still pending', async () => {
+    const api = installWindowApiMock()
+    let resolveCreate!: (v: unknown) => void
+    api.promptSessions.createWorktree.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve }))
+    const { usePromptSessions } = await import('../promptSessions')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+    usePromptSessions.getState().approveProposed(proposed.id)
+    await usePromptSessions.getState().markCompleted(proposed.id)
+
+    resolveCreate({ dir: '/tmp/late-worktree', branch: `sm-epic/${proposed.id}`, baseCwd: '/proj', status: 'active' })
+    // Flush microtasks so the .then() handler above has a chance to run.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(usePromptSessions.getState().sessions[proposed.id].worktree).toBeUndefined()
   })
 })

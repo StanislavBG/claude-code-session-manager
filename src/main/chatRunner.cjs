@@ -53,6 +53,7 @@ const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
+const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -548,13 +549,22 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
 
     if (!silent) broadcast('chat:run:started', { tabId, sessionId });
 
+    // sessionId IS the Epic's claudeSessionId for an Epic-backed tab (see
+    // comment above childEnv) — resolves to that Epic's isolated worktree
+    // dir when one exists (PRD 1033), else `cwd` unchanged. `cwd` itself is
+    // NEVER repointed: every ops-root/model/exchange resolution above and
+    // below keeps using it exactly as before — only this ACTUAL spawn cwd
+    // option does. See epicSpawnCwd.cjs's header comment (the ops-root
+    // hazard) and jobWorktree.cjs's own (execCwd vs job.cwd) for why.
+    const execCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: sessionId });
+
     // Spawn with stdin closed (mirrors scheduler's 'ignore' — prevents the
     // "claude -p stdin must be closed" gotcha from kg.cjs). stdout is piped for
     // real-time NDJSON streaming; stderr piped for error-message capture.
     let child;
     try {
       child = spawn(claudeBin, args, {
-        cwd,
+        cwd: execCwd,
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true, // own process group so killTree can SIGTERM descendants

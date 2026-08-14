@@ -1650,6 +1650,10 @@ export interface SessionManagerAPI {
      *  additive step 1 of a two-PRD chain; a later PRD routes
      *  createPromptSession through this. */
     create: (payload: PromptSessionsCreateEpicPayload) => Promise<PromptSessionsCreateEpicResult>;
+    /** Creates this Epic's isolated `git worktree` checkout
+     *  (lib/epicWorktreeMint.cjs) — resolves to the `worktree` field shape on
+     *  success, or null on any failure (never rejects). */
+    createWorktree: (payload: PromptSessionsCreateWorktreePayload) => Promise<PromptSessionsCreateWorktreeResult | null>;
   };
 }
 
@@ -1694,6 +1698,19 @@ export interface PromptSessionsCreateEpicPayload {
 export interface PromptSessionsCreateEpicResult {
   epicId: string;
   session: Record<string, unknown>;
+}
+
+// ─────────────────────────────────── PromptSessions create-worktree (main-side createEpicWorktree)
+export interface PromptSessionsCreateWorktreePayload {
+  cwd: string;
+  epicId: string;
+}
+
+export interface PromptSessionsCreateWorktreeResult {
+  dir: string;
+  branch: string;
+  baseCwd: string;
+  status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled';
 }
 
 // ─────────────────────────────────── PromptSession event-appended broadcast

@@ -417,5 +417,11 @@ contextBridge.exposeInMainWorld('api', {
      *  additive step 1 of a two-PRD chain; a later PRD routes
      *  createPromptSession through this. */
     create: (payload) => ipcRenderer.invoke('promptSessions:create-epic', payload),
+    /** Creates this Epic's isolated `git worktree` checkout (main-side
+     *  gitWorktree.cjs's createEpicWorktree) — called fire-and-forget from
+     *  approveProposed at the proposed->active transition. Resolves to the
+     *  `worktree` field shape on success, or null (not a repo / dirty base
+     *  tree / disabled / cap reached) — never rejects. */
+    createWorktree: (payload) => ipcRenderer.invoke('promptSessions:create-worktree', payload),
   },
 });

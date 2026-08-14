@@ -120,7 +120,11 @@ test('a cwd outside every allowed root is rejected before anything is merged', a
 
 test('a request with a malformed branch name is rejected by ipcSchemas validation', async () => {
   const cwd = await mkRepoCwd();
-  await expect(
-    handler(null, { cwd, epicId: 'epic-merge-y', branch: 'not-an-epic-branch', dir: '/tmp/whatever' }),
-  ).rejects.toThrow();
+  // `validated()` parses BEFORE calling the handler, so a schema rejection is
+  // a synchronous throw, not a rejected promise (ipcSchemas.cjs:851-856 —
+  // Electron's IPC harness is what turns it into a rejection at the boundary).
+  // Same assertion style as promptSessionsCreateEpicHandler.test.cjs:86-106.
+  expect(
+    () => handler(null, { cwd, epicId: 'epic-merge-y', branch: 'not-an-epic-branch', dir: '/tmp/whatever' }),
+  ).toThrow();
 });

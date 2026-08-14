@@ -116,3 +116,85 @@ test('stats at most the newest few run dirs (bound enforced)', () => {
   // too, so at most MAX_DIRS_SCANNED * 2 readFileSync calls.
   expect(readFileCalls).toBeLessThanOrEqual(MAX_DIRS_SCANNED * 2);
 });
+
+// ─── sidecar-resilience (2026-08-13) ────────────────────────────────────────
+//
+// Every branch used to `return` on the FIRST candidate dir, so an unreadable
+// or half-written sidecar in the newest run erased an older, complete terminal
+// record — the anti-resurrection guard switching itself off on exactly the
+// input it exists to survive, which lets reconcile re-derive a fresh queue row
+// and re-run an already-completed PRD. It also made MAX_DIRS_SCANNED a no-op.
+
+function memFs(files) {
+  return {
+    readdirSync: (d) => Object.keys(files[d] ?? {}),
+    existsSync: (p) => {
+      const dir = path.dirname(p);
+      const base = path.basename(p);
+      return Boolean(files[path.dirname(dir)]?.[path.basename(dir)]?.[base]);
+    },
+    readFileSync: (p) => {
+      const dir = path.dirname(p);
+      const base = path.basename(p);
+      const content = files[path.dirname(dir)]?.[path.basename(dir)]?.[base];
+      if (content === undefined) throw new Error(`ENOENT: ${p}`);
+      return content;
+    },
+  };
+}
+
+const RUNS = '/runs';
+const SLUG = '900-thing';
+
+function tree(dirs) {
+  return { [RUNS]: dirs };
+}
+
+test('an unreadable meta sidecar in the newest dir falls through to an older complete run', () => {
+  const fsImpl = memFs(tree({
+    '2026-08-14T02-00-00-000Z': { [`${SLUG}.meta.json`]: '{ not json' },
+    '2026-08-14T01-00-00-000Z': {
+      [`${SLUG}.meta.json`]: JSON.stringify({ exitCode: 0, finishedAt: 1786669013583 }),
+      [`${SLUG}.verdicts.json`]: JSON.stringify({ verdict: 'clean' }),
+    },
+  }));
+  const out = latestTerminalOutcomeForSlug(SLUG, { runsDir: RUNS, fsImpl });
+  expect(out).toBeTruthy();
+  expect(out.status).toBe('completed');
+  expect(out.runId).toBe('2026-08-14T01-00-00-000Z');
+});
+
+test('a newest run missing its verdicts sidecar falls through instead of erasing the older record', () => {
+  const fsImpl = memFs(tree({
+    '2026-08-14T02-00-00-000Z': { [`${SLUG}.meta.json`]: JSON.stringify({ exitCode: 0, finishedAt: 1 }) },
+    '2026-08-14T01-00-00-000Z': {
+      [`${SLUG}.meta.json`]: JSON.stringify({ exitCode: 0, finishedAt: 1786669013583 }),
+      [`${SLUG}.verdicts.json`]: JSON.stringify({ verdict: 'pass_no_commit_prior_run_verified' }),
+    },
+  }));
+  const out = latestTerminalOutcomeForSlug(SLUG, { runsDir: RUNS, fsImpl });
+  expect(out).toBeTruthy();
+  expect(out.status).toBe('completed');
+  expect(out.runId).toBe('2026-08-14T01-00-00-000Z');
+});
+
+test('a non-zero exit in the newest dir is still authoritative — fall-through only covers UNREADABLE sidecars', () => {
+  const fsImpl = memFs(tree({
+    '2026-08-14T02-00-00-000Z': { [`${SLUG}.meta.json`]: JSON.stringify({ exitCode: 1, finishedAt: 2 }) },
+    '2026-08-14T01-00-00-000Z': {
+      [`${SLUG}.meta.json`]: JSON.stringify({ exitCode: 0, finishedAt: 1 }),
+      [`${SLUG}.verdicts.json`]: JSON.stringify({ verdict: 'clean' }),
+    },
+  }));
+  const out = latestTerminalOutcomeForSlug(SLUG, { runsDir: RUNS, fsImpl });
+  expect(out.status).toBe('failed');
+  expect(out.runId).toBe('2026-08-14T02-00-00-000Z');
+});
+
+test('every candidate being unreadable still yields null (no invented outcome)', () => {
+  const fsImpl = memFs(tree({
+    '2026-08-14T02-00-00-000Z': { [`${SLUG}.meta.json`]: '{ nope' },
+    '2026-08-14T01-00-00-000Z': { [`${SLUG}.meta.json`]: '{ also nope' },
+  }));
+  expect(latestTerminalOutcomeForSlug(SLUG, { runsDir: RUNS, fsImpl })).toBeNull();
+});

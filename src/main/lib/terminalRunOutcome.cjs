@@ -67,7 +67,16 @@ function latestTerminalOutcomeForSlug(slug, { runsDir, fsImpl = fs } = {}) {
     try {
       meta = JSON.parse(fsImpl.readFileSync(metaPath, 'utf8'));
     } catch {
-      return null;
+      // An unreadable/half-written sidecar in THIS dir says nothing about the
+      // older ones — fall through to the next-newest candidate rather than
+      // abandoning the scan. Returning null here made the caller treat the
+      // slug as having no terminal run at all, which resurrects and re-runs
+      // an already-completed PRD (the anti-resurrection guard silently
+      // switching itself off on the one input it exists to survive). This is
+      // also what makes MAX_DIRS_SCANNED mean what its name says: before,
+      // every branch below returned on the FIRST candidate, so the newest dir
+      // was the only one ever consulted.
+      continue;
     }
 
     // meta.json's finishedAt is an epoch-ms number; callers (e.g. the
@@ -86,7 +95,10 @@ function latestTerminalOutcomeForSlug(slug, { runsDir, fsImpl = fs } = {}) {
     try {
       verdicts = JSON.parse(fsImpl.readFileSync(verdictsPath, 'utf8'));
     } catch {
-      return null;
+      // Same reasoning as the meta read above: a run whose verdicts sidecar
+      // never landed (killed between the two writes) must not erase an older,
+      // complete terminal record for this slug.
+      continue;
     }
 
     if (COMPLETED_EQUIVALENT_VERDICTS.has(verdicts.verdict)) {

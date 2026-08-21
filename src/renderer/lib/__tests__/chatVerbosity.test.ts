@@ -9,6 +9,8 @@ import {
   showsToolStrip,
   showsInjectedPreamble,
   ASSISTANT_CLAMP_CHARS,
+  OPENING_PROMPT_CLAMP_CHARS,
+  openingPromptClamp,
   CHAT_VERBOSITY_ORDER,
   CHAT_VERBOSITY_DISPLAY_ORDER,
   type ChatVerbosity,
@@ -234,5 +236,26 @@ describe('clampTurnText', () => {
     expect(r.truncated).toBe(true)
     expect(r.hiddenChars).toBeGreaterThan(0)
     expect(r.body.length + r.hiddenChars).toBe(text.length)
+  })
+})
+
+describe('openingPromptClamp', () => {
+  it('CORE: clamps the Epic opening prompt at every level except raw', () => {
+    expect(openingPromptClamp('summary')).toBe(OPENING_PROMPT_CLAMP_CHARS)
+    expect(openingPromptClamp('brief')).toBe(OPENING_PROMPT_CLAMP_CHARS)
+    expect(openingPromptClamp('standard')).toBe(OPENING_PROMPT_CLAMP_CHARS)
+    expect(openingPromptClamp('detail')).toBe(OPENING_PROMPT_CLAMP_CHARS)
+    // raw is the byte-exact record by definition.
+    expect(openingPromptClamp('raw')).toBeNull()
+  })
+
+  it('CORE: a 5k-word opening prompt clamps to a thin body with the rest recoverable', () => {
+    const huge = `Rewrite the importer.\n\n${'word '.repeat(5000)}`
+    const clamped = clampTurnText(huge, openingPromptClamp('standard'))
+    expect(clamped.truncated).toBe(true)
+    expect(clamped.body.length).toBeLessThanOrEqual(OPENING_PROMPT_CLAMP_CHARS)
+    expect(clamped.hiddenChars).toBeGreaterThan(20000)
+    // Nothing is dropped from the store — expanding restores it in full.
+    expect(clampTurnText(huge, null).body).toBe(huge)
   })
 })

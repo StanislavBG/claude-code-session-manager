@@ -32,6 +32,7 @@ import {
   levelNumber,
   showsToolStrip,
   showsInjectedPreamble,
+  openingPromptClamp,
   type ChatVerbosity,
 } from '../../lib/chatVerbosity'
 
@@ -652,6 +653,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // on a confirmation can never be hidden by it.
   const { visible: visibleTurns, hiddenCount, revealLevel } = filterTurnsByVerbosity(dedupedTurns, verbosity)
   const clampBodyChars = ASSISTANT_CLAMP_CHARS[verbosity]
+  // The Epic's first user turn is its opening prompt (see
+  // OPENING_PROMPT_CLAMP_CHARS) — a thin expandable line, not a wall of text.
+  const openingClamp = openingPromptClamp(verbosity)
   // Tool cards are a level-1/2 affordance only; at 3–5 file changes still
   // surface through the separate attachment/edited_text_file event turns.
   const toolStripVariant = showsToolStrip(verbosity) ? ('collapsible' as const) : ('hidden' as const)
@@ -1058,7 +1062,10 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
             {timeline.length === 0 && !running && (
               <div
-                className="rounded-xl border border-dashed border-rule px-6 py-8 text-center text-sm leading-relaxed text-fg-faint"
+                // A goal can run to thousands of words; cap the placeholder's
+                // height so it scrolls inside its own box rather than pushing
+                // the composer off-screen.
+                className="max-h-[40vh] overflow-y-auto rounded-xl border border-dashed border-rule px-6 py-8 text-center text-sm leading-relaxed whitespace-pre-wrap text-fg-faint"
                 data-testid="epic-seed-goal"
               >
                 {promptSession.goalText}
@@ -1100,7 +1107,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                       enableRawSessionActions={false}
                       inlineFilePreview
                       toolStripVariant={toolStripVariant}
-                      clampBodyChars={clampBodyChars}
+                      clampBodyChars={i === 0 && t.role === 'user' ? openingClamp : clampBodyChars}
                       injectedPreamble={injectedPreamble}
                       needsDecisionStyle
                       precedingUserPrompt={precedingUserPrompt}

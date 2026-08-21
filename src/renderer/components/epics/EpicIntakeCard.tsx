@@ -61,6 +61,20 @@ function groupSections(sections: EpicIntakeSection[]): SectionGroup[] {
 
 const SUMMARY_MAX = 96
 
+/**
+ * A section longer than this starts COLLAPSED regardless of its kind's
+ * DEFAULT_EXPANDED entry. `goal` is the human's own ask and normally wants to
+ * be open, but a multi-thousand-word opening prompt rendered in full pushes
+ * every reply off-screen and makes the Session details view unusable — so past
+ * this budget it degrades to the same thin one-line summary the ambient
+ * sections use, and the human expands it when they actually want to re-read it.
+ */
+const LONG_SECTION_CHARS = 400
+
+function groupChars(items: EpicIntakeSection[]): number {
+  return items.reduce((n, s) => n + s.text.length, 0)
+}
+
 function oneLineSummary(items: EpicIntakeSection[]): string {
   if (items.length === 1) {
     const t = items[0].text.replace(/\s+/g, ' ').trim()
@@ -70,7 +84,8 @@ function oneLineSummary(items: EpicIntakeSection[]): string {
 }
 
 function SectionCard({ group }: { group: SectionGroup }) {
-  const [open, setOpen] = useState(DEFAULT_EXPANDED[group.kind])
+  const long = groupChars(group.items) > LONG_SECTION_CHARS
+  const [open, setOpen] = useState(DEFAULT_EXPANDED[group.kind] && !long)
   const count = group.items.length
   return (
     <div
@@ -96,7 +111,12 @@ function SectionCard({ group }: { group: SectionGroup }) {
         )}
       </button>
       {open && (
-        <div className="grid gap-2 bg-bg px-2.5 py-2" data-testid="epic-intake-section-body">
+        // Even expanded, a long section scrolls inside its own box rather than
+        // growing the page without bound.
+        <div
+          className={`grid gap-2 bg-bg px-2.5 py-2 ${long ? 'max-h-[45vh] overflow-y-auto' : ''}`}
+          data-testid="epic-intake-section-body"
+        >
           {group.items.map((item, i) => (
             <div key={i} className="min-w-0 text-sm leading-relaxed whitespace-pre-wrap text-fg">
               {group.items.length > 1 && (

@@ -259,3 +259,22 @@ export function clampTurnText(text: string, max: number | null): ClampedText {
   const body = text.slice(0, cut).trimEnd()
   return { body, truncated: true, hiddenChars: text.length - body.length }
 }
+
+/**
+ * Character budget for the Epic's FIRST user turn — its opening prompt.
+ *
+ * That turn is not ordinary chat: it is the whole AIM briefing plus the
+ * human's own goal text, which routinely runs to thousands of words. Rendered
+ * in full it pushes every actual reply off-screen and makes the Session
+ * details view unusable, so it collapses to a thin expandable line (Turn's
+ * existing `clampBodyChars` + "Show full message" toggle) at every level
+ * except `raw`, which is the byte-exact record by definition.
+ *
+ * Distinct from ASSISTANT_CLAMP_CHARS above: this one is role- and
+ * position-scoped (first user turn) rather than verbosity-scoped.
+ */
+export const OPENING_PROMPT_CLAMP_CHARS = 400
+
+export function openingPromptClamp(level: ChatVerbosity): number | null {
+  return level === 'raw' ? null : OPENING_PROMPT_CLAMP_CHARS
+}

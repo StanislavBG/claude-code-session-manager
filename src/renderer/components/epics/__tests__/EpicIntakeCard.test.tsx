@@ -166,4 +166,52 @@ describe('EpicIntakeCard', () => {
     expect(el.querySelector('[data-testid="turn-frame-header"]')).toBeTruthy()
     expect(el.querySelector('[data-testid="epic-intake-badge"]')?.textContent).toBe('AIM briefing')
   })
+  it('CORE: a multi-thousand-word Goal collapses to a thin one-line summary instead of rendering in full', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const huge = `Rewrite the importer. ${'word '.repeat(2000)}`
+    const el = mount(
+      createElement(EpicIntakeCard, {
+        sections: [{ kind: 'goal', label: 'Goal', text: huge }],
+        at: Date.now(),
+        openingPrompt: huge,
+      }),
+    )
+    // Collapsed: summary line present, body absent — despite goal's
+    // DEFAULT_EXPANDED being true for a short goal.
+    expect(el.querySelector('[data-testid="epic-intake-section-body"]')).toBeNull()
+    const summary = el.querySelector('[data-testid="epic-intake-section-summary"]')!
+    expect(summary.textContent!.length).toBeLessThan(120)
+    expect(summary.textContent).toContain('Rewrite the importer.')
+  })
+
+  it('CORE: expanding a long Goal bounds its height rather than growing the page without limit', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const huge = `Rewrite the importer. ${'word '.repeat(2000)}`
+    const el = mount(
+      createElement(EpicIntakeCard, {
+        sections: [{ kind: 'goal', label: 'Goal', text: huge }],
+        at: Date.now(),
+        openingPrompt: huge,
+      }),
+    )
+    const toggle = el.querySelector('[data-testid="epic-intake-section-toggle"]') as HTMLButtonElement
+    act(() => toggle.click())
+    const body = el.querySelector('[data-testid="epic-intake-section-body"]')!
+    expect(body.textContent).toContain('Rewrite the importer.')
+    expect(body.className).toContain('overflow-y-auto')
+  })
+
+  it('EDGE: a SHORT goal still opens by default — the collapse is length-driven, not kind-driven', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const el = mount(
+      createElement(EpicIntakeCard, {
+        sections: [{ kind: 'goal', label: 'Goal', text: 'Fix the thing.' }],
+        at: Date.now(),
+        openingPrompt: 'Fix the thing.',
+      }),
+    )
+    const body = el.querySelector('[data-testid="epic-intake-section-body"]')!
+    expect(body.textContent).toContain('Fix the thing.')
+    expect(body.className).not.toContain('overflow-y-auto')
+  })
 })

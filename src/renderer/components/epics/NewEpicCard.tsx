@@ -3,6 +3,7 @@ import { usePromptSessions, type PromptSession } from '../../state/promptSession
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { compactPath } from '../../lib/compactPath'
+import { resolveEpicProject } from '../../lib/epicProjectScope'
 import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { composeEpicIntake } from '../../lib/epicIntake'
 import { useChat } from '../../state/chat'
@@ -200,14 +201,20 @@ export function NewEpicCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionKey])
 
-  const effectiveCwd = cwd || (activeTabCwd && knownCwds.includes(activeTabCwd) ? activeTabCwd : '') || knownCwds[0] || ''
+  // Epics are always created from within a tab's project context, and that
+  // context is the tab's cwd ALONE — never filtered through the
+  // transcript-derived known-projects list, which a brand-new project is
+  // legitimately missing from until its first session is written. See
+  // lib/epicProjectScope.ts. The selector only earns its place on screen when
+  // there is no active tab at all; otherwise it's a second way to change
+  // something already decided by which tab is open.
+  const { cwd: effectiveCwd, showSelector: showProjectSelector } = resolveEpicProject({
+    picked: cwd,
+    activeTabCwd,
+    knownCwds,
+  })
   const trimmedGoal = goal.trim()
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
-  // Epics are always created from within a tab's project context — the
-  // selector only earns its place on screen when that context is missing
-  // (no active tab, or its cwd isn't a known project). Otherwise it's a
-  // second way to change something already decided by which tab is open.
-  const showProjectSelector = !(activeTabCwd && knownCwds.includes(activeTabCwd))
 
   // Grounding board is real data (fs reads + existing store counts, never
   // fabricated) — computed lazily, only once "advanced" is opened, and

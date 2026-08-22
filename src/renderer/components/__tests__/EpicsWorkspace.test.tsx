@@ -135,14 +135,13 @@ describe('EpicsWorkspace', () => {
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })
 
-  it('"New Session" swaps in the creation card; picking a project + goal creates and selects the new Epic', async () => {
+  it('"New Session" swaps in the creation card and creates the Epic in the ACTIVE TAB\'s project, even a brand-new one', async () => {
     installWindowApiMock()
-    // Active tab's cwd deliberately NOT a known project, so NewEpicCard
-    // still shows its own project selector (it collapses to a static label
-    // once the active tab's cwd is already a known project) — this test is
-    // exercising that selector, not EpicsWorkspace's own scoping. A tab must
-    // stay active, though: EpicsWorkspace itself now shows an empty state
-    // with no "New Session" entry point at all when no tab is active.
+    // Active tab's cwd is deliberately NOT a known project — i.e. a project
+    // opened for the first time, with no ~/.claude/projects/ transcript
+    // folder yet. There is no project selector to pick from: the tab IS the
+    // project (lib/epicProjectScope.ts). This used to fall through to
+    // knownCwds[0] and open the first session against a different project.
     useSessions.setState({
       tabs: [{ ...ALPHA_TAB, id: 'tab-gamma', sessionId: 'tab-gamma', cwd: '/home/bilko/Projects/gamma' }],
       activeTabId: 'tab-gamma',
@@ -155,16 +154,13 @@ describe('EpicsWorkspace', () => {
     })
     expect(el.querySelector('[data-testid="new-epic-card"]')).not.toBeNull()
 
-    const select = el.querySelector('[data-testid="new-prompt-cwd"]') as HTMLSelectElement
+    expect(el.querySelector('[data-testid="new-prompt-cwd"]')).toBeNull()
+    expect(el.querySelector('[data-testid="new-prompt-cwd-static"]')?.textContent).toContain('gamma')
     const setNativeValue = (elm: HTMLSelectElement | HTMLTextAreaElement, value: string) => {
       const proto = elm instanceof HTMLSelectElement ? window.HTMLSelectElement.prototype : window.HTMLTextAreaElement.prototype
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
       setter.call(elm, value)
     }
-    act(() => {
-      setNativeValue(select, '/home/bilko/Projects/beta')
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-    })
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
     act(() => {
       setNativeValue(goal, 'a brand new goal')
@@ -180,7 +176,7 @@ describe('EpicsWorkspace', () => {
     // Sliced to the first 4 args — openingPrompt/sections (trailing args,
     // PRD session-chat-conversion-into-simplified-chat) are covered by
     // NewEpicCard.test.tsx's own dedicated tests.
-    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual(['/home/bilko/Projects/beta', 'a brand new goal', 'feature', 'NewEpicCard'])
+    expect(createPromptSessionSpy.mock.calls[0].slice(0, 4)).toEqual(['/home/bilko/Projects/gamma', 'a brand new goal', 'feature', 'NewEpicCard'])
     expect(el.querySelector('[data-testid="new-epic-card"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-detail"]')).not.toBeNull()
   })

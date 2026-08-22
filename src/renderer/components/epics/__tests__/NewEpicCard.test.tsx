@@ -76,6 +76,17 @@ afterEach(() => {
 })
 
 describe('NewEpicCard', () => {
+  it('grounds the session in the active tab cwd even when that project has no transcripts yet', () => {
+    // A project opened for the first time is absent from useKnownProjects()
+    // (it is derived from ~/.claude/projects/, a transcript store). It used to
+    // fall through to knownCwds[0], so the first session in a new project
+    // opened against a DIFFERENT project and had to be migrated by hand.
+    useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/brand-new' } as never], activeTabId: 't1' })
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    expect(el.querySelector('[data-testid="new-prompt-cwd"]')).toBeNull()
+    expect(el.querySelector('[data-testid="new-prompt-cwd-static"]')?.textContent).toContain('brand-new')
+  })
+
   it('disables Create until a project and a goal are present', () => {
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePromptSessions, promptSessionActiveIndexPath } from '../../state/promptSessions'
 import { useChatSignals } from '../../lib/useChatSignals'
+import { epicProjectCwds } from '../../lib/epicProjectScope'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { useEpicUsage } from '../../state/epicUsage'
@@ -86,7 +87,11 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   // ProjectsLanding's own hydrate loop. Keyed off a joined string (not the
   // `knownCwds` array itself, which useKnownProjects hands back as a fresh
   // reference every render) so this doesn't refire every render.
-  const knownCwdsKey = knownCwds.join('\n')
+  // Union'd with the cwd on screen: a project opened for the first time has no
+  // `~/.claude/projects/` transcript folder yet, so it is absent from
+  // knownCwds and its Epics would never hydrate or be watched. See
+  // lib/epicProjectScope.ts.
+  const knownCwdsKey = epicProjectCwds(knownCwds, effectiveCwd ?? null).join('\n')
   useEffect(() => {
     for (const c of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
       void usePromptSessions.getState().hydrate(c)

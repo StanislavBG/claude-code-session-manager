@@ -16,6 +16,7 @@
 'use strict';
 
 import { test, expect, afterEach } from 'vitest';
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
@@ -40,6 +41,12 @@ async function mkCwd() {
   const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-promptsessions-create-epic-'));
   config.addAllowedRoot(cwd);
   tmpDirs.push(cwd);
+  // Project-overlay fixture so the 'architect' agentType used below resolves
+  // via ensureEpic's write-time persona-existence check without depending on
+  // the host's ~/.claude/agents/ (epicMint.cjs).
+  const agentsDir = path.join(cwd, '.claude', 'agents');
+  fs.mkdirSync(agentsDir, { recursive: true });
+  fs.writeFileSync(path.join(agentsDir, 'architect.md'), '---\nname: architect\n---\nFixture persona for tests.\n');
   return cwd;
 }
 

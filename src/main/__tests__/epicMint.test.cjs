@@ -30,8 +30,8 @@ async function mkCwd() {
 }
 
 /** The New Epic UI's call shape — the only caller allowed to mint. */
-function mint(cwd, opts = {}) {
-  return ensureEpic(cwd, { mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI, ...opts });
+function mint(cwd, opts = {}, deps = {}) {
+  return ensureEpic(cwd, { mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI, ...opts }, deps);
 }
 
 function writeIndex(cwd, index) {
@@ -281,4 +281,52 @@ test('ensureEpic refuses the mint and appends an epic_mint_refused audit event w
   expect(records).toHaveLength(1);
   expect(records[0].kind).toBe('epic_mint_refused');
   expect(records[0].reason).toMatch(/forced test failure/);
+});
+
+// ─── AGENTTYPE → PERSONA FK (write-time existence check) ────────────────────
+// "throw on write, report on read" — a mint whose agentType names a persona
+// that doesn't resolve is refused outright; a persona that goes dangling
+// LATER (renamed/deleted after the Epic was minted) is legitimate history,
+// left to agentModelResolve.cjs's readPersonaModel (stays permissive) and the
+// ops-hygiene sweep to report.
+
+test('minting with an unknown agentType throws and names the two paths checked', async () => {
+  const cwd = await mkCwd();
+
+  await expect(mint(cwd, { goalText: 'bad persona ref', agentType: 'no-such-persona' }))
+    .rejects.toThrow(/no-such-persona/);
+  await expect(mint(cwd, { goalText: 'bad persona ref', agentType: 'no-such-persona' }))
+    .rejects.toThrow(new RegExp(path.join(cwd, '.claude', 'agents', 'no-such-persona.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  expect(Object.keys(readActiveIndex(cwd).sessions)).toHaveLength(0);
+});
+
+test('minting with a valid (globally-resolvable) agentType succeeds via an injected personaExists dep', async () => {
+  const cwd = await mkCwd();
+
+  const minted = await mint(cwd, {
+    goalText: 'good persona ref',
+    agentType: 'architect',
+  }, { personaExists: () => true });
+
+  expect(minted.created).toBe(true);
+  expect(readActiveIndex(cwd).sessions[minted.epicId].agentType).toBe('architect');
+});
+
+test('minting with a project-overlay-only persona succeeds', async () => {
+  const cwd = await mkCwd();
+  const overlayDir = path.join(cwd, '.claude', 'agents');
+  fs.mkdirSync(overlayDir, { recursive: true });
+  fs.writeFileSync(path.join(overlayDir, 'overlay-only.md'), '---\nname: overlay-only\n---\nbody\n');
+
+  const minted = await mint(cwd, { goalText: 'overlay persona ref', agentType: 'overlay-only' });
+
+  expect(minted.created).toBe(true);
+  expect(readActiveIndex(cwd).sessions[minted.epicId].agentType).toBe('overlay-only');
+});
+
+test('minting with no agentType at all is unaffected by the persona check', async () => {
+  const cwd = await mkCwd();
+  const minted = await mint(cwd, { goalText: 'no persona at all' });
+  expect(minted.created).toBe(true);
 });

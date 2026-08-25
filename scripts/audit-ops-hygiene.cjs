@@ -234,10 +234,68 @@ function auditPatternE() {
   };
 }
 
+/**
+ * Pattern F — referential-integrity report for the Agent/WorkType/Epic/PRD/Job
+ * ERD's unvalidated-string foreign keys (`PromptSession.agentType` -> a
+ * persona file, `PromptSession.tag` -> the WorkType union, queue-row
+ * `epicId`/`sourcePromptId` -> an Epic). "Throw on write, report on read":
+ * epicMint.cjs's ensureEpic refuses to MINT a bad reference; this pass only
+ * REPORTS references that were valid at creation and later went dangling
+ * (persona renamed/deleted, Epic archived) — that is legitimate history, not
+ * something this script repairs. Read-only, same as every other pattern here.
+ */
+function auditPatternF() {
+  const { WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
+  const { personaFileExists } = require('../src/main/lib/epicMint.cjs');
+
+  const index = readJson(path.join(SESSIONS_DIR, 'active-index.json'), null);
+  const sessions = index && typeof index.sessions === 'object' && index.sessions ? index.sessions : {};
+
+  const danglingAgentType = [];
+  const invalidTag = [];
+  for (const [epicId, session] of Object.entries(sessions)) {
+    if (!session || typeof session !== 'object') continue;
+    if (session.agentType && !personaFileExists(projectCwd, session.agentType)) {
+      danglingAgentType.push({ epicId, agentType: session.agentType });
+    }
+    if (session.tag && !WORK_TYPES.includes(session.tag)) {
+      invalidTag.push({ epicId, tag: session.tag });
+    }
+  }
+
+  const queue = readJson(QUEUE_PATH, { jobs: [] });
+  const jobs = Array.isArray(queue.jobs) ? queue.jobs : [];
+  const danglingJobRefs = [];
+  for (const job of jobs) {
+    const jobId = job.slug ?? null;
+    if (job.epicId && !Object.prototype.hasOwnProperty.call(sessions, job.epicId)) {
+      danglingJobRefs.push({ jobId, field: 'epicId', value: job.epicId });
+    }
+    if (job.sourcePromptId && !Object.prototype.hasOwnProperty.call(sessions, job.sourcePromptId)) {
+      danglingJobRefs.push({ jobId, field: 'sourcePromptId', value: job.sourcePromptId });
+    }
+  }
+
+  const totalFindings = danglingAgentType.length + invalidTag.length + danglingJobRefs.length;
+
+  return {
+    danglingAgentTypeCount: danglingAgentType.length,
+    danglingAgentType,
+    invalidTagCount: invalidTag.length,
+    invalidTag,
+    danglingJobRefCount: danglingJobRefs.length,
+    danglingJobRefs,
+    verdict: totalFindings === 0
+      ? 'CLEAN: every Epic agentType/tag and queue epicId/sourcePromptId reference resolves.'
+      : 'INVESTIGATE: dangling reference(s) found — advisory only, no repair performed (see ops-maintenance-protocol.md).',
+  };
+}
+
 function main() {
   const c = auditPatternC();
   const d = auditPatternD();
   const e = auditPatternE();
+  const f = auditPatternF();
 
   console.log('=== Pattern C: flat scheduler/prds/ ===');
   console.log(`  top-level .md files: ${c.flatTopLevelMdCount}`);
@@ -262,8 +320,23 @@ function main() {
     for (const u of e.unattributed) console.log(`    FLAG: ${u.file}`);
   }
   console.log(`  verdict: ${e.verdict}`);
+  console.log();
+  console.log('=== Pattern F: referential integrity (agentType / tag / queue epicId+sourcePromptId) ===');
+  console.log(`  dangling agentType refs: ${f.danglingAgentTypeCount}`);
+  if (f.danglingAgentType.length > 0) {
+    for (const r of f.danglingAgentType) console.log(`    FLAG: Epic ${r.epicId} -> agentType '${r.agentType}'`);
+  }
+  console.log(`  invalid tag values: ${f.invalidTagCount}`);
+  if (f.invalidTag.length > 0) {
+    for (const r of f.invalidTag) console.log(`    FLAG: Epic ${r.epicId} -> tag '${r.tag}'`);
+  }
+  console.log(`  dangling queue job refs: ${f.danglingJobRefCount}`);
+  if (f.danglingJobRefs.length > 0) {
+    for (const r of f.danglingJobRefs) console.log(`    FLAG: job ${r.jobId ?? '(no slug)'} -> ${r.field} '${r.value}'`);
+  }
+  console.log(`  verdict: ${f.verdict}`);
 
-  return { patternC: c, patternD: d, patternE: e };
+  return { patternC: c, patternD: d, patternE: e, patternF: f };
 }
 
 if (require.main === module) {
@@ -273,4 +346,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { auditPatternC, auditPatternD, auditPatternE };
+module.exports = { auditPatternC, auditPatternD, auditPatternE, auditPatternF };

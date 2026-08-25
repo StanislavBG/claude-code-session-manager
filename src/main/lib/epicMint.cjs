@@ -28,6 +28,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
@@ -117,6 +118,59 @@ function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+/**
+ * safeAgentMdPath(baseDir, agentType) — `<baseDir>/<agentType>.md`, refused
+ * (returns null) if resolving it would escape baseDir (a `..`-laced
+ * agentType). Deliberately NOT config.cjs's validatePath: that guards
+ * allowedRoots (home dir + every cwd a TAB has opened), a registry ensureEpic
+ * cannot assume the caller's cwd is already in — epicMint.cjs is a plain
+ * Node module callable from scheduler/watchdog contexts with a trusted cwd
+ * that was never opened as a TAB. Containment within baseDir is the only
+ * property that actually matters here.
+ */
+function safeAgentMdPath(baseDir, agentType) {
+  const resolvedBase = path.resolve(baseDir);
+  const withSep = resolvedBase.endsWith(path.sep) ? resolvedBase : resolvedBase + path.sep;
+  const resolved = path.resolve(resolvedBase, `${agentType}.md`);
+  return resolved.startsWith(withSep) ? resolved : null;
+}
+
+/**
+ * resolvePersonaPaths(cwd, agentType, deps) — the two on-disk locations an
+ * agentType name could resolve to, project overlay first: matches the
+ * precedence agentLibrary.cjs already documents (a project overlay at
+ * `<cwd>/.claude/agents/<name>.md` wins over the global
+ * `~/.claude/agents/<name>.md`).
+ */
+function resolvePersonaPaths(cwd, agentType, deps = {}) {
+  const projectDir = deps.projectDir || path.join(cwd, '.claude', 'agents');
+  const globalDir = deps.globalDir || path.join(os.homedir(), '.claude', 'agents');
+  return {
+    projectPath: path.join(projectDir, `${agentType}.md`),
+    globalPath: path.join(globalDir, `${agentType}.md`),
+  };
+}
+
+/**
+ * personaFileExists(cwd, agentType, deps) — true iff `agentType` resolves to
+ * a readable `.md` persona file, checking the project overlay before the
+ * global agents dir. Never throws (a traversal attempt or missing file is
+ * treated as "doesn't exist", same fail-closed spirit as
+ * agentModelResolve.cjs's readPersonaModel).
+ */
+function personaFileExists(cwd, agentType, deps = {}) {
+  const projectDir = deps.projectDir || path.join(cwd, '.claude', 'agents');
+  const globalDir = deps.globalDir || path.join(os.homedir(), '.claude', 'agents');
+  for (const baseDir of [projectDir, globalDir]) {
+    const real = safeAgentMdPath(baseDir, agentType);
+    if (!real) continue;
+    try {
+      if (fs.statSync(real).isFile()) return true;
+    } catch { /* not found or unreadable — keep checking */ }
+  }
+  return false;
+}
+
 function slugify(text) {
   return String(text || 'epic')
     .toLowerCase()
@@ -168,7 +222,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, mintAuthority = null } = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, mintAuthority = null } = {}, deps = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -227,6 +281,23 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
         + 'approveProposed, never through ensureEpic()';
       appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason });
       throw new Error(reason);
+    }
+
+    // WRITE-TIME FK CHECK (throw on write, report on read — see this file's
+    // header + agentModelResolve.cjs's readPersonaModel, which is the READ
+    // side of this same FK and stays permissive on purpose). A mint whose
+    // agentType names a persona that doesn't resolve is a bug in the caller
+    // (a typo, or a persona deleted between the picker loading and the mint
+    // landing) — refuse it now rather than silently orphaning the Epic.
+    if (agentType) {
+      const checkPersonaExists = deps.personaExists || personaFileExists;
+      if (!checkPersonaExists(cwd, agentType, deps)) {
+        const { projectPath, globalPath } = resolvePersonaPaths(cwd, agentType, deps);
+        const reason = `agentType '${agentType}' does not resolve to a readable persona file — checked `
+          + `${projectPath} and ${globalPath}`;
+        appendAuditEvent('epic_mint_refused', { cwd, epicId: explicitEpicId ?? null, status, reason });
+        throw new Error(`ensureEpic: ${reason}`);
+      }
     }
 
     const epicId = `${slugify(goalText)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -358,6 +429,8 @@ module.exports = {
   removeEpic,
   activeIndexPath,
   readActiveIndex,
+  personaFileExists,
+  resolvePersonaPaths,
   // Exported so lib/activeIndexMerge.cjs's renderer-facing merge IPC handler
   // serializes through the SAME lock instance as ensureEpic/
   // appendPrdCreatedEvent (module-level Map, shared via Node's require

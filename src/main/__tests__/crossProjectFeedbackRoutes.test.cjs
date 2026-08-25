@@ -62,6 +62,13 @@ async function mkProject({ managed = true } = {}) {
   config.addAllowedRoot(cwd);
   tmpDirs.push(cwd);
   if (managed) fs.mkdirSync(path.join(cwd, 'session-manager-operations'), { recursive: true });
+  // Project-overlay fixture for the DEFAULT_FEEDBACK_AGENT ('architect') —
+  // ensureEpic's write-time persona-existence check (epicMint.cjs) now
+  // requires a real persona file to mint against; this keeps these tests
+  // hermetic instead of depending on the host's ~/.claude/agents/.
+  const agentsDir = path.join(cwd, '.claude', 'agents');
+  fs.mkdirSync(agentsDir, { recursive: true });
+  fs.writeFileSync(path.join(agentsDir, 'architect.md'), '---\nname: architect\n---\nFixture persona for tests.\n');
   return fs.realpathSync(cwd);
 }
 

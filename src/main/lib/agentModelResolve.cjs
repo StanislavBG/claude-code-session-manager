@@ -27,6 +27,35 @@ const configMgr = require('../config.cjs');
 /** The hardcoded floor every branch of resolveEpicModel falls back to — --model must never be omitted (CLAUDE.md "Automation model pinning"). */
 const FALLBACK_MODEL = 'sonnet';
 
+// READ side of the agentType FK (write side: epicMint.cjs's ensureEpic —
+// "throw on write, report on read"). A persona can legitimately be renamed
+// or deleted after an Epic was created against it; that Epic must keep
+// loading (this module's whole contract is "never throws"), but the
+// dangling reference should still be visible somewhere. Logged at most once
+// per (cwd, agentType) so a headless launch that resolves the same Epic's
+// model on every turn doesn't flood opsErrorLog's daily file.
+const loggedDanglingPersonas = new Set();
+
+function logDanglingPersonaOnce(cwd, agentType) {
+  if (!cwd || !agentType) return;
+  const key = `${cwd}::${agentType}`;
+  if (loggedDanglingPersonas.has(key)) return;
+  loggedDanglingPersonas.add(key);
+  try {
+    // Required lazily: opsErrorLog.cjs is a leaf module with no Electron
+    // dependency, but keeping this require inside the miss path avoids
+    // paying for it on the (overwhelmingly common) hit path.
+    const { appendError } = require('./opsErrorLog.cjs');
+    appendError({
+      cwd,
+      scope: 'agentModelResolve',
+      level: 'warn',
+      message: `agentType '${agentType}' has no resolvable persona file — model resolution fell back to '${FALLBACK_MODEL}'`,
+      meta: { agentType },
+    });
+  } catch { /* logging must never break model resolution */ }
+}
+
 /**
  * Looks up the agentType an Epic (PromptSession) was created with, by the
  * Epic's own claudeSessionId — the same domain-model join `prdCreate.cjs`'s
@@ -56,12 +85,14 @@ function readPersonaModel(agentType, deps = {}) {
   try {
     real = validatePath(path.join(globalDir, `${agentType}.md`));
   } catch {
+    logDanglingPersonaOnce(deps.cwd, agentType);
     return null;
   }
   let text;
   try {
     text = fs.readFileSync(real, 'utf8');
   } catch {
+    logDanglingPersonaOnce(deps.cwd, agentType);
     return null;
   }
   const { fm } = splitFrontmatter(text);
@@ -81,7 +112,7 @@ function resolveEpicModel({ cwd, claudeSessionId, fallbackModel = FALLBACK_MODEL
   try {
     const agentType = findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps);
     if (!agentType) return fallbackModel;
-    const model = readPersonaModel(agentType, deps);
+    const model = readPersonaModel(agentType, { ...deps, cwd });
     if (!model || model === 'inherit') return fallbackModel;
     return model;
   } catch {

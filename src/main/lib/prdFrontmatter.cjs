@@ -23,6 +23,10 @@
  */
 'use strict';
 
+const { PRD_WORK_TYPES } = require('./workTypeLibrary.cjs');
+
+const PRD_TAG_VALUES = new Set(PRD_WORK_TYPES);
+
 function splitFrontmatter(raw) {
   if (typeof raw !== 'string' || !raw.startsWith('---\n')) {
     return { fm: {}, body: raw, fmLineCount: 0 };
@@ -118,11 +122,8 @@ function applyKey(fm, key, after) {
       fm.sourceTabId = String(v);
       return;
     case 'tag':
-      // Matches the TS source's applyKey exactly: a 'discussion'-tagged
-      // ticket never reaches PRD authoring, so that value is never parsed
-      // here even if present in a hand-edited file — see this file's header
-      // comment.
-      if (v === 'feature' || v === 'bug' || v === 'build') fm.tag = v;
+      // Matches the TS source's applyKey exactly — see PRD_TAG_VALUES above.
+      if (PRD_TAG_VALUES.has(v)) fm.tag = v;
       return;
     case 'createdVia':
       fm.createdVia = String(v);

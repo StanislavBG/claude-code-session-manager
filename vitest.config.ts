@@ -87,6 +87,7 @@ export default defineConfig({
       'src/main/__tests__/epicMint.test.cjs',
       'src/main/__tests__/promptSessionSchema.test.cjs',
       'src/main/__tests__/scheduleJobSchema.test.cjs',
+      'src/main/__tests__/workTypeLibrary.test.cjs',
       'src/main/__tests__/scheduleJobStatusDrift.test.cjs',
       'src/main/__tests__/scheduleJobTransitions.test.cjs',
       'src/main/__tests__/scheduleJobTransitionsGrep.test.cjs',

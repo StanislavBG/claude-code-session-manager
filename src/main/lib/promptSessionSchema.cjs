@@ -13,22 +13,14 @@
 'use strict';
 
 const { z } = require('zod');
+const { WorkTypeSchema } = require('./workTypeLibrary.cjs');
 
 // Mirrors EpicTag (src/renderer/lib/tagLibrary.ts:10) — the Epic-level
-// mission tag, NOT the same value set as ipcSchemas.cjs's scheduleRetagPrd
-// tag enum (~line 349), which only covers 5 of these 6 values ('feature',
-// 'bug', 'discussion', 'build', 'project-home-builder') and is missing
-// 'bilko-host-publisher' — the two enums describe related but distinct
-// concepts (PRD-scheduling tag vs. Epic-mission tag), so this is its own
-// definition rather than an import of that one.
-const EpicTagSchema = z.enum([
-  'feature',
-  'bug',
-  'discussion',
-  'build',
-  'project-home-builder',
-  'bilko-host-publisher',
-]);
+// mission tag. Epic tag and PRD tag (ipcSchemas.cjs's scheduleRetagPrd `tag`
+// field) are the same WorkType concept, so both validate against the shared
+// WorkTypeSchema from workTypeLibrary.cjs rather than each declaring their
+// own enum literal.
+const EpicTagSchema = WorkTypeSchema;
 
 // Mirrors EpicSource (src/renderer/state/promptSessions.ts:22-27).
 const EpicSourceSchema = z.object({

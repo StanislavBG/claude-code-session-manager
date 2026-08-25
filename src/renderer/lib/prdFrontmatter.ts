@@ -27,6 +27,13 @@
  * a recognized key the caller actually changed.
  */
 
+import { TAG_LIBRARY, type EpicTag } from './tagLibrary'
+
+// A 'discussion'-tagged ticket never reaches PRD authoring, so that value is
+// excluded here even though the write-side schema (ipcSchemas.cjs's
+// schedulerCreatePrd) accepts it as a WorkType in general.
+const PRD_TAG_VALUES: Set<EpicTag> = new Set(TAG_LIBRARY.map((entry) => entry.tag).filter((tag) => tag !== 'discussion'))
+
 export type PrdFrontmatter = {
   title?: string
   cwd?: string
@@ -34,7 +41,7 @@ export type PrdFrontmatter = {
   parallelGroup?: number
   sourcePromptId?: string
   sourceTabId?: string
-  tag?: 'feature' | 'bug' | 'discussion' | 'build'
+  tag?: EpicTag
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -192,7 +199,7 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       fm.sourceTabId = String(v)
       return
     case 'tag':
-      if (v === 'feature' || v === 'bug' || v === 'build') fm.tag = v
+      if (typeof v === 'string' && PRD_TAG_VALUES.has(v as EpicTag)) fm.tag = v as EpicTag
       return
   }
 }

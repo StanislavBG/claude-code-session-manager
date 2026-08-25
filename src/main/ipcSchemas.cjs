@@ -9,6 +9,7 @@ const { z } = require('zod');
 const os = require('node:os');
 const path = require('node:path');
 const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
+const { WorkTypeSchema, PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -332,12 +333,9 @@ const schedulerCreatePrd = z.object({
   // forgot to pass sourcePromptId explicitly.
   originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // User-selected Feature/Bug tag (PRD 774) carried from the originating
-  // PromptTicket — deterministic, never LLM-classified. NOT the same value
-  // set as PromptSession's Epic-mission `tag` (lib/promptSessionSchema.cjs's
-  // EpicTagSchema) — that one also includes 'bilko-host-publisher'. Keep
-  // these two enums in sync deliberately if their meanings ever converge;
-  // don't assume editing one updates the other.
-  tag: z.enum(['feature', 'bug', 'discussion', 'build', 'project-home-builder']).optional(),
+  // PromptTicket — deterministic, never LLM-classified. Epic tag and PRD tag
+  // are the same WorkType concept (lib/workTypeLibrary.cjs).
+  tag: WorkTypeSchema.optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
@@ -387,8 +385,9 @@ const adminPrdFrontmatterPatch = z.object({
   sourceTabId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // 'discussion' deliberately excluded: matches prdFrontmatter.cjs's
   // parsePrdFile, which never parses that value for a PRD's tag key (a
-  // discussion-tagged Epic never reaches PRD authoring).
-  tag: z.enum(['feature', 'bug', 'build']).optional(),
+  // discussion-tagged Epic never reaches PRD authoring) — see
+  // workTypeLibrary.cjs's PrdWorkTypeSchema.
+  tag: PrdWorkTypeSchema.optional(),
   // Provenance stamp (PRD-authoring lockdown). Free-text rather than an enum
   // — 'scheduler-api' (create-time) and 'legacy-adopted' (migration/manual
   // adopt) are the two values this codebase writes today, but the field

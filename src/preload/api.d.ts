@@ -199,6 +199,11 @@ export interface McpStatusResult {
   checkedAt: number;
 }
 
+/** Mirrors WorkType (src/main/lib/workTypeLibrary.cjs) / EpicTag (tagLibrary.ts) — the
+ *  same Epic-mission taxonomy, reused here since an Agent persona's `tags` field is that
+ *  same concept, not a free-form string list. */
+export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher';
+
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
 export interface AgentPersona {
   name: string;
@@ -207,7 +212,7 @@ export interface AgentPersona {
   model: string | null;
   color: string | null;
   /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
-  tags: string[];
+  tags: AgentPersonaTag[];
   /** Project cwds whose Sessions toolbar shows a one-click Action button for this
    *  agent. The single entry `'*'` means every project. Empty = no Action button. */
   projects: string[];
@@ -234,7 +239,7 @@ export interface AgentPersonaSaveInput {
   tools: string[];
   model: string;
   color: string;
-  tags: string[];
+  tags: AgentPersonaTag[];
   /** Project cwds (or the `'*'` sentinel) this persona's Action button appears in. */
   projects?: string[];
   /** Opening instruction sent by this persona's Action button. */

@@ -466,11 +466,11 @@ ipcMain.handle('agents:list-personas', () => agentLibrary.listPersonas());
 function broadcastAgentsChanged() {
   sendIfAlive(mainWindow, 'agents:changed', {});
 }
-ipcMain.handle('agents:save-persona', async (_e, payload) => {
+ipcMain.handle('agents:save-persona', validated(schemas.agentsSavePersona, async (payload) => {
   const result = await agentLibrary.savePersona(payload);
   broadcastAgentsChanged();
   return result;
-});
+}));
 ipcMain.handle('agents:delete-persona', async (_e, payload) => {
   const result = await agentLibrary.deletePersona(payload);
   broadcastAgentsChanged();

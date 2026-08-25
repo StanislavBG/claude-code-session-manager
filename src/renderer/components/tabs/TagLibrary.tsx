@@ -6,7 +6,15 @@ import { TAG_LIBRARY, type TagLibraryEntry } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { agentTagDef } from '../../lib/agentTagDefs'
 import { toast } from '../../state/toast'
-import type { AgentPersona } from '../../../preload/api'
+import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
+
+// The write-side schema (agentPersonaSchema.cjs) only accepts these — mirrors AgentLibrary.tsx's
+// own KNOWN_PERSONA_TAGS/toKnownTags (each file keeps a component-local copy per this app's
+// "renderer stores/components are islands" convention; both derive from the same TAG_LIBRARY).
+const KNOWN_PERSONA_TAGS = new Set<string>(TAG_LIBRARY.map((t) => t.tag))
+function toKnownTags(tags: string[]): AgentPersonaTag[] {
+  return tags.filter((t): t is AgentPersonaTag => KNOWN_PERSONA_TAGS.has(t))
+}
 
 /**
  * Tag Library — read-only directory of the Epic intent-tag taxonomy, plus a
@@ -55,7 +63,7 @@ function TagLibraryComponent() {
 
   const selected = TAG_LIBRARY.find((entry) => entry.tag === selectedTag) ?? null
 
-  const assign = async (persona: AgentPersona, tag: string) => {
+  const assign = async (persona: AgentPersona, tag: AgentPersonaTag) => {
     try {
       await window.api.agents.savePersona({
         name: persona.name,
@@ -64,7 +72,10 @@ function TagLibraryComponent() {
         tools: persona.tools,
         model: persona.model ?? 'inherit',
         color: persona.color ?? '',
-        tags: [...persona.tags, tag],
+        // Drop any tag that isn't in the closed WorkType union — a persona already carrying a
+        // stale/foreign tag (permitted on read) must not fail agentPersonaSchema.cjs's
+        // write-side validation just because that leftover tag rode along.
+        tags: toKnownTags([...persona.tags, tag]),
         body: persona.body,
       })
       setAdding(false)
@@ -74,7 +85,7 @@ function TagLibraryComponent() {
     }
   }
 
-  const unassign = async (persona: AgentPersona, tag: string) => {
+  const unassign = async (persona: AgentPersona, tag: AgentPersonaTag) => {
     try {
       await window.api.agents.savePersona({
         name: persona.name,
@@ -83,7 +94,7 @@ function TagLibraryComponent() {
         tools: persona.tools,
         model: persona.model ?? 'inherit',
         color: persona.color ?? '',
-        tags: persona.tags.filter((t) => t !== tag),
+        tags: toKnownTags(persona.tags.filter((t) => t !== tag)),
         body: persona.body,
       })
       await load()
@@ -154,8 +165,8 @@ function TagLibraryDetail({
   personas: AgentPersona[] | null
   adding: boolean
   setAdding: (v: boolean) => void
-  onAssign: (persona: AgentPersona, tag: string) => void
-  onUnassign: (persona: AgentPersona, tag: string) => void
+  onAssign: (persona: AgentPersona, tag: AgentPersonaTag) => void
+  onUnassign: (persona: AgentPersona, tag: AgentPersonaTag) => void
 }) {
   const tone = ticketTagTone(entry.tag)
   const def = agentTagDef(entry.tag)

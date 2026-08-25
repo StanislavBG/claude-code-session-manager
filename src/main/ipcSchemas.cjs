@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
 const { WorkTypeSchema, PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
+const { AgentPersonaSaveSchema } = require('./lib/agentPersonaSchema.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -462,6 +463,14 @@ const setConfigSchema = z.object({
 const setSessionSlotsSchema = z.object({
   cap: z.number().int().min(0).max(10),
 }).strict();
+
+// ──────────────────────────────────────────── Agent Library
+// agents:save-persona — the Agent entity (Agent/WorkType/Epic/PRD/Job ERD)
+// had no boundary validation until this schema; Epic and Job each got theirs
+// only after a production incident (see scheduleJobSchema.cjs's header).
+// Full field-level rules live in lib/agentPersonaSchema.cjs, mirroring
+// AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
+const agentsSavePersona = AgentPersonaSaveSchema;
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
@@ -961,6 +970,7 @@ module.exports = {
     chatClassifyTicket,
     chatExternalSend,
     exchangesList,
+    agentsSavePersona,
   },
   validated,
 };

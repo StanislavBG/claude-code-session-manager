@@ -5,7 +5,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { toast } from '../../state/toast'
-import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
+import type { AgentPersona, AgentPersonaSaveInput, AgentPersonaTag } from '../../../preload/api'
 import { TAG_LIBRARY } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
@@ -51,6 +51,10 @@ interface Draft {
   tools: string[]
   model: string
   color: string
+  // string[], not AgentPersonaTag[] — mirrors AgentPersona.tags (read path stays permissive;
+  // a loaded persona may carry a stale/foreign tag). Filtered down to KNOWN_PERSONA_TAGS at
+  // save time so the write-side schema (agentPersonaSchema.cjs's closed WorkType union) never
+  // rejects a save just because the persona already had an unrecognized tag on disk.
   tags: string[]
   projects: string[]
   action: string
@@ -74,6 +78,13 @@ function toDraft(p: AgentPersona): Draft {
 }
 
 const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', color: '', tags: [], projects: [], action: '', actionLabel: '', body: '' }
+
+// The write-side schema (agentPersonaSchema.cjs) only accepts these — a persona loaded with a
+// foreign tag must have it dropped before save, not merely re-sent verbatim (see Draft.tags).
+const KNOWN_PERSONA_TAGS = new Set<string>(TAG_LIBRARY.map((t) => t.tag))
+function toKnownTags(tags: string[]): AgentPersonaTag[] {
+  return tags.filter((t): t is AgentPersonaTag => KNOWN_PERSONA_TAGS.has(t))
+}
 
 function AgentLibraryComponent() {
   const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
@@ -159,7 +170,10 @@ function AgentLibraryComponent() {
         tools: obj.tools,
         model: obj.model,
         color: obj.color,
-        tags: obj.tags,
+        // Drop any tag that isn't in the closed WorkType union before sending — a persona
+        // loaded with a stale/foreign tag (permitted on read) must not make every future save
+        // of that persona fail agentPersonaSchema.cjs's validation.
+        tags: toKnownTags(obj.tags),
         projects: obj.projects,
         action: obj.action,
         actionLabel: obj.actionLabel,

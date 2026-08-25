@@ -73,7 +73,10 @@ describe('actionTag', () => {
   })
 
   it('ignores a tag this app does not know', () => {
-    expect(actionTag({ tags: ['not-a-tag'] })).toBe('discussion')
+    // Read path stays permissive by design — an on-disk persona file can carry
+    // a stale/foreign tag value even though the write-side schema (PRD 1037)
+    // now rejects it, so this simulates that drift with an explicit cast.
+    expect(actionTag({ tags: ['not-a-tag'] as unknown as AgentPersona['tags'] })).toBe('discussion')
   })
 })
 

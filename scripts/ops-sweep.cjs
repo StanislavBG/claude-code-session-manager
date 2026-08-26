@@ -35,6 +35,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../src/main/health.cjs');
 
 const targetCwd = process.argv[2];
 if (!targetCwd) {
@@ -44,6 +45,20 @@ if (!targetCwd) {
 
 const OPS_ROOT = path.join(targetCwd, 'session-manager-operations');
 const CLAUDE_MD_PATH = path.join(targetCwd, 'CLAUDE.md');
+
+// computeClaudeMdSize(claudeMdText) -> { chars, budget, withinBudget } | null
+//
+// Reuses health.cjs's parseClaudeMdBudget/evaluateClaudeMdBudget (same
+// SIZE BUDGET header convention, same byte-length-not-String.length rule)
+// rather than re-implementing the parse here. Returns null when there's no
+// CLAUDE.md at all, matching hasClaudeMd's existing null-safe shape.
+function computeClaudeMdSize(claudeMdText) {
+  if (claudeMdText == null) return null;
+  const chars = Buffer.byteLength(claudeMdText, 'utf8');
+  const budget = parseClaudeMdBudget(claudeMdText);
+  const evaluated = evaluateClaudeMdBudget(chars, budget);
+  return { chars, budget, withinBudget: evaluated.ok };
+}
 
 function readText(p) {
   try { return fs.readFileSync(p, 'utf8'); } catch { return null; }
@@ -100,6 +115,8 @@ if (!fs.existsSync(OPS_ROOT) || !fs.statSync(OPS_ROOT).isDirectory()) {
     targetCwd,
     opsRoot: OPS_ROOT,
     error: 'no session-manager-operations/ folder found at target cwd',
+    hasClaudeMd: fs.existsSync(CLAUDE_MD_PATH),
+    claudeMdSize: computeClaudeMdSize(readText(CLAUDE_MD_PATH)),
     namespaces: [],
     findings: [],
   }, null, 2) + '\n');
@@ -107,10 +124,17 @@ if (!fs.existsSync(OPS_ROOT) || !fs.statSync(OPS_ROOT).isDirectory()) {
 }
 
 const claudeMd = readText(CLAUDE_MD_PATH);
+const claudeMdSize = computeClaudeMdSize(claudeMd);
 const namespaceDirs = listDirEntries(OPS_ROOT).filter((e) => e.isDirectory());
 
 const namespaces = [];
 const findings = [];
+if (claudeMdSize && !claudeMdSize.withinBudget) {
+  findings.push({
+    type: 'CLAUDE_MD_OVER_BUDGET',
+    detail: `CLAUDE.md is ${claudeMdSize.chars} chars, over its ${claudeMdSize.budget}-char budget by ${claudeMdSize.chars - claudeMdSize.budget}`,
+  });
+}
 
 for (const entry of namespaceDirs) {
   const name = entry.name;
@@ -196,6 +220,7 @@ process.stdout.write(JSON.stringify({
   targetCwd,
   opsRoot: OPS_ROOT,
   hasClaudeMd: !!claudeMd,
+  claudeMdSize,
   namespaceCount: namespaces.length,
   namespaces,
   findings,

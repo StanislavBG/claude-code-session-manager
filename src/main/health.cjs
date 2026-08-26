@@ -181,6 +181,37 @@ function evaluatePerProjectStall(stallSummary, lastRunAtIso, now, thresholdMs) {
   return results;
 }
 
+// Parses the "SIZE BUDGET — 12,000 chars" header line out of a project's
+// CLAUDE.md text. Tolerant of the em-dash, bold markers, the leading
+// blockquote '>', and the thousands comma. Returns null (not a throw, not a
+// default) when the line is absent or unparseable — a CLAUDE.md that
+// predates this convention has nothing to enforce, and that must stay a
+// silent skip rather than a manufactured RED.
+function parseClaudeMdBudget(text) {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/SIZE BUDGET\s*[—-]+\s*([\d,]+)\s*chars/i);
+  if (!match) return null;
+  const n = Number(match[1].replace(/,/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Pure comparison of CLAUDE.md's actual byte size against its self-declared
+// budget (see parseClaudeMdBudget). budget === null means "no budget
+// declared" — skip silently rather than treating it as 0 or infinite.
+function evaluateClaudeMdBudget(chars, budget) {
+  if (budget == null) return { ok: true, applicable: false };
+  const overage = chars - budget;
+  if (overage <= 0) return { ok: true, applicable: true, chars, budget };
+  return {
+    ok: false,
+    applicable: true,
+    chars,
+    budget,
+    overage,
+    message: `CLAUDE.md is ${chars} chars, over its ${budget}-char budget by ${overage} (see the SIZE BUDGET note in CLAUDE.md)`,
+  };
+}
+
 // Pure evaluator over migratePrds()'s { moved, skipped, unresolved } result —
 // kept separate from the fs-touching check() call site so it's directly
 // unit-testable, matching evaluateTickLiveness's pattern.
@@ -443,6 +474,23 @@ async function check() {
     };
   }
 
+  // 6.4. Check project CLAUDE.md against its own self-declared SIZE BUDGET
+  // header (see the CLAUDE.md size-budget note). Skips silently when no
+  // budget line is present — this is not required for every project.
+  try {
+    const claudeMdPath = path.join(PROJECT_ROOT, 'CLAUDE.md');
+    const claudeMdText = fs.readFileSync(claudeMdPath, 'utf8');
+    const chars = Buffer.byteLength(claudeMdText, 'utf8');
+    const budget = parseClaudeMdBudget(claudeMdText);
+    const budgetResult = evaluateClaudeMdBudget(chars, budget);
+    status.components.claude_md_budget = budgetResult;
+    if (!budgetResult.ok) {
+      status.issues.push(budgetResult.message);
+    }
+  } catch (e) {
+    status.components.claude_md_budget = { ok: true, applicable: false };
+  }
+
   // 6.5. Check ~/.claude/CLAUDE.md's @import chain resolves cleanly.
   // Informational only — a broken/stale persona import degrades instruction
   // fidelity, not app health, so it never flips status.ok to false. See
@@ -492,7 +540,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'prd_migration'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'prd_migration', 'claude_md_budget'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -515,6 +563,8 @@ module.exports = {
   evaluatePrdMigrationHealth,
   computeProjectProblemCounts,
   evaluatePerProjectStall,
+  parseClaudeMdBudget,
+  evaluateClaudeMdBudget,
   TICK_STALL_THRESHOLD_MS,
   HEARTBEAT_STALE_MS,
 };

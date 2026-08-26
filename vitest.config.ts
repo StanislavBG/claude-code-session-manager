@@ -84,6 +84,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-reap-dead-running-jobs.test.cjs',
       'src/main/__tests__/scheduler-unreadable-queue-guard.test.cjs',
       'src/main/__tests__/health-prd-migration.test.cjs',
+      'src/main/__tests__/health-claude-md-budget.test.cjs',
       'src/main/__tests__/epicMint.test.cjs',
       'src/main/__tests__/promptSessionSchema.test.cjs',
       'src/main/__tests__/scheduleJobSchema.test.cjs',

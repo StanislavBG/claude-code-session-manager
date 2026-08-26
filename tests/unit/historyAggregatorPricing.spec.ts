@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createRequire } from 'node:module'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
@@ -104,18 +104,105 @@ describe('parseJSONL tail-merge preserves byModel across appends', () => {
 })
 
 describe('remote.aggregate', () => {
-  it('returns the existing result shape plus per-model costUsd and a top-level cacheSavingsUsd', async () => {
-    const result = await remote.aggregate({})
-    expect(Array.isArray(result.rows)).toBe(true)
-    expect(typeof result.scannedMs).toBe('number')
-    expect(typeof result.cacheSavingsUsd).toBe('number')
-    for (const row of result.rows) {
-      expect(row.byModel).toBeTypeOf('object')
-      for (const bucket of Object.values(row.byModel) as any[]) {
-        expect(typeof bucket.costUsd).toBe('number')
-      }
+  // PROJECTS_DIR (historyAggregator.cjs), ROLLUP_PATH (historyRollup.cjs), and
+  // allowedRoots/WRITE_PREFIXES (config.cjs) are all computed from
+  // os.homedir() once at first require — so a bare re-require after
+  // overriding HOME would still see the real paths. Purging these three
+  // modules from require.cache and re-requiring under a fixture HOME (same
+  // pattern as src/main/__tests__/historyAggregatorIntraday.test.cjs and
+  // historyRollup.test.cjs) is what makes the scan hermetic instead of
+  // walking the developer's real ~/.claude/projects tree.
+  const MODULES_TO_RELOAD = [
+    '../../src/main/lib/historyRollup.cjs',
+    '../../src/main/historyAggregator.cjs',
+    '../../src/main/config.cjs',
+  ]
+
+  function purgeRequireCache() {
+    for (const m of MODULES_TO_RELOAD) {
+      try { delete require.cache[require.resolve(m)] } catch { /* not loaded yet */ }
     }
-    // Scans the real ~/.claude/projects tree with no filters; under full-suite
-    // fs contention this can exceed vitest's 5000ms default.
-  }, 15000)
+  }
+
+  let realHome: string | undefined
+  let tmpHome: string
+  let freshAggregator: any
+
+  beforeEach(async () => {
+    realHome = process.env.HOME
+    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-hist-aggregate-test-'))
+    process.env.HOME = tmpHome
+
+    const projectsDir = path.join(tmpHome, '.claude', 'projects')
+    const proj1 = path.join(projectsDir, 'test-project-one')
+    const proj2 = path.join(projectsDir, 'test-project-two')
+    await fsp.mkdir(proj1, { recursive: true })
+    await fsp.mkdir(proj2, { recursive: true })
+
+    const assistantLine = (
+      model: string,
+      tokens: { in: number; out: number; cacheR: number; cacheC: number },
+    ) =>
+      JSON.stringify({
+        message: {
+          role: 'assistant',
+          model,
+          usage: {
+            input_tokens: tokens.in,
+            output_tokens: tokens.out,
+            cache_read_input_tokens: tokens.cacheR,
+            cache_creation_input_tokens: tokens.cacheC,
+          },
+        },
+      })
+
+    await fsp.writeFile(
+      path.join(proj1, 'session.jsonl'),
+      [
+        assistantLine('claude-sonnet-5', { in: 1000, out: 500, cacheR: 200, cacheC: 100 }),
+        assistantLine('claude-opus-4-8-20260115', { in: 2000, out: 1000, cacheR: 0, cacheC: 0 }),
+      ].join('\n') + '\n',
+    )
+    await fsp.writeFile(
+      path.join(proj2, 'session.jsonl'),
+      assistantLine('claude-haiku-4-5-20251001', { in: 500, out: 250, cacheR: 50, cacheC: 0 }) + '\n',
+    )
+
+    purgeRequireCache()
+    freshAggregator = require('../../src/main/historyAggregator.cjs')
+  })
+
+  afterEach(async () => {
+    process.env.HOME = realHome
+    purgeRequireCache()
+    await fsp.rm(tmpHome, { recursive: true, force: true })
+  })
+
+  it('returns concrete rows/costUsd/cacheSavingsUsd computed from a hermetic fixture corpus, not the real ~/.claude/projects tree', async () => {
+    const result = await freshAggregator.remote.aggregate({})
+
+    expect(Array.isArray(result.rows)).toBe(true)
+    expect(result.rows.length).toBe(2)
+    expect(typeof result.scannedMs).toBe('number')
+
+    const row1 = result.rows.find((r: any) => r.encodedCwd === 'test-project-one')
+    const row2 = result.rows.find((r: any) => r.encodedCwd === 'test-project-two')
+    expect(row1).toBeTruthy()
+    expect(row2).toBeTruthy()
+
+    expect(row1.byModel['claude-sonnet-5'].inputTokens).toBe(1000)
+    expect(row1.byModel['claude-sonnet-5'].outputTokens).toBe(500)
+    expect(row1.byModel['claude-sonnet-5'].cacheReadTokens).toBe(200)
+    expect(row1.byModel['claude-sonnet-5'].cacheCreationTokens).toBe(100)
+    // (1000 input + 100 cache-creation) * $3/1e6 + 500 output * $15/1e6 + 200 cache-read * $0.3/1e6
+    expect(row1.byModel['claude-sonnet-5'].costUsd).toBeCloseTo(0.01086, 10)
+    // 2000 input * $15/1e6 + 1000 output * $75/1e6
+    expect(row1.byModel['claude-opus-4-8-20260115'].costUsd).toBeCloseTo(0.105, 10)
+    // 500 input * $0.8/1e6 + 250 output * $4/1e6 + 50 cache-read * $0.08/1e6
+    expect(row2.byModel['claude-haiku-4-5-20251001'].costUsd).toBeCloseTo(0.001404, 10)
+
+    // cache-read savings = cacheReadTokens * (inputRate - cacheReadRate), summed across models:
+    // sonnet 200*(3-0.3)/1e6 + opus 0 + haiku 50*(0.8-0.08)/1e6
+    expect(result.cacheSavingsUsd).toBeCloseTo(0.000576, 10)
+  })
 })

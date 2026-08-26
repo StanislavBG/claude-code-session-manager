@@ -60,6 +60,20 @@ no matter how old.
      process/routing rule for a specific skill → that skill's `SKILL.md`). Write it into the
      target file first, in that file's own voice and section, then delete the memory. Two
      overlapping memories covering the same territory fold into ONE rule, not two.
+
+     **FOLD MUST NOT GROW AN ALWAYS-LOADED FILE.** A `CLAUDE.md` is read on every turn of every
+     session; this skill is the only process that routinely writes *into* one, which makes it a
+     one-way ratchet — memory gets a sanitation pass, `CLAUDE.md` becomes its landfill, and nothing
+     ever evicts from the landfill. So:
+     - If the target `CLAUDE.md` declares a **size budget**, honour it. Check `wc -c` first. If the
+       fold would breach it, fold the *rule* into `CLAUDE.md` as one line and its rationale into
+       whichever linked reference doc that file points at — never append the full memory body.
+     - Prefer the **narrowest** always-loaded target: a specific `SKILL.md` over project
+       `CLAUDE.md`, and project over global. Only a genuinely cross-project rule earns the global file.
+     - A fold that adds more than ~2 lines to a `CLAUDE.md` is a signal you're moving narrative, not
+       a law. Compress to the imperative rule and drop the history.
+     - Report the net char delta per instruction file you touched in the step-7 summary, so a run
+       that quietly added 3k to an always-loaded file is visible rather than counted as "cleanup".
    - **TRIM.** The memory mixes durable facts with dated, closed narrative (a deploy log, a
      PRD-tracking blow-by-blow, "verified live" status updates). Keep only what's still true
      and not written down elsewhere; cut the rest. Re-verify any code claim you keep (grep it).
@@ -101,9 +115,15 @@ caller can parse it without scraping prose:
   "deleted": [{ "name": "feedback_fix_dont_ask", "reason": "baked into CLAUDE.md + develop/SKILL.md" }],
   "folded": [{ "name": "feedback_nav_microservices", "into": "CLAUDE.md ## Avoid", "reason": "merged with feedback_extend_dont_add_tabs" }],
   "trimmed": [{ "name": "web_remote_v2_mobile", "reason": "PRDs landed; cut deploy-log narrative" }],
-  "kept": [{ "name": "no_schedule_self_e2e", "reason": "active, tracks open PRD" }]
+  "kept": [{ "name": "no_schedule_self_e2e", "reason": "active, tracks open PRD" }],
+  "instructionFileDelta": [{ "file": "CLAUDE.md", "charsBefore": 11576, "charsAfter": 11702, "delta": 126, "withinBudget": true }]
 }
 ```
+
+`instructionFileDelta` is required whenever the run wrote to any always-loaded instruction file
+(`CLAUDE.md`, a `SKILL.md`). It is what makes a FOLD-heavy run that grew an always-loaded file by
+3k visible instead of counted as "cleanup" — see the FOLD rule above. Set `withinBudget: false`
+(and say so in the prose summary) if the file declares a size budget and the run breached it.
 
 Still print the normal human-readable summary too — the JSON block is additive, not a
 replacement.

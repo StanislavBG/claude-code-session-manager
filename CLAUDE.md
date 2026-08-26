@@ -6,6 +6,13 @@ tabs. Per-project state lives under `<cwd>/session-manager-operations/`.
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
 before changing anything in that area.** Reference docs, all under `session-manager-operations/architecture/`:
 
+> **SIZE BUDGET — 12,000 chars**, checked with `wc -c CLAUDE.md` before every commit. This file is
+> read on every turn of every session. A new law is ONE line here; its rationale goes in the linked
+> doc. Over budget means **split, don't append**. Correcting a wrong line does not license a longer
+> one — rewrite at the same length, move the "why" to the doc. (The file hit 65,768 chars by
+> 2026-08-24: 57 feature commits appended, 0 of 359 PRDs ever pruned, and 7 of 8 `docs(claude-md)`
+> "cleanup" commits *grew* it. This paragraph is the only reaper.)
+
 | Doc | Covers |
 | --- | --- |
 | [`domain-model.md`](session-manager-operations/architecture/domain-model.md) | TAB / EPIC / PRD, Agent+Tag, AIM prompt, worktree isolation, single-writer law |
@@ -147,9 +154,3 @@ spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for `n
 
 **Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
 `SimpleShell.tsx`, reusing `DEFAULT_PRESETS[0]`; persisted-tab hydration skipped).
-
-## Future: Files API
-
-The **Files API** (`anthropic-beta: files-api-2025-04-14`; reference by `file_id`, 500 MB/file, ZDR-ineligible)
-is not yet surfaced. Needs: new IPC namespace, separate Anthropic API key resolution, CSP changes for
-`api.anthropic.com` uploads.

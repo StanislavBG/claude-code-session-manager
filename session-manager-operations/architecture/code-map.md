@@ -55,3 +55,10 @@ The renderer uses isolated zustand stores (no cross-store subscription). Data fl
 3. **Components** consume stores via hooks (`useConfig()`, `useLiveTab()`, `useScheduleState()`, etc.). For multi-store queries, compose selectors in the component or use memoized helpers.
 4. **Panes** (SchedulePanel, History views) own local UI state (filters, collapsed sections) separate from global stores. Panes are stateless containers that accept props for the data they display.
 
+
+## Future: Files API (not yet surfaced)
+
+
+The **Files API** (`anthropic-beta: files-api-2025-04-14`; reference by `file_id`, 500 MB/file, ZDR-ineligible)
+is not yet surfaced. Needs: new IPC namespace, separate Anthropic API key resolution, CSP changes for
+`api.anthropic.com` uploads.

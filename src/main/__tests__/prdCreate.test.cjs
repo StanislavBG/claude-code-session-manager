@@ -512,6 +512,23 @@ test('POST /admin/scheduler/create-prd with sourcePromptId writes it into the cr
   }
 });
 
+test('POST /admin/scheduler/create-prd with tag writes it into the created PRD frontmatter (PRD 1041)', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/create-prd', token,
+      body: validCreateBody({ slug: 'with-a-tag', tag: 'bug' }),
+    });
+    expect(res.status).toBe(200);
+    const written = fs.readFileSync(path.join(prdsDir, `${res.json.nn}-with-a-tag.md`), 'utf8');
+    expect(written).toMatch(/^tag: bug$/m);
+  } finally {
+    await admin.stop();
+  }
+});
+
 // ──────────────────────────────────────────── originClaudeSessionId fallback
 // (2026-08-01 fix: a PRD queued via the scheduler_create_prd MCP tool from
 // inside an Epic's own chat session, without an explicit sourcePromptId,

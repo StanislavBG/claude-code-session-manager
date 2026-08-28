@@ -28,6 +28,7 @@ const {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
+const { PRD_WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
 
 const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
 
@@ -130,6 +131,11 @@ const TOOLS = [
         dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
         sourcePromptId: { type: 'string', description: "Effectively required: an EXISTING, already-human-approved Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join — NOT a PromptTicket.id (those are distinct fields). The server never mints a new Epic; if this is omitted and no Epic can be resolved (via the SM_CHAT_SESSION_ID fallback below), the write is refused with an error telling the caller to create/approve an Epic first." },
         sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
+        tag: {
+          type: 'string',
+          enum: PRD_WORK_TYPES,
+          description: 'Optional: the work type of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
+        },
       },
       required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
     },
@@ -183,7 +189,7 @@ const TOOLS = [
             parallelGroup: { type: 'number' },
             sourcePromptId: { type: 'string' },
             sourceTabId: { type: 'string' },
-            tag: { type: 'string', enum: ['feature', 'bug', 'build'] },
+            tag: { type: 'string', enum: PRD_WORK_TYPES },
           },
         },
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter)' },

@@ -20,6 +20,7 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const TAG_LIBRARY_PATH = path.join(REPO_ROOT, 'src/renderer/lib/tagLibrary.ts');
 const API_D_TS_PATH = path.join(REPO_ROOT, 'src/preload/api.d.ts');
 const IPC_SCHEMAS_PATH = path.join(REPO_ROOT, 'src/main/ipcSchemas.cjs');
+const SCHEDULER_MCP_SERVER_PATH = path.join(REPO_ROOT, 'scripts/scheduler-mcp-server.cjs');
 
 test('WORK_TYPES matches the expected 6 canonical ids in order', () => {
   expect(WORK_TYPES).toEqual([
@@ -65,5 +66,24 @@ test('ipcSchemas.cjs no longer hardcodes the full-taxonomy tag z.enum literal', 
   // The old scheduleRetagPrd literal was missing 'bilko-host-publisher'
   // (5 of the 6 WORK_TYPES values) — assert that exact stale shape is gone.
   expect(src).not.toMatch(/z\.enum\(\['feature',\s*'bug',\s*'discussion',\s*'build',\s*'project-home-builder'\]\)/);
-  expect(src).toMatch(/tag:\s*WorkTypeSchema/);
+  // Epic tag (schedulerCreateEpic-style routes) draws on the full 6-value
+  // WorkType union via EpicTagSchema, which is itself WorkTypeSchema
+  // (promptSessionSchema.cjs). PRD tag fields (schedulerCreatePrd,
+  // adminPrdFrontmatterPatch) draw on the narrower 5-value PrdWorkTypeSchema
+  // — independent values, same shared vocabulary (PRD 1041).
+  expect(src).toMatch(/tag:\s*EpicTagSchema/);
+  const prdTagMatches = [...src.matchAll(/tag:\s*PrdWorkTypeSchema/g)];
+  expect(prdTagMatches.length).toBeGreaterThanOrEqual(2);
+});
+
+test('scheduler-mcp-server.cjs requires PRD_WORK_TYPES rather than hardcoding a tag enum literal, and imports it exactly twice (scheduler_create_prd + scheduler_update_prd)', () => {
+  const { PRD_WORK_TYPES } = require('../lib/workTypeLibrary.cjs');
+  const src = fs.readFileSync(SCHEDULER_MCP_SERVER_PATH, 'utf8');
+  expect(src).toMatch(/require\(['"].*workTypeLibrary\.cjs['"]\)/);
+  const occurrences = [...src.matchAll(/enum:\s*PRD_WORK_TYPES/g)].length;
+  // scheduler_create_prd's inputSchema.tag.enum and scheduler_update_prd's
+  // frontmatter.tag.enum — exactly 2 sites, not the Epic-tag (6-value)
+  // enum on feedback_open_session's tag property.
+  expect(occurrences).toBe(2);
+  expect(PRD_WORK_TYPES).toEqual(['feature', 'bug', 'build', 'project-home-builder', 'bilko-host-publisher']);
 });

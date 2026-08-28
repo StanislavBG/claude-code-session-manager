@@ -9,7 +9,7 @@ const { z } = require('zod');
 const os = require('node:os');
 const path = require('node:path');
 const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
-const { WorkTypeSchema, PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
+const { PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/agentPersonaSchema.cjs');
 
 // ──────────────────────────────────────────── PTY
@@ -333,10 +333,13 @@ const schedulerCreatePrd = z.object({
   // within an Epic's own chat session joins that Epic even if the tool call
   // forgot to pass sourcePromptId explicitly.
   originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
-  // User-selected Feature/Bug tag (PRD 774) carried from the originating
-  // PromptTicket — deterministic, never LLM-classified. Epic tag and PRD tag
-  // are the same WorkType concept (lib/workTypeLibrary.cjs).
-  tag: WorkTypeSchema.optional(),
+  // User-selected work-type tag (PRD 774; independence from the parent
+  // Epic's own tag confirmed PRD 1041) — deterministic, never LLM-classified.
+  // Epic tag and PRD tag draw on the same WorkType vocabulary
+  // (lib/workTypeLibrary.cjs) but are independent values; 'discussion' is
+  // excluded here for the same reason adminPrdFrontmatterPatch excludes it
+  // below — a discussion-tagged Epic never reaches PRD authoring.
+  tag: PrdWorkTypeSchema.optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.

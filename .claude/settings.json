@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "node scripts/hooks/guard-prd-writes.cjs"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/hooks/guard-inline-implementation.cjs"
           }
         ]
       }

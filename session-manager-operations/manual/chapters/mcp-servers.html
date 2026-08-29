@@ -26,6 +26,14 @@ tools) and <code>bilko-host</code> (<code>node</code> against a path in the sibl
 <code>Bilko</code> repo) — both plain <code>stdio</code> servers with no <code>type</code> field
 set, since <code>stdio</code> is the default transport.</p>
 
+<p class="manual-note">On first launch, the app also registers <code>session-manager-scheduler</code>
+at <strong>User</strong> scope automatically — a project's own <code>.mcp.json</code> only reaches
+that project, so without a User-scope registration every other project on the machine silently
+lacked <code>scheduler_create_prd</code> and agents fell back to hand-writing PRDs or implementing
+inline. This is a one-shot, idempotent seed: it never overwrites an existing registration (manual
+or otherwise), and a deliberate <code>claude mcp remove</code> stays removed. Opt out with
+<code>SM_SEED_SCHEDULER_MCP_DISABLE=1</code>.</p>
+
 <figure class="manual-figure" data-figure="mcp-servers-list">
   <div class="manual-figure__frame" data-capture="MCP Servers tab, User scope, several servers with mixed connection states"></div>
   <figcaption>

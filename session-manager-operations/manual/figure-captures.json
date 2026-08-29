@@ -1,5 +1,5 @@
 {
-  "$comment": "Per-figure capture recipes consumed by scripts/capture-manual-figures.mjs. Every <figure data-figure=\"...\"> declared in session-manager-operations/manual/chapters/*.html must have a matching entry here, keyed by that id. navKey is a CommandPalette 'nav:<key>' id (see src/renderer/components/CommandPalette.tsx). steps run in order before the screenshot; each callout selector is resolved to a live DOM bounding box at capture time — never a hardcoded pixel guess.",
+  "$comment": "Per-figure capture recipes consumed by scripts/capture-manual-figures.mjs. Every <figure data-figure=\"...\"> declared in session-manager-operations/manual/chapters/*.html must have a matching entry here, keyed by that id, EXCEPT the figures listed in this script's own KNOWN_UNREACHABLE (see src/main/__tests__ / manual figure-coverage test) — those are surfaces the script genuinely cannot reach (a state it has no way to produce) and are deliberately left out rather than shipping a recipe known to fail. navKey is a CommandPalette 'nav:<key>' id (see src/renderer/components/CommandPalette.tsx). steps run in order before the screenshot; each callout selector is resolved to a live DOM bounding box at capture time — never a hardcoded pixel guess. Many selectors below are plain text=/class selectors rather than data-testid, because the underlying screens (Agent Library, Tag Library, MCP Servers, Hooks, Memory, Settings, Plugins, History, Home) carry zero data-testid attributes as of this writing — verified by grep, not assumed.",
   "first-launch": {
     "navKey": "project-home",
     "waitForSelector": "[data-testid=\"tour-statusbar\"]",
@@ -40,6 +40,184 @@
       { "arrow": "left", "selector": "button:has-text(\"Rules\")" },
       { "arrow": "up", "selector": "button:has-text(\"Project\")" },
       { "arrow": "down", "selector": "text=allow" }
+    ]
+  },
+  "home-overview": {
+    "navKey": "overview",
+    "waitForSelector": "#home-needs-you",
+    "callouts": [
+      { "arrow": "up", "selector": "text=slots busy" },
+      { "arrow": "left", "selector": "text=Projects" },
+      { "arrow": "down", "selector": "#home-needs-you" }
+    ]
+  },
+  "home-usage-meters": {
+    "navKey": "overview",
+    "waitForSelector": "text=5-hour",
+    "callouts": [
+      { "arrow": "left", "selector": "text=5-hour" },
+      { "arrow": "up", "selector": "text=Weekly" },
+      { "arrow": "right", "selector": "text=resets in" }
+    ]
+  },
+  "project-brief-overview": {
+    "navKey": "project-home",
+    "waitForSelector": "text=What is in flight",
+    "callouts": [
+      { "arrow": "up", "selector": "text=What is in flight" },
+      { "arrow": "left", "selector": "button:has-text(\"Generate My Project Home\")" },
+      { "arrow": "down", "selector": "text=generated" }
+    ]
+  },
+  "agent-library-editor": {
+    "navKey": "agent-library",
+    "steps": [
+      { "action": "click", "selector": "[data-agent-row]" }
+    ],
+    "waitForSelector": "text=default model",
+    "callouts": [
+      { "arrow": "left", "selector": "[data-agent-row]" },
+      { "arrow": "up", "selector": "text=default model" },
+      { "arrow": "right", "selector": "text=tags" }
+    ]
+  },
+  "tag-library-detail": {
+    "navKey": "tag-library",
+    "steps": [
+      { "action": "click", "selector": "button:has-text(\"#discussion\")" }
+    ],
+    "waitForSelector": "text=develop eagerness",
+    "callouts": [
+      { "arrow": "left", "selector": "button:has-text(\"#discussion\")" },
+      { "arrow": "up", "selector": "text=develop eagerness" },
+      { "arrow": "right", "selector": "text=opening framing" }
+    ]
+  },
+  "mcp-servers-list": {
+    "navKey": "mcp",
+    "waitForSelector": "button:has-text(\"test connections\")",
+    "callouts": [
+      { "arrow": "left", "selector": "button:has-text(\"User\")" },
+      { "arrow": "up", "selector": "[role=\"img\"]" },
+      { "arrow": "right", "selector": "button:has-text(\"test connections\")" }
+    ]
+  },
+  "hooks-events-view": {
+    "navKey": "hooks",
+    "steps": [
+      { "action": "click", "selector": "button:has-text(\"PreToolUse\")" }
+    ],
+    "waitForSelector": "h3:has-text(\"PreToolUse\")",
+    "callouts": [
+      { "arrow": "left", "selector": "button:has-text(\"PreToolUse\")" },
+      { "arrow": "right", "selector": "text=matcher" },
+      { "arrow": "down", "selector": "button:has-text(\"test fire\")" }
+    ]
+  },
+  "memory-clusters-view": {
+    "navKey": "memory",
+    "steps": [
+      { "action": "click", "selector": "text=Clusters" }
+    ],
+    "waitForSelector": "text=generated",
+    "callouts": [
+      { "arrow": "up", "selector": "text=generated" },
+      { "arrow": "right", "selector": "button:has-text(\"Refresh\")" },
+      { "arrow": "down", "selector": "div.border.border-line.rounded.p-3" }
+    ]
+  },
+  "settings-scope-switcher": {
+    "navKey": "settings",
+    "steps": [
+      { "action": "click", "selector": "text=Guided" }
+    ],
+    "waitForSelector": "[data-testid=\"settings-scope-note\"]",
+    "callouts": [
+      { "arrow": "left", "selector": "text=Guided" },
+      { "arrow": "up", "selector": "text=User" },
+      { "arrow": "right", "selector": "[data-testid=\"settings-scope-note\"]" }
+    ]
+  },
+  "file-explorer-browser": {
+    "navKey": "projects",
+    "steps": [
+      { "action": "click", "selector": "[data-testid=\"projects-file-tree-pane\"] >> text=package.json" }
+    ],
+    "waitForSelector": "[data-testid=\"projects-editor-pane\"]",
+    "callouts": [
+      { "arrow": "left", "selector": "[data-testid=\"projects-file-tree-pane\"]" },
+      { "arrow": "up", "selector": "[data-testid=\"projects-launcher-trigger\"]" },
+      { "arrow": "right", "selector": "[data-testid=\"projects-editor-pane\"]" }
+    ]
+  },
+  "bilko-host-publish": {
+    "navKey": "bilko-host",
+    "waitForSelector": "text=Hosted documents",
+    "callouts": [
+      { "arrow": "left", "selector": "label:has-text(\"Slug\") input" },
+      { "arrow": "up", "selector": "button:has-text(\"Prepare Bundle\")" },
+      { "arrow": "right", "selector": "text=Hosted documents" }
+    ]
+  },
+  "plugins-installed-view": {
+    "navKey": "plugins",
+    "steps": [
+      { "action": "click", "selector": "tr.cursor-pointer" },
+      { "action": "click", "selector": "text=Skills" },
+      { "action": "click", "selector": "div.font-mono.font-semibold.text-accent" }
+    ],
+    "waitForSelector": "button:has-text(\"graph\")",
+    "callouts": [
+      { "arrow": "left", "selector": "[role=\"tablist\"][aria-label=\"Plugins view\"]" },
+      { "arrow": "up", "selector": "text=Skills" },
+      { "arrow": "right", "selector": "button:has-text(\"graph\")" }
+    ]
+  },
+  "skills-installed-view": {
+    "navKey": "skills",
+    "steps": [
+      { "action": "click", "selector": "text=User" },
+      { "action": "click", "selector": "button.flex-1.min-w-0.text-left" }
+    ],
+    "waitForSelector": "[aria-label^=\"Remove \"]",
+    "callouts": [
+      { "arrow": "left", "selector": "[aria-label^=\"Remove \"]" },
+      { "arrow": "up", "selector": "text=User" },
+      { "arrow": "right", "selector": "span.rounded.border.uppercase" }
+    ]
+  },
+  "footer-todo-chip": {
+    "navKey": "terminal",
+    "steps": [
+      { "action": "click", "selector": "[data-testid=\"footer-todos\"]" }
+    ],
+    "waitForSelector": "[data-testid=\"footer-todos-popover\"]",
+    "callouts": [
+      { "arrow": "left", "selector": "[data-testid=\"footer-todos\"]" },
+      { "arrow": "up", "selector": "[data-testid=\"footer-todos\"]" },
+      { "arrow": "right", "selector": "[data-testid=\"footer-todos-popover\"] li.bg-bg-hi" }
+    ]
+  },
+  "history-dashboard": {
+    "navKey": "history",
+    "steps": [
+      { "action": "click", "selector": "text=Spend" },
+      { "action": "click", "selector": "text=30d" }
+    ],
+    "waitForSelector": "[data-testid=\"history-dashboard\"]",
+    "callouts": [
+      { "arrow": "up", "selector": "text=Spend" },
+      { "arrow": "left", "selector": "text=Monthly budget" },
+      { "arrow": "right", "selector": "table tbody tr" }
+    ]
+  },
+  "system-prompt-editor": {
+    "navKey": "system-prompt",
+    "waitForSelector": "[data-testid=\"referenced-files-rail\"]",
+    "callouts": [
+      { "arrow": "left", "selector": "[data-testid=\"referenced-files-rail\"]" },
+      { "arrow": "up", "selector": "[data-testid=\"document-editor-pane\"]" },
+      { "arrow": "right", "selector": "button:has-text(\"Save\")" }
     ]
   }
 }

@@ -169,7 +169,11 @@ export function buildCommands(): Command[] {
     },
 
     // ── nav ── (NavKey values from AlmanacSidebar.tsx — keep in sync when tabs are added/removed)
-    { id: 'nav:overview', label: 'Home — this machine', section: 'nav', emitOnly: true },
+    // Label must start with "Go to " like every other nav command below —
+    // capture-manual-figures.mjs's navigateToTab types "go to <navKey-with-spaces>"
+    // and fuzzy-matches it against this label; a label without that prefix (or
+    // without every query character present, in order) can never match.
+    { id: 'nav:overview', label: 'Go to Overview — this machine', section: 'nav', emitOnly: true },
     { id: 'nav:project-home', label: 'Go to Home', section: 'nav', emitOnly: true },
     { id: 'nav:terminal', label: 'Go to Terminal', section: 'nav', emitOnly: true },
     { id: 'nav:settings', label: 'Go to Settings', section: 'nav', emitOnly: true },
@@ -184,6 +188,9 @@ export function buildCommands(): Command[] {
     { id: 'nav:history', label: 'Go to History', section: 'nav', emitOnly: true },
     { id: 'nav:system-prompt', label: 'Go to System Prompt', section: 'nav', emitOnly: true },
     { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },
+    { id: 'nav:agent-library', label: 'Go to Agent Library', section: 'nav', emitOnly: true },
+    { id: 'nav:tag-library', label: 'Go to Tag Library', section: 'nav', emitOnly: true },
+    { id: 'nav:bilko-host', label: 'Go to Bilko Host', section: 'nav', emitOnly: true },
   ]
   return cmds
 }

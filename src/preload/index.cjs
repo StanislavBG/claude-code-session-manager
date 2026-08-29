@@ -314,6 +314,10 @@ contextBridge.exposeInMainWorld('api', {
     read: (cwd, epicId, limit) =>
       ipcRenderer.invoke('promptSessionTranscript:read', { cwd, epicId, ...(limit ? { limit } : {}) }),
   },
+  epicDelegationStats: {
+    get: (cwd, epicId, claudeSessionId) =>
+      ipcRenderer.invoke('epicDelegationStats:get', { cwd, epicId, claudeSessionId: claudeSessionId ?? null }),
+  },
   auditLog: {
     append: (kind, fields) => ipcRenderer.invoke('auditLog:append', { kind, ...fields }),
   },

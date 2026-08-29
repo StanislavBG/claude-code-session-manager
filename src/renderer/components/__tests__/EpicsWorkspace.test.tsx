@@ -69,6 +69,7 @@ function installWindowApiMock() {
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
       usageFor: vi.fn().mockResolvedValue({}),
     },
+    epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },
     config: {
       readText: vi.fn().mockResolvedValue({ exists: true, text: 'transcript content', mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),

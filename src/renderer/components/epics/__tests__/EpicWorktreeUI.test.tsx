@@ -41,6 +41,7 @@ function installWindowApiMock(opts: { mergeToMain?: ReturnType<typeof vi.fn> } =
   const api = {
     app: { gitBranch: vi.fn().mockResolvedValue(null) },
     agents: { listPersonas: vi.fn().mockResolvedValue([]) },
+    epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),

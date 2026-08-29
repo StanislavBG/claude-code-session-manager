@@ -629,6 +629,26 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     setView('discussion')
   }, [epicId])
 
+  // Delegation drift readout ("N PRDs · M inline") — derived at read time
+  // in the main process from the Epic's own live prds/ dir + its own claude
+  // session transcript (epicDelegationStats.cjs); this component only holds
+  // the fetched result, never walks the filesystem itself.
+  const [delegationStats, setDelegationStats] = useState<{ prdsQueued: number; inlineEdits: number } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    window.api.epicDelegationStats
+      .get(cwd, epicId, sessionId)
+      .then((stats) => {
+        if (!cancelled) setDelegationStats(stats)
+      })
+      .catch(() => {
+        if (!cancelled) setDelegationStats(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [cwd, epicId, sessionId])
+
   // Raw slices only — never derive inside the selector (zustand v5 compares
   // snapshots by reference; a freshly-built value re-renders forever).
   const globalVerbosity = useChatPrefs((s) => s.verbosity)
@@ -883,6 +903,17 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               {branch && (
                 <span className="font-mono text-xs text-fg-faint" data-testid="epic-detail-branch">
                   ⎇ {branch}
+                </span>
+              )}
+              {delegationStats && (
+                <span
+                  className={`font-mono text-[10.5px] ${
+                    delegationStats.inlineEdits > 0 && delegationStats.prdsQueued === 0 ? 'text-amber-400' : 'text-fg-faint'
+                  }`}
+                  data-testid="epic-delegation-stats"
+                  title="PRDs queued in this Epic's own prds/ dir vs. Write/Edit tool calls against application source in its own transcript"
+                >
+                  {delegationStats.prdsQueued} {delegationStats.prdsQueued === 1 ? 'PRD' : 'PRDs'} · {delegationStats.inlineEdits} inline
                 </span>
               )}
             </div>

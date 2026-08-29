@@ -69,6 +69,7 @@ const { registerProjectBriefIpc } = require('./projectBrief.cjs');
 const { registerProjectPagesIpc } = require('./projectPages.cjs');
 const { registerBilkoHostIpc } = require('./bilkoHost.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
+const { computeEpicDelegationStats } = require('./lib/epicDelegationStats.cjs');
 const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const heapSnapshot = require('./heapSnapshot.cjs');
@@ -810,6 +811,11 @@ ipcMain.handle('promptSessionTranscript:append', validated(schemas.promptSession
 ipcMain.handle('promptSessionTranscript:read', validated(schemas.promptSessionTranscriptRead, async ({ cwd, epicId, limit }) => {
   const turns = await promptSessionTranscript.readTurns(cwd, epicId, { limit });
   return { turns };
+}));
+// Derived-at-read-time "PRDs queued vs inline edits" counter (no writer —
+// reads the Epic's own live prds/ dir + its own claude session transcript).
+ipcMain.handle('epicDelegationStats:get', validated(schemas.epicDelegationStatsGet, async ({ cwd, epicId, claudeSessionId }) => {
+  return computeEpicDelegationStats(cwd, epicId, claudeSessionId || null);
 }));
 // Renderer Epic lifecycle trace (PRD 940) — append-only, no read/list IPC.
 // Kind allowlist enforced by schemas.auditLogAppend, not here.

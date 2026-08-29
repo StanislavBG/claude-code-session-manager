@@ -613,6 +613,17 @@ const promptSessionTranscriptRead = z.object({
   limit: z.number().int().positive().max(10_000).optional(),
 }).strict();
 
+// ──────────────────────────────────────────── Epic delegation stats
+// (derived-at-read-time "PRDs queued vs inline edits" counter surfaced on
+// the Epic card). claudeSessionId is optional — a proposed Epic that never
+// started chatting has none, and the computation just reports 0 inline
+// edits rather than throwing.
+const epicDelegationStatsGet = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_EPIC_ID_RE),
+  claudeSessionId: z.string().max(128).optional().nullable(),
+}).strict();
+
 // ──────────────────────────────────────────── Audit log (renderer Epic
 // lifecycle trace, PRD 940). Kind allowlist is enforced HERE, main-side — the
 // renderer cannot write arbitrary kinds through this channel, only the six
@@ -954,6 +965,7 @@ module.exports = {
     projectBriefUpdate,
     promptSessionTranscriptAppend,
     promptSessionTranscriptRead,
+    epicDelegationStatsGet,
     promptSessionsMergeActiveIndex,
     promptSessionsCreateEpic,
     promptSessionsCreateWorktree,

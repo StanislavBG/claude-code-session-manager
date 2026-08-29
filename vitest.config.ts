@@ -145,6 +145,7 @@ export default defineConfig({
       'scripts/__tests__/package-files.test.cjs',
       'src/main/__tests__/seedAgentPersonas.test.cjs',
       'src/main/__tests__/seedSchedulerMcp.test.cjs',
+      'src/main/lib/__tests__/epicDelegationStats.test.cjs',
     ],
     globals: true,
   },

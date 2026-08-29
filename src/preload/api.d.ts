@@ -1584,6 +1584,13 @@ export interface SessionManagerAPI {
     /** Read back an Epic's full-text turns (optionally capped to the last `limit`). Skips corrupt lines rather than throwing. */
     read: (cwd: string, epicId: string, limit?: number) => Promise<{ turns: PromptSessionTranscriptTurn[] }>;
   };
+  epicDelegationStats: {
+    /** Derived-at-read-time "did this Epic delegate?" counters: prdsQueued (live PRD files under
+     *  this Epic's own scheduler/epics/<id>/prds/ dir) and inlineEdits (Write/Edit/NotebookEdit
+     *  tool calls against src/scripts/plugins/bin in the Epic's own claude session transcript).
+     *  Read-only, no new writer — reads zero on any missing/unreadable state, never throws. */
+    get: (cwd: string, epicId: string, claudeSessionId?: string | null) => Promise<{ prdsQueued: number; inlineEdits: number }>;
+  };
   auditLog: {
     /** Append one Epic-lifecycle audit event to ~/.claude/session-manager/audit-log.jsonl.
      *  Kind allowlist is enforced main-side (ipcSchemas.cjs) — this channel is

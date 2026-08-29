@@ -71,6 +71,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const SOURCE_DIRS = ['src', 'scripts', 'plugins', 'bin'];
 const DENY_TAGS = new Set(['feature', 'bug']);
@@ -96,6 +97,35 @@ function isApplicationSource(cwd, absPath) {
   if (rel.startsWith('..') || path.isAbsolute(rel)) return false; // outside cwd
   const topLevel = rel.split(path.sep)[0];
   return SOURCE_DIRS.includes(topLevel);
+}
+
+/**
+ * The PreToolUse payload's `cwd` is the CLI process's actual spawn cwd. For
+ * an Epic running in its default isolated `git worktree` (gitWorktree.cjs,
+ * epicSpawnCwd.cjs — "both the Terminal PTY and headless Chat spawn cwd
+ * resolve to it"), that is a throwaway checkout under os.tmpdir(), which
+ * never contains `session-manager-operations/` — the ops root always lives
+ * in the real project tree (see gitWorktree.cjs's "ops-root hazard" header:
+ * "spawn cwd = worktree dir, ops-root cwd = real project cwd, always").
+ * Resolve back to the real project cwd via git's shared `.git` dir before
+ * giving up, so this guard isn't silently inert for every Epic running in
+ * its default worktree.
+ */
+function resolveOpsRootCwd(rawCwd) {
+  if (fs.existsSync(path.join(rawCwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json'))) {
+    return rawCwd;
+  }
+  try {
+    const commonDir = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd: rawCwd, encoding: 'utf8', timeout: 5000 },
+    ).trim();
+    if (!commonDir) return rawCwd;
+    return path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+  } catch {
+    return rawCwd;
+  }
 }
 
 function resolveEpicTag(cwd, sessionId) {
@@ -158,7 +188,8 @@ async function main() {
     if (!isApplicationSource(cwd, absPath)) return allow();
 
     const sessionId = typeof payload.session_id === 'string' ? payload.session_id : null;
-    const epic = resolveEpicTag(cwd, sessionId);
+    const opsRootCwd = resolveOpsRootCwd(cwd);
+    const epic = resolveEpicTag(opsRootCwd, sessionId);
     if (!epic) return allow(); // unresolvable session — allow by construction
 
     if (epic.allowInlineImplementation) return allow();

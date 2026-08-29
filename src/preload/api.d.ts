@@ -322,6 +322,19 @@ export interface TestFireHookResult {
   durationMs: number;
 }
 
+export interface DelegationReadinessCheck {
+  id: 'scheduler-mcp' | 'dev-plugin' | 'agent-personas' | 'prd-write-guard';
+  label: string;
+  ok: boolean;
+  detail: string;
+  fix: string | null;
+}
+
+export interface DelegationReadiness {
+  ok: boolean;
+  checks: DelegationReadinessCheck[];
+}
+
 export interface OtelConfig {
   enabled: boolean;
   endpoint: string;
@@ -1271,6 +1284,9 @@ export interface SessionManagerAPI {
     /** Boot diagnostic — assertCwdInsideHome(os.homedir()) result. ok=false
      *  on macOS symlinked-/Users mismatch and blocks all session spawns. */
     homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;
+    /** "Can this project actually delegate?" — the 4 preconditions for
+     *  scheduler_create_prd being in an agent's tool list at all. */
+    delegationReadiness: (cwd: string) => Promise<DelegationReadiness>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;

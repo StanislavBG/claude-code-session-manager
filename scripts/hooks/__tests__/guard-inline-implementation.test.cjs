@@ -147,6 +147,44 @@ test('allows a path under session-manager-operations/ even in a feature Epic', (
   expect(parsed).toEqual({ continue: true });
 });
 
+test('resolves the ops root through a git worktree checkout (Epic default isolation)', () => {
+  // Mirrors gitWorktree.cjs's isolation: an active Epic's Terminal/Chat spawn
+  // cwd is a separate worktree checkout, never the project cwd that owns
+  // session-manager-operations/ — the hook must resolve back to the main
+  // tree via git rather than going inert for every isolated Epic.
+  const mainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-guard-inline-main-'));
+  spawnSync('git', ['init', '-q', mainDir]);
+  spawnSync('git', ['-C', mainDir, 'commit', '--allow-empty', '-q', '-m', 'init']);
+  const worktreeDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-guard-inline-wt-')), 'checkout');
+  const addResult = spawnSync('git', ['-C', mainDir, 'worktree', 'add', '-q', '-b', 'test-branch', worktreeDir]);
+  expect(addResult.status).toBe(0);
+
+  const dir = path.join(mainDir, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'active-index.json'),
+    JSON.stringify({
+      sessions: { 'epic-1': { id: 'epic-1', claudeSessionId: 'sess-feature', tag: 'feature' } },
+      events: [],
+      tombstones: [],
+    }),
+  );
+
+  try {
+    const { parsed } = runHook({
+      session_id: 'sess-feature',
+      tool_name: 'Write',
+      cwd: worktreeDir,
+      tool_input: { file_path: `${worktreeDir}/src/main/foo.cjs`, content: 'x' },
+    });
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+  } finally {
+    spawnSync('git', ['-C', mainDir, 'worktree', 'remove', '--force', worktreeDir]);
+    fs.rmSync(mainDir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(worktreeDir), { recursive: true, force: true });
+  }
+});
+
 test('fails open on malformed stdin JSON', () => {
   const { parsed, status } = runHook('{ not valid json');
   expect(status).toBe(0);

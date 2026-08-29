@@ -537,6 +537,11 @@ const projectBriefCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 
+// ──────────────────────────────────────────── Delegation readiness
+const delegationReadinessCwd = z.object({
+  cwd: z.string().min(1).max(4096),
+}).strict();
+
 // ──────────────────────────────────────────── Project Pages (PRD 932)
 // Same validation split as projectBriefCwd above: real path validation is
 // config.cjs's validatePath at first fs access in projectPages.cjs.
@@ -974,6 +979,7 @@ module.exports = {
     chatExternalSend,
     exchangesList,
     agentsSavePersona,
+    delegationReadinessCwd,
   },
   validated,
 };

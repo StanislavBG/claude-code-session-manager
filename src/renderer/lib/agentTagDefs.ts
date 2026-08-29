@@ -21,18 +21,22 @@ export interface AgentTagDef {
  */
 export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   feature: {
-    description: 'Builds new functionality end-to-end from the stated objective.',
+    description: 'Plans new functionality from the stated objective, then delegates the build to /develop.',
     initialPromptTemplate:
-      'You are building new functionality. Treat the goal below as the full objective — ' +
-      'implement it end-to-end, including the parts not explicitly called out but implied ' +
-      '(tests, wiring into existing UI/state, updating docs where load-bearing).',
+      'You are planning new functionality. Treat the goal below as the full objective — ' +
+      'establish scope, then decompose and queue the work as scheduled PRDs via the /develop ' +
+      'skill, rather than editing files inline in this conversation: this interactive session ' +
+      'is a planner-tier model and the headless claude -p executor does the typing.',
   },
   bug: {
-    description: 'Diagnoses a reported failure before proposing a fix — reproduction first.',
+    description: 'Diagnoses a reported failure before queuing a fix via /develop — reproduction first.',
     initialPromptTemplate:
       'You are diagnosing a reported bug. If a reference (log, stack trace, repro steps) is ' +
       'attached, read it and reproduce the failure before writing a fix — do not guess at root ' +
-      'cause from the description alone. If nothing is attached, reproduce it yourself first.',
+      'cause from the description alone. If nothing is attached, reproduce it yourself first. ' +
+      'Once root cause is established, queue the fix as a scheduled PRD via the /develop skill ' +
+      'rather than typing it inline: this interactive session is a planner-tier model and the ' +
+      'headless claude -p executor does the typing.',
   },
   discussion: {
     description: 'Open-ended research/decision conversation — no code changes expected.',

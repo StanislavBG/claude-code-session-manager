@@ -213,9 +213,10 @@ describe('NewEpicCard', () => {
       cwd: '/home/bilko/Projects/alpha',
       prompt:
         `${CONTEXT_INJECTIONS['general-behavior'].text}\n\n` +
-        'You are building new functionality. Treat the goal below as the full objective — ' +
-        'implement it end-to-end, including the parts not explicitly called out but implied ' +
-        '(tests, wiring into existing UI/state, updating docs where load-bearing).\n\n' +
+        'You are planning new functionality. Treat the goal below as the full objective — ' +
+        'establish scope, then decompose and queue the work as scheduled PRDs via the /develop ' +
+        'skill, rather than editing files inline in this conversation: this interactive session ' +
+        'is a planner-tier model and the headless claude -p executor does the typing.\n\n' +
         'Goal: Flaky test\n\nMake CI stop flaking',
     })
   })

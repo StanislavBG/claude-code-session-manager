@@ -33,6 +33,7 @@ export const SCREEN_KEYS: NavKey[] = [
   'bilko-host',
   // Tools (promoted from modal in v0.13.1)
   'voice',
+  'data-model',
   // In-app file editor (Files sidebar / terminal links route here).
   'editor',
 ]

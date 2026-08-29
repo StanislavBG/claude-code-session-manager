@@ -82,6 +82,9 @@ export const NAV_ITEMS: NavGroupItem[] = [
 
   // Tools
   { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk', faces: HOME },
+  // Data Model is HOME-only: it diagrams the APPLICATION's own persisted
+  // shapes, identical for every project — same precedent as History above.
+  { key: 'data-model', group: 'Tools', label: 'Data Model', icon: 'compass',   hint: 'ERD of what Session Manager actually persists, and how it joins', faces: HOME },
 ]
 
 /**

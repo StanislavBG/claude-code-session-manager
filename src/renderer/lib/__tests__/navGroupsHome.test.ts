@@ -21,7 +21,7 @@ describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
     'overview', 'plugins', 'voice', 'agent-library', 'tag-library',
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
-    'history',
+    'history', 'data-model',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host', 'scheduler']
   const BOTH = ['projects']
@@ -211,6 +211,27 @@ describe('voice is home-only', () => {
   it('home face includes voice', () => {
     const keys = getNavItemsForFace('home').map((item) => item.key)
     expect(keys).toContain('voice')
+  })
+})
+
+describe('data-model is home-only', () => {
+  it('NAV_ITEMS tags data-model with faces: [home]', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'data-model')
+    expect(item?.faces).toEqual(['home'])
+  })
+
+  it('project face excludes data-model', () => {
+    const keys = getNavItemsForFace('project').map((item) => item.key)
+    expect(keys).not.toContain('data-model')
+  })
+
+  it('home face includes data-model', () => {
+    const keys = getNavItemsForFace('home').map((item) => item.key)
+    expect(keys).toContain('data-model')
+  })
+
+  it('isHomeOnlyNavKey(data-model) is true, so face-agnostic routes assert the home face', () => {
+    expect(isHomeOnlyNavKey('data-model')).toBe(true)
   })
 })
 

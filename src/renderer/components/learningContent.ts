@@ -572,4 +572,21 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'Publish never bypasses a failing gate automatically — a human always decides whether to override.',
       ],
     },
+  'data-model': {
+      headline: 'Data Model — an ERD of what Session Manager actually persists',
+      intro: 'A hand-maintained diagram of the app\'s own storage: entities, their on-disk path/format, the single-writer owner if one is declared, their fields, and how they relate. It is a mirror of the real shapes in code (lib/dataModelErd.ts), not a live scanner — it can drift if a shape changes without an update.',
+      sections: [
+        {
+          title: 'What it shows',
+          items: [
+            { term: 'Diagram', body: 'Boxes grouped by realm (project/machine/both), with relation lines. Click a box for its storage path, fields, and relations; toggle a group in the legend to hide it.' },
+            { term: 'Tables', body: 'The same entities as a flat, grouped list of tables — useful for scanning every field at once.' },
+          ],
+        },
+      ],
+      tips: [
+        'Home face only — this diagrams the application\'s own data model, which is identical for every project.',
+        'Read-only reference material, not live data — nothing here reflects the currently-open project\'s actual on-disk state.',
+      ],
+    },
 }

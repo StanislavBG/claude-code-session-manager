@@ -47,6 +47,7 @@ import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopo
 import { TerminalAppearanceCard } from './home/TerminalAppearanceCard'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
+import { ERD_ENTITIES } from '../../lib/dataModelErd'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
 import type { DirEntry, ScheduleJob } from '../../../preload/api'
@@ -102,6 +103,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
         <ActiveSessionsCard onNavigate={onNavigate} />
         <RecentSessionsCard onNavigate={onNavigate} />
         <AgentsCard />
+        <DataModelCard onNavigate={onNavigate} />
         {/* App-wide terminal theme + font size. Lives here, not in a gear
          *  popover inside a Terminal pane, because it is machine-wide state —
          *  see lib/terminalSettings.ts for exactly what it reaches. */}
@@ -197,6 +199,32 @@ function AgentsCard() {
           )
         })}
       </div>
+    </section>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Data Model — reference-only entry point into the app's own ERD
+// (lib/dataModelErd.ts / tabs/DataModel.tsx). Not a live signal, so it sits
+// beside Agents/Terminal Appearance rather than in the top grid or Needs you.
+// ────────────────────────────────────────────────────────────────────
+export function DataModelCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
+  return (
+    <section className="mb-6">
+      <button
+        type="button"
+        data-testid="home-data-model-card"
+        onClick={() => onNavigate?.('data-model')}
+        className="w-full text-left bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] flex items-center justify-between hover:bg-bg-elev/40 transition-colors"
+      >
+        <span>
+          <span className="block font-serif text-[16px] font-medium text-fg">Data Model</span>
+          <span className="block text-[12.5px] text-fg-dim">
+            {ERD_ENTITIES.length} entities — what Session Manager persists, and how it joins
+          </span>
+        </span>
+        <span className="font-mono text-[11px] text-accent shrink-0">Open →</span>
+      </button>
     </section>
   )
 }

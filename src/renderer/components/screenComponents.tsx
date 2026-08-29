@@ -29,6 +29,7 @@ const Hooks = lazy(() => import('./tabs/Hooks').then((m) => ({ default: m.Hooks 
 const AgentLibrary = lazy(() => import('./tabs/AgentLibrary').then((m) => ({ default: m.AgentLibrary })))
 const TagLibrary = lazy(() => import('./tabs/TagLibrary').then((m) => ({ default: m.TagLibrary })))
 const HostBilko = lazy(() => import('./tabs/HostBilko').then((m) => ({ default: m.HostBilko })))
+const DataModel = lazy(() => import('./tabs/DataModel').then((m) => ({ default: m.DataModel })))
 
 const SCREEN_LOADING_FALLBACK = <div className="p-6 text-xs text-fg-faint">Loading…</div>
 
@@ -73,6 +74,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'bilko-host':    { title: 'Host on Bilko.run',              intro: 'Publish this project\'s generated Marketing page to bilko.run as a static-path listing, via the bilko-host MCP\'s gated publish pipeline.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
+  'data-model':       { title: 'Data Model',           intro: 'A hand-maintained ERD of what Session Manager actually persists — storage paths, single-writer owners, and how entities relate.' },
 }
 
 const noop = () => { /* page-mode close handler; nav-away closes implicitly */ }
@@ -139,6 +141,7 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
       case 'agent-library': return <LazyScreen><AgentLibrary /></LazyScreen>
       case 'tag-library':   return <LazyScreen><TagLibrary /></LazyScreen>
       case 'bilko-host':    return <LazyScreen><HostBilko /></LazyScreen>
+      case 'data-model':    return <LazyScreen><DataModel /></LazyScreen>
       // Former-modal tools rendered with variant="page" so they paint inline
       // with no overlay/portal. Pass a noop onClose since the route owns
       // visibility; the navigate-away action effectively closes them.

@@ -31,6 +31,19 @@ export const CONTEXT_INJECTIONS = {
       'something new. Ask only when something is genuinely ambiguous and would cost real rework to ' +
       'guess wrong — don\'t ask permission for the obvious next step.',
   },
+  'delegate-implementation': {
+    key: 'delegate-implementation',
+    label: 'Delegate implementation',
+    description:
+      'Keeps this interactive session in a planning-and-deciding role and pushes actual ' +
+      'implementation to the headless scheduler, independent of which Agent persona is chosen — ' +
+      'the same floor as General behaviour, on by default for feature/bug work.',
+    text:
+      'This interactive session plans and decides; it does not implement. Once scope is clear, ' +
+      'queue the implementation as scheduled PRDs via the /develop skill and let it run headless — ' +
+      'do not edit application source inline in this conversation. If the scheduler tools are ' +
+      'unavailable, say so explicitly rather than falling back to implementing the work yourself.',
+  },
 } as const satisfies Record<string, ContextInjectionDef>
 
 export type ContextInjectionKey = keyof typeof CONTEXT_INJECTIONS

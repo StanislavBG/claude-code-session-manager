@@ -213,6 +213,7 @@ describe('NewEpicCard', () => {
       cwd: '/home/bilko/Projects/alpha',
       prompt:
         `${CONTEXT_INJECTIONS['general-behavior'].text}\n\n` +
+        `${CONTEXT_INJECTIONS['delegate-implementation'].text}\n\n` +
         'You are planning new functionality. Treat the goal below as the full objective — ' +
         'establish scope, then decompose and queue the work as scheduled PRDs via the /develop ' +
         'skill, rather than editing files inline in this conversation: this interactive session ' +
@@ -479,5 +480,67 @@ describe('NewEpicCard', () => {
     expect(descriptionSpan).toBeTruthy()
     expect(descriptionSpan!.className).toContain('truncate')
     expect(descriptionSpan!.className).toContain('min-w-0')
+  })
+
+  it('defaults the "delegate implementation" injection ON for feature/bug and OFF for discussion, flipping when the tag changes', async () => {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const toggle = el.querySelector('[data-testid="new-epic-advanced-toggle"]') as HTMLButtonElement
+    act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+
+    const delegateCheckbox = () =>
+      el.querySelector('[data-testid="context-injection-toggle-delegate-implementation"]') as HTMLInputElement
+    // Default tag is 'feature' — on by default.
+    expect(delegateCheckbox().checked).toBe(true)
+
+    act(() => {
+      const back = el.querySelector('[data-testid="new-epic-flip-to-goal"]') as HTMLButtonElement
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const discussionPill = el.querySelector('[data-testid="new-epic-kind-discussion"]') as HTMLButtonElement
+    act(() => discussionPill.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+    expect(delegateCheckbox().checked).toBe(false)
+
+    act(() => {
+      const back = el.querySelector('[data-testid="new-epic-flip-to-goal"]') as HTMLButtonElement
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const bugPill = el.querySelector('[data-testid="new-epic-kind-bug"]') as HTMLButtonElement
+    act(() => bugPill.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+    expect(delegateCheckbox().checked).toBe(true)
+  })
+
+  it('does not let a later tag change silently override an explicit human toggle of a Context Injection', async () => {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const toggle = el.querySelector('[data-testid="new-epic-advanced-toggle"]') as HTMLButtonElement
+    act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+
+    const delegateCheckbox = () =>
+      el.querySelector('[data-testid="context-injection-toggle-delegate-implementation"]') as HTMLInputElement
+    // Default tag 'feature' defaults this on — explicitly turn it OFF.
+    expect(delegateCheckbox().checked).toBe(true)
+    act(() => {
+      delegateCheckbox().click()
+    })
+    expect(delegateCheckbox().checked).toBe(false)
+
+    // Switching to 'bug' (also normally default-on) must NOT resurrect it —
+    // the human's explicit OFF pick survives the tag change.
+    act(() => {
+      const back = el.querySelector('[data-testid="new-epic-flip-to-goal"]') as HTMLButtonElement
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const bugPill = el.querySelector('[data-testid="new-epic-kind-bug"]') as HTMLButtonElement
+    act(() => bugPill.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+    expect(delegateCheckbox().checked).toBe(false)
   })
 })

@@ -107,6 +107,20 @@ describe('composeEpicIntake', () => {
     expect(openingPrompt).toBe(expected)
   })
 
+  it('emits enabled Context Injections in CONTEXT_INJECTIONS key order, not the order the caller passed them', () => {
+    const { openingPrompt } = composeEpicIntake({
+      title: 'T',
+      goal: 'G',
+      // Pass delegate-implementation before general-behavior in the object —
+      // output order must still follow CONTEXT_INJECTIONS' own key order.
+      contextInjections: { 'delegate-implementation': true, 'general-behavior': true },
+    })
+    const generalIdx = openingPrompt.indexOf(CONTEXT_INJECTIONS['general-behavior'].text)
+    const delegateIdx = openingPrompt.indexOf(CONTEXT_INJECTIONS['delegate-implementation'].text)
+    expect(generalIdx).toBeGreaterThanOrEqual(0)
+    expect(delegateIdx).toBeGreaterThan(generalIdx)
+  })
+
   describe('sections', () => {
     it('emits actor, injection, input, mission, goal, reference in that order, matching openingPrompt', () => {
       const { sections, openingPrompt } = composeEpicIntake({

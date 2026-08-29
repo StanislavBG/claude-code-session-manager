@@ -19,6 +19,22 @@ import type { AgentPersona } from '../../../preload/api'
 const FALLBACK_MISSION_TAGS: EpicTag[] = ['feature', 'bug', 'discussion']
 
 /**
+ * Default on/off state for every Context Injection, given the currently
+ * selected Mission tag. `general-behavior` is the universal floor and is
+ * always on. `delegate-implementation` defaults on only for `feature`/`bug`
+ * — the missions whose own Mission template already tells the agent to
+ * queue work via /develop — and off otherwise (e.g. `discussion`, where no
+ * implementation is expected). A human toggle always overrides this default
+ * (see `injectionOverrides` below); this function only supplies the
+ * fallback for keys the human hasn't touched.
+ */
+function defaultContextInjectionsForTag(t: EpicTag): Record<ContextInjectionKey, boolean> {
+  return Object.fromEntries(
+    CONTEXT_INJECTION_ORDER.map((k) => [k, k === 'delegate-implementation' ? t === 'feature' || t === 'bug' : true]),
+  ) as Record<ContextInjectionKey, boolean>
+}
+
+/**
  * Which missions this Epic may be given, derived from the SELECTED persona's
  * own `tags:` frontmatter (AgentPersona.tags — the same many-to-many
  * membership TagLibrary.tsx and AgentLibrary.tsx both edit through
@@ -150,10 +166,15 @@ export function NewEpicCard({
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
   // Context Injections (contextInjections.ts) — Session-Manager-authored
   // text, independent of Actor/Input/Mission, each its own on/off toggle.
-  // Default on: they're meant to help every Epic, so opting out is the
-  // deliberate action, not the default.
-  const [contextInjectionsOn, setContextInjectionsOn] = useState<Record<ContextInjectionKey, boolean>>(
-    () => Object.fromEntries(CONTEXT_INJECTION_ORDER.map((k) => [k, true])) as Record<ContextInjectionKey, boolean>,
+  // Only an explicit human toggle is stored; the displayed/used value is
+  // always `defaultContextInjectionsForTag(tag)` overridden by that map, so
+  // there is one source of truth per key instead of a stored value plus a
+  // synchronization effect fighting over it — a tag change simply changes
+  // what an UNtouched key falls back to.
+  const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>({})
+  const contextInjectionsOn = useMemo<Record<ContextInjectionKey, boolean>>(
+    () => ({ ...defaultContextInjectionsForTag(tag), ...injectionOverrides }),
+    [tag, injectionOverrides],
   )
 
   useEffect(() => {
@@ -245,7 +266,7 @@ export function NewEpicCard({
     setAgentName((agents?.find((a) => a.name === 'architect') ?? agents?.[0])?.name ?? '')
     setAdvanced(false)
     setBoard(null)
-    setContextInjectionsOn(Object.fromEntries(CONTEXT_INJECTION_ORDER.map((k) => [k, true])) as Record<ContextInjectionKey, boolean>)
+    setInjectionOverrides({})
     att.clear()
   }
 
@@ -595,7 +616,7 @@ export function NewEpicCard({
                     <input
                       type="checkbox"
                       checked={on}
-                      onChange={(e) => setContextInjectionsOn((prev) => ({ ...prev, [key]: e.target.checked }))}
+                      onChange={(e) => setInjectionOverrides((prev) => ({ ...prev, [key]: e.target.checked }))}
                       data-testid={`context-injection-toggle-${key}`}
                       className="mt-0.5"
                     />

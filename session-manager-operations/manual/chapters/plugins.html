@@ -1,0 +1,53 @@
+<h1>Plugins — the Installed inspector and the Library catalog</h1>
+
+<p class="lede">Plugins is a Home-face-only Configure tab with two sub-views: <strong>Installed</strong>,
+a read-only inspector over whatever's already on this machine, and <strong>Library</strong>, a
+searchable catalog you actually install from. It is deliberately not a third place to edit Skills,
+Agents, or Hooks — it inspects a plugin's contents, it doesn't let you rewrite them.</p>
+
+<table class="manual-table">
+  <thead><tr><th>View</th><th>What it's for</th></tr></thead>
+  <tbody>
+    <tr><td>Installed</td><td>Reads <code>~/.claude/plugins/installed_plugins.json</code> and lists
+    every plugin already on this machine — name, origin, version, and a drill-in showing its
+    Skills / Agents / MCP server / Hooks / Monitors / LSP / Bin sections.</td></tr>
+    <tr><td>Library</td><td>A searchable catalog of installable plugins. Its Install button runs a
+    real install, not just a copy-to-clipboard.</td></tr>
+  </tbody>
+</table>
+
+<figure class="manual-figure" data-figure="plugins-installed-view">
+  <div class="manual-figure__frame" data-capture="Plugins tab, Installed view, one plugin row drilled into showing its Skills/Agents/MCP/Hooks sections"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Installed / Library — the two sub-views.
+    <span class="callout" data-arrow="up">2</span> A plugin row, drilled in — read-only, section by
+    section.
+    <span class="callout" data-arrow="right">3</span> A skill within that plugin, opened in a
+    read-only body view with a list/graph toggle for how its skills reference each other.
+  </figcaption>
+</figure>
+
+<h2>Installed: a read-only inspector, on purpose</h2>
+
+<p>Clicking a row in Installed drills into the plugin's contents — the same Skills / Agents / MCP
+server / Hooks / Monitors / LSP / Bin breakdown any plugin can carry. This view intentionally
+never lets you edit any of it here: editing a plugin's own skills or agents would duplicate the
+Skills tab and Agent Library's UI for content that already has a canonical home there. Opening a
+skill from within a drilled-in plugin shows its body in a read-only markdown view, plus a
+list/graph toggle that visualizes how that plugin's skills reference each other.</p>
+
+<h2>Library: search, then Install for real</h2>
+
+<p>Library is a searchable catalog. Each row shows the plugin's name, its official/installed/bundle
+badges, a description, the exact install command as text you can copy — and an Install button that
+doesn't just show you that command, it runs it. Pressing Install shells out to the <code>claude</code>
+CLI directly: <code>claude plugin marketplace add &lt;source&gt;</code> first if the plugin's
+marketplace isn't registered yet, then <code>claude plugin install &lt;slug&gt;</code> (or
+<code>&lt;slug&gt;@&lt;marketplace&gt;</code> once one is registered) — the same commands you'd type
+yourself, run for you with progress streamed back into the row.</p>
+
+<p class="manual-note">This project's own dev skillset — the <strong>session-manager-dev</strong>
+plugin behind <code>/develop</code>, <code>/project-status</code>, <code>/requesting-code-review</code>,
+and the rest — is normally auto-installed the first time the app boots, not something you need to
+find here. Library's Install button for it exists as the fallback path: if that first-boot install
+is ever skipped or fails, installing it manually from here uses the identical mechanism.</p>

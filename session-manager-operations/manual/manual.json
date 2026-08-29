@@ -19,6 +19,12 @@
       "file": "epics-and-sessions.html"
     },
     {
+      "slug": "file-explorer",
+      "title": "File Explorer — one browser, two starting points",
+      "blurb": "Why the same tab opens to your home folder from Home but your active project from a Tab, the autosave + dirty-state editor pane, and switching projects without leaving it.",
+      "file": "file-explorer.html"
+    },
+    {
       "slug": "scheduler",
       "title": "Scheduler — author once, run around your token window",
       "blurb": "Writing a PRD that actually completes, how the queue picks work, auto-pause on rate limits, and reading a job parked in needs_review.",
@@ -49,10 +55,22 @@
       "file": "agent-library.html"
     },
     {
+      "slug": "system-prompt",
+      "title": "System Prompt — editing the CLI's own house rules, machine-wide",
+      "blurb": "The one file this tab actually writes — ~/.claude/CLAUDE.md — why there's no scope switcher, and editing an @-import as the real file it is, not a preview.",
+      "file": "system-prompt.html"
+    },
+    {
       "slug": "skills",
       "title": "Skills — what auto-fires, what you type, and where it lives",
       "blurb": "Telling a Skill apart from a Slash Command, why scope matters before you touch Toggle or Remove, and finding this project's own dev skillset in the Library.",
       "file": "skills.html"
+    },
+    {
+      "slug": "plugins",
+      "title": "Plugins — the Installed inspector and the Library catalog",
+      "blurb": "Why Installed is read-only by design, how Library's Install button actually runs claude plugin install for you, and where this project's own dev skillset comes from.",
+      "file": "plugins.html"
     },
     {
       "slug": "home-and-project-brief",
@@ -71,6 +89,12 @@
       "title": "Tag Library — the mission that ships with every Epic",
       "blurb": "How a tag's opening framing and /develop eagerness shape every Epic that carries it, and the one relationship on this page you can actually edit.",
       "file": "tag-library.html"
+    },
+    {
+      "slug": "bilko-host",
+      "title": "Host on Bilko.run — publishing this project's page, gated for real",
+      "blurb": "The free Prepare Bundle / gated Publish two-stage pipeline, hosting more than one page under one listing, and reading a gate failure without guessing.",
+      "file": "bilko-host.html"
     },
     {
       "slug": "history-analytics",

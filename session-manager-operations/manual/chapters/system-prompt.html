@@ -1,0 +1,56 @@
+<h1>System Prompt — editing the CLI's own house rules, machine-wide</h1>
+
+<p class="lede">System Prompt is a Home-face-only Configure tab that edits one real file:
+<code>~/.claude/CLAUDE.md</code>, the instructions the <code>claude</code> CLI loads into every
+session it starts, on this machine, in every project. It is not a preview or a copy — saving here
+writes the actual file the CLI reads next time it launches.</p>
+
+<div class="manual-note" data-testid="system-prompt-scope-note">
+  <strong>User system prompt.</strong> This is the real <code>~/.claude/CLAUDE.md</code> on disk —
+  the instructions the <code>claude</code> CLI loads into every session it starts on this machine,
+  in every project. A project's own <code>CLAUDE.md</code> / <code>CLAUDE.local.md</code> are read
+  from that project's directory when a session launches there; they are not edited here.
+</div>
+
+<h2>Why there's no scope switcher here</h2>
+
+<p>Other editor-shaped tabs in this app carry a User / Project / Local scope switcher. System
+Prompt deliberately doesn't: it's reachable only from the Home face, which has no project context
+of its own, so a Project or Local scope selector here would either dead-end or silently point at
+whichever project happened to own some other open tab. The page reads and writes exactly one
+scope, always — <code>user</code> — and that choice doesn't change if you switch to a Project
+face with a tab already open.</p>
+
+<figure class="manual-figure" data-figure="system-prompt-editor">
+  <div class="manual-figure__frame" data-capture="System Prompt tab, referenced-files rail on the left listing the root CLAUDE.md plus its @-imports, main editor pane open on the right, save bar at the bottom"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> The referenced-files rail — the root file plus
+    every file it <code>@</code>-imports.
+    <span class="callout" data-arrow="up">2</span> The editor pane — Edit / Preview / Split, same
+    chrome the Editor tab uses.
+    <span class="callout" data-arrow="right">3</span> The save bar — explicit Save / Revert, with a
+    dirty-state indicator.
+  </figcaption>
+</figure>
+
+<h2>Imports are editable, not just previewed</h2>
+
+<p>If your <code>~/.claude/CLAUDE.md</code> uses <code>@path/to/file.md</code>-style imports — the
+way this very project's own instructions are composed — the left rail lists every one of them
+alongside the root file. Clicking an imported file opens it in the same editor pane, and it's
+genuinely editable: whatever you save there is literally part of the prompt the CLI loads, not a
+read-only preview of it.</p>
+
+<p>The one exception is an import that doesn't resolve to a readable file. That row still shows up
+in the rail, but opens forced read-only with a warning banner:</p>
+
+<p class="manual-note">"This import does not resolve to a readable file — the CLI will skip it."</p>
+
+<h2>Saving</h2>
+
+<p>Unlike File Explorer's editor pane, System Prompt does not autosave — a save bar at the bottom
+carries explicit <strong>Save</strong> and <strong>Revert</strong> actions, tracking dirty state
+and the last-saved time so you always know whether what's on screen matches what's on disk. Saving
+while an imported file is open writes only that import — the root <code>CLAUDE.md</code> is left
+untouched — since the two are separate files on disk even though they compose into one prompt at
+load time.</p>

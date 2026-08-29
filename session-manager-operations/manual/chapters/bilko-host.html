@@ -1,0 +1,69 @@
+<h1>Host on Bilko.run — publishing this project's page, gated for real</h1>
+
+<p class="lede">Host on Bilko.run is a Project-face-only Configure tab that takes this project's
+generated Project Page and puts it live on bilko.run, at
+<code>bilko.run/projects/&lt;slug&gt;/</code>. It's a thin cockpit over Bilko's own publish
+pipeline — this tab never writes to that site directly; every real publish goes through a gated
+MCP tool chain and a dedicated Epic that runs the actual checks.</p>
+
+<div class="manual-note">The Session Manager <strong>app is free</strong> and stays free — hosting
+a project on bilko.run from this tab is an ordinary app feature, not something gated behind a
+purchase. The Field Manual you're reading is the only thing Session Manager sells; nothing in this
+tab, or anywhere else in the app, checks a license or entitlement before letting you publish.</div>
+
+<h2>Two stages: a free local build, then a gated publish</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Stage</th><th>What runs</th><th>Trigger</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Stage A — Prepare Bundle</td>
+      <td>Deterministic, no agent involved: rebuilds a local static bundle from your current
+      hosted-documents list into <code>session-manager-operations/bilko-host/dist/</code>.</td>
+      <td><strong>Prepare Bundle</strong> button. Free, idempotent, safe to re-run any time the
+      document list changes.</td>
+    </tr>
+    <tr>
+      <td>Stage B — Publish</td>
+      <td>Starts a Session tagged <code>bilko-host-publisher</code>, which calls Bilko's own
+      <code>bilko-host</code> MCP tools to register the slug (first publish only) and push the
+      bundle through five gates — manifest schema, size budget, a golden-path check, an
+      accessibility scan, and a dependency audit.</td>
+      <td><strong>Publish</strong> button — disabled until a bundle exists. If a publish is already
+      in flight, it turns into <strong>View publish in progress</strong> instead of starting a
+      second one.</td>
+    </tr>
+  </tbody>
+</table>
+
+<figure class="manual-figure" data-figure="bilko-host-publish">
+  <div class="manual-figure__frame" data-capture="Host on Bilko.run tab, slug field filled in, Prepare Bundle and Publish buttons, hosted documents list below with the root document and one sub-path document"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> Slug field — <code>bilko.run/projects/&lt;slug&gt;/</code>.
+    <span class="callout" data-arrow="up">2</span> Prepare Bundle, then Publish — the two-stage
+    pipeline, one button each.
+    <span class="callout" data-arrow="right">3</span> Hosted documents — the root page plus any
+    sub-path pages you've added, each removable.
+  </figcaption>
+</figure>
+
+<h2>One project, one Bilko listing, many pages under it</h2>
+
+<p>A Bilko listing isn't limited to a single page. The root document (published at the slug's own
+URL) defaults to this project's Marketing Project Page, but you can add any number of additional
+documents at their own sub-paths — another Project Page lens (Home, Feature, or Architecture)
+hosted as its own page, or an arbitrary local HTML file from this project. Each one lands at
+<code>bilko.run/projects/&lt;slug&gt;/&lt;subpath&gt;/</code>.</p>
+
+<p class="manual-note">Removing a document from the list here takes effect immediately in your
+local bundle, but stays live on bilko.run until your <em>next</em> Publish — Bilko's publish tool
+replaces the entire listing wholesale each time, which is also what guarantees a removed document
+actually disappears rather than lingering as an orphaned file.</p>
+
+<h2>Reading a publish failure</h2>
+
+<p>If a gate rejects the bundle, the status card shows <strong>Last publish failed:</strong>
+followed by that gate's own error message — never a generic "something went wrong." The publishing
+Session reports exactly which of the five gates failed and does not attempt to bypass it on its
+own initiative; overriding a failing gate is a decision only a human makes, from that Session's own
+conversation.</p>

@@ -1,0 +1,67 @@
+<h1>File Explorer — one browser, two starting points</h1>
+
+<p class="lede">File Explorer is the only left-nav destination that shows up on <strong>both</strong>
+sidebar faces — <code>projects</code> is the sole <code>faces: BOTH</code> entry in
+<code>NAV_ITEMS</code>. It is a plain file tree plus an editor pane
+(<code>ProjectsWorkspace.tsx</code>), not a second copy of the Terminal or a project switcher in
+disguise — though it does let you jump projects from inside it.</p>
+
+<h2>Which folder it opens to depends on which sidebar you clicked it from</h2>
+
+<p>This is the one thing that trips people up, because the tab looks identical either way. The
+root it browses is resolved from the current sidebar face, not from any setting you pick:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Opened from</th><th>Starts at</th></tr></thead>
+  <tbody>
+    <tr><td>Home sidebar</td><td>Your OS home folder — independent of any project tab you have
+    open elsewhere.</td></tr>
+    <tr><td>a Project tab's sidebar</td><td>That tab's own project directory (its <code>cwd</code>) —
+    even if you also have a different project's tab open at the same time.</td></tr>
+  </tbody>
+</table>
+
+<p class="manual-note">If a tab has no project open yet, the Project-face copy shows "No session
+selected" rather than silently falling back to your home folder — it never guesses at a project
+you haven't opened.</p>
+
+<figure class="manual-figure" data-figure="file-explorer-browser">
+  <div class="manual-figure__frame" data-capture="File Explorer tab, file tree pane on the left with a file selected, editor pane open on the right showing that file's contents"></div>
+  <figcaption>
+    <span class="callout" data-arrow="left">1</span> The file tree — click a row to open it in the
+    pane on the right; drag the divider to resize.
+    <span class="callout" data-arrow="up">2</span> The projects launcher — switch which project's
+    files you're browsing without leaving the tab.
+    <span class="callout" data-arrow="right">3</span> The editor pane — dirty-state indicator sits
+    next to the filename.
+  </figcaption>
+</figure>
+
+<h2>Two panes: a tree on the left, an editor on the right</h2>
+
+<p>The left pane is a collapsible file tree rooted at whichever folder the face rules above
+resolved. Collapsing it shrinks it down to a thin labeled rail rather than hiding it entirely, and
+both the split ratio and the collapsed state persist across restarts. The divider between the two
+panes is draggable, and double-clicking it resets the split back to its default third.</p>
+
+<p>The right pane dispatches by file type: plain text opens in the same document editor other
+editor-shaped tabs (like System Prompt) use, images and PDFs get their own dedicated preview
+panes, and anything binary or oversized falls back to a plain info pane rather than trying to
+render it as text.</p>
+
+<h2>Editing: autosave, a dirty indicator, and a close guard</h2>
+
+<p>Once a file is open, edits autosave a little over a second after you stop typing — there is no
+explicit Save button to remember to press. The status line next to the filename tracks this
+directly: <strong>Editing…</strong> while autosave is pending, <strong>Saving…</strong> mid-write,
+and <strong>All changes saved</strong> once it lands. Closing a file (or the whole tab) with
+unsaved changes still pending prompts you before discarding them — the same guard fires whether
+you're closing one file, the others, or everything at once.</p>
+
+<h2>Switching projects without leaving the tab</h2>
+
+<p>The projects launcher above the file tree lists every known project, each with a pin toggle (so
+your most-used projects sort to the top) and an archive action, which asks for confirmation before
+removing a project from the list. Picking a different project from here swaps the file tree's root
+directly — it's the fastest way to peek at another project's files without opening a new tab for
+it.</p>

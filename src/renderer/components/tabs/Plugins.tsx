@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
@@ -6,7 +6,7 @@ import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { Badge } from '../ui/Badge'
 import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
-import type { DirEntry } from '../../../preload/api'
+import type { DirEntry, SeedStatus } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
 import { parseSkillMeta } from '../../lib/skillFrontmatter'
@@ -75,6 +75,23 @@ function PluginsComponent() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
   const [view, setView] = useState<PluginsView>('installed')
+  const [seedStatus, setSeedStatus] = useState<SeedStatus | null>(null)
+  const [dismissedSeeders, setDismissedSeeders] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.app
+      .seedStatus?.()
+      .then((s) => {
+        if (!cancelled) setSeedStatus(s)
+      })
+      .catch(() => {
+        /* no seed status available — banner simply stays hidden */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!home) return
@@ -184,9 +201,27 @@ function PluginsComponent() {
     },
   ]
 
+  const exhaustedSeeders = useMemo(() => {
+    if (!seedStatus) return []
+    return (Object.keys(seedStatus) as Array<keyof SeedStatus>).filter(
+      (id) => seedStatus[id].status === 'exhausted' && !dismissedSeeders.has(id),
+    )
+  }, [seedStatus, dismissedSeeders])
+
+  const seedBanner =
+    exhaustedSeeders.length > 0 ? (
+      <SeedStatusBanner
+        seeders={exhaustedSeeders}
+        seedStatus={seedStatus!}
+        onDismiss={(id) => setDismissedSeeders((prev) => new Set(prev).add(id))}
+        onOpenLibrary={() => setView('library')}
+      />
+    ) : null
+
   if (view === 'library') {
     return (
       <Panel toolbar={<PluginsViewTabs active={view} onChange={setView} />}>
+        {seedBanner}
         <PluginsLibrary />
       </Panel>
     )
@@ -206,6 +241,7 @@ function PluginsComponent() {
         </>
       }
     >
+      {seedBanner}
       {loading ? (
         <EmptyState title="scanning plugins…" />
       ) : selectedRow ? (
@@ -237,6 +273,57 @@ function PluginsComponent() {
 
 // Memoized: no props; own data comes from store/IPC hooks inside the component.
 export const Plugins = memo(PluginsComponent)
+
+const SEEDER_LABELS: Record<keyof SeedStatus, string> = {
+  'dev-plugin': 'session-manager-dev plugin',
+  'scheduler-mcp': 'Scheduler MCP server',
+  'agent-personas': 'Agent personas (Architect, Dev Lead)',
+}
+
+/**
+ * Dismissible warning banner for a first-boot seeder that gave up after
+ * MAX_ATTEMPTS. Dismissal is in-memory only (component state) — the marker
+ * files stay the single source of truth for seed state, so reloading the tab
+ * (or restarting the app) re-shows the banner until the manual fix is applied.
+ */
+function SeedStatusBanner({
+  seeders,
+  seedStatus,
+  onDismiss,
+  onOpenLibrary,
+}: {
+  seeders: Array<keyof SeedStatus>
+  seedStatus: SeedStatus
+  onDismiss: (id: keyof SeedStatus) => void
+  onOpenLibrary: () => void
+}) {
+  return (
+    <div className="shrink-0 flex flex-col gap-1.5 px-3 py-2 border-b border-line bg-yellow-950/20">
+      {seeders.map((id) => (
+        <div key={id} className="flex items-start gap-2 text-xs text-yellow-300">
+          <div className="flex-1 min-w-0">
+            <div className="font-medium">{SEEDER_LABELS[id]} setup failed after retrying — manual fix needed</div>
+            {id === 'dev-plugin' ? (
+              <div className="text-yellow-400/80 mt-0.5">
+                Click <button onClick={onOpenLibrary} className="underline hover:no-underline">here</button> to open the
+                Library tab, then click Install next to "session-manager-dev".
+              </div>
+            ) : (
+              <div className="text-yellow-400/80 mt-0.5 font-mono">{seedStatus[id].fix}</div>
+            )}
+          </div>
+          <button
+            onClick={() => onDismiss(id)}
+            className="shrink-0 text-yellow-400/70 hover:text-yellow-300"
+            aria-label={`Dismiss ${SEEDER_LABELS[id]} warning`}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 /**
  * 2-way tab switcher: Installed / Library, matching the ViewSwitcher pattern

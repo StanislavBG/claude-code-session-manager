@@ -56,6 +56,8 @@ const queueOps = require('./queueOps.cjs');
 const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const { seedAgentPersonas } = require('./seedAgentPersonas.cjs');
+const { seedSchedulerMcp } = require('./seedSchedulerMcp.cjs');
+const { getSeedStatus } = require('./seedStatus.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
@@ -498,6 +500,9 @@ ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE
 // on disk or the home self-check failed (e.g. macOS /Users symlink mismatch).
 ipcMain.handle('app:claude-bin-status', () => bootClaudeBin);
 ipcMain.handle('app:home-self-check', () => bootHomeSelfCheck);
+// First-boot seeder outcomes ('done' | 'pending' | 'exhausted' per seeder),
+// read live from each seeder's own marker file — see seedStatus.cjs.
+ipcMain.handle('app:seed-status', () => getSeedStatus());
 
 ipcMain.handle('app:pick-directory', async () => {
   console.log('[main] pick-directory invoked');
@@ -1164,15 +1169,23 @@ app.whenReady().then(async () => {
   // First-boot default: install the bundled session-manager-dev plugin (its 10
   // dev skills) from the app's own marketplace. One-shot + idempotent; never
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
-  seedDevPlugin({ logger: console }).catch((e) => {
+  seedDevPlugin({ logger: console, writeLog: logs.writeLine }).catch((e) => {
     logs.writeLine({ scope: 'seed-dev-plugin', level: 'error', message: 'seed failed', meta: { error: e?.message } });
   });
   // First-boot default: seed the bundled Architect + Dev Lead Agent personas
   // into ~/.claude/agents/ so the Agent Library isn't empty on a fresh
   // install. One-shot + idempotent; never overwrites an existing persona;
   // never throws. SM_SEED_AGENT_PERSONAS_DISABLE=1 to opt out.
-  seedAgentPersonas({ logger: console }).catch((e) => {
+  seedAgentPersonas({ logger: console, writeLog: logs.writeLine }).catch((e) => {
     logs.writeLine({ scope: 'seed-agent-personas', level: 'error', message: 'seed failed', meta: { error: e?.message } });
+  });
+  // First-boot default: register the session-manager-scheduler MCP server at
+  // USER scope so scheduler_create_prd is available in every project, not
+  // just this repo's own .mcp.json. One-shot + idempotent; never overwrites
+  // an existing registration; never throws. SM_SEED_SCHEDULER_MCP_DISABLE=1
+  // to opt out.
+  seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }).catch((e) => {
+    logs.writeLine({ scope: 'seed-scheduler-mcp', level: 'error', message: 'seed failed', meta: { error: e?.message } });
   });
   // History rollup finalize pass: deferred 30s past boot so it never competes
   // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this

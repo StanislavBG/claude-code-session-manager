@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
     // missing-claude-bin / home-symlink-mismatch as toasts.
     claudeBinStatus: () => ipcRenderer.invoke('app:claude-bin-status'),
     homeSelfCheck: () => ipcRenderer.invoke('app:home-self-check'),
+    seedStatus: () => ipcRenderer.invoke('app:seed-status'),
     delegationReadiness: (cwd) => ipcRenderer.invoke('app:delegation-readiness', { cwd }),
     onNewSession: (handler) => {
       const listener = () => handler();

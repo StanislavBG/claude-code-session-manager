@@ -106,7 +106,7 @@ function runClaudeMcpAdd(serverPath) {
   });
 }
 
-async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd } = {}) {
+async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd, writeLog = () => {} } = {}) {
   if (process.env.SM_SEED_SCHEDULER_MCP_DISABLE === '1') return;
   const marker = readMarker();
   if (marker.done) return;                       // succeeded before — leave it alone.
@@ -125,12 +125,24 @@ async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd } = 
     } else {
       // Failure: bump the attempt counter so the next boot can retry (bounded).
       logger.warn?.(`[seedSchedulerMcp] registration failed${r.error ? ` — ${r.error}` : ''}; attempt ${marker.attempts + 1}/${MAX_ATTEMPTS}`);
+      writeLog({
+        scope: 'seed-scheduler-mcp',
+        level: 'error',
+        message: 'registration failed',
+        meta: { error: r.error, exitCode: r.exitCode, attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
+      });
       writeMarker({ done: false, attempts: marker.attempts + 1 });
     }
   } catch (err) {
     logger.warn?.('[seedSchedulerMcp] error:', err?.message ?? err);
+    writeLog({
+      scope: 'seed-scheduler-mcp',
+      level: 'error',
+      message: 'seed error',
+      meta: { error: err?.message ?? String(err), attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
+    });
     writeMarker({ done: false, attempts: marker.attempts + 1 });
   }
 }
 
-module.exports = { seedSchedulerMcp };
+module.exports = { seedSchedulerMcp, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME };

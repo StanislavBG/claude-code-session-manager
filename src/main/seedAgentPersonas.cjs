@@ -57,7 +57,7 @@ function writeMarker(state) {
   }
 }
 
-async function seedAgentPersonas({ logger = console } = {}) {
+async function seedAgentPersonas({ logger = console, writeLog = () => {} } = {}) {
   if (process.env.SM_SEED_AGENT_PERSONAS_DISABLE === '1') return;
   const marker = readMarker();
   if (marker.done) return;                       // succeeded before — leave it alone.
@@ -79,8 +79,14 @@ async function seedAgentPersonas({ logger = console } = {}) {
     writeMarker({ done: true, attempts: marker.attempts });
   } catch (err) {
     logger.warn?.('[seedAgentPersonas] error:', err?.message ?? err);
+    writeLog({
+      scope: 'seed-agent-personas',
+      level: 'error',
+      message: 'seed error',
+      meta: { error: err?.message ?? String(err), attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
+    });
     writeMarker({ done: false, attempts: marker.attempts + 1 });
   }
 }
 
-module.exports = { seedAgentPersonas };
+module.exports = { seedAgentPersonas, markerPath, MAX_ATTEMPTS };

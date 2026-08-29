@@ -65,7 +65,7 @@ function writeMarker(state) {
   }
 }
 
-async function seedDevPlugin({ logger = console } = {}) {
+async function seedDevPlugin({ logger = console, writeLog = () => {} } = {}) {
   if (process.env.SM_SEED_DEV_PLUGIN_DISABLE === '1') return;
   const marker = readMarker();
   if (marker.done) return;                       // succeeded before — leave it alone.
@@ -84,12 +84,24 @@ async function seedDevPlugin({ logger = console } = {}) {
     } else {
       // Failure: bump the attempt counter so the next boot can retry (bounded).
       logger.warn?.(`[seedDevPlugin] install failed (exit ${r.exitCode})${r.error ? ` — ${r.error}` : ''}; attempt ${marker.attempts + 1}/${MAX_ATTEMPTS}`);
+      writeLog({
+        scope: 'seed-dev-plugin',
+        level: 'error',
+        message: 'install failed',
+        meta: { exitCode: r.exitCode, error: r.error, attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
+      });
       writeMarker({ done: false, attempts: marker.attempts + 1 });
     }
   } catch (err) {
     logger.warn?.('[seedDevPlugin] error:', err?.message ?? err);
+    writeLog({
+      scope: 'seed-dev-plugin',
+      level: 'error',
+      message: 'seed error',
+      meta: { error: err?.message ?? String(err), attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
+    });
     writeMarker({ done: false, attempts: marker.attempts + 1 });
   }
 }
 
-module.exports = { seedDevPlugin };
+module.exports = { seedDevPlugin, markerPath, MAX_ATTEMPTS };

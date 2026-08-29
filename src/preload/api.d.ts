@@ -335,6 +335,13 @@ export interface DelegationReadiness {
   checks: DelegationReadinessCheck[];
 }
 
+/** First-boot seeder outcome, one per seeder id, derived from its marker file.
+ *  `fix` is the manual remedy shown by the Plugins banner when `status` is 'exhausted'. */
+export type SeedStatus = Record<
+  'dev-plugin' | 'scheduler-mcp' | 'agent-personas',
+  { status: 'done' | 'pending' | 'exhausted'; fix: string }
+>;
+
 export interface OtelConfig {
   enabled: boolean;
   endpoint: string;
@@ -1284,6 +1291,10 @@ export interface SessionManagerAPI {
     /** Boot diagnostic — assertCwdInsideHome(os.homedir()) result. ok=false
      *  on macOS symlinked-/Users mismatch and blocks all session spawns. */
     homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;
+    /** First-boot seeder outcomes, read live from each seeder's own marker
+     *  file: 'done' (succeeded), 'pending' (not yet run / retrying),
+     *  'exhausted' (gave up after MAX_ATTEMPTS — manual fix needed). */
+    seedStatus: () => Promise<SeedStatus>;
     /** "Can this project actually delegate?" — the 4 preconditions for
      *  scheduler_create_prd being in an agent's tool list at all. */
     delegationReadiness: (cwd: string) => Promise<DelegationReadiness>;

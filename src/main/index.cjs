@@ -54,6 +54,7 @@ const teams = require('./teams.cjs');
 const queueOps = require('./queueOps.cjs');
 const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
+const { seedAgentPersonas } = require('./seedAgentPersonas.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
@@ -1151,6 +1152,13 @@ app.whenReady().then(async () => {
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
   seedDevPlugin({ logger: console }).catch((e) => {
     logs.writeLine({ scope: 'seed-dev-plugin', level: 'error', message: 'seed failed', meta: { error: e?.message } });
+  });
+  // First-boot default: seed the bundled Architect + Dev Lead Agent personas
+  // into ~/.claude/agents/ so the Agent Library isn't empty on a fresh
+  // install. One-shot + idempotent; never overwrites an existing persona;
+  // never throws. SM_SEED_AGENT_PERSONAS_DISABLE=1 to opt out.
+  seedAgentPersonas({ logger: console }).catch((e) => {
+    logs.writeLine({ scope: 'seed-agent-personas', level: 'error', message: 'seed failed', meta: { error: e?.message } });
   });
   // History rollup finalize pass: deferred 30s past boot so it never competes
   // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this

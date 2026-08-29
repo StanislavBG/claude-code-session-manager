@@ -15,7 +15,10 @@ let tmpHome;
 let realHome;
 let seedAgentPersonas;
 
-const MODULES_TO_RELOAD = ['../seedAgentPersonas.cjs'];
+// config.cjs bakes os.homedir() into top-level consts at first require
+// (allowedRoots/WRITE_PREFIXES, used by writeJsonSync) — must be purged
+// alongside seedAgentPersonas.cjs so each test's tmpHome takes effect.
+const MODULES_TO_RELOAD = ['../seedAgentPersonas.cjs', '../config.cjs'];
 
 function purgeRequireCache() {
   for (const m of MODULES_TO_RELOAD) {

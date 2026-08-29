@@ -21,6 +21,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { writeJsonSync } = require('./config.cjs');
 
 const PERSONAS = ['architect', 'dev-lead'];
 const MAX_ATTEMPTS = 3; // give a transient first-boot failure a few chances
@@ -50,9 +51,7 @@ function readMarker() {
 
 function writeMarker(state) {
   try {
-    const p = markerPath();
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify({ ...state, ts: new Date().toISOString() }) + '\n');
+    writeJsonSync(markerPath(), { ...state, ts: new Date().toISOString() });
   } catch (err) {
     console.warn('[seedAgentPersonas] could not write marker:', err?.message ?? err);
   }

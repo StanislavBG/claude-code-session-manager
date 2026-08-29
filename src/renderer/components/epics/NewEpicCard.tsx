@@ -12,7 +12,8 @@ import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } f
 import { agentTagDef } from '../../lib/agentTagDefs'
 import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
-import type { AgentPersona } from '../../../preload/api'
+import { Badge } from '../ui/Badge'
+import type { AgentPersona, DelegationReadiness } from '../../../preload/api'
 
 /** Missions offered when the selected persona declares no `tags:` of its own
  *  (or the Agent Library is empty) — the three general-purpose ones. */
@@ -164,6 +165,11 @@ export function NewEpicCard({
   const [advanced, setAdvanced] = useState(false)
   const [home, setHome] = useState<string | null>(null)
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
+  // "Can this project actually delegate?" (delegation-readiness-probe) —
+  // fetched once per card mount, never polled. `null` covers both "not
+  // fetched yet" and "probe failed" (unknown), so a missing/erroring IPC
+  // surface just renders no indicator rather than a broken card.
+  const [readiness, setReadiness] = useState<DelegationReadiness | null>(null)
   // Context Injections (contextInjections.ts) — Session-Manager-authored
   // text, independent of Actor/Input/Mission, each its own on/off toggle.
   // Only an explicit human toggle is stored; the displayed/used value is
@@ -237,6 +243,19 @@ export function NewEpicCard({
   const trimmedGoal = goal.trim()
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
 
+  useEffect(() => {
+    if (!effectiveCwd) return
+    let cancelled = false
+    Promise.resolve(window.api.app?.delegationReadiness?.(effectiveCwd)).then(
+      (r) => { if (!cancelled && r) setReadiness(r) },
+      () => { if (!cancelled) setReadiness(null) },
+    )
+    return () => { cancelled = true }
+    // Fetched once per mount (first time effectiveCwd is known), not
+    // re-polled on every later cwd/tab change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Grounding board is real data (fs reads + existing store counts, never
   // fabricated) — computed lazily, only once "advanced" is opened, and
   // refreshed whenever the two things that change what it reads (project,
@@ -308,7 +327,7 @@ export function NewEpicCard({
       tag,
       agentName: selectedAgent?.name,
       agentDescription: selectedAgent?.description ?? undefined,
-      inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt) : undefined,
+      inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt, readiness) : undefined,
       contextInjections: contextInjectionsOn,
     })
     // Every Epic is BORN 'proposed'; nothing is created directly as 'active'.
@@ -420,6 +439,23 @@ export function NewEpicCard({
               >
                 <span className="uppercase tracking-[0.09em]">Project</span>
                 <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
+              </div>
+            )}
+
+            {readiness && !readiness.ok && (
+              <div
+                data-testid="delegation-readiness-warning"
+                className="mb-2.5 rounded-md border border-honey/30 bg-honey/15 px-2.5 py-2 text-[11.5px] leading-[1.5]"
+              >
+                <Badge tone="warn">Delegation not ready</Badge>
+                <ul className="mt-1.5 list-disc pl-4 text-fg-dim">
+                  {readiness.checks.filter((c) => !c.ok).map((c) => (
+                    <li key={c.id} data-testid={`delegation-readiness-check-${c.id}`}>
+                      <span className="font-medium text-fg">{c.label}</span>
+                      {c.fix && <span className="text-fg-faint"> — {c.fix}</span>}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

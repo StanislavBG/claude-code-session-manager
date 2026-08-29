@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { computeGroundingBoard } from './groundingBoard'
+import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from './groundingBoard'
+import type { DelegationReadiness } from '../../preload/api'
 
 function installApi(overrides: {
   readText?: Record<string, { exists: boolean; text: string }>
@@ -170,5 +171,38 @@ describe('computeGroundingBoard', () => {
     })
     const local = groups.find((g) => g.key === 'local')!
     expect(local.items.find((i) => i.name === 'Epic isolation')?.present).toBe(true)
+  })
+})
+
+describe('summarizeGroundingBoard', () => {
+  const groups: GroundingGroup[] = [
+    { key: 'system', label: 'System', path: '~/.claude/', items: [{ name: 'CLAUDE.md', detail: '', tokK: 0, present: true }] },
+  ]
+  const passingReadiness: DelegationReadiness = { ok: true, checks: [{ id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: true, detail: '', fix: null }] }
+  const failingReadiness: DelegationReadiness = {
+    ok: false,
+    checks: [
+      { id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: false, detail: '', fix: 'claude mcp add ...' },
+      { id: 'dev-plugin', label: 'session-manager-dev plugin enabled', ok: true, detail: '', fix: null },
+    ],
+  }
+
+  it('is unchanged when readiness is omitted', () => {
+    expect(summarizeGroundingBoard(groups)).toBe('Grounding: System (CLAUDE.md)')
+  })
+
+  it('is unchanged when every readiness check passes', () => {
+    expect(summarizeGroundingBoard(groups, passingReadiness)).toBe('Grounding: System (CLAUDE.md)')
+  })
+
+  it('appends only the failing check labels, as one line, when a check fails', () => {
+    const result = summarizeGroundingBoard(groups, failingReadiness)
+    expect(result).toBe('Grounding: System (CLAUDE.md) · NOT delegation-ready: Scheduler MCP server registered')
+    expect(result).not.toContain('\n')
+    expect(result).not.toContain('session-manager-dev plugin enabled')
+  })
+
+  it('is unchanged when readiness is null (probe failed / unknown)', () => {
+    expect(summarizeGroundingBoard(groups, null)).toBe('Grounding: System (CLAUDE.md)')
   })
 })

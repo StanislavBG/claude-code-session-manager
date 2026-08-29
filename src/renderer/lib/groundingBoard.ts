@@ -10,6 +10,7 @@
  */
 
 import { CLAUDE_MD_SCOPES, SETTINGS_SCOPES } from './scopes'
+import type { DelegationReadiness } from '../../preload/api'
 
 export interface GroundingItem {
   name: string
@@ -182,12 +183,19 @@ export async function computeGroundingBoard(input: GroundingBoardInput): Promise
  * silent file-discovery. Pure derivation over an already-computed board — no
  * extra fs/IPC reads beyond what the grounding board UI already performs.
  */
-export function summarizeGroundingBoard(groups: GroundingGroup[]): string {
+export function summarizeGroundingBoard(groups: GroundingGroup[], readiness?: DelegationReadiness | null): string {
   const parts = groups
     .map((g) => {
       const present = g.items.filter((i) => i.present).map((i) => i.name)
       return present.length ? `${g.label} (${present.join(', ')})` : null
     })
     .filter((s): s is string => s !== null)
-  return parts.length ? `Grounding: ${parts.join(' · ')}` : 'Grounding: none detected'
+  const base = parts.length ? `Grounding: ${parts.join(' · ')}` : 'Grounding: none detected'
+
+  // Absence of a registered tool is otherwise invisible to the agent (it's
+  // just missing from its tool list, with no error to catch) — state it as
+  // an inventory fact here so the opening prompt names the gap instead of
+  // silently omitting it. Unchanged when readiness is absent or all-green.
+  const failing = readiness?.ok === false ? readiness.checks.filter((c) => !c.ok).map((c) => c.label) : []
+  return failing.length ? `${base} · NOT delegation-ready: ${failing.join(', ')}` : base
 }

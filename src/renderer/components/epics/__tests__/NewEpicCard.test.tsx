@@ -57,7 +57,11 @@ beforeEach(() => {
   listPersonasSpy.mockResolvedValue([])
   ;(window as unknown as { api: unknown }).api = {
     agents: { listPersonas: listPersonasSpy },
-    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko'), gitBranch: vi.fn().mockResolvedValue('main') },
+    app: {
+      homeDir: vi.fn().mockResolvedValue('/home/bilko'),
+      gitBranch: vi.fn().mockResolvedValue('main'),
+      delegationReadiness: vi.fn().mockResolvedValue({ ok: true, checks: [] }),
+    },
     config: {
       readText: vi.fn().mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null }),
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
@@ -542,5 +546,80 @@ describe('NewEpicCard', () => {
     act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await act(async () => {})
     expect(delegateCheckbox().checked).toBe(false)
+  })
+
+  describe('delegation readiness', () => {
+    it('shows no warning and leaves the Input line unchanged when every check passes', async () => {
+      ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, checks: [] })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+      const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+      act(() => setNativeValue(goal, 'Ship it'))
+      const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+      act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+      await act(async () => {})
+
+      expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+      const [, , , , , , persistedSections] = createPromptSessionSpy.mock.calls[0]
+      const inputSection = (persistedSections as Array<{ kind: string; text: string }>).find((s) => s.kind === 'input')
+      expect(inputSection!.text).not.toContain('delegation-ready')
+      expect(inputSection!.text).toBe('Grounding: Local (working tree, Epic isolation)')
+    })
+
+    it('renders a warning naming the failing check and states the gap in the Input line when a check fails', async () => {
+      ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        checks: [
+          { id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: false, detail: 'no entry', fix: 'claude mcp add session-manager-scheduler --scope user -- node scripts/scheduler-mcp-server.cjs' },
+          { id: 'dev-plugin', label: 'session-manager-dev plugin enabled', ok: true, detail: 'enabled', fix: null },
+        ],
+      })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      const warning = el.querySelector('[data-testid="delegation-readiness-warning"]')
+      expect(warning).not.toBeNull()
+      expect(warning!.textContent).toContain('Scheduler MCP server registered')
+      expect(warning!.textContent).toContain('claude mcp add session-manager-scheduler')
+      // Only the failing check is listed, not the passing one.
+      expect(el.querySelector('[data-testid="delegation-readiness-check-dev-plugin"]')).toBeNull()
+
+      const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+      act(() => setNativeValue(goal, 'Ship it'))
+      const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+      act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+      await act(async () => {})
+
+      const [, , , , , , persistedSections] = createPromptSessionSpy.mock.calls[0]
+      const inputSection = (persistedSections as Array<{ kind: string; text: string }>).find((s) => s.kind === 'input')
+      expect(inputSection!.text).toContain('NOT delegation-ready')
+      expect(inputSection!.text).toContain('Scheduler MCP server registered')
+    })
+
+    it('degrades to unknown (no warning, no thrown error) when the probe rejects', async () => {
+      ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'))
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+      expect(el.querySelector('[data-testid="new-epic-create"]')).not.toBeNull()
+    })
+
+    it('does not block Epic creation while a delegation check is failing', async () => {
+      ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        checks: [{ id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: false, detail: 'no entry', fix: 'do X' }],
+      })
+      const onCreated = vi.fn()
+      const el = mount(<NewEpicCard onCreated={onCreated} onCancel={vi.fn()} />)
+      await act(async () => {})
+      const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+      act(() => setNativeValue(goal, 'Ship it'))
+      const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+      expect(create.disabled).toBe(false)
+      act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+      await act(async () => {})
+      expect(onCreated).toHaveBeenCalled()
+    })
   })
 })

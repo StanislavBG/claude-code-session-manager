@@ -55,6 +55,7 @@ const queueOps = require('./queueOps.cjs');
 const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const { seedAgentPersonas } = require('./seedAgentPersonas.cjs');
+const { seedSchedulerMcp } = require('./seedSchedulerMcp.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
@@ -1159,6 +1160,14 @@ app.whenReady().then(async () => {
   // never throws. SM_SEED_AGENT_PERSONAS_DISABLE=1 to opt out.
   seedAgentPersonas({ logger: console }).catch((e) => {
     logs.writeLine({ scope: 'seed-agent-personas', level: 'error', message: 'seed failed', meta: { error: e?.message } });
+  });
+  // First-boot default: register the session-manager-scheduler MCP server at
+  // USER scope so scheduler_create_prd is available in every project, not
+  // just this repo's own .mcp.json. One-shot + idempotent; never overwrites
+  // an existing registration; never throws. SM_SEED_SCHEDULER_MCP_DISABLE=1
+  // to opt out.
+  seedSchedulerMcp({ logger: console }).catch((e) => {
+    logs.writeLine({ scope: 'seed-scheduler-mcp', level: 'error', message: 'seed failed', meta: { error: e?.message } });
   });
   // History rollup finalize pass: deferred 30s past boot so it never competes
   // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this

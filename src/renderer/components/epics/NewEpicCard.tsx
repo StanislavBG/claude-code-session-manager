@@ -320,6 +320,15 @@ export function NewEpicCard({
             otherEpicsInProject: Object.values(allEpics).filter((e) => e.cwd === effectiveCwd).length,
           }).catch(() => null)
         : null)
+    // The persona's own operating rules — Claude Code only loads a persona's
+    // markdown BODY when the file runs as a subagent, never for an Epic's
+    // main loop, so without this only agentDescription's one-liner ever
+    // reaches the session. Resolved with project-overlay-then-global
+    // precedence for effectiveCwd (unlike selectedAgent.body, which is
+    // global-dir only), best-effort — a read failure just omits the section.
+    const personaBody = selectedAgent
+      ? await window.api.agents.getPersonaBody({ cwd: effectiveCwd, name: selectedAgent.name }).catch(() => null)
+      : null
     const { goalText, openingPrompt, sections } = composeEpicIntake({
       title,
       goal,
@@ -327,6 +336,8 @@ export function NewEpicCard({
       tag,
       agentName: selectedAgent?.name,
       agentDescription: selectedAgent?.description ?? undefined,
+      agentBody: personaBody?.text,
+      agentPath: personaBody?.path,
       inputSummary: groundingForPrompt ? summarizeGroundingBoard(groundingForPrompt, readiness) : undefined,
       contextInjections: contextInjectionsOn,
     })

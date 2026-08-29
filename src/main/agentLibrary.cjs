@@ -22,6 +22,7 @@ const fsSync = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
+const { resolvePersonaPaths } = require('./lib/epicMint.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -249,6 +250,47 @@ async function listPersonas({
   return personas;
 }
 
+/**
+ * Reads a persona `.md` file's raw text for `epicIntake.ts`'s `agentBody`
+ * input, honoring the same project-overlay-then-global precedence as
+ * `epicMint.cjs`'s `resolvePersonaPaths` (a project's `<cwd>/.claude/agents/
+ * <name>.md` wins over `~/.claude/agents/<name>.md`) — the same precedence
+ * `listPersonas` deliberately does NOT apply, since that lists only the
+ * global directory for the Agent Library nav page. Returns `null` when
+ * neither location has the file; frontmatter stripping and the 6000-char cap
+ * are epicIntake.ts's job, not this reader's.
+ */
+async function getPersonaBody({
+  cwd,
+  name,
+  validatePath = configMgr.validatePath,
+} = {}) {
+  // Same gate savePersona/deletePersona apply before touching a path built
+  // from `name` (agentLibrary.cjs's PERSONA_NAME_RE check) — without it a
+  // `name` like "../../other-project/CLAUDE" survives resolvePersonaPaths'
+  // plain path.join and validatePath's allowed-roots check (which only
+  // confirms the resolved path stays under the home dir / an opened
+  // project), letting any readable .md under those roots be read and
+  // forwarded into the Epic's opening prompt.
+  if (!PERSONA_NAME_RE.test(name || '')) return null;
+  const { projectPath, globalPath } = resolvePersonaPaths(cwd, name);
+  for (const candidate of [projectPath, globalPath]) {
+    let real;
+    try {
+      real = validatePath(candidate);
+    } catch {
+      continue;
+    }
+    try {
+      const text = await fsp.readFile(real, 'utf8');
+      return { path: real, text };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 module.exports = {
   listPersonas,
   openProjects,
@@ -257,6 +299,7 @@ module.exports = {
   deletePersona,
   removeOverride,
   serializePersona,
+  getPersonaBody,
   PERSONA_NAME_RE,
   ALL_PROJECTS,
 };

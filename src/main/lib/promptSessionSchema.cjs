@@ -41,7 +41,7 @@ const EpicSourceSchema = z.object({
 // data so the Epic's first turn can render a structured AIM briefing card
 // instead of regex-parsing the flat string back apart.
 const EpicIntakeSectionSchema = z.object({
-  kind: z.enum(['actor', 'injection', 'input', 'mission', 'goal', 'reference']),
+  kind: z.enum(['actor', 'persona-body', 'injection', 'input', 'mission', 'goal', 'reference']),
   label: z.string(),
   text: z.string(),
   source: z.string().optional(),

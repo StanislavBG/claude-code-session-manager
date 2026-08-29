@@ -486,6 +486,12 @@ ipcMain.handle('agents:remove-override', async (_e, payload) => {
   broadcastAgentsChanged();
   return result;
 });
+// New Epic AIM composer (epicIntake.ts's `agentBody`/`agentPath`): unlike
+// list-personas above (global dir only), this honors the project-overlay-
+// then-global precedence so an Epic's opening prompt carries the persona
+// body that actually applies to its cwd. Read-only.
+ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody, (payload) =>
+  agentLibrary.getPersonaBody(payload)));
 
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
 // Structured data over the four preconditions for scheduler_create_prd being

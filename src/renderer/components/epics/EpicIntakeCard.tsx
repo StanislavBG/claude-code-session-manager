@@ -19,6 +19,7 @@ import { TurnFrame } from '../ChatTranscriptTurn'
 
 const GROUP_LABEL: Record<EpicIntakeSection['kind'], string> = {
   actor: 'Actor',
+  'persona-body': 'Persona notes',
   injection: 'Injections',
   input: 'Input',
   mission: 'Mission',
@@ -33,6 +34,7 @@ const GROUP_LABEL: Record<EpicIntakeSection['kind'], string> = {
 // injection/input.
 const DEFAULT_EXPANDED: Record<EpicIntakeSection['kind'], boolean> = {
   actor: true,
+  'persona-body': false,
   injection: false,
   input: false,
   mission: true,

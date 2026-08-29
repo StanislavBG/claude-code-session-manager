@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { composeEpicIntake } from './epicIntake'
+import { composeEpicIntake, joinSections } from './epicIntake'
 import { agentTagDef } from './agentTagDefs'
 import { CONTEXT_INJECTIONS } from './contextInjections'
 
@@ -119,6 +119,85 @@ describe('composeEpicIntake', () => {
     const delegateIdx = openingPrompt.indexOf(CONTEXT_INJECTIONS['delegate-implementation'].text)
     expect(generalIdx).toBeGreaterThanOrEqual(0)
     expect(delegateIdx).toBeGreaterThan(generalIdx)
+  })
+
+  describe('persona-body', () => {
+    it('emits a persona-body section right after actor and before injection when a non-empty body is supplied', () => {
+      const { sections, openingPrompt } = composeEpicIntake({
+        title: 'T',
+        goal: 'G',
+        agentName: 'debugger',
+        agentDescription: 'desc',
+        agentBody: 'Never implement inline; queue via /develop.',
+        contextInjections: { 'general-behavior': true },
+      })
+      expect(sections.map((s) => s.kind)).toEqual(['actor', 'persona-body', 'injection', 'goal'])
+      expect(sections[1]).toEqual({
+        kind: 'persona-body',
+        label: 'Persona notes',
+        text: 'Never implement inline; queue via /develop.',
+        source: 'debugger',
+      })
+      expect(openingPrompt).toContain('Never implement inline; queue via /develop.')
+    })
+
+    it('is byte-identical to today\'s output when agentBody is absent', () => {
+      const { openingPrompt, sections } = composeEpicIntake({
+        title: 'T',
+        goal: 'G',
+        agentName: 'debugger',
+        agentDescription: 'desc',
+      })
+      expect(openingPrompt).toBe('You are acting as the "debugger" agent: desc\n\nGoal: T\n\nG')
+      expect(sections.some((s) => s.kind === 'persona-body')).toBe(false)
+    })
+
+    it('strips a leading YAML frontmatter block from the persona body', () => {
+      const raw = ['---', 'name: debugger', 'description: desc', '---', '', 'Never implement inline.'].join('\n')
+      const { sections } = composeEpicIntake({ title: 'T', goal: 'G', agentBody: raw })
+      expect(sections.find((s) => s.kind === 'persona-body')?.text).toBe('Never implement inline.')
+    })
+
+    it('is a no-op when the body has no frontmatter fence', () => {
+      const { sections } = composeEpicIntake({ title: 'T', goal: 'G', agentBody: 'Just plain persona prose.' })
+      expect(sections.find((s) => s.kind === 'persona-body')?.text).toBe('Just plain persona prose.')
+    })
+
+    it('omits the section entirely when the stripped/trimmed body is empty', () => {
+      const { sections } = composeEpicIntake({ title: 'T', goal: 'G', agentBody: '   \n  ' })
+      expect(sections.some((s) => s.kind === 'persona-body')).toBe(false)
+    })
+
+    it('truncates a body over 6000 characters and names the persona file path in the notice', () => {
+      const longBody = 'x'.repeat(6500)
+      const { sections } = composeEpicIntake({
+        title: 'T',
+        goal: 'G',
+        agentBody: longBody,
+        agentPath: '/home/user/.claude/agents/architect.md',
+      })
+      const text = sections.find((s) => s.kind === 'persona-body')?.text ?? ''
+      expect(text.startsWith('x'.repeat(6000))).toBe(true)
+      expect(text.length).toBeLessThan(longBody.length)
+      const lines = text.trim().split('\n')
+      expect(lines[lines.length - 1]).toContain('/home/user/.claude/agents/architect.md')
+      expect(lines[lines.length - 1].toLowerCase()).toContain('truncat')
+    })
+
+    it('round-trips joinSections(sections) === openingPrompt for a case including a persona body', () => {
+      const result = composeEpicIntake({
+        title: 'T',
+        goal: 'G',
+        referencePaths: ['/tmp/a.png', '/tmp/b.png'],
+        tag: 'bug',
+        agentName: 'debugger',
+        agentDescription: 'desc',
+        agentBody: 'Operating rules go here.',
+        inputSummary: 'Grounding: none',
+        contextInjections: { 'general-behavior': true },
+      })
+      expect(joinSections(result.sections)).toBe(result.openingPrompt)
+    })
   })
 
   describe('sections', () => {

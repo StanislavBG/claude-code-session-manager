@@ -542,6 +542,12 @@ const delegationReadinessCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 
+// ──────────────────────────────────────────── Agent persona body (New Epic AIM)
+const agentsGetPersonaBody = z.object({
+  cwd: z.string().min(1).max(4096),
+  name: z.string().min(1).max(200),
+}).strict();
+
 // ──────────────────────────────────────────── Project Pages (PRD 932)
 // Same validation split as projectBriefCwd above: real path validation is
 // config.cjs's validatePath at first fs access in projectPages.cjs.
@@ -991,6 +997,7 @@ module.exports = {
     chatExternalSend,
     exchangesList,
     agentsSavePersona,
+    agentsGetPersonaBody,
     delegationReadinessCwd,
   },
   validated,

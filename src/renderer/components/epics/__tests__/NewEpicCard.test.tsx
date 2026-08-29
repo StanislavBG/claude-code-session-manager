@@ -14,6 +14,7 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const sendSpy = vi.fn()
 const listPersonasSpy = vi.fn(async (): Promise<AgentPersona[]> => [])
+const getPersonaBodySpy = vi.fn(async (): Promise<{ path: string; text: string } | null> => null)
 
 vi.mock('../../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
@@ -55,8 +56,10 @@ beforeEach(() => {
   useSessions.setState({ tabs: [], activeTabId: null })
   listPersonasSpy.mockClear()
   listPersonasSpy.mockResolvedValue([])
+  getPersonaBodySpy.mockClear()
+  getPersonaBodySpy.mockResolvedValue(null)
   ;(window as unknown as { api: unknown }).api = {
-    agents: { listPersonas: listPersonasSpy },
+    agents: { listPersonas: listPersonasSpy, getPersonaBody: getPersonaBodySpy },
     app: {
       homeDir: vi.fn().mockResolvedValue('/home/bilko'),
       gitBranch: vi.fn().mockResolvedValue('main'),

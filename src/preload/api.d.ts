@@ -1356,6 +1356,11 @@ export interface SessionManagerAPI {
     savePersona: (payload: AgentPersonaSaveInput) => Promise<{ ok: boolean; path: string }>;
     deletePersona: (payload: { name: string }) => Promise<{ ok: boolean }>;
     removeOverride: (payload: { name: string; projectName: string }) => Promise<{ ok: boolean }>;
+    /** Raw persona `.md` text for the New Epic AIM composer (epicIntake.ts's `agentBody`),
+     *  resolved with project-overlay-then-global precedence for `cwd` — unlike
+     *  `listPersonas` above, which only reads the global directory. Null when neither
+     *  location has the file. */
+    getPersonaBody: (payload: { cwd: string; name: string }) => Promise<{ path: string; text: string } | null>;
     /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
     onChanged: (handler: () => void) => () => void;
   };
@@ -1736,7 +1741,7 @@ export interface PromptSessionsCreateEpicPayload {
    *  turn can render a structured AIM briefing card. */
   openingPrompt?: string;
   sections?: Array<{
-    kind: 'actor' | 'injection' | 'input' | 'mission' | 'goal' | 'reference';
+    kind: 'actor' | 'persona-body' | 'injection' | 'input' | 'mission' | 'goal' | 'reference';
     label: string;
     text: string;
     source?: string;

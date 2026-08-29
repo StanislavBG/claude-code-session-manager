@@ -41,6 +41,24 @@ export interface EpicIntakeFields {
    *  line entirely when either is absent. */
   agentDescription?: string
   /**
+   * The persona markdown file's raw text (frontmatter included — this
+   * function strips it) — the persona's operating rules, which Claude Code
+   * only loads when the file runs as a subagent, never for an Epic's main
+   * loop. Without this, only `agentDescription`'s one-liner ever reaches the
+   * session, so a persona's central rules (e.g. "never implement inline,
+   * queue via /develop") are written down and delivered nowhere. Emitted as
+   * its own `persona-body` section right after `actor`, with its YAML
+   * frontmatter block stripped and whitespace trimmed, capped at 6000
+   * characters with an explicit truncation notice. Omitted entirely when the
+   * stripped/trimmed body is empty.
+   */
+  agentBody?: string
+  /** Absolute path of the persona `.md` file `agentBody` was read from — named
+   *  in the truncation notice when the body exceeds the 6000-char cap, so the
+   *  reader knows which file to open for the untruncated rules. Unused when
+   *  `agentBody` is absent or under the cap. */
+  agentPath?: string
+  /**
    * AIM's "Input" axis, stated explicitly: one line naming what's grounding
    * this session (System/Project/Local CLAUDE.md, skills, mcp servers, etc.),
    * from `groundingBoard.ts`'s `summarizeGroundingBoard`. Placed after the
@@ -71,7 +89,7 @@ export interface EpicIntakeFields {
  * tag / reference path) where one exists, for a card subtitle.
  */
 export interface EpicIntakeSection {
-  kind: 'actor' | 'injection' | 'input' | 'mission' | 'goal' | 'reference'
+  kind: 'actor' | 'persona-body' | 'injection' | 'input' | 'mission' | 'goal' | 'reference'
   label: string
   text: string
   source?: string
@@ -80,11 +98,12 @@ export interface EpicIntakeSection {
 export interface EpicIntake {
   goalText: string
   openingPrompt: string
-  /** Same six kinds composeEpicIntake already concatenates, emitted in that
-   *  same order: actor, injection(s), input, mission, goal, reference(s).
-   *  Each input is independently optional, so a caller supplying none of
-   *  agentName/agentDescription/inputSummary/tag/contextInjections still
-   *  gets a valid (shorter) array — never an error. */
+  /** Same kinds composeEpicIntake already concatenates, emitted in that same
+   *  order: actor, persona-body, injection(s), input, mission, goal,
+   *  reference(s). Each input is independently optional, so a caller
+   *  supplying none of
+   *  agentName/agentDescription/agentBody/inputSummary/tag/contextInjections
+   *  still gets a valid (shorter) array — never an error. */
   sections: EpicIntakeSection[]
 }
 
@@ -99,6 +118,34 @@ function withReferences(body: string, referencePaths: string[]): string {
   return lines.length ? `${body}\n\n${lines.join('\n')}` : body
 }
 
+/** Cap on the persona body forwarded into the opening prompt — a runaway
+ *  persona file must not be able to dominate it. */
+const AGENT_BODY_CHAR_CAP = 6000
+
+/** Strips a leading YAML frontmatter block (`---\n...\n---`), no-op when the
+ *  text doesn't open with one. Mirrors the detection rule in
+ *  `src/main/lib/prdFrontmatter.cjs`'s `splitFrontmatter` (main can't import
+ *  this renderer module — no ES modules in main — so the same small rule is
+ *  duplicated here rather than shared). */
+function stripFrontmatter(raw: string): string {
+  if (!raw.startsWith('---\n')) return raw
+  const end = raw.indexOf('\n---', 4)
+  if (end === -1) return raw
+  return raw.slice(end + 4).replace(/^\n/, '')
+}
+
+/** Builds the `persona-body` section text: frontmatter-stripped, trimmed,
+ *  capped at `AGENT_BODY_CHAR_CAP` with a trailing truncation notice naming
+ *  `agentPath`. Returns null when the stripped/trimmed body is empty. */
+function buildPersonaBodyText(agentBody: string, agentPath: string | undefined): string | null {
+  const body = stripFrontmatter(agentBody).trim()
+  if (!body) return null
+  if (body.length <= AGENT_BODY_CHAR_CAP) return body
+  const truncated = body.slice(0, AGENT_BODY_CHAR_CAP)
+  const pathLabel = agentPath ? singleLine(agentPath) : 'the persona file'
+  return `${truncated}\n\n[Truncated — ${pathLabel} exceeds ${AGENT_BODY_CHAR_CAP} characters; see the file for the full body.]`
+}
+
 /**
  * Re-joins the emitted sections back into the exact flat string
  * composeEpicIntake produced before sections existed. Every boundary is a
@@ -109,7 +156,7 @@ function withReferences(body: string, referencePaths: string[]): string {
  * is what makes byte-identity with the pre-sections output structural
  * instead of merely tested.
  */
-function joinSections(sections: EpicIntakeSection[]): string {
+export function joinSections(sections: EpicIntakeSection[]): string {
   return sections.reduce((out, s, i) => {
     if (i === 0) return s.text
     const prev = sections[i - 1]
@@ -130,6 +177,8 @@ export function composeEpicIntake({
   tag,
   agentName,
   agentDescription,
+  agentBody,
+  agentPath,
   inputSummary,
   contextInjections,
 }: EpicIntakeFields): EpicIntake {
@@ -141,10 +190,11 @@ export function composeEpicIntake({
   // reads it as the objective rather than as the first line of the request.
   const promptBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedGoal}` : trimmedGoal
 
-  // AIM order: Actor, then Context Injections (extending "who's acting" with
-  // "how they generally behave"), then Input, then Mission, then the human's
-  // own goal, then any attached references — who is running this Epic, what
-  // it's standing on, what it's here to do, what it opened with.
+  // AIM order: Actor, then the persona's own body (its operating rules),
+  // then Context Injections (extending "who's acting" with "how they
+  // generally behave"), then Input, then Mission, then the human's own goal,
+  // then any attached references — who is running this Epic, what its rules
+  // are, what it's standing on, what it's here to do, what it opened with.
   const sections: EpicIntakeSection[] = []
 
   if (agentName && agentDescription) {
@@ -154,6 +204,13 @@ export function composeEpicIntake({
       text: `You are acting as the "${singleLine(agentName)}" agent: ${singleLine(agentDescription)}`,
       source: agentName,
     })
+  }
+
+  if (agentBody) {
+    const text = buildPersonaBodyText(agentBody, agentPath)
+    if (text) {
+      sections.push({ kind: 'persona-body', label: 'Persona notes', text, source: agentName })
+    }
   }
 
   // Each enabled injection is its own section, in CONTEXT_INJECTIONS' own key

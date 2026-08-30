@@ -2290,6 +2290,37 @@ async function resolveVerifyPrdPath(job) {
 }
 
 /**
+ * resolveFixPlanPath(failedJob) → { fixPath, fixSlug, group, livePrdDir }
+ *
+ * Where spawnInvestigation's auto-fix plan for `failedJob` must be written.
+ * The plan belongs in the SAME dir the original PRD lives in right now
+ * (`livePrdDir`, from resolveVerifyPrdPath's live-dir search — usually the
+ * originating Epic's `epics/<epicId>/prds/`), never the retired flat dir:
+ * consolidateFlatPrds (prdMigration.cjs) sweeps only the flat dir and
+ * archives any `.md` there with no live queue row, which a freshly-authored
+ * fix plan never has yet — so writing it flat means the very next
+ * reconcile() pass (src/main/scheduler.cjs's consolidateAllFlatPrds call)
+ * archives it before it can ever be enqueued. `livePrdDir` is null (and the
+ * flat dir, `prdDirForCwd`, is used instead) only when the original PRD
+ * can't be found live anywhere on disk — an archived twin is deliberately
+ * NOT treated as a live location for this purpose.
+ *
+ * Exported as a pure(ish) helper (one fs-free branch, one await) so tests
+ * can prove the round trip — fix plan lands beside its original and
+ * survives a consolidateFlatPrds(cwd) pass — without spawning a real
+ * investigation.
+ */
+async function resolveFixPlanPath(failedJob) {
+  const livePrdPath = await resolveVerifyPrdPath(failedJob);
+  const livePrdDir = livePrdPath ? path.dirname(livePrdPath) : null;
+  const baseSlug = failedJob.slug.replace(/^\d+-/, '');
+  const group = failedJob.parallelGroup ?? 99;
+  const fixSlug = `${String(group).padStart(2, '0')}-fix-${baseSlug}`;
+  const fixPath = path.join(livePrdDir ?? prdDirForCwd(failedJob.cwd), `${fixSlug}.md`);
+  return { fixPath, fixSlug, group, livePrdDir };
+}
+
+/**
  * notifyOriginatingTab(job) → void
  *
  * On a true terminal transition (completed/failed — never the benign
@@ -3165,20 +3196,24 @@ async function spawnInvestigation(failedJob, runDir) {
   const failedLogPath = path.join(runDir, `${failedJob.slug}.log`);
   const investigationLogPath = path.join(runDir, `${failedJob.slug}.investigation.log`);
 
+  // livePrdDir is the SAME dir the original PRD lives in right now (usually
+  // its Epic-scoped `epics/<epicId>/prds/`) — the fix plan must land there
+  // too, since consolidateFlatPrds only ever sweeps the retired flat dir
+  // (prdDirForCwd) and would archive a freshly-authored fix plan on the very
+  // next reconcile() pass before it ever gets a queue row. Only fall back to
+  // the flat dir when the original PRD can't be found on disk at all — an
+  // archived twin (archivedPrdPathForJob) is deliberately NOT used for the
+  // write dir, only for reading originalBody below.
   let originalBody = '';
+  const { fixPath, fixSlug, group, livePrdDir } = await resolveFixPlanPath(failedJob);
   try {
-    const originalPath = (await resolveVerifyPrdPath(failedJob)) ?? archivedPrdPathForJob(failedJob);
+    const originalPath = livePrdDir ? path.join(livePrdDir, `${failedJob.slug}.md`) : archivedPrdPathForJob(failedJob);
     originalBody = (await parsePrd(originalPath)).body;
   } catch {
     originalBody = failedJob.bodyPreview || '(original PRD missing from disk)';
   }
 
   const logTail = readTail(failedLogPath, 16 * 1024) || '(failed to read log)';
-
-  const baseSlug = failedJob.slug.replace(/^\d+-/, '');
-  const group = failedJob.parallelGroup ?? 99;
-  const fixSlug = `${String(group).padStart(2, '0')}-fix-${baseSlug}`;
-  const fixPath = path.join(prdDirForCwd(failedJob.cwd), `${fixSlug}.md`);
 
   if (fs.existsSync(fixPath)) {
     console.log(`[scheduler] skip investigation: fix plan already exists at ${fixPath}`);
@@ -5712,4 +5747,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };

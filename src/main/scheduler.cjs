@@ -3012,6 +3012,16 @@ function isFixPlanSlug(slug) {
 }
 
 /**
+ * The fix-plan slug spawnInvestigation authors for a given failed job —
+ * shared by selectAutoFixTargets (queue-membership check) and
+ * reverifyNeedsReview's autofix_plan_unqueued annotation (same check, run
+ * one or more passes later) so both use one slug formula.
+ */
+function fixSlugFor(job) {
+  return `${String(job.parallelGroup ?? 99).padStart(2, '0')}-fix-${job.slug.replace(/^\d+-/, '')}`;
+}
+
+/**
  * Returns true for statuses that a fix-plan completion should promote
  * (clear) on the original job. Both 'failed' and 'needs_review' are
  * recoverable via a fix-plan; 'completed', 'running', 'pending' are not.
@@ -3316,6 +3326,13 @@ async function spawnInvestigation(failedJob, runDir) {
           ? `investigation spawn failed: ${error?.message ?? String(error)}`
           : `investigation error: ${error.message}`;
         sl(`\n[scheduler] ${errMsg}\n`);
+        // Stamp the outcome even on this early exit — otherwise the job is
+        // left with autoFixAttempted: true and no outcome, which used to
+        // read as a permanent dead-end (see selectAutoFixTargets).
+        mutate((s) => {
+          const j = s.jobs.find((x) => x.slug === failedJob.slug);
+          if (j) j.autoFixOutcome = 'error';
+        }).catch(() => {});
         return;
       }
       sl(`\n[scheduler] investigation exit code=${exitCode}\n`);
@@ -3336,6 +3353,10 @@ async function spawnInvestigation(failedJob, runDir) {
       }
       if (fs.existsSync(fixPath)) {
         console.log(`[scheduler] investigation produced fix plan: ${fixSlug}`);
+        mutate((s) => {
+          const j = s.jobs.find((x) => x.slug === failedJob.slug);
+          if (j) j.autoFixOutcome = 'plan';
+        }).catch(() => {});
       } else {
         console.log(`[scheduler] investigation finished WITHOUT producing fix plan (slug=${failedJob.slug}, code=${exitCode})`);
         // Record the no-plan outcome so selectAutoFixTargets can offer one
@@ -3746,10 +3767,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
               process.env.SM_AUTOFIX_DISABLE !== '1' &&
               isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists)
             ) {
-              const isNoPlanRetry = s.jobs[i2].autoFixAttempted && s.jobs[i2].autoFixOutcome === 'no-plan';
+              const isRetryAttempt = s.jobs[i2].autoFixAttempted === true;
               s.jobs[i2].autoFixAttempted = true;
               if (!s.jobs[i2].runId) s.jobs[i2].runId = runId;
-              if (isNoPlanRetry) {
+              if (isRetryAttempt) {
                 s.jobs[i2].autoFixRetries = (s.jobs[i2].autoFixRetries ?? 0) + 1;
                 delete s.jobs[i2].autoFixOutcome;
               }
@@ -4373,6 +4394,35 @@ function isUnresolvableNeedsReview(job, { hasRunDir }) {
 }
 
 /**
+ * Pure predicate: an auto-fix attempt whose one bounded retry is already
+ * spent, and whose outcome was NOT 'plan' (a produced plan is judged by
+ * isPlanUnqueued instead — a plan is never retried, only annotated if it
+ * never reaches the queue). Covers all three exhaustible outcomes
+ * ('no-plan', 'error', and unstamped/undefined) — mirrors the retry
+ * eligibility rule in selectAutoFixTargets so a job can never be retry-
+ * eligible there and simultaneously un-annotatable here.
+ */
+function isExhaustedAutoFix(job) {
+  return !!job && job.status === 'needs_review'
+    && job.autoFixAttempted === true
+    && job.autoFixOutcome !== 'plan'
+    && (job.autoFixRetries ?? 0) >= 1;
+}
+
+/**
+ * Pure predicate: an investigation produced a fix plan (autoFixOutcome ===
+ * 'plan') but its fix-plan slug is not present among `queuedSlugs` — the
+ * plan file failed to become a queue row (write failure, or some other
+ * reason reconcile() never ingested it). `queuedSlugs` is the caller's
+ * current job-slug set, passed in rather than read here so this stays pure.
+ */
+function isPlanUnqueued(job, queuedSlugs) {
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.autoFixOutcome !== 'plan') return false;
+  return !queuedSlugs.has(fixSlugFor(job));
+}
+
+/**
  * Pure predicate: is this job eligible for the boot re-verify self-heal? Only
  * needs_review jobs with a run log (own or backfilled via resolveRunId) AND a
  * transcript-scan verdict. Crucially EXCLUDES 'uncommitted_changes' (git
@@ -4452,9 +4502,13 @@ function isRescanCandidate(job) {
  *   - a runId, own or backfilled via resolveJobRunId (need a run log to investigate)
  *   - not itself a fix-plan slug (avoids infinite recursion)
  *   - autoFixAttempted cap: a job with no prior attempt is eligible; a job
- *     whose prior attempt outcome was 'no-plan' gets ONE bounded retry
- *     (autoFixRetries < 1); any other attempted job (or an exhausted
- *     no-plan retry) is excluded
+ *     whose prior attempt outcome was 'no-plan', 'error', or UNSTAMPED
+ *     (investigation exited without recording any outcome — unknown is not
+ *     "succeeded") gets ONE bounded retry (autoFixRetries < 1); a job whose
+ *     outcome was 'plan' (a fix plan was produced) is never retried here —
+ *     it either lands as a queue row on its own or gets flagged
+ *     autofix_plan_unqueued by reverifyNeedsReview's annotation pass; an
+ *     exhausted retry is excluded
  *   - no fix sibling on disk (fixSlugExists) or already in the queue
  */
 function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRunId }) {
@@ -4465,10 +4519,13 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     if (!runId) return false;
     if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth)) return false;
     if (job.autoFixAttempted) {
-      if (job.autoFixOutcome !== 'no-plan') return false;
+      const retryEligible = job.autoFixOutcome === 'no-plan'
+        || job.autoFixOutcome === 'error'
+        || job.autoFixOutcome == null;
+      if (!retryEligible) return false;
       if ((job.autoFixRetries ?? 0) >= 1) return false;
     }
-    const fixSlug = `${String(job.parallelGroup ?? 99).padStart(2, '0')}-fix-${job.slug.replace(/^\d+-/, '')}`;
+    const fixSlug = fixSlugFor(job);
     if (fixSlugExists(fixSlug)) return false;
     if (slugsInQueue.has(fixSlug)) return false;
     return true;
@@ -4596,20 +4653,29 @@ async function reverifyNeedsReview() {
 
   // Surface needs_review jobs that can never self-heal or get an auto-fix
   // investigation (no runId, no backfillable run dir) instead of leaving
-  // them silently stranded. Also surface no-plan auto-fix jobs whose one
-  // bounded retry is already exhausted. Both are annotated, never looped on.
+  // them silently stranded. Also surface auto-fix jobs whose one bounded
+  // retry is already exhausted (outcome 'no-plan', 'error', or unstamped —
+  // selectAutoFixTargets treats all three as retry-eligible, so all three
+  // must also be annotatable once the retry is spent), and jobs whose
+  // investigation DID produce a fix plan that never became a queue row
+  // (write failed, or reconcile hasn't picked it up for some other reason).
+  // All three classes are annotated, never looped on — a needs_review job
+  // must not exit this pass both un-retried and un-annotated.
   const afterHealForAnnotate = await readQueue();
   const unresolvable = afterHealForAnnotate.jobs.filter(
     (j) => isUnresolvableNeedsReview(j, { hasRunDir: !!resolveRunId(j) }) && j.verifierVerdict !== 'no_run_artifacts',
   );
-  const exhaustedNoPlan = afterHealForAnnotate.jobs.filter(
-    (j) => j.status === 'needs_review'
-      && j.autoFixAttempted && j.autoFixOutcome === 'no-plan' && (j.autoFixRetries ?? 0) >= 1
-      && j.verifierVerdict !== 'autofix_no_plan',
+  const exhaustedAutoFix = afterHealForAnnotate.jobs.filter(
+    (j) => isExhaustedAutoFix(j) && j.verifierVerdict !== 'autofix_no_plan',
   );
-  if (unresolvable.length || exhaustedNoPlan.length) {
+  const queuedSlugs = new Set(afterHealForAnnotate.jobs.map((j) => j.slug));
+  const planUnqueued = afterHealForAnnotate.jobs.filter(
+    (j) => isPlanUnqueued(j, queuedSlugs) && j.verifierVerdict !== 'autofix_plan_unqueued',
+  );
+  if (unresolvable.length || exhaustedAutoFix.length || planUnqueued.length) {
     const unresolvableSet = new Set(unresolvable.map((j) => j.slug));
-    const exhaustedSet = new Set(exhaustedNoPlan.map((j) => j.slug));
+    const exhaustedSet = new Set(exhaustedAutoFix.map((j) => j.slug));
+    const planUnqueuedSet = new Set(planUnqueued.map((j) => j.slug));
     await mutate((s) => {
       for (const j of s.jobs) {
         if (unresolvableSet.has(j.slug)) {
@@ -4618,14 +4684,22 @@ async function reverifyNeedsReview() {
         } else if (exhaustedSet.has(j.slug)) {
           j.verifierVerdict = 'autofix_no_plan';
           j.error = 'auto-fix investigation produced no fix plan after retry — manual review';
+        } else if (planUnqueuedSet.has(j.slug)) {
+          j.verifierVerdict = 'autofix_plan_unqueued';
+          j.error = 'auto-fix investigation produced a fix plan that never reached the queue — manual review';
         }
       }
     });
     if (unresolvable.length) {
       console.log(`[scheduler] boot reverify: no run artifacts for ${unresolvable.map((j) => j.slug).join(', ')} — flagged for manual review`);
     }
-    if (exhaustedNoPlan.length) {
-      console.log(`[scheduler] boot reverify: auto-fix retry exhausted for ${exhaustedNoPlan.map((j) => j.slug).join(', ')} — flagged for manual review`);
+    if (exhaustedAutoFix.length) {
+      console.log(`[scheduler] boot reverify: auto-fix retry exhausted for ${exhaustedAutoFix.map((j) => j.slug).join(', ')} — flagged for manual review`);
+    }
+    if (planUnqueued.length) {
+      for (const j of planUnqueued) {
+        console.log(`[scheduler] boot reverify: auto-fix plan never queued for ${j.slug} — flagged for manual review`);
+      }
     }
     await broadcast();
   }
@@ -4643,7 +4717,7 @@ async function reverifyNeedsReview() {
     for (const job of targets) {
       const runId = job.runId || resolveRunId(job);
       const runDir = path.join(RUNS_DIR, runId);
-      const isNoPlanRetry = job.autoFixAttempted && job.autoFixOutcome === 'no-plan';
+      const isRetryAttempt = job.autoFixAttempted === true;
       // Persist the attempt BEFORE spawning — a crash mid-investigation still
       // counts it (mirrors orphanRetries). Safe even when the slot is busy: the
       // investigation is queued and drained as slots free, so it is genuinely
@@ -4653,13 +4727,13 @@ async function reverifyNeedsReview() {
         if (j) {
           j.autoFixAttempted = true;
           if (!j.runId && runId) j.runId = runId;
-          if (isNoPlanRetry) {
+          if (isRetryAttempt) {
             j.autoFixRetries = (j.autoFixRetries ?? 0) + 1;
             delete j.autoFixOutcome;
           }
         }
       });
-      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (${isNoPlanRetry ? 'retry' : '1/1'})`);
+      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (${isRetryAttempt ? 'retry' : '1/1'})`);
       spawnInvestigation(job, runDir).catch((e) => {
         console.error('[scheduler] auto-fix spawnInvestigation error', job.slug, e);
       });
@@ -5747,4 +5821,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };

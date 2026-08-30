@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const {
   selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate,
   healTargetForFix, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH,
-  isEligibleForImmediateAutoFix,
+  isEligibleForImmediateAutoFix, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor,
 } = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
@@ -34,8 +34,8 @@ test('selects a fresh needs_review job', () => {
   assert.strictEqual(result[0].slug, '05-my-feature');
 });
 
-test('excludes job with autoFixAttempted: true', () => {
-  const jobs = [makeJob({ autoFixAttempted: true })];
+test('excludes job with autoFixAttempted: true whose retry is already spent', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixRetries: 1 })];
   const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
   assert.strictEqual(result.length, 0);
 });
@@ -105,10 +105,110 @@ test('autoFixOutcome no-plan with retries=1 is exhausted (not selected)', () => 
   assert.strictEqual(result.length, 0);
 });
 
-test('autoFixAttempted true with no outcome recorded stays excluded (existing 1-attempt cap)', () => {
-  const jobs = [makeJob({ autoFixAttempted: true })];
+// ---- PRD: unstamped/error outcomes must retry once, not dead-end forever ----
+
+test('autoFixAttempted true with NO outcome recorded (unstamped — spawn threw before onExit wired) is retry-eligible once', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixRetries: 0 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 1);
+});
+
+test('autoFixAttempted true with no outcome AND retries=1 is exhausted (not selected)', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixRetries: 1 })];
   const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
   assert.strictEqual(result.length, 0);
+});
+
+test('autoFixOutcome error with retries=0 is retry-eligible', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixOutcome: 'error', autoFixRetries: 0 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 1);
+});
+
+test('autoFixOutcome error with retries=1 is exhausted (not selected)', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixOutcome: 'error', autoFixRetries: 1 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
+});
+
+test('autoFixOutcome plan is NEVER retried, regardless of autoFixRetries', () => {
+  const jobs = [makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 0 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
+});
+
+// ---- isExhaustedAutoFix / isPlanUnqueued (reverifyNeedsReview annotation) ----
+
+test('isExhaustedAutoFix: no-plan outcome with retries spent → true', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'no-plan', autoFixRetries: 1 });
+  assert.strictEqual(isExhaustedAutoFix(job), true);
+});
+
+test('isExhaustedAutoFix: error outcome with retries spent → true', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'error', autoFixRetries: 1 });
+  assert.strictEqual(isExhaustedAutoFix(job), true);
+});
+
+test('isExhaustedAutoFix: unstamped outcome with retries spent → true', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixRetries: 1 });
+  assert.strictEqual(isExhaustedAutoFix(job), true);
+});
+
+test('isExhaustedAutoFix: retries not yet spent → false (still eligible for its one retry)', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'no-plan', autoFixRetries: 0 });
+  assert.strictEqual(isExhaustedAutoFix(job), false);
+});
+
+test('isExhaustedAutoFix: plan outcome is never "exhausted" here — isPlanUnqueued\'s job instead', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 1 });
+  assert.strictEqual(isExhaustedAutoFix(job), false);
+});
+
+test('isPlanUnqueued: plan outcome, fix slug absent from queue → true', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan' });
+  assert.strictEqual(isPlanUnqueued(job, new Set()), true);
+});
+
+test('isPlanUnqueued: plan outcome, fix slug present in queue → false', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan' });
+  assert.strictEqual(isPlanUnqueued(job, new Set([fixSlugFor(job)])), false);
+});
+
+test('isPlanUnqueued: no-plan outcome is never "plan unqueued"', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'no-plan' });
+  assert.strictEqual(isPlanUnqueued(job, new Set()), false);
+});
+
+// ---- invariant: every needs_review job is either an auto-fix target, or
+// classified by one of the annotation predicates (i.e. would receive a
+// non-null verifierVerdict) — no job may fall through both. ----
+
+test('invariant: attempted+no-outcome, retries spent → not a target, but IS annotatable', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixRetries: 1 });
+  const isTarget = selectAutoFixTargets([job], { fixSlugExists: noSiblingOnDisk }).length === 1;
+  const isAnnotatable = isExhaustedAutoFix(job) || isPlanUnqueued(job, new Set())
+    || isUnresolvableNeedsReview(job, { hasRunDir: true });
+  assert.strictEqual(isTarget, false);
+  assert.strictEqual(isAnnotatable, true);
+});
+
+test('invariant: plan outcome, no queue row → not a target, but IS annotatable (autofix_plan_unqueued)', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan' });
+  const isTarget = selectAutoFixTargets([job], { fixSlugExists: noSiblingOnDisk }).length === 1;
+  const isAnnotatable = isExhaustedAutoFix(job) || isPlanUnqueued(job, new Set())
+    || isUnresolvableNeedsReview(job, { hasRunDir: true });
+  assert.strictEqual(isTarget, false);
+  assert.strictEqual(isAnnotatable, true);
+});
+
+test('invariant: plan outcome WITH a queue row → not a target and NOT annotated (waiting on the fix-plan job itself)', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan' });
+  const queuedSlugs = new Set([fixSlugFor(job)]);
+  const isTarget = selectAutoFixTargets([job], { fixSlugExists: noSiblingOnDisk }).length === 1;
+  const isAnnotatable = isExhaustedAutoFix(job) || isPlanUnqueued(job, queuedSlugs)
+    || isUnresolvableNeedsReview(job, { hasRunDir: true });
+  assert.strictEqual(isTarget, false);
+  assert.strictEqual(isAnnotatable, false);
 });
 
 test('excludes when fix sibling exists on disk', () => {
@@ -224,10 +324,16 @@ test('isEligibleForImmediateAutoFix: fresh needs_review job (fresh from spawnJob
   assert.strictEqual(result, true);
 });
 
-test('isEligibleForImmediateAutoFix: job already autoFixAttempted is excluded (prevents double-spawn with the periodic pass)', () => {
-  const job = makeJob({ autoFixAttempted: true });
+test('isEligibleForImmediateAutoFix: attempted job with retry already spent is excluded (prevents double-spawn with the periodic pass)', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixRetries: 1 });
   const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
   assert.strictEqual(result, false);
+});
+
+test('isEligibleForImmediateAutoFix: attempted job with an unstamped outcome and its retry still unspent IS eligible (bounded once)', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixRetries: 0 });
+  const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
+  assert.strictEqual(result, true);
 });
 
 test('isEligibleForImmediateAutoFix: fix sibling already on disk excludes the job', () => {

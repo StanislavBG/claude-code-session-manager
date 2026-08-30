@@ -93,6 +93,18 @@ test('a FAILED bare-named dep holds the dependent and reports an explicit reason
   assert.match(reason, /874-nav-face-project-home <- leftnav-two-face-framework/);
 });
 
+test('a SKIPPED (never-ran) bare-named dep holds the dependent and reports an explicit reason', () => {
+  const jobs = [
+    job('873-leftnav-two-face-framework', 'skipped'),
+    job('874-nav-face-project-home', 'pending', { dependsOn: ['leftnav-two-face-framework'] }),
+  ];
+  const { batch, reason } = pick(jobs);
+  assert.deepEqual(batch, []);
+  assert.match(reason, /depends-gate/);
+  assert.match(reason, /never-ran dependencies/);
+  assert.match(reason, /874-nav-face-project-home <- leftnav-two-face-framework/);
+});
+
 // ---------------------------------------------------------------------------
 // Parallelism regression coverage.
 //
@@ -206,6 +218,20 @@ test('hold record carries a failed dep status alongside the depends-gate reason'
   assert.match(reason, /depends-gate/);
   assert.deepEqual(holds, [
     { slug: '986-dependent', dep: 'foundation', depStatus: 'failed' },
+  ]);
+});
+
+test('hold record carries a skipped dep status alongside the depends-gate reason', () => {
+  const jobs = [
+    job('985-foundation', 'skipped'),
+    job('986-dependent', 'pending', { dependsOn: ['foundation'] }),
+  ];
+  const { batch, reason, holds } = pick(jobs, new Set(), 5);
+  assert.deepEqual(batch, []);
+  assert.match(reason, /depends-gate/);
+  assert.match(reason, /never-ran dependencies/);
+  assert.deepEqual(holds, [
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'skipped' },
   ]);
 });
 

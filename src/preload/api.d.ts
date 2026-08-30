@@ -391,7 +391,7 @@ export interface ScheduleConfig {
  *  so this union is a manually-kept copy; drift from JOB_STATUSES (and from
  *  the renderer's own mirrors in StatusBadge.tsx/SchedulePanel.tsx) is
  *  caught by src/main/__tests__/scheduleJobStatusDrift.test.cjs. */
-export type ScheduleJobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review' | 'quarantined';
+export type ScheduleJobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'skipped' | 'failed' | 'needs_review' | 'quarantined';
 
 export interface ScheduleJobRuntime {
   pid: number;

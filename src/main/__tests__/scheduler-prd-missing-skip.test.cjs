@@ -126,7 +126,11 @@ test("spawnJob's post-run handler retires a prd-missing skip as a plain completi
     const state = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
     const row = state.jobs.find((j) => j.slug === slug);
     expect(row).toBeDefined();
-    expect(row.status).toBe('completed');
+    // A 'prd-missing' skip means no executor ever ran — it must land on the
+    // distinct 'skipped' status, never 'completed' (the status a genuine
+    // successful run produces), so unrun work can never masquerade as done.
+    expect(row.status).toBe('skipped');
+    expect(row.status).not.toBe('completed');
     expect(row.exitCode).toBe(0);
     expect(row.error).toBeNull();
     // No verify pass ran and no RCA feedback fired: a verified run always

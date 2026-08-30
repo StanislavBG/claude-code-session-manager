@@ -10,13 +10,14 @@
 // JOB_STATUSES (src/main/lib/scheduleJobSchema.cjs) — the renderer can't
 // import that .cjs directly, so this union is a manually-kept mirror. Drift
 // is caught by src/main/__tests__/scheduleJobSchema.test.cjs.
-export type JobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'failed' | 'needs_review' | 'quarantined'
+export type JobStatus = 'pending' | 'running' | 'investigating' | 'completed' | 'skipped' | 'failed' | 'needs_review' | 'quarantined'
 
 export const CLASSES: Record<JobStatus, string> = {
   pending:      'bg-bg-hi text-fg-dim border-line',
   running:      'bg-amber-950/50 text-amber-200 border-amber-800/60',
   investigating: 'bg-blue-950/50 text-blue-200 border-blue-800/60',
   completed:    'bg-green-950/50 text-green-200 border-green-800/60',
+  skipped:      'bg-zinc-800/50 text-zinc-300 border-zinc-600/60',
   failed:       'bg-red-950/50 text-red-200 border-red-800/60',
   needs_review: 'bg-orange-950/50 text-orange-200 border-orange-800/60',
   quarantined:  'bg-fuchsia-950/50 text-fuchsia-200 border-fuchsia-800/60',
@@ -42,6 +43,9 @@ export function StatusBadge({ status, className = '' }: StatusBadgeProps) {
       )}
       {status === 'completed' && (
         <span aria-hidden="true">✓</span>
+      )}
+      {status === 'skipped' && (
+        <span aria-hidden="true">⊘</span>
       )}
       {status.replace('_', ' ')}
     </span>

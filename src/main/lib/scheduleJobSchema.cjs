@@ -24,7 +24,7 @@
 
 const { z } = require('zod');
 
-const JOB_STATUSES = ['pending', 'running', 'investigating', 'completed', 'failed', 'needs_review', 'quarantined'];
+const JOB_STATUSES = ['pending', 'running', 'investigating', 'completed', 'skipped', 'failed', 'needs_review', 'quarantined'];
 
 const ScheduleJobStatusSchema = z.enum(JOB_STATUSES);
 

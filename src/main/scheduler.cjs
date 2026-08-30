@@ -1424,7 +1424,7 @@ async function reconcile(state) {
         seen.add(job.slug);
         next.push({ ...job });
         console.warn(`[scheduler] reconcile: keeping ${job.status} job ${job.slug} — PRD source not visible in any candidate dir`);
-      } else if (job.status === 'completed' || job.status === 'failed') {
+      } else if (job.status === 'completed' || job.status === 'failed' || job.status === 'skipped') {
         terminalDroppedNeedingHistoryCheck.push(job);
       }
       continue;
@@ -2104,7 +2104,7 @@ async function clearPause(source) {
  * already-'completed' job, and that path is exactly what this guards.
  */
 function resetJobFields(job, errorMsg, opts = {}) {
-  if (job.status === 'completed' && opts.force !== true) return false;
+  if ((job.status === 'completed' || job.status === 'skipped') && opts.force !== true) return false;
   if (!transitionJob(job, 'pending', { reason: errorMsg ?? 'reset to pending', source: opts.source ?? 'resetJobFields' })) return false;
   job.runId = null;
   job.startedAt = null;
@@ -3486,13 +3486,18 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // Stale queue entry: the PRD was archived (already shipped) or is gone
     // from disk entirely (deleted before dispatch). Both are retire-not-fail
     // results from prdArchivedSkipResult with exitCode 0 and no transcript —
-    // treat any truthy skip reason as a plain completion: no verify pass, no
-    // commit guard, no RCA feedback item.
+    // no verify pass, no commit guard, no RCA feedback item — but only
+    // 'prd-archived' actually means the work shipped (archivedTwinExists
+    // found the file under a prds-archived/ dir). 'prd-missing' means no
+    // executor ever ran at all, so it must NOT land on the same 'completed'
+    // status a genuine successful run produces — that conflation is what let
+    // 20 never-executed sigma PRDs read as shipped (2026-08-30 incident).
     if (res.skipped) {
+      const targetStatus = res.skipped === 'prd-missing' ? 'skipped' : 'completed';
       await mutate((s) => {
         const idx = s.jobs.findIndex((x) => x.slug === job.slug);
         if (idx >= 0) {
-          transitionJob(s.jobs[idx], 'completed', { reason: res.note ?? 'PRD archived or missing — treated as already-shipped', source: 'spawnJob:skip-archived' });
+          transitionJob(s.jobs[idx], targetStatus, { reason: res.note ?? 'PRD archived or missing — treated as already-shipped', source: 'spawnJob:skip-archived' });
           s.jobs[idx].finishedAt = new Date().toISOString();
           s.jobs[idx].exitCode = 0;
           s.jobs[idx].error = null;
@@ -4297,7 +4302,7 @@ async function pollLoop() {
 // callers/tests that only pass `jobs` are unaffected.
 function selectHistoryJobs(jobs, limit, historyEntries = []) {
   const cap = Math.max(1, Math.min(500, Number.isFinite(limit) ? Math.floor(limit) : 50));
-  const hot = (Array.isArray(jobs) ? jobs : []).filter((j) => j && (j.status === 'completed' || j.status === 'failed'));
+  const hot = (Array.isArray(jobs) ? jobs : []).filter((j) => j && (j.status === 'completed' || j.status === 'failed' || j.status === 'skipped'));
   const seen = new Set(hot.map((j) => `${j.slug}|${j.runId ?? ''}`));
   const archived = (Array.isArray(historyEntries) ? historyEntries : []).filter((j) => {
     if (!j) return false;
@@ -5759,7 +5764,7 @@ const remote = {
     const state = await readQueue();
     const job = state.jobs.find((j) => j.slug === slug);
     if (!job) return { ok: false, error: 'not found' };
-    if (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review') {
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review' || job.status === 'skipped') {
       return { ok: false, error: `job already terminal (status: "${job.status}") — nothing to cancel` };
     }
     const wasRunning = job.status === 'running';

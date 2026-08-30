@@ -62,9 +62,11 @@ function jobKey(job) {
 
 /**
  * O(n) over `jobs`. Splits terminal jobs into `hot` (stays in queue.json)
- * and `toArchive` (moves to history.jsonl). A completed/failed job archives
- * only when ALL of:
- *   - status is 'completed' or 'failed'
+ * and `toArchive` (moves to history.jsonl). A completed/failed/skipped job
+ * archives only when ALL of:
+ *   - status is 'completed', 'failed', or 'skipped' (skipped: a job whose
+ *     PRD source vanished before dispatch — never ran, but still terminal,
+ *     and must age out of the hot queue the same as any other finished row)
  *   - finishedAt parses and is older than opts.retentionMs (default
  *     HISTORY_RETENTION_MS)
  *   - it is not the healTargetForFix() parent of a pending/running fix-plan
@@ -90,7 +92,7 @@ function partitionJobs(jobs, nowMs, opts = {}) {
     if (!j) continue;
     const finishedMs = j.finishedAt ? Date.parse(j.finishedAt) : NaN;
     const archivable =
-      (j.status === 'completed' || j.status === 'failed') &&
+      (j.status === 'completed' || j.status === 'failed' || j.status === 'skipped') &&
       Number.isFinite(finishedMs) &&
       (nowMs - finishedMs) > retentionMs &&
       !protectedSlugs.has(j.slug);

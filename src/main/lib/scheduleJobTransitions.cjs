@@ -44,7 +44,10 @@ const STATUS_HISTORY_CAP = 20;
  *    manual archive of an already-shipped PRD), pending->failed (admin
  *    cancelJob on a not-yet-started job)
  *  - running->completed|failed|needs_review (normal run outcomes, reaper),
- *    running->pending (halt/rate-limit reset, transient-failure retry)
+ *    running->skipped (spawnJob:skip-archived's 'prd-missing' case — no
+ *    executor ever ran; kept distinct from 'completed' so unrun work can't
+ *    read as shipped), running->pending (halt/rate-limit reset,
+ *    transient-failure retry)
  *  - investigating->failed|needs_review (restore prior status once the
  *    investigation probe exits), investigating->completed (defensive: the
  *    restored prior status could in principle be 'completed' if a caller
@@ -58,6 +61,9 @@ const STATUS_HISTORY_CAP = 20;
  *  - completed->pending (force-only reset, gated separately by
  *    resetJobFields' own guard — this table only says the edge is
  *    structurally legal, not that every caller may take it unconditionally)
+ *  - skipped->pending (force-only reset, same resetJobFields guard as
+ *    completed->pending — 'skipped' is otherwise terminal: no further
+ *    transitions out)
  *  - quarantined->pending (reconcile()'s adopt path, PRD-authoring lockdown:
  *    a PRD discovered with no `createdVia` provenance stamp is queued
  *    'quarantined' instead of 'pending'; the ONLY way out is the PRD being
@@ -66,11 +72,12 @@ const STATUS_HISTORY_CAP = 20;
  */
 const LEGAL_TRANSITIONS = {
   pending: ['running', 'completed', 'failed'],
-  running: ['completed', 'failed', 'needs_review', 'pending'],
+  running: ['completed', 'failed', 'needs_review', 'skipped', 'pending'],
   investigating: ['failed', 'needs_review', 'completed', 'pending'],
   failed: ['investigating', 'pending', 'completed'],
   needs_review: ['investigating', 'pending', 'completed'],
   completed: ['pending'],
+  skipped: ['pending'],
   quarantined: ['pending'],
 };
 

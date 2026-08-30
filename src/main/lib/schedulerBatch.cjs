@@ -97,6 +97,12 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
 
   const pending = [];
   const heldByFailedDep = [];
+  // A dep that never ran (its PRD source vanished before dispatch — see
+  // scheduleJobSchema.cjs's 'skipped' status) is just as blocking as a
+  // failed one and deserves the same explicit reason, not a silent fall into
+  // the generic `holds` bucket — resetting won't help here (the source file
+  // is gone), so the guidance differs from the failed-dep case.
+  const heldBySkippedDep = [];
   // Per-job hold records, surfaced to the UI so a `pending` row can say WHICH
   // dep is holding it instead of leaving the reason in console.log.
   const holds = [];
@@ -105,7 +111,9 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
     if (!dep) { pending.push(j); continue; }
     const depRows = rowsForDep(dep);
     const failed = depRows.some((d) => d.status === 'failed');
+    const skipped = depRows.some((d) => d.status === 'skipped');
     if (failed) heldByFailedDep.push({ job: j, dep });
+    else if (skipped) heldBySkippedDep.push({ job: j, dep });
     holds.push({
       slug: j.slug,
       dep,
@@ -114,9 +122,17 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
     // running/pending/needs_review dep — simply not eligible this tick.
   }
   if (pending.length === 0) {
+    const reasons = [];
     if (heldByFailedDep.length > 0) {
       const detail = heldByFailedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
-      const reason = `[scheduler] depends-gate [${projectCwd}]: holding ${heldByFailedDep.length} job(s) behind failed dependencies [${detail}]. Reset or archive the dep to unblock.`;
+      reasons.push(`holding ${heldByFailedDep.length} job(s) behind failed dependencies [${detail}]. Reset or archive the dep to unblock.`);
+    }
+    if (heldBySkippedDep.length > 0) {
+      const detail = heldBySkippedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
+      reasons.push(`holding ${heldBySkippedDep.length} job(s) behind never-ran dependencies [${detail}]. The dep's PRD source is gone — author a fresh PRD for that work to unblock.`);
+    }
+    if (reasons.length > 0) {
+      const reason = `[scheduler] depends-gate [${projectCwd}]: ${reasons.join(' ')}`;
       console.log(reason);
       return { batch: [], reason, holds };
     }

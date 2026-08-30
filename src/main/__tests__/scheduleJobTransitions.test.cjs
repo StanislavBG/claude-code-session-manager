@@ -109,6 +109,7 @@ test('LEGAL_TRANSITIONS covers every real scheduler.cjs edge', () => {
     ['running', 'completed'],
     ['running', 'failed'],
     ['running', 'needs_review'],
+    ['running', 'skipped'],
     ['running', 'pending'],
     ['investigating', 'failed'],
     ['investigating', 'needs_review'],
@@ -120,10 +121,33 @@ test('LEGAL_TRANSITIONS covers every real scheduler.cjs edge', () => {
     ['needs_review', 'pending'],
     ['needs_review', 'completed'],
     ['completed', 'pending'],
+    ['skipped', 'pending'],
   ];
   for (const [from, to] of mustBeLegal) {
     expect(LEGAL_TRANSITIONS[from]).toContain(to);
   }
+});
+
+test('running -> skipped is legal (a job whose PRD source vanished before dispatch never ran)', () => {
+  const slug = uniqueSlug('skip');
+  const job = { slug, cwd: '/tmp/proj', status: 'running' };
+
+  const ok = transitionJob(job, 'skipped', { reason: 'PRD source no longer exists on disk', source: 'spawnJob:skip-archived' });
+
+  expect(ok).toBe(true);
+  expect(job.status).toBe('skipped');
+  expect(job.statusHistory[0]).toMatchObject({ from: 'running', to: 'skipped' });
+});
+
+test('skipped is terminal: no transitions out except the explicit pending reset', () => {
+  expect(LEGAL_TRANSITIONS.skipped).toEqual(['pending']);
+  const slug = uniqueSlug('skip-terminal');
+  const job = { slug, cwd: '/tmp/proj', status: 'skipped' };
+  expect(transitionJob(job, 'running', { reason: 'nope', source: 'test' })).toBe(false);
+  expect(transitionJob(job, 'completed', { reason: 'nope', source: 'test' })).toBe(false);
+  expect(job.status).toBe('skipped');
+  expect(transitionJob(job, 'pending', { reason: 'reset', source: 'test' })).toBe(true);
+  expect(job.status).toBe('pending');
 });
 
 test('a genuinely nonsensical edge (completed -> running) is illegal', () => {

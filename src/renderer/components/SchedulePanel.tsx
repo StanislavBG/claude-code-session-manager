@@ -35,10 +35,10 @@ function truncateLabel(text: string, max = 60): string {
   return `${trimmed.slice(0, max - 1)}…`
 }
 
-type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'needs_review' | 'failed' | 'quarantined'
+type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'skipped' | 'needs_review' | 'failed' | 'quarantined'
 interface QueueFilter { text: string; status: FilterStatus }
 
-const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'investigating', 'pending', 'completed', 'needs_review', 'failed', 'quarantined']
+const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'investigating', 'pending', 'completed', 'skipped', 'needs_review', 'failed', 'quarantined']
 
 function loadFilter(): QueueFilter {
   try {
@@ -1149,6 +1149,7 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
     { label: 'Investigating', value: 'investigating' },
     { label: 'Pending', value: 'pending' },
     { label: 'Completed', value: 'completed' },
+    { label: 'Skipped', value: 'skipped' },
     { label: 'Needs review', value: 'needs_review' },
     { label: 'Failed', value: 'failed' },
     { label: 'Quarantined', value: 'quarantined' },

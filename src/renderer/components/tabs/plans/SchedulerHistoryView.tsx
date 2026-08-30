@@ -30,6 +30,7 @@ function toDateStr(iso: string | null | undefined): string {
 const STATUS_OPTIONS = [
   { value: 'all',       label: 'All' },
   { value: 'completed', label: 'Completed' },
+  { value: 'skipped',   label: 'Skipped' },
   { value: 'failed',    label: 'Failed' },
 ] as const
 type StatusFilter = typeof STATUS_OPTIONS[number]['value']

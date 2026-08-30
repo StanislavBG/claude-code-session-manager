@@ -91,6 +91,13 @@ test('partitionJobs: running and pending jobs never archive, regardless of age',
   expect(hot.map((j) => j.slug).sort()).toEqual(['04-running', '05-pending']);
 });
 
+test('partitionJobs: old skipped job archives (never-ran rows must age out of the hot queue too)', () => {
+  const j = old({ slug: '03b-old-skipped', status: 'skipped', runId: 'run-3b' });
+  const { hot, toArchive } = queueHistory.partitionJobs([j], NOW);
+  expect(hot).toEqual([]);
+  expect(toArchive.map((x) => x.slug)).toEqual(['03b-old-skipped']);
+});
+
 test('partitionJobs: needs_review jobs never archive', () => {
   const j = old({ slug: '06-review', status: 'needs_review', runId: 'run-6' });
   const { hot, toArchive } = queueHistory.partitionJobs([j], NOW);

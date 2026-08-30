@@ -29,6 +29,7 @@ const BADGE_CLASSES: Record<ScheduleJobStatus, string> = {
   investigating: 'bg-accent text-white',
   pending:       'bg-bg text-fg-dim border border-line',
   completed:     'bg-sage/20 text-sage',
+  skipped:       'bg-fg-dim/10 text-fg-dim border border-line',
   needs_review:  'bg-butter/25 text-fg-dim',
   failed:        'bg-accent/15 text-accent',
   quarantined:   'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40',
@@ -37,6 +38,7 @@ const BADGE_CLASSES: Record<ScheduleJobStatus, string> = {
 const BADGE_MARKS: Partial<Record<ScheduleJobStatus, string>> = {
   pending:      '○',
   completed:    '✓',
+  skipped:      '⊘',
   needs_review: '!',
   failed:       '✕',
   quarantined:  '⚑',
@@ -224,6 +226,10 @@ export const STATUS_TONE: Record<string, { bg: string; text: string; border: boo
   ready:        { bg: 'bg-bg',        text: 'text-fg-dim',   border: true,  label: 'ready to run' },
   draft:        { bg: 'bg-bg',        text: 'text-fg-faint', border: true,  label: 'draft' },
   completed:    { bg: 'bg-sage/20',   text: 'text-sage',     border: false, label: 'completed' },
+  // Never-ran: the PRD source vanished before dispatch, so no executor
+  // spawned — deliberately neutral, never the green 'completed' tone, so an
+  // unrun row can't masquerade as shipped work (see JOB_STATUSES header).
+  skipped:      { bg: 'bg-fg-dim/10', text: 'text-fg-dim',   border: true,  label: 'skipped' },
   failed:       { bg: 'bg-accent/15', text: 'text-accent',   border: false, label: 'failed' },
   needs_review: { bg: 'bg-butter/25', text: 'text-fg-dim',   border: false, label: 'needs review' },
   // A chat PromptTicket (PRD 750) that classified 'develop' and handed off to

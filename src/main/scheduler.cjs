@@ -5358,6 +5358,20 @@ async function init() {
   }
 }
 
+// Measured against this repo's own live+archived PRD set (868 entries
+// across every local project — the admin route has no cwd filter by
+// default): no single field dominates a listPrdsInternal() entry: title is
+// the largest at ~30% of payload bytes, followed by slug/cwd/sourcePromptId/
+// epicId at 12-14% each — the 353KB the route was shipping came from
+// returning the full unbounded row count, not from one oversized field.
+// This trims the fields an agent doesn't need to answer "what PRDs are
+// there" (parallelGroup/estimateMinutes/sourcePromptId/epicId/
+// archivedStatus); `fields=full` restores them.
+function toCompactPrdEntry(entry) {
+  const { slug, title, cwd, mtimeMs, archived, status } = entry;
+  return { slug, title, cwd, mtimeMs, archived, status };
+}
+
 /**
  * listPrdsInternal() → every live + archived PRD across every project,
  * with each entry's real job status folded in (`status`: the live queue
@@ -5617,15 +5631,25 @@ const remote = {
 
   // Every live+archived PRD across every project (listPrdsInternal, shared
   // with the renderer's schedule:list-prds IPC handler), filtered by the
-  // admin route's cwd/epicId/status query params.
+  // admin route's cwd/epicId/status query params and paged by
+  // limit/offset. Sort order is listPrdsInternal's own slug.localeCompare
+  // (numeric) — stable across calls since it's a pure string sort, so
+  // paging by offset can't skip or duplicate an entry between requests as
+  // long as the underlying PRD set doesn't change mid-page.
   async listPrds(filter = {}) {
     const all = await listPrdsInternal();
-    return all.filter((entry) => {
+    const filtered = all.filter((entry) => {
       if (filter.cwd && entry.cwd !== filter.cwd) return false;
       if (filter.epicId && entry.epicId !== filter.epicId) return false;
       if (filter.status && entry.status !== filter.status) return false;
       return true;
     });
+    const total = filtered.length;
+    const limit = filter.limit ?? 100;
+    const offset = filter.offset ?? 0;
+    const page = filtered.slice(offset, offset + limit);
+    const prds = filter.fields === 'full' ? page : page.map(toCompactPrdEntry);
+    return { prds, total, limit, offset, hasMore: offset + page.length < total };
   },
 
   // Full body + parsed frontmatter for one PRD, live or archived. Mirrors

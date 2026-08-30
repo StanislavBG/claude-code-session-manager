@@ -45,6 +45,16 @@ function parseJsonBody(raw) {
  * scheduler.cjs's own registerAdminRoute(s) pattern.
  */
 function registerAdminRoute(adminHttp, remote) {
+  // GET /admin/scheduler/prds — paginated PRD listing (PRD: 353KB/120s
+  // fix). Sort order is stable and explicit: slug ascending via
+  // String.localeCompare(..., { numeric: true }) (listPrdsInternal in
+  // scheduler.cjs), so offset paging can't skip or duplicate an entry
+  // between calls as long as the underlying PRD set is unchanged.
+  // `limit`/`offset` default to 100/0 (hard max limit 500); `total` is the
+  // filtered count BEFORE the page slice, and `hasMore` is derived from
+  // `total`, not from whether the page came back full. `fields=full` opts
+  // into the secondary detail fields (parallelGroup, estimateMinutes,
+  // sourcePromptId, epicId, archivedStatus) omitted by default.
   adminHttp.registerRoute('GET', '/admin/scheduler/prds', async (req, res, query) => {
     let input;
     try {
@@ -53,8 +63,8 @@ function registerAdminRoute(adminHttp, remote) {
       sendJson(res, 400, { ok: false, error: 'invalid query', details: e?.issues ?? e?.message });
       return;
     }
-    const prds = await remote.listPrds(input);
-    sendJson(res, 200, { ok: true, prds });
+    const { prds, total, limit, offset, hasMore } = await remote.listPrds(input);
+    sendJson(res, 200, { ok: true, prds, total, limit, offset, hasMore });
   });
 
   adminHttp.registerRoute('GET', '/admin/scheduler/prd', async (req, res, query) => {

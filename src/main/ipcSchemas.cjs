@@ -369,6 +369,16 @@ const adminListPrdsQuery = z.object({
   cwd: z.string().min(1).max(4096).optional(),
   epicId: z.string().min(1).max(200).optional(),
   status: z.string().min(1).max(40).optional(),
+  // Page size — default 100, hard max 500 so an agent can't accidentally
+  // re-request the full unbounded list (PRD: the 353KB/120s-timeout
+  // incident this pagination exists to fix). Query strings arrive as text,
+  // so these coerce before the int/range checks run.
+  limit: z.coerce.number().int().min(1).max(500).optional().default(100),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+  // 'compact' (default) omits the secondary detail fields (parallelGroup,
+  // estimateMinutes, sourcePromptId, epicId, archivedStatus) that aren't
+  // needed to answer "what PRDs are there"; 'full' restores them.
+  fields: z.enum(['compact', 'full']).optional().default('compact'),
 });
 
 const adminGetPrdQuery = z.object({

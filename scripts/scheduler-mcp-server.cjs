@@ -144,13 +144,19 @@ const TOOLS = [
     name: 'scheduler_list_prds',
     description: "THE ONLY SUPPORTED WAY to list scheduled PRDs (live + archived) via the session-manager app's admin API. "
       + 'Each entry includes its real job status (pending/running/completed/failed/needs_review, or null if not yet '
-      + 'queued/reconciled). Optionally filter by project cwd, Epic id, and/or status.',
+      + 'queued/reconciled). Optionally filter by project cwd, Epic id, and/or status. Results are paginated (default '
+      + 'limit 100, max 500) sorted by slug ascending — check `hasMore`/`total` in the response before assuming you '
+      + "received every PRD; page further with `offset`. Default fields are compact (no parallelGroup/estimateMinutes/"
+      + 'sourcePromptId/epicId/archivedStatus) — pass fields:"full" to restore them.',
     inputSchema: {
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Optional: only PRDs targeting this project cwd' },
         epicId: { type: 'string', description: 'Optional: only PRDs belonging to this Epic id' },
         status: { type: 'string', description: 'Optional: only PRDs whose job status equals this value' },
+        limit: { type: 'number', description: 'Optional: page size, default 100, max 500' },
+        offset: { type: 'number', description: 'Optional: page offset, default 0' },
+        fields: { type: 'string', enum: ['compact', 'full'], description: 'Optional: "full" restores secondary detail fields; default "compact"' },
       },
     },
   },
@@ -353,8 +359,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (args?.cwd) qs.set('cwd', args.cwd);
       if (args?.epicId) qs.set('epicId', args.epicId);
       if (args?.status) qs.set('status', args.status);
+      if (args?.limit !== undefined) qs.set('limit', String(args.limit));
+      if (args?.offset !== undefined) qs.set('offset', String(args.offset));
+      if (args?.fields) qs.set('fields', args.fields);
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       const result = await adminRequest('GET', `/admin/scheduler/prds${suffix}`);
+      // Surface hasMore/total up front so an agent can't mistake a partial
+      // page for the full list (the 353KB/120s-timeout incident this
+      // pagination exists to fix).
+      if (result?.ok && result.hasMore) {
+        result.note = `partial list: returned ${result.prds.length} of ${result.total} PRDs (offset ${result.offset}, limit ${result.limit}) — pass a higher offset to see more`;
+      }
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_get_prd') {

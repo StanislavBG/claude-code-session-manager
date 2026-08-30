@@ -139,7 +139,107 @@ test('GET /admin/scheduler/prds lists a live PRD with status null (no queue row 
     const entry = res.json.prds.find((p) => p.slug === slug);
     expect(entry).toBeTruthy();
     expect(entry.status).toBe(null);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prds defaults to limit=100/offset=0, reports total/hasMore, omits secondary fields', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-list-defaults';
+  const slug = uniqueSlug('list-prds-defaults');
+  await writePrdFixture({ cwd, epicId, slug });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prds?cwd=${encodeURIComponent(cwd)}`, token });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.limit).toBe(100);
+    expect(res.json.offset).toBe(0);
+    expect(res.json.total).toBe(res.json.prds.length);
+    expect(res.json.hasMore).toBe(false);
+    const entry = res.json.prds.find((p) => p.slug === slug);
+    expect(entry).toBeTruthy();
+    expect('epicId' in entry).toBe(false);
+    expect('sourcePromptId' in entry).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prds?fields=full restores secondary fields', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-list-full';
+  const slug = uniqueSlug('list-prds-full');
+  await writePrdFixture({ cwd, epicId, slug });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prds?cwd=${encodeURIComponent(cwd)}&fields=full`, token });
+    expect(res.status).toBe(200);
+    const entry = res.json.prds.find((p) => p.slug === slug);
     expect(entry.epicId).toBe(epicId);
+    expect(entry.sourcePromptId).toBeTruthy();
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prds pages disjointly by limit/offset in stable slug order', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-list-paged';
+  const base = uniqueSlug('list-prds-paged');
+  const slugs = [];
+  for (let i = 0; i < 5; i++) {
+    const slug = `${base}-${i}`;
+    slugs.push(slug);
+    await writePrdFixture({ cwd, epicId, slug });
+  }
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const qs = `cwd=${encodeURIComponent(cwd)}&epicId=${encodeURIComponent(epicId)}`;
+    const page1 = await request(port, { path: `/admin/scheduler/prds?${qs}&limit=2&offset=0`, token });
+    const page2 = await request(port, { path: `/admin/scheduler/prds?${qs}&limit=2&offset=2`, token });
+    const page3 = await request(port, { path: `/admin/scheduler/prds?${qs}&limit=2&offset=4`, token });
+
+    expect(page1.json.prds).toHaveLength(2);
+    expect(page1.json.total).toBe(5);
+    expect(page1.json.hasMore).toBe(true);
+    expect(page2.json.prds).toHaveLength(2);
+    expect(page2.json.hasMore).toBe(true);
+    expect(page3.json.prds).toHaveLength(1);
+    expect(page3.json.hasMore).toBe(false);
+
+    const seenSlugs = [...page1.json.prds, ...page2.json.prds, ...page3.json.prds].map((p) => p.slug);
+    expect(new Set(seenSlugs).size).toBe(5);
+    const expectedOrder = [...seenSlugs].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    expect(seenSlugs).toEqual(expectedOrder);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prds rejects limit over the hard max with a 400', async () => {
+  const cwd = projectCwd();
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prds?cwd=${encodeURIComponent(cwd)}&limit=501`, token });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('GET /admin/scheduler/prds rejects a negative offset with a 400', async () => {
+  const cwd = projectCwd();
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, { path: `/admin/scheduler/prds?cwd=${encodeURIComponent(cwd)}&offset=-1`, token });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
   } finally {
     await admin.stop();
   }

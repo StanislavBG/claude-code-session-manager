@@ -100,7 +100,7 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
-const { transitionJob } = require('./lib/scheduleJobTransitions.cjs');
+const { transitionJob, STATUS_HISTORY_CAP } = require('./lib/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/auditLog.cjs');
@@ -4748,6 +4748,43 @@ async function reverifyNeedsReview() {
   return { rescanned: candidates.length, healed, leftForReview };
 }
 
+/**
+ * schedule:clear-queue's core state mutation, split out so it's testable
+ * without ipcMain/electron: every victim (non-running job whose slug is in
+ * `victimSlugs`) must leave a durable history.jsonl record before it
+ * disappears from queue.json — a manual clear used to just filter the row
+ * out with no trace (a job could vanish with zero audit trail; see the
+ * 2026-08-30 sigma `788-pr-sweep-final-gate` incident). Non-terminal victims
+ * (pending/investigating/needs_review/quarantined) are force-transitioned to
+ * 'skipped' — never 'completed', since a manually-cleared job did not ship.
+ * Victims already terminal (completed/failed/skipped) keep their real
+ * status; they just get a statusHistory note + a history row so they don't
+ * silently drop before aging past HISTORY_RETENTION_MS.
+ *
+ * Mutates `state.jobs` in place (drops the victims, same contract as
+ * reconcile()) and returns the job snapshots to append to history.jsonl.
+ */
+function applyClearQueueVictims(state, victimSlugs, archiveNoteBySlug, archiveDir) {
+  const historyEntries = [];
+  for (const job of state.jobs) {
+    if (!victimSlugs.has(job.slug)) continue;
+    const reason = archiveNoteBySlug?.get(job.slug) ?? `PRD archived to ${archiveDir}`;
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'skipped') {
+      // Already terminal — keep the real status, just record the clear.
+      const history = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+      history.push({ from: job.status, to: job.status, reason, source: 'clear-queue', at: new Date().toISOString() });
+      while (history.length > STATUS_HISTORY_CAP) history.shift();
+      job.statusHistory = history;
+    } else {
+      transitionJob(job, 'skipped', { reason, source: 'clear-queue' });
+    }
+    if (!job.finishedAt) job.finishedAt = new Date().toISOString();
+    historyEntries.push({ ...job });
+  }
+  state.jobs = state.jobs.filter((j) => !victimSlugs.has(j.slug));
+  return historyEntries;
+}
+
 function registerScheduleHandlers() {
   ensureDirs();
   supervisor.registerHandlers();
@@ -4910,10 +4947,6 @@ function registerScheduleHandlers() {
     return { ok: true, kind: 'info', message };
   });
 
-  // Archive every non-running PRD and drop its entry from queue.json.
-  // Running entries are kept (would orphan an in-flight job). PRD files are
-  // moved (not deleted) to prds-archived/<ISO>/ so the user can recover them.
-  // Path containment is enforced — only files inside PRDS_DIR are moved.
   ipcMain.handle('schedule:clear-queue', async () => {
     ensureDirs();
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -4925,6 +4958,7 @@ function registerScheduleHandlers() {
     }
     await fsp.mkdir(archiveDir, { recursive: true });
     let archived = 0;
+    const archiveNoteBySlug = new Map();
     for (const job of victims) {
       const srcDir = await findPrdDir(job.slug) ?? prdDirForCwd(job.cwd);
       const src = path.resolve(path.join(srcDir, `${job.slug}.md`));
@@ -4933,17 +4967,27 @@ function registerScheduleHandlers() {
       try {
         await fsp.rename(src, dst);
         archived++;
+        archiveNoteBySlug.set(job.slug, `PRD file archived to ${archiveDir}`);
       } catch (e) {
         // ENOENT: the .md is already gone (reconcile would drop it on next
         // read anyway). Either way, fall through and remove from queue.
         if (e?.code !== 'ENOENT') {
           logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'clear-queue: rename failed', meta: { slug: job.slug, error: e?.message } });
         }
+        archiveNoteBySlug.set(job.slug, `PRD file already gone (ENOENT) when archiving to ${archiveDir}`);
       }
     }
     await mutate(async (s) => {
       const victimSlugs = new Set(victims.map((j) => j.slug));
-      s.jobs = s.jobs.filter((j) => !victimSlugs.has(j.slug));
+      const historyEntries = applyClearQueueVictims(s, victimSlugs, archiveNoteBySlug, archiveDir);
+      // Append BEFORE this mutate's writeQueue persists s.jobs without the
+      // victims (mutate() only writes after this callback resolves) — same
+      // append-before-drop ordering queueHistory.cjs's reconcile() callers
+      // use, so a crash right after this handler returns can never leave a
+      // row gone from queue.json with nothing in history.jsonl yet.
+      if (historyEntries.length > 0) {
+        await queueHistory.appendHistory(historyEntries);
+      }
       await reconcile(s);
       return null;
     });
@@ -5850,4 +5894,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims };

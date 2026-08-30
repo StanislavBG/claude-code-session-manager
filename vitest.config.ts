@@ -150,6 +150,7 @@ export default defineConfig({
       'src/main/__tests__/seedStatus.test.cjs',
       'src/main/lib/__tests__/epicDelegationStats.test.cjs',
       'src/main/__tests__/health-delegation-chain.test.cjs',
+      'src/main/__tests__/scheduler-clear-queue-history.test.cjs',
     ],
     globals: true,
   },

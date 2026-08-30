@@ -69,16 +69,22 @@ const STATUS_HISTORY_CAP = 20;
  *    'quarantined' instead of 'pending'; the ONLY way out is the PRD being
  *    stamped via the update-prd API — reconcile() detects the stamp on its
  *    next pass and promotes the row)
+ *  - pending|investigating|needs_review|quarantined -> skipped
+ *    (schedule:clear-queue: a manual queue clear force-terminates any
+ *    non-running victim row so it can leave a durable history.jsonl record
+ *    instead of vanishing — same 'never ran, don't call it completed'
+ *    rationale as running->skipped, just reachable from every pre-dispatch
+ *    or unresolved status a queued row can be sitting in)
  */
 const LEGAL_TRANSITIONS = {
-  pending: ['running', 'completed', 'failed'],
+  pending: ['running', 'completed', 'failed', 'skipped'],
   running: ['completed', 'failed', 'needs_review', 'skipped', 'pending'],
-  investigating: ['failed', 'needs_review', 'completed', 'pending'],
+  investigating: ['failed', 'needs_review', 'completed', 'pending', 'skipped'],
   failed: ['investigating', 'pending', 'completed'],
-  needs_review: ['investigating', 'pending', 'completed'],
+  needs_review: ['investigating', 'pending', 'completed', 'skipped'],
   completed: ['pending'],
   skipped: ['pending'],
-  quarantined: ['pending'],
+  quarantined: ['pending', 'skipped'],
 };
 
 let refusedTransitionCount = 0;

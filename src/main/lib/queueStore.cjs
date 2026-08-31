@@ -38,7 +38,8 @@ const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 
 const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-machine.json');
 const LEGACY_QUEUE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json');
-const STATE_SUBPATH = ['session-manager-operations', 'scheduler', 'state'];
+const OPS_DIRNAME = 'session-manager-operations';
+const STATE_SUBPATH = [OPS_DIRNAME, 'scheduler', 'state'];
 
 /**
  * A project's `session-manager-operations/scheduler/state/` directory.
@@ -60,6 +61,20 @@ function projectStateDir(cwd) {
   if (!path.isAbsolute(cwd)) {
     throw new Error(`projectStateDir: cwd must be an absolute path, got "${cwd}"`);
   }
+  // ...and it must not itself sit INSIDE an ops root. Absolute-and-existing
+  // was not enough: a transcript records an agent's `cd` into a PRD folder,
+  // activeSessions hands that subdirectory over as a project, and this join
+  // materializes a second ops root under the first — the doubled
+  // `.../prds/session-manager-operations/scheduler/state/queue.json` stubs
+  // found in starry-night-ships on 2026-08-30 (14 of them, 8 days' worth).
+  // activeSessions.projectRootOf normalizes such a cwd away upstream; this is
+  // the fail-closed backstop for every other caller. A queue file below an
+  // ops root is always a bug, never a project.
+  if (cwd.split(path.sep).includes(OPS_DIRNAME)) {
+    throw new Error(
+      `projectStateDir: cwd must be a project root, not a path inside ${OPS_DIRNAME}/, got "${cwd}"`,
+    );
+  }
   return path.join(cwd, ...STATE_SUBPATH);
 }
 
@@ -69,6 +84,22 @@ function projectQueuePath(cwd) {
 
 function projectHistoryPath(cwd) {
   return path.join(projectStateDir(cwd), 'history.jsonl');
+}
+
+/**
+ * queuePathOrSkip(cwd, context) → the shard path, or null when `cwd` is not a
+ * usable project root. projectStateDir fails closed on a relative or
+ * ops-internal cwd; a single such job row (or a stale cached cwd) must not
+ * abort a whole read or write of every OTHER project's queue, so callers that
+ * loop over many cwds log-and-skip instead of throwing.
+ */
+function queuePathOrSkip(cwd, context) {
+  try {
+    return projectQueuePath(cwd);
+  } catch (e) {
+    console.error(`[queueStore] ${context}: skipping invalid project cwd — ${e?.message}`);
+    return null;
+  }
 }
 
 function writeJsonAtomicSync(file, value) {
@@ -183,7 +214,8 @@ function readMergedSync(opts) {
     }
   }
   for (const cwd of stateCwds(opts)) {
-    const file = projectQueuePath(cwd);
+    const file = queuePathOrSkip(cwd, 'read');
+    if (!file) continue;
     try {
       const { jobs, invalid } = shapeJobs(fs.readFileSync(file, 'utf8'), file);
       out.jobs.push(...jobs);
@@ -212,7 +244,8 @@ async function readMerged(opts) {
     }
   }
   for (const cwd of stateCwds(opts)) {
-    const file = projectQueuePath(cwd);
+    const file = queuePathOrSkip(cwd, 'read');
+    if (!file) continue;
     try {
       const { jobs, invalid } = shapeJobs(await fsp.readFile(file, 'utf8'), file);
       out.jobs.push(...jobs);
@@ -261,12 +294,14 @@ async function writeSplit(state, defaultCwd) {
     byCwd.get(cwd).push(job);
   }
   for (const [cwd, jobs] of byCwd) {
+    const file = queuePathOrSkip(cwd, 'writeSplit');
+    if (!file) continue;
     try {
-      await writeJsonAtomic(projectQueuePath(cwd), { jobs });
+      await writeJsonAtomic(file, { jobs });
     } catch (e) {
       // A single unwritable project (deleted repo dir, permissions) must not
       // lose every other project's write.
-      console.error(`[queueStore] failed to write ${projectQueuePath(cwd)}: ${e?.message}`);
+      console.error(`[queueStore] failed to write ${file}: ${e?.message}`);
     }
   }
   bustCwdCache();
@@ -316,7 +351,8 @@ async function migrateLegacyGlobalQueue(defaultCwd) {
   }
   let moved = 0;
   for (const [cwd, jobs] of byCwd) {
-    const file = projectQueuePath(cwd);
+    const file = queuePathOrSkip(cwd, 'legacy split');
+    if (!file) continue;
     let existing = [];
     try { existing = shapeJobs(await fsp.readFile(file, 'utf8'), file).jobs; } catch { /* fresh shard */ }
     const have = new Set(existing.map((j) => j.slug));

@@ -124,3 +124,54 @@ test('the guards compose: no relative cwd from a transcript can reach an ops-roo
   // And even if one somehow did, the write path itself refuses it.
   expect(() => queueStore.projectStateDir('src/renderer/state')).toThrow(/absolute path/);
 });
+
+// ─── the second incident: an ABSOLUTE cwd INSIDE an ops root ────────────────
+//
+// Reported from starry-night-ships on 2026-08-30: 14 stray
+// `.../session-manager-operations/scheduler/state/queue.json` stubs, each
+// nested under another ops directory (`scheduler/prds/`, `prompt-sessions/`,
+// `scheduler/epics/<id>/prds/`), every one holding `{"jobs": []}` and mtimes
+// spanning 8 days. The 2026-08-13 absolute-path guard above could not catch
+// them: these cwds ARE absolute and DO exist. They came from transcripts
+// where an agent had `cd`'d into the artifact directory it was writing, so
+// the last transcript row recorded that subdirectory as the session cwd.
+
+test('a transcript cwd inside an ops root is normalized to the project root, not taken literally', async () => {
+  const project = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-nested-'));
+  tmpDirs.push(project);
+  const prdDir = path.join(project, 'session-manager-operations', 'scheduler', 'epics', 'e-1', 'prds');
+  fs.mkdirSync(prdDir, { recursive: true });
+  const projectsDir = await mkProjectsDir({ nested: prdDir });
+
+  const cwds = activeProjectCwds(Infinity, { projectsDir });
+  expect(cwds).toContain(project);
+  expect(cwds).not.toContain(prdDir);
+});
+
+test('normalization keeps the active-project signal rather than dropping the row', () => {
+  const { projectRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+  expect(projectRootOf('/p/session-manager-operations/prompt-sessions')).toBe('/p');
+  expect(projectRootOf('/p/session-manager-operations')).toBe('/p');
+  expect(projectRootOf('/p/session-manager-operations/scheduler/state')).toBe('/p');
+  // Already-nested strays truncate at the FIRST segment — the inner one is
+  // itself the bug, never a project.
+  expect(projectRootOf('/p/session-manager-operations/x/session-manager-operations/y')).toBe('/p');
+  // A plain project cwd is untouched.
+  expect(projectRootOf('/p/src/main')).toBe('/p/src/main');
+  // A directory that merely CONTAINS the name as a substring is not a segment.
+  expect(projectRootOf('/p/session-manager-operations-archive')).toBe('/p/session-manager-operations-archive');
+});
+
+test('projectStateDir fails closed on an ops-internal cwd, naming the offending value', () => {
+  expect(() => queueStore.projectStateDir('/p/session-manager-operations/scheduler/prds'))
+    .toThrow(/must be a project root/);
+  expect(() => queueStore.projectStateDir('/p/session-manager-operations/scheduler/prds'))
+    .toThrow(/scheduler\/prds/);
+  // The guard is segment-exact, not a substring match.
+  expect(queueStore.projectStateDir('/p/session-manager-operations-archive'))
+    .toBe(path.join('/p/session-manager-operations-archive', 'session-manager-operations', 'scheduler', 'state'));
+});
+
+// The writeSplit half of this guard lives in opsRootNestedWrite.test.cjs —
+// it must override HOME before requiring queueStore (writeSplit persists
+// machine state to a homedir path), which cannot be done from this file.

@@ -21,6 +21,34 @@ const TAIL_BYTES = 64 * 1024;
 // Safety cap on distinct cwds to bound result set size. O(1) extra space.
 const MAX_CWDS = 50;
 
+// The ops-root folder name. A transcript's `cwd` can point INSIDE it whenever
+// an agent `cd`s into an artifact directory (a PRD folder, prompt-sessions,
+// scheduler/state) — Claude Code records the new absolute cwd on every
+// subsequent row, and this scan reads the LAST such row. Left unnormalized,
+// that subdirectory is handed to consumers as if it were a project, and
+// queueStore.writeSplit materializes a whole second ops root beneath it:
+// `<project>/session-manager-operations/scheduler/epics/<id>/prds/session-
+// manager-operations/scheduler/state/queue.json`, holding `{"jobs": []}`.
+// Observed live on 2026-08-30 in starry-night-ships: 14 such stubs, mtimes
+// spanning 8 days, one per directory an agent had cd'd into.
+//
+// Truncating at the segment is strictly better than dropping the row: the
+// ancestor IS the project the agent was working in, so the active-project
+// signal survives instead of being silently lost.
+const OPS_DIRNAME = 'session-manager-operations';
+
+/**
+ * projectRootOf(cwd) → the project root for a cwd that may sit inside an ops
+ * tree. Returns cwd unchanged when it does not. Only the FIRST occurrence
+ * matters — a nested stray ops root is itself the bug, never a project.
+ */
+function projectRootOf(cwd) {
+  const parts = cwd.split(path.sep);
+  const i = parts.indexOf(OPS_DIRNAME);
+  if (i <= 0) return cwd;
+  return parts.slice(0, i).join(path.sep) || path.sep;
+}
+
 /**
  * readTailLines(filePath, maxBytes) → string[]
  * Reads at most maxBytes from the END of filePath and splits into non-empty lines.
@@ -70,8 +98,12 @@ function activeProjectCwds(maxAgeMin = 90, {
   const seen = new Set();
   const result = [];
 
-  function addCwd(cwd) {
-    if (!cwd || typeof cwd !== 'string') return;
+  function addCwd(rawCwd) {
+    if (!rawCwd || typeof rawCwd !== 'string') return;
+    // Normalize an ops-internal cwd up to its project root BEFORE any of the
+    // checks below — the stray-ops-root incident (see OPS_DIRNAME above) got
+    // through precisely because such a path is absolute and does exist.
+    const cwd = projectRootOf(rawCwd);
     // Must be ABSOLUTE. A relative fragment would pass the statSync below
     // whenever it happens to resolve against THIS process's own cwd, and
     // every consumer (queueStore.projectStateDir, prdLocations) then joins
@@ -146,4 +178,4 @@ function allProjectCwds(opts = {}) {
   return activeProjectCwds(Infinity, { maxCwds: 500, ...opts });
 }
 
-module.exports = { activeProjectCwds, allProjectCwds };
+module.exports = { activeProjectCwds, allProjectCwds, projectRootOf };

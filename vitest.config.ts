@@ -56,6 +56,7 @@ export default defineConfig({
       'src/main/lib/__tests__/localAdminHttp.test.cjs',
       'src/main/lib/__tests__/toolUseClassify.test.cjs',
       'src/main/lib/__tests__/instanceLock.test.cjs',
+      'src/main/lib/__tests__/childWithLog.test.cjs',
       'src/main/__tests__/uniquePrdNumbers.test.cjs',
       'src/main/lib/__tests__/sessionSlots.test.cjs',
       'src/main/lib/__tests__/buildTarget.test.cjs',

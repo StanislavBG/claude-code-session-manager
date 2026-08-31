@@ -49,6 +49,10 @@
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 
+// Grace period between the post-exit SIGTERM sweep and the follow-up SIGKILL
+// sweep of a detached child's process group. See sweepChildProcessGroup below.
+const POST_EXIT_GROUP_SWEEP_GRACE_MS = 5000;
+
 // ---------- Phase 1 ----------
 
 /**
@@ -119,6 +123,33 @@ function openLog(logPath) {
  * }} opts
  * @returns {{ child: import('child_process').ChildProcess | null, cancel: () => void }}
  */
+// Post-exit process-group sweep.
+//
+// Incident (2026-08-31, ~/Projects/starry-night-ships): scheduler jobs spawn
+// detached: true, and every watchdog path (result-tail, deadman, idle-tail)
+// kills the whole process group via ctx.killTree — but only on an *overrun*
+// exit. When the executor child exits normally, nothing swept the group, so
+// anything the agent had backgrounded to work around the foreground call cap
+// (the `bash -c '<gate> > /tmp/x.log; echo $? > /tmp/x.done'` shape) reparented
+// to init and kept running for nobody: three orphaned test batteries at PPID 1
+// were found, one burning ~5 cores for 56 minutes. The invariant this restores:
+// a job's descendants must not outlive the job. Killing the job's own process
+// group at the job's own exit is ownership-based and needs no /proc heuristics
+// to distinguish an abandoned descendant from a live one.
+function sweepChildProcessGroup(child, detached) {
+  if (!detached) return;
+  if (!child || !child.pid || child.pid <= 1) return;
+  // Defensive: never target the Session Manager process's own group.
+  if (child.pid === process.pid) return;
+
+  try { process.kill(-child.pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
+
+  const t = setTimeout(() => {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
+  }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
+  if (t.unref) t.unref();
+}
+
 function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watchdogs = [], onExit }) {
   const startedAt = Date.now();
 
@@ -183,6 +214,7 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
         safeLog,
       });
     }
+    sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached);
     closeFd();
   };
 
@@ -215,4 +247,4 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   return { child, cancel };
 }
 
-module.exports = { openLog, withChildAndLog };
+module.exports = { openLog, withChildAndLog, POST_EXIT_GROUP_SWEEP_GRACE_MS };

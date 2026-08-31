@@ -267,10 +267,16 @@ test('depth-1 (ordinary, no investigationDepth field) needs_review job is eligib
   assert.strictEqual(result.length, 1);
 });
 
-test('fix-plan job with investigationDepth: 2 is now ALSO eligible', () => {
-  const jobs = [makeJob({ slug: '05-fix-foo', investigationDepth: 2 })];
+test('fix-plan job with investigationDepth: 1 is still eligible (its first -fix follow-up)', () => {
+  const jobs = [makeJob({ slug: '05-fix-foo', investigationDepth: 1 })];
   const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
   assert.strictEqual(result.length, 1);
+});
+
+test('fix-plan job with investigationDepth: 2 is now NOT eligible (cap lowered to permit at most -fix-fix)', () => {
+  const jobs = [makeJob({ slug: '05-fix-foo', investigationDepth: 2 })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
 });
 
 test('fix-plan job with investigationDepth: 3 is NOT eligible (bound holds)', () => {
@@ -289,7 +295,7 @@ test('isFixPlanBeyondDepthCap: non-fix-plan slug is never capped regardless of d
   assert.strictEqual(isFixPlanBeyondDepthCap('05-my-feature', 99), false);
 });
 
-test('isFixPlanBeyondDepthCap: fix-plan at depth 1 or 2 is not capped, depth 3 is', () => {
+test('isFixPlanBeyondDepthCap: fix-plan at depth 1 is not capped, depth 2 is', () => {
   assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', 1), false);
   assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH), false);
   assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH + 1), true);
@@ -345,6 +351,12 @@ test('isEligibleForImmediateAutoFix: fix sibling already on disk excludes the jo
 
 test('isEligibleForImmediateAutoFix: fix-plan job beyond the depth cap is excluded', () => {
   const job = makeJob({ slug: '05-fix-foo', investigationDepth: 3 });
+  const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
+  assert.strictEqual(result, false);
+});
+
+test('isEligibleForImmediateAutoFix: fix-plan job at investigationDepth 2 is now excluded (previously eligible under the old cap)', () => {
+  const job = makeJob({ slug: '05-fix-foo', investigationDepth: 2 });
   const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
   assert.strictEqual(result, false);
 });

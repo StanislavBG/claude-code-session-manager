@@ -4354,12 +4354,17 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
 // their pass_no_commit verdict is a harmless no-op (same facts, same verdict).
 const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'pass_no_commit', 'pass_no_commit_already_shipped']);
 
-// Bounds fix-plan recursion: depth 1 = the original job, depth 2 = its fix
-// (gets exactly one follow-up investigation if it also lands in
-// needs_review), depth 3+ (a fix-of-a-fix-of-a-fix) is excluded. Shared by
-// selectAutoFixTargets and spawnInvestigation so both call sites agree on
-// one threshold.
-const MAX_INVESTIGATION_DEPTH = 2;
+// Bounds fix-plan recursion: cap N permits at most N+1 fix jobs per original
+// slug (depth 1 = the original job, depth 2 = its `-fix`, depth 3+ is
+// excluded). With N=1 that's `<slug>-fix` and `<slug>-fix-fix`, never a third
+// `-fix-fix-fix`. Lowered from 2 to 1 on 2026-08-31 (starry-night-ships):
+// three concurrent chains (115-fix-fix, 113-fix-fix, 111-fix-fix-fix) were
+// riding the old cap, and 115-fix-fix's own root-cause section read "The
+// code was already CORRECT. Only verification and commit failed." — a third
+// auto-retry re-runs an entire PRD and test battery to redo a `git commit`,
+// at near-zero marginal success probability. Shared by selectAutoFixTargets
+// and spawnInvestigation so both call sites agree on one threshold.
+const MAX_INVESTIGATION_DEPTH = 1;
 
 /**
  * True when a fix-plan job's investigationDepth is at or past the recursion

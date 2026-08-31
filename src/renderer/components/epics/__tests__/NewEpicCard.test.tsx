@@ -624,5 +624,51 @@ describe('NewEpicCard', () => {
       await act(async () => {})
       expect(onCreated).toHaveBeenCalled()
     })
+
+    it('drops the previous project banner and re-probes when the active tab cwd changes', async () => {
+      const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+      readinessSpy.mockImplementation(async (cwd: string) => {
+        if (cwd === '/home/bilko/Projects/alpha') {
+          return {
+            ok: false,
+            checks: [
+              { id: 'prd-write-guard', label: 'PRD write guard hook installed', ok: false, detail: 'missing', fix: `Add a PreToolUse hook to ${cwd}/.claude/settings.json` },
+            ],
+          }
+        }
+        return { ok: true, checks: [] }
+      })
+      useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/alpha' } as never], activeTabId: 't1' })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      expect(readinessSpy).toHaveBeenLastCalledWith('/home/bilko/Projects/alpha')
+      const warningBefore = el.querySelector('[data-testid="delegation-readiness-warning"]')
+      expect(warningBefore).not.toBeNull()
+      expect(warningBefore!.textContent).toContain('/home/bilko/Projects/alpha')
+
+      act(() => {
+        useSessions.setState({ tabs: [{ id: 't2', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't2' })
+      })
+      await act(async () => {})
+
+      expect(readinessSpy).toHaveBeenLastCalledWith('/home/bilko/Projects/beta')
+      expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+    })
+
+    it('fires the probe with the active tab cwd once one is set, after starting with no tabs', async () => {
+      const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+      readinessSpy.mockResolvedValue({ ok: true, checks: [] })
+      useSessions.setState({ tabs: [], activeTabId: null })
+      mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      act(() => {
+        useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't1' })
+      })
+      await act(async () => {})
+
+      expect(readinessSpy).toHaveBeenLastCalledWith('/home/bilko/Projects/beta')
+    })
   })
 })

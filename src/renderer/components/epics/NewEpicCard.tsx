@@ -166,9 +166,11 @@ export function NewEpicCard({
   const [home, setHome] = useState<string | null>(null)
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
   // "Can this project actually delegate?" (delegation-readiness-probe) —
-  // fetched once per card mount, never polled. `null` covers both "not
-  // fetched yet" and "probe failed" (unknown), so a missing/erroring IPC
-  // surface just renders no indicator rather than a broken card.
+  // re-fetched whenever effectiveCwd changes, never polled on an interval.
+  // `null` covers "not fetched yet", "probe failed" (unknown), and "cwd just
+  // changed, previous project's result cleared" — so a missing/erroring IPC
+  // surface or a mid-flight cwd switch just renders no indicator rather than
+  // a broken or wrong-project card.
   const [readiness, setReadiness] = useState<DelegationReadiness | null>(null)
   // Context Injections (contextInjections.ts) — Session-Manager-authored
   // text, independent of Actor/Input/Mission, each its own on/off toggle.
@@ -244,6 +246,7 @@ export function NewEpicCard({
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
 
   useEffect(() => {
+    setReadiness(null)
     if (!effectiveCwd) return
     let cancelled = false
     Promise.resolve(window.api.app?.delegationReadiness?.(effectiveCwd)).then(
@@ -251,10 +254,10 @@ export function NewEpicCard({
       () => { if (!cancelled) setReadiness(null) },
     )
     return () => { cancelled = true }
-    // Fetched once per mount (first time effectiveCwd is known), not
-    // re-polled on every later cwd/tab change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    // Scoped to the resolved project: re-runs whenever effectiveCwd changes,
+    // and clears any prior project's result before the new probe lands so a
+    // stale reading can never be shown against the wrong project.
+  }, [effectiveCwd])
 
   // Grounding board is real data (fs reads + existing store counts, never
   // fabricated) — computed lazily, only once "advanced" is opened, and

@@ -2609,9 +2609,15 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  * tree was dirty — closed by widening that call site's condition, not by
  * changing this function's four defenses below, which still apply to both
  * shapes identically:
- *   - siblingRunning: a concurrent job in the same cwd makes working-tree
- *     evidence unreliable in both directions (extra dirt OR a clean tree
- *     that isn't this job's doing).
+ *   - siblingRunning: on a SHARED tree only — a concurrent job in the same
+ *     cwd makes working-tree evidence unreliable in both directions (extra
+ *     dirt OR a clean tree that isn't this job's doing). Suppressed by
+ *     ranInWorktree: when this job ran in its own git worktree, the
+ *     newly-dirty set and the integrated HEAD are attributable to this job
+ *     alone regardless of what siblings were doing concurrently in their own
+ *     worktrees, so the excuse does not apply (PRD 109 shipped 'completed'
+ *     with nothing committed specifically because this carve-out fired
+ *     unconditionally during a high-concurrency run).
  *   - jobSelfCommitted: HEAD moved during the run, so the job's deliverable
  *     landed even if dirt (from a concurrent actor) remains.
  *   - legitimateNoOp (COMPLETED_EQUIVALENT_VERDICTS): runVerify.cjs's own
@@ -2631,8 +2637,8 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  *     still a genuine finish-protocol violation (incident:
  *     523-fix-bounded-fix-plan-retry, 2026-07-12).
  */
-function commitGuardVerdict({ newlyDirty, siblingRunning, jobSelfCommitted, legitimateNoOp, isFixPlanJob, verifyResult }) {
-  if (siblingRunning || jobSelfCommitted || legitimateNoOp) return null;
+function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelfCommitted, legitimateNoOp, isFixPlanJob, verifyResult }) {
+  if ((siblingRunning && !ranInWorktree) || jobSelfCommitted || legitimateNoOp) return null;
   const dirty = newlyDirty || [];
   if (dirty.length === 0 && isFixPlanJob) return null;
 
@@ -3624,6 +3630,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         const guardVerdict = commitGuardVerdict({
           newlyDirty,
           siblingRunning,
+          ranInWorktree: worktree.ok,
           jobSelfCommitted,
           legitimateNoOp: guardIsLegitimateNoOp,
           isFixPlanJob: isFixPlanSlug(job.slug),

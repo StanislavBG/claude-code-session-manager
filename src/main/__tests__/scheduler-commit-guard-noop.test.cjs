@@ -165,6 +165,47 @@ test('commitGuardVerdict: self-commit skip still works (regression check)', () =
   expect(verdict).toBeNull();
 });
 
+test('commitGuardVerdict: ranInWorktree=true defeats siblingRunning — clean tree, no self-commit → silent_no_op (PRD 109 shape)', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: true,
+    ranInWorktree: true,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: false,
+    verifyResult: null,
+  });
+  expect(verdict).not.toBeNull();
+  expect(verdict.verdict).toBe('silent_no_op');
+  expect(verdict.downgradeTo).toBe('needs_review');
+});
+
+test('commitGuardVerdict: identical inputs with ranInWorktree=false → no flag (legacy shared-tree behaviour unchanged)', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: true,
+    ranInWorktree: false,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: false,
+    verifyResult: null,
+  });
+  expect(verdict).toBeNull();
+});
+
+test('commitGuardVerdict: ranInWorktree=true + siblingRunning=true but jobSelfCommitted=true → no flag (self-commit carve-out still applies)', () => {
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: true,
+    ranInWorktree: true,
+    jobSelfCommitted: true,
+    legitimateNoOp: false,
+    isFixPlanJob: false,
+    verifyResult: null,
+  });
+  expect(verdict).toBeNull();
+});
+
 test('commitGuardVerdict: carries forward a non-clean prior verdict as an annotation', () => {
   const verifyResult = {
     verdict: 'transcript_errors',

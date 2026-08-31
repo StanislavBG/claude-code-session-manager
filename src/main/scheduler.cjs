@@ -3430,6 +3430,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       console.log(`[scheduler] ${job.slug}: isolated in worktree ${worktree.dir} (branch ${worktree.branch})`);
     } else {
       console.log(`[scheduler] ${job.slug}: running in main tree (worktree not used: ${worktree.reason})`);
+      // Surface any degraded-isolation fallback on the job row itself so it's
+      // queryable from the queue instead of console-only — except the
+      // deliberate env-disable flag, which is an intentional opt-out, not a
+      // degradation worth flagging.
+      if (!jobWorktree.isWorktreeDisabled()) {
+        await mutate((s) => {
+          const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (idx >= 0) s.jobs[idx].worktreeFallbackReason = worktree.reason;
+        });
+      }
     }
 
     // Integrate the job's branch back into guardCwd's own HEAD, THEN tear the

@@ -142,8 +142,8 @@ test('falls back with a reason for a non-git cwd', async () => {
   expect(result.reason).toMatch(/not a git repository/);
 });
 
-test('falls back with a reason for a dirty base tree (never silently drops uncommitted human WIP)', async () => {
-  fs.writeFileSync(path.join(repoCwd, 'dirty.txt'), 'uncommitted\n', 'utf8');
+test('falls back with a reason for a dirty base tree with a modified TRACKED file (never silently drops uncommitted human WIP)', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
   const result = await jobWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });
   expect(result.ok).toBe(false);
   expect(result.reason).toMatch(/uncommitted changes/);

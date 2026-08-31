@@ -157,10 +157,21 @@ async function isGitRepo(cwd) {
   }
 }
 
-/** True when `cwd`'s own working tree (not any worktree) has zero pending changes. */
+/**
+ * True when `cwd`'s own working tree (not any worktree) has zero pending
+ * changes to TRACKED files (modified or staged). Untracked files are
+ * deliberately excluded (`--untracked-files=no`): an untracked file is never
+ * tracked WIP a job depends on, and `git worktree add` checks out only
+ * committed HEAD content into the new worktree — it never touches, copies, or
+ * is affected by the base tree's untracked files either way. Counting them as
+ * "dirty" here bought no safety: one stray scratch file in a project silently
+ * disabled isolation for every job in that project, permanently, since a
+ * failed-to-commit job leaves the tree dirty and re-triggers the same
+ * fallback for every subsequent job (RCA: PRD 1064, starry-night-ships).
+ */
 async function isBaseTreeClean(cwd) {
   try {
-    const out = await execGit(['status', '--porcelain'], { cwd, timeout: 10_000 });
+    const out = await execGit(['status', '--porcelain', '--untracked-files=no'], { cwd, timeout: 10_000 });
     return out.trim().length === 0;
   } catch {
     return false;

@@ -82,7 +82,7 @@ test('a non-git cwd resolves to null rather than throwing (Epic proceeds unisola
 
 test('a dirty base tree resolves to null rather than throwing', async () => {
   const cwd = await mkRepoCwd();
-  fs.writeFileSync(path.join(cwd, 'dirty.txt'), 'uncommitted\n', 'utf8');
+  fs.writeFileSync(path.join(cwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
 
   const result = await handler(null, { cwd, epicId: 'epic-mint-3' });
   expect(result).toBeNull();

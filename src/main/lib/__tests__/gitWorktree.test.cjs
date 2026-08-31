@@ -168,8 +168,8 @@ test('[job] falls back with a reason for a non-git cwd', async () => {
   expect(result.reason).toMatch(/not a git repository/);
 });
 
-test('[job] falls back with a reason for a dirty base tree (never silently drops uncommitted human WIP)', async () => {
-  fs.writeFileSync(path.join(repoCwd, 'dirty.txt'), 'uncommitted\n', 'utf8');
+test('[job] falls back with a reason for a dirty base tree with a modified TRACKED file (never silently drops uncommitted human WIP)', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
   const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });
   expect(result.ok).toBe(false);
   expect(result.reason).toMatch(/uncommitted changes/);
@@ -397,4 +397,16 @@ test('keyFromBranch strips the kind-specific prefix and returns null for a forei
 
 test('createWorktree throws on an unknown kind', async () => {
   await expect(gitWorktree.createWorktree({ kind: 'bogus', cwd: repoCwd, key: 'x' })).rejects.toThrow(/unknown kind/);
+});
+
+// ──────────────────────────────────────────── isBaseTreeClean (PRD 1064)
+
+test('isBaseTreeClean ignores untracked files — a single stray untracked file must not disable isolation', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'scratch_untracked.txt'), 'not tracked\n', 'utf8');
+  expect(await gitWorktree.isBaseTreeClean(repoCwd)).toBe(true);
+});
+
+test('isBaseTreeClean still reports dirty for a modified TRACKED file', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'modified tracked content\n', 'utf8');
+  expect(await gitWorktree.isBaseTreeClean(repoCwd)).toBe(false);
 });

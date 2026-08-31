@@ -64,6 +64,7 @@ export default defineConfig({
       'src/main/lib/__tests__/delegationReadiness.test.cjs',
       'src/main/lib/__tests__/opsOwnership.test.cjs',
       'src/main/lib/__tests__/schedulerBatchDepends.test.cjs',
+      'src/main/lib/__tests__/schedulerBatchProjectCap.test.cjs',
       'src/main/lib/__tests__/terminalRunOutcome.test.cjs',
       'src/main/lib/__tests__/importReferences.spec.cjs',
       'src/main/__tests__/prdLocations.test.cjs',

@@ -101,11 +101,20 @@ describe('pickForProject dependsOn eligibility (PRD 832)', () => {
   // like anything else with no blocking dependsOn — the 828 row is no longer
   // held back merely for carrying a higher number.
   it('legacy same-NN pending jobs are eligible alongside higher-numbered ones', () => {
-    const a = job('827-one', 'pending', 827);
-    const b = job('827-two', 'pending', 827);
-    const later = job('828-three', 'pending', 828);
-    const res = pickForProject([a, b, later], new Set(), 3);
-    expect(res.batch.map((j) => j.slug).sort()).toEqual(['827-one', '827-two', '828-three']);
+    // Predates the per-project job cap (PRD 1066, default 2); raise it so
+    // this test keeps exercising parallelGroup semantics, not the cap.
+    const prevCap = process.env.SM_PROJECT_JOB_CAP;
+    process.env.SM_PROJECT_JOB_CAP = '10';
+    try {
+      const a = job('827-one', 'pending', 827);
+      const b = job('827-two', 'pending', 827);
+      const later = job('828-three', 'pending', 828);
+      const res = pickForProject([a, b, later], new Set(), 3);
+      expect(res.batch.map((j) => j.slug).sort()).toEqual(['827-one', '827-two', '828-three']);
+    } finally {
+      if (prevCap === undefined) delete process.env.SM_PROJECT_JOB_CAP;
+      else process.env.SM_PROJECT_JOB_CAP = prevCap;
+    }
   });
 });
 

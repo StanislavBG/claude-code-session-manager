@@ -118,15 +118,25 @@ test('a SKIPPED (never-ran) bare-named dep holds the dependent and reports an ex
 // ---------------------------------------------------------------------------
 
 test('fires EVERY dependency-eligible job, not one per parallelGroup', () => {
-  const jobs = [
-    job('983-a', 'pending'),
-    job('984-b', 'pending'),
-    job('985-c', 'pending'),
-    job('986-d', 'pending'),
-  ];
-  const { batch } = pick(jobs, new Set(), 5);
-  // Pre-fix this returned exactly ['983-a'] — one singleton group.
-  assert.deepEqual(batch.map((j) => j.slug), ['983-a', '984-b', '985-c', '986-d']);
+  // This test predates the per-project job cap (PRD 1066, default 2) and
+  // asserts against the parallelGroup barrier specifically — raise the cap
+  // so it isn't incidentally exercising that unrelated limit.
+  const prevCap = process.env.SM_PROJECT_JOB_CAP;
+  process.env.SM_PROJECT_JOB_CAP = '10';
+  try {
+    const jobs = [
+      job('983-a', 'pending'),
+      job('984-b', 'pending'),
+      job('985-c', 'pending'),
+      job('986-d', 'pending'),
+    ];
+    const { batch } = pick(jobs, new Set(), 5);
+    // Pre-fix this returned exactly ['983-a'] — one singleton group.
+    assert.deepEqual(batch.map((j) => j.slug), ['983-a', '984-b', '985-c', '986-d']);
+  } finally {
+    if (prevCap === undefined) delete process.env.SM_PROJECT_JOB_CAP;
+    else process.env.SM_PROJECT_JOB_CAP = prevCap;
+  }
 });
 
 test('a higher-numbered job is NOT held behind an in-flight lower-numbered one', () => {

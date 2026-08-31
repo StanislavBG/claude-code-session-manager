@@ -1,4 +1,32 @@
+const sessionSlots = require('./sessionSlots.cjs');
+
+// The global sessionSlots pool (default 5, [0,10]) is machine-wide and
+// project-blind: all of it can land on one project. Measured 2026-08-31 in a
+// sibling project — 4 concurrent executors, loadavg 25.89/14 cores, one test
+// process pinned at 522% CPU for 30 minutes — CPU contention silently
+// downgraded that project's own timing-sensitive test gate into a no-op
+// ("CONTENDED ... load/core 1.92 > 0.50"). This is an INNER constraint layered
+// under the existing pool (schedulerBatch.cjs's pickForProject), never a
+// second pool — sessionSlots.acquire() in spawnJob is untouched and remains
+// the outer limit. Override with SM_PROJECT_JOB_CAP (integer, clamped to
+// [1, sessionSlots.MAX_SLOTS]).
+const DEFAULT_PROJECT_JOB_CAP = 2;
+
+/** Per-project concurrent-job cap. `cwd` is accepted for future per-project
+ * tuning; today every project shares the same default/env-overridden value. */
+function projectJobCap(cwd) { // eslint-disable-line no-unused-vars
+  if (process.env.SM_PROJECT_JOB_CAP !== undefined) {
+    const parsed = parseInt(process.env.SM_PROJECT_JOB_CAP, 10);
+    if (Number.isFinite(parsed)) {
+      return Math.min(sessionSlots.MAX_SLOTS, Math.max(1, parsed));
+    }
+  }
+  return DEFAULT_PROJECT_JOB_CAP;
+}
+
 module.exports = {
+  DEFAULT_PROJECT_JOB_CAP,
+  projectJobCap,
   // Steady-state billing-usage poll cadence (success path). Drives when the
   // `when-available` policy notices the 5h window crossing the utilization
   // threshold — i.e. when to stop (util ≥ threshold) and start (util < threshold)

@@ -14,6 +14,7 @@
 
 const path = require('node:path');
 const os = require('node:os');
+const { projectJobCap } = require('./schedulerConfig.cjs');
 
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
@@ -145,13 +146,34 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
     return { batch: [], reason, holds };
   }
 
+  // Per-project cap: an INNER constraint layered under the global sessionSlots
+  // pool passed in via `slots`. A project already running at its cap is held
+  // here even when the machine-wide pool has slots free elsewhere — see
+  // schedulerConfig.cjs's projectJobCap doc for the incident this fixes.
+  //
+  // Count every queue.json row already `running` for this project, not just
+  // the caller-tracked `runningSlugsInProject` — a row can be genuinely alive
+  // but still outside the tracked `running` Set during the boot-orphan grace
+  // window (see pickNextBatch's own untrackedRunning correction above), and
+  // the cap must not admit a job past it on that technicality.
+  const cap = projectJobCap(projectCwd);
+  const actualRunningInProject = projectJobs.filter((j) => j.status === 'running').length;
+  const capRemaining = Math.max(0, cap - actualRunningInProject);
+  const effectiveSlots = Math.min(slots, capRemaining);
+  if (effectiveSlots <= 0) {
+    const reason = `[scheduler] project-cap [${projectCwd}]: ${runningSlugsInProject.size}/${cap} ` +
+      `already running, holding ${pending.length} eligible job(s)`;
+    console.log(reason);
+    return { batch: [], reason, holds };
+  }
+
   // parallelGroup is a PRIORITY HINT, not a barrier: when there are more
   // eligible jobs than slots, the lower (earlier-authored) PRD numbers go
   // first. Everything else about the number is display-only.
   const batch = pending
     .slice()
     .sort((a, b) => (a.parallelGroup ?? 99) - (b.parallelGroup ?? 99))
-    .slice(0, slots);
+    .slice(0, effectiveSlots);
   console.log(
     `[scheduler] concurrency [${projectCwd}]: firing ${batch.length} of ${pending.length} ` +
     `eligible job(s) [${batch.map((j) => j.slug).join(', ')}]`,

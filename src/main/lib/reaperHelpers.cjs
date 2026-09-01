@@ -70,4 +70,50 @@ function classifyRunOutcome(logPath) {
 // never drift apart (they increment the SAME j.orphanRetries field).
 const ORPHAN_REQUEUE_CAP = 5;
 
-module.exports = { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP };
+/**
+ * selectReapableJobs(jobs, now, { pidAlive, grace }) → { reapable, warnings }
+ *
+ * Pure predicate (no IO — `pidAlive` is injected) deciding which 'running'
+ * rows reapDeadRunningJobs() should finalize this cycle. Two distinct dead
+ * shapes:
+ *  - has a runtime.pid, but the process is gone (pidAlive(pid) === false):
+ *    the existing, unchanged behaviour.
+ *  - has NO runtime.pid at all: previously skipped forever ("spawn may be
+ *    mid-flight; give it a cycle" with no age bound). Now reaped once
+ *    `startedAt` is older than `grace` — the spawn never got far enough to
+ *    record a pid and nothing pid-bound can ever catch it (see
+ *    PIDLESS_SPAWN_GRACE_MS's header for why the grace window is safe).
+ *
+ * A pidless row whose `startedAt` is missing or unparseable is neither
+ * reaped nor skipped silently — age can't be proven, so it is surfaced in
+ * `warnings` instead (the caller logs it) and left alone.
+ */
+function selectReapableJobs(jobs, now, { pidAlive, grace } = {}) {
+  const reapable = [];
+  const warnings = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'running') continue;
+    const pid = j.runtime?.pid;
+    if (pid) {
+      if (pidAlive(pid)) continue;
+      reapable.push({ slug: j.slug, pid, pidless: false });
+      continue;
+    }
+    const startedAt = Date.parse(j.startedAt ?? '');
+    if (Number.isNaN(startedAt)) {
+      warnings.push({ slug: j.slug, reason: 'pidless row with missing/unparseable startedAt — cannot prove age' });
+      continue;
+    }
+    const ageMs = now - startedAt;
+    if (ageMs < grace) continue; // spawn may still be mid-flight
+    reapable.push({
+      slug: j.slug,
+      pid: null,
+      pidless: true,
+      reason: `reaped: no runtime.pid recorded after ${Math.round(grace / 60_000)}m — spawn never completed`,
+    });
+  }
+  return { reapable, warnings };
+}
+
+module.exports = { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs };

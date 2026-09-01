@@ -55,7 +55,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
-const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP } = require('./lib/reaperHelpers.cjs');
+const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
@@ -78,6 +78,7 @@ const {
   QUARANTINE_ESCALATE_MS: QUARANTINE_ESCALATE_MS_DEFAULT,
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
+  PIDLESS_SPAWN_GRACE_MS,
 } = require('./lib/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
@@ -4197,11 +4198,13 @@ async function maybeLaunchWhenAvailable(state) {
 // ---------- dead-process reaper ----------
 
 /**
- * Scan running jobs, identify those whose claude process is provably dead, and
- * finalize them to completed/failed by reading the run log. Called once per
- * poll cycle. Conservative: a job with no runtime.pid yet (spawn mid-flight)
- * is always skipped. A job whose pid is alive (claudePidAlive) is always skipped.
- * Exported so unit tests can invoke it directly.
+ * Scan running jobs, identify those whose claude process is provably dead OR
+ * whose spawn never got far enough to record a runtime.pid in the first
+ * place, and finalize them to completed/failed by reading the run log.
+ * Called once per poll cycle. A job whose pid is alive (claudePidAlive) is
+ * always skipped. A pidless job younger than PIDLESS_SPAWN_GRACE_MS is
+ * skipped too (spawn may still be mid-flight) — see selectReapableJobs for
+ * the full predicate. Exported so unit tests can invoke it directly.
  */
 async function reapDeadRunningJobs() {
   try {
@@ -4211,32 +4214,45 @@ async function reapDeadRunningJobs() {
     // status:"running" with no slug left in runningSet to trigger reconciliation.
     // queue.json is the source of truth for which jobs are actually running.
     const state = await readQueue();
+    const { reapable, warnings } = selectReapableJobs(state.jobs, Date.now(), {
+      pidAlive: claudePidAlive,
+      grace: PIDLESS_SPAWN_GRACE_MS,
+    });
+    for (const w of warnings) {
+      console.warn(`[scheduler] reapDeadRunningJobs: ${w.reason} slug=${w.slug} — leaving row alone`);
+    }
+
     const dead = [];
-    for (const j of state.jobs) {
-      if (j.status !== 'running') continue;
-      const pid = j.runtime?.pid;
-      if (!pid) continue; // spawn may be mid-flight; give it a cycle
-      if (claudePidAlive(pid)) continue;
-      const logPath = j.runId
+    for (const { slug, pid, pidless, reason } of reapable) {
+      const j = state.jobs.find((x) => x.slug === slug);
+      const logPath = j?.runId
         ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`)
         : null;
+      // Absent/empty run dir → classifyRunOutcome finds no result event →
+      // 'no_result' → non-success below → filed as failed, never completed.
       const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
-      dead.push({ slug: j.slug, pid, outcome });
+      dead.push({ slug, pid, outcome, pidless, reason });
     }
     if (dead.length === 0) return;
 
     await mutate((s) => {
-      for (const { slug, pid, outcome } of dead) {
+      for (const { slug, pid, outcome, pidless, reason } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const success = outcome === 'success';
-        transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: `reaped: process gone (outcome=${outcome})`, source: 'reapDeadRunningJobs' });
+        const transitionReason = pidless ? reason : `reaped: process gone (outcome=${outcome})`;
+        transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: transitionReason, source: 'reapDeadRunningJobs' });
         s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
         s.jobs[idx].finishedAt = new Date().toISOString();
-        s.jobs[idx].error = success ? null : `reaped: process gone, no success result in log (${outcome})`;
+        s.jobs[idx].error = success ? null : `${transitionReason} (outcome=${outcome})`;
         delete s.jobs[idx].runtime;
         runningSet.delete(slug);
-        console.log(`[scheduler] reaped dead job slug=${slug} pid=${pid} outcome=${outcome}`);
+        if (pidless) {
+          console.log(`[scheduler] reaped pidless zombie job slug=${slug} outcome=${outcome}`);
+          appendAuditEvent('job_reaped_pidless', { slug, cwd: s.jobs[idx].cwd ?? null, outcome, graceMs: PIDLESS_SPAWN_GRACE_MS });
+        } else {
+          console.log(`[scheduler] reaped dead job slug=${slug} pid=${pid} outcome=${outcome}`);
+        }
       }
     });
 
@@ -6001,4 +6017,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS };

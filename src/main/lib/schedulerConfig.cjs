@@ -86,4 +86,14 @@ module.exports = {
   // PRD at 3x is 15 minutes, which is noise. Override with
   // SM_JOB_OVERRUN_FLOOR_MINUTES.
   JOB_OVERRUN_FLOOR_MS: 45 * 60_000,
+
+  // A 'running' row with no runtime.pid recorded (spawnJob's status:running
+  // mutate at scheduler.cjs:~3524 landed, but the pid-bearing runtime={}
+  // mutate that follows executeJob's spawn callback never did — the spawn
+  // itself never got far enough to produce a pid) is presumed dead once it
+  // is older than this. Must comfortably exceed the longest observed gap
+  // between those two mutates; the 2026-09-01 repro sat pidless for 464
+  // minutes with an empty run dir, so 10 minutes is a wide margin above any
+  // legitimate spawn-in-flight window, not a tight one.
+  PIDLESS_SPAWN_GRACE_MS: 10 * 60_000,
 };

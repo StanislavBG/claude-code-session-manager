@@ -36,7 +36,8 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reap-dead-running-jobs-test-'));
 process.env.HOME = tmpHome;
 
-const { reapDeadRunningJobs } = require('../scheduler.cjs');
+const { reapDeadRunningJobs, PIDLESS_SPAWN_GRACE_MS } = require('../scheduler.cjs');
+const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
 
 function registerActiveProject(cwd) {
   const projectsDir = path.join(tmpHome, '.claude', 'projects');
@@ -85,6 +86,64 @@ test('reapDeadRunningJobs reconciles a queue.json row stuck at status:running wi
   assert.equal(jobs[0].status, 'completed', 'job must be reconciled from disk state, not skipped via the runningSet gate');
   assert.equal(jobs[0].exitCode, 0);
   assert.equal(jobs[0].runtime, undefined);
+});
+
+test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS with an empty run dir as failed, not completed, and audits it', async () => {
+  const projectCwd = path.join(tmpHome, 'c-project');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const staleStartedAt = new Date(Date.now() - PIDLESS_SPAWN_GRACE_MS - 60_000).toISOString();
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'pidless-zombie',
+      status: 'running',
+      cwd: projectCwd,
+      runId: 'run-pidless-zombie',
+      startedAt: staleStartedAt,
+      estimateMinutes: 24,
+      // no runtime key at all — the spawn never got far enough to record one
+    },
+  ]);
+  // Empty run dir: created, but never written to (the exact 2026-09-01 repro).
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', 'run-pidless-zombie'), { recursive: true });
+
+  const auditSizeBefore = fs.existsSync(AUDIT_LOG_PATH) ? fs.statSync(AUDIT_LOG_PATH).size : 0;
+
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].status, 'failed', 'an empty run dir must never be reaped as completed');
+  assert.match(jobs[0].error, /no runtime\.pid recorded/);
+  assert.equal(jobs[0].runtime, undefined);
+
+  const auditText = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').slice(auditSizeBefore);
+  const auditLines = auditText.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const pidlessEvent = auditLines.find((e) => e.kind === 'job_reaped_pidless' && e.slug === 'pidless-zombie');
+  assert.ok(pidlessEvent, 'reaping a pidless row must leave an audit trace');
+});
+
+test('reapDeadRunningJobs leaves a pidless row alone while it is still within the grace window', async () => {
+  const projectCwd = path.join(tmpHome, 'd-project');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const freshStartedAt = new Date(Date.now() - 60_000).toISOString(); // 1 minute ago
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'mid-flight-spawn',
+      status: 'running',
+      cwd: projectCwd,
+      runId: 'run-mid-flight',
+      startedAt: freshStartedAt,
+    },
+  ]);
+
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  assert.equal(jobs[0].status, 'running', 'a genuinely mid-flight spawn must not be reaped');
 });
 
 test('reapDeadRunningJobs is a no-op when no job is actually running in queue.json', async () => {

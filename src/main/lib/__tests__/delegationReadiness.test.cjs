@@ -175,6 +175,31 @@ test('unparseable JSON files yield ok:false with a detail, never a throw', async
   expect(result.ok).toBe(false);
 });
 
+test('prd-write-guard: fix string names the guard script by an absolute, existing path', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), { hooks: { PreToolUse: [] } });
+
+  const result = checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'prd-write-guard');
+  expect(check.ok).toBe(false);
+
+  const match = check.fix.match(/node (\S+guard-prd-writes\.cjs)/);
+  expect(match).toBeTruthy();
+  const scriptPath = match[1];
+  expect(scriptPath.startsWith('/')).toBe(true);
+  expect(fs.existsSync(scriptPath)).toBe(true);
+});
+
+test('prd-write-guard: detection still passes for session-manager\'s own RELATIVE hook command', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  // makeGreenFixtures already installs the relative form used in this repo's
+  // own .claude/settings.json — assert it explicitly so a future tightening
+  // of the `ok` check to an exact/absolute match is caught here.
+  const result = checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'prd-write-guard');
+  expect(check.ok).toBe(true);
+});
+
 test('missing cwd/.claude/settings.json entirely is treated as guard-absent, not a throw', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.rm(path.join(cwd, '.claude', 'settings.json'));

@@ -19,6 +19,7 @@ const os = require('node:os');
 const SCHEDULER_MCP_NAME = 'session-manager-scheduler';
 const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
 const SCHEDULER_MCP_SERVER_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'scheduler-mcp-server.cjs');
+const PRD_WRITE_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-prd-writes.cjs');
 
 /** Read + JSON.parse a file, returning `fallback` on any read/parse failure. */
 function readJsonSafe(absPath, fallback) {
@@ -115,7 +116,7 @@ function checkPrdWriteGuard({ cwd }) {
       : `no guard-prd-writes PreToolUse hook in ${cwd}/.claude/settings.json`,
     fix: ok
       ? null
-      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Write|Edit|NotebookEdit that runs node scripts/hooks/guard-prd-writes.cjs`,
+      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Write|Edit|NotebookEdit that runs node ${PRD_WRITE_GUARD_SCRIPT}`,
   };
 }
 

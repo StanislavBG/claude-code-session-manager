@@ -43,6 +43,7 @@ import { AlmanacIcon } from '../../layout/AlmanacIcon'
 import { EmptyState } from '../../ui/EmptyState'
 import { toast } from '../../../state/toast'
 import { PhBlock, PhCard } from './ph-primitives'
+import { PhAgentTools } from './PhAgentTools'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
 
 const EMPTY_JOBS: ScheduleJob[] = []
@@ -160,6 +161,7 @@ function ProjectHomeComponent() {
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
         <PhNow cwd={activeTab.cwd} snapshots={snapshots} />
         <PhOpenQuestions cwd={activeTab.cwd} sessions={sessions} chats={chats} />
+        <PhAgentTools cwd={activeTab.cwd} />
 
         <div className="rounded-xl border border-line bg-bg-hi px-6 py-5 mb-3.5 flex items-start gap-4">
           <div className="min-w-0">

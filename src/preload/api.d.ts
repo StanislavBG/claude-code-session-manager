@@ -199,6 +199,31 @@ export interface McpStatusResult {
   checkedAt: number;
 }
 
+/** One session-manager-scheduler MCP tool's catalog entry (src/main/lib/mcpToolCatalog.cjs) —
+ *  the same data GET /admin/mcp/catalog serves, read in-process for Project Home's
+ *  PhAgentTools block. */
+export interface McpToolCatalogEntry {
+  name: string;
+  group: 'scheduler' | 'chat' | 'feedback' | 'help';
+  purpose: string;
+  whenToUse: string;
+  whenNotToUse: string;
+  exampleArgs: Record<string, unknown>;
+  notes: string | null;
+}
+
+export interface McpRecipe {
+  id: string;
+  title: string;
+  steps: string[];
+}
+
+export interface McpCatalogResult {
+  ok: boolean;
+  tools: McpToolCatalogEntry[];
+  recipes: McpRecipe[];
+}
+
 /** Mirrors WorkType (src/main/lib/workTypeLibrary.cjs) / EpicTag (tagLibrary.ts) — the
  *  same Epic-mission taxonomy, reused here since an Agent persona's `tags` field is that
  *  same concept, not a free-form string list. */
@@ -1361,6 +1386,7 @@ export interface SessionManagerAPI {
   };
   mcp: {
     status: () => Promise<McpStatusResult>;
+    catalog: () => Promise<McpCatalogResult>;
   };
   agents: {
     listPersonas: () => Promise<AgentPersona[]>;

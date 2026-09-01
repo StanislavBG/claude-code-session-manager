@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   mcp: {
     status: () => ipcRenderer.invoke('mcp:status'),
+    catalog: () => ipcRenderer.invoke('mcp:catalog'),
   },
   agents: {
     listPersonas: () => ipcRenderer.invoke('agents:list-personas'),

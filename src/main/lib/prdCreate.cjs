@@ -25,6 +25,7 @@ const { expandHome } = require('./expandHome.cjs');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
+const { resolveProjectContext } = require('./projectRootResolve.cjs');
 
 const STANDARDS_PATH = path.join(
   __dirname, '..', '..', '..',
@@ -138,17 +139,41 @@ function resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId) {
  * (400/409/500), left to the caller since only the HTTP route needs it.
  */
 async function createPrd(input, remote) {
-  // cwd is untrusted: this is the first *creating* mutation on a
-  // token-authed API whose product is "a command that will later run
-  // with --dangerously-skip-permissions in a chosen cwd". Route it
-  // through config.cjs's validatePath (allowedRoots = home dir) —
-  // same boundary every other fs-touching IPC handler uses — never a
-  // bespoke check here.
-  // Normalize a `~`-prefixed cwd BEFORE it reaches allocateParallelGroup/
-  // readPrd/writePrd — those pass cwd through to safeSlugPathIn-adjacent path
-  // joins that treat it as a literal path segment, so an unexpanded `~/...`
-  // fails downstream as a bare "invalid slug" instead of a clear cwd error.
-  const cwd = expandHome(input.cwd);
+  // cwd is untrusted AND, since this PRD, optional — a caller inside an
+  // Epic's git worktree naturally passes its worktree pwd (or omits cwd
+  // entirely and relies on originClaudeSessionId/sourcePromptId). Resolve the
+  // real project + owning Epic server-side BEFORE any validation: a worktree
+  // cwd currently PASSES config.validatePath and then reads the WRONG
+  // active-index.json (a git-tracked snapshot frozen at branch time), which
+  // is why "the Epic got lost" reports keep recurring even though the Epic
+  // never left main's index. See projectRootResolve.cjs's header.
+  const rawCwd = input.cwd ? expandHome(input.cwd) : null;
+  const originProjectRoot = input.originProjectRoot ? expandHome(input.originProjectRoot) : null;
+  const resolved = resolveProjectContext({
+    cwd: rawCwd,
+    originClaudeSessionId: input.originClaudeSessionId,
+    // Only ask the resolver to hunt for the project BY Epic id when no cwd
+    // (nor a trusted SM_PROJECT_ROOT hint) was supplied at all — an explicit
+    // cwd that merely needs worktree/ops-path normalization is already fixed
+    // by projectRootOf above, so the common already-correct-cwd call (cwd +
+    // sourcePromptId both supplied) never pays for a cross-project scan.
+    epicId: (rawCwd || originProjectRoot) ? undefined : input.sourcePromptId,
+    originProjectRoot,
+  });
+
+  if (!resolved.cwd) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'cwd is required — pass cwd explicitly, or originClaudeSessionId/sourcePromptId that resolves '
+        + 'to an existing, already-approved Epic (create/approve an Epic first)',
+    };
+  }
+
+  // A resolved Epic's own project cwd always wins over the supplied/hinted
+  // one — see resolveProjectContext's header. `cwd` below is that final,
+  // already-normalized (worktree -> main tree) value.
+  const cwd = resolved.cwd;
   let realCwd;
   try {
     realCwd = config.validatePath(cwd);
@@ -164,9 +189,16 @@ async function createPrd(input, remote) {
   config.addAllowedRoot(realCwd);
   input = { ...input, cwd };
 
-  if (!input.sourcePromptId && input.originClaudeSessionId) {
-    const resolved = resolveSourcePromptIdFromClaudeSession(cwd, input.originClaudeSessionId);
-    if (resolved) input = { ...input, sourcePromptId: resolved };
+  if (resolved.epicId) {
+    input = { ...input, sourcePromptId: resolved.epicId };
+  } else if (!input.sourcePromptId && input.originClaudeSessionId) {
+    // Fallback kept for the narrow case a caller passes originClaudeSessionId
+    // but resolveProjectContext (which also scans cross-project) somehow
+    // missed it — resolveSourcePromptIdFromClaudeSession is the single-cwd
+    // primitive resolveProjectContext itself is built from, so this can only
+    // ever be a no-op in practice; kept for defense-in-depth, not duplicated logic.
+    const fallback = resolveSourcePromptIdFromClaudeSession(cwd, input.originClaudeSessionId);
+    if (fallback) input = { ...input, sourcePromptId: fallback };
   }
 
   const slug = input.slug || deriveSlugFromTitle(input.title);

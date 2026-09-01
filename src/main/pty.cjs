@@ -156,6 +156,11 @@ class PtyManager {
       // back to its originating Epic and minted an unrelated sibling one
       // instead (prdCreate.cjs's resolveSourcePromptIdFromClaudeSession).
       SM_CHAT_SESSION_ID: tabId,
+      // The real project cwd (never the worktree spawnCwd resolved below) —
+      // forwarded by scheduler-mcp-server.cjs as originProjectRoot so
+      // create-prd/open-session/readiness resolve the right project even
+      // from a worktree pwd. See projectRootResolve.cjs.
+      SM_PROJECT_ROOT: cwd,
     });
 
     const shell = process.env.SHELL || '/bin/bash';

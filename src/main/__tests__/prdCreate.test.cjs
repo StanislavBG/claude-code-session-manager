@@ -15,6 +15,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const { execFileSync } = require('node:child_process');
 const {
   deriveSlugFromTitle,
   buildPrdBody,
@@ -583,6 +584,114 @@ test('createPrd resolves sourcePromptId from originClaudeSessionId when the call
 });
 
 // Same real-homedir rationale as the two tests above.
+// ──────────────────────────────────────────── worktree-cwd Epic-lookup
+// hazard (PRD: projectRootResolve.cjs) — reproduces the live starry-night-
+// ships shape: main's active-index.json has the Epic, a linked worktree's
+// own (git-tracked, frozen-at-branch-time) copy does not. Passing the
+// worktree's pwd as `cwd` must still resolve to main and join the Epic there.
+
+function git(args, cwd) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+function initRepo(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  git(['init', '-q'], dir);
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Test'], dir);
+  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', 'initial'], dir);
+}
+
+test('createPrd resolves a worktree cwd to the main tree and joins the Epic whose row only exists in main\'s active-index (live starry-night-ships shape)', async () => {
+  const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-worktree-cwd-hazard-'));
+  const mainRepo = path.join(tmpRoot, 'main');
+  const worktreeDir = path.join(tmpRoot, 'worktree', 'epic-1');
+  config.addAllowedRoot(mainRepo);
+  try {
+    initRepo(mainRepo);
+    fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
+    git(['worktree', 'add', '-b', 'sm-epic/epic-1', worktreeDir, 'HEAD'], mainRepo);
+
+    // Main's index has the Epic; the worktree's own copy (as checked out at
+    // branch time) does not — the exact live-repro shape.
+    await writeActiveIndexFixture(mainRepo, {
+      'epic-1': { id: 'epic-1', claudeSessionId: 'claude-sess-epic-1', status: 'active' },
+    });
+
+    const prdsDir = path.join(mainRepo, 'session-manager-operations', 'scheduler', 'epics', 'epic-1', 'prds');
+    const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+    const receivedCwds = [];
+    const realAllocate = remote.allocateParallelGroup.bind(remote);
+    remote.allocateParallelGroup = async (cwd) => { receivedCwds.push(cwd); return realAllocate(cwd); };
+
+    const result = await createPrd(
+      validCreateBody({ cwd: worktreeDir, slug: 'joins-from-worktree', sourcePromptId: 'epic-1' }),
+      remote,
+    );
+
+    expect(result.ok).toBe(true);
+    // Resolved and passed to the remote as the MAIN tree, never the worktree.
+    expect(receivedCwds.every((c) => c === mainRepo)).toBe(true);
+    const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+    expect(written).toMatch(/sourcePromptId: epic-1/);
+    expect(written).toMatch(new RegExp(`cwd: ${mainRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  } finally {
+    await fsp.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('createPrd omits cwd entirely and resolves the project purely from sourcePromptId (cwd optional inside an Epic session)', async () => {
+  const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-cwd-optional-epic-'));
+  config.addAllowedRoot(root);
+  // resolveProjectContext's cross-project scan (used when cwd is omitted
+  // entirely) is built on activeSessions.allProjectCwds — a scan of REAL
+  // ~/.claude/projects transcripts. In production this is always populated
+  // (the calling session itself opened `root` as a project), so seed a
+  // matching transcript here rather than the fixture root being invisible to
+  // the scan. Cleaned up in `finally`.
+  const transcriptDir = path.join(os.homedir(), '.claude', 'projects', `sm-cwd-optional-test-${Date.now()}`);
+  try {
+    await writeActiveIndexFixture(root, {
+      'epic-cwd-optional': { id: 'epic-cwd-optional', claudeSessionId: 'claude-sess-cwd-optional', status: 'active' },
+    });
+    await fsp.mkdir(transcriptDir, { recursive: true });
+    await fsp.writeFile(path.join(transcriptDir, 'a.jsonl'), `${JSON.stringify({ cwd: root })}\n`, 'utf8');
+
+    const prdsDir = path.join(root, 'session-manager-operations', 'scheduler', 'epics', 'epic-cwd-optional', 'prds');
+    const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+    const body = validCreateBody({ slug: 'no-cwd-supplied', sourcePromptId: 'epic-cwd-optional' });
+    delete body.cwd;
+
+    const result = await createPrd(body, remote);
+
+    expect(result.ok).toBe(true);
+    const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+    expect(written).toMatch(/sourcePromptId: epic-cwd-optional/);
+  } finally {
+    await fsp.rm(transcriptDir, { recursive: true, force: true });
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createPrd with neither cwd nor a resolvable Epic fails with a clear cwd-required error', async () => {
+  const remote = {
+    async allocateParallelGroup() { throw new Error('must not be called'); },
+    async readPrd() { throw new Error('must not be called'); },
+    async writePrd() { throw new Error('must not be called'); },
+  };
+  const body = validCreateBody();
+  delete body.cwd;
+
+  const result = await createPrd(body, remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/cwd is required/);
+});
+
 test('createPrd leaves sourcePromptId unset when originClaudeSessionId matches no known Epic (plain SessionTab chat)', async () => {
   const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-origin-session-no-match-'));
   config.addAllowedRoot(root);

@@ -66,6 +66,7 @@ const {
 } = require('./epicMint.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
+const { resolveProjectContext } = require('./projectRootResolve.cjs');
 
 /** Only these three Epic tags make sense for an inbound report — they are
  *  exactly the tags that route through /develop (tagLibrary.ts). 'build',
@@ -251,8 +252,14 @@ function validateFeedbackInput(input = {}) {
   } catch (e) {
     return bad(400, `toCwd rejected: ${e.message}`);
   }
+  // Normalize fromCwd (worktree -> main tree, ops-internal path -> project
+  // root) BEFORE validatePath/the same-project check below — an agent
+  // sending feedback from inside its own Epic's worktree pwd must be
+  // compared/chained against its REAL project, not the ephemeral checkout.
+  // See projectRootResolve.cjs's header.
+  const normalizedFromCwd = resolveProjectContext({ cwd: input.fromCwd }).cwd || input.fromCwd;
   try {
-    fromCwd = config.validatePath(path.resolve(input.fromCwd));
+    fromCwd = config.validatePath(path.resolve(normalizedFromCwd));
   } catch (e) {
     return bad(400, `fromCwd rejected: ${e.message}`);
   }

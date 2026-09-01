@@ -301,7 +301,12 @@ const PRD_CREATE_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const NO_NEWLINE_RE = /^[^\r\n]*$/;
 const schedulerCreatePrd = z.object({
   title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines'),
-  cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines'),
+  // Optional (PRD: worktree-cwd Epic-lookup hazard) — when omitted, prdCreate.cjs's
+  // createPrd resolves the real project cwd server-side via
+  // projectRootResolve.cjs's resolveProjectContext, using originClaudeSessionId/
+  // sourcePromptId/originProjectRoot. A call with none of those still fails with
+  // a clear "cwd is required" error.
+  cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   estimateMinutes: z.number().int().min(1).max(100000),
   goal: z.string().min(1).max(20000),
   acceptanceCriteria: z.array(z.string().min(1).max(2000)).min(1).max(100),
@@ -333,6 +338,13 @@ const schedulerCreatePrd = z.object({
   // within an Epic's own chat session joins that Epic even if the tool call
   // forgot to pass sourcePromptId explicitly.
   originClaudeSessionId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  // Trusted project-root hint (SM_PROJECT_ROOT env, stamped by chatRunner.cjs/
+  // pty.cjs/scheduler.cjs's job spawn onto the child that ultimately calls this
+  // route, forwarded by scheduler-mcp-server.cjs as originProjectRoot) — never
+  // written to frontmatter; projectRootResolve.cjs's resolveProjectContext
+  // treats it as a higher-priority hint than the caller-supplied cwd, but
+  // still loses to a resolved Epic's own project cwd.
+  originProjectRoot: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   // User-selected work-type tag (PRD 774; independence from the parent
   // Epic's own tag confirmed PRD 1041) — deterministic, never LLM-classified.
   // Epic tag and PRD tag draw on the same WorkType vocabulary

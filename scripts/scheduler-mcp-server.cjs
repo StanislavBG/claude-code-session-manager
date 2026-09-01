@@ -97,7 +97,10 @@ async function adminRequest(method, urlPath, body) {
 // app is down, so this must degrade to a reported-unavailable state rather
 // than throwing NOT_RUNNING_ERROR and failing the whole help call.
 async function fetchReadiness() {
-  const cwd = process.cwd();
+  // SM_PROJECT_ROOT (when present) is a trusted hint for the real project
+  // root — forwarded so a worktree/ops-internal process.cwd() still reports
+  // the real project's readiness. See projectRootResolve.cjs.
+  const cwd = process.env.SM_PROJECT_ROOT || process.cwd();
   try {
     const qs = new URLSearchParams({ cwd });
     const result = await adminRequest('GET', `/admin/mcp/readiness?${qs.toString()}`);
@@ -136,7 +139,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'One-line human-readable title' },
-        cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run)' },
+        cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
         estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes' },
         goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
         acceptanceCriteria: {
@@ -156,7 +159,7 @@ const TOOLS = [
           description: 'Optional: the work type of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
         },
       },
-      required: ['title', 'cwd', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
+      required: ['title', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
     },
   },
   {
@@ -427,6 +430,13 @@ async function handleCallTool(request) {
       if (!payload.sourcePromptId && process.env.SM_CHAT_SESSION_ID) {
         payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
       }
+      // SM_PROJECT_ROOT (chatRunner.cjs/pty.cjs/scheduler.cjs's job spawn) —
+      // a trusted hint for the real project cwd, forwarded so the admin route
+      // can resolve it even when the caller omitted cwd or passed a worktree
+      // pwd. See projectRootResolve.cjs's resolveProjectContext.
+      if (process.env.SM_PROJECT_ROOT) {
+        payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
+      }
       const result = await adminRequest('POST', '/admin/scheduler/create-prd', payload);
       // Never say "queued" — this tool only writes the PRD file; the queue
       // row is derived by the scheduler's next reconcile pass, not by this
@@ -453,6 +463,10 @@ async function handleCallTool(request) {
       const payload = { ...args };
       if (!payload.fromEpicId && process.env.SM_CHAT_SESSION_ID) {
         payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
+      }
+      // See scheduler_create_prd's own SM_PROJECT_ROOT forwarding above.
+      if (process.env.SM_PROJECT_ROOT) {
+        payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
       }
       const result = await adminRequest('POST', '/admin/feedback/open-session', payload);
       // Never say "sent", "filed" or "fixed" — this call delivers a PROPOSAL

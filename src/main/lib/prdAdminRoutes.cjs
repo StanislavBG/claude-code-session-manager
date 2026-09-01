@@ -31,6 +31,7 @@ const { appendAuditEvent } = require('./auditLog.cjs');
 const queueOps = require('../queueOps.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./mcpToolCatalog.cjs');
 const { checkDelegationReadiness } = require('./delegationReadiness.cjs');
+const { resolveProjectContext } = require('./projectRootResolve.cjs');
 
 function parseJsonBody(raw) {
   try {
@@ -70,7 +71,12 @@ function registerAdminRoute(adminHttp, remote) {
       sendJson(res, 400, { ok: false, error: 'invalid query', details: e?.issues ?? e?.message });
       return;
     }
-    const result = checkDelegationReadiness({ cwd: input.cwd });
+    // Normalize a worktree/ops-internal cwd to its real project root first —
+    // session_manager_help called from inside an Epic's worktree must report
+    // THAT project's readiness, not a worktree checkout's own (nonexistent)
+    // config state. See projectRootResolve.cjs's header.
+    const resolved = resolveProjectContext({ cwd: input.cwd });
+    const result = await checkDelegationReadiness({ cwd: resolved.cwd || input.cwd });
     // `ok: true` means "the route answered"; `ready`/`checks` carry the
     // actual delegation-readiness verdict — kept distinct so a caller can't
     // mistake "readiness is false" for "the request itself failed".

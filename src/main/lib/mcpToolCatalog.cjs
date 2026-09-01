@@ -67,7 +67,11 @@ const MCP_TOOL_CATALOG = [
       + "automatically by the scheduler's next reconcile pass (typically within ~1 "
       + 'minute); the response has `enqueued: false` for exactly this reason. Every PRD '
       + 'must join an EXISTING, already-human-approved Epic (pass sourcePromptId) — this '
-      + 'tool never mints a new one, and refuses the write if no Epic can be resolved.',
+      + 'tool never mints a new one, and refuses the write if no Epic can be resolved. '
+      + '`cwd` is OPTIONAL when called from inside an Epic session (chat or terminal, '
+      + 'including from inside that Epic\'s own git worktree pwd): the server resolves '
+      + 'the real project from the calling session\'s sourcePromptId/originClaudeSessionId, '
+      + 'never from a worktree\'s own possibly-stale active-index.json snapshot.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '

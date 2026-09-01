@@ -518,7 +518,12 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // resolveSourcePromptIdFromClaudeSession. sessionId IS the Epic's
     // claudeSessionId for an Epic-backed tab (domain model: Epic:claude-session
     // 1:1); for a non-Epic tab, resolution below simply finds no match.
-    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId });
+    // SM_PROJECT_ROOT is the real project cwd (never the worktree spawn cwd
+    // resolved below) — scheduler-mcp-server.cjs forwards it as
+    // originProjectRoot on create-prd/open-session/readiness calls so those
+    // routes can resolve the right project even from a worktree pwd. See
+    // projectRootResolve.cjs.
+    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd });
 
     // Prepend the stop-signal protocol instruction and the chat-mode truth
     // instruction to every prompt

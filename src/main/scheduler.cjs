@@ -2938,7 +2938,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
     // overrides `--model sonnet`, so scheduled jobs burn Opus credits silently.
     // PATH must include Homebrew/user bins or the job's node/git children ENOENT
     // when Electron was launched from Finder/Dock on macOS (stripped PATH).
-    const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
+    // SM_PROJECT_ROOT is the main-tree cwd (never spawnCwd, which may be a
+    // job/epic worktree) — forwarded by scheduler-mcp-server.cjs as
+    // originProjectRoot so a job running inside its own worktree can still
+    // resolve the real project for create-prd/open-session/readiness. See
+    // projectRootResolve.cjs.
+    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_PROJECT_ROOT: cwd });
 
     // Track whether the agent has emitted a `result` event in its JSONL stream.
     // null until seen; then one of "success" | "error_max_turns" | … per the

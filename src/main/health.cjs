@@ -16,6 +16,7 @@ const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { computeStallSummary } = require('./scheduler.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
+const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -223,6 +224,94 @@ function evaluatePrdMigrationHealth(migrationResult, legacyPrdsDir) {
     strandedCount,
     ...(strandedCount > 0 ? { unresolved: migrationResult.unresolved } : {}),
   };
+}
+
+// computeEpicIndexDrift(cwd) → { orphan_rows, orphan_files, unmirrored,
+//   orphanRowIds, orphanFileIds, unmirroredFiles }
+//
+// One project's drift between active-index.json (the index) and prompt-
+// sessions/<id>.json (the status mirror epicStatusMirror.cjs writes on every
+// status-changing write path). Pure filesystem read, never throws — an
+// unreadable index or prompt-sessions dir degrades to empty rather than
+// aborting the whole health check (matches evaluatePrdMigrationHealth's
+// fail-open-on-read spirit).
+function computeEpicIndexDrift(cwd) {
+  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  const indexPath = path.join(dir, 'active-index.json');
+  let sessions = {};
+  let tombstones = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    sessions = parsed && typeof parsed.sessions === 'object' && parsed.sessions ? parsed.sessions : {};
+    tombstones = parsed && typeof parsed.tombstones === 'object' && parsed.tombstones ? parsed.tombstones : {};
+  } catch { /* missing/unreadable index — treat as empty, not a throw */ }
+
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'active-index.json');
+  } catch { /* prompt-sessions/ doesn't exist yet — nothing to compare */ }
+
+  const fileIds = new Set(files.map((f) => f.slice(0, -'.json'.length)));
+  const orphanRowIds = Object.keys(sessions).filter((id) => !fileIds.has(id));
+
+  const orphanFileIds = [];
+  const unmirroredFiles = [];
+  for (const file of files) {
+    const id = file.slice(0, -'.json'.length);
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+    } catch {
+      continue; // unreadable file — neither orphan nor unmirrored classification applies
+    }
+    if (!parsed || typeof parsed !== 'object' || !parsed.status) {
+      unmirroredFiles.push(file);
+      continue;
+    }
+    const looksLive = (parsed.status === 'proposed' || parsed.status === 'active') && !parsed.archivedAt;
+    const hasRow = Object.prototype.hasOwnProperty.call(sessions, id);
+    const isTombstoned = Object.prototype.hasOwnProperty.call(tombstones, id);
+    if (looksLive && !hasRow && !isTombstoned) orphanFileIds.push(file);
+  }
+
+  return {
+    orphan_rows: orphanRowIds.length,
+    orphan_files: orphanFileIds.length,
+    unmirrored: unmirroredFiles.length,
+    orphanRowIds,
+    orphanFileIds,
+    unmirroredFiles,
+  };
+}
+
+// evaluateEpicIndexHealth(cwds) → { component, issues }
+//
+// Shapes computeEpicIndexDrift's per-project result into a health component +
+// issue lines, matching evaluateDelegationChainHealth's pattern. Only
+// orphan_rows (an index row whose Epic file is gone — the actual data-loss
+// signal) is an issue; orphan_files and unmirrored are informational drift,
+// not failures — a fresh install or an Epic mid-migration legitimately has
+// unmirrored files.
+function evaluateEpicIndexHealth(cwds) {
+  const byProject = {};
+  const issues = [];
+  let anyOrphanRows = false;
+  for (const cwd of cwds) {
+    const drift = computeEpicIndexDrift(cwd);
+    byProject[cwd] = {
+      orphan_rows: drift.orphan_rows,
+      orphan_files: drift.orphan_files,
+      unmirrored: drift.unmirrored,
+    };
+    if (drift.orphan_rows > 0) {
+      anyOrphanRows = true;
+      issues.push(
+        `Epic index drift: ${cwd} has ${drift.orphan_rows} active-index.json row(s) with no matching `
+        + `prompt-sessions/<id>.json file (${drift.orphanRowIds.join(', ')})`
+      );
+    }
+  }
+  return { component: { ok: !anyOrphanRows, byProject }, issues };
 }
 
 async function check() {
@@ -536,6 +625,19 @@ async function check() {
     status.components.run_log_retention = { ok: true, error: e.message };
   }
 
+  // 6.65. Epic index drift — orphan_rows/orphan_files/unmirrored across every
+  // project this machine has ever opened (allProjectCwds, no recency filter
+  // — a quiet project still owns its Epics). See computeEpicIndexDrift's
+  // header.
+  try {
+    const { component, issues: epicIndexIssues } = evaluateEpicIndexHealth(allProjectCwds());
+    status.components.epic_index = component;
+    status.issues.push(...epicIndexIssues);
+  } catch (e) {
+    status.components.epic_index = { ok: false, error: e.message };
+    status.issues.push(`Epic index health check failed: ${e.message}`);
+  }
+
   // 7. Summary scoring: ok if all critical components pass.
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
@@ -561,6 +663,8 @@ module.exports = {
   evaluateTickLiveness,
   readFreshHeartbeat,
   evaluatePrdMigrationHealth,
+  computeEpicIndexDrift,
+  evaluateEpicIndexHealth,
   computeProjectProblemCounts,
   evaluatePerProjectStall,
   parseClaudeMdBudget,

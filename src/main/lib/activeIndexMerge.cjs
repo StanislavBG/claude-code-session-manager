@@ -36,6 +36,7 @@
 const path = require('path');
 const { activeIndexPath, withPathLock } = require('./epicMint.cjs');
 const config = require('../config.cjs');
+const { mirrorEpicStatus } = require('./epicStatusMirror.cjs');
 
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -160,6 +161,20 @@ async function mergeActiveIndex(cwd, { sessions: rawMemorySessions = {}, events:
     // payload, so a compromised/forged renderer call can't claim a
     // different writer id.
     await config.writeJson(filePath, index, { writer: 'epics' });
+    // Status mirror (epicStatusMirror.cjs) — this IPC handler is the
+    // renderer-driven persist path (persistActiveIndex), the write site for
+    // both the 'proposed'->'active' start transition (approveProposed) and
+    // every other in-place session mutation. Mirrors every surviving row so
+    // a lost/clobbered active-index.json can be reconstructed from these
+    // files (activeIndexRebuild.cjs). Best-effort per row: one bad write must
+    // not undo the index write that already landed above.
+    for (const [id, sess] of Object.entries(mergedSessions)) {
+      try {
+        mirrorEpicStatus(cwd, id, { session: sess, status: sess.status });
+      } catch (e) {
+        console.warn(`[activeIndexMerge] mirrorEpicStatus failed for ${id}`, e);
+      }
+    }
     return { sessions: mergedSessions, events: mergedEvents };
   });
 }

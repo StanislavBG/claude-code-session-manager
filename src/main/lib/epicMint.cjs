@@ -34,6 +34,7 @@ const crypto = require('node:crypto');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
+const { mirrorEpicStatus, removeEpicMirror } = require('./epicStatusMirror.cjs');
 // Required as the module object (not destructured) so a test can
 // monkeypatch promptSessionSchema.assertValidPromptSession in place to
 // simulate a corrupted construction — the real construction below is
@@ -362,6 +363,13 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
     index.sessions[epicId] = session;
     index.events[epicId] = [firstEvent];
     writeActiveIndex(cwd, index);
+    // Status mirror (see epicStatusMirror.cjs's header) — every Epic is born
+    // 'proposed', so this is the FIRST mirror write for this id, inside the
+    // same withPathLock task the index write above just ran in. Carries the
+    // full validated `session` object (not just status) so a later rebuild
+    // (activeIndexRebuild.cjs) can reconstruct a complete row from this file
+    // alone.
+    mirrorEpicStatus(cwd, epicId, { session, status });
 
     // Every mint is logged — the trace-back point for "who created this Epic"
     // (see auditLog.cjs).
@@ -416,6 +424,10 @@ function removeEpic(cwd, epicId) {
     delete index.sessions[epicId];
     delete index.events[epicId];
     writeActiveIndex(cwd, index);
+    // Undo the mirror written by ensureEpic's mint branch too — otherwise
+    // the rolled-back id would linger as an orphan_file (a mirrored status
+    // with no index row and no tombstone) in health.cjs's epic_index check.
+    removeEpicMirror(cwd, epicId);
     return true;
   });
 }
@@ -429,6 +441,7 @@ module.exports = {
   removeEpic,
   activeIndexPath,
   readActiveIndex,
+  writeActiveIndex,
   personaFileExists,
   resolvePersonaPaths,
   // Exported so lib/activeIndexMerge.cjs's renderer-facing merge IPC handler

@@ -79,6 +79,13 @@ const PromptSessionSchema = z.object({
   // Passthrough only as of PRD 1032 — nothing populates this yet; the next
   // PRD in this chain wires Epic worktree minting.
   worktree: EpicWorktreeSchema.optional(),
+  // Status-mirror fields (epicStatusMirror.cjs) written onto prompt-sessions/
+  // <id>.json alongside the active-index.json row — never onto the index row
+  // itself, so a plain PromptSession read from active-index.json normally
+  // omits them. Optional here only so activeIndexRebuild.cjs can validate a
+  // mirrored file's reconstructed row against this same schema.
+  archivedAt: z.string().nullable().optional(),
+  indexedAt: z.string().optional(),
 });
 
 /**

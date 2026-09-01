@@ -82,6 +82,9 @@ const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
+const { rebuildActiveIndex } = require('./lib/activeIndexRebuild.cjs');
+const { activeIndexPath: promptSessionsActiveIndexPath } = require('./lib/epicMint.cjs');
+const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
 let mainWindow = null;
 let rebooting = false;
@@ -502,7 +505,7 @@ ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
 // Structured data over the four preconditions for scheduler_create_prd being
 // in an agent's tool list at all — surfacing it in the UI is a sibling PRD.
-ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadinessCwd, (payload) =>
+ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadinessCwd, async (payload) =>
   checkDelegationReadiness(payload)
 ));
 
@@ -1206,6 +1209,42 @@ app.whenReady().then(async () => {
   seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }).catch((e) => {
     logs.writeLine({ scope: 'seed-scheduler-mcp', level: 'error', message: 'seed failed', meta: { error: e?.message } });
   });
+  // Epic index self-heal: a project whose active-index.json is MISSING or
+  // fails to parse has lost every open Epic's status unless the per-Epic
+  // status mirror (epicStatusMirror.cjs) can rebuild it. Runs once per boot,
+  // fire-and-forget, and only touches a project whose index reads unclean —
+  // a clean index is never rewritten here. See activeIndexRebuild.cjs.
+  try {
+    for (const projectCwd of allProjectCwds()) {
+      const indexPath = promptSessionsActiveIndexPath(projectCwd);
+      let unclean = false;
+      let parseError = null;
+      if (!fs.existsSync(indexPath)) {
+        unclean = true;
+      } else {
+        try {
+          JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+        } catch (e) {
+          unclean = true;
+          parseError = e.message;
+        }
+      }
+      if (!unclean) continue;
+      try {
+        const { rows, skipped } = rebuildActiveIndex(projectCwd);
+        logs.writeLine({
+          scope: 'active-index-rebuild',
+          level: 'info',
+          message: 'rebuilt active-index.json from status mirrors',
+          meta: { cwd: projectCwd, parseError, restored: rows.length, skipped: skipped.length },
+        });
+      } catch (e) {
+        logs.writeLine({ scope: 'active-index-rebuild', level: 'error', message: 'rebuild failed', meta: { cwd: projectCwd, error: e?.message } });
+      }
+    }
+  } catch (e) {
+    logs.writeLine({ scope: 'active-index-rebuild', level: 'error', message: 'boot sweep failed', meta: { error: e?.message } });
+  }
   // History rollup finalize pass: deferred 30s past boot so it never competes
   // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this
   // is just the one-shot in-app pass).

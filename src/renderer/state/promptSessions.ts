@@ -124,6 +124,15 @@ export interface PromptSessionArchive {
   events: PromptSessionEvent[]
   transcript: string
   archivedAt: string
+  /** Status mirror fields (see src/main/lib/epicStatusMirror.cjs) — copies of
+   *  `session.status`/`session.cwd` plus a write timestamp, kept at the TOP
+   *  level so activeIndexRebuild.cjs can read every prompt-sessions/<id>.json
+   *  file uniformly without reaching into the nested `session` shape, which
+   *  differs for a live (proposed/active) Epic's sparse mirror. Absent on
+   *  archives written before this field existed. */
+  status?: PromptSession['status']
+  cwd?: string
+  indexedAt?: string
   /** Full-text turns from the durable per-Epic transcript store
    *  (promptSessionTranscript.cjs), populated whenever `transcript` above
    *  came back empty — the raw `~/.claude/projects/...` JSONL copy is a
@@ -696,6 +705,9 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       events: get().events[promptSessionId] ?? closedEventList,
       transcript,
       archivedAt: now,
+      status: completed.status,
+      cwd: completed.cwd,
+      indexedAt: now,
       ...(durableTurns ? { durableTurns } : {}),
     }
     try {

@@ -35,7 +35,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../src/main/health.cjs');
+const { parseClaudeMdBudget, evaluateClaudeMdBudget, computeEpicIndexDrift } = require('../src/main/health.cjs');
 
 const targetCwd = process.argv[2];
 if (!targetCwd) {
@@ -129,6 +129,19 @@ const namespaceDirs = listDirEntries(OPS_ROOT).filter((e) => e.isDirectory());
 
 const namespaces = [];
 const findings = [];
+
+// Epic index drift (orphan_rows/orphan_files/unmirrored) — same three counts
+// health.cjs's epic_index component reports, reused here (not
+// re-implemented) so the two never disagree. See computeEpicIndexDrift's
+// header in src/main/health.cjs.
+const epicIndexDrift = computeEpicIndexDrift(targetCwd);
+if (epicIndexDrift.orphan_rows > 0) {
+  findings.push({
+    type: 'EPIC_INDEX_ORPHAN_ROWS',
+    detail: `prompt-sessions/active-index.json has ${epicIndexDrift.orphan_rows} row(s) with no matching `
+      + `prompt-sessions/<id>.json file (${epicIndexDrift.orphanRowIds.join(', ')})`,
+  });
+}
 if (claudeMdSize && !claudeMdSize.withinBudget) {
   findings.push({
     type: 'CLAUDE_MD_OVER_BUDGET',
@@ -221,6 +234,11 @@ process.stdout.write(JSON.stringify({
   opsRoot: OPS_ROOT,
   hasClaudeMd: !!claudeMd,
   claudeMdSize,
+  epicIndexDrift: {
+    orphan_rows: epicIndexDrift.orphan_rows,
+    orphan_files: epicIndexDrift.orphan_files,
+    unmirrored: epicIndexDrift.unmirrored,
+  },
   namespaceCount: namespaces.length,
   namespaces,
   findings,

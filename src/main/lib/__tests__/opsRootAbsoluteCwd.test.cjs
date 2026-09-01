@@ -175,3 +175,154 @@ test('projectStateDir fails closed on an ops-internal cwd, naming the offending 
 // The writeSplit half of this guard lives in opsRootNestedWrite.test.cjs —
 // it must override HOME before requiring queueStore (writeSplit persists
 // machine state to a homedir path), which cannot be done from this file.
+
+// ─── the third incident: a cwd INSIDE a linked git worktree ─────────────────
+//
+// Verified live 2026-09-01 in starry-night-ships: a transcript's last `cwd`
+// row pointed at `/tmp/session-manager-epic-worktrees/<hash>/<epicId>` — an
+// absolute, existing directory, so it was accepted as a project and the real
+// project root (`/home/bilko/Projects/starry-night-ships`) never entered the
+// list at all. `worktreeMainRootOf` reverses a linked worktree's `.git` FILE
+// (`gitdir: <main>/.git/worktrees/<name>`) back to `<main>`.
+
+const { worktreeMainRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('../gitWorktree.cjs');
+
+// A worktree's MAIN tree root must live outside os.tmpdir() for these fixtures
+// to double as a realistic "real project" for the tmp-drop-guard tests below
+// (a real project is never itself under /tmp — only the linked worktree is).
+// `test-results/` is already gitignored in this repo.
+const NON_TMP_SCRATCH_ROOT = path.join(process.cwd(), 'test-results', 'opsroot-fixtures');
+
+async function mkNonTmpDir(prefix) {
+  fs.mkdirSync(NON_TMP_SCRATCH_ROOT, { recursive: true });
+  return fsp.mkdtemp(path.join(NON_TMP_SCRATCH_ROOT, prefix));
+}
+
+async function makeWorktreeFixture() {
+  const main = await mkNonTmpDir('sm-opsroot-main-');
+  tmpDirs.push(main);
+  fs.mkdirSync(path.join(main, '.git'), { recursive: true });
+  const worktree = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-worktree-'));
+  tmpDirs.push(worktree);
+  const worktreeName = 'sm-epic-abc123';
+  const worktreeGitFile = path.join(worktree, '.git');
+  const adminDir = path.join(main, '.git', 'worktrees', worktreeName);
+  fs.mkdirSync(adminDir, { recursive: true });
+  // Real `git worktree add` writes this back-reference (the admin dir's own
+  // `gitdir` file points at the linked worktree's `.git` FILE) — required by
+  // worktreeMainRootOf's round-trip check so a crafted `.git` file elsewhere
+  // on disk can't redirect resolution to an arbitrary directory.
+  fs.writeFileSync(path.join(adminDir, 'gitdir'), `${worktreeGitFile}\n`, 'utf8');
+  fs.writeFileSync(worktreeGitFile, `gitdir: ${adminDir}\n`, 'utf8');
+  return { main, worktree };
+}
+
+test('worktreeMainRootOf resolves a linked worktree .git FILE back to the main tree root', async () => {
+  const { main, worktree } = await makeWorktreeFixture();
+  expect(worktreeMainRootOf(worktree)).toBe(main);
+});
+
+test('worktreeMainRootOf returns the ancestor unchanged when .git is a real directory', async () => {
+  const main = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-plain-main-'));
+  tmpDirs.push(main);
+  fs.mkdirSync(path.join(main, '.git'), { recursive: true });
+  const nested = path.join(main, 'src', 'main', 'lib');
+  fs.mkdirSync(nested, { recursive: true });
+  expect(worktreeMainRootOf(nested)).toBe(main);
+});
+
+test('worktreeMainRootOf returns null on a garbled .git file instead of throwing', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-garbled-'));
+  tmpDirs.push(dir);
+  fs.writeFileSync(path.join(dir, '.git'), 'not a gitdir line at all', 'utf8');
+  expect(worktreeMainRootOf(dir)).toBeNull();
+
+  const dir2 = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-garbled2-'));
+  tmpDirs.push(dir2);
+  fs.writeFileSync(path.join(dir2, '.git'), 'gitdir: /some/path/without/the/marker\n', 'utf8');
+  expect(worktreeMainRootOf(dir2)).toBeNull();
+});
+
+test('worktreeMainRootOf refuses a crafted .git file that redirects to an arbitrary directory with no back-reference', async () => {
+  // A `.git` FILE is an ordinary file — nothing stops an untrusted repo from
+  // shipping one at a nested path pointing anywhere. Without verifying the
+  // admin dir's own `gitdir` back-reference, this would let a crafted repo
+  // redirect activeSessions' project-root resolution (and therefore
+  // queueStore's ops-root writes) to an attacker-chosen absolute directory.
+  const arbitraryTarget = await mkNonTmpDir('sm-opsroot-arbitrary-target-');
+  tmpDirs.push(arbitraryTarget);
+  const attackerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-attacker-'));
+  tmpDirs.push(attackerDir);
+  // No admin dir/back-reference file exists under arbitraryTarget/.git/worktrees/.
+  fs.writeFileSync(
+    path.join(attackerDir, '.git'),
+    `gitdir: ${path.join(arbitraryTarget, '.git', 'worktrees', 'x')}\n`,
+    'utf8',
+  );
+  expect(worktreeMainRootOf(attackerDir)).toBeNull();
+});
+
+test('worktreeMainRootOf refuses a crafted .git file whose admin dir exists but back-references a DIFFERENT worktree', async () => {
+  const { main } = await makeWorktreeFixture();
+  const attackerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-attacker2-'));
+  tmpDirs.push(attackerDir);
+  // Points at a REAL admin dir (main's own), but that admin dir's gitdir
+  // back-reference points at the ORIGINAL worktree, not attackerDir.
+  fs.writeFileSync(
+    path.join(attackerDir, '.git'),
+    `gitdir: ${path.join(main, '.git', 'worktrees', 'sm-epic-abc123')}\n`,
+    'utf8',
+  );
+  expect(worktreeMainRootOf(attackerDir)).toBeNull();
+});
+
+test('worktreeMainRootOf returns null for a plain non-git directory', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-opsroot-nogit-'));
+  tmpDirs.push(dir);
+  expect(worktreeMainRootOf(dir)).toBeNull();
+});
+
+test('projectRootOf resolves a worktree cwd to the main tree root', async () => {
+  const { main, worktree } = await makeWorktreeFixture();
+  const { projectRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+  expect(projectRootOf(worktree)).toBe(main);
+});
+
+test('projectRootOf resolves a cwd nested inside a worktree\'s OWN ops tree to the main root', async () => {
+  const { main, worktree } = await makeWorktreeFixture();
+  const { projectRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+  const nestedOps = path.join(worktree, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(nestedOps, { recursive: true });
+  expect(projectRootOf(nestedOps)).toBe(main);
+});
+
+test('activeProjectCwds resolves a worktree cwd to the real project and drops unresolvable tmp cwds', async () => {
+  const { main, worktree } = await makeWorktreeFixture();
+  // A bare, .git-less directory directly under the managed epic-worktree
+  // root — the shape a torn-down or mid-teardown worktree leaves behind.
+  // worktreeMainRootOf can't resolve it (no .git), so only the drop-guard's
+  // prefixDropRoots check keeps it out of the project list.
+  fs.mkdirSync(WORKTREE_KIND_CONFIG.epic.root, { recursive: true });
+  const bareWorktreeRoot = await fsp.mkdtemp(path.join(WORKTREE_KIND_CONFIG.epic.root, 'sm-opsroot-bare-'));
+  tmpDirs.push(bareWorktreeRoot);
+  const projectsDir = await mkProjectsDir({
+    resolvable: worktree,
+    unresolvable: bareWorktreeRoot,
+    bareTmpdir: os.tmpdir(),
+  });
+
+  const cwds = activeProjectCwds(Infinity, { projectsDir });
+  expect(cwds).toContain(main);
+  expect(cwds).not.toContain(worktree);
+  expect(cwds).not.toContain(bareWorktreeRoot);
+  expect(cwds).not.toContain(os.tmpdir());
+});
+
+test('a main-tree root resolved from a worktree dedupes against a directly-observed cwd for the same project', async () => {
+  const { main, worktree } = await makeWorktreeFixture();
+  const projectsDir = await mkProjectsDir({ direct: main, viaWorktree: worktree });
+
+  const cwds = activeProjectCwds(Infinity, { projectsDir });
+  expect(cwds.filter((c) => c === main)).toHaveLength(1);
+});

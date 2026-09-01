@@ -11,8 +11,28 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('../../src/main/lib/gitWorktree.cjs');
 
 const HOME = os.homedir();
+const TMPDIR = os.tmpdir();
+
+// The last-resort drop targets for addCwd's tmp guard.
+//   - exactDropCwds: dropped only on an EXACT match — os.tmpdir() itself
+//     (e.g. `/tmp`). NOT a prefix match: this codebase's own test suite
+//     routinely stubs HOME to a tmp dir and nests a fake project cwd
+//     underneath it, a legitimate, unrelated use of os.tmpdir() that a
+//     blanket prefix match would wrongly drop.
+//   - prefixDropRoots: dropped on an exact match OR any nested path — the two
+//     managed worktree roots (both live under os.tmpdir() per gitWorktree
+//     .cjs's KIND_CONFIG). Nothing but managed worktree checkouts is ever
+//     created under these roots, so a prefix match here is safe. A resolvable
+//     worktree (managed or user-made, anywhere on disk) is already handled by
+//     worktreeMainRootOf above; this guard only catches what that resolution
+//     could not — e.g. a bare, .git-less worktree-root directory.
+const TMP_DROP_ROOTS = {
+  exactDropCwds: [TMPDIR],
+  prefixDropRoots: [WORKTREE_KIND_CONFIG.job.root, WORKTREE_KIND_CONFIG.epic.root],
+};
 
 // Transcript reads only need the last line with a `cwd` field — a few dozen
 // lines is always enough. 64 KB keeps peak RSS proportionate.
@@ -37,16 +57,93 @@ const MAX_CWDS = 50;
 // signal survives instead of being silently lost.
 const OPS_DIRNAME = 'session-manager-operations';
 
+// Bound on the ancestor walk in worktreeMainRootOf — well past any real
+// filesystem depth, purely to guarantee termination without relying on
+// reaching '/' (e.g. a symlink loop or an unusually deep path).
+const MAX_WORKTREE_WALK = 40;
+
+const WORKTREES_MARKER = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+
+/**
+ * worktreeMainRootOf(cwd) → the main tree's root when cwd sits inside a
+ * linked `git worktree` (job/epic worktrees under os.tmpdir(), or a
+ * user-made one anywhere). Walks UP from cwd looking for a `.git` entry:
+ *   - `.git` is a FILE (linked worktree) whose first line is
+ *     `gitdir: <main>/.git/worktrees/<name>` → returns <main>.
+ *   - `.git` is a DIRECTORY (already the main tree) → returns that ancestor.
+ *   - nothing found within MAX_WORKTREE_WALK levels → returns null.
+ * Pure fs, synchronous, never throws — any unexpected shape (garbled file,
+ * unreadable entry, gitdir path without the worktrees marker) yields null so
+ * the caller leaves the cwd unchanged rather than guessing.
+ */
+function worktreeMainRootOf(cwd) {
+  let dir = cwd;
+  for (let i = 0; i < MAX_WORKTREE_WALK; i++) {
+    const gitPath = path.join(dir, '.git');
+    let stat;
+    try {
+      stat = fs.statSync(gitPath);
+    } catch {
+      stat = null;
+    }
+    if (stat) {
+      if (stat.isDirectory()) return dir;
+      if (stat.isFile()) {
+        let body;
+        try {
+          body = fs.readFileSync(gitPath, 'utf8');
+        } catch {
+          return null;
+        }
+        const firstLine = body.split('\n', 1)[0].trim();
+        const prefix = 'gitdir:';
+        if (!firstLine.startsWith(prefix)) return null;
+        const gitdir = firstLine.slice(prefix.length).trim();
+        const markerIdx = gitdir.indexOf(WORKTREES_MARKER);
+        if (markerIdx <= 0) return null;
+        const candidateMain = gitdir.slice(0, markerIdx);
+        const worktreeName = gitdir.slice(markerIdx + WORKTREES_MARKER.length).split(path.sep)[0];
+        // Round-trip verification: gitdir's content is a plain file that
+        // anything on disk could have written (e.g. a nested `.git` file
+        // tracked inside an untrusted repo), so it must not be trusted to
+        // redirect callers to an arbitrary attacker-chosen absolute path.
+        // A genuine linked worktree's admin dir back-references the exact
+        // `.git` FILE we are resolving via its own `gitdir` pointer file —
+        // require that round trip before accepting candidateMain.
+        if (!worktreeName) return null;
+        const adminGitdirFile = path.join(candidateMain, '.git', 'worktrees', worktreeName, 'gitdir');
+        let backRef;
+        try {
+          backRef = fs.readFileSync(adminGitdirFile, 'utf8').trim();
+        } catch {
+          return null;
+        }
+        if (path.resolve(backRef) !== path.resolve(gitPath)) return null;
+        return candidateMain;
+      }
+      return null;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+
 /**
  * projectRootOf(cwd) → the project root for a cwd that may sit inside an ops
- * tree. Returns cwd unchanged when it does not. Only the FIRST occurrence
- * matters — a nested stray ops root is itself the bug, never a project.
+ * tree and/or a linked git worktree. Returns cwd unchanged when neither
+ * applies. Only the FIRST ops-dir occurrence matters — a nested stray ops
+ * root is itself the bug, never a project. The ops-dir truncation runs
+ * first, then the worktree resolution, so a cwd deep inside a worktree's OWN
+ * ops tree still lands on the real project's main root.
  */
 function projectRootOf(cwd) {
   const parts = cwd.split(path.sep);
   const i = parts.indexOf(OPS_DIRNAME);
-  if (i <= 0) return cwd;
-  return parts.slice(0, i).join(path.sep) || path.sep;
+  const truncated = i > 0 ? (parts.slice(0, i).join(path.sep) || path.sep) : cwd;
+  const mainRoot = worktreeMainRootOf(truncated);
+  return mainRoot || truncated;
 }
 
 /**
@@ -85,11 +182,13 @@ function readTailLines(filePath, maxBytes) {
  *   Complexity: O(P × L) over P project dirs, each bounded-tail read (64 KB).
  *
  * opts (for testing):
- *   projectsDir  — override the default ~/.claude/projects path
+ *   projectsDir   — override the default ~/.claude/projects path
+ *   tmpDropRoots  — override the tmp guard's drop roots (default TMP_DROP_ROOTS)
  */
 function activeProjectCwds(maxAgeMin = 90, {
   projectsDir = path.join(HOME, '.claude', 'projects'),
   maxCwds = MAX_CWDS,
+  tmpDropRoots = TMP_DROP_ROOTS,
 } = {}) {
   // maxAgeMin === Infinity means "every project ever seen, no recency filter"
   // (allProjectCwds below). Date.now() - Infinity is -Infinity, which every
@@ -111,6 +210,17 @@ function activeProjectCwds(maxAgeMin = 90, {
     // whole per-project state off these strings — a project is a cwd, and a
     // cwd is an absolute path.
     if (!path.isAbsolute(cwd)) return;
+    // Drop-guard of last resort: a cwd that is (or sits inside) a known
+    // worktree-scratch root after projectRootOf's normalization is one
+    // worktreeMainRootOf could not resolve to a main tree — never a real
+    // project.
+    if (tmpDropRoots.exactDropCwds.includes(cwd)) return;
+    const isUnderPrefixDropRoot = tmpDropRoots.prefixDropRoots.some((root) => {
+      if (cwd === root) return true;
+      const rel = path.relative(root, cwd);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    });
+    if (isUnderPrefixDropRoot) return;
     if (seen.has(cwd) || result.length >= maxCwds) return;
     // Must exist AND be a directory — a transcript naming a since-deleted
     // path, or a file, is not a project.
@@ -178,4 +288,4 @@ function allProjectCwds(opts = {}) {
   return activeProjectCwds(Infinity, { maxCwds: 500, ...opts });
 }
 
-module.exports = { activeProjectCwds, allProjectCwds, projectRootOf };
+module.exports = { activeProjectCwds, allProjectCwds, projectRootOf, worktreeMainRootOf };

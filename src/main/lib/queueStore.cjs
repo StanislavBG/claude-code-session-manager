@@ -34,6 +34,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { allProjectCwds, activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
+const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 
 const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-machine.json');
@@ -75,6 +76,18 @@ function projectStateDir(cwd) {
       `projectStateDir: cwd must be a project root, not a path inside ${OPS_DIRNAME}/, got "${cwd}"`,
     );
   }
+  // ...and it must not be an EPHEMERAL cwd (inside os.tmpdir(), or a linked
+  // git worktree root). A worktree is torn down when its Epic/job ends, so
+  // any state written there is silently destroyed — verified live 2026-09-01
+  // as a scheduler shard rewritten every reconcile pass inside a since-deleted
+  // epic worktree. See ephemeralCwd.cjs for the two conditions this covers.
+  if (isEphemeralCwd(cwd)) {
+    const err = new Error(
+      `projectStateDir: refusing ephemeral cwd (tmpdir or linked git worktree), got "${cwd}"`,
+    );
+    err.ephemeral = true;
+    throw err;
+  }
   return path.join(cwd, ...STATE_SUBPATH);
 }
 
@@ -97,7 +110,11 @@ function queuePathOrSkip(cwd, context) {
   try {
     return projectQueuePath(cwd);
   } catch (e) {
-    console.error(`[queueStore] ${context}: skipping invalid project cwd — ${e?.message}`);
+    if (e?.ephemeral) {
+      console.warn(`[queueStore] ${context}: refusing ephemeral cwd "${cwd}" — ${e.message}`);
+    } else {
+      console.error(`[queueStore] ${context}: skipping invalid project cwd — ${e?.message}`);
+    }
     return null;
   }
 }

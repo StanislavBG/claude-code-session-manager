@@ -24,6 +24,12 @@
  *
  * Usage:
  *   node scripts/cleanup-nested-queue-stubs.cjs [projectCwd] [--apply]
+ *
+ * A SEPARATE, unrelated stray class — ops-state materialized inside an
+ * EPHEMERAL cwd (os.tmpdir() itself, or a linked git worktree, see
+ * ephemeralCwd.cjs) rather than nested under a real project's own ops root —
+ * is handled by the sibling cleanup-worktree-ops-stubs.cjs, dispatched here:
+ *   node scripts/cleanup-nested-queue-stubs.cjs --worktree-stubs [--apply|--dry-run]
  */
 
 const fs = require('node:fs');
@@ -31,6 +37,12 @@ const path = require('node:path');
 
 const OPS = 'session-manager-operations';
 const args = process.argv.slice(2);
+
+if (args.includes('--worktree-stubs')) {
+  const { main } = require('./cleanup-worktree-ops-stubs.cjs');
+  process.exit(main(args.filter((a) => a !== '--worktree-stubs')));
+}
+
 const apply = args.includes('--apply');
 const cwd = path.resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
 const opsRoot = path.join(cwd, OPS);

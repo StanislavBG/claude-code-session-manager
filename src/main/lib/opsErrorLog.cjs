@@ -14,6 +14,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
+const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
 
 // Same redaction policy as logs.cjs's sanitizeMeta — kept independent (not
 // shared/required) so this module has no dependency on the Electron `app`
@@ -58,6 +59,15 @@ function todayFile(cwd) {
  */
 function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], message, meta }) {
   if (!cwd || typeof cwd !== 'string') return; // no project to attribute this line to — skip
+  if (isEphemeralCwd(cwd)) {
+    // A worktree is torn down when its Epic/job ends and os.tmpdir() is
+    // scratch space either way — never materialize logs there. See
+    // ephemeralCwd.cjs / queueStore.cjs's projectStateDir for the sibling
+    // refusal on the scheduler namespace (verified live 2026-09-01 as a
+    // recreated /tmp/session-manager-operations/logs/ tree).
+    console.warn(`[opsErrorLog] appendError: refusing ephemeral cwd "${cwd}" (scope=${scope || 'unknown'})`);
+    return;
+  }
   const file = todayFile(cwd);
   try {
     assertOpsWrite(file, 'logs');

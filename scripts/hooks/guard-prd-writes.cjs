@@ -38,11 +38,23 @@
  *   }
  *
  * ── Adopting this hook in a DIFFERENT (non-session-manager) project ──────
+ * DON'T HAND-WRITE THIS. Session Manager installs it: open New Session in
+ * that project and press "Fix it" on the readiness banner's PRD-write-guard
+ * row (src/main/lib/delegationReadiness.cjs's installPrdWriteGuard, which
+ * merges into any existing hooks block instead of clobbering it).
+ *
+ * The standardized approach is REFERENCE, not vendor — do NOT copy this file
+ * into the adopting repo. Vendoring drifts (it already did, with exactly one
+ * adopter), and what is being guarded is session-manager-operations/scheduler/,
+ * Session Manager's own territory inside someone else's repo, so the
+ * enforcement logic belongs with the owner.
+ *
  * This file lives in the session-manager repo, so a relative
  * `node scripts/hooks/guard-prd-writes.cjs` command only resolves when the
- * hook runs with THIS repo as cwd. Any other project's `.claude/settings.json`
- * (that project's own `scheduler/` folder still gets the same single-writer
- * protection) must reference this file by its ABSOLUTE path instead:
+ * hook runs with THIS repo as cwd. Pasting that relative string into another
+ * project yields a hook that exits non-zero WITHOUT code 2 — a non-blocking
+ * error — so it silently guards nothing. Any other project's
+ * `.claude/settings.json` must reference this file by its ABSOLUTE path:
  *
  *   {
  *     "hooks": {

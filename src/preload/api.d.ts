@@ -328,6 +328,16 @@ export interface DelegationReadinessCheck {
   ok: boolean;
   detail: string;
   fix: string | null;
+  /** Non-null when Session Manager can install this fix itself, one press. */
+  fixAction: 'install-prd-write-guard' | null;
+}
+
+export interface InstallPrdWriteGuardResult {
+  ok: boolean;
+  action: 'installed' | 'repaired' | 'already-installed' | 'error';
+  settingsPath?: string;
+  command?: string;
+  error?: string;
 }
 
 export interface DelegationReadiness {
@@ -1298,6 +1308,7 @@ export interface SessionManagerAPI {
     /** "Can this project actually delegate?" — the 4 preconditions for
      *  scheduler_create_prd being in an agent's tool list at all. */
     delegationReadiness: (cwd: string) => Promise<DelegationReadiness>;
+    installPrdWriteGuard: (cwd: string) => Promise<InstallPrdWriteGuardResult>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;

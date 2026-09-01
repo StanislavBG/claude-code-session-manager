@@ -178,12 +178,12 @@ describe('summarizeGroundingBoard', () => {
   const groups: GroundingGroup[] = [
     { key: 'system', label: 'System', path: '~/.claude/', items: [{ name: 'CLAUDE.md', detail: '', tokK: 0, present: true }] },
   ]
-  const passingReadiness: DelegationReadiness = { ok: true, checks: [{ id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: true, detail: '', fix: null }] }
+  const passingReadiness: DelegationReadiness = { ok: true, checks: [{ id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: true, detail: '', fix: null, fixAction: null }] }
   const failingReadiness: DelegationReadiness = {
     ok: false,
     checks: [
-      { id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: false, detail: '', fix: 'claude mcp add ...' },
-      { id: 'dev-plugin', label: 'session-manager-dev plugin enabled', ok: true, detail: '', fix: null },
+      { id: 'scheduler-mcp', label: 'Scheduler MCP server registered', ok: false, detail: '', fix: 'claude mcp add ...', fixAction: null },
+      { id: 'dev-plugin', label: 'session-manager-dev plugin enabled', ok: true, detail: '', fix: null, fixAction: null },
     ],
   }
 

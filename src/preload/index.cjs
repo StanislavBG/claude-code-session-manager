@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
     homeSelfCheck: () => ipcRenderer.invoke('app:home-self-check'),
     seedStatus: () => ipcRenderer.invoke('app:seed-status'),
     delegationReadiness: (cwd) => ipcRenderer.invoke('app:delegation-readiness', { cwd }),
+    installPrdWriteGuard: (cwd) => ipcRenderer.invoke('app:install-prd-write-guard', { cwd }),
     onNewSession: (handler) => {
       const listener = () => handler();
       ipcRenderer.on('app:new-session', listener);

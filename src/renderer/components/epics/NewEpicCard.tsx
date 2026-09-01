@@ -172,6 +172,7 @@ export function NewEpicCard({
   // surface or a mid-flight cwd switch just renders no indicator rather than
   // a broken or wrong-project card.
   const [readiness, setReadiness] = useState<DelegationReadiness | null>(null)
+  const [fixing, setFixing] = useState(false)
   // Context Injections (contextInjections.ts) — Session-Manager-authored
   // text, independent of Actor/Input/Mission, each its own on/off toggle.
   // Only an explicit human toggle is stored; the displayed/used value is
@@ -258,6 +259,32 @@ export function NewEpicCard({
     // and clears any prior project's result before the new probe lands so a
     // stale reading can never be shown against the wrong project.
   }, [effectiveCwd])
+
+  // One-press install for the one readiness check Session Manager can close
+  // itself. The main process owns WHICH approach gets installed (reference,
+  // never vendored — installPrdWriteGuard's header) so every project on the
+  // machine gets the same entry instead of re-litigating it; the renderer only
+  // fires it and re-probes.
+  async function installGuard() {
+    if (!effectiveCwd || fixing) return
+    setFixing(true)
+    try {
+      const r = await window.api.app?.installPrdWriteGuard?.(effectiveCwd)
+      if (!r?.ok) {
+        toast.error(r?.error || 'Could not install the PRD-write guard hook')
+        return
+      }
+      toast.info(r.action === 'already-installed'
+        ? 'PRD-write guard was already installed'
+        : `PRD-write guard ${r.action} in ${r.settingsPath}`)
+      const next = await window.api.app?.delegationReadiness?.(effectiveCwd)
+      if (next) setReadiness(next)
+    } catch (e) {
+      toast.error(`Could not install the PRD-write guard hook: ${String(e)}`)
+    } finally {
+      setFixing(false)
+    }
+  }
 
   // Grounding board is real data (fs reads + existing store counts, never
   // fabricated) — computed lazily, only once "advanced" is opened, and
@@ -467,6 +494,17 @@ export function NewEpicCard({
                     <li key={c.id} data-testid={`delegation-readiness-check-${c.id}`}>
                       <span className="font-medium text-fg">{c.label}</span>
                       {c.fix && <span className="text-fg-faint"> — {c.fix}</span>}
+                      {c.fixAction === 'install-prd-write-guard' && (
+                        <button
+                          type="button"
+                          data-testid="delegation-readiness-fix-prd-write-guard"
+                          disabled={fixing}
+                          onClick={installGuard}
+                          className="ml-1.5 rounded border border-line px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg hover:bg-bg-elev disabled:opacity-50"
+                        >
+                          {fixing ? 'Installing…' : 'Fix it'}
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>

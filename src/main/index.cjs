@@ -36,7 +36,7 @@ const epicWorktreeMint = require('./lib/epicWorktreeMint.cjs');
 const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
-const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
+const { checkDelegationReadiness, installPrdWriteGuard } = require('./lib/delegationReadiness.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
 const crossProjectFeedback = require('./lib/crossProjectFeedback.cjs');
@@ -498,6 +498,13 @@ ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody
 // in an agent's tool list at all — surfacing it in the UI is a sibling PRD.
 ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadinessCwd, (payload) =>
   checkDelegationReadiness(payload)
+));
+
+// The one readiness check with a sanctioned one-press install. Session Manager
+// standardizes on the REFERENCE approach (absolute path to this repo's guard
+// script, never a vendored copy) — see installPrdWriteGuard's header.
+ipcMain.handle('app:install-prd-write-guard', validated(schemas.delegationReadinessCwd, (payload) =>
+  installPrdWriteGuard(payload)
 ));
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);

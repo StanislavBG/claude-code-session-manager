@@ -32,12 +32,12 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run dev` — Vite + Electron with HMR. `SM_DEV=1` set automatically.
 - `npm run build` — production renderer build into `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
-- `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. This repo does **not**
-  use `node --test` — it can't resolve the TypeScript renderer imports.
+- `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. NOT `node --test` —
+  it can't resolve the TypeScript renderer imports.
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
-- `npm run lint` — runs `lint:selectors` + `lint:hooks`. Both guard blank-screen crash classes; run alongside typecheck.
-- `npm run health` — `src/main/health.cjs`. Exit 0 = GREEN. Entry point for `/local-project-health`.
-- `npm publish` — runs `vite build` via `prepublishOnly`. Tag is `latest`.
+- `npm run lint` — `lint:selectors` + `lint:hooks`. Both guard blank-screen crashes; run alongside typecheck.
+- `npm run health` — `src/main/health.cjs`. Exit 0 = GREEN. Entry for `/local-project-health`.
+- `npm publish` — runs `vite build` via `prepublishOnly`. Tag `latest`.
 
 ## Domain model — the laws
 
@@ -96,8 +96,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 
 ## Scheduler
 
-Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` as `claude -p` jobs.
-Detail in [`code-map.md`](session-manager-operations/architecture/code-map.md) and
+Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` as `claude -p` jobs. Detail:
+[`code-map.md`](session-manager-operations/architecture/code-map.md),
 [`scheduler/README.md`](session-manager-operations/scheduler/README.md).
 
 - **PRD authoring is API-only** — the `scheduler_create_prd` MCP tool is the sole sanctioned way to write a
@@ -105,7 +105,9 @@ Detail in [`code-map.md`](session-manager-operations/architecture/code-map.md) a
 - Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md) —
-  9 sections of rules from two real stuck-job incidents, plus a pre-queue checklist (§10).
+  rules from two real stuck-job incidents + a pre-queue checklist (§10).
+- **PRD-write guard: adopt by REFERENCE, never vendor** — other repos point at THIS repo's absolute
+  `scripts/hooks/guard-prd-writes.cjs`; New Epic's readiness banner installs it (`installPrdWriteGuard`).
 - A job parked in `needs_review` is a **question**, routed back to the Epic that authored the PRD. It never
   creates work on its own.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
@@ -143,8 +145,8 @@ Each of these is a real incident, with the post-mortem in
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs` / `app:test-fire-hook`.
 - Re-implementing tmp+rename atomic writes — use `config.cjs`'s `writeJson` / `writeTextAtomic`.
 - Reading remote URLs in production — `createWindow` hard-fails if `dist/index.html` is missing.
-- Adding a new LeftNav tab before checking whether an existing surface already owns that data. The nav has
-  been pruned once already after growing to ~31 destinations with real overlap.
+- Adding a new LeftNav tab before checking whether an existing surface already owns that data. The nav was
+  pruned once already after growing to ~31 destinations with real overlap.
 - Adding pane-specific state to parent tabs, or importing design primitives via wildcard.
 
 ## Distribution
@@ -153,4 +155,4 @@ Published as `claude-code-session-manager` on npm (`npx claude-code-session-mana
 spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for `node-pty`. Linux + darwin only.
 
 **Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
-`SimpleShell.tsx`, reusing `DEFAULT_PRESETS[0]`; persisted-tab hydration skipped).
+`SimpleShell.tsx`, `DEFAULT_PRESETS[0]`; no persisted-tab hydration).

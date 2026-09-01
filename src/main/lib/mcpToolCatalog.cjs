@@ -23,7 +23,7 @@ const { z } = require('zod');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help']),
   purpose: z.string().min(1),
   whenToUse: z.string().min(1),
   whenNotToUse: z.string().min(1),
@@ -208,6 +208,22 @@ const MCP_TOOL_CATALOG = [
       + 'There is no callback and no reply channel — do not wait for an answer, and do not tell the user '
       + 'the other project has "been fixed" or "is working on it". Report only that the proposal was '
       + 'delivered.',
+  },
+  {
+    name: 'session_manager_help',
+    group: 'help',
+    purpose: 'THE ENTRY POINT — call this tool FIRST whenever you are unsure which session-manager-scheduler '
+      + 'tool to reach for, or a call to this server just failed. Returns the same tool catalog every other '
+      + "tool's description is composed from, this project's multi-tool recipes, and this machine's "
+      + 'delegation-readiness state (tells apart "not registered" from "registered but the app is down").',
+    whenToUse: 'Call with no arguments for the full grouped tool list plus recipe titles. Pass `tool` (a tool '
+      + 'name) for that one tool\'s full entry, including its exampleArgs. Pass `topic` (a recipe id) for that '
+      + 'recipe\'s step-by-step instructions. Pass both to get both sections in one call.',
+    whenNotToUse: 'Do not use this to actually perform scheduler/chat/feedback work — it is read-only '
+      + "documentation and never a substitute for calling the tool it describes.",
+    exampleArgs: {},
+    notes: 'Always returns the static catalog even when the session-manager app is not running — only the '
+      + '`readiness` section of the response depends on the admin API being reachable.',
   },
 ];
 

@@ -664,6 +664,25 @@ test('POST /admin/scheduler/archive-prd with cwd narrows the search: a cwd with 
   }
 });
 
+test('GET /admin/mcp/readiness requires cwd and returns the delegation-readiness checks for it', async () => {
+  const cwd = projectCwd();
+  const { admin, port, token } = await startAdmin();
+  try {
+    const missing = await request(port, { path: '/admin/mcp/readiness', token });
+    expect(missing.status).toBe(400);
+    expect(missing.json.ok).toBe(false);
+
+    const res = await request(port, { path: `/admin/mcp/readiness?cwd=${encodeURIComponent(cwd)}`, token });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(true);
+    expect(typeof res.json.ready).toBe('boolean');
+    expect(Array.isArray(res.json.checks)).toBe(true);
+    expect(res.json.checks.some((c) => c.id === 'scheduler-mcp')).toBe(true);
+  } finally {
+    await admin.stop();
+  }
+});
+
 test('POST /admin/scheduler/retag-prd rewrites estimateMinutes frontmatter', async () => {
   const cwd = projectCwd();
   const epicId = 'epic-retag';

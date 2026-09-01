@@ -30,6 +30,7 @@ const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const queueOps = require('../queueOps.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./mcpToolCatalog.cjs');
+const { checkDelegationReadiness } = require('./delegationReadiness.cjs');
 
 function parseJsonBody(raw) {
   try {
@@ -53,6 +54,27 @@ function registerAdminRoute(adminHttp, remote) {
   // "alongside the existing PRD admin routes".
   adminHttp.registerRoute('GET', '/admin/mcp/catalog', async (req, res) => {
     sendJson(res, 200, { ok: true, tools: MCP_TOOL_CATALOG, recipes: MCP_RECIPES });
+  });
+
+  // GET /admin/mcp/readiness?cwd=... — session_manager_help's live half: the
+  // catalog above is static and always answerable in-process, but "is this
+  // MCP server actually wired up for this project" needs the same four
+  // checks delegationReadiness.cjs already runs for the New Epic readiness
+  // banner. `cwd` is a required query param (this server has no notion of
+  // "the" project — one admin API instance serves every open tab/project).
+  adminHttp.registerRoute('GET', '/admin/mcp/readiness', async (req, res, query) => {
+    let input;
+    try {
+      input = schemas.delegationReadinessCwd.parse(Object.fromEntries(query ?? []));
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid query', details: e?.issues ?? e?.message });
+      return;
+    }
+    const result = checkDelegationReadiness({ cwd: input.cwd });
+    // `ok: true` means "the route answered"; `ready`/`checks` carry the
+    // actual delegation-readiness verdict — kept distinct so a caller can't
+    // mistake "readiness is false" for "the request itself failed".
+    sendJson(res, 200, { ok: true, ready: result.ok, checks: result.checks });
   });
 
   // GET /admin/scheduler/prds — paginated PRD listing (PRD: 353KB/120s

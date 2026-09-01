@@ -29,7 +29,7 @@ const {
   CallToolRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 const { PRD_WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
-const { MCP_TOOL_CATALOG, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
+const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
 
 const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
 
@@ -41,8 +41,21 @@ function descriptionFor(toolName) {
 
 const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
 
+// Defined once so every failure path points to the same next call, verbatim
+// — never paste this sentence at each return site (PRD: session_manager_help).
+const HELP_POINTER = ' — call session_manager_help for the correct usage';
+
+function withPointer(text) {
+  const str = String(text);
+  return str.endsWith(HELP_POINTER) ? str : str + HELP_POINTER;
+}
+
+function errorResult(text) {
+  return { content: [{ type: 'text', text: withPointer(text) }], isError: true };
+}
+
 const NOT_RUNNING_ERROR =
-  'session-manager app is not running (admin API unreachable) — start it first';
+  `session-manager app is not running (admin API unreachable) — start it first${HELP_POINTER}`;
 
 async function readAdminConfig() {
   const raw = await fsp.readFile(TOKEN_PATH, 'utf8');
@@ -75,6 +88,26 @@ async function adminRequest(method, urlPath, body) {
   }
   const json = await res.json();
   return json;
+}
+
+// session_manager_help's live half. The catalog/recipes below are static and
+// answerable purely in-process (no admin API needed), but "is this MCP
+// server actually wired up for THIS project" needs the admin API's
+// checkDelegationReadiness result — that's genuinely unavailable when the
+// app is down, so this must degrade to a reported-unavailable state rather
+// than throwing NOT_RUNNING_ERROR and failing the whole help call.
+async function fetchReadiness() {
+  const cwd = process.cwd();
+  try {
+    const qs = new URLSearchParams({ cwd });
+    const result = await adminRequest('GET', `/admin/mcp/readiness?${qs.toString()}`);
+    if (result?.ok === false) {
+      return { available: false, cwd, reason: result.error ?? 'readiness check failed' };
+    }
+    return { available: true, cwd, ok: result.ready, checks: result.checks };
+  } catch (e) {
+    return { available: false, cwd, reason: e?.message ?? String(e) };
+  }
 }
 
 const TOOLS = [
@@ -280,6 +313,17 @@ const TOOLS = [
       required: ['toCwd', 'fromCwd', 'title', 'body'],
     },
   },
+  {
+    name: 'session_manager_help',
+    description: descriptionFor('session_manager_help'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tool: { type: 'string', description: 'Optional: a tool name — returns that one catalog entry, including exampleArgs' },
+        topic: { type: 'string', description: 'Optional: a recipe id — returns that recipe\'s step-by-step instructions' },
+      },
+    },
+  },
 ];
 
 const server = new Server(
@@ -289,13 +333,17 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+// Named + exported (see module.exports below) so mcpToolCatalog.test.cjs's
+// sibling can exercise session_manager_help's argument handling directly —
+// mocking node:fs/promises + global.fetch to drive adminRequest — without
+// booting a stdio transport.
+async function handleCallTool(request) {
   const { name, arguments: args } = request.params;
   try {
     if (name === 'scheduler_reset_job') {
       const slug = args && typeof args.slug === 'string' ? args.slug : null;
       if (!slug) {
-        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+        return errorResult('missing required argument: slug');
       }
       const force = args && args.force === true;
       const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
@@ -327,7 +375,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'scheduler_get_prd') {
       const slug = args && typeof args.slug === 'string' ? args.slug : null;
       if (!slug) {
-        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+        return errorResult('missing required argument: slug');
       }
       const qs = new URLSearchParams({ slug });
       if (args?.cwd) qs.set('cwd', args.cwd);
@@ -337,7 +385,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'scheduler_update_prd') {
       const slug = args && typeof args.slug === 'string' ? args.slug : null;
       if (!slug) {
-        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+        return errorResult('missing required argument: slug');
       }
       const result = await adminRequest('POST', '/admin/scheduler/update-prd', args);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
@@ -345,7 +393,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'scheduler_archive_prd') {
       const slugs = Array.isArray(args?.slugs) ? args.slugs : null;
       if (!slugs || slugs.length === 0) {
-        return { content: [{ type: 'text', text: 'missing required argument: slugs' }], isError: true };
+        return errorResult('missing required argument: slugs');
       }
       const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
       const result = await adminRequest('POST', '/admin/scheduler/archive-prd', { slugs, cwd });
@@ -354,7 +402,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'scheduler_cancel_job') {
       const slug = args && typeof args.slug === 'string' ? args.slug : null;
       if (!slug) {
-        return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
+        return errorResult('missing required argument: slug');
       }
       const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
       const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug, cwd });
@@ -363,7 +411,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'scheduler_retag_prd') {
       const items = Array.isArray(args?.items) ? args.items : null;
       if (!items || items.length === 0) {
-        return { content: [{ type: 'text', text: 'missing required argument: items' }], isError: true };
+        return errorResult('missing required argument: items');
       }
       const result = await adminRequest('POST', '/admin/scheduler/retag-prd', { items });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
@@ -395,7 +443,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'feedback_open_session') {
       for (const key of ['toCwd', 'fromCwd', 'title', 'body']) {
         if (!args || typeof args[key] !== 'string' || !args[key].trim()) {
-          return { content: [{ type: 'text', text: `missing required argument: ${key}` }], isError: true };
+          return errorResult(`missing required argument: ${key}`);
         }
       }
       // Same fallback shape as scheduler_create_prd: forward this process's
@@ -418,16 +466,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const tabId = args && typeof args.tabId === 'string' ? args.tabId : null;
       const prompt = args && typeof args.prompt === 'string' ? args.prompt : null;
       if (!tabId || !prompt) {
-        return { content: [{ type: 'text', text: 'missing required arguments: tabId, prompt' }], isError: true };
+        return errorResult('missing required arguments: tabId, prompt');
       }
       const result = await adminRequest('POST', '/admin/chat/send-prompt', { tabId, prompt });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
-    return { content: [{ type: 'text', text: `unknown tool: ${name}` }], isError: true };
+    if (name === 'session_manager_help') {
+      const toolName = args && typeof args.tool === 'string' ? args.tool : null;
+      const topic = args && typeof args.topic === 'string' ? args.topic : null;
+
+      const response = {};
+
+      if (toolName) {
+        const entry = CATALOG_BY_NAME.get(toolName);
+        if (!entry) {
+          const valid = MCP_TOOL_CATALOG.map((e) => e.name);
+          return errorResult(`unknown tool "${toolName}" for session_manager_help — valid tool names: ${valid.join(', ')}`);
+        }
+        response.tool = entry;
+      }
+
+      if (topic) {
+        const recipe = MCP_RECIPES.find((r) => r.id === topic);
+        if (!recipe) {
+          const valid = MCP_RECIPES.map((r) => r.id);
+          return errorResult(`unknown topic "${topic}" for session_manager_help — valid topic ids: ${valid.join(', ')}`);
+        }
+        response.recipe = recipe;
+      }
+
+      if (!toolName && !topic) {
+        response.tools = MCP_TOOL_CATALOG.map((e) => ({ name: e.name, group: e.group, purpose: e.purpose }));
+        response.recipes = MCP_RECIPES.map((r) => ({ id: r.id, title: r.title }));
+      }
+
+      response.readiness = await fetchReadiness();
+
+      return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+    }
+    return errorResult(`unknown tool: ${name}`);
   } catch (e) {
-    return { content: [{ type: 'text', text: e?.message ?? String(e) }], isError: true };
+    return errorResult(e?.message ?? String(e));
   }
-});
+}
+
+server.setRequestHandler(CallToolRequestSchema, handleCallTool);
 
 async function main() {
   const transport = new StdioServerTransport();
@@ -445,4 +528,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { TOOLS };
+module.exports = { TOOLS, handleCallTool, HELP_POINTER, NOT_RUNNING_ERROR };

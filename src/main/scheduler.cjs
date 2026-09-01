@@ -79,6 +79,7 @@ const {
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
   PIDLESS_SPAWN_GRACE_MS,
+  INVESTIGATION_MAX_MS,
 } = require('./lib/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
@@ -101,7 +102,7 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
-const { transitionJob, STATUS_HISTORY_CAP } = require('./lib/scheduleJobTransitions.cjs');
+const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/auditLog.cjs');
@@ -1144,6 +1145,73 @@ function findOverrunningJobs(jobs, now, { factor, floorMs } = {}) {
       ranMs,
       ratio: ranMs / (est * 60_000),
     });
+  }
+  return out;
+}
+
+/**
+ * findStrandedInvestigations(jobs, now, maxMs, isAlive = claudePidAlive)
+ *   → [{ slug, cwd, ageMs, restoreStatus }]
+ *
+ * Pure (besides the warn-log side effect on the two unprovable-age cases
+ * below), no other IO. spawnInvestigation's own restore of a job's
+ * pre-investigation status runs entirely inside the process that spawned the
+ * probe (its withChildAndLog onExit handler, or the synchronous-throw catch
+ * path) — so a job left 'investigating' when the app itself dies or restarts
+ * has NOTHING left to restore it. The comment at spawnInvestigation's onExit
+ * asserts "'investigating' must never be the job's resting state"; this is
+ * the sweep that makes that true across a restart, not just within one.
+ *
+ * A row qualifies only when ALL of:
+ *  - status is 'investigating'
+ *  - its most recent transition INTO 'investigating' (statusHistory's last
+ *    `to === 'investigating'` entry — a job can be investigated more than
+ *    once across its life, e.g. a retried auto-fix) is older than `maxMs`
+ *  - it has no live probe process behind it (checked via runtime.pid, set by
+ *    spawnInvestigation once its child spawns and cleared on every restore
+ *    path, the same shape reapDeadRunningJobs already uses for 'running' rows)
+ *
+ * `restoreStatus` is that transition entry's `from` — the exact value
+ * spawnInvestigation itself would have restored to (`failedJob.status ||
+ * 'failed'`), which for a row that already finished and recorded
+ * finishedAt+exitCode (the burrow-834 shape) is whatever terminal status was
+ * computed for that outcome BEFORE the probe was spawned — this sweep never
+ * re-derives it from exitCode, only replays the already-recorded decision.
+ *
+ * A row with no recoverable transition timestamp cannot have its age proven,
+ * so it is warn-logged and left alone rather than guessed at — same posture
+ * as findStaleQuarantinedJobs/findOverrunningJobs.
+ *
+ * `restoreStatus` is validated against LEGAL_TRANSITIONS['investigating']
+ * before being returned — `statusHistory`'s `from` should only ever be
+ * 'failed' or 'needs_review' (the only two states LEGAL_TRANSITIONS allows
+ * into 'investigating'), but a corrupted/unexpected value must not be handed
+ * straight to transitionJob: an illegal target is refused outright (row stays
+ * stuck at 'investigating', re-detected as stranded every sweep with no path
+ * out), so an out-of-set `from` falls back to 'failed' here instead.
+ */
+const INVESTIGATING_RESTORE_TARGETS = new Set(LEGAL_TRANSITIONS.investigating);
+function findStrandedInvestigations(jobs, now, maxMs, isAlive = claudePidAlive) {
+  const out = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'investigating') continue;
+    const entries = (j.statusHistory || []).filter((h) => h.to === 'investigating');
+    const entry = entries[entries.length - 1];
+    if (!entry) {
+      console.warn(`[scheduler] findStrandedInvestigations: ${j.slug} is 'investigating' with no statusHistory entry recording the transition — cannot prove age, leaving alone`);
+      continue;
+    }
+    const since = Date.parse(entry.at ?? '');
+    if (Number.isNaN(since)) {
+      console.warn(`[scheduler] findStrandedInvestigations: ${j.slug} has an unparseable investigating-transition timestamp (${entry.at}) — cannot prove age, leaving alone`);
+      continue;
+    }
+    const ageMs = now - since;
+    if (ageMs < maxMs) continue; // a live probe must not be yanked out from under itself
+    const pid = j.runtime?.pid;
+    if (pid && isAlive(pid)) continue; // probe genuinely still running — not stranded
+    const restoreStatus = INVESTIGATING_RESTORE_TARGETS.has(entry.from) ? entry.from : 'failed';
+    out.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs, restoreStatus });
   }
   return out;
 }
@@ -3374,7 +3442,10 @@ async function spawnInvestigation(failedJob, runDir) {
       // 'investigating' must never be the job's resting state.
       mutate((s) => {
         const j = s.jobs.find((x) => x.slug === failedJob.slug);
-        if (j && j.status === 'investigating') transitionJob(j, failedJob.status || 'failed', { reason: 'investigation probe exited — restoring prior status', source: 'spawnInvestigation:onExit' });
+        if (j && j.status === 'investigating') {
+          transitionJob(j, failedJob.status || 'failed', { reason: 'investigation probe exited — restoring prior status', source: 'spawnInvestigation:onExit' });
+          delete j.runtime;
+        }
       })
         .then(() => broadcast({ flush: true }))
         .catch(() => {});
@@ -3431,6 +3502,15 @@ async function spawnInvestigation(failedJob, runDir) {
 
   if (child) {
     safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
+    // Recorded so findStrandedInvestigations (a post-restart maintenance
+    // sweep — the live process has no other way to know a probe is still
+    // running) can tell a live probe apart from one whose owning process is
+    // long gone, the same way reapDeadRunningJobs checks a running job's
+    // runtime.pid.
+    mutate((s) => {
+      const j = s.jobs.find((x) => x.slug === failedJob.slug);
+      if (j && j.status === 'investigating') j.runtime = { pid: child.pid };
+    }).catch(() => {});
   }
   return { deferred: false };
   } catch (e) {
@@ -3440,7 +3520,10 @@ async function spawnInvestigation(failedJob, runDir) {
     releaseSlot();
     mutate((s) => {
       const j = s.jobs.find((x) => x.slug === failedJob.slug);
-      if (j && j.status === 'investigating') transitionJob(j, failedJob.status || 'failed', { reason: 'investigation spawn threw before exiting — restoring prior status', source: 'spawnInvestigation:catch' });
+      if (j && j.status === 'investigating') {
+        transitionJob(j, failedJob.status || 'failed', { reason: 'investigation spawn threw before exiting — restoring prior status', source: 'spawnInvestigation:catch' });
+        delete j.runtime;
+      }
     })
       .then(() => broadcast({ flush: true }))
       .catch(() => {});
@@ -5395,6 +5478,35 @@ async function init() {
         slug: over.slug, cwd: over.cwd, estimateMinutes: over.estimateMinutes, ranMs: over.ranMs, ratio: over.ratio,
       });
     }
+
+    // Stranded-investigation restore. Unlike the two escalations above, this
+    // one ACTS: 'investigating' is a transient status whose restore
+    // (spawnInvestigation's onExit/catch) only runs inside the process that
+    // spawned the probe, so an app restart mid-probe leaves the row frozen
+    // there forever (see findStrandedInvestigations' header, and the
+    // "'investigating' must never be the job's resting state" comment at
+    // spawnInvestigation's onExit). This restores each stranded row to the
+    // exact terminal status it already carried before the probe was
+    // spawned — it never re-runs or re-investigates anything.
+    const stranded = findStrandedInvestigations(s.jobs, Date.now(), INVESTIGATION_MAX_MS);
+    if (stranded.length > 0) {
+      mutate((ms) => {
+        for (const st of stranded) {
+          const j = ms.jobs.find((x) => x.slug === st.slug);
+          if (!j || j.status !== 'investigating') continue; // race guard — may have resolved since the scan above
+          transitionJob(j, st.restoreStatus, { reason: `stranded investigation restored after ${Math.round(st.ageMs / 60_000)}m with no live probe behind it`, source: 'findStrandedInvestigations' });
+          delete j.runtime;
+          console.warn(
+            `[scheduler] STRANDED INVESTIGATION RESTORED: project=${st.cwd ?? '(unknown)'} slug=${st.slug} `
+            + `age=${Math.round(st.ageMs / 3_600_000)}h (>= ${Math.round(INVESTIGATION_MAX_MS / 3_600_000)}h threshold), no live probe — `
+            + `restored to '${st.restoreStatus}'`,
+          );
+          appendAuditEvent('investigation_stranded_restored', { slug: st.slug, cwd: st.cwd, ageMs: st.ageMs, restoreStatus: st.restoreStatus });
+        }
+      })
+        .then(() => broadcast({ flush: true }))
+        .catch(() => {});
+    }
   }, 10 * 60_000);
 
   // Self-rescheduling poll loop with exponential backoff. Replaces the
@@ -6017,4 +6129,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS };

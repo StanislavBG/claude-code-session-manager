@@ -96,4 +96,17 @@ module.exports = {
   // minutes with an empty run dir, so 10 minutes is a wide margin above any
   // legitimate spawn-in-flight window, not a tight one.
   PIDLESS_SPAWN_GRACE_MS: 10 * 60_000,
+
+  // A job sitting in 'investigating' longer than this, with no live probe
+  // process behind it, is stranded — spawnInvestigation's own onExit/catch
+  // restore only runs inside the process that spawned the probe, so an app
+  // restart mid-probe leaves the row frozen forever (see
+  // findStrandedInvestigations in scheduler.cjs). The investigation deadman
+  // (MAX_INVESTIGATION_DURATION_MS, scheduler.cjs) already SIGKILLs a probe
+  // at 30 minutes, so 60 minutes gives a full deadman-kill-plus-onExit cycle
+  // of slack before treating a row as abandoned rather than merely slow.
+  // Observed incident: burrow's 834-session-summary-... sat 'investigating'
+  // for 1653 minutes (27.5h) after its probe had already finished and
+  // recorded finishedAt+exitCode.
+  INVESTIGATION_MAX_MS: 60 * 60_000,
 };

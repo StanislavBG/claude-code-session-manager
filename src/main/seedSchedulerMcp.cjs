@@ -81,6 +81,27 @@ function alreadyRegistered() {
   }
 }
 
+/**
+ * true only when the user-scope entry EXISTS but its script arg no longer
+ * resolves on disk (repo moved, worktree deleted). An entry that is entirely
+ * ABSENT is a deliberate `claude mcp remove` and must stay removed — that
+ * case returns false here, same as any other "not registered" read.
+ */
+function scriptPathMissing() {
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8');
+    const servers = JSON.parse(raw)?.mcpServers;
+    const entry = servers && servers[SERVER_NAME];
+    if (!entry) return false;
+    const args = Array.isArray(entry.args) ? entry.args : [];
+    const scriptArg = args[args.length - 1];
+    if (typeof scriptArg !== 'string' || !scriptArg) return false;
+    return !fs.existsSync(scriptArg);
+  } catch {
+    return false;
+  }
+}
+
 /** Run `claude mcp add session-manager-scheduler --scope user -- node <serverPath>`.
  *  No shell:true — argv array passed directly to spawn. */
 function runClaudeMcpAdd(serverPath) {
@@ -106,14 +127,47 @@ function runClaudeMcpAdd(serverPath) {
   });
 }
 
-async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd, writeLog = () => {} } = {}) {
+/** Run `claude mcp remove session-manager-scheduler --scope user`, best-effort. */
+function runClaudeMcpRemove() {
+  return new Promise((resolve) => {
+    const claudeBin = resolveClaudeBin();
+    let proc;
+    try {
+      proc = spawn(
+        claudeBin,
+        ['mcp', 'remove', SERVER_NAME, '--scope', 'user'],
+        { cwd: os.homedir(), env: cleanChildEnv({ PATH: pathWithUserBins() }), stdio: 'ignore' }
+      );
+    } catch (err) {
+      resolve({ ok: false, error: err?.message ?? String(err) });
+      return;
+    }
+    proc.on('error', (err) => resolve({ ok: false, error: err?.message ?? String(err) }));
+    proc.on('close', (code) => resolve({ ok: code === 0, exitCode: code }));
+  });
+}
+
+async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd, removeFn = runClaudeMcpRemove, writeLog = () => {} } = {}) {
   if (process.env.SM_SEED_SCHEDULER_MCP_DISABLE === '1') return;
   const marker = readMarker();
-  if (marker.done) return;                       // succeeded before — leave it alone.
-  if (marker.attempts >= MAX_ATTEMPTS) return;   // gave up — manual install only.
+
+  // `claude mcp add` refuses when a server of this name already exists, so a
+  // repair must remove the stale entry first — but ONLY when the marker says
+  // `done` AND the registered script has actually gone missing. An entry
+  // that's simply absent (marker done, no ~/.claude.json entry at all) is a
+  // deliberate `claude mcp remove` and must stay removed exactly as today.
+  let repairing = false;
+  if (marker.done) {
+    if (!scriptPathMissing()) return;
+    repairing = true;
+    logger.warn?.('[seedSchedulerMcp] user-scope registration points at a missing script — repairing…');
+    await removeFn();
+  } else if (marker.attempts >= MAX_ATTEMPTS) {
+    return; // gave up — manual install only.
+  }
 
   try {
-    if (alreadyRegistered()) {
+    if (!repairing && alreadyRegistered()) {
       writeMarker({ done: true, attempts: marker.attempts });
       return;
     }

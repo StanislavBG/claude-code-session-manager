@@ -11,6 +11,7 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
+const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
@@ -224,6 +225,20 @@ function evaluatePrdMigrationHealth(migrationResult, legacyPrdsDir) {
     strandedCount,
     ...(strandedCount > 0 ? { unresolved: migrationResult.unresolved } : {}),
   };
+}
+
+// Pure shaping of checkDelegationReadiness()'s result (delegationReadiness.cjs)
+// into a health component + issue lines — kept separate from the fs-touching
+// check() call site so it's directly unit-testable, matching
+// evaluatePrdMigrationHealth's pattern. delegationReadiness.cjs already wraps
+// every filesystem read (readJsonSafe / try-catch), so a missing/unreadable
+// config surfaces here as one of `checks` with ok:false, never a throw.
+function evaluateDelegationChainHealth(delegationResult) {
+  const component = { ok: delegationResult.ok, checks: delegationResult.checks };
+  const issues = delegationResult.checks
+    .filter((c) => !c.ok)
+    .map((c) => `Delegation readiness: ${c.label} failed — ${c.detail}${c.fix ? ` (fix: ${c.fix})` : ''}`);
+  return { component, issues };
 }
 
 // computeEpicIndexDrift(cwd) → { orphan_rows, orphan_files, unmirrored,
@@ -594,6 +609,22 @@ async function check() {
     }
   }
 
+  // 6.55. Delegation-chain readiness — answers "can this machine actually
+  // delegate work to the scheduler?" (see delegationReadiness.cjs's header:
+  // when the scheduler MCP isn't registered, scheduler_create_prd is simply
+  // absent from the agent's tool list — no error to catch, so an agent asked
+  // to delegate just implements inline instead). Critical: a failing check
+  // here means Epics silently stop queueing PRDs on this machine.
+  try {
+    const delegation = await checkDelegationReadiness({ cwd: PROJECT_ROOT });
+    const { component, issues: delegationIssues } = evaluateDelegationChainHealth(delegation);
+    status.components.delegation_chain = component;
+    status.issues.push(...delegationIssues);
+  } catch (e) {
+    status.components.delegation_chain = { ok: false, error: e.message };
+    status.issues.push(`Delegation readiness check failed: ${e.message}`);
+  }
+
   // 6.6. Run-log retention report (informational only — never blocks health).
   // Read-only against the REAL scheduled-plans/runs/ dir: reports current
   // usage + what the configured policy (if any) would remove. Nothing is
@@ -642,7 +673,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'prd_migration', 'claude_md_budget'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -663,6 +694,7 @@ module.exports = {
   evaluateTickLiveness,
   readFreshHeartbeat,
   evaluatePrdMigrationHealth,
+  evaluateDelegationChainHealth,
   computeEpicIndexDrift,
   evaluateEpicIndexHealth,
   computeProjectProblemCounts,

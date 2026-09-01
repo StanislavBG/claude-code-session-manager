@@ -599,6 +599,28 @@ describe('NewEpicCard', () => {
       expect(inputSection!.text).toContain('Scheduler MCP server registered')
     })
 
+    it('renders one row per failing check, however many the probe returns (not hard-coded to 4)', async () => {
+      const checks = [
+        { id: 'scheduler-mcp', label: 'a', ok: false, detail: 'd', fix: null },
+        { id: 'scheduler-mcp-live', label: 'b', ok: false, detail: 'd', fix: null },
+        { id: 'scheduler-mcp-project-duplicate', label: 'c', ok: true, warn: true, detail: 'd', fix: null },
+        { id: 'dev-plugin', label: 'e', ok: false, detail: 'd', fix: null },
+        { id: 'agent-personas', label: 'f', ok: false, detail: 'd', fix: null },
+        { id: 'prd-write-guard', label: 'g', ok: false, detail: 'd', fix: null },
+      ]
+      ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, checks })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      // 5 of the 6 checks are !ok (the duplicate check is a warning, ok:true).
+      const failingIds = checks.filter((c) => !c.ok).map((c) => c.id)
+      expect(failingIds).toHaveLength(5)
+      for (const id of failingIds) {
+        expect(el.querySelector(`[data-testid="delegation-readiness-check-${id}"]`)).not.toBeNull()
+      }
+      expect(el.querySelector('[data-testid="delegation-readiness-check-scheduler-mcp-project-duplicate"]')).toBeNull()
+    })
+
     it('degrades to unknown (no warning, no thrown error) when the probe rejects', async () => {
       ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'))
       const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)

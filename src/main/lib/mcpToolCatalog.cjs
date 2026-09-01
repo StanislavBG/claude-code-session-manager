@@ -219,7 +219,8 @@ const MCP_TOOL_CATALOG = [
     purpose: 'THE ENTRY POINT — call this tool FIRST whenever you are unsure which session-manager-scheduler '
       + 'tool to reach for, or a call to this server just failed. Returns the same tool catalog every other '
       + "tool's description is composed from, this project's multi-tool recipes, and this machine's "
-      + 'delegation-readiness state (tells apart "not registered" from "registered but the app is down").',
+      + 'delegation-readiness state (tells apart "not registered", "registered but dead" — the process '
+      + 'won\'t even answer tools/list — and "registered and answering").',
     whenToUse: 'Call with no arguments for the full grouped tool list plus recipe titles. Pass `tool` (a tool '
       + 'name) for that one tool\'s full entry, including its exampleArgs. Pass `topic` (a recipe id) for that '
       + 'recipe\'s step-by-step instructions. Pass both to get both sections in one call.',

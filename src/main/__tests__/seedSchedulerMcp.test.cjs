@@ -143,3 +143,69 @@ test('a failed attempt bumps the counter and stops after MAX_ATTEMPTS', async ()
   expect(called).toBe(false);
   expect(readMarker()).toMatchObject({ done: false, attempts: 3 });
 });
+
+// ─────────────────────────────── repair: marker done, script path stale
+
+test('marker done + user-scope script path missing -> removes then re-adds, marker stays done', async () => {
+  fs.mkdirSync(path.dirname(markerPath()), { recursive: true });
+  fs.writeFileSync(markerPath(), JSON.stringify({ done: true, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.writeFileSync(
+    claudeJsonPath(),
+    JSON.stringify({
+      mcpServers: {
+        'session-manager-scheduler': { type: 'stdio', command: 'node', args: ['/definitely/does/not/exist.cjs'] },
+      },
+    })
+  );
+
+  const removeCalls = [];
+  const removeFn = async () => { removeCalls.push(1); return { ok: true }; };
+  const addCalls = [];
+  const addFn = async (serverPath) => { addCalls.push(serverPath); return { ok: true, exitCode: 0 }; };
+
+  await seedSchedulerMcp({ logger: silentLogger(), addFn, removeFn });
+
+  expect(removeCalls).toHaveLength(1);
+  expect(addCalls).toHaveLength(1);
+  expect(path.isAbsolute(addCalls[0])).toBe(true);
+  expect(readMarker().done).toBe(true);
+});
+
+test('marker done + user-scope entry ABSENT (deliberate remove) stays removed, no repair attempted', async () => {
+  fs.mkdirSync(path.dirname(markerPath()), { recursive: true });
+  fs.writeFileSync(markerPath(), JSON.stringify({ done: true, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+  // No ~/.claude.json at all — same as a deliberate `claude mcp remove`.
+
+  let removeCalled = false;
+  let addCalled = false;
+  const removeFn = async () => { removeCalled = true; return { ok: true }; };
+  const addFn = async () => { addCalled = true; return { ok: true }; };
+
+  await seedSchedulerMcp({ logger: silentLogger(), addFn, removeFn });
+
+  expect(removeCalled).toBe(false);
+  expect(addCalled).toBe(false);
+});
+
+test('marker done + user-scope script path exists -> healthy, no repair attempted', async () => {
+  fs.mkdirSync(path.dirname(markerPath()), { recursive: true });
+  fs.writeFileSync(markerPath(), JSON.stringify({ done: true, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.writeFileSync(
+    claudeJsonPath(),
+    JSON.stringify({
+      mcpServers: {
+        'session-manager-scheduler': { type: 'stdio', command: 'node', args: [markerPath()] }, // any existing file
+      },
+    })
+  );
+
+  let removeCalled = false;
+  let addCalled = false;
+  const removeFn = async () => { removeCalled = true; return { ok: true }; };
+  const addFn = async () => { addCalled = true; return { ok: true }; };
+
+  await seedSchedulerMcp({ logger: silentLogger(), addFn, removeFn });
+
+  expect(removeCalled).toBe(false);
+  expect(addCalled).toBe(false);
+});

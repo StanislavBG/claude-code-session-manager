@@ -348,13 +348,23 @@ export interface TestFireHookResult {
 }
 
 export interface DelegationReadinessCheck {
-  id: 'scheduler-mcp' | 'dev-plugin' | 'agent-personas' | 'prd-write-guard';
+  id:
+    | 'scheduler-mcp'
+    | 'scheduler-mcp-live'
+    | 'scheduler-mcp-project-duplicate'
+    | 'dev-plugin'
+    | 'agent-personas'
+    | 'prd-write-guard';
   label: string;
   ok: boolean;
   detail: string;
   fix: string | null;
   /** Non-null when Session Manager can install this fix itself, one press. */
   fixAction: 'install-prd-write-guard' | null;
+  /** True when ok:true is a WARNING (still passing, but worth a human's attention) — today only scheduler-mcp-project-duplicate. */
+  warn?: boolean;
+  /** True when this check didn't run because a precondition (another check) already failed — reported ok:true, not a failure. */
+  skipped?: boolean;
 }
 
 export interface InstallPrdWriteGuardResult {

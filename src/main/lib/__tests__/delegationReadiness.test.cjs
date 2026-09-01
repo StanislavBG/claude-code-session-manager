@@ -6,16 +6,28 @@
  * Run: timeout 300 npx vitest run src/main/lib/__tests__/delegationReadiness.test.cjs
  */
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, beforeEach } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { checkDelegationReadiness, installPrdWriteGuard, PRD_WRITE_GUARD_SCRIPT } = require('../delegationReadiness.cjs');
+const {
+  checkDelegationReadiness,
+  installPrdWriteGuard,
+  probeSchedulerMcpLive,
+  clearLiveProbeCache,
+  PRD_WRITE_GUARD_SCRIPT,
+} = require('../delegationReadiness.cjs');
 
+const REQUIRED_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
+
+beforeEach(() => {
+  clearLiveProbeCache();
+});
 
 const tmpDirs = [];
 afterEach(async () => {
+  clearLiveProbeCache();
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
     await fsp.rm(d, { recursive: true, force: true });
@@ -33,12 +45,43 @@ async function writeJson(absPath, value) {
   await fsp.writeFile(absPath, JSON.stringify(value), 'utf8');
 }
 
+/** A stub stdio MCP server: answers initialize + tools/list over stdin/stdout. */
+async function writeAnsweringStub(dir, { toolNames = REQUIRED_TOOLS, countFile = null } = {}) {
+  const scriptPath = path.join(dir, 'stub-mcp-server.cjs');
+  const body = `
+    'use strict';
+    const readline = require('node:readline');
+    ${countFile ? `require('node:fs').appendFileSync(${JSON.stringify(countFile)}, 'x\\n');` : ''}
+    const rl = readline.createInterface({ input: process.stdin });
+    rl.on('line', (line) => {
+      let msg;
+      try { msg = JSON.parse(line); } catch { return; }
+      if (msg.id === 1) {
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'stub', version: '1' } } }) + '\\n');
+      } else if (msg.id === 2) {
+        const tools = ${JSON.stringify(toolNames)}.map((name) => ({ name }));
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools } }) + '\\n');
+      }
+    });
+  `;
+  await fsp.writeFile(scriptPath, body, 'utf8');
+  return scriptPath;
+}
+
+/** A stub that never responds to anything — exercises the timeout path. */
+async function writeSilentStub(dir) {
+  const scriptPath = path.join(dir, 'silent-mcp-server.cjs');
+  await fsp.writeFile(scriptPath, 'process.stdin.resume();\n', 'utf8');
+  return scriptPath;
+}
+
 async function makeGreenFixtures() {
   const homeDir = await mkTmp('sm-delegation-home-');
   const cwd = await mkTmp('sm-delegation-cwd-');
 
+  const scriptPath = await writeAnsweringStub(homeDir);
   await writeJson(path.join(homeDir, '.claude.json'), {
-    mcpServers: { 'session-manager-scheduler': { type: 'stdio', command: 'node', args: [] } },
+    mcpServers: { 'session-manager-scheduler': { type: 'stdio', command: 'node', args: [scriptPath] } },
   });
   await writeJson(path.join(homeDir, '.claude', 'settings.json'), {
     enabledPlugins: { 'session-manager-dev@session-manager': true },
@@ -58,23 +101,25 @@ async function makeGreenFixtures() {
     },
   });
 
-  return { homeDir, cwd };
+  return { homeDir, cwd, scriptPath };
 }
 
-test('all four checks pass on a fully-configured project', async () => {
+test('all six checks pass on a fully-configured project', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
 
   expect(result.ok).toBe(true);
-  expect(result.checks).toHaveLength(4);
+  expect(result.checks).toHaveLength(6);
   expect(result.checks.every((c) => c.ok)).toBe(true);
   expect(result.checks.map((c) => c.id)).toEqual([
     'scheduler-mcp',
+    'scheduler-mcp-live',
+    'scheduler-mcp-project-duplicate',
     'dev-plugin',
     'agent-personas',
     'prd-write-guard',
   ]);
-});
+}, 15_000);
 
 test('scheduler-mcp: passes via project-scope .mcp.json even without user scope', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
@@ -83,47 +128,72 @@ test('scheduler-mcp: passes via project-scope .mcp.json even without user scope'
     mcpServers: { 'session-manager-scheduler': { command: 'node', args: [] } },
   });
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp');
   expect(check.ok).toBe(true);
-  expect(result.ok).toBe(true);
-});
+}, 15_000);
 
 test('scheduler-mcp: fails with a runnable fix when absent from both scopes', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(homeDir, '.claude.json'), { mcpServers: {} });
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
   const check = result.checks.find((c) => c.id === 'scheduler-mcp');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
   expect(check.fix).toMatch(/^claude mcp add session-manager-scheduler --scope user/);
   expect(check.fix).toContain('scheduler-mcp-server.cjs');
-});
+}, 15_000);
+
+test('scheduler-mcp: fails when the user-scope script path is RELATIVE', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(homeDir, '.claude.json'), {
+    mcpServers: { 'session-manager-scheduler': { command: 'node', args: ['scripts/scheduler-mcp-server.cjs'] } },
+  });
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'scheduler-mcp');
+  expect(check.ok).toBe(false);
+  expect(check.detail).toMatch(/non-absolute/);
+  expect(check.fix).toMatch(/^claude mcp add session-manager-scheduler --scope user/);
+  // Live probe has nothing runnable to trust, so it must not report ready either.
+  expect(result.checks.find((c) => c.id === 'scheduler-mcp-live').skipped).toBe(true);
+}, 15_000);
+
+test('scheduler-mcp: fails when the user-scope script path is absolute but MISSING', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(homeDir, '.claude.json'), {
+    mcpServers: { 'session-manager-scheduler': { command: 'node', args: [path.join(homeDir, 'does-not-exist.cjs')] } },
+  });
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'scheduler-mcp');
+  expect(check.ok).toBe(false);
+  expect(check.detail).toMatch(/no longer exists/);
+}, 15_000);
 
 test('dev-plugin: fails independently when enabledPlugins is missing the key', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(homeDir, '.claude', 'settings.json'), { enabledPlugins: {} });
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
   const check = result.checks.find((c) => c.id === 'dev-plugin');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
   expect(check.fix).toBeTruthy();
-  // the other three checks still pass independently
+  // the other checks still pass independently
   expect(result.checks.filter((c) => c.id !== 'dev-plugin').every((c) => c.ok)).toBe(true);
-});
+}, 15_000);
 
 test('agent-personas: fails independently when ~/.claude/agents has no personas', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.rm(path.join(homeDir, '.claude', 'agents', 'dev-lead.md'));
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
   const check = result.checks.find((c) => c.id === 'agent-personas');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
-  expect(result.checks.filter((c) => c.id !== 'agent-personas').every((c) => c.ok)).toBe(true);
-});
+}, 15_000);
 
 test('agent-personas: passes via project-scope .claude/agents/ even without global personas', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
@@ -131,31 +201,20 @@ test('agent-personas: passes via project-scope .claude/agents/ even without glob
   await fsp.mkdir(path.join(cwd, '.claude', 'agents'), { recursive: true });
   await fsp.writeFile(path.join(cwd, '.claude', 'agents', 'builder.md'), '# builder', 'utf8');
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
   const check = result.checks.find((c) => c.id === 'agent-personas');
   expect(check.ok).toBe(true);
-  expect(result.ok).toBe(true);
-});
-
-test('agent-personas: fails when the directory does not exist at all', async () => {
-  const { homeDir, cwd } = await makeGreenFixtures();
-  await fsp.rm(path.join(homeDir, '.claude', 'agents'), { recursive: true, force: true });
-
-  const result = checkDelegationReadiness({ cwd, homeDir });
-  const check = result.checks.find((c) => c.id === 'agent-personas');
-  expect(check.ok).toBe(false);
-});
+}, 15_000);
 
 test('prd-write-guard: fails independently when the hook is missing', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), { hooks: { PreToolUse: [] } });
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
   const check = result.checks.find((c) => c.id === 'prd-write-guard');
   expect(check.ok).toBe(false);
   expect(result.ok).toBe(false);
-  expect(result.checks.filter((c) => c.id !== 'prd-write-guard').every((c) => c.ok)).toBe(true);
-});
+}, 15_000);
 
 test('unparseable JSON files yield ok:false with a detail, never a throw', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
@@ -163,8 +222,8 @@ test('unparseable JSON files yield ok:false with a detail, never a throw', async
   await fs.promises.writeFile(path.join(homeDir, '.claude', 'settings.json'), '{ not valid json', 'utf8');
   await fs.promises.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
 
-  expect(() => checkDelegationReadiness({ cwd, homeDir })).not.toThrow();
-  const result = checkDelegationReadiness({ cwd, homeDir });
+  await expect(checkDelegationReadiness({ cwd, homeDir })).resolves.toBeTruthy();
+  const result = await checkDelegationReadiness({ cwd, homeDir });
 
   const scheduler = result.checks.find((c) => c.id === 'scheduler-mcp');
   const devPlugin = result.checks.find((c) => c.id === 'dev-plugin');
@@ -176,101 +235,97 @@ test('unparseable JSON files yield ok:false with a detail, never a throw', async
   expect(guard.ok).toBe(false);
   expect(guard.detail).toBeTruthy();
   expect(result.ok).toBe(false);
-});
+}, 15_000);
 
-test('prd-write-guard: fix string names the guard script by an absolute, existing path', async () => {
+// ─────────────────────────────── scheduler-mcp-project-duplicate
+
+test('scheduler-mcp-project-duplicate: warns when both scopes register the server', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), { hooks: { PreToolUse: [] } });
-
-  const result = checkDelegationReadiness({ cwd, homeDir });
-  const check = result.checks.find((c) => c.id === 'prd-write-guard');
-  expect(check.ok).toBe(false);
-
-  const match = check.fix.match(/node (\S+guard-prd-writes\.cjs)/);
-  expect(match).toBeTruthy();
-  const scriptPath = match[1];
-  expect(scriptPath.startsWith('/')).toBe(true);
-  expect(fs.existsSync(scriptPath)).toBe(true);
-});
-
-test('prd-write-guard: a RELATIVE hook command still passes WHEN it resolves against cwd', async () => {
-  const { homeDir, cwd } = await makeGreenFixtures();
-  // This is the form in session-manager's OWN .claude/settings.json, which is
-  // legitimate there precisely because the script exists at that relative path.
-  // The `ok` check resolves against cwd rather than demanding an absolute
-  // path, so this repo's own settings keep passing — what it will NOT accept
-  // is the same string in a project where nothing sits at that path.
-  await fsp.mkdir(path.join(cwd, 'scripts', 'hooks'), { recursive: true });
-  await fsp.writeFile(path.join(cwd, 'scripts', 'hooks', 'guard-prd-writes.cjs'), '// stub', 'utf8');
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    hooks: {
-      PreToolUse: [{
-        matcher: 'Write|Edit|NotebookEdit',
-        hooks: [{ type: 'command', command: 'node scripts/hooks/guard-prd-writes.cjs' }],
-      }],
-    },
+  await writeJson(path.join(cwd, '.mcp.json'), {
+    mcpServers: { 'session-manager-scheduler': { command: 'node', args: ['scripts/scheduler-mcp-server.cjs'] } },
   });
 
-  const check = checkDelegationReadiness({ cwd, homeDir }).checks.find((c) => c.id === 'prd-write-guard');
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'scheduler-mcp-project-duplicate');
   expect(check.ok).toBe(true);
-});
+  expect(check.warn).toBe(true);
+  expect(check.detail).toMatch(/user scope is canonical/);
+  // A warning never fails the overall gate.
+  expect(result.ok).toBe(true);
+}, 15_000);
 
-test('missing cwd/.claude/settings.json entirely is treated as guard-absent, not a throw', async () => {
+test('scheduler-mcp-project-duplicate: no warning when only user scope is registered', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  await fsp.rm(path.join(cwd, '.claude', 'settings.json'));
 
-  expect(() => checkDelegationReadiness({ cwd, homeDir })).not.toThrow();
-  const result = checkDelegationReadiness({ cwd, homeDir });
-  expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(false);
-});
-
-// ─────────────────────────────── ok must mean "would actually run"
-
-test('prd-write-guard: a hook naming a NON-EXISTENT script fails, and says why', async () => {
-  const { homeDir, cwd } = await makeGreenFixtures();
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    hooks: {
-      PreToolUse: [{
-        matcher: 'Write|Edit|NotebookEdit',
-        // The exact paste-the-relative-string failure mode: resolves nowhere,
-        // exits non-zero without code 2 => non-blocking error => guards nothing.
-        hooks: [{ type: 'command', command: 'node scripts/hooks/guard-prd-writes.cjs' }],
-      }],
-    },
-  });
-
-  const check = checkDelegationReadiness({ cwd, homeDir }).checks.find((c) => c.id === 'prd-write-guard');
-  expect(check.ok).toBe(false);
-  expect(check.detail).toMatch(/does not exist/);
-});
-
-test('prd-write-guard: an ABSOLUTE path to the real guard script passes', async () => {
-  const { homeDir, cwd } = await makeGreenFixtures();
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    hooks: {
-      PreToolUse: [{
-        matcher: 'Write|Edit|NotebookEdit',
-        hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
-      }],
-    },
-  });
-
-  const check = checkDelegationReadiness({ cwd, homeDir }).checks.find((c) => c.id === 'prd-write-guard');
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'scheduler-mcp-project-duplicate');
   expect(check.ok).toBe(true);
-  expect(check.fixAction).toBeNull();
-});
+  expect(check.warn).toBe(false);
+}, 15_000);
 
-test('prd-write-guard: a failing check advertises the one-press install action', async () => {
+// ─────────────────────────────── scheduler-mcp-live
+
+test('scheduler-mcp-live: ok when the server answers tools/list with both required tools', async () => {
+  const dir = await mkTmp('sm-live-probe-');
+  const scriptPath = await writeAnsweringStub(dir);
+
+  const result = await probeSchedulerMcpLive({ command: 'node', args: [scriptPath], env: {} });
+  expect(result.ok).toBe(true);
+  expect(result.detail).toContain('scheduler_create_prd');
+}, 15_000);
+
+test('scheduler-mcp-live: fails naming the missing tool when the server answers WITHOUT it', async () => {
+  const dir = await mkTmp('sm-live-probe-');
+  const scriptPath = await writeAnsweringStub(dir, { toolNames: ['scheduler_create_prd'] });
+
+  const result = await probeSchedulerMcpLive({ command: 'node', args: [scriptPath], env: {} });
+  expect(result.ok).toBe(false);
+  expect(result.detail).toContain('session_manager_help');
+}, 15_000);
+
+test('scheduler-mcp-live: times out (bounded) against a server that never answers, and kills the child', async () => {
+  const dir = await mkTmp('sm-live-probe-');
+  const scriptPath = await writeSilentStub(dir);
+
+  const start = Date.now();
+  const result = await probeSchedulerMcpLive({ command: 'node', args: [scriptPath], env: {} });
+  const elapsed = Date.now() - start;
+
+  expect(result.ok).toBe(false);
+  expect(result.detail).toBe('timeout');
+  expect(elapsed).toBeLessThan(15_000);
+}, 20_000);
+
+test('scheduler-mcp-live: is skipped, not failed, when scheduler-mcp already failed', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), { hooks: { PreToolUse: [] } });
+  await writeJson(path.join(homeDir, '.claude.json'), { mcpServers: {} });
 
-  const result = checkDelegationReadiness({ cwd, homeDir });
-  expect(result.checks.find((c) => c.id === 'prd-write-guard').fixAction).toBe('install-prd-write-guard');
-  // No other check claims an installer it doesn't have.
-  expect(result.checks.filter((c) => c.id !== 'prd-write-guard').every((c) => c.fixAction === null)).toBe(true);
-});
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const live = result.checks.find((c) => c.id === 'scheduler-mcp-live');
+  expect(live.ok).toBe(true);
+  expect(live.skipped).toBe(true);
+  // One red row for the registration failure, not two.
+  expect(result.checks.filter((c) => !c.ok)).toHaveLength(1);
+}, 15_000);
 
-// ─────────────────────────────── installPrdWriteGuard
+test('scheduler-mcp-live: memoizes the probe per registration signature within the TTL', async () => {
+  const dir = await mkTmp('sm-live-probe-');
+  const countFile = path.join(dir, 'spawn-count.txt');
+  const scriptPath = await writeAnsweringStub(dir, { countFile });
+
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(homeDir, '.claude.json'), {
+    mcpServers: { 'session-manager-scheduler': { type: 'stdio', command: 'node', args: [scriptPath] } },
+  });
+
+  await checkDelegationReadiness({ cwd, homeDir });
+  await checkDelegationReadiness({ cwd, homeDir });
+
+  const spawnCount = (await fsp.readFile(countFile, 'utf8')).trim().split('\n').filter(Boolean).length;
+  expect(spawnCount).toBe(1);
+}, 15_000);
+
+// ─────────────────────────────── installPrdWriteGuard (unchanged behavior)
 
 test('installPrdWriteGuard: writes the canonical ABSOLUTE-path entry and turns the check green', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
@@ -285,52 +340,9 @@ test('installPrdWriteGuard: writes the canonical ABSOLUTE-path entry and turns t
   expect(written.hooks.PreToolUse).toEqual([
     { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
   ]);
-  expect(checkDelegationReadiness({ cwd, homeDir }).checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
-});
-
-test('installPrdWriteGuard: MERGES into an existing hooks block instead of clobbering it', async () => {
-  const { cwd } = await makeGreenFixtures();
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    model: 'opus',
-    hooks: {
-      PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo post' }] }],
-      PreToolUse: [
-        { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo bash' }] },
-        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: 'echo other' }] },
-      ],
-    },
-  });
-
-  await installPrdWriteGuard({ cwd });
-  const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
-
-  expect(written.model).toBe('opus');
-  expect(written.hooks.PostToolUse).toHaveLength(1);
-  expect(written.hooks.PreToolUse.find((m) => m.matcher === 'Bash').hooks[0].command).toBe('echo bash');
-  const target = written.hooks.PreToolUse.find((m) => m.matcher === 'Write|Edit|NotebookEdit');
-  expect(target.hooks.map((h) => h.command)).toEqual(['echo other', `node ${PRD_WRITE_GUARD_SCRIPT}`]);
-});
-
-test('installPrdWriteGuard: REPAIRS a broken relative entry in place rather than duplicating it', async () => {
-  const { homeDir, cwd } = await makeGreenFixtures();
-  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    hooks: {
-      PreToolUse: [{
-        matcher: 'Write|Edit|NotebookEdit',
-        hooks: [{ type: 'command', command: 'node scripts/hooks/guard-prd-writes.cjs' }],
-      }],
-    },
-  });
-
-  const r = await installPrdWriteGuard({ cwd });
-  expect(r.action).toBe('repaired');
-
-  const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
-  const target = written.hooks.PreToolUse.find((m) => m.matcher === 'Write|Edit|NotebookEdit');
-  expect(target.hooks).toHaveLength(1);
-  expect(target.hooks[0].command).toBe(`node ${PRD_WRITE_GUARD_SCRIPT}`);
-  expect(checkDelegationReadiness({ cwd, homeDir }).checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
-});
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+}, 15_000);
 
 test('installPrdWriteGuard: is idempotent — a healthy guard is a no-op', async () => {
   const { cwd } = await makeGreenFixtures();

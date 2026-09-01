@@ -503,8 +503,8 @@ ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody
   agentLibrary.getPersonaBody(payload)));
 
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
-// Structured data over the four preconditions for scheduler_create_prd being
-// in an agent's tool list at all — surfacing it in the UI is a sibling PRD.
+// Structured data over the preconditions for scheduler_create_prd being in an
+// agent's tool list at all — surfacing it in the UI is a sibling PRD.
 ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadinessCwd, async (payload) =>
   checkDelegationReadiness(payload)
 ));

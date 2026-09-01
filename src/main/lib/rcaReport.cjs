@@ -74,7 +74,7 @@ const PREVENTION_HINTS = {
   [FAILURE_CLASSES.ALREADY_SHIPPED]:
     "This run found its acceptance criteria already satisfied by a prior commit and correctly made no change, so no commit landed and the verifier returned `pass_no_commit`. This is a stale re-run, not an execution failure — the PRD's `.md` was never moved out of `session-manager-operations/scheduler/prds/` after the work shipped. Archive the PRD into `session-manager-operations/scheduler/prds-archived/` instead of re-queuing or re-running it.",
   [FAILURE_CLASSES.SELF_QUEUE]:
-    "This run either invoked /develop or /process-feedback from inside its own headless execution, or backgrounded a long-running command and called ScheduleWakeup to check back later — both are the 'you ARE the executor — never re-queue or self-schedule' anti-pattern. A headless PRD run must perform its own acceptance criteria directly and has no next turn to resume it (standards.md → Execution discipline).",
+    "This run either invoked /develop or /process-feedback from inside its own headless execution, or backgrounded a long-running command (e.g. a verification/test run) and called Monitor, TaskOutput, or ScheduleWakeup to check back later — all are the 'you ARE the executor — never re-queue or self-schedule' anti-pattern. A headless PRD run must perform its own acceptance criteria directly and has no next turn to resume it (standards.md → Execution discipline).",
   [FAILURE_CLASSES.STUCK_LOOP]:
     'Bound every command with `timeout <N> <cmd>` — never leave an unbounded `until`/`while true`/`sleep` poll in a PRD body (PRD_AUTHORING.md loop-hang guidance).',
   [FAILURE_CLASSES.POST_AC_OVERRUN]:

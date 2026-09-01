@@ -61,6 +61,18 @@ describe('FINISH_PROTOCOL', () => {
   it('reinforces the no-bonus-work bound', () => {
     expect(FINISH_PROTOCOL).toMatch(/beyond the acceptance criteria/i)
   })
+
+  it('mandates foreground verification and forbids backgrounding it for later pickup', () => {
+    expect(FINISH_PROTOCOL).toMatch(/SYNCHRONOUSLY/)
+    expect(FINISH_PROTOCOL).toMatch(/Monitor/)
+    expect(FINISH_PROTOCOL).toMatch(/TaskOutput/)
+    expect(FINISH_PROTOCOL).toMatch(/ScheduleWakeup/)
+    expect(FINISH_PROTOCOL).toMatch(/background Bash/)
+    expect(FINISH_PROTOCOL).toMatch(/no later turn/)
+    expect(FINISH_PROTOCOL).toMatch(/timeout \d+/)
+    // governs the whole run, not just step 3 VERIFY
+    expect(FINISH_PROTOCOL).toMatch(/whole run, not just\s*\nstep 3/)
+  })
 })
 
 // Regression: PRD 599-sharp-osv-fix-batch-b committed real work on four

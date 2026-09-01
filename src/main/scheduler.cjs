@@ -205,6 +205,18 @@ const FINISH_PROTOCOL = `
 Once every acceptance-criteria line above is satisfied, finish in this EXACT
 sequence. Do not stop before the commit lands; committing is part of the job.
 
+RUN VERIFICATION IN THE FOREGROUND — this applies to the whole run, not just
+step 3 below: every test/typecheck/lint/build command you run, whether while
+implementing the AC or during VERIFY, must run SYNCHRONOUSLY and you must wait
+for it to return. Never start a verification command as a background task
+(no background Bash) and then call Monitor, TaskOutput, or ScheduleWakeup to
+pick up its result later — a headless \`claude -p\` run has no later turn, so
+nothing ever delivers that notification and the run dies mid-verification with
+no commit and no verdict. For a long-running command, bound it yourself with
+the shell (e.g. \`timeout 300 npm test\`) and a matching foreground tool
+timeout; if it still cannot finish inside budget, stop and emit
+SCHEDULER_VERDICT: FAIL with the reason instead of deferring it.
+
 1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
    surfaces (correctness first). For any finding you judge a false positive, say
    why in your result; do not silently skip it. If \`/code-review\` is not

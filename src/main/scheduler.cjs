@@ -2637,7 +2637,7 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  *     still a genuine finish-protocol violation (incident:
  *     523-fix-bounded-fix-plan-retry, 2026-07-12).
  */
-function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelfCommitted, legitimateNoOp, isFixPlanJob, verifyResult }) {
+function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelfCommitted, legitimateNoOp, isFixPlanJob, verifyResult, salvagePatch }) {
   if ((siblingRunning && !ranInWorktree) || jobSelfCommitted || legitimateNoOp) return null;
   const dirty = newlyDirty || [];
   if (dirty.length === 0 && isFixPlanJob) return null;
@@ -2657,9 +2657,10 @@ function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelf
   }
 
   const sample = dirty.slice(0, 3).join(', ');
+  const salvageNote = salvagePatch ? ` — recoverable from salvage patch ${salvagePatch}` : '';
   return {
     verdict: 'uncommitted_changes',
-    reason: `finish protocol incomplete: ${dirty.length} uncommitted file(s) left in working tree (e.g. ${sample})`,
+    reason: `finish protocol incomplete: ${dirty.length} uncommitted file(s) left in working tree (e.g. ${sample})${salvageNote}`,
     downgradeTo: 'needs_review',
     annotations: carried.length ? carried : undefined,
   };
@@ -3464,6 +3465,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     let res;
     let worktreeLeftoverDirty = [];
     let worktreeIntegrationFailure = null;
+    let worktreeSalvagePatch = null;
     try {
       res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
         await mutate((s) => {
@@ -3478,6 +3480,19 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     } finally {
       if (worktree.ok) {
         worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
+        // Salvage the worktree's full diff (tracked + untracked) to the run
+        // dir BEFORE the checkout is removed below — otherwise a job killed
+        // before its finish-protocol commit loses that work outright, with
+        // no branch, no stash, no patch anywhere. Best-effort: never blocks
+        // integration/cleanup and never changes the job's verdict.
+        if (worktreeLeftoverDirty.length) {
+          const salvagePath = path.join(runDir, `${job.slug}.uncommitted.patch`);
+          const salvage = await jobWorktree.salvageJobWorktreeDiff({ dir: worktree.dir, outFile: salvagePath });
+          if (salvage && salvage.ok) {
+            worktreeSalvagePatch = salvagePath;
+            console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
+          }
+        }
         const integration = await jobWorktree.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug });
         if (!integration.ok) {
           worktreeIntegrationFailure = integration.reason;
@@ -3635,6 +3650,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           legitimateNoOp: guardIsLegitimateNoOp,
           isFixPlanJob: isFixPlanSlug(job.slug),
           verifyResult,
+          salvagePatch: worktreeSalvagePatch,
         });
         if (guardVerdict) {
           verifyResult = guardVerdict;
@@ -3726,6 +3742,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           transitionJob(s.jobs[i2], effectiveStatus, { reason: sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`, source: 'spawnJob:finalize' });
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
+          if (worktreeSalvagePatch) {
+            s.jobs[i2].worktreeSalvagePatch = worktreeSalvagePatch;
+          } else {
+            delete s.jobs[i2].worktreeSalvagePatch;
+          }
           s.jobs[i2].error = effectiveStatus === 'needs_review'
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
             // A failed job (non-zero exit) never consults verifyResult above,
@@ -3904,12 +3925,13 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         });
         await broadcast({ flush: true });
       } else if (decision.action === 'fail-dirty') {
-        console.log(`[scheduler] transient failure (${decision.transientKind}) for ${job.slug} left ${newlyDirtyCount} uncommitted file(s) (e.g. ${dirtySample}) — not auto-requeuing`);
+        const salvageNote = worktreeSalvagePatch ? ` — recoverable from salvage patch ${worktreeSalvagePatch}` : '';
+        console.log(`[scheduler] transient failure (${decision.transientKind}) for ${job.slug} left ${newlyDirtyCount} uncommitted file(s) (e.g. ${dirtySample})${salvageNote} — not auto-requeuing`);
         await mutate((s) => {
           const i = s.jobs.findIndex((x) => x.slug === job.slug);
           if (i >= 0) {
             transitionJob(s.jobs[i], 'failed', { reason: `transient failure (${decision.transientKind}) left uncommitted work — not auto-requeued`, source: 'spawnJob:fail-dirty' });
-            s.jobs[i].error = `transient failure (${decision.transientKind}) left ${newlyDirtyCount} uncommitted file(s) in working tree (e.g. ${dirtySample}) — not auto-requeued to avoid overwriting partial work; review and commit or discard manually`;
+            s.jobs[i].error = `transient failure (${decision.transientKind}) left ${newlyDirtyCount} uncommitted file(s) in working tree (e.g. ${dirtySample})${salvageNote} — not auto-requeued to avoid overwriting partial work; review and commit or discard manually`;
           }
         });
         await broadcast({ flush: true });

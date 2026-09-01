@@ -327,6 +327,44 @@ async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
   activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
 }
 
+/**
+ * Best-effort dump of a worktree's full outstanding diff (tracked
+ * modifications AND untracked files) to `outFile`, for a caller about to
+ * tear the worktree down. A job killed before its finish-protocol commit
+ * (rate limit, timeout, crash, hard kill) otherwise loses that work
+ * outright the moment `cleanupWorktree` removes the checkout — no branch,
+ * no stash, no patch survives it. `git add -A --intent-to-add` stages
+ * untracked paths (empty blobs) without touching their content, so the
+ * subsequent `git diff HEAD --binary` includes their full contents exactly
+ * like a tracked modification; the result is a patch a later `git apply`
+ * can consume verbatim.
+ *
+ * Never throws — this always runs immediately before teardown and must
+ * never block branch integration/cleanup or change a job's verdict. Writes
+ * nothing (and returns `{ ok: false }`) when the worktree is clean or on
+ * any git failure, so a successful run's teardown never leaves a 0-byte
+ * artifact behind.
+ */
+async function salvageWorktreeDiff({ cwd, outFile }) {
+  try {
+    const status = await execGit(['status', '--porcelain'], { cwd, timeout: 15_000 });
+    if (!status.trim()) return { ok: false };
+    try {
+      await execGit(['add', '-A', '--intent-to-add'], { cwd, timeout: 30_000 });
+    } catch {
+      // Best-effort — the diff below still captures whatever staged/tracked
+      // changes exist even if intent-to-add partially failed.
+    }
+    const patch = await execGit(['diff', 'HEAD', '--binary'], { cwd, timeout: 30_000 });
+    if (!patch || !patch.trim()) return { ok: false };
+    const { writeTextAtomic } = require('../config.cjs');
+    await writeTextAtomic(outFile, patch);
+    return { ok: true, bytes: Buffer.byteLength(patch, 'utf8') };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Parse `git worktree list --porcelain` into `[{ worktree, branch }]`. */
 function parseWorktreeListPorcelain(text) {
   const entries = [];
@@ -410,6 +448,9 @@ async function integrateJobBranch({ cwd, branch, slug }) {
 async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'job', cwd, dir, branch, keepBranch });
 }
+async function salvageJobWorktreeDiff({ dir, outFile }) {
+  return salvageWorktreeDiff({ cwd: dir, outFile });
+}
 
 async function createEpicWorktree({ cwd, epicId }) {
   return createWorktree({ kind: 'epic', cwd, key: epicId });
@@ -434,6 +475,7 @@ module.exports = {
   createWorktree,
   integrateBranch,
   cleanupWorktree,
+  salvageWorktreeDiff,
   parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot,
   // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
@@ -441,6 +483,7 @@ module.exports = {
   createJobWorktree,
   integrateJobBranch,
   cleanupJobWorktree,
+  salvageJobWorktreeDiff,
   // Epic-kind convenience wrappers.
   createEpicWorktree,
   integrateEpicBranch,

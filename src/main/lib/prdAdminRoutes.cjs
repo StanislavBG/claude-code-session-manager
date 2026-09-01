@@ -29,6 +29,7 @@ const { schemas } = require('../ipcSchemas.cjs');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const queueOps = require('../queueOps.cjs');
+const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./mcpToolCatalog.cjs');
 
 function parseJsonBody(raw) {
   try {
@@ -45,6 +46,15 @@ function parseJsonBody(raw) {
  * scheduler.cjs's own registerAdminRoute(s) pattern.
  */
 function registerAdminRoute(adminHttp, remote) {
+  // GET /admin/mcp/catalog — read-only surface for mcpToolCatalog.cjs, the
+  // single source of truth scheduler-mcp-server.cjs's tool descriptions are
+  // now composed from (PRD: agent-facing help + Home-tab surface). No
+  // `remote` dependency; kept in this file only because it registers
+  // "alongside the existing PRD admin routes".
+  adminHttp.registerRoute('GET', '/admin/mcp/catalog', async (req, res) => {
+    sendJson(res, 200, { ok: true, tools: MCP_TOOL_CATALOG, recipes: MCP_RECIPES });
+  });
+
   // GET /admin/scheduler/prds — paginated PRD listing (PRD: 353KB/120s
   // fix). Sort order is stable and explicit: slug ascending via
   // String.localeCompare(..., { numeric: true }) (listPrdsInternal in

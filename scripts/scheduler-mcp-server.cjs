@@ -29,6 +29,15 @@ const {
   CallToolRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 const { PRD_WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
+const { MCP_TOOL_CATALOG, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
+
+const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
+
+function descriptionFor(toolName) {
+  const entry = CATALOG_BY_NAME.get(toolName);
+  if (!entry) throw new Error(`mcpToolCatalog.cjs has no entry for tool "${toolName}"`);
+  return composeDescription(entry);
+}
 
 const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
 
@@ -71,9 +80,7 @@ async function adminRequest(method, urlPath, body) {
 const TOOLS = [
   {
     name: 'scheduler_reset_job',
-    description: "Reset a stuck scheduler job by slug via the session-manager app's admin API. "
-      + 'Refuses a job whose status is already "completed" unless force:true is passed — resetting '
-      + 'a completed job re-executes already-shipped work.',
+    description: descriptionFor('scheduler_reset_job'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -86,34 +93,12 @@ const TOOLS = [
   },
   {
     name: 'scheduler_list_jobs',
-    description: "List scheduler jobs via the session-manager app's admin API.",
+    description: descriptionFor('scheduler_list_jobs'),
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'scheduler_create_prd',
-    description:
-      "THE ONLY SANCTIONED WAY to author a PRD. Write a new PRD file via the session-manager "
-      + "app's admin API. Server-side validates the frontmatter, atomically allocates the NN "
-      + 'parallel-group number, appends the engineering standards, and writes the PRD file to '
-      + "disk. This tool ONLY writes the file — it does not create a scheduler queue row. The "
-      + 'queue row is derived automatically by the scheduler\'s next reconcile pass (typically '
-      + 'within ~1 minute); the response has `enqueued: false` for exactly this reason. Every '
-      + 'PRD must join an EXISTING, already-human-approved Epic (pass sourcePromptId) — this '
-      + 'tool never mints a new one, and refuses the write if no Epic can be resolved. '
-      + 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
-      + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '
-      + 'API unreachable — that is the ONLY case where hand-authoring the PRD file directly on '
-      + 'disk is an acceptable DEGRADED, LAST-RESORT fallback; the caller MUST say so explicitly '
-      + 'and visibly in its report (which file, why the tool was unreachable, that it needs '
-      + 'verification) since the server-side validation, atomic NN allocation, and '
-      + 'Epic-existence check this tool performs did not run for that file. '
-      + '(b) this tool is ABSENT from your tool list entirely — you were never offered it, so '
-      + 'there is no error to catch. That means the session-manager-scheduler MCP server is not '
-      + 'registered for this project: a MISCONFIGURATION, not an offline app. In that case DO '
-      + 'NOT hand-write any PRD file — stop and tell the human the MCP server is not registered '
-      + '(fix: `claude mcp add session-manager-scheduler --scope user -- node '
-      + '<session-manager-repo>/scripts/scheduler-mcp-server.cjs`, once at user scope covers '
-      + 'every project). See /develop.',
+    description: descriptionFor('scheduler_create_prd'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -143,12 +128,7 @@ const TOOLS = [
   },
   {
     name: 'scheduler_list_prds',
-    description: "THE ONLY SUPPORTED WAY to list scheduled PRDs (live + archived) via the session-manager app's admin API. "
-      + 'Each entry includes its real job status (pending/running/completed/failed/needs_review, or null if not yet '
-      + 'queued/reconciled). Optionally filter by project cwd, Epic id, and/or status. Results are paginated (default '
-      + 'limit 100, max 500) sorted by slug ascending — check `hasMore`/`total` in the response before assuming you '
-      + "received every PRD; page further with `offset`. Default fields are compact (no parallelGroup/estimateMinutes/"
-      + 'sourcePromptId/epicId/archivedStatus) — pass fields:"full" to restore them.',
+    description: descriptionFor('scheduler_list_prds'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -163,8 +143,7 @@ const TOOLS = [
   },
   {
     name: 'scheduler_get_prd',
-    description: "THE ONLY SUPPORTED WAY to read one PRD's full body + parsed frontmatter (live or archived) via the "
-      + "session-manager app's admin API.",
+    description: descriptionFor('scheduler_get_prd'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -176,11 +155,7 @@ const TOOLS = [
   },
   {
     name: 'scheduler_update_prd',
-    description: "THE ONLY SUPPORTED WAY to edit a NOT-yet-running PRD's frontmatter and/or body via the session-manager "
-      + 'app\'s admin API. Refuses once a queue row exists for the slug and its status is anything but "pending" '
-      + '(running/completed/failed/needs_review) — editing the spec under a live or already-finished executor is refused, '
-      + 'not silently applied. Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
-      + 'sourcePromptId, sourceTabId, tag) may be patched; unrecognized keys (e.g. dependsOn) round-trip unchanged.',
+    description: descriptionFor('scheduler_update_prd'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -206,8 +181,7 @@ const TOOLS = [
   },
   {
     name: 'scheduler_archive_prd',
-    description: "THE ONLY SUPPORTED WAY to archive one or more PRDs (move to prds-archived/) via the session-manager "
-      + "app's admin API.",
+    description: descriptionFor('scheduler_archive_prd'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -219,10 +193,7 @@ const TOOLS = [
   },
   {
     name: 'scheduler_cancel_job',
-    description: "THE ONLY SUPPORTED WAY to cancel a not-yet-terminal scheduler job via the session-manager app's admin "
-      + 'API. A running job is SIGTERM\'d; a pending job is simply retired. There is no "cancelled" job status, so a '
-      + 'cancelled job lands as "failed" with an error naming the cause. Refuses a slug whose job is already terminal '
-      + '(completed/failed/needs_review) — nothing to cancel.',
+    description: descriptionFor('scheduler_cancel_job'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,8 +205,7 @@ const TOOLS = [
   },
   {
     name: 'scheduler_retag_prd',
-    description: "THE ONLY SUPPORTED WAY to rewrite a PRD's parallelGroup and/or estimateMinutes frontmatter (and, if "
-      + "parallelGroup changes, its NN- filename prefix) via the session-manager app's admin API.",
+    description: descriptionFor('scheduler_retag_prd'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -258,10 +228,7 @@ const TOOLS = [
   },
   {
     name: 'chat_send_prompt',
-    description:
-      "Push a prompt into an already-open tab's chat queue via the session-manager app's admin "
-      + 'API. The renderer resolves the tab (must currently be open) and runs the prompt through '
-      + 'the same queued-vs-immediate path as a manual send. No-ops if the tab is unknown/closed.',
+    description: descriptionFor('chat_send_prompt'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -273,31 +240,12 @@ const TOOLS = [
   },
   {
     name: 'feedback_list_projects',
-    description:
-      'List the OTHER projects on this machine that can receive feedback (i.e. that Session Manager '
-      + 'already manages — they have a session-manager-operations/ directory). Call this FIRST when you '
-      + 'need the exact `toCwd` for feedback_open_session and are not certain of it — never guess a path. '
-      + 'A project missing from this list has simply never been opened in Session Manager; ask the human '
-      + 'to open it once rather than inventing a path.',
+    description: descriptionFor('feedback_list_projects'),
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'feedback_open_session',
-    description:
-      'THE ONLY SANCTIONED WAY to hand a finding from THIS project to a DIFFERENT project. Opens a new '
-      + "PROPOSED session in the receiving project's own Sessions queue, carrying your report as its "
-      + 'opening prompt and stamped with where it came from. Session Manager performs the cross-folder '
-      + 'write; you never write another project\'s files yourself. '
-      + 'WHAT THIS DOES NOT DO: it does not start anything, queue a PRD, or spend a token. The session '
-      + 'lands as `proposed` and runs only if a human in the RECEIVING project presses "Approve & start". '
-      + 'There is no callback and no reply channel — do not wait for an answer, and do not tell the user '
-      + 'the other project has "been fixed" or "is working on it". Report only that the proposal was '
-      + 'delivered. '
-      + 'WHEN NOT TO USE IT: for work in the project you are ALREADY in, run /develop inside the Epic you '
-      + 'are already in — this tool refuses toCwd === fromCwd outright. '
-      + 'Write the report for a reader who has never seen your project: state the symptom, where you '
-      + 'observed it, what you expected, and (if you know) the file in THEIR repo that looks responsible. '
-      + 'Never assume they can see your code.',
+    description: descriptionFor('feedback_open_session'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -486,7 +434,15 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((e) => {
-  process.stderr.write(`scheduler-mcp-server fatal: ${e?.stack ?? e}\n`);
-  process.exit(1);
-});
+// Guarded so mcpToolCatalog.test.cjs can `require()` this file to read TOOLS
+// (for both-directions name-parity) without opening a stdio transport as a
+// require-time side effect — only the real `node scripts/scheduler-mcp-server.cjs`
+// invocation satisfies require.main === module.
+if (require.main === module) {
+  main().catch((e) => {
+    process.stderr.write(`scheduler-mcp-server fatal: ${e?.stack ?? e}\n`);
+    process.exit(1);
+  });
+}
+
+module.exports = { TOOLS };

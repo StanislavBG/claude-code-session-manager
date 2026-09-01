@@ -157,6 +157,8 @@ export default defineConfig({
       'src/main/__tests__/scheduler-clear-queue-history.test.cjs',
       'src/main/lib/__tests__/ephemeralCwd.test.cjs',
       'src/main/lib/__tests__/reaperHelpers.test.cjs',
+      'src/main/__tests__/scheduler-stranded-investigation.test.cjs',
+      'src/main/lib/__tests__/mcpToolCatalog.test.cjs',
     ],
     globals: true,
   },

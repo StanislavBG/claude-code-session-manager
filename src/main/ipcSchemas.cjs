@@ -343,8 +343,12 @@ const schedulerCreatePrd = z.object({
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
+// Optional cwd narrows every slug's directory search to one project (same
+// role as scheduler_get_prd/scheduler_update_prd's cwd hint) — omitted, the
+// search still spans every candidate PRD dir machine-wide.
 const scheduleArchivePrd = z.object({
   slugs: z.array(z.string().regex(SCHEDULE_SLUG_RE)).min(1).max(500),
+  cwd: z.string().min(1).max(4096).optional(),
 });
 
 const scheduleRetagItem = z.object({
@@ -425,6 +429,7 @@ const adminUpdatePrd = z.object({
 
 const adminCancelJob = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
+  cwd: z.string().min(1).max(4096).optional(),
 });
 
 // ──────────────────────────────────────────── Projects

@@ -79,6 +79,7 @@ const TOOLS = [
       properties: {
         slug: { type: 'string', description: 'PRD slug of the job to reset' },
         force: { type: 'boolean', description: 'Required to reset a job whose status is already "completed"' },
+        cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
       },
       required: ['slug'],
     },
@@ -211,6 +212,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         slugs: { type: 'array', items: { type: 'string' }, description: 'Slugs to archive' },
+        cwd: { type: 'string', description: 'Optional: the PRDs\' project cwd, narrows/speeds the search for every slug in this batch' },
       },
       required: ['slugs'],
     },
@@ -225,6 +227,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         slug: { type: 'string', description: 'PRD slug of the job to cancel' },
+        cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
       },
       required: ['slug'],
     },
@@ -347,7 +350,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
       }
       const force = args && args.force === true;
-      const result = await adminRequest('POST', '/admin/scheduler/reset-job', { slug, force });
+      const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
+      const result = await adminRequest('POST', '/admin/scheduler/reset-job', { slug, force, cwd });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_list_jobs') {
@@ -395,7 +399,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (!slugs || slugs.length === 0) {
         return { content: [{ type: 'text', text: 'missing required argument: slugs' }], isError: true };
       }
-      const result = await adminRequest('POST', '/admin/scheduler/archive-prd', { slugs });
+      const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
+      const result = await adminRequest('POST', '/admin/scheduler/archive-prd', { slugs, cwd });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_cancel_job') {
@@ -403,7 +408,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (!slug) {
         return { content: [{ type: 'text', text: 'missing required argument: slug' }], isError: true };
       }
-      const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug });
+      const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
+      const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug, cwd });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_retag_prd') {

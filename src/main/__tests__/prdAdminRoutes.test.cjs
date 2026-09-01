@@ -110,6 +110,12 @@ async function startAdmin() {
   process.env.SM_E2E = '1';
   const admin = createAdminHttp();
   prdAdminRoutes.registerAdminRoute(admin, scheduler.remote);
+  // Also wires reset-job/jobs (scheduler.cjs's own admin routes) onto the
+  // SAME admin instance/port, against the real (not faked) `remote` — this
+  // file's real-filesystem setup is what the reset-job/cancel-job/archive-prd
+  // slug-vs-not-found split needs, unlike scheduler-admin-routes.test.cjs's
+  // fake remote.
+  scheduler.registerAdminRoutes(admin, scheduler.remote);
   const { port, token } = await admin.start();
   if (prevE2e === undefined) delete process.env.SM_E2E; else process.env.SM_E2E = prevE2e;
   return { admin, port, token };
@@ -382,6 +388,276 @@ test('POST /admin/scheduler/archive-prd moves a PRD to prds-archived/', async ()
     expect(res.status).toBe(200);
     expect(res.json.ok).toBe(true);
     expect(res.json.archived).toBe(1);
+    expect(fs.existsSync(filePath)).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+// ─────────────────────────────────────── invalid-slug vs unknown-slug split
+//
+// PRD: safeSlugPath used to collapse "malformed slug" and "well-formed slug
+// found nowhere" into the same `null` -> "invalid slug" response, so an
+// agent that typed a real slug for a PRD in the wrong project (or a since-
+// archived one) read the error as "I typed it wrong" and retried instead of
+// listing PRDs. These tests pin the split for all three verbs plus the new
+// optional `cwd` narrowing.
+
+test('POST /admin/scheduler/reset-job with a malformed slug returns "invalid slug"', async () => {
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug: 'not a slug!!' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).toBe('invalid slug');
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job with a well-formed slug that exists nowhere returns a distinct unknown-slug error', async () => {
+  const { admin, port, token } = await startAdmin();
+  try {
+    const slug = uniqueSlug('definitely-not-a-real-prd');
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).not.toBe('invalid slug');
+    expect(res.json.error).toMatch(/unknown slug/);
+    expect(res.json.error).toMatch(/scheduler_list_prds/);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job with a cwd naming a project with no PRD dir yields the unknown-slug error, not a crash', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-reset-cwd-miss';
+  const slug = uniqueSlug('reset-cwd-miss');
+  await writePrdFixture({ cwd, epicId, slug }); // exists under `cwd`, not under `otherCwd`
+
+  const otherCwd = path.join(tmpHome, 'fake-project-cwd-empty');
+  fs.mkdirSync(otherCwd, { recursive: true });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug, cwd: otherCwd },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).toMatch(/unknown slug/);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job with a matching cwd resets a known job', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-reset-cwd-hit';
+  const slug = uniqueSlug('reset-cwd-hit');
+  await writePrdFixture({ cwd, epicId, slug });
+  await scheduler.writeQueue({
+    jobs: [{ slug, title: 'x', cwd, status: 'needs_review' }],
+    config: {},
+    paused: null,
+  });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug, cwd },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, slug, status: 'pending' });
+  } finally {
+    await admin.stop();
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('POST /admin/scheduler/reset-job with cwd resets the SAME-slug job belonging to that project, not a same-slug job from another project (cwd narrows the job lookup, not just the file lookup)', async () => {
+  // Slugs derive from title text with no cwd salt, so two different projects
+  // can legitimately queue an identically-slugged job. `cwd` must disambiguate
+  // which one gets reset, not just which PRD file gets read for existence.
+  const cwdA = projectCwd();
+  const cwdB = path.join(tmpHome, 'fake-project-cwd-collision-b');
+  fs.mkdirSync(cwdB, { recursive: true });
+  config.addAllowedRoot(cwdB);
+  // queueStore.cjs's readMerged only reads back a project's shard if that
+  // project's cwd is discoverable via allProjectCwds (scans ~/.claude/projects/
+  // *.jsonl for a `cwd` field) — same fake-transcript trick beforeAll used for
+  // the shared fixture cwd.
+  const projDirB = path.join(tmpHome, '.claude', 'projects', 'fake-project-slug-b');
+  fs.mkdirSync(projDirB, { recursive: true });
+  fs.writeFileSync(path.join(projDirB, 'session.jsonl'), `${JSON.stringify({ cwd: cwdB })}\n`, 'utf8');
+  const { bustCwdCache } = require('../lib/queueStore.cjs');
+  bustCwdCache();
+  const slug = uniqueSlug('collision-slug');
+  const epicId = 'epic-reset-collision';
+  await writePrdFixture({ cwd: cwdB, epicId, slug });
+  await scheduler.writeQueue({
+    jobs: [
+      { slug, title: 'project A job', cwd: cwdA, status: 'needs_review' },
+      { slug, title: 'project B job', cwd: cwdB, status: 'needs_review' },
+    ],
+    config: {},
+    paused: null,
+  });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug, cwd: cwdB },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, slug, status: 'pending' });
+
+    const state = await scheduler.remote.listJobs();
+    const jobA = state.find((j) => j.cwd === cwdA);
+    const jobB = state.find((j) => j.cwd === cwdB);
+    expect(jobA.status).toBe('needs_review'); // untouched
+    expect(jobB.status).toBe('pending'); // the one actually targeted
+  } finally {
+    await admin.stop();
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('POST /admin/scheduler/cancel-job with a malformed slug is rejected at the request-schema layer (400) — never reaches "not found"', async () => {
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/cancel-job', token, body: { slug: 'not a slug!!' },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).not.toMatch(/unknown slug|not found/i);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('remote.cancelJob itself (bypassing the HTTP schema layer) returns "invalid slug" for a malformed slug, distinct from "unknown slug"', async () => {
+  const malformed = await scheduler.remote.cancelJob('not a slug!!');
+  expect(malformed).toEqual({ ok: false, error: 'invalid slug' });
+
+  const wellFormedMissing = await scheduler.remote.cancelJob(uniqueSlug('cancel-remote-missing'));
+  expect(wellFormedMissing.ok).toBe(false);
+  expect(wellFormedMissing.error).not.toBe('invalid slug');
+  expect(wellFormedMissing.error).toMatch(/unknown slug/);
+});
+
+test('POST /admin/scheduler/cancel-job with a well-formed slug that has no queued job returns a distinct unknown-slug error (404)', async () => {
+  const { admin, port, token } = await startAdmin();
+  try {
+    const slug = uniqueSlug('cancel-missing');
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/cancel-job', token, body: { slug },
+    });
+    expect(res.status).toBe(404);
+    expect(res.json.ok).toBe(false);
+    expect(res.json.error).not.toBe('invalid slug');
+    expect(res.json.error).toMatch(/unknown slug/);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/cancel-job with cwd narrows job lookup to that project', async () => {
+  const cwd = projectCwd();
+  const slug = uniqueSlug('cancel-cwd-scope');
+  await scheduler.writeQueue({
+    jobs: [{ slug, title: 'x', cwd, status: 'pending' }],
+    config: {},
+    paused: null,
+  });
+  const otherCwd = path.join(tmpHome, 'fake-project-cwd-cancel-miss');
+  fs.mkdirSync(otherCwd, { recursive: true });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const missRes = await request(port, {
+      method: 'POST', path: '/admin/scheduler/cancel-job', token, body: { slug, cwd: otherCwd },
+    });
+    expect(missRes.status).toBe(404);
+    expect(missRes.json.ok).toBe(false);
+
+    const hitRes = await request(port, {
+      method: 'POST', path: '/admin/scheduler/cancel-job', token, body: { slug, cwd },
+    });
+    expect(hitRes.status).toBe(200);
+    expect(hitRes.json.ok).toBe(true);
+  } finally {
+    await admin.stop();
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('POST /admin/scheduler/archive-prd with a malformed slug is rejected at the request-schema layer (400) — never reaches "not found"', async () => {
+  const { admin, port, token } = await startAdmin();
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/archive-prd', token, body: { slugs: ['not a slug!!'] },
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.ok).toBe(false);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('queueOps.archiveMany itself (bypassing the HTTP schema layer) splits "invalid slug" from "not found in any PRDs dir"', async () => {
+  const queueOps = require('../queueOps.cjs');
+  const malformed = await queueOps.archiveMany(['not a slug!!']);
+  expect(malformed.results[0]).toMatchObject({ ok: false, error: 'invalid slug' });
+
+  const missing = await queueOps.archiveMany([uniqueSlug('archive-remote-missing')]);
+  expect(missing.results[0]).toMatchObject({ ok: false, error: 'not found in any PRDs dir' });
+});
+
+test('POST /admin/scheduler/archive-prd with a well-formed slug found nowhere returns a distinct not-found error', async () => {
+  const { admin, port, token } = await startAdmin();
+  try {
+    const slug = uniqueSlug('archive-missing');
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/archive-prd', token, body: { slugs: [slug] },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.results[0].ok).toBe(false);
+    expect(res.json.results[0].error).toBe('not found in any PRDs dir');
+    expect(res.json.results[0].error).not.toBe('invalid slug');
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/archive-prd with cwd narrows the search: a cwd with no PRD dir misses, the real cwd hits', async () => {
+  const cwd = projectCwd();
+  const epicId = 'epic-archive-cwd';
+  const slug = uniqueSlug('archive-cwd-scope');
+  const filePath = await writePrdFixture({ cwd, epicId, slug });
+
+  const otherCwd = path.join(tmpHome, 'fake-project-cwd-archive-miss');
+  fs.mkdirSync(otherCwd, { recursive: true });
+
+  const { admin, port, token } = await startAdmin();
+  try {
+    const missRes = await request(port, {
+      method: 'POST', path: '/admin/scheduler/archive-prd', token, body: { slugs: [slug], cwd: otherCwd },
+    });
+    expect(missRes.json.results[0].ok).toBe(false);
+    expect(missRes.json.results[0].error).toBe('not found in any PRDs dir');
+    expect(fs.existsSync(filePath)).toBe(true);
+
+    const hitRes = await request(port, {
+      method: 'POST', path: '/admin/scheduler/archive-prd', token, body: { slugs: [slug], cwd },
+    });
+    expect(hitRes.json.results[0].ok).toBe(true);
     expect(fs.existsSync(filePath)).toBe(false);
   } finally {
     await admin.stop();

@@ -128,7 +128,7 @@ const INTERACTIVE_AC_PATTERNS = [
 ];
 
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
-const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
 
 // PRD 808: PRDS_DIR is now the LEGACY global dir — kept as a migration
 // source and search fallback for not-yet-migrated files. Live PRDs resolve
@@ -139,9 +139,16 @@ function candidatePrdsDirs() {
   return [PRDS_DIR, ...resolvePrdsDirs()];
 }
 
-/** Search every candidate PRD dir for `<slug>.md`; returns the containing dir or null. */
-async function findPrdDir(slug) {
-  for (const dir of candidatePrdsDirs()) {
+/**
+ * Search every candidate PRD dir for `<slug>.md`; returns the containing dir
+ * or null. `cwd`, if given, narrows the search to that one project's own PRD
+ * dirs (its flat prds/ dir plus its Epic-scoped dirs) instead of scanning
+ * every project machine-wide — same narrowing pattern scheduler.cjs's
+ * getPrdParsed uses.
+ */
+async function findPrdDir(slug, cwd) {
+  const dirs = cwd ? [resolvePrdWriteDir(cwd), ...listEpicPrdDirs(cwd)] : candidatePrdsDirs();
+  for (const dir of dirs) {
     try {
       await fsp.access(path.join(dir, `${slug}.md`));
       return dir;
@@ -311,9 +318,9 @@ function archiveDirForSource(srcDir, ts) {
   return path.join(path.dirname(srcDir), 'prds-archived', ts);
 }
 
-async function archiveOne(slug, ts) {
+async function archiveOne(slug, ts, cwd) {
   if (!SLUG_RE.test(slug)) return { ok: false, slug, error: 'invalid slug' };
-  const srcDir = await findPrdDir(slug);
+  const srcDir = await findPrdDir(slug, cwd);
   if (!srcDir) return { ok: false, slug, error: 'not found in any PRDs dir' };
   const src = path.resolve(path.join(srcDir, `${slug}.md`));
   if (!src.startsWith(srcDir + path.sep)) return { ok: false, slug, error: 'path escape (src)' };
@@ -342,7 +349,7 @@ async function archiveOne(slug, ts) {
  */
 let retireCompletedSlugsFn = async () => {};
 
-async function archiveMany(slugs) {
+async function archiveMany(slugs, cwd) {
   if (!Array.isArray(slugs) || slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
   }
@@ -353,7 +360,7 @@ async function archiveMany(slugs) {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const results = [];
   for (const slug of slugs) {
-    results.push(await archiveOne(slug, ts));
+    results.push(await archiveOne(slug, ts, cwd));
   }
   const archived = results.filter((r) => r.ok).length;
   const archivedSlugs = results.filter((r) => r.ok).map((r) => r.slug);

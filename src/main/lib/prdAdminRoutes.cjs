@@ -121,7 +121,7 @@ function registerAdminRoute(adminHttp, remote) {
       sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
       return;
     }
-    const result = await queueOps.archiveMany(input.slugs);
+    const result = await queueOps.archiveMany(input.slugs, input.cwd);
     // Audit only the slugs that actually archived — archiveMany's `results`
     // array carries the real per-slug outcome; logging every requested slug
     // regardless of whether it succeeded would misrepresent a partial-failure
@@ -147,9 +147,11 @@ function registerAdminRoute(adminHttp, remote) {
       sendJson(res, 400, { ok: false, error: 'invalid payload', details: e?.issues ?? e?.message });
       return;
     }
-    const result = await remote.cancelJob(input.slug);
+    const result = await remote.cancelJob(input.slug, { cwd: input.cwd });
     if (!result.ok) {
-      const status = /not found/i.test(result.error ?? '') ? 404 : 409;
+      const status = result.error === 'invalid slug' ? 400
+        : /unknown slug|not found/i.test(result.error ?? '') ? 404
+          : 409;
       sendJson(res, status, result);
       return;
     }

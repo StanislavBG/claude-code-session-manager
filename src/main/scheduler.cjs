@@ -68,7 +68,7 @@ const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
 const logs = require('./logs.cjs');
-const { schemas, validated } = require('./ipcSchemas.cjs');
+const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
 const {
   POLL_INTERVAL_MS,
@@ -700,6 +700,43 @@ async function safeSlugPath(slug) {
   const dir = await findPrdDir(slug);
   if (!dir) return null;
   return safeSlugPathIn(dir, slug);
+}
+
+/**
+ * The two distinct failure modes safeSlugPath collapses into one nullable
+ * return (the defect this fixes — see the PRD that added this helper's
+ * Goal): a slug that fails SCHEDULE_SLUG_RE is a caller mistake ("invalid
+ * slug"), while a well-formed slug that exists in no candidate PRD dir is a
+ * lookup miss ("unknown slug") — an agent retrying the first as if it were
+ * the second (or vice versa) burns a turn on the wrong fix. Returns
+ * `{ ok: true, path }` or `{ ok: false, reason: 'invalid-slug' | 'not-found' }`.
+ * `cwd`, if given, narrows the search to that one project's own PRD dirs
+ * (prdDirForCwd + its Epic-scoped dirs — same pattern as getPrdParsed);
+ * omitted, it searches every candidate dir machine-wide via findPrdDir.
+ */
+async function resolveSlugOrReason(slug, cwd) {
+  if (!SCHEDULE_SLUG_RE.test(slug)) return { ok: false, reason: 'invalid-slug' };
+  if (cwd) {
+    for (const dir of [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
+      const p = safeSlugPathIn(dir, slug);
+      if (!p) continue;
+      try {
+        await fsp.access(p);
+        return { ok: true, path: p };
+      } catch { /* not in this dir — try the next candidate */ }
+    }
+    return { ok: false, reason: 'not-found' };
+  }
+  const dir = await findPrdDir(slug);
+  if (!dir) return { ok: false, reason: 'not-found' };
+  const p = safeSlugPathIn(dir, slug);
+  if (!p) return { ok: false, reason: 'not-found' };
+  return { ok: true, path: p };
+}
+
+/** Actionable message for `resolveSlugOrReason`'s 'not-found' reason. */
+function unknownSlugMessage(slug) {
+  return `unknown slug "${slug}": no PRD file with that name in any known project — call scheduler_list_prds (optionally with cwd) to see what exists`;
 }
 
 /**
@@ -5694,9 +5731,16 @@ const remote = {
   },
 
   async resetJob(slug, opts = {}) {
-    if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
+    const resolved = await resolveSlugOrReason(slug, opts.cwd);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.reason === 'invalid-slug' ? 'invalid slug' : unknownSlugMessage(slug) };
+    }
     const outcome = await mutate((state) => {
-      const idx = state.jobs.findIndex((j) => j.slug === slug);
+      // Same cwd filter as resolveSlugOrReason's file lookup above — slugs are
+      // derived from title text with no cwd salt, so two different projects
+      // can independently produce the identical slug; an opts.cwd caller must
+      // reset THAT project's job, not just any queue row matching the string.
+      const idx = state.jobs.findIndex((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Terminal-status guard lives in resetJobFields itself; force:true
       // threads through to override it.
@@ -5884,10 +5928,16 @@ const remote = {
   // cancelled job lands in 'failed' with an error naming the cause,
   // consistent with every other non-success terminal outcome. Refuses a
   // slug that's already terminal — nothing left to cancel.
-  async cancelJob(slug) {
+  async cancelJob(slug, opts = {}) {
+    if (!SCHEDULE_SLUG_RE.test(slug)) return { ok: false, error: 'invalid slug' };
     const state = await readQueue();
-    const job = state.jobs.find((j) => j.slug === slug);
-    if (!job) return { ok: false, error: 'not found' };
+    const job = state.jobs.find((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
+    if (!job) {
+      return {
+        ok: false,
+        error: `unknown slug "${slug}": no queued job with that name${opts.cwd ? ` in cwd ${opts.cwd}` : ''} — call scheduler_list_jobs to see what exists`,
+      };
+    }
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review' || job.status === 'skipped') {
       return { ok: false, error: `job already terminal (status: "${job.status}") — nothing to cancel` };
     }
@@ -5945,7 +5995,8 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
       return;
     }
     const force = parsed.force === true;
-    const result = await remoteObj.resetJob(slug, { force });
+    const cwd = typeof parsed.cwd === 'string' ? parsed.cwd : undefined;
+    const result = await remoteObj.resetJob(slug, { force, cwd });
     sendJson(res, 200, result);
   });
 }

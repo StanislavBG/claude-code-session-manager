@@ -183,6 +183,11 @@ function shapeMachine(raw) {
     scheduledFor: data.scheduledFor ?? null,
     lastRunAt: data.lastRunAt ?? null,
     paused: data.paused ?? null,
+    // Launch circuit breaker (lib/launchFailure.cjs): per-persona blocks and
+    // the degraded-mode env a persona is currently launching with. Machine
+    // state, not per-project: the broken thing is the installed CLI.
+    launchBlocks: data.launchBlocks && typeof data.launchBlocks === 'object' ? data.launchBlocks : {},
+    launchMitigations: data.launchMitigations && typeof data.launchMitigations === 'object' ? data.launchMitigations : {},
   };
 }
 
@@ -229,7 +234,7 @@ function shapeJobs(raw, file) {
  * consulted so writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, invalidJobs: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
   const sourceCwds = [];
   try {
     Object.assign(out, shapeMachine(fs.readFileSync(MACHINE_STATE_PATH, 'utf8')));
@@ -259,7 +264,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, invalidJobs: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
   const sourceCwds = [];
   try {
     Object.assign(out, shapeMachine(await fsp.readFile(MACHINE_STATE_PATH, 'utf8')));
@@ -309,6 +314,8 @@ async function writeSplit(state, defaultCwd) {
     scheduledFor: state.scheduledFor ?? null,
     lastRunAt: state.lastRunAt ?? null,
     paused: state.paused ?? null,
+    launchBlocks: state.launchBlocks ?? {},
+    launchMitigations: state.launchMitigations ?? {},
   });
 
   const byCwd = new Map();

@@ -118,6 +118,11 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
   )
 
   const paused = snapshot.paused
+  // Launch circuit breakers (issue #11): a persona whose headless launches
+  // are being rejected by the API before any turn. Distinct from `paused` —
+  // the rest of the queue keeps running; only the broken persona is held.
+  const launchBlocks = Object.entries(snapshot.launchBlocks ?? {})
+  const launchMitigations = Object.entries(snapshot.launchMitigations ?? {})
   const pollHealth = snapshot.pollHealth
   const pollStale = pollHealth != null && !pollHealth.lastPollOk
 
@@ -143,6 +148,58 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
           </button>
         </div>
       )}
+
+      {/* Launch circuit breakers — one red banner per blocked persona */}
+      {launchBlocks.map(([key, block]) => (
+        <div
+          key={`launch-block-${key}`}
+          data-testid="launch-block-banner"
+          className="flex items-start gap-3 border rounded-xl px-4 py-2.5 text-[13px] bg-red-950/60 border-red-700/50 text-red-200"
+        >
+          <div className="flex-1 leading-snug min-w-0">
+            <div className="font-medium">
+              Launches for <span className="font-mono">{key}</span> jobs are failing before any work starts
+              {block.httpStatus ? ` (HTTP ${block.httpStatus}, ${block.kind})` : ` (${block.kind})`}
+              {block.exhausted
+                ? ' — held until the Claude CLI version changes or you press Retry now.'
+                : block.until
+                  ? ` — next automatic probe ${new Date(block.until).getTime() > now ? `in ${formatRelative(new Date(block.until).getTime() - now)}` : 'on the next tick'}.`
+                  : '.'}
+            </div>
+            <div className="mt-0.5 text-red-200/80">{block.hint}</div>
+            <div className="mt-0.5 font-mono text-[12px] text-red-200/70 truncate" title={block.message}>
+              {block.attempts} failed probe{block.attempts === 1 ? '' : 's'}
+              {block.claudeVersion ? ` · CLI ${block.claudeVersion}` : ''}
+              {block.lastSlug ? ` · last: ${block.lastSlug}` : ''}
+              {' · '}{block.message}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.api.schedule.resume()}
+            className="shrink-0 px-2.5 py-1 rounded border border-current/40 hover:bg-white/10 transition-colors text-[12px] font-medium"
+          >
+            Retry now
+          </button>
+        </div>
+      ))}
+      {/* Degraded-mode launches — amber, informational */}
+      {launchMitigations.map(([key, m]) => (
+        <div
+          key={`launch-mitigation-${key}`}
+          data-testid="launch-mitigation-banner"
+          className="flex items-start gap-3 border rounded-xl px-4 py-2.5 text-[13px] bg-amber-950/60 border-amber-700/50 text-amber-200"
+        >
+          <div className="flex-1 leading-snug min-w-0">
+            <div className="font-medium">
+              <span className="font-mono">{key}</span> jobs are running in degraded mode
+              {' '}(<span className="font-mono">{Object.entries(m.env).map(([k, v]) => `${k}=${v}`).join(' ')}</span>)
+              {m.claudeVersion ? ` since CLI ${m.claudeVersion}` : ''}.
+            </div>
+            <div className="mt-0.5 text-amber-200/80">{m.hint}</div>
+          </div>
+        </div>
+      ))}
 
       {/* Stats row */}
       <div className="flex items-center gap-5 flex-wrap bg-bg-hi border border-line rounded-xl px-4 py-3">

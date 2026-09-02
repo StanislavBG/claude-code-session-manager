@@ -53,7 +53,9 @@ const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, probeClaudeVersion } = require('./lib/claudeBin.cjs');
+const launchFailure = require('./lib/launchFailure.cjs');
+const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
 const { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
@@ -2229,6 +2231,10 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
     lastRunAt: state.lastRunAt,
     nextReset: getNextResetCached(),
     paused: state.paused,
+    // Launch circuit breaker (issue #11): which personas cannot launch right
+    // now and why, plus any degraded-mode env in force. Empty objects when healthy.
+    launchBlocks: state.launchBlocks ?? {},
+    launchMitigations: state.launchMitigations ?? {},
     utilization: cachedUtilization,
     pollHealth: {
       lastPollAt,
@@ -2372,7 +2378,17 @@ async function setPaused(reason, resumeAtIso) {
 
 async function clearPause(source) {
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
+  const humanOverride = source === 'manual' || source === 'run-now';
   const wasPaused = await mutate((s) => {
+    // A human Resume / Run now also re-closes every launch circuit breaker:
+    // the operator is asserting the environment is fixed (CLI updated,
+    // re-logged-in). The next dispatch of each persona is its probe; if the
+    // environment is still broken the breaker simply re-arms.
+    if (humanOverride && s.launchBlocks && Object.keys(s.launchBlocks).length) {
+      console.log(`[scheduler] clearPause (${source}): clearing launch blocks [${Object.keys(s.launchBlocks).join(', ')}]`);
+      for (const j of s.jobs) if (j.status === 'pending' && j.heldReason && /^launch blocked/.test(j.heldReason)) delete j.heldReason;
+      s.launchBlocks = {};
+    }
     if (!s.paused) return false;
     console.log(`[scheduler] clearPause (${source || 'manual'})`);
     s.paused = null;
@@ -3197,7 +3213,7 @@ function pickRunDir() {
  * Watchdogs are declared as an array; the result-tailer's exit-code mapping
  * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
-async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null) {
+async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null) {
   const logPath = path.join(runDir, `${job.slug}.log`);
   const metaPath = path.join(runDir, `${job.slug}.meta.json`);
   // `cwd` stays the MAIN tree throughout — PRD lookup (findPrdDir/prdPathForJob)
@@ -3389,12 +3405,26 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // originProjectRoot so a job running inside its own worktree can still
     // resolve the real project for create-prd/open-session/readiness. See
     // projectRootResolve.cjs.
+    // SM_SCHEDULER_JOB_SLUG marks the child (and the MCP servers it
+    // inherits its env to) as a headless scheduled executor, so
+    // scheduler-mcp-server.cjs can refuse scheduler_create_prd from inside a
+    // run (issue #11 list C1 — the PRD 460 self-queue incident). Only a
+    // persona whose whole job is decomposition may still queue.
+    // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
+    // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
+    // being rejected — lib/launchFailure.cjs); applied last so it wins.
     const childEnv = cleanChildEnv({
       PATH: pathWithUserBins(),
       SM_PROJECT_ROOT: cwd,
+      SM_SCHEDULER_JOB_SLUG: job.slug,
+      SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
       BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
+      ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
     });
+    if (launchEnv && Object.keys(launchEnv).length) {
+      safeLog(`[scheduler] launch mitigation env applied: ${Object.entries(launchEnv).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
+    }
 
     // Track whether the agent has emitted a `result` event in its JSONL stream.
     // null until seen; then one of "success" | "error_max_turns" | … per the
@@ -3563,16 +3593,33 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           `duration=${Math.round(durationMs / 1000)}s\n`);
         const rateLimited = effectiveCode !== 0 && detectRateLimitInLog(logPath);
         const networkError = effectiveCode !== 0 && !rateLimited && detectNetworkErrorInLog(logPath);
+        // Non-run detection (issue #11 lists A1–A3): the harness's `result`
+        // event tells us whether the model ever got a turn. A first-request
+        // API rejection (num_turns ≤ 1, output_tokens 0, `API Error:` text)
+        // is a broken ENVIRONMENT, not a failed PRD — spawnJob routes it to
+        // the launch circuit breaker instead of failed/investigation.
+        const resultStats = launchFailure.readResultEvent(logPath);
+        const launchFailed = (effectiveCode !== 0 && !rateLimited && !networkError)
+          ? launchFailure.classifyLaunchFailure(resultStats)
+          : null;
+        if (launchFailed) {
+          sl(`\n[scheduler] LAUNCH FAILURE (${launchFailed.kind}${launchFailed.httpStatus ? ` HTTP ${launchFailed.httpStatus}` : ''}): ` +
+            `${launchFailed.message} — no turn was taken; this is not a PRD failure\n`);
+        }
         // Sync write: child 'exit' handler must flush meta before resolve()
         // so the spawnJob mutate() that follows sees the persisted exit code.
         config.writeJsonSync(metaPath, {
           slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited, networkError,
+          launchFailure: launchFailed,
+          numTurns: resultStats?.numTurns ?? null, outputTokens: resultStats?.outputTokens ?? null,
+          totalCostUsd: resultStats?.totalCostUsd ?? null, terminalReasonFromHarness: resultStats?.terminalReason ?? null,
+          launchEnvApplied: launchEnv && Object.keys(launchEnv).length ? Object.keys(launchEnv) : [],
           startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA,
           originSessionId, contextDigestApplied,
         });
-        resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, leakedDescendants: leaked, sessionId });
+        resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, launchFailure: launchFailed, resultStats, leakedDescendants: leaked, sessionId });
       },
     });
 
@@ -3775,7 +3822,27 @@ function readRunOutcomeSidecars(runDir, slug) {
  * or if the run being investigated actually verified clean (nothing to fix —
  * see shouldSkipInvestigationForCleanRun).
  */
+const INVESTIGATION_LAUNCH_KEY = 'investigation';
+
 async function spawnInvestigation(failedJob, runDir) {
+  // The probe launches with the same CLI as the job it diagnoses. While
+  // that CLI cannot launch at all (launch circuit breaker, issue #11 list
+  // B1: probes e4f82da2/d374e6bf died on the same HTTP 400 as the runs
+  // they were investigating) there is nothing to diagnose — skip, loudly.
+  {
+    const state = await readQueue().catch(() => null);
+    const block = state?.launchBlocks?.[INVESTIGATION_LAUNCH_KEY];
+    const jobBlock = state?.launchBlocks?.[launchFailure.launchBlockKeyFor(failedJob)];
+    const gate = launchFailure.evaluateLaunchGate(block || jobBlock, { now: Date.now(), claudeVersion: await probeClaudeVersion() });
+    if (gate.state === 'blocked') {
+      console.log(`[scheduler] skip investigation: ${failedJob.slug} — ${gate.reason}`);
+      await mutate((s) => {
+        const j = s.jobs.find((x) => x.slug === failedJob.slug);
+        if (j) { j.autoFixOutcome = 'launch-blocked'; j.autoFixNote = gate.reason; }
+      }).catch(() => {});
+      return { deferred: false };
+    }
+  }
   // Resume-first recovery (PRD 1111) always gets first refusal — a job
   // eligible for a bounded `--resume` dispatch must never also get a
   // cold-read fix-plan PRD authored in the same pass. selectResumeRecoveryTarget
@@ -3961,6 +4028,23 @@ async function spawnInvestigation(failedJob, runDir) {
         return;
       }
       sl(`\n[scheduler] investigation exit code=${exitCode}\n`);
+      if (exitCode !== 0) {
+        const probeResult = launchFailure.readResultEvent(investigationLogPath);
+        const probeLaunchFailure = launchFailure.classifyLaunchFailure(probeResult);
+        if (probeLaunchFailure) {
+          sl(`\n[scheduler] investigation LAUNCH FAILURE (${probeLaunchFailure.kind}): ${probeLaunchFailure.message} — arming '${INVESTIGATION_LAUNCH_KEY}' launch block\n`);
+          probeClaudeVersion().then((claudeVersion) => mutate((s) => {
+            s.launchBlocks = s.launchBlocks || {};
+            s.launchBlocks[INVESTIGATION_LAUNCH_KEY] = launchFailure.armLaunchBlock(s.launchBlocks[INVESTIGATION_LAUNCH_KEY] || null, {
+              kind: probeLaunchFailure.kind, httpStatus: probeLaunchFailure.httpStatus, message: probeLaunchFailure.message,
+              now: Date.now(), claudeVersion, slug: failedJob.slug, runId: failedJob.runId ?? null,
+            });
+            const j = s.jobs.find((x) => x.slug === failedJob.slug);
+            if (j) { j.autoFixOutcome = 'launch-blocked'; j.autoFixNote = `investigation probe never ran: ${probeLaunchFailure.message}`; }
+          })).catch(() => {});
+          return;
+        }
+      }
       // Fold the investigation's <RCA> summary into the root-cause report already
       // written for this job (needs_review jobs only — writeRcaReport no-ops when
       // failedJob has no verifierVerdict, e.g. plain 'failed' jobs never got one).
@@ -4028,6 +4112,121 @@ async function spawnInvestigation(failedJob, runDir) {
   }
 }
 
+/**
+ * computeLaunchHolds(state) → Map<slug, reason>
+ *
+ * The launch circuit breaker's per-tick view (lib/launchFailure.cjs, issue
+ * #11): every pending row whose persona is blocked is held with its reason;
+ * when a persona's backoff has elapsed exactly ONE of its pending rows is
+ * left pickable (the half-open probe) and the rest are held behind it. A
+ * CLI version change drops the block outright — that is the incident's real
+ * fix (`claude update`) and the queue must resume on the next tick.
+ * Mutates nothing; spawnJob makes the durable decision at dispatch.
+ */
+async function computeLaunchHolds(state, { now = Date.now(), claudeVersion } = {}) {
+  const held = new Map();
+  const blocks = state?.launchBlocks;
+  if (!blocks || typeof blocks !== 'object' || !Object.keys(blocks).length) return held;
+  const version = claudeVersion === undefined ? await probeClaudeVersion() : claudeVersion;
+  const probeAllowed = new Set();
+  for (const j of state.jobs || []) {
+    if (j.status !== 'pending') continue;
+    const key = launchFailure.launchBlockKeyFor(j);
+    const block = blocks[key];
+    if (!block) continue;
+    const gate = launchFailure.evaluateLaunchGate(block, { now, claudeVersion: version });
+    if (gate.state === 'open') continue;
+    if (gate.state === 'probe' && !probeAllowed.has(key)) {
+      probeAllowed.add(key);
+      continue;
+    }
+    held.set(j.slug, gate.state === 'probe'
+      ? `launch blocked (${block.kind}) — waiting for this tick's probe of '${key}'`
+      : gate.reason);
+  }
+  return held;
+}
+
+/**
+ * A run that never got a turn (res.launchFailure — see executeJob's onExit)
+ * is routed here instead of the failed/investigation path (issue #11 lists
+ * A1–A3, B1): the row goes back to `pending` carrying the API's own message
+ * as its error, no retry budget is consumed, no auto-fix probe is spawned
+ * (it would die the same way), and the persona's launch circuit breaker is
+ * armed so the queue stops re-dispatching identical doomed launches while
+ * still self-healing on backoff / CLI update / human Retry.
+ */
+/**
+ * Pure state mutation behind handleLaunchFailure (exported for tests): arms
+ * the persona's breaker and returns the job's `running` row to `pending`
+ * carrying the API message. Returns the armed block.
+ */
+function applyLaunchFailure(s, { job, lf, runId, launchKey, mitigationApplied, claudeVersion, now = Date.now() }) {
+  s.launchBlocks = s.launchBlocks || {};
+  s.launchMitigations = s.launchMitigations || {};
+  const prev = s.launchBlocks[launchKey] || null;
+  const armed = launchFailure.armLaunchBlock(prev, {
+    kind: lf.kind, httpStatus: lf.httpStatus, message: lf.message, now, claudeVersion,
+    slug: job.slug, runId, mitigationApplied,
+  });
+  s.launchBlocks[launchKey] = armed;
+  // A mitigation that was in force and still failed is no longer proven —
+  // drop it so the hint and the next probe are honest.
+  if (mitigationApplied && s.launchMitigations[launchKey]) delete s.launchMitigations[launchKey];
+  const i = (s.jobs || []).findIndex((x) => x.slug === job.slug);
+  if (i >= 0 && s.jobs[i].status === 'running') {
+    const prevCount = s.jobs[i].launchFailure?.count ?? 0;
+    const msg = `launch failure (${lf.kind}${lf.httpStatus ? ` HTTP ${lf.httpStatus}` : ''}): ${lf.message}`;
+    resetJobFields(s.jobs[i], msg, { source: 'spawnJob:launch-failure' });
+    s.jobs[i].launchFailure = {
+      kind: lf.kind, httpStatus: lf.httpStatus ?? null, message: lf.message,
+      at: new Date(now).toISOString(), runId, count: prevCount + 1, mitigationApplied,
+    };
+    s.jobs[i].terminalReason = `launch_failure:${lf.kind}`;
+    s.jobs[i].heldReason = armed.exhausted
+      ? `launch blocked (${lf.kind}) after ${armed.attempts} failed probe(s) — ${armed.hint}`
+      : `launch blocked (${lf.kind}) — re-probe at ${armed.until}. ${armed.hint}`;
+  }
+  return armed;
+}
+
+async function handleLaunchFailure({ job, res, runId, runDir, launchKey, launchEnv, claudeVersion }) {
+  const lf = res.launchFailure;
+  const now = Date.now();
+  const mitigationApplied = !!(launchEnv && Object.keys(launchEnv).length);
+  let armed = null;
+  await mutate((s) => {
+    armed = applyLaunchFailure(s, { job, lf, runId, launchKey, mitigationApplied, claudeVersion, now });
+  });
+  launchFailure.writeOutcomeSidecar(runDir, job.slug, {
+    runId,
+    exitCode: res.exitCode,
+    durationMs: res.durationMs ?? null,
+    numTurns: res.resultStats?.numTurns ?? null,
+    outputTokens: res.resultStats?.outputTokens ?? null,
+    totalCostUsd: res.resultStats?.totalCostUsd ?? null,
+    verdict: null,
+    status: 'pending',
+    terminalReason: `launch_failure:${lf.kind}`,
+    launchFailure: { kind: lf.kind, httpStatus: lf.httpStatus ?? null, message: lf.message },
+    launchEnvApplied: launchEnv ? Object.keys(launchEnv) : [],
+    filesChanged: 0,
+    landedCommit: null,
+  });
+  try {
+    appendError({
+      cwd: job.cwd || DEFAULT_PROJECT_CWD,
+      scope: 'scheduler',
+      level: 'error',
+      message: `launch failure (${lf.kind}) for ${job.slug}: ${lf.message} — persona '${launchKey}' blocked, attempt ${armed?.attempts}${armed?.exhausted ? ' (exhausted; needs CLI update or Retry)' : ''}`,
+      meta: { slug: job.slug, runId, kind: lf.kind, httpStatus: lf.httpStatus ?? null, claudeVersion: claudeVersion ?? null, mitigationApplied, hint: armed?.hint },
+    });
+  } catch { /* durable logging must never break the queue */ }
+  console.error(`[scheduler] ${job.slug}: LAUNCH FAILURE (${lf.kind}${lf.httpStatus ? ` HTTP ${lf.httpStatus}` : ''}) — ${lf.message}. ` +
+    `Persona '${launchKey}' blocked (attempt ${armed?.attempts}${armed?.until ? `, re-probe at ${armed.until}` : ', exhausted'}). ${armed?.hint}`);
+  await broadcast({ flush: true });
+}
+
 async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
@@ -4072,6 +4271,52 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       await broadcast({ flush: true });
       return;
     }
+    // Launch circuit breaker (lib/launchFailure.cjs, issue #11). Re-evaluated
+    // here, not just in tickQueue, because the block can change between the
+    // pick and this dispatch (another job's probe just failed). 'blocked' →
+    // hold the row; 'probe' → this job is the single half-open probe and is
+    // stamped as such so no sibling probes the same broken persona at once.
+    const launchKey = launchFailure.launchBlockKeyFor(job);
+    const claudeVersionNow = await probeClaudeVersion();
+    let launchEnv = null;
+    let launchProbe = false;
+    const launchGate = await mutate((s) => {
+      s.launchBlocks = s.launchBlocks || {};
+      s.launchMitigations = s.launchMitigations || {};
+      const mitigation = s.launchMitigations[launchKey];
+      if (mitigation && claudeVersionNow && mitigation.claudeVersion && mitigation.claudeVersion !== claudeVersionNow) {
+        console.log(`[scheduler] launch gate: CLI version changed (${mitigation.claudeVersion} → ${claudeVersionNow}) — dropping ${launchKey} mitigation to retry a clean launch`);
+        delete s.launchMitigations[launchKey];
+      }
+      const block = s.launchBlocks[launchKey];
+      const gate = launchFailure.evaluateLaunchGate(block, { now: Date.now(), claudeVersion: claudeVersionNow });
+      if (gate.state === 'open' && block) {
+        console.log(`[scheduler] launch gate: clearing ${launchKey} block (${gate.reason})`);
+        delete s.launchBlocks[launchKey];
+      }
+      if (gate.state === 'blocked') {
+        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+        if (idx >= 0) s.jobs[idx].heldReason = gate.reason;
+        return gate;
+      }
+      if (gate.state === 'probe') {
+        block.probing = { slug: job.slug, at: new Date().toISOString() };
+        launchProbe = true;
+        launchEnv = block.mitigationEnv || null;
+      } else if (s.launchMitigations[launchKey]?.env) {
+        launchEnv = { ...s.launchMitigations[launchKey].env };
+      }
+      return gate;
+    });
+    if (launchGate.state === 'blocked') {
+      console.log(`[scheduler] ${job.slug}: deferring — ${launchGate.reason}`);
+      await broadcast({ flush: true });
+      return;
+    }
+    if (launchProbe) {
+      console.log(`[scheduler] ${job.slug}: dispatching as launch probe for '${launchKey}'${launchEnv ? ` with mitigation ${JSON.stringify(launchEnv)}` : ''}`);
+    }
+
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
@@ -4210,7 +4455,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           }
         });
         await broadcast({ flush: true });
-      }, worktree.ok ? worktree.dir : undefined, resumeTarget, foreignWip);
+      }, worktree.ok ? worktree.dir : undefined, resumeTarget, foreignWip, launchEnv);
     } finally {
       if (worktree.ok) {
         worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
@@ -4292,6 +4537,36 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           ...afterGuardCwd.filter((p) => !new Set(guardBaseline || []).has(p)),
           ...worktreeLeftoverDirty,
         ])];
+
+    if (res.launchFailure) {
+      await handleLaunchFailure({ job, res, runId, runDir, launchKey, launchEnv, claudeVersion: claudeVersionNow });
+      return;
+    }
+    if (launchFailure.resultShowsRealTurn(res.resultStats)) {
+      // The launch worked (whatever happens to the run next) — close the
+      // breaker for this persona. If the probe only got through thanks to a
+      // mitigation env, keep applying that env to every later launch of the
+      // persona until the CLI version changes; otherwise the very next job
+      // would fail the same way and re-arm the block (a flap per job).
+      await mutate((s) => {
+        const block = s.launchBlocks?.[launchKey];
+        if (!block) return;
+        delete s.launchBlocks[launchKey];
+        if (launchEnv && Object.keys(launchEnv).length) {
+          s.launchMitigations = s.launchMitigations || {};
+          s.launchMitigations[launchKey] = {
+            kind: block.kind,
+            env: { ...launchEnv },
+            since: new Date().toISOString(),
+            claudeVersion: claudeVersionNow ?? block.claudeVersion ?? null,
+            hint: launchFailure.launchFailureHint(block.kind, { claudeVersion: claudeVersionNow ?? block.claudeVersion }),
+          };
+          console.log(`[scheduler] launch gate: ${launchKey} recovered via mitigation ${JSON.stringify(launchEnv)} — kept in force until the CLI version changes`);
+        } else {
+          console.log(`[scheduler] launch gate: ${launchKey} recovered — block cleared after ${block.attempts} failed probe(s)`);
+        }
+      });
+    }
 
     if (res.rateLimited) {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
@@ -4579,6 +4854,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           } else {
             delete s.jobs[i2].verifierVerdict;
           }
+          // Closed-set outcome taxonomy (issue #11 list A2) so a queue row
+          // says WHY it ended without anyone opening the transcript.
+          s.jobs[i2].terminalReason = launchFailure.deriveTerminalReason({
+            effectiveStatus, exitCode: res.exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure,
+          });
+          delete s.jobs[i2].launchFailure;
+          delete s.jobs[i2].heldReason;
           // Persist the commit-guard's exact dirty-path list (verdict
           // 'uncommitted_changes' only) so a later resume-recovery attempt
           // (selectResumeRecoveryTarget) can name these paths without
@@ -4708,6 +4990,24 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       await archiveCompletedPrd(slug, cwd);
     }
     await broadcast({ flush: true });
+
+    // Per-run outcome sidecar (issue #11 list B5): turns/tokens/verdict in one
+    // small JSON next to the log so fleet health never needs a transcript parse.
+    launchFailure.writeOutcomeSidecar(runDir, job.slug, {
+      runId,
+      exitCode: res.exitCode,
+      durationMs: res.durationMs ?? null,
+      numTurns: res.resultStats?.numTurns ?? null,
+      outputTokens: res.resultStats?.outputTokens ?? null,
+      totalCostUsd: res.resultStats?.totalCostUsd ?? null,
+      verdict: verifyResult?.verdict ?? (res.exitCode === 0 ? 'clean' : null),
+      status: terminalNotifySnapshot?.status ?? failedJobSnapshot?.status ?? null,
+      terminalReason: terminalNotifySnapshot?.terminalReason ?? failedJobSnapshot?.terminalReason ?? null,
+      launchFailure: null,
+      launchEnvApplied: launchEnv ? Object.keys(launchEnv) : [],
+      filesChanged: Array.isArray(newlyDirtyAll) ? newlyDirtyAll.length : null,
+      landedCommit: jobLandedCommitThisRun ?? null,
+    });
 
     if (terminalNotifySnapshot) {
       notifyOriginatingTab(terminalNotifySnapshot).catch((e) => {
@@ -4887,10 +5187,12 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     // cap that sessionSlots.cjs was written to replace — which silently
     // ceilinged the queue at 3 while the pool the user configured said 5.
     const freeSlots = sessionSlots.available();
+    const heldSlugs = await computeLaunchHolds(state);
     const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots, {
       leaseHeld: quietMachineLease.isHeld(),
       machineInUse: sessionSlots.inUse(),
       now: Date.now(),
+      heldSlugs,
     });
     if (batch.length === 0 && freeSlots === 0) {
       const snap = sessionSlots.snapshot();
@@ -7163,4 +7465,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure };

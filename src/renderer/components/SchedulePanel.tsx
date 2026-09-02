@@ -983,8 +983,15 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
             </div>
           )}
           {hold && (
-            <div className="text-[12.5px] mt-0.5 text-amber-400/90 font-mono">
-              held · waiting on {hold.dep} ({hold.depStatus})
+            <div className="text-[12.5px] mt-0.5 text-amber-400/90 font-mono" data-testid="job-row-hold">
+              {hold.dep
+                ? <>held · waiting on {hold.dep} ({hold.depStatus})</>
+                : <>held · {hold.reason ?? 'launch blocked'}</>}
+            </div>
+          )}
+          {!hold && job.status === 'pending' && job.heldReason && (
+            <div className="text-[12.5px] mt-0.5 text-amber-400/90 font-mono" data-testid="job-row-held-reason">
+              held · {job.heldReason}
             </div>
           )}
           <EpicTag

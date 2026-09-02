@@ -488,6 +488,21 @@ async function handleCallTool(request) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_create_prd') {
+      // Hard refusal at the authoring boundary (issue #11, list C1): a
+      // headless scheduled executor performs its own acceptance criteria and
+      // never queues follow-on work — PRD 460 called /develop from inside its
+      // run, spawned a duplicate PRD, and exited 0 having done nothing. The
+      // standards prose already says so; this makes the harness enforce it.
+      // scheduler.cjs stamps SM_SCHEDULER_JOB_SLUG on every job spawn and
+      // SM_SCHEDULER_JOB_MAY_QUEUE=1 only for personas whose whole job is
+      // decomposition (architect), so a planning PRD still can.
+      if (process.env.SM_SCHEDULER_JOB_SLUG && process.env.SM_SCHEDULER_JOB_MAY_QUEUE !== '1') {
+        return errorResult(
+          `refused: scheduler_create_prd was called from inside headless scheduled job '${process.env.SM_SCHEDULER_JOB_SLUG}'. `
+          + 'A PRD executor performs its own acceptance criteria directly and never queues follow-on work (self-queue failure class). '
+          + 'If more work is genuinely needed, say so in your final result text — the authoring Epic decides whether to queue it.',
+        );
+      }
       // If the caller (the model) didn't pass sourcePromptId, forward this
       // process's own SM_CHAT_SESSION_ID (set by chatRunner.cjs on the
       // parent claude -p process this MCP server inherited its env from) so

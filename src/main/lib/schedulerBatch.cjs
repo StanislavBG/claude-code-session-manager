@@ -82,7 +82,7 @@ function findBlockingDep(job, projectJobs) {
  *   project this tick, plus (when batch is empty because a gate held it) the
  *   human-readable reason text that would otherwise only reach console.log.
  */
-function pickForProject(projectJobs, runningSlugsInProject, slots) {
+function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = new Map()) {
   const projectCwd = (projectJobs.find((j) => j.cwd) || {}).cwd || DEFAULT_PROJECT_CWD;
 
   // Explicit dependsOn eligibility (PRD 832). A dep slug is BLOCKING while a
@@ -118,10 +118,20 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   // (evaluated before this function is ever called) is the only path that
   // can fire one, since dispatching one is a whole-tick, all-projects
   // exclusive decision this per-project function can't see.
+  // Launch-gate holds (lib/launchFailure.cjs, issue #11): a pending row
+  // whose launch persona is circuit-broken is NOT a candidate this tick and
+  // must not shadow a pickable sibling behind it. It still gets a per-row
+  // hold record so the Queue UI says why it is waiting.
+  const launchHolds = [];
+  for (const j of projectJobs) {
+    if (j.status === 'pending' && !runningSlugsInProject.has(j.slug) && heldSlugs.has(j.slug)) {
+      launchHolds.push({ slug: j.slug, dep: null, depStatus: null, reason: heldSlugs.get(j.slug) || 'launch blocked' });
+    }
+  }
   const allPending = projectJobs.filter(
-    (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug) && j.quietMachine !== true,
+    (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug) && j.quietMachine !== true && !heldSlugs.has(j.slug),
   );
-  if (allPending.length === 0) return { batch: [], reason: null, holds: [] };
+  if (allPending.length === 0) return { batch: [], reason: null, holds: launchHolds };
 
   const pending = [];
   const heldByFailedDep = [];
@@ -133,7 +143,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   const heldBySkippedDep = [];
   // Per-job hold records, surfaced to the UI so a `pending` row can say WHICH
   // dep is holding it instead of leaving the reason in console.log.
-  const holds = [];
+  const holds = [...launchHolds];
   for (const j of allPending) {
     const dep = blockingDep(j);
     if (!dep) { pending.push(j); continue; }
@@ -289,6 +299,11 @@ function enqueueTimestamp(job) {
  */
 function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
   const { leaseHeld = false, machineInUse = 0, now = Date.now() } = quietOpts;
+  // slug → hold reason for rows the launch circuit breaker is holding back
+  // this tick (scheduler.cjs computes it from state.launchBlocks). Held rows
+  // are invisible to every pick below but still surface as holds.
+  const heldSlugs = quietOpts.heldSlugs instanceof Map ? quietOpts.heldSlugs : new Map();
+  const pickable = (j) => j.status === 'pending' && !running.has(j.slug) && !heldSlugs.has(j.slug);
 
   // Exclusive lease (PRD 1107): while a quiet-machine job is running, it
   // holds the WHOLE pool — no other job, in any project, dispatches until it
@@ -301,8 +316,14 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
     return { batch: [], reason, holds: [] };
   }
 
-  if (!allJobs.some((j) => j.status === 'pending' && !running.has(j.slug))) {
-    return { batch: [], reason: null, holds: [] };
+  if (!allJobs.some(pickable)) {
+    const holds = [];
+    for (const j of allJobs) {
+      if (j.status === 'pending' && !running.has(j.slug) && heldSlugs.has(j.slug)) {
+        holds.push({ slug: j.slug, dep: null, depStatus: null, reason: heldSlugs.get(j.slug) || 'launch blocked' });
+      }
+    }
+    return { batch: [], reason: null, holds };
   }
 
   // Orphan correction: a queue.json row still marked `running` that this
@@ -337,9 +358,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
   // job dispatches.
   if (slots > 0) {
     const quietWaitMs = quietMachineWaitMs();
-    const quietPending = allJobs.filter(
-      (j) => j.status === 'pending' && !running.has(j.slug) && j.quietMachine === true,
-    );
+    const quietPending = allJobs.filter((j) => pickable(j) && j.quietMachine === true);
     for (const job of quietPending) {
       const projectJobs = projectMap.get(job.cwd || DEFAULT_PROJECT_CWD) || [job];
       if (findBlockingDep(job, projectJobs)) continue; // blocked — try the next quiet candidate
@@ -361,9 +380,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
   // pickForProject's running count and cap stay accurate across passes.
   const candidates = [];
   for (const [cwd, projectJobs] of projectMap) {
-    const hasPending = projectJobs.some(
-      (j) => j.status === 'pending' && !running.has(j.slug),
-    );
+    const hasPending = projectJobs.some(pickable);
     if (!hasPending) continue;
     const view = projectJobs.map((j) => ({ ...j }));
     const runningSlugsInProject = new Set(
@@ -371,7 +388,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
     );
     const runningCount = projectJobs.filter((j) => j.status === 'running').length;
     const oldestPendingMs = projectJobs
-      .filter((j) => j.status === 'pending' && !running.has(j.slug))
+      .filter(pickable)
       .reduce((min, j) => Math.min(min, enqueueTimestamp(j)), Infinity);
     candidates.push({ cwd, view, runningSlugsInProject, runningCount, oldestPendingMs, active: true });
   }
@@ -391,7 +408,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
     for (const c of candidates) {
       if (slots <= 0) break;
       if (!c.active) continue;
-      const result = pickForProject(c.view, c.runningSlugsInProject, 1);
+      const result = pickForProject(c.view, c.runningSlugsInProject, 1, heldSlugs);
       for (const h of result.holds ?? []) if (!holdsBySlug.has(h.slug)) holdsBySlug.set(h.slug, h);
       if (result.batch.length === 0) {
         if (heldReason === null && result.reason) heldReason = result.reason;
@@ -410,6 +427,14 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
       c.runningCount += 1;
     }
     if (addedThisPass === 0) break;
+  }
+  // A project whose only pending rows are launch-held never becomes a
+  // candidate above, so its hold records would be lost — surface them here
+  // so the Queue UI still says why those rows are waiting.
+  for (const j of allJobs) {
+    if (j.status === 'pending' && !running.has(j.slug) && heldSlugs.has(j.slug) && !holdsBySlug.has(j.slug)) {
+      holdsBySlug.set(j.slug, { slug: j.slug, dep: null, depStatus: null, reason: heldSlugs.get(j.slug) || 'launch blocked' });
+    }
   }
   const holds = [...holdsBySlug.values()];
   return { batch, reason: batch.length === 0 ? heldReason : null, holds };

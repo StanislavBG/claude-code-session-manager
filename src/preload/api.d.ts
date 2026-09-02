@@ -525,6 +525,24 @@ export interface ScheduleJob {
    *  lost — set whenever the commit-guard's worktree or in-place salvage
    *  pass produced one (PRD 1098). */
   salvagePatch?: string | null;
+  /** Why a pending row is not being dispatched this tick (worktree cap, launch circuit breaker). */
+  heldReason?: string;
+  /** Set when this row's last dispatch never got a model turn (issue #11): the
+   *  API's own message, and how many times in a row it has happened. Cleared
+   *  by the next run that finalizes. */
+  launchFailure?: {
+    kind: ScheduleLaunchFailureKind;
+    httpStatus: number | null;
+    message: string;
+    at: string;
+    runId: string | null;
+    count: number;
+    mitigationApplied: boolean;
+  };
+  /** Closed-set outcome taxonomy stamped at finalize: 'completed',
+   *  'impl_failed:exit_N', 'signal_kill', 'signal_kill_with_commit',
+   *  'verifier:<verdict>', 'worktree_integration_failed', 'launch_failure:<kind>'. */
+  terminalReason?: string;
   /** The newly-dirty paths a terminal run left uncommitted, diffed against
    *  the pre-run baseline — set on EVERY terminal outcome that left dirt
    *  (completed/failed/needs_review alike, not just the exit=0 commit-guard
@@ -636,8 +654,51 @@ export interface SchedulePollHealth {
 /** One `pending` job held by an unsatisfied dependency, and which dep. */
 export interface ScheduleJobHold {
   slug: string;
-  dep: string;
-  depStatus: string;
+  /** The dependency slug holding this row, or null for a non-dependency hold (launch circuit breaker). */
+  dep: string | null;
+  depStatus: string | null;
+  /** Human-readable hold reason when `dep` is null. */
+  reason?: string | null;
+}
+
+/** Why a headless run never got a model turn (lib/launchFailure.cjs, issue #11). */
+export type ScheduleLaunchFailureKind =
+  | 'model_config_rejected'
+  | 'bad_request'
+  | 'auth_failed'
+  | 'model_not_found'
+  | 'api_overloaded'
+  | 'api_error';
+
+/** One persona's open launch circuit breaker. Keyed by the PRD `agentType` (or 'default' / 'investigation'). */
+export interface ScheduleLaunchBlock {
+  kind: ScheduleLaunchFailureKind;
+  httpStatus: number | null;
+  /** The API's own message, verbatim (bounded). */
+  message: string;
+  /** Operator-facing explanation + the action that clears it. */
+  hint: string;
+  since: string;
+  lastAt: string;
+  /** ISO time of the next half-open probe; null = exhausted (waits for a CLI version change or Retry). */
+  until: string | null;
+  attempts: number;
+  exhausted: boolean;
+  claudeVersion: string | null;
+  lastSlug: string | null;
+  lastRunId: string | null;
+  mitigationEnv: Record<string, string> | null;
+  mitigationApplied: boolean;
+  probing: { slug: string; at: string } | null;
+}
+
+/** Degraded-mode env a persona is currently launching with (e.g. thinking disabled for an outdated CLI). */
+export interface ScheduleLaunchMitigation {
+  kind: ScheduleLaunchFailureKind;
+  env: Record<string, string>;
+  since: string;
+  claudeVersion: string | null;
+  hint: string;
 }
 
 /** Outcome of the scheduler's last tick — why the batch was (or wasn't) fired.
@@ -684,6 +745,10 @@ export interface ScheduleStateSnapshot {
   nextReset: string | null;
   /** Set when scheduler self-paused (rate-limit detected). null when running normally. */
   paused: SchedulePauseInfo | null;
+  /** Launch circuit breakers currently open, keyed by persona. Empty when every persona can launch. */
+  launchBlocks?: Record<string, ScheduleLaunchBlock>;
+  /** Degraded-mode launch env in force per persona. Empty when nothing is degraded. */
+  launchMitigations?: Record<string, ScheduleLaunchMitigation>;
   /** Latest five_hour utilization percent (0–100) cached from billing.fetchUsage. null if unknown. */
   utilization: number | null;
   /** Poll health — last billing poll result; used to detect stale utilization. */

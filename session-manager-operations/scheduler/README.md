@@ -111,3 +111,35 @@ large enough to matter), that's a deliberate decision made in an Epic the human 
 per `ops-maintenance-protocol.md` Pattern E/F — never a file-age/size-based deletion made
 unilaterally by a sweep agent or ad hoc script. Building an automatic pruning mechanism is out of
 scope here and would need its own proposed Epic.
+
+## Launch circuit breaker (non-runs are not failures)
+
+A run whose FIRST API request is rejected — `num_turns ≤ 1`, `output_tokens 0`, result text
+`API Error: <status> …` — never got a model turn. That is a broken environment (an outdated
+CLI sending a parameter the model rejects, expired credentials, an unknown `--model`, an
+overloaded API), not a failed PRD. GitHub issue #11 (macOS, 2026-09-02) had 12 of 41 runs
+in one project recorded as `failed` with `error: null` this way, each followed by an
+investigation probe that died identically.
+
+`src/main/lib/launchFailure.cjs` classifies it (`classifyLaunchFailure`) and
+`scheduler.cjs` routes it:
+
+- The row returns to `pending` with the API's own message as `error`, a `launchFailure`
+  record, `terminalReason: launch_failure:<kind>`, and a `heldReason`. No retry budget is
+  consumed, no auto-fix investigation is spawned, and the row is never marked `failed`.
+- The persona's breaker (`launchBlocks[<agentType>]` in the machine state file) opens with
+  exponential backoff (kind-specific base, 1 h cap, exhausted after 8 attempts). Every
+  pending row of that persona is held with the reason; other personas keep running.
+- When the backoff elapses exactly ONE row is dispatched as the half-open probe. A real
+  turn closes the breaker. A `claude --version` change (the actual fix: `claude update`)
+  clears it immediately. Resume / Run now clears every breaker (the human is asserting the
+  environment is fixed).
+- `model_config_rejected` probes run with `MAX_THINKING_TOKENS=0`; if that gets through,
+  the env is kept as `launchMitigations[<persona>]` (amber banner) until the CLI version
+  changes, so the queue keeps moving in degraded mode instead of flapping.
+- Every finalized run also writes `<slug>.outcome.json` (turns, tokens, verdict,
+  `terminalReason`) next to its log, and every finalized row carries a closed-set
+  `terminalReason`, so a non-start is distinguishable from an implementation failure
+  without opening a transcript.
+- Headless jobs launch with `SM_SCHEDULER_JOB_SLUG` set; `scheduler_create_prd` refuses
+  calls from inside one unless `SM_SCHEDULER_JOB_MAY_QUEUE=1` (architect persona only).

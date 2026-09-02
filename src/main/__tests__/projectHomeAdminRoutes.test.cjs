@@ -155,6 +155,17 @@ test('contract: self-sufficient — 5 lenses, non-empty slots, absolute paths, n
   // reason).
   const operationalFields = JSON.stringify({ protocol: body.protocol, catalog: body.catalog, paths: body.paths });
   expect(operationalFields).not.toMatch(/src\/renderer|src\/main|scripts\//);
+  // PRD 1093's exact banned-substring list (the class of path that broke
+  // generation on a foreign machine before this route existed).
+  for (const banned of [
+    'session-manager-operations/architecture/',
+    'session-manager-operations/design-mocks/',
+    '.claude/agents/',
+    'src/renderer/',
+    'npm run build:project-pages',
+  ]) {
+    expect(operationalFields, `operational fields must not mention "${banned}"`).not.toContain(banned);
+  }
 });
 
 test('contract: rejects a missing/non-absolute cwd with a structured error, not a throw', async () => {
@@ -441,4 +452,34 @@ test('status: reflects what render() just wrote', async () => {
     expect(body.output[lens].exists).toBe(true);
     expect(typeof body.output[lens].mtimeMs).toBe('number');
   }
+});
+
+// ─── bilkoHost interaction (PRD 1093) ─────────────────────────────────
+// bilkoHost.cjs reads opsPath(cwd, 'project-pages', 'output', 'marketing.html')
+// (around line 107) and opsPath(cwd, 'project-pages', 'output', `${lens}.html`)
+// for project-page-lens documents (around line 219). Prove render()'s real
+// output satisfies both read paths, so the publish half of the pipeline
+// doesn't silently break the next time this file's output layout changes.
+test('render output lands exactly where bilkoHost.cjs expects it', async () => {
+  const cwd = await mkProjectCwd();
+  fs.writeFileSync(path.join(cwd, 'package.json'), JSON.stringify({ name: 'demo-app', version: '1.0.0' }));
+  const fake = makeFakeAdminHttp();
+  registerAdminRoute(fake);
+
+  const contract = await fake.call('GET', '/admin/project-home/contract', { query: new URLSearchParams({ cwd }) });
+  const picks = picksFromCatalog(contract.body.catalog);
+  await fake.call('POST', '/admin/project-home/render', { body: { cwd, summary: validSummary(), picks } });
+
+  const bilkoHost = require('../bilkoHost.cjs');
+  const hostState = await bilkoHost.get({ cwd });
+  expect(hostState.hasMarketingPage).toBe(true);
+
+  await bilkoHost.addDocument({
+    cwd,
+    subpath: 'feature',
+    title: 'Feature',
+    source: { kind: 'project-page-lens', lens: 'feature' },
+  });
+  const result = await bilkoHost.prepareBundle({ cwd, slug: 'demo-app' });
+  expect(fs.existsSync(path.join(result.distPath, 'feature', 'index.html'))).toBe(true);
 });

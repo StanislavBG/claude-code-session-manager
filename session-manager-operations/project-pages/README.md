@@ -13,9 +13,11 @@ session-manager-operations/project-pages/
                       (src/renderer/lib/projectPages/summaryType.ts)
   picks.json        — Stage 2 slot→variant picks (per lens)
   output/
+    home.html
     marketing.html
     feature.html
     architecture.html
+    brief.html
     manifest.json   — { generatedAt, ... }
 ```
 

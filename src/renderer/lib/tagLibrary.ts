@@ -65,7 +65,7 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     tag: 'project-home-builder',
     label: 'Project Home Builder',
     description:
-      'Generates a project\'s 3 static Project Page HTML files via the project-home-builder local agent — see session-manager-operations/architecture/project-pages-pipeline.md. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
+      'Generates a project\'s 5 static Project Page HTML files (home, marketing, feature, architecture, brief) via the project-home-builder local agent — see session-manager-operations/architecture/project-pages-pipeline.md. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
     developsVia: 'project-home-builder agent protocol (falls back to /develop only if that pipeline doesn\'t exist yet)',
   },

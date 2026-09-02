@@ -11,7 +11,7 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -160,6 +160,90 @@ test('[job] merge-commit message text is byte-for-byte unchanged from the pre-ge
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
+test('[job] integration is skipped (carried-wip-only) when the branch only commits the carried base WIP, and the base tree stays untouched', async () => {
+  const slug = 'test-slug-carried-wip-only';
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.carriedPaths).toEqual(['README.md']);
+
+  // The job commits exactly the carried content, doing no other work.
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'commit carried README'], worktree.dir);
+
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, carriedPaths: worktree.carriedPaths });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(false);
+  expect(outcome.reason).toBe('carried-wip-only');
+
+  const headAfter = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  expect(headAfter).toBe(headBefore);
+  // The base tree's own uncommitted README edit is untouched — never
+  // discarded, never re-applied.
+  expect(git(['status', '--porcelain'], repoCwd)).toContain('README.md');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: !outcome.ok });
+});
+
+test('[job] a branch that commits carried paths ALONGSIDE its own work still attempts integration normally (no silent drop)', async () => {
+  const slug = 'test-slug-carried-plus-own-work';
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.carriedPaths).toEqual(['README.md']);
+
+  fs.writeFileSync(path.join(worktree.dir, 'new-file.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit touching carried path + own work'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, carriedPaths: worktree.carriedPaths });
+  // The base tree still holds README.md dirty, so a real merge attempt here
+  // is expected to fail exactly like the existing worktreeIntegrationFailure
+  // path — branch preserved, not merged, not silently discarded.
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toBeTruthy();
+
+  const branches = git(['branch', '--list', worktree.branch], repoCwd);
+  expect(branches).toContain(worktree.branch.replace('sm-job/', ''));
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] a branch that ADDS its own edit on top of the carried content on the SAME path is never classified carried-wip-only (content-verify, not path-only)', async () => {
+  const slug = 'test-slug-carried-same-path-plus-edit';
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.carriedPaths).toEqual(['README.md']);
+
+  // The job's real work lands on the SAME path the base tree had WIP on —
+  // committing MORE than just the carried content. A path-only check would
+  // wrongly see "only README.md changed, and README.md was carried" and
+  // classify this as carried-wip-only, causing the caller to delete this
+  // branch (and the job's real commit with it) instead of attempting a
+  // normal merge.
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'uncommitted tracked edit\njob added this line\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job extends the carried README further'], worktree.dir);
+
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, carriedPaths: worktree.carriedPaths });
+  // The base tree still holds README.md dirty, so a real merge attempt here
+  // is expected to fail exactly like the existing worktreeIntegrationFailure
+  // path — branch preserved, not merged, not silently discarded.
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toBeTruthy();
+  expect(outcome.reason).not.toBe('carried-wip-only');
+
+  const headAfter = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  expect(headAfter).toBe(headBefore);
+  const branches = git(['branch', '--list', worktree.branch], repoCwd);
+  expect(branches).toContain(worktree.branch.replace('sm-job/', ''));
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
 test('[job] falls back with a reason for a non-git cwd', async () => {
   const nonGitDir = path.join(tmpRoot, 'not-a-repo');
   fs.mkdirSync(nonGitDir, { recursive: true });
@@ -168,11 +252,47 @@ test('[job] falls back with a reason for a non-git cwd', async () => {
   expect(result.reason).toMatch(/not a git repository/);
 });
 
-test('[job] falls back with a reason for a dirty base tree with a modified TRACKED file (never silently drops uncommitted human WIP)', async () => {
+test('[job] a dirty tracked base file is carried into the worktree with identical content, and the base tree is never written to', async () => {
   fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const statusBefore = git(['status', '--porcelain'], repoCwd);
+  const stashBefore = git(['stash', 'list'], repoCwd);
+
   const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });
-  expect(result.ok).toBe(false);
-  expect(result.reason).toMatch(/uncommitted changes/);
+  expect(result.ok).toBe(true);
+  expect(result.carriedPaths).toEqual(['README.md']);
+  expect(fs.readFileSync(path.join(result.dir, 'README.md'), 'utf8')).toBe('uncommitted tracked edit\n');
+
+  const statusAfter = git(['status', '--porcelain'], repoCwd);
+  const stashAfter = git(['stash', 'list'], repoCwd);
+  expect(statusAfter).toBe(statusBefore);
+  expect(stashAfter).toBe(stashBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});
+
+test('[job] an untracked-only dirty base file is NOT carried and stays on the existing clean-create path', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'scratch.txt'), 'stray scratch file\n', 'utf8');
+  const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });
+  expect(result.ok).toBe(true);
+  expect(result.carriedPaths).toEqual([]);
+  expect(fs.existsSync(path.join(result.dir, 'scratch.txt'))).toBe(false);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});
+
+test('[job] carry-over failure (git apply cannot apply) degrades cleanly: worktree torn down, ok:false, active count released', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const spy = vi.spyOn(gitWorktree, 'captureAndCarryBaseDiff').mockResolvedValue({ ok: false, reason: 'simulated git apply failure' });
+  try {
+    const before = gitWorktree._getActiveWorktreeCountForTests('job');
+    const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/carry-over of base WIP failed/);
+    expect(gitWorktree._getActiveWorktreeCountForTests('job')).toBe(before);
+    const list = git(['worktree', 'list', '--porcelain'], repoCwd);
+    expect(list).not.toContain('sm-job/x');
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('[job] falls back once the concurrency cap is reached, and recovers after cleanup', async () => {

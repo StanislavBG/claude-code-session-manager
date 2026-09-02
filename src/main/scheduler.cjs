@@ -3778,6 +3778,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         });
       }
     }
+    // Base-tree WIP carried into the worktree (createWorktree, PRD 1094) —
+    // recorded on the job row so integration can exclude these paths from
+    // the branch diff below, and so it's queryable from the queue.
+    const carriedPaths = (worktree.ok && Array.isArray(worktree.carriedPaths)) ? worktree.carriedPaths : [];
+    if (carriedPaths.length) {
+      await mutate((s) => {
+        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+        if (idx >= 0) s.jobs[idx].carriedPaths = carriedPaths;
+      });
+    }
 
     // Integrate the job's branch back into guardCwd's own HEAD, THEN tear the
     // worktree checkout down — both must happen BEFORE any git read below
@@ -3823,7 +3833,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
           }
         }
-        const integration = await jobWorktree.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug });
+        const integration = await jobWorktree.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths });
+        if (integration.ok && integration.reason === 'carried-wip-only') {
+          console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} touched only carried base WIP paths — skipping merge (carried-wip-only)`);
+        }
         if (!integration.ok) {
           worktreeIntegrationFailure = integration.reason;
           console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);

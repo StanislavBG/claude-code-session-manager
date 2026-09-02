@@ -206,15 +206,66 @@ async function removeWorktreeDir(cwd, dir) {
 }
 
 /**
- * Create a linked worktree on a fresh branch checked out from the main
- * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd }` on
- * success, or `{ ok: false, reason }` — the reason is always a short,
- * human-readable string meant to be logged verbatim so a fallback to running
- * in place is never silent.
+ * Capture the base tree's outstanding TRACKED diff (`git diff HEAD
+ * --binary` — read-only, never stages or touches `cwd`) and apply it inside
+ * the freshly created worktree `dir`, so a job started against a dirty base
+ * tree sees the SAME content it would have seen running in place, without
+ * the base tree ever being written to. Returns `{ ok: true, paths }` or
+ * `{ ok: false, reason }`; never throws.
  *
- * Never throws: every failure mode (not a repo, dirty base, cap reached, git
- * error) is a normal, expected outcome for a project that hasn't opted into
- * — or currently can't support — isolation, not an exceptional one.
+ * This is deliberately read-context, not work-product: the authoritative
+ * copy of the human's WIP stays in `cwd` the whole time. Nothing here ever
+ * `git add`s or commits the carried paths on the job's behalf, and nothing
+ * ever restores them back into `cwd` — they were never removed from it.
+ */
+async function captureAndCarryBaseDiff({ cwd, dir }) {
+  let paths = [];
+  let patch = '';
+  try {
+    const nameOut = await execGit(['diff', 'HEAD', '--name-only'], { cwd, timeout: 15_000 });
+    paths = nameOut.split('\n').map((l) => l.trim()).filter(Boolean);
+    patch = await execGit(['diff', 'HEAD', '--binary'], { cwd, timeout: 30_000 });
+  } catch (e) {
+    return { ok: false, reason: `capturing base diff failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  if (!patch || !patch.trim()) return { ok: true, paths: [] };
+
+  const patchFile = path.join(os.tmpdir(), `sm-worktree-carry-${crypto.randomBytes(8).toString('hex')}.patch`);
+  try {
+    await fsp.writeFile(patchFile, patch, 'utf8');
+    await execGit(['apply', '--binary', patchFile], { cwd: dir, timeout: 30_000 });
+  } catch (e) {
+    return { ok: false, reason: `git apply failed: ${(e && (e.stderrText || e.message)) || e}` };
+  } finally {
+    try { await fsp.rm(patchFile, { force: true }); } catch { /* best-effort */ }
+  }
+  return { ok: true, paths };
+}
+
+/**
+ * Create a linked worktree on a fresh branch checked out from the main
+ * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
+ * carriedPaths }` on success, or `{ ok: false, reason }` — the reason is
+ * always a short, human-readable string meant to be logged verbatim so a
+ * fallback to running in place is never silent.
+ *
+ * A dirty base tree (tracked modifications) no longer disables isolation —
+ * a worktree only ever checks out committed HEAD content, so the base
+ * tree's outstanding diff is captured and applied inside the fresh worktree
+ * (`captureAndCarryBaseDiff`) instead: the job sees the same content it
+ * would have seen running in place, while the shared base tree is never
+ * written to and stays untouchable for the run's whole duration. If that
+ * capture/apply fails for any reason (binary conflict, non-zero `git
+ * apply`), creation degrades to the OLD behaviour — the worktree is torn
+ * down and this returns `{ ok: false, reason: 'carry-over of base WIP
+ * failed: ...' }` — so this change can never turn a working fallback into a
+ * hard failure. `carriedPaths` (possibly empty) is threaded back so callers
+ * can exclude the human's carried WIP from branch integration.
+ *
+ * Never throws: every failure mode (not a repo, cap reached, carry-over
+ * failure, git error) is a normal, expected outcome for a project that
+ * hasn't opted into — or currently can't support — isolation, not an
+ * exceptional one.
  */
 async function createWorktree({ kind, cwd, key }) {
   configFor(kind); // throws on an unknown kind before anything else runs
@@ -224,12 +275,7 @@ async function createWorktree({ kind, cwd, key }) {
 
   if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
 
-  // A dirty base tree means the caller may be depending on the human's own
-  // uncommitted WIP in `cwd` — a worktree only ever checks out committed
-  // HEAD content, so isolating into one here would silently drop that WIP
-  // from what it sees. Falling back to running in place is strictly safer
-  // than guessing.
-  if (!(await isBaseTreeClean(cwd))) return { ok: false, reason: 'base working tree has uncommitted changes' };
+  const baseWasClean = await isBaseTreeClean(cwd);
 
   if (activeWorktreeCount[kind] >= getMaxConcurrentWorktrees(kind)) {
     return { ok: false, reason: `worktree cap reached (${getMaxConcurrentWorktrees(kind)} concurrent)` };
@@ -256,7 +302,23 @@ async function createWorktree({ kind, cwd, key }) {
     activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
     return { ok: false, reason: `git worktree add failed: ${(e && (e.stderrText || e.message)) || e}` };
   }
-  return { ok: true, dir, branch, baseCwd: cwd };
+
+  let carriedPaths = [];
+  if (!baseWasClean) {
+    // Routed through module.exports (not the bare local function) so tests
+    // can substitute a failing carry-over without needing a real git-apply
+    // conflict fixture — see gitWorktree.test.cjs's carry-over-failure case.
+    const carry = await module.exports.captureAndCarryBaseDiff({ cwd, dir });
+    if (!carry.ok) {
+      await removeWorktreeDir(cwd, dir);
+      try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* best-effort */ }
+      activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+      return { ok: false, reason: `carry-over of base WIP failed: ${carry.reason}` };
+    }
+    carriedPaths = carry.paths;
+  }
+
+  return { ok: true, dir, branch, baseCwd: cwd, carriedPaths };
 }
 
 /**
@@ -269,8 +331,16 @@ async function createWorktree({ kind, cwd, key }) {
  * e.g. a genuine content conflict. On failure the branch is left un-merged
  * and NOT deleted (see cleanupWorktree) so the work is recoverable, never
  * silently discarded.
+ *
+ * `carriedPaths` (optional — from createWorktree's WIP carry-over) skips the
+ * merge entirely, returning `{ ok: true, integrated: false, reason:
+ * 'carried-wip-only' }`, when the branch's ONLY committed changes touch
+ * paths that were carried in as the human's base-tree WIP rather than the
+ * job's own work — landing such a commit would just re-apply the human's
+ * uncommitted edit back onto itself via a merge, and could conflict with
+ * the base tree still holding that same path dirty.
  */
-async function integrateBranch({ cwd, branch, key, kind }) {
+async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
   let branchHead;
   try {
@@ -286,6 +356,45 @@ async function integrateBranch({ cwd, branch, key, kind }) {
   }
   if (mergeBase && mergeBase === branchHead) {
     return { ok: true, integrated: false, reason: 'branch has no new commits' };
+  }
+
+  if (Array.isArray(carriedPaths) && carriedPaths.length) {
+    try {
+      const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+      const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+        // Path membership alone is NOT enough: a job that legitimately edits
+        // the SAME file the base tree had carried-in WIP on would otherwise
+        // have its real commit misclassified as "just the carried WIP" and
+        // dropped — the caller treats `integrated: false` as safe-to-delete
+        // the branch, so that commit would be gone for good, worse than the
+        // ordinary merge-conflict path (branch kept, flagged for manual
+        // recovery) this shortcut is supposed to be a safe subset of.
+        // Content-verify: only when every changed path's committed blob on
+        // `branch` is byte-identical to what's STILL sitting dirty in `cwd`
+        // right now proves the job committed exactly the carried WIP and
+        // nothing more. Any mismatch (including a read failure — fail
+        // toward the safer default) falls through to the normal merge
+        // attempt below instead of skipping.
+        let allIdentical = true;
+        for (const p of changed) {
+          try {
+            const branchContent = await execGit(['show', `${branch}:${p}`], { cwd, timeout: 10_000 });
+            const baseContent = await fsp.readFile(path.join(cwd, p), 'utf8');
+            if (branchContent !== baseContent) { allIdentical = false; break; }
+          } catch {
+            allIdentical = false;
+            break;
+          }
+        }
+        if (allIdentical) {
+          return { ok: true, integrated: false, reason: 'carried-wip-only' };
+        }
+      }
+    } catch {
+      // Best-effort classification only — if the diff can't be read, fall
+      // through to the normal integration attempt below.
+    }
   }
 
   try {
@@ -442,8 +551,8 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
 async function createJobWorktree({ cwd, slug }) {
   return createWorktree({ kind: 'job', cwd, key: slug });
 }
-async function integrateJobBranch({ cwd, branch, slug }) {
-  return integrateBranch({ kind: 'job', cwd, branch, key: slug });
+async function integrateJobBranch({ cwd, branch, slug, carriedPaths }) {
+  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths });
 }
 async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'job', cwd, dir, branch, keepBranch });
@@ -473,6 +582,7 @@ module.exports = {
   branchNameFor,
   keyFromBranch,
   createWorktree,
+  captureAndCarryBaseDiff,
   integrateBranch,
   cleanupWorktree,
   salvageWorktreeDiff,

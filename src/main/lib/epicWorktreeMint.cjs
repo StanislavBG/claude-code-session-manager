@@ -13,8 +13,11 @@
  * that can only run main-process side, so approveProposed fires this IPC
  * call fire-and-forget and patches `worktree` onto the session once it
  * resolves — the transition itself is never blocked or delayed by it, and a
- * failure (not a repo / dirty base tree / disabled / cap reached) simply
- * leaves `worktree` unset, exactly as if this call had never been made.
+ * failure (not a repo / disabled / cap reached / carry-over of a dirty base
+ * tree's WIP failed) simply leaves `worktree` unset, exactly as if this call
+ * had never been made. A dirty base tree itself no longer disables
+ * isolation — its outstanding diff is carried into the fresh worktree
+ * instead (gitWorktree.cjs's createWorktree).
  *
  * Mirrors promptSessionsCreateEpic.cjs's shape: `validatePath(cwd)` closes
  * the same "arbitrary renderer-supplied cwd" gap that handler documents,

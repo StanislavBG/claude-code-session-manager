@@ -80,12 +80,14 @@ test('a non-git cwd resolves to null rather than throwing (Epic proceeds unisola
   expect(result).toBeNull();
 });
 
-test('a dirty base tree resolves to null rather than throwing', async () => {
+test('a dirty base tree still creates the worktree, carrying the uncommitted edit in rather than falling back unisolated', async () => {
   const cwd = await mkRepoCwd();
   fs.writeFileSync(path.join(cwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
 
   const result = await handler(null, { cwd, epicId: 'epic-mint-3' });
-  expect(result).toBeNull();
+  expect(result).not.toBeNull();
+  expect(fs.readFileSync(path.join(result.dir, 'README.md'), 'utf8')).toBe('uncommitted tracked edit\n');
+  expect(fs.readFileSync(path.join(cwd, 'README.md'), 'utf8')).toBe('uncommitted tracked edit\n');
 });
 
 test('SM_EPIC_WORKTREE_DISABLE=1 resolves to null rather than throwing', async () => {

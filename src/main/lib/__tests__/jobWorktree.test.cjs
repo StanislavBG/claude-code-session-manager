@@ -142,11 +142,13 @@ test('falls back with a reason for a non-git cwd', async () => {
   expect(result.reason).toMatch(/not a git repository/);
 });
 
-test('falls back with a reason for a dirty base tree with a modified TRACKED file (never silently drops uncommitted human WIP)', async () => {
+test('a dirty tracked base file is carried into the worktree instead of disabling isolation (never silently drops uncommitted human WIP)', async () => {
   fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
   const result = await jobWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });
-  expect(result.ok).toBe(false);
-  expect(result.reason).toMatch(/uncommitted changes/);
+  expect(result.ok).toBe(true);
+  expect(result.carriedPaths).toEqual(['README.md']);
+  expect(fs.readFileSync(path.join(result.dir, 'README.md'), 'utf8')).toBe('uncommitted tracked edit\n');
+  await jobWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
 });
 
 test('falls back once the concurrency cap is reached, and recovers after cleanup', async () => {

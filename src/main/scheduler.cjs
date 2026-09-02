@@ -129,6 +129,7 @@ function resolveOriginSessionId(cwd, epicId) {
   return session && typeof session.claudeSessionId === 'string' ? session.claudeSessionId : null;
 }
 const sessionSlots = require('./lib/sessionSlots.cjs');
+const quietMachineLease = require('./lib/quietMachineLease.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
@@ -1732,6 +1733,7 @@ async function reconcile(state) {
       // membership, so moving the file between Epic dirs must re-point the row.
       epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
+      quietMachine: p.quietMachine === true,
       originSessionId: job.originSessionId
         ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
@@ -1843,6 +1845,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId ?? inv.row?.sourceTabId ?? null,
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
+      quietMachine: p.quietMachine === true,
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
     };
@@ -1963,6 +1966,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId,
       epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
+      quietMachine: p.quietMachine === true,
       originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       status: 'pending',
@@ -3098,6 +3102,20 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
       digestText = '';
     }
   }
+  // Quiet-machine degraded dispatch (PRD 1107): this job opted into
+  // `quietMachine: true` but waited past quietMachineWaitMs() without the
+  // machine ever going quiet, so pickNextBatch dispatched it anyway rather
+  // than wedge the queue forever. Told to the executor as a plain prompt
+  // line — its own wall-clock/timing acceptance criteria were measured (or
+  // will be measured) under CPU contention from sibling jobs, not on a
+  // quiet machine, so it should not report a timing result as trustworthy
+  // without saying so.
+  if (job.quietLeaseDegraded === true) {
+    prompt = `NOTE: this job requested \`quietMachine: true\` but the machine never went idle within the `
+      + `configured wait window, so it was dispatched anyway (degraded). Any timing/frame-rate/performance `
+      + `measurement in this run may be affected by CPU contention from other concurrent jobs — say so explicitly `
+      + `in your result rather than reporting it as a clean measurement.\n\n${prompt}`;
+  }
   // Always route through composeExecutorPrompt (even with an empty digest)
   // so the finish protocol is appended in the prompt's tail exactly once,
   // after any digest fence rather than concatenated ahead of it.
@@ -3735,6 +3753,16 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     return;
   }
   runningSet.add(job.slug);
+  // Exclusive quiet-machine lease (PRD 1107) — acquired here, in the same
+  // slot-acquire/dispatch step as sessionSlots, and released in this
+  // function's own finally below alongside sessionSlots.release, so every
+  // exit path (normal exit, timeout, SIGTERM, crash) that already frees the
+  // session slot also frees the lease. pickNextBatch only ever hands this
+  // function a quietMachine job when the lease was free at pick time, so
+  // acquire() here should never fail in practice — but check anyway rather
+  // than assume, since a lease held by a stale slug would otherwise wedge
+  // silently.
+  const quietLeaseAcquired = job.quietMachine === true && quietMachineLease.acquire(job.slug);
   try {
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
@@ -3742,6 +3770,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         transitionJob(s.jobs[idx], 'running', { reason: 'dispatched for execution', source: 'spawnJob:dispatch' });
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
+        if (job.quietMachine === true) {
+          s.jobs[idx].quietMachine = true;
+          s.jobs[idx].quietLeaseDegraded = job.quietLeaseDegraded === true;
+        }
       }
     });
     await broadcast({ flush: true });
@@ -4382,6 +4414,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     runningSet.delete(job.slug);
     // Slot release notifies subscribed pumps (chat lane) machine-wide.
     sessionSlots.release(slotToken);
+    // Release the exclusive quiet-machine lease on EVERY exit path this
+    // finally covers (normal exit, timeout, SIGTERM, crash) — see the
+    // acquire-site comment above. Bounded: a lease this function never
+    // acquired is simply a no-op release.
+    if (quietLeaseAcquired) quietMachineLease.release(job.slug);
     // Each job completion is a signal to advance the queue.
     tickQueue().catch(() => {});
   }
@@ -4420,7 +4457,11 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     // cap that sessionSlots.cjs was written to replace — which silently
     // ceilinged the queue at 3 while the pool the user configured said 5.
     const freeSlots = sessionSlots.available();
-    const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots);
+    const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots, {
+      leaseHeld: quietMachineLease.isHeld(),
+      machineInUse: sessionSlots.inUse(),
+      now: Date.now(),
+    });
     if (batch.length === 0 && freeSlots === 0) {
       const snap = sessionSlots.snapshot();
       const pendingCount = state.jobs.filter((j) => j.status === 'pending').length;

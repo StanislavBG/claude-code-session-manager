@@ -171,6 +171,10 @@ const TOOLS = [
           enum: PRD_WORK_TYPES,
           description: 'Optional: the work type of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
         },
+        quietMachine: {
+          type: 'boolean',
+          description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',
+        },
       },
       required: ['title', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
     },

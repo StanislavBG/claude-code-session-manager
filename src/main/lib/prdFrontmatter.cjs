@@ -72,8 +72,8 @@ function splitFrontmatter(raw) {
  * into `extras`.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt', 'quietMachine']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt', 'quietMachine'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -130,6 +130,13 @@ function applyKey(fm, key, after) {
       return;
     case 'issuedAt':
       fm.issuedAt = String(v);
+      return;
+    case 'quietMachine':
+      // Opt-in exclusive-lease flag (PRD 1107) — only a literal `true`
+      // frontmatter value opts in; anything else (including an explicit
+      // `false`) is treated as "not set" so the field never round-trips as
+      // a no-op line for the overwhelming majority of PRDs that omit it.
+      if (v === true) fm.quietMachine = true;
       return;
   }
 }

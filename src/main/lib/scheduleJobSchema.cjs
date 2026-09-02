@@ -86,6 +86,15 @@ const ScheduleJobSchema = z
     sourcePromptId: z.string().nullable().optional(),
     epicId: z.string().nullable().optional(),
     statusHistory: z.array(ScheduleJobStatusHistoryEntrySchema).optional(),
+    // Opt-in exclusive-lease PRD flag (PRD 1107) — serializes this job against
+    // every other job machine-wide for its run so a timing-sensitive gate
+    // (frame time, performance fence) measures without CPU contention. See
+    // quietMachineLease.cjs + schedulerBatch.cjs's pickNextBatch.
+    quietMachine: z.boolean().optional(),
+    // Set true when the job was dispatched anyway after waiting past
+    // quietMachineWaitMs without the machine going quiet — tells a reader the
+    // job's measurements ran under contention, not on a quiet machine.
+    quietLeaseDegraded: z.boolean().optional(),
   })
   .passthrough();
 

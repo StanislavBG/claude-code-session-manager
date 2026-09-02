@@ -500,6 +500,16 @@ export interface ScheduleJob {
    *  change be reviewed after the fact instead of only inferred from a
    *  heartbeat count. */
   statusHistory?: ScheduleJobStatusHistoryEntry[];
+  /** Opt-in PRD frontmatter flag (PRD 1107): dispatched only when zero other
+   *  jobs are running machine-wide, and holds an exclusive lease over the
+   *  whole session-slot pool for its run — no other job dispatches while it
+   *  is running. For timing-sensitive acceptance criteria (frame time,
+   *  performance fences) that need to trust their own numbers. */
+  quietMachine?: boolean;
+  /** True when a `quietMachine` job was dispatched anyway after waiting past
+   *  the configurable quiet-wait interval without the machine going quiet —
+   *  tells a reader its measurements ran under contention. */
+  quietLeaseDegraded?: boolean;
 }
 
 export interface ScheduleJobStatusHistoryEntry {
@@ -1838,6 +1848,7 @@ export interface PromptSessionsCreateWorktreeResult {
   branch: string;
   baseCwd: string;
   status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled';
+  carriedPaths?: string[];
 }
 
 // ─────────────────────────────────── PromptSessions merge-to-main (main-side integrateEpicBranch)
@@ -1846,6 +1857,7 @@ export interface PromptSessionsMergeToMainPayload {
   epicId: string;
   branch: string;
   dir: string;
+  carriedPaths?: string[];
 }
 
 export interface PromptSessionsMergeToMainResult {

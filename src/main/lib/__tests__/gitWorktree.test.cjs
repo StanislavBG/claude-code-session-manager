@@ -530,3 +530,116 @@ test('isBaseTreeClean still reports dirty for a modified TRACKED file', async ()
   fs.writeFileSync(path.join(repoCwd, 'README.md'), 'modified tracked content\n', 'utf8');
   expect(await gitWorktree.isBaseTreeClean(repoCwd)).toBe(false);
 });
+
+// ──────────────────────────────────────────── orphaned on-disk checkouts (PRD 1108)
+
+test('[job] cleanupWorktree rmdirs the now-empty parent hash dir, but a sibling checkout in the same hash dir survives', async () => {
+  const first = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'sibling-a' });
+  const second = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'sibling-b' });
+  expect(first.ok).toBe(true);
+  expect(second.ok).toBe(true);
+  const hashDir = path.dirname(first.dir);
+  expect(path.dirname(second.dir)).toBe(hashDir);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: first.dir, branch: first.branch });
+  expect(fs.existsSync(first.dir)).toBe(false);
+  // The hash dir must survive — the sibling checkout still lives under it.
+  expect(fs.existsSync(hashDir)).toBe(true);
+  expect(fs.existsSync(second.dir)).toBe(true);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: second.dir, branch: second.branch });
+  expect(fs.existsSync(second.dir)).toBe(false);
+  // Now that the last sibling is gone, the empty hash dir is reclaimed too.
+  expect(fs.existsSync(hashDir)).toBe(false);
+});
+
+test('[job] reconcileWorktreesOnBoot reclaims an orphaned on-disk checkout for a project cwd it was never handed', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'orphan-old' });
+  expect(worktree.ok).toBe(true);
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  // Simulate age: back-date the checkout dir's mtime well past the 1s
+  // threshold used below, without touching anything about its content.
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(worktree.dir, old, old);
+
+  // No cwd handed in at all — this is the "project no longer tracked" case
+  // the per-cwd loop can never reach on its own.
+  await gitWorktree.reconcileWorktreesOnBoot([], { kind: 'job', staleAgeMs: 1_000 });
+
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+  // The hash dir it lived under is empty now and must be reclaimed too.
+  expect(fs.existsSync(path.dirname(worktree.dir))).toBe(false);
+  // The main tree's own worktree registration must not be left dangling.
+  const list = git(['worktree', 'list', '--porcelain'], repoCwd);
+  expect(list).not.toContain(worktree.dir);
+});
+
+test('[job] reconcileWorktreesOnBoot never reclaims a fresh, in-use checkout younger than the age threshold', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'fresh-in-use' });
+  expect(worktree.ok).toBe(true);
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+
+  await gitWorktree.reconcileWorktreesOnBoot([], { kind: 'job', staleAgeMs: 24 * 60 * 60 * 1000 });
+
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[epic] the orphan sweep age threshold defaults much higher (7 days) than the job kind (24h)', () => {
+  expect(gitWorktree.getStaleSweepAgeMs('job')).toBe(24 * 60 * 60 * 1000);
+  expect(gitWorktree.getStaleSweepAgeMs('epic')).toBe(7 * 24 * 60 * 60 * 1000);
+});
+
+test('[epic] SM_EPIC_WORKTREE_STALE_MS overrides the epic orphan-sweep age threshold independently of the job env var', () => {
+  const original = process.env.SM_EPIC_WORKTREE_STALE_MS;
+  try {
+    process.env.SM_EPIC_WORKTREE_STALE_MS = '12345';
+    expect(gitWorktree.getStaleSweepAgeMs('epic')).toBe(12345);
+    expect(gitWorktree.getStaleSweepAgeMs('job')).toBe(24 * 60 * 60 * 1000);
+  } finally {
+    if (original === undefined) delete process.env.SM_EPIC_WORKTREE_STALE_MS;
+    else process.env.SM_EPIC_WORKTREE_STALE_MS = original;
+  }
+});
+
+test('[job] sweepStaleWorktreeCheckouts treats staleAgeMs: 0 as "reclaim immediately", not as "unset — use the default"', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'zero-age' });
+  expect(worktree.ok).toBe(true);
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+
+  const result = await gitWorktree.sweepStaleWorktreeCheckouts('job', { staleAgeMs: 0 });
+
+  expect(result.checkoutsRemoved).toBe(1);
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+});
+
+test('[job] sweepStaleWorktreeCheckouts never deletes anything outside its own kind root, even via a symlink shaped like a traversal', async () => {
+  const outsideDir = path.join(tmpRoot, 'outside-root');
+  fs.mkdirSync(outsideDir, { recursive: true });
+  const markerFile = path.join(outsideDir, 'do-not-delete.txt');
+  fs.writeFileSync(markerFile, 'still here\n', 'utf8');
+
+  const root = gitWorktree.worktreeRootFor('job');
+  const hashDir = path.join(root, 'traversal-hash-dir');
+  fs.mkdirSync(hashDir, { recursive: true });
+  const escapePath = path.join(hashDir, 'escape');
+  fs.symlinkSync(outsideDir, escapePath, 'dir');
+
+  const result = await gitWorktree.sweepStaleWorktreeCheckouts('job', { staleAgeMs: 0 });
+
+  expect(fs.existsSync(markerFile)).toBe(true);
+  expect(fs.existsSync(outsideDir)).toBe(true);
+  expect(result.checkoutsRemoved).toBe(0);
+
+  fs.rmSync(hashDir, { recursive: true, force: true });
+});
+
+test('[job] reconcileWorktreesOnBoot logs a one-shot report line with reclaimed counts', async () => {
+  const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/boot sweep \(kind:job\): reclaimed \d+ checkout\(s\), \d+ empty root dir\(s\)/));
+  } finally {
+    logSpy.mockRestore();
+  }
+});

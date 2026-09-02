@@ -51,7 +51,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, dependsOn,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, dependsOn, quietMachine,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -78,6 +78,12 @@ function buildPrdBody(input) {
   if (tag) fmLines.push(`tag: ${tag}`);
   // Explicit ordering (PRD 832): replaces the retired shared-NN convention.
   if (dependsOn && dependsOn.length) fmLines.push(`dependsOn: [${dependsOn.join(', ')}]`);
+  // Opt-in exclusive-lease flag (PRD 1107): serializes this job against
+  // every other job machine-wide for its run, for a PRD whose acceptance
+  // criteria are wall-clock/timing measurements that CPU contention from
+  // sibling jobs would otherwise invalidate. Only emitted when true — see
+  // prdFrontmatter.cjs's applyKey for the matching "only true opts in" parse.
+  if (quietMachine === true) fmLines.push('quietMachine: true');
   fmLines.push('---', '');
 
   const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');

@@ -14,9 +14,39 @@
 
 const path = require('node:path');
 const os = require('node:os');
-const { projectJobCap } = require('./schedulerConfig.cjs');
+const { projectJobCap, quietMachineWaitMs } = require('./schedulerConfig.cjs');
 
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
+
+/**
+ * The dep slug (if any) blocking `job` from running, per PRD 832's
+ * dependsOn semantics — a dep is blocking while a queue row for it exists
+ * in a non-completed state; a slug with no row is treated as already done
+ * (completed rows are retired to history shards). Resolves a dep by exact
+ * slug first, then by bare-name match (a human-authored `dependsOn:` can't
+ * know the `NN-` prefix the allocator will hand a sibling PRD — see
+ * pickForProject's own comment on this for the incident it fixes).
+ * Shared by pickForProject (per-project gating) and pickNextBatch's
+ * quiet-machine dispatch check (PRD 1107), so the two can never disagree
+ * about whether a job is eligible.
+ */
+function findBlockingDep(job, projectJobs) {
+  const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
+  const rowsByBareSlug = new Map();
+  for (const j of projectJobs) {
+    const bare = String(j.slug ?? '').replace(/^\d+-/, '');
+    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
+    rowsByBareSlug.get(bare).push(j);
+  }
+  const rowsForDep = (slug) => {
+    const exact = rowBySlug.get(slug);
+    if (exact) return [exact];
+    return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
+  };
+  return (job.dependsOn ?? []).find((slug) => (
+    rowsForDep(slug).some((dep) => dep.status !== 'completed')
+  ));
+}
 
 /**
  * Per-project batch picker. `dependsOn` is the ONLY ordering primitive.
@@ -63,7 +93,6 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   // Legacy jobs without dependsOn keep the shared-NN group semantics below
   // unchanged (lowest-number-first waves), so an in-flight mixed queue keeps
   // its order without migration.
-  const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
   // A PRD's filename slug carries the auto-allocated `NN-` prefix
   // (prdCreate.cjs builds `${nn}-${slug}`), but a human/agent authoring
   // `dependsOn:` writes the BARE name it chose — it cannot know the number
@@ -72,27 +101,25 @@ function pickForProject(projectJobs, runningSlugsInProject, slots) {
   // dependency gate into a no-op (observed live 2026-08-01: 22 PRDs listing
   // `leftnav-two-face-framework` while the real row was
   // `873-leftnav-two-face-framework`, all of them eligible immediately even
-  // though the framework PRD they build on had not landed). Resolve a dep by
-  // exact slug first, then fall back to matching rows whose slug is that dep
-  // with a leading `NN-` stripped.
-  const rowsByBareSlug = new Map();
-  for (const j of projectJobs) {
-    const bare = String(j.slug ?? '').replace(/^\d+-/, '');
-    if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
-    rowsByBareSlug.get(bare).push(j);
-  }
-  /** Every queue row a dep string refers to (exact match, else bare-name match). */
+  // though the framework PRD they build on had not landed). findBlockingDep
+  // resolves a dep by exact slug first, then falls back to matching rows
+  // whose slug is that dep with a leading `NN-` stripped.
+  const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
   const rowsForDep = (slug) => {
     const exact = rowBySlug.get(slug);
     if (exact) return [exact];
-    return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
+    const bare = String(slug ?? '').replace(/^\d+-/, '');
+    return projectJobs.filter((j) => String(j.slug ?? '').replace(/^\d+-/, '') === bare);
   };
-  const blockingDep = (j) => (j.dependsOn ?? []).find((slug) => (
-    rowsForDep(slug).some((dep) => dep.status !== 'completed')
-  ));
+  const blockingDep = (j) => findBlockingDep(j, projectJobs);
 
+  // quietMachine jobs (PRD 1107) never dispatch through the ordinary
+  // per-project picker — pickNextBatch's dedicated quiet-machine check
+  // (evaluated before this function is ever called) is the only path that
+  // can fire one, since dispatching one is a whole-tick, all-projects
+  // exclusive decision this per-project function can't see.
   const allPending = projectJobs.filter(
-    (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug),
+    (j) => j.status === 'pending' && !runningSlugsInProject.has(j.slug) && j.quietMachine !== true,
   );
   if (allPending.length === 0) return { batch: [], reason: null, holds: [] };
 
@@ -247,11 +274,33 @@ function enqueueTimestamp(job) {
  *   have the running count subtracted from it again. The scheduler no longer
  *   keeps a private concurrency cap of its own: per sessionSlots.cjs's own
  *   charter, caps belong to Session-Manager's one pool, not to each consumer.
+ * @param {object} [quietOpts] - PRD 1107 quiet-machine state, all pure inputs
+ *   so this function stays unit-testable without electron/sessionSlots:
+ *   - leaseHeld: true while a quiet-machine job is currently running
+ *     (quietMachineLease.cjs's isHeld()) — holds ALL dispatch, every project,
+ *     until it releases.
+ *   - machineInUse: sessionSlots.inUse() — jobs running machine-wide RIGHT
+ *     NOW (scheduler jobs AND chat runs). A quiet-machine job only dispatches
+ *     when this is 0, unless it has waited past quietMachineWaitMs().
+ *   - now: ms epoch, defaults to Date.now() (injectable for tests).
  * @returns {{ batch: object[], reason: string | null, holds: object[] }} Jobs
  *   to spawn this tick, plus (when batch is empty because a gate held it) the
  *   human-readable hold reason that would otherwise only reach console.log.
  */
-function pickNextBatch(allJobs, running, freeSlots) {
+function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
+  const { leaseHeld = false, machineInUse = 0, now = Date.now() } = quietOpts;
+
+  // Exclusive lease (PRD 1107): while a quiet-machine job is running, it
+  // holds the WHOLE pool — no other job, in any project, dispatches until it
+  // releases. Checked first, ahead of even the "anything pending?" early
+  // return, so the reason is always attributable to the lease rather than a
+  // generic drain.
+  if (leaseHeld) {
+    const reason = '[scheduler] quiet-machine: lease held by a running job — holding all dispatch until it releases';
+    console.log(reason);
+    return { batch: [], reason, holds: [] };
+  }
+
   if (!allJobs.some((j) => j.status === 'pending' && !running.has(j.slug))) {
     return { batch: [], reason: null, holds: [] };
   }
@@ -277,6 +326,34 @@ function pickNextBatch(allJobs, running, freeSlots) {
     const key = job.cwd || DEFAULT_PROJECT_CWD;
     if (!projectMap.has(key)) projectMap.set(key, []);
     projectMap.get(key).push(job);
+  }
+
+  // Quiet-machine dispatch (PRD 1107) — evaluated BEFORE the ordinary
+  // per-project round-robin, and as an ALL-OR-NOTHING decision for this
+  // tick: a quiet-machine job either fires alone (nothing else in this
+  // batch), or it doesn't fire and the ordinary round-robin runs unaffected.
+  // This is what makes "while it runs no other job is dispatched" true —
+  // ordinary jobs are simply never offered a slot in the SAME tick a quiet
+  // job dispatches.
+  if (slots > 0) {
+    const quietWaitMs = quietMachineWaitMs();
+    const quietPending = allJobs.filter(
+      (j) => j.status === 'pending' && !running.has(j.slug) && j.quietMachine === true,
+    );
+    for (const job of quietPending) {
+      const projectJobs = projectMap.get(job.cwd || DEFAULT_PROJECT_CWD) || [job];
+      if (findBlockingDep(job, projectJobs)) continue; // blocked — try the next quiet candidate
+      const machineQuiet = machineInUse === 0;
+      const waitedMs = now - enqueueTimestamp(job);
+      const degraded = !machineQuiet && waitedMs >= quietWaitMs;
+      if (!machineQuiet && !degraded) continue; // still waiting for a quiet machine
+      const reason = machineQuiet
+        ? `[scheduler] quiet-machine: dispatching ${job.slug} exclusively (machine idle)`
+        : `[scheduler] quiet-machine: dispatching ${job.slug} DEGRADED — waited ${Math.round(waitedMs / 60_000)}m ` +
+          `> ${Math.round(quietWaitMs / 60_000)}m without the machine going quiet`;
+      console.log(reason);
+      return { batch: [{ ...job, quietLeaseDegraded: degraded }], reason: null, holds: [] };
+    }
   }
 
   // Per-project candidates (only projects with pending work), each carrying
@@ -387,4 +464,6 @@ function findStarvedProjects(jobs, now, thresholdMs) {
   return out;
 }
 
-module.exports = { pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, DEFAULT_PROJECT_CWD };
+module.exports = {
+  pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, findBlockingDep, DEFAULT_PROJECT_CWD,
+};

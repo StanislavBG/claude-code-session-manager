@@ -129,7 +129,26 @@ module.exports = {
   // SM_LOAD_GATE_PER_CORE (float, clamped to [0.25, 4]; 0 disables).
   LOAD_GATE_PER_CORE: 0.85,
   loadGateThreshold,
+
+  // A `quietMachine: true` PRD (PRD 1107 — see quietMachineLease.cjs +
+  // schedulerBatch.cjs's pickNextBatch) waits for zero other jobs to be
+  // running machine-wide before it dispatches, so its own timing-sensitive
+  // acceptance criteria (frame time, performance fences) aren't measured
+  // under CPU contention. A queue's worth of ordinary jobs must never wedge
+  // behind one waiting forever: past this many ms of waiting it dispatches
+  // anyway, stamped `quietLeaseDegraded: true`. Override with
+  // SM_QUIET_MACHINE_WAIT_MINUTES (integer minutes, clamped to [1, 1440]).
+  DEFAULT_QUIET_MACHINE_WAIT_MS: 30 * 60_000,
+  quietMachineWaitMs,
 };
+
+function quietMachineWaitMs() {
+  const raw = process.env.SM_QUIET_MACHINE_WAIT_MINUTES;
+  if (raw === undefined || raw === '') return module.exports.DEFAULT_QUIET_MACHINE_WAIT_MS;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return module.exports.DEFAULT_QUIET_MACHINE_WAIT_MS;
+  return Math.min(1440, Math.max(1, parsed)) * 60_000;
+}
 
 function loadGateThreshold() {
   const raw = process.env.SM_LOAD_GATE_PER_CORE;

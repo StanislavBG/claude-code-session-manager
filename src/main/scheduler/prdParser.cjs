@@ -99,6 +99,10 @@ async function parsePrdRaw(filePath) {
     // quarantines it instead of queuing it to run.
     createdVia: fm.createdVia || null,
     issuedAt: fm.issuedAt || null,
+    // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
+    // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
+    // matches prdFrontmatter.cjs's applyKey semantics for this field.
+    quietMachine: fm.quietMachine === 'true',
     body: body.trim(),
   };
 }

@@ -77,6 +77,12 @@ const { execFile } = require('node:child_process');
 // The job cap's assumptions (few, short-lived, quickly-reclaimed checkouts)
 // simply don't transfer, so the epic kind gets a separately-configurable,
 // much higher ceiling rather than sharing the job kind's default.
+// staleSweepAgeEnv/defaultStaleSweepAgeMs back the on-disk orphan sweep
+// (reconcileWorktreesOnBoot's root-level pass, below) — how old an on-disk
+// checkout must be before it's reclaimed even though no caller-supplied cwd
+// vouches for it. The job default (24h) matches a job's whole lifetime being
+// minutes; the epic default (7d) matches an Epic legitimately living for
+// days, same rationale as defaultMax above.
 const KIND_CONFIG = {
   job: {
     root: path.join(os.tmpdir(), 'session-manager-job-worktrees'),
@@ -84,6 +90,8 @@ const KIND_CONFIG = {
     disableEnv: 'SM_JOB_WORKTREE_DISABLE',
     maxEnv: 'SM_JOB_WORKTREE_MAX',
     defaultMax: 4,
+    staleSweepAgeEnv: 'SM_JOB_WORKTREE_STALE_MS',
+    defaultStaleSweepAgeMs: 24 * 60 * 60 * 1000,
   },
   epic: {
     root: path.join(os.tmpdir(), 'session-manager-epic-worktrees'),
@@ -91,6 +99,8 @@ const KIND_CONFIG = {
     disableEnv: 'SM_EPIC_WORKTREE_DISABLE',
     maxEnv: 'SM_EPIC_WORKTREE_MAX',
     defaultMax: 50,
+    staleSweepAgeEnv: 'SM_EPIC_WORKTREE_STALE_MS',
+    defaultStaleSweepAgeMs: 7 * 24 * 60 * 60 * 1000,
   },
 };
 
@@ -125,6 +135,21 @@ function getMaxConcurrentWorktrees(kind) {
   const cfg = configFor(kind);
   const raw = Number(process.env[cfg.maxEnv]);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : cfg.defaultMax;
+}
+
+function getStaleSweepAgeMs(kind) {
+  const cfg = configFor(kind);
+  const raw = Number(process.env[cfg.staleSweepAgeEnv]);
+  return Number.isFinite(raw) && raw > 0 ? raw : cfg.defaultStaleSweepAgeMs;
+}
+
+/** True when resolved path `p` is `root` itself or nested under it — the one
+ *  gate every deletion routine below must pass before touching disk, so a
+ *  path-traversal-shaped key can never escape this kind's own tmpdir root. */
+function isUnderRoot(p, root) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedP = path.resolve(p);
+  return resolvedP === resolvedRoot || resolvedP.startsWith(resolvedRoot + path.sep);
 }
 
 // In-memory count of worktrees currently checked out by THIS process, kept
@@ -195,7 +220,16 @@ function branchNameFor(kind, key) {
   return `${configFor(kind).branchPrefix}${key}`;
 }
 
-/** Best-effort teardown of one worktree checkout — never throws. */
+/**
+ * Best-effort teardown of one worktree checkout — never throws. Also rmdirs
+ * `dir`'s parent (the per-cwd hash directory `worktreeDirFor` nests every
+ * checkout under) when it's left empty, so a torn-down checkout doesn't
+ * leave a permanent empty leftover behind (RCA: PRD 1108 — 1125 of 1133
+ * on-disk hash dirs under the job root were exactly this, never reclaimed).
+ * Uses non-recursive `fs.rmdir`, which only succeeds on a truly empty
+ * directory, so a sibling checkout still living under the same hash dir can
+ * never be destroyed by this call.
+ */
 async function removeWorktreeDir(cwd, dir) {
   try {
     await execGit(['worktree', 'remove', '--force', dir], { cwd, timeout: 15_000 });
@@ -208,6 +242,175 @@ async function removeWorktreeDir(cwd, dir) {
   } catch {
     /* best-effort */
   }
+  const parentDir = path.dirname(dir);
+  // Guard against ever rmdir-ing os.tmpdir() itself — every real caller's
+  // `dir` is `<kind root>/<hash>/<key>`, so `parentDir` is always the hash
+  // dir, never the tmpdir root, but this keeps the guarantee explicit rather
+  // than relying solely on call-site discipline.
+  if (parentDir === os.tmpdir()) return;
+  try {
+    const remaining = await fsp.readdir(parentDir);
+    if (remaining.length === 0) await fsp.rmdir(parentDir);
+  } catch {
+    // Not empty (a sibling checkout survives), doesn't exist, or a race —
+    // all fine to ignore.
+  }
+}
+
+/**
+ * Reads a linked worktree checkout's own `.git` file (a plain text pointer,
+ * not a directory, for any `git worktree add` checkout) to recover the path
+ * of the MAIN tree it's registered against, without needing a caller-
+ * supplied cwd. Content looks like `gitdir: /path/to/main/.git/worktrees/
+ * <name>`; the main tree is that path with the trailing `/.git/worktrees/
+ * <name>` segment stripped off.
+ *
+ * Round-trip verified before being trusted, mirroring the same defense
+ * `scripts/lib/activeSessions.cjs`'s `worktreeMainRootOf` already applies: a
+ * `.git` pointer file is a plain text file, so its content must not be
+ * trusted to redirect `git worktree remove --force` at an arbitrary path
+ * without the candidate main tree's OWN admin dir
+ * (`<main>/.git/worktrees/<name>/gitdir`) agreeing this checkout is really
+ * one of its registered worktrees. Returns null on any read/parse/mismatch —
+ * never throws.
+ */
+async function mainTreeFromWorktreeGitFile(dir) {
+  try {
+    const gitFile = path.join(dir, '.git');
+    const content = await fsp.readFile(gitFile, 'utf8');
+    const match = content.match(/^gitdir:\s*(.+)$/m);
+    if (!match) return null;
+    const gitdir = match[1].trim();
+    const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+    const idx = gitdir.lastIndexOf(marker);
+    if (idx === -1) return null;
+    const candidateMain = gitdir.slice(0, idx);
+    const worktreeName = gitdir.slice(idx + marker.length).split(path.sep)[0];
+    if (!worktreeName) return null;
+
+    const adminGitdirFile = path.join(candidateMain, '.git', 'worktrees', worktreeName, 'gitdir');
+    const backRef = (await fsp.readFile(adminGitdirFile, 'utf8')).trim();
+    if (path.resolve(backRef) !== path.resolve(gitFile)) return null;
+
+    return candidateMain;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tear down one orphaned on-disk checkout that `sweepStaleWorktreeCheckouts`
+ * found with no caller-supplied cwd to run `git worktree remove` against.
+ * Recovers the main tree from the checkout's own `.git` file and removes the
+ * registration there first, so the main repo's `git worktree list` is never
+ * left with a stale entry pointing at a directory we just deleted. Falls back
+ * to a plain `rm -rf` (plus a best-effort `worktree prune` run from inside
+ * the checkout itself, in case git can still resolve it) when that lookup
+ * fails. Never throws.
+ */
+async function teardownOrphanedCheckout(dir) {
+  const mainTree = await mainTreeFromWorktreeGitFile(dir);
+  if (mainTree) {
+    try {
+      await execGit(['worktree', 'remove', '--force', dir], { cwd: mainTree, timeout: 15_000 });
+    } catch {
+      // Registration already gone, or the main tree no longer agrees this is
+      // one of its worktrees — fall through to the plain rm below either way.
+    }
+    try { await fsp.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { await execGit(['worktree', 'prune'], { cwd: mainTree, timeout: 10_000 }); } catch { /* best-effort */ }
+    return;
+  }
+  try { await execGit(['worktree', 'prune'], { cwd: dir, timeout: 10_000 }); } catch { /* best-effort */ }
+  try { await fsp.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
+/**
+ * Sweeps this kind's ENTIRE on-disk worktree root directly — not limited to
+ * any caller-supplied list of cwds — for checkouts belonging to a project
+ * `reconcileWorktreesOnBoot` was never handed a cwd for (a project removed
+ * from Session Manager, or a stray leftover from before this sweep existed).
+ * The per-cwd loop in `reconcileWorktreesOnBoot` can only clean what it's
+ * told about; this covers the rest.
+ *
+ * A checkout younger than `staleAgeMs` (mtime-based) is NEVER touched — this
+ * is what keeps an in-progress job or Epic safe from a concurrent boot sweep.
+ * This intentionally does NOT accept an `isLive` predicate the way
+ * `reconcileWorktreesOnBoot`'s per-cwd pass does: that predicate is scoped to
+ * ONE project's own active-index.json per call, but this sweep walks EVERY
+ * project's checkouts under the shared kind root in one pass — applying one
+ * project's liveness answer to another project's checkout would be worse
+ * than no answer at all (a false "not live" for a foreign key would tear
+ * down a genuinely active Epic before its own project's turn ever runs this
+ * sweep). The age threshold (7 days for epics, by default) is the only
+ * safety margin here, deliberately.
+ *
+ * Every path visited is verified (`isUnderRoot`) to be nested under this
+ * kind's own root before any read or delete, so a maliciously-shaped on-disk
+ * name can never walk this sweep outside its own tmpdir root.
+ *
+ * Returns `{ checkoutsRemoved, emptyRootsRemoved }`. Never throws.
+ */
+async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
+  const root = worktreeRootFor(kind);
+  const staleAgeMs = Number.isFinite(opts.staleAgeMs) && opts.staleAgeMs >= 0
+    ? opts.staleAgeMs
+    : getStaleSweepAgeMs(kind);
+  const result = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
+
+  let hashEntries;
+  try {
+    hashEntries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return result; // root doesn't exist yet (or unreadable) — nothing to sweep
+  }
+
+  for (const hashEntry of hashEntries) {
+    if (!hashEntry.isDirectory()) continue;
+    const hashDir = path.join(root, hashEntry.name);
+    if (!isUnderRoot(hashDir, root)) continue;
+
+    let keyEntries;
+    try {
+      keyEntries = await fsp.readdir(hashDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const keyEntry of keyEntries) {
+      if (!keyEntry.isDirectory()) continue;
+      const checkoutDir = path.join(hashDir, keyEntry.name);
+      if (!isUnderRoot(checkoutDir, root)) continue;
+
+      let stat;
+      try {
+        stat = await fsp.stat(checkoutDir);
+      } catch {
+        continue;
+      }
+      if (Date.now() - stat.mtimeMs < staleAgeMs) continue; // still fresh — never touched
+
+      try {
+        await teardownOrphanedCheckout(checkoutDir);
+        result.checkoutsRemoved++;
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    try {
+      const remaining = await fsp.readdir(hashDir);
+      if (remaining.length === 0) {
+        await fsp.rmdir(hashDir);
+        result.emptyRootsRemoved++;
+      }
+    } catch {
+      // Not empty (a fresh checkout survives, or one this pass just skipped),
+      // doesn't exist, or a race — all fine to ignore.
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -599,6 +802,14 @@ function keyFromBranch(kind, branch) {
  * equivalent concept (a job worktree found at boot is, by definition, from a
  * run that didn't finish) and typically omits `isLive`.
  *
+ * After the per-cwd pass, this also runs `sweepStaleWorktreeCheckouts` —
+ * a second, root-directory-driven pass that is NOT limited to `cwds`, so a
+ * checkout belonging to a project no longer known to the caller (removed
+ * from Session Manager, or a leftover from before this sweep existed) still
+ * gets reclaimed once it's older than `opts.staleAgeMs` (default per-kind,
+ * see `KIND_CONFIG`). A one-shot log line reports the totals so a recurring
+ * leak stays visible (RCA: PRD 1108).
+ *
  * Never throws — a project that isn't a git repo, or has no worktrees, is a
  * silent no-op.
  */
@@ -607,6 +818,7 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
   const isLive = typeof opts.isLive === 'function' ? opts.isLive : null;
   const root = worktreeRootFor(kind);
   const list = Array.isArray(cwds) ? cwds.filter(Boolean) : [];
+  let checkoutsRemoved = 0;
   for (const cwd of list) {
     if (!(await isGitRepo(cwd))) continue;
     let out = '';
@@ -621,12 +833,29 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
       const key = keyFromBranch(kind, entry.branch);
       if (isLive && key && (await isLive(key, entry))) continue;
       await removeWorktreeDir(cwd, entry.worktree);
+      checkoutsRemoved++;
       if (entry.branch) {
         try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
       }
     }
     try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
   }
+
+  let sweep = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
+  try {
+    sweep = await sweepStaleWorktreeCheckouts(kind, { staleAgeMs: opts.staleAgeMs });
+  } catch {
+    /* never let the orphan sweep take down boot reconciliation */
+  }
+  const totals = {
+    checkoutsRemoved: checkoutsRemoved + sweep.checkoutsRemoved,
+    emptyRootsRemoved: sweep.emptyRootsRemoved,
+  };
+  console.log(
+    `[gitWorktree] boot sweep (kind:${kind}): reclaimed ${totals.checkoutsRemoved} checkout(s), ` +
+    `${totals.emptyRootsRemoved} empty root dir(s)`
+  );
+  return totals;
 }
 
 // ──────────────────────────────────────────── kind-scoped convenience wrappers
@@ -662,6 +891,7 @@ module.exports = {
   worktreeRootFor,
   isWorktreeDisabled,
   getMaxConcurrentWorktrees,
+  getStaleSweepAgeMs,
   isGitRepo,
   isBaseTreeClean,
   worktreeDirFor,
@@ -675,6 +905,8 @@ module.exports = {
   salvageDirtyDelta,
   parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot,
+  sweepStaleWorktreeCheckouts,
+  mainTreeFromWorktreeGitFile,
   // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
   // always exposed.
   createJobWorktree,

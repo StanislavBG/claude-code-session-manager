@@ -224,6 +224,12 @@ const promptSessionsMergeToMain = z.object({
   epicId: z.string().regex(PROMPT_SESSION_ID_RE),
   branch: z.string().regex(/^sm-epic\/[A-Za-z0-9_-]{1,64}$/),
   dir: z.string().min(1).max(4096),
+  // Base-tree WIP paths carried into this worktree at creation time
+  // (gitWorktree.cjs's createWorktree, PRD 1094) — threaded through so
+  // integrateEpicBranch can apply the same carried-wip-only skip the job
+  // path already gets. Absent on a worktree created before this field
+  // existed, or one whose base tree was clean at creation.
+  carriedPaths: z.array(z.string().min(1).max(4096)).max(2000).optional(),
 });
 
 // Renderer entry points for the per-project "disable Epic worktree
@@ -352,6 +358,14 @@ const schedulerCreatePrd = z.object({
   // excluded here for the same reason adminPrdFrontmatterPatch excludes it
   // below — a discussion-tagged Epic never reaches PRD authoring.
   tag: PrdWorkTypeSchema.optional(),
+  // Opt-in exclusive-lease flag (PRD 1107): the scheduler dispatches this PRD
+  // only once zero other jobs are running machine-wide, and holds every other
+  // job off the whole session-slot pool while it runs — for a PRD whose
+  // acceptance criteria are wall-clock/timing measurements (frame time,
+  // performance fences) that CPU contention from sibling jobs would otherwise
+  // invalidate. See prdCreate.cjs's buildPrdBody and schedulerBatch.cjs's
+  // pickNextBatch.
+  quietMachine: z.boolean().optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.

@@ -1197,6 +1197,100 @@ test('no_verdict_sentinel guard: same run but with SCHEDULER_VERDICT: PASS senti
   }
 });
 
+// ─── abandoned_background_task: auto-backgrounded Bash + no sentinel/commit ─
+
+/** A run whose Bash command hit the harness's 120s foreground timeout and was
+ *  auto-backgrounded, then the run ended without ever coming back to commit
+ *  or emit the finish-protocol sentinel. */
+function abandonedBackgroundTaskRunEvents(resultText) {
+  return [
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: 'toolu_bg_001',
+          name: 'Bash',
+          input: { command: 'npm run test:unit', description: 'Run full unit suite' },
+        }],
+      },
+    },
+    {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_bg_001',
+          content: 'Command did not complete within its 120s timeout and was moved to the background (ID: bcn1lpvpd). Output is being written to: /tmp/claude-1000/tasks/bcn1lpvpd.output. You will be notified when it completes. To check interim output, use Read on that file path.',
+          is_error: false,
+        }],
+      },
+    },
+    { type: 'result', subtype: 'success', result: resultText },
+  ];
+}
+
+test('abandoned_background_task: background marker + no sentinel + no commit → abandoned_background_task', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '1116-encyclopedia-animations-section';
+    writeLog(tmp, slug, abandonedBackgroundTaskRunEvents('Waiting for the backgrounded test run to finish.'));
+    const prdPath = writePrd(tmp, slug, '# Encyclopedia animations section');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'abandoned_background_task', `expected abandoned_background_task, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('abandoned_background_task guard: no background marker, no sentinel, no commit → stays plain no_verdict_sentinel', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '1116-no-background-marker';
+    writeLog(tmp, slug, noOpRunEvents('I need clarification on which capture API to target before proceeding.'));
+    const prdPath = writePrd(tmp, slug, '# Encyclopedia animations section');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: false,
+    });
+    assert.equal(verdict.verdict, 'no_verdict_sentinel', `expected plain no_verdict_sentinel, got ${verdict.verdict}: ${verdict.reason}`);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
+test('abandoned_background_task guard: background marker present but run DID commit → clean', async () => {
+  const tmp = makeTmpDir();
+  try {
+    const slug = '1116-background-marker-but-committed';
+    writeLog(tmp, slug, abandonedBackgroundTaskRunEvents('Backgrounded test run finished green; work committed.'));
+    const prdPath = writePrd(tmp, slug, '# Encyclopedia animations section');
+    const verdict = await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running' },
+      allJobs: [],
+      committedDuringRun: true,
+    });
+    assert.equal(verdict.verdict, 'clean', `background marker with a landed commit should stay clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, null);
+  } finally {
+    rmdir(tmp);
+  }
+});
+
 // ─── pass_no_commit: PASS sentinel with no commit is not "clean" ───────────
 
 test('pass_no_commit: SCHEDULER_VERDICT: PASS but no commit landed → needs_review', async () => {

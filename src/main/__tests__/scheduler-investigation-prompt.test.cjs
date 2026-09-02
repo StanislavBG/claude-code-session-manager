@@ -54,6 +54,37 @@ test('prompt includes the resolved job fields', () => {
   assert.match(prompt, /05-fix-my-feature\.md/);
 });
 
+// ─── abandoned_background_task: investigation prompt directs a commit-first check ─
+
+test('prompt for an abandoned_background_task job directs inspecting the working tree and committing before re-implementing', () => {
+  const prompt = buildInvestigationPrompt(makeArgs({
+    failedJob: { slug: '05-my-feature', title: 'My feature', exitCode: 0, verifierVerdict: 'abandoned_background_task' },
+  }));
+  assert.match(prompt, /abandoned_background_task/);
+  assert.match(prompt, /git status/);
+  assert.match(prompt, /COMMIT/);
+  assert.match(prompt, /not re-implement or re-plan the PRD from scratch/);
+});
+
+test('prompt for a job with no abandoned_background_task verdict omits the note', () => {
+  const prompt = buildInvestigationPrompt(makeArgs());
+  assert.doesNotMatch(prompt, /abandoned_background_task/);
+});
+
+test('prompt for an abandoned_background_task job with a salvage patch names its exact path', () => {
+  const prompt = buildInvestigationPrompt(makeArgs({
+    failedJob: {
+      slug: '05-my-feature',
+      title: 'My feature',
+      exitCode: 0,
+      verifierVerdict: 'abandoned_background_task',
+      salvagePatch: '/tmp/runs/2026-09-02/05-my-feature.uncommitted.patch',
+    },
+  }));
+  assert.match(prompt, /05-my-feature\.uncommitted\.patch/);
+  assert.match(prompt, /apply it to the working tree BEFORE inspecting/);
+});
+
 // ─── cwd-must-be-git-repo-root guidance (99-fix-e2e-needs-review-test) ────────
 
 test('prompt instructs that cwd must be the git repo root where the fix will land', () => {

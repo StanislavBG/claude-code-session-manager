@@ -13,7 +13,8 @@
  *   verifyRun({ runDir, prdPath, queueEntry, allJobs }) → Promise<Verdict>
  *
  * Verdict shape:
- *   { verdict: 'clean'|'halt'|'deps_unmet'|'transcript_errors'|'verify_unavailable',
+ *   { verdict: 'clean'|'halt'|'deps_unmet'|'transcript_errors'|'verify_unavailable'
+ *       |'no_verdict_sentinel'|'abandoned_background_task',
  *     reason: string,
  *     downgradeTo: 'pending'|'needs_review'|null }
  *
@@ -23,6 +24,8 @@
  *   deps_unmet      → 'pending'   (re-fires when deps clear)
  *   transcript_errors → 'needs_review' (requires human flip)
  *   verify_unavailable → 'needs_review'
+ *   no_verdict_sentinel → 'needs_review'
+ *   abandoned_background_task → 'needs_review'
  *
  * Time complexity: O(N·L) where N = log line count, L = avg content line count.
  * The log is read once with readFileSync (700 KB typical; well within Node.js
@@ -229,6 +232,28 @@ function parseLog(logPath) {
   }
 
   return { events, resultEvent, error: null, transcriptCommitLanded };
+}
+
+// Stable, narrow substrings of the harness's auto-background tool_result text
+// (Bash: "Command did not complete within its 120s timeout and was moved to
+// the background... You will be notified when it completes."). Anchored on
+// short distinctive fragments rather than the whole sentence so harness
+// wording drift degrades to the generic no_verdict_sentinel verdict instead
+// of throwing.
+const BACKGROUND_TASK_MARKERS = ['moved to the background', 'You will be notified when it completes'];
+
+/**
+ * True when any tool_result in the transcript carries the harness's
+ * auto-background marker text — i.e. a Bash command was auto-backgrounded
+ * after its foreground timeout and the run ended waiting for a notification
+ * a headless run structurally cannot receive.
+ */
+function hasAbandonedBackgroundTask(events) {
+  for (const ev of events) {
+    if (ev.kind !== 'tool_result' || !ev.content) continue;
+    if (BACKGROUND_TASK_MARKERS.some((marker) => ev.content.includes(marker))) return true;
+  }
+  return false;
 }
 
 // ─── self-recovery helpers ────────────────────────────────────────────────────
@@ -905,15 +930,30 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       : undefined;
 
     // No pattern hits is not automatically "clean": a run that neither
-    // committed anything nor ever emitted the finish-protocol sentinel likely
-    // ended before doing real work (e.g. stopped on a clarifying question).
-    // Weaker evidence than a caught transcript error, but still not clean.
+    // committed anything nor ever emitted the finish-protocol sentinel did not
+    // finish for SOME reason. When the transcript shows the harness's
+    // auto-background marker, that reason is knowable and cheap to recover
+    // from: the run backgrounded a long Bash command past its foreground
+    // timeout and ended waiting for a "you will be notified" callback a
+    // headless run can never receive — it did not necessarily fail to do the
+    // work, it failed to come back and commit it. That gets its own verdict
+    // (abandoned_background_task) so the auto-fix investigation checks the
+    // working tree for already-written work first, instead of re-planning the
+    // whole PRD from a wrong "stopped on a clarifying question" premise.
     if (sentinel === null && !commitEvidence) {
-      issues.push({
-        verdict: 'no_verdict_sentinel',
-        reason: 'run made no commit and emitted no SCHEDULER_VERDICT sentinel — likely ended before the finish protocol (e.g. stopped on a clarifying question)',
-        priority: 1,
-      });
+      if (hasAbandonedBackgroundTask(events)) {
+        issues.push({
+          verdict: 'abandoned_background_task',
+          reason: 'run made no commit and emitted no SCHEDULER_VERDICT sentinel, and the transcript shows a Bash command auto-backgrounded past its foreground timeout — the run likely ended waiting for a background-task notification a headless run cannot receive, not because the work failed; the work is probably already written and just needs to be committed',
+          priority: 1,
+        });
+      } else {
+        issues.push({
+          verdict: 'no_verdict_sentinel',
+          reason: 'run made no commit and emitted no SCHEDULER_VERDICT sentinel — the run ended before the finish protocol for some reason (stopped on a clarifying question, crashed, ran out of turns, or another cause not identifiable from this transcript alone)',
+          priority: 1,
+        });
+      }
     }
 
     // A truthful-looking PASS sentinel with no commit is still not "clean":
@@ -1122,4 +1162,5 @@ module.exports = {
   allDeliverablesAlreadyTracked,
   isAncestorCommit,
   isGitRepo,
+  hasAbandonedBackgroundTask,
 };

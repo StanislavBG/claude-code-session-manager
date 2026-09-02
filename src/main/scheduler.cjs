@@ -3637,7 +3637,27 @@ function healTargetForFix(fixSlug, jobs) {
  * spawnInvestigation computes.
  */
 function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group }) {
-  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.
+  const abandonedBackgroundTaskNote = failedJob.verifierVerdict === 'abandoned_background_task' ? `
+
+# Known failure class: abandoned background task
+This job's verifier verdict is \`abandoned_background_task\`: the transcript shows a Bash command
+auto-backgrounded past its foreground timeout, and the run ended waiting for a "you will be
+notified when it completes" callback a headless run structurally cannot receive. This is NOT
+evidence the work failed — it is evidence the run stopped short of its finish protocol. The work is
+usually already written and correct; only the commit is missing.
+
+By the time this investigation runs, the failed job's isolated worktree (if it ran in one) has
+already been cleaned up — \`${cwd}\` is the BASE repo, not that worktree, so a plain \`git status\`/
+\`git diff\` there will usually show nothing even though real work was produced. The scheduler
+salvages any uncommitted diff from a killed job's worktree BEFORE deleting it${
+    failedJob.salvagePatch ? `, and this job's salvage patch was captured at:\n\n   ${failedJob.salvagePatch}` : ', to a `.uncommitted.patch` file next to the run log — check the run dir for one'
+  }.
+
+The fix-plan PRD you write for this MUST instruct its executor to, in order:
+1. Check for a salvage patch (named \`<slug>.uncommitted.patch\` in the run directory${failedJob.salvagePatch ? `, e.g. \`${failedJob.salvagePatch}\`` : ''}) and, if found, apply it to the working tree BEFORE inspecting \`git status\`/\`git diff\` in ${cwd} for uncommitted changes matching the original PRD's acceptance criteria.
+2. If the work is present (via the applied patch or already in the tree) and satisfies the acceptance criteria, run the project's verify commands and COMMIT it — do not re-implement or re-plan the PRD from scratch.
+3. Only fall back to re-implementing whatever acceptance criteria are genuinely missing after applying any salvage patch, not the whole PRD.` : '';
+  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.${abandonedBackgroundTaskNote}
 
 # Failed job
 - Slug: ${failedJob.slug}
@@ -5369,7 +5389,7 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
 // investigation jobs correctly found "nothing to fix" but were flagged
 // anyway). For non-fix-plan jobs the exemption never applies, so rescanning
 // their pass_no_commit verdict is a harmless no-op (same facts, same verdict).
-const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'pass_no_commit', 'pass_no_commit_already_shipped']);
+const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'abandoned_background_task', 'pass_no_commit', 'pass_no_commit_already_shipped']);
 
 // Bounds fix-plan recursion: cap N permits at most N+1 fix jobs per original
 // slug (depth 1 = the original job, depth 2 = its `-fix`, depth 3+ is
@@ -5506,14 +5526,21 @@ function isPlanUnqueued(job, queuedSlugs) {
  * Bias to needs_review: a false yellow costs a human glance, a false green
  * costs a silently-unfixed bug — which is exactly what happened.
  */
+// abandoned_background_task shares no_verdict_sentinel's exact rescan path
+// (same "sentinel === null && !commitEvidence" gate in runVerify, same
+// committedDuringRun repo-wide-not-per-job attribution problem) — the PRD 983
+// incident mechanism above applies identically, so it gets the same guard
+// rather than a carve-out that would silently reopen the same false-heal hole.
+const NO_ATTRIBUTABLE_COMMIT_VERDICTS = new Set(['no_verdict_sentinel', 'abandoned_background_task']);
+
 function healRefusalReason(job, verdict, committedDuringRun) {
   if (!job || !verdict) return null;
   if (!COMPLETED_EQUIVALENT_VERDICTS.has(verdict.verdict)) return null;
-  if (job.verifierVerdict !== 'no_verdict_sentinel') return null;
+  if (!NO_ATTRIBUTABLE_COMMIT_VERDICTS.has(job.verifierVerdict)) return null;
   // A commit this job actually recorded as its own is real evidence; the
   // repo-wide window scan is not.
   if (job.landedCommit) return null;
-  return 'no_verdict_sentinel with no job-attributable commit — refusing to heal'
+  return `${job.verifierVerdict} with no job-attributable commit — refusing to heal`
     + ` (committedInWindow=${committedDuringRun === true} is repo-wide, not proof this job delivered)`;
 }
 

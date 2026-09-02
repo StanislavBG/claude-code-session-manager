@@ -47,6 +47,7 @@ const VERDICT_LABELS = {
   verify_unavailable: 'verify unavailable',
   uncommitted_changes: 'uncommitted changes',
   no_verdict_sentinel: 'no commit or verdict sentinel',
+  abandoned_background_task: 'abandoned auto-backgrounded task',
   pass_no_commit: 'PASS sentinel but no commit landed',
   pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
   pass_no_commit_prior_run_verified: 'PASS with no commit — prior run of this slug already landed the work',
@@ -67,6 +68,7 @@ const FAILURE_CLASSES = {
   NO_SENTINEL: 'no-sentinel',
   UNCOMMITTED: 'uncommitted-changes',
   TRANSCRIPT_ERRORS: 'transcript-errors',
+  ABANDONED_BACKGROUND_TASK: 'abandoned-background-task',
   UNKNOWN: 'unknown',
 };
 
@@ -83,6 +85,17 @@ const RECOVERY_ACTIONS = {
   [FAILURE_CLASSES.NO_SENTINEL]: 'verify-and-close',
   [FAILURE_CLASSES.UNCOMMITTED]: 'resume-and-commit',
   [FAILURE_CLASSES.TRANSCRIPT_ERRORS]: 'investigate',
+  // NOT 'resume-and-commit': that action is only ever actually dispatched by
+  // selectResumeRecoveryTarget in scheduler.cjs, which gates strictly on
+  // verifierVerdict === 'uncommitted_changes' plus a sessionId + recorded
+  // uncommittedPaths — none of which an abandoned_background_task job has.
+  // Labeling it 'resume-and-commit' here would be pure telemetry fiction (the
+  // RCA report / job.rcaRecoveryAction would claim a resume attempt that
+  // never happens); 'investigate' is what actually runs (spawnInvestigation),
+  // and buildInvestigationPrompt's abandoned-background-task note is what
+  // carries the "check for salvaged work, commit before re-implementing"
+  // guidance into that cold-read investigation.
+  [FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK]: 'investigate',
   [FAILURE_CLASSES.UNKNOWN]: 'investigate',
 };
 
@@ -106,6 +119,8 @@ const PREVENTION_HINTS = {
     'Stage the exact paths you created or modified — never a blanket/wildcard git-add of the whole tree, since the queue can run sibling jobs against this same working tree and a blanket add sweeps up their in-flight edits — and `git commit` as the final finish-protocol step before printing the verdict sentinel; never end a run with a dirty working tree.',
   [FAILURE_CLASSES.TRANSCRIPT_ERRORS]:
     'Recover or annotate every error within ~10 lines (e.g. `# expected/handled: <why>`) instead of leaving a bare Traceback near the end of the transcript.',
+  [FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK]:
+    'A headless run cannot receive a background-task completion notification — never let a long Bash command auto-background past its foreground timeout and then wait for it. Run long commands with an explicit bound (`timeout <N> <cmd>`) so they finish in the foreground, or poll their output file directly instead of waiting on Monitor/notification.',
   [FAILURE_CLASSES.UNKNOWN]:
     'Re-run the acceptance criteria gate locally against the failure log to pin down the specific break before re-queuing.',
 };
@@ -158,6 +173,16 @@ function classifyFailure({ verdict, logTail }) {
     ALREADY_SHIPPED_RE.test(logTail || '')
   ) {
     return FAILURE_CLASSES.ALREADY_SHIPPED;
+  }
+
+  // Checked before SELF_QUEUE/STUCK_LOOP: the verifier already did the real
+  // detection work (scanning for the harness's own auto-background marker
+  // text) to produce this verdict — trust it rather than re-deriving from the
+  // log tail, which can otherwise false-match SELF_QUEUE_WAKEUP_RE/STUCK_LOOP_RE
+  // on words like "sleep"/"background" that appear in the harness's own
+  // auto-background tool_result.
+  if (verdict === 'abandoned_background_task') {
+    return FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK;
   }
 
   // Checked before STUCK_LOOP: a backgrounded command + ScheduleWakeup

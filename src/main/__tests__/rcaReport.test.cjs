@@ -186,3 +186,27 @@ test('writeRcaReport: SM_RCA_DISABLE=1 skips without writing', async () => {
   expect(res.reason).toBe('disabled');
   expect(fs.readdirSync(runDir).filter((f) => f.startsWith('root-cause-'))).toHaveLength(0);
 });
+
+test('classifyFailure: blocked_by_foreign_wip_streak verdict classifies as BLOCKED_BY_FOREIGN_WIP, never UNKNOWN', () => {
+  const failureClass = rcaReport.classifyFailure({ verdict: 'blocked_by_foreign_wip_streak', logTail: 'anything' });
+  expect(failureClass).toBe(rcaReport.FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP);
+});
+
+test('writeRcaReport: a blocked_by_foreign_wip_streak verdict points at the sibling job, not "re-run the gate"', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run-blocked');
+  writeRun(runDir, 'blockedslug');
+  writePrd(cwd, 'blockedslug');
+
+  const res = await rcaReport.writeRcaReport({
+    job: baseJob({ cwd, slug: 'blockedslug' }),
+    runDir,
+    verdict: 'blocked_by_foreign_wip_streak',
+  });
+
+  expect(res.filed).toBe(true);
+  expect(res.failureClass).toBe(rcaReport.FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP);
+  const body = fs.readFileSync(res.path, 'utf8');
+  expect(body).toMatch(/sibling job/i);
+  expect(body).not.toMatch(/Re-run the acceptance criteria gate/);
+});

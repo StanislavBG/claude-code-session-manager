@@ -239,6 +239,7 @@ export const VERDICT_LABELS: Record<string, string> = {
   no_verdict_sentinel: 'no commit or verdict sentinel',
   pass_no_commit: 'PASS sentinel but no commit landed',
   silent_no_op: 'no commit, clean tree — no evidence of work',
+  blocked_by_foreign_wip_streak: "blocked by a sibling job's foreign WIP 3x in a row",
 }
 
 export function verdictLabel(verdict: string): string {

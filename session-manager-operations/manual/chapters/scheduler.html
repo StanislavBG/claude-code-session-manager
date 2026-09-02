@@ -106,6 +106,13 @@ directly into a project's <code>scheduler/epics/&lt;epic-id&gt;/prds/</code> fol
 frontmatter, atomically allocates the PRD number, and enforces that every PRD joins an existing
 Session rather than floating free. You will never need to hand-write a PRD file yourself.</p>
 
+<p>A PRD's <code>agentType</code> field picks who runs it — a persona name, defaulting to
+<code>dev-lead</code> — and it drives more than the prompt: the scheduler resolves it to that
+persona's own system prompt <em>and</em> model, so a PRD authored for a review-heavy persona
+runs under that persona's chosen model without you specifying <code>--model</code> yourself. If
+the named persona no longer exists, the job still runs — it just falls back to no persona and the
+default model, logged once rather than parking or failing.</p>
+
 <h2>When a job parks in <code>needs_review</code></h2>
 
 <p><code>needs_review</code> is <strong>a question, not a result</strong>. When a job lands there,
@@ -130,6 +137,11 @@ is to route back to you.</p>
   re-drain over the same set is a no-op.</li>
   <li><strong>External watchdog</strong> — an out-of-process timer relaunches the app if its
   heartbeat goes stale while jobs are outstanding.</li>
+  <li><strong>Launch circuit breaker</strong> — a run that 400s before it ever got a turn (a bad
+  CLI/model flag combination, not your PRD) is recognized as a launch failure, not a failed PRD:
+  the job resets to pending and a per-persona breaker opens, backs off, and probes itself back
+  closed once launches succeed again — so one bad CLI update can't burn through every queued job
+  logging the same failure.</li>
 </ul>
 
 <p class="manual-note">All of it exists so that "queue it and go to bed" is a real workflow rather

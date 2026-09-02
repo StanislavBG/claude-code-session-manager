@@ -173,6 +173,60 @@ test('writeRcaReport: skips when there is no run directory to write into', async
   expect(res.reason).toBe('no-run-dir');
 });
 
+// ─── recovery actions ────────────────────────────────────────────────────────
+
+test('RECOVERY_ACTIONS: every FAILURE_CLASSES member has an entry from the closed set', () => {
+  const CLOSED_SET = new Set(['archive', 'resume-and-commit', 'verify-and-close', 'investigate']);
+  for (const failureClass of Object.values(rcaReport.FAILURE_CLASSES)) {
+    expect(rcaReport.RECOVERY_ACTIONS).toHaveProperty(failureClass);
+    expect(CLOSED_SET.has(rcaReport.RECOVERY_ACTIONS[failureClass])).toBe(true);
+  }
+});
+
+test('recoveryActionFor: maps each known failure class to its expected action', () => {
+  const { FAILURE_CLASSES, recoveryActionFor } = rcaReport;
+  expect(recoveryActionFor(FAILURE_CLASSES.ALREADY_SHIPPED)).toBe('archive');
+  expect(recoveryActionFor(FAILURE_CLASSES.UNCOMMITTED)).toBe('resume-and-commit');
+  expect(recoveryActionFor(FAILURE_CLASSES.NO_SENTINEL)).toBe('verify-and-close');
+  expect(recoveryActionFor(FAILURE_CLASSES.SELF_QUEUE)).toBe('investigate');
+  expect(recoveryActionFor(FAILURE_CLASSES.STUCK_LOOP)).toBe('investigate');
+  expect(recoveryActionFor(FAILURE_CLASSES.POST_AC_OVERRUN)).toBe('investigate');
+  expect(recoveryActionFor(FAILURE_CLASSES.TRANSCRIPT_ERRORS)).toBe('investigate');
+  expect(recoveryActionFor(FAILURE_CLASSES.UNKNOWN)).toBe('investigate');
+});
+
+test('recoveryActionFor: defaults to investigate for an unrecognised class', () => {
+  expect(rcaReport.recoveryActionFor('totally-made-up-class')).toBe('investigate');
+  expect(rcaReport.recoveryActionFor(undefined)).toBe('investigate');
+});
+
+test('writeRcaReport: markdown carries a machine-readable recovery-action line matching recoveryActionFor, for each failure class', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writePrd(cwd, 'testslug');
+
+  const cases = [
+    { verdict: 'pass_no_commit', logTail: 'The work was already implemented in a prior commit.', expectedClass: rcaReport.FAILURE_CLASSES.ALREADY_SHIPPED },
+    { verdict: 'transcript_errors', logTail: 'Launching skill: session-manager-dev:develop', expectedClass: rcaReport.FAILURE_CLASSES.SELF_QUEUE },
+    { verdict: 'transcript_errors', logTail: 'while true; do sleep 1; done', expectedClass: rcaReport.FAILURE_CLASSES.STUCK_LOOP },
+    { verdict: 'uncommitted_changes', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.UNCOMMITTED },
+    { verdict: 'no_verdict_sentinel', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.NO_SENTINEL },
+    { verdict: 'transcript_errors', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.TRANSCRIPT_ERRORS },
+    { verdict: 'some_other_verdict', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.UNKNOWN },
+  ];
+
+  for (const { verdict, logTail, expectedClass } of cases) {
+    writeRun(runDir, 'testslug', { logLines: logTail.split('\n') });
+    const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd }), runDir, verdict });
+    expect(res.failureClass).toBe(expectedClass);
+    const expectedAction = rcaReport.recoveryActionFor(expectedClass);
+    expect(res.recoveryAction).toBe(expectedAction);
+    const body = fs.readFileSync(res.path, 'utf8');
+    expect(body).toContain(`recovery-action: ${expectedAction}`);
+  }
+});
+
 test('writeRcaReport: SM_RCA_DISABLE=1 skips without writing', async () => {
   process.env.SM_RCA_DISABLE = '1';
   const cwd = makeProject();

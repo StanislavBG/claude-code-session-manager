@@ -12,6 +12,7 @@ const {
   selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate,
   healTargetForFix, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH,
   isEligibleForImmediateAutoFix, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor,
+  applyRcaClassification,
 } = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
@@ -211,6 +212,12 @@ test('invariant: plan outcome WITH a queue row → not a target and NOT annotate
   assert.strictEqual(isAnnotatable, false);
 });
 
+test('excludes a job whose rcaRecoveryAction is archive (already-shipped stale re-run must never buy a fix-plan)', () => {
+  const jobs = [makeJob({ rcaRecoveryAction: 'archive', rcaFailureClass: 'already-shipped' })];
+  const result = selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
+});
+
 test('excludes when fix sibling exists on disk', () => {
   const jobs = [makeJob()];
   // fixSlug = '05-fix-my-feature'
@@ -374,6 +381,42 @@ test('isEligibleForImmediateAutoFix: a job whose status is not needs_review (e.g
   const job = makeJob({ status: 'pending' });
   const result = isEligibleForImmediateAutoFix(job, [job], noSiblingOnDisk);
   assert.strictEqual(result, false);
+});
+
+// ---- applyRcaClassification (persists writeRcaReport's verdict onto the job row) ----
+
+test('applyRcaClassification: persists failureClass + recoveryAction onto a needs_review job', () => {
+  const job = makeJob({ status: 'needs_review' });
+  const applied = applyRcaClassification(job, { filed: true, failureClass: 'already-shipped', recoveryAction: 'archive' });
+  assert.strictEqual(applied, true);
+  assert.strictEqual(job.rcaFailureClass, 'already-shipped');
+  assert.strictEqual(job.rcaRecoveryAction, 'archive');
+});
+
+test('applyRcaClassification: no-op when the report was never filed', () => {
+  const job = makeJob({ status: 'needs_review' });
+  const applied = applyRcaClassification(job, { filed: false, reason: 'disabled' });
+  assert.strictEqual(applied, false);
+  assert.strictEqual(job.rcaFailureClass, undefined);
+});
+
+test('applyRcaClassification: no-op when the job has moved off needs_review', () => {
+  const job = makeJob({ status: 'completed' });
+  const applied = applyRcaClassification(job, { filed: true, failureClass: 'unknown', recoveryAction: 'investigate' });
+  assert.strictEqual(applied, false);
+  assert.strictEqual(job.rcaFailureClass, undefined);
+});
+
+test('applyRcaClassification: no-op when the job is missing (e.g. slug lookup miss)', () => {
+  const applied = applyRcaClassification(undefined, { filed: true, failureClass: 'unknown', recoveryAction: 'investigate' });
+  assert.strictEqual(applied, false);
+});
+
+test('applyRcaClassification result feeds selectAutoFixTargets: an archive-classified job is excluded', () => {
+  const job = makeJob({ status: 'needs_review' });
+  applyRcaClassification(job, { filed: true, failureClass: 'already-shipped', recoveryAction: 'archive' });
+  const result = selectAutoFixTargets([job], { fixSlugExists: noSiblingOnDisk });
+  assert.strictEqual(result.length, 0);
 });
 
 console.log('scheduler-autofix-select tests: PASS');

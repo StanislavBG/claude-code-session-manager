@@ -34,10 +34,11 @@ async function main() {
     // logicBundle.ts re-exports LENS_LIBRARY/LENS_ORDER from library/index.ts
     // (the ported component library) — those slot modules are .tsx files with
     // JSX component definitions (never invoked here, only referenced by id),
-    // so the bundle still needs the JSX transform + react as an external,
-    // exactly like build-project-pages-renderer.mjs's config.
+    // so the bundle still needs the JSX transform. react/jsx-runtime is
+    // INLINED (no externals) because react is a devDependency and the tarball
+    // consumer has no react on its require path — same reasoning as
+    // build-project-pages-renderer.mjs (PRD 1088).
     jsx: 'automatic',
-    external: ['react', 'react-dom'],
   });
 
   console.log(`Built ${OUT_FILE}`);

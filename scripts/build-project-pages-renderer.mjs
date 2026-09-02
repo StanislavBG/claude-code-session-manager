@@ -32,7 +32,10 @@ async function main() {
     format: 'cjs',
     target: 'node18',
     jsx: 'automatic',
-    external: ['react', 'react-dom'],
+    // No externals: react + react-dom/server are devDependencies, so a machine
+    // that installed the npm tarball has neither on its require path. The
+    // bundle must be self-sufficient for `node scripts/render-project-pages.cjs`
+    // to run there (PRD 1088).
   });
 
   console.log(`Built ${OUT_FILE}`);
